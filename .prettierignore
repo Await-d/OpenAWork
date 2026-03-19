@@ -1,0 +1,10 @@
+dist
+node_modules
+.expo
+src-tauri
+pnpm-lock.yaml
+.sisyphus
+.serena
+.agentdocs
+apps/*/playwright-report
+apps/*/test-results

@@ -1,0 +1,34 @@
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+.expo
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Tauri
+src-tauri/target
+
+# Agent/AI tooling (not for version control)
+.agentdocs/
+.serena/
+.sisyphus/
+
+# Husky hooks (auto-generated, not for version control)
+.husky/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea
+*.suo
+*.user
+
+# Test coverage
+coverage
