@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true
+  },
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/agent-core" },
+    { "path": "./services/agent-gateway" }
+  ],
+  "include": []
+}
