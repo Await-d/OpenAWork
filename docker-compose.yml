@@ -1,0 +1,53 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: services/agent-gateway/Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      GATEWAY_PORT: 3000
+      GATEWAY_HOST: 0.0.0.0
+      JWT_SECRET: change-me-in-production-min-32-chars
+      JWT_EXPIRES_IN: 15m
+      DATABASE_URL: postgresql://openAwork:openAwork@postgres:5432/openAwork
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '5173:80'
+    depends_on:
+      - gateway
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: openAwork
+      POSTGRES_PASSWORD: openAwork
+      POSTGRES_DB: openAwork
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U openAwork']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
