@@ -1,11 +1,12 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolCallCard } from '@openAwork/shared-ui';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+const writeClipboardMock = vi.fn<(value: string) => Promise<void>>(async () => undefined);
 
 async function flushEffects() {
   await act(async () => {
@@ -23,6 +24,11 @@ describe('ToolCallCard diff view', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: writeClipboardMock },
+    });
+    writeClipboardMock.mockClear();
   });
 
   afterEach(async () => {
@@ -36,7 +42,7 @@ describe('ToolCallCard diff view', () => {
       .IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('shows side-by-side before/after labels when expanding a diff tool output', async () => {
+  it('keeps diff visible by default and shows raw input/output after expanding', async () => {
     await act(async () => {
       root!.render(
         <ToolCallCard
@@ -52,9 +58,48 @@ describe('ToolCallCard diff view', () => {
     });
 
     await flushEffects();
-    expect(container?.textContent).toContain('文件变更视图');
-    expect(container?.textContent).toContain('修改前');
-    expect(container?.textContent).toContain('修改后');
+    expect(container?.textContent).toContain('src/example.ts');
+    expect(container?.textContent).toContain('+2 / -1');
+    expect(container?.textContent).toContain('const b = 2;');
+    expect(container?.textContent).toContain('const b = 3;');
+    expect(container?.textContent).not.toContain('输入');
+    expect(container?.textContent).not.toContain('输出');
+
+    const toggle = container?.querySelector('button[data-tool-card-toggle="true"]');
+    const copyButton = container?.querySelector('button[data-tool-card-copy="true"]');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+
+    act(() => {
+      copyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(writeClipboardMock).toHaveBeenCalledTimes(1);
+    expect(writeClipboardMock.mock.calls[0]?.[0] ?? '').toContain('工具：workspace_review_diff');
+    expect(writeClipboardMock.mock.calls[0]?.[0] ?? '').toContain('输入');
+    expect(writeClipboardMock.mock.calls[0]?.[0] ?? '').toContain('输出');
+
+    act(() => {
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.textContent).toContain('输入');
+    expect(container?.textContent).toContain('输出');
+    expect(container?.textContent).toContain('filePath');
+    expect(container?.textContent).toContain('diff');
+    expect(container?.textContent).toContain('const b = 2;');
+    expect(container?.textContent).toContain('const b = 3;');
+
+    act(() => {
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.textContent).not.toContain('输入');
+    expect(container?.textContent).not.toContain('输出');
     expect(container?.textContent).toContain('const b = 2;');
     expect(container?.textContent).toContain('const b = 3;');
   });
@@ -91,10 +136,10 @@ describe('ToolCallCard diff view', () => {
     });
 
     await flushEffects();
-    expect(container?.textContent).toContain('文件切换');
     expect(container?.textContent).toContain('src/example.ts');
     expect(container?.textContent).toContain('src/feature.ts');
     expect(container?.textContent).toContain('const b = 2;');
+    expect(container?.textContent).toContain('复制');
 
     const buttons = Array.from(container?.querySelectorAll('button') ?? []);
     const featureButton = buttons.find((button) => button.textContent?.includes('feature.ts'));

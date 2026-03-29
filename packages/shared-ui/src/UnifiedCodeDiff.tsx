@@ -350,6 +350,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           color: '#93c5fd',
           background: 'rgba(59, 130, 246, 0.1)',
           borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+          fontVariantNumeric: 'tabular-nums',
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
         }}
@@ -377,6 +378,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           fontSize: 11,
           color: 'var(--color-muted, #94a3b8)',
           borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+          fontVariantNumeric: 'tabular-nums',
           userSelect: 'none',
         }}
       >
@@ -389,6 +391,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           fontSize: 11,
           color: 'var(--color-muted, #94a3b8)',
           borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+          fontVariantNumeric: 'tabular-nums',
           userSelect: 'none',
         }}
       >
@@ -414,8 +417,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           minHeight: 26,
           fontSize: 12,
           lineHeight: 1.5,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
+          whiteSpace: 'pre',
           color: row.kind === 'empty' ? 'transparent' : 'var(--color-text, #f8fafc)',
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
@@ -427,7 +429,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
   );
 }
 
-function DiffSideCell({ side }: { side: DiffSide }) {
+function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; side: DiffSide }) {
   return (
     <div
       style={{
@@ -436,8 +438,7 @@ function DiffSideCell({ side }: { side: DiffSide }) {
         alignItems: 'stretch',
         minWidth: 0,
         background: sideBackground(side.kind),
-        border: `1px solid ${sideBorder(side.kind)}`,
-        borderRadius: side.kind === 'empty' ? 0 : 0,
+        borderRight: showRightBorder ? `1px solid ${sideBorder(side.kind)}` : 'none',
       }}
     >
       <div
@@ -447,6 +448,7 @@ function DiffSideCell({ side }: { side: DiffSide }) {
           fontSize: 11,
           color: 'var(--color-muted, #94a3b8)',
           borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+          fontVariantNumeric: 'tabular-nums',
           userSelect: 'none',
         }}
       >
@@ -472,8 +474,7 @@ function DiffSideCell({ side }: { side: DiffSide }) {
           minHeight: 26,
           fontSize: 12,
           lineHeight: 1.5,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
+          whiteSpace: 'pre',
           color: side.kind === 'empty' ? 'transparent' : 'var(--color-text, #f8fafc)',
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
@@ -491,7 +492,7 @@ export function UnifiedCodeDiff({
   diffText,
   filePath,
   maxHeight = 360,
-  viewMode = 'split',
+  viewMode = 'unified',
 }: UnifiedCodeDiffProps) {
   const usingSnapshot = typeof beforeText === 'string' || typeof afterText === 'string';
   const normalizedBefore = beforeText ?? '';
@@ -525,83 +526,68 @@ export function UnifiedCodeDiff({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 10,
-        border: '1px solid var(--color-border, #334155)',
-        borderRadius: tokens.radius.lg,
-        background: 'color-mix(in srgb, var(--color-surface, #111827) 90%, transparent)',
-        padding: '10px 12px',
+        overflow: 'hidden',
+        border: '1px solid color-mix(in srgb, var(--color-border, #334155) 88%, transparent)',
+        borderRadius: tokens.radius.md,
+        background: 'color-mix(in srgb, var(--color-surface, #111827) 96%, transparent)',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text, #f8fafc)' }}>
-            文件变更视图
+      {(filePath || summary.added > 0 || summary.removed > 0) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '8px 12px',
+            borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
+            background: 'rgba(15, 23, 42, 0.12)',
+          }}
+        >
+          <div
+            style={{
+              minWidth: 0,
+              fontSize: 11,
+              color: 'var(--color-text, #f8fafc)',
+              fontFamily:
+                'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={filePath}
+          >
+            {filePath ?? 'Diff'}
           </div>
-          {filePath && (
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--color-muted, #94a3b8)',
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
-                wordBreak: 'break-all',
-              }}
-            >
-              {filePath}
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <span
+          <div
             style={{
+              flexShrink: 0,
               fontSize: 11,
-              fontWeight: 700,
-              color: '#86efac',
-              background: 'rgba(16, 185, 129, 0.12)',
-              border: '1px solid rgba(16, 185, 129, 0.28)',
-              borderRadius: 999,
-              padding: '2px 8px',
+              color: 'var(--color-muted, #94a3b8)',
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
-            +{summary.added}
-          </span>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: '#fca5a5',
-              background: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.28)',
-              borderRadius: 999,
-              padding: '2px 8px',
-            }}
-          >
-            -{summary.removed}
-          </span>
+            +{summary.added} / -{summary.removed}
+          </div>
         </div>
-      </div>
+      )}
 
       {viewMode === 'split' ? (
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-            gap: 8,
             fontSize: 11,
             color: 'var(--color-muted, #94a3b8)',
             fontWeight: 700,
+            borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+            background: 'rgba(15, 23, 42, 0.08)',
           }}
         >
-          <div style={{ padding: '0 8px' }}>修改前</div>
-          <div style={{ padding: '0 8px' }}>修改后</div>
+          <div style={{ padding: '6px 10px', borderRight: '1px solid rgba(148, 163, 184, 0.08)' }}>
+            修改前
+          </div>
+          <div style={{ padding: '6px 10px' }}>修改后</div>
         </div>
       ) : (
         <div
@@ -613,12 +599,14 @@ export function UnifiedCodeDiff({
             color: 'var(--color-muted, #94a3b8)',
             fontWeight: 700,
             padding: '0 0 0 1px',
+            borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+            background: 'rgba(15, 23, 42, 0.08)',
           }}
         >
-          <div style={{ padding: '0 6px', textAlign: 'right' }}>旧</div>
-          <div style={{ padding: '0 6px', textAlign: 'right' }}>新</div>
-          <div style={{ padding: '0 0', textAlign: 'center' }}>±</div>
-          <div style={{ padding: '0 8px' }}>内容</div>
+          <div style={{ padding: '6px', textAlign: 'right' }}>旧</div>
+          <div style={{ padding: '6px', textAlign: 'right' }}>新</div>
+          <div style={{ padding: '6px 0', textAlign: 'center' }}>±</div>
+          <div style={{ padding: '6px 8px' }}>内容</div>
         </div>
       )}
 
@@ -626,11 +614,9 @@ export function UnifiedCodeDiff({
         style={{
           overflow: 'auto',
           maxHeight,
-          borderRadius: tokens.radius.md,
-          border: '1px solid rgba(148, 163, 184, 0.12)',
         }}
       >
-        <div style={{ minWidth: 640 }}>
+        <div style={{ minWidth: viewMode === 'split' ? 720 : undefined }}>
           {viewMode === 'split'
             ? rows.map((row, index) => {
                 if (row.type === 'hunk') {
@@ -659,12 +645,11 @@ export function UnifiedCodeDiff({
                     style={{
                       display: 'grid',
                       gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                      gap: 8,
                       borderTop: index === 0 ? 'none' : '1px solid rgba(148, 163, 184, 0.06)',
                     }}
                   >
-                    <DiffSideCell side={row.left} />
-                    <DiffSideCell side={row.right} />
+                    <DiffSideCell side={row.left} showRightBorder />
+                    <DiffSideCell side={row.right} showRightBorder={false} />
                   </div>
                 );
               })
