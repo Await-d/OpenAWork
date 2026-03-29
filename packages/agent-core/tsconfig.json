@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@openAwork/shared": ["../shared/src/index.ts"]
+    }
+  },
+  "references": [{ "path": "../shared" }],
+  "include": ["src"]
+}

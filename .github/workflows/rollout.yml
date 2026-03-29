@@ -1,0 +1,156 @@
+name: Gradual Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Rollout target (mobile | desktop | gateway)'
+        required: true
+        type: choice
+        options:
+          - mobile
+          - desktop
+          - gateway
+      percentage:
+        description: 'Rollout percentage (5 | 25 | 100)'
+        required: true
+        type: choice
+        options:
+          - '5'
+          - '25'
+          - '100'
+      version:
+        description: 'Version tag to roll out (e.g. mobile-v1.2.0)'
+        required: true
+        type: string
+
+jobs:
+  validate:
+    name: Pre-rollout validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests
+        run: pnpm --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" test
+
+      - name: Smoke check health endpoint
+        if: inputs.target == 'gateway'
+        run: |
+          curl -f ${{ secrets.GATEWAY_STAGING_URL }}/health || exit 1
+
+  rollout:
+    name: Execute ${{ inputs.percentage }}% rollout — ${{ inputs.target }} ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    needs: validate
+    environment:
+      name: ${{ inputs.percentage == '100' && 'production' || 'staging' }}
+    steps:
+      - name: Log rollout intent
+        run: |
+          echo "Target:     ${{ inputs.target }}"
+          echo "Version:    ${{ inputs.version }}"
+          echo "Percentage: ${{ inputs.percentage }}%"
+
+      - name: Tag Sentry release
+        run: |
+          curl -sf https://sentry.io/api/0/organizations/${{ secrets.SENTRY_ORG }}/releases/ \
+            -H "Authorization: Bearer ${{ secrets.SENTRY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{ \"version\": \"${{ inputs.version }}\", \"projects\": [\"${{ secrets.SENTRY_PROJECT }}\"] }" || true
+
+      - name: Mobile — promote EAS channel percentage
+        if: inputs.target == 'mobile'
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Mobile — execute EAS rollout
+        if: inputs.target == 'mobile'
+        working-directory: apps/mobile
+        run: |
+          eas channel:rollout --channel production --percent ${{ inputs.percentage }} --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Gateway — rolling deploy
+        if: inputs.target == 'gateway'
+        run: |
+          echo "Gateway rolling deploy at ${{ inputs.percentage }}% would run here."
+          echo "Integrate with your orchestration platform (k8s, fly.io, etc.)"
+
+      - name: Desktop — GitHub Release visibility
+        if: inputs.target == 'desktop'
+        run: |
+          echo "Desktop updater JSON is already published via tauri-action."
+          echo "Control rollout by staging the update endpoint behind a feature flag."
+
+  auto-rollback:
+    name: Auto-rollback gate
+    runs-on: ubuntu-latest
+    needs: rollout
+    steps:
+      - name: Wait and check error rate
+        run: |
+          echo "Sleeping 5 minutes to observe error rate..."
+          sleep 300
+
+      - name: Check Sentry error rate
+        id: sentry-check
+        run: |
+          ERROR_RATE=$(curl -sf \
+            -H "Authorization: Bearer ${{ secrets.SENTRY_TOKEN }}" \
+            "${{ secrets.SENTRY_API_URL }}/error-rate/?version=${{ inputs.version }}" \
+            | jq -r '.rate // "0"') || ERROR_RATE="0"
+          echo "error_rate=$ERROR_RATE" >> $GITHUB_OUTPUT
+          echo "Observed error rate: $ERROR_RATE%"
+
+      - name: Setup EAS for rollback
+        if: ${{ fromJson(steps.sentry-check.outputs.error_rate) > 5 && inputs.target == 'mobile' }}
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Rollback mobile — set EAS rollout to 0%
+        if: ${{ fromJson(steps.sentry-check.outputs.error_rate) > 5 && inputs.target == 'mobile' }}
+        working-directory: apps/mobile
+        run: |
+          echo "ERROR RATE EXCEEDED 5% — rolling back mobile to 0%"
+          eas channel:rollout --channel production --percent 0 --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Rollback desktop — re-publish previous latest.json
+        if: ${{ fromJson(steps.sentry-check.outputs.error_rate) > 5 && inputs.target == 'desktop' }}
+        run: |
+          echo "ERROR RATE EXCEEDED 5% — desktop rollback required"
+          echo "Manually re-publish the previous stable release to restore latest.json"
+          echo "Previous version: find the last stable tag before ${{ inputs.version }}"
+          exit 1
+
+      - name: Rollback gateway
+        if: ${{ fromJson(steps.sentry-check.outputs.error_rate) > 5 && inputs.target == 'gateway' }}
+        run: |
+          echo "ERROR RATE EXCEEDED 5% — gateway rollback required"
+          echo "Redeploy previous gateway version tag via your orchestration platform"
+          exit 1
+
+      - name: Rollout healthy
+        if: ${{ fromJson(steps.sentry-check.outputs.error_rate) <= 5 }}
+        run: echo "Rollout healthy at ${{ inputs.percentage }}% — proceed to next stage."

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenAWork",
+  "version": "0.0.1",
+  "identifier": "com.openAwork.desktop",
+  "build": {
+    "frontendDist": "../../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm --filter @openAwork/web dev",
+    "beforeBuildCommand": "pnpm --filter @openAwork/web build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenAWork",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon_32x32.png",
+      "icons/icon_128x128.png",
+      "icons/icon_256x256.png",
+      "icons/icon_512x512.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "externalBin": ["binaries/node"],
+    "resources": ["sidecars/agent-gateway/"]
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    },
+    "updater": {
+      "pubkey": "vNyM9fcv5lH8yTSa7RQBp0ukzyhKelFFp3IYP8OkgJY=",
+      "endpoints": [
+        "https://github.com/openAwork/openAwork/releases/latest/download/latest.json",
+        "https://github.com/openAwork/openAwork/releases/download/{{current_version}}-preview/latest.json"
+      ],
+      "dialog": false
+    }
+  }
+}

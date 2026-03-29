@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "OpenAWork",
+    "slug": "openAwork",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "updates": {
+      "url": "https://u.expo.dev/5d5fee00-cf47-4452-a6b3-238c1b84eb0c",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 3000
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "ios": {
+      "bundleIdentifier": "com.openAwork.mobile",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.openAwork.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "5d5fee00-cf47-4452-a6b3-238c1b84eb0c"
+      }
+    }
+  }
+}

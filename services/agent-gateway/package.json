@@ -1,0 +1,48 @@
+{
+  "name": "@openAwork/agent-gateway",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "build:binary": "bun build src/index.ts --compile --outfile dist/agent-gateway",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run test:unit && pnpm run test:verification",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:verification": "pnpm run test:responses && pnpm run test:permissions && pnpm run test:session-tasks && pnpm run test:task-tool",
+    "test:responses": "tsx src/verification/verify-openai-responses.ts",
+    "test:permissions": "tsx src/verification/verify-permissions-routes.ts",
+    "test:session-tasks": "tsx src/verification/verify-session-task-routes.ts && tsx src/verification/verify-session-delete-child-detach.ts",
+    "test:task-tool": "tsx src/verification/verify-task-tool-no-permission.ts && tsx src/verification/verify-task-tool-auto-run.ts && tsx src/verification/verify-task-tool-failure-propagation.ts && tsx src/verification/verify-task-tool-pending-interaction-resume.ts && tsx src/verification/verify-task-tool-question-resume.ts",
+    "lint": "eslint .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "@fastify/jwt": "^9.0.0",
+    "@fastify/static": "^8.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "@octokit/rest": "^22.0.1",
+    "@slack/bolt": "^4.4.0",
+    "@openAwork/agent-core": "workspace:*",
+    "@openAwork/browser-automation": "workspace:*",
+    "@openAwork/logger": "workspace:*",
+    "@openAwork/lsp-client": "workspace:*",
+    "@openAwork/mcp-client": "workspace:*",
+    "@openAwork/shared": "workspace:*",
+    "@openAwork/skill-registry": "workspace:*",
+    "@openAwork/skills": "workspace:*",
+    "@types/turndown": "^5.0.6",
+    "fastify": "^5.0.0",
+    "fastify-plugin": "^5.1.0",
+    "turndown": "^7.2.2",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "vitest": "^2.1.9"
+  }
+}

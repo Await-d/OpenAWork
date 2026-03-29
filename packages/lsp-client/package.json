@@ -1,0 +1,29 @@
+{
+  "name": "@openAwork/lsp-client",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.2.0",
+    "vscode-languageserver-types": "^3.17.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

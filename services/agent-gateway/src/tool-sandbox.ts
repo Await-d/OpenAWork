@@ -1,0 +1,2550 @@
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import type { ToolCallRequest, ToolCallResult, ToolDefinition } from '@openAwork/agent-core';
+import type { ZodTypeAny } from 'zod';
+import {
+  ToolRegistry,
+  ToolNotFoundError,
+  ToolValidationError,
+  ToolTimeoutError,
+} from '@openAwork/agent-core';
+import { AgentTaskManagerImpl, defaultIgnoreManager } from '@openAwork/agent-core';
+import { webSearchTool, lspDiagnosticsTool, lspTouchTool } from '@openAwork/agent-core';
+import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from './db.js';
+import { lspManager } from './lsp/router.js';
+import {
+  WORKSPACE_TOOL_NAMES,
+  globTool,
+  grepTool,
+  listTool,
+  readTool,
+  resolveWorkspaceReviewFilePath,
+  workspaceCreateDirectoryTool,
+  workspaceCreateFileTool,
+  workspaceReadFileTool,
+  workspaceReviewRevertTool,
+  workspaceReviewDiffTool,
+  workspaceReviewStatusTool,
+  workspaceSearchTool,
+  workspaceTreeTool,
+  workspaceWriteFileTool,
+  writeTool,
+} from './workspace-tools.js';
+import { BATCH_TOOL_DISALLOWED, BATCH_TOOL_MAX_CALLS } from './batch-tools.js';
+import { applyPatchToolDefinition, buildApplyPatchPermissionScope } from './apply-patch-tools.js';
+import { bashToolDefinition, buildBashPermissionScope, runBashCommand } from './bash-tools.js';
+import { createEditTool } from './edit-tools.js';
+import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
+import { createSkillTool } from './skill-tools.js';
+import { taskToolDefinition } from './task-tools.js';
+import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
+import { websearchTool } from './tool-aliases.js';
+import { webfetchTool } from './web-tools.js';
+import { resolveDelegatedAgent } from './task-agent-resolution.js';
+import {
+  formatSubTodoReadValidationError,
+  formatSubTodoWriteValidationError,
+  formatTodoReadValidationError,
+  formatTodoWriteValidationError,
+  runSubTodoReadTool,
+  runSubTodoWriteTool,
+  subTodoReadInputSchema,
+  subTodoReadTool,
+  subTodoWriteInputSchema,
+  subTodoWriteTool,
+  runTodoReadTool,
+  runTodoWriteTool,
+  todoReadInputSchema,
+  todoReadTool,
+  todoWriteInputSchema,
+  todoWriteTool,
+} from './todo-tools.js';
+import { createPermissionAskedEvent } from './session-permission-events.js';
+import { publishSessionRunEvent } from './session-run-events.js';
+import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import {
+  isGatewayToolEnabledForSessionMetadata,
+  shouldAutoApproveToolForSessionMetadata,
+} from './session-tool-visibility.js';
+import {
+  appendSessionMessage,
+  getLatestReferencedToolResult,
+  getSessionToolResultByCallId,
+  listSessionMessages,
+} from './session-message-store.js';
+import { extractLatestChildSessionSummary } from './task-result-extraction.js';
+import {
+  clearTaskParentAutoResumeContext,
+  consumeTaskParentAutoResumeContext,
+  scheduleTaskParentAutoResume,
+  upsertTaskParentAutoResumeContext,
+} from './task-parent-auto-resume.js';
+import { validateWorkspacePath } from './workspace-paths.js';
+import {
+  callMcpToolForSession,
+  getConfiguredMcpServerForSession,
+  getConfiguredMcpServersForSession,
+  getMcpServerFingerprint,
+  listMcpToolsForSession,
+} from './mcp-runtime.js';
+import type { RunEvent } from '@openAwork/shared';
+
+const FILE_TOOLS = new Set([
+  'file_read',
+  'file_write',
+  'edit',
+  'read',
+  'read_file',
+  'write',
+  'write_file',
+  'workspace_read_file',
+  'workspace_write_file',
+  'workspace_create_file',
+  'workspace_review_diff',
+  'workspace_review_revert',
+]);
+
+const PERMISSION_GATED_TOOLS = new Set([
+  'apply_patch',
+  'bash',
+  'edit',
+  'skill',
+  'mcp_list_tools',
+  'write',
+  'workspace_write_file',
+  'workspace_create_file',
+  'workspace_create_directory',
+  'workspace_review_revert',
+  'mcp_call',
+]);
+
+const TOOL_WHITELIST = new Set<string>([
+  'apply_patch',
+  'bash',
+  'web_search',
+  websearchTool.name,
+  webfetchTool.name,
+  'question',
+  'read_tool_output',
+  'edit',
+  'batch',
+  'skill',
+  'task',
+  'lsp_diagnostics',
+  'lsp_touch',
+  subTodoReadTool.name,
+  subTodoWriteTool.name,
+  todoReadTool.name,
+  todoWriteTool.name,
+  'mcp_list_tools',
+  'mcp_call',
+  ...WORKSPACE_TOOL_NAMES,
+]);
+const DEFAULT_TOOL_TIMEOUT_MS = 30000;
+
+type PermissionDecision = 'once' | 'session' | 'permanent' | 'reject';
+
+interface SessionOwnerRow {
+  user_id: string;
+}
+
+interface SessionMetadataRow {
+  metadata_json: string;
+}
+
+interface PermissionApprovalRow {
+  id: string;
+  decision: PermissionDecision;
+}
+
+interface PermissionPendingRow {
+  id: string;
+}
+
+interface QuestionPendingRow {
+  id: string;
+}
+
+interface PermissionRequestContext {
+  scope: string;
+  reason: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  previewAction: string;
+}
+
+type PermissionState =
+  | { kind: 'approved'; decision: PermissionDecision; requestId: string }
+  | { kind: 'pending'; requestId: string; created: boolean }
+  | { kind: 'not_needed' };
+
+export interface SandboxExecutionContext {
+  clientRequestId?: string;
+  nextRound?: number;
+  requestData?: Record<string, unknown>;
+}
+
+interface PermissionRequestPayload {
+  clientRequestId: string;
+  nextRound: number;
+  requestData: Record<string, unknown>;
+  toolCallId: string;
+  rawInput: Record<string, unknown>;
+}
+
+interface TaskBackgroundRunResult {
+  pendingInteraction: boolean;
+  statusCode: number;
+  summary: string;
+}
+
+interface TaskParentToolReference {
+  clientRequestId: string;
+  toolCallId: string;
+}
+
+const TASK_PARENT_TOOL_CALL_ID_KEY = 'taskParentToolCallId';
+const TASK_PARENT_TOOL_REQUEST_ID_KEY = 'taskParentToolRequestId';
+
+type TaskToolOutputStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+
+interface TaskSessionRow {
+  id: string;
+  metadata_json: string;
+  state_status: string;
+}
+
+interface ParsedTaskSessionRow extends TaskSessionRow {
+  metadata: Record<string, unknown>;
+  parentSessionId: string | null;
+}
+
+const MAX_TASK_CHILD_SESSION_DEPTH = 4;
+const MAX_TASK_CHILD_SESSION_DESCENDANTS = 24;
+const MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT = 4;
+
+function mapTaskStatusToToolOutputStatus(status: string): TaskToolOutputStatus {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'completed':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'pending';
+  }
+}
+
+function mapTaskStatusToUpdateStatus(
+  status: string,
+): 'pending' | 'in_progress' | 'done' | 'failed' | 'cancelled' {
+  switch (status) {
+    case 'running':
+      return 'in_progress';
+    case 'completed':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'pending';
+  }
+}
+
+function createTaskToolResultClientRequestId(clientRequestId: string, toolCallId: string): string {
+  return `${clientRequestId}:tool:${toolCallId}`;
+}
+
+function findTaskBySessionId(
+  graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>,
+  childSessionId: string,
+) {
+  return Object.values(graph.tasks).find((task) => task.sessionId === childSessionId) ?? null;
+}
+
+function buildTaskToolOutput(input: {
+  assignedAgent: string;
+  category?: string;
+  errorMessage?: string;
+  requestedSkills?: string[];
+  result?: string;
+  sessionId: string;
+  status: TaskToolOutputStatus;
+  taskId: string;
+}) {
+  return {
+    taskId: input.taskId,
+    sessionId: input.sessionId,
+    status: input.status,
+    assignedAgent: input.assignedAgent,
+    ...(input.category ? { category: input.category } : {}),
+    ...(input.requestedSkills && input.requestedSkills.length > 0
+      ? { requestedSkills: input.requestedSkills }
+      : {}),
+    ...(input.result ? { result: input.result } : {}),
+    ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+  };
+}
+
+function truncateTaskReminderText(value: string, maxLength = 1200): string {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function buildTaskCompletionAssistantEventText(input: {
+  assignedAgent: string;
+  childSessionId: string;
+  errorMessage?: string;
+  result?: string;
+  status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
+  taskTitle: string;
+}): string {
+  const primaryMessage = truncateTaskReminderText(
+    input.errorMessage ?? input.result ?? '子代理执行已结束。',
+  );
+  const payload = {
+    type: 'assistant_event',
+    payload: {
+      kind: 'agent',
+      title:
+        input.status === 'failed'
+          ? `子代理失败 · ${input.taskTitle}`
+          : input.status === 'cancelled'
+            ? `子代理已取消 · ${input.taskTitle}`
+            : `子代理已完成 · ${input.taskTitle}`,
+      message: [
+        `代理：${input.assignedAgent}`,
+        input.errorMessage ? `错误：${primaryMessage}` : `结果：${primaryMessage}`,
+        `会话：${input.childSessionId}`,
+      ].join('\n'),
+      status:
+        input.status === 'failed' ? 'error' : input.status === 'cancelled' ? 'paused' : 'success',
+    },
+  };
+
+  return JSON.stringify(payload);
+}
+
+function createTaskCompletionReminderClientRequestId(input: {
+  status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
+  taskId: string;
+  updatedAt: number;
+}): string {
+  return `task-reminder:${input.taskId}:${input.status}:${input.updatedAt}`;
+}
+
+function appendParentTaskCompletionReminder(input: {
+  assignedAgent: string;
+  childSessionId: string;
+  errorMessage?: string;
+  parentSessionId: string;
+  result?: string;
+  status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
+  taskId: string;
+  taskTitle: string;
+  taskUpdatedAt: number;
+  userId: string;
+}): void {
+  appendSessionMessage({
+    sessionId: input.parentSessionId,
+    userId: input.userId,
+    role: 'assistant',
+    content: [
+      {
+        type: 'text',
+        text: buildTaskCompletionAssistantEventText({
+          assignedAgent: input.assignedAgent,
+          childSessionId: input.childSessionId,
+          errorMessage: input.errorMessage,
+          result: input.result,
+          status: input.status,
+          taskTitle: input.taskTitle,
+        }),
+      },
+    ],
+    clientRequestId: createTaskCompletionReminderClientRequestId({
+      status: input.status,
+      taskId: input.taskId,
+      updatedAt: input.taskUpdatedAt,
+    }),
+    replaceExisting: true,
+  });
+}
+
+function isTaskCreatedSessionMetadata(metadata: Record<string, unknown>): boolean {
+  return metadata['createdByTool'] === 'task';
+}
+
+function listParsedTaskSessionsForUser(userId: string): ParsedTaskSessionRow[] {
+  return sqliteAll<TaskSessionRow>(
+    'SELECT id, metadata_json, state_status FROM sessions WHERE user_id = ?',
+    [userId],
+  ).map((row) => {
+    const metadata = parseSessionMetadataJson(row.metadata_json);
+    const parentSessionId =
+      typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : null;
+    return {
+      ...row,
+      metadata,
+      parentSessionId,
+    };
+  });
+}
+
+function resolveTaskSessionChain(
+  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
+  sessionId: string,
+): string[] {
+  const chain: string[] = [];
+  const visited = new Set<string>();
+  let currentSessionId: string | null = sessionId;
+
+  while (currentSessionId && !visited.has(currentSessionId)) {
+    chain.push(currentSessionId);
+    visited.add(currentSessionId);
+    currentSessionId = sessionsById.get(currentSessionId)?.parentSessionId ?? null;
+  }
+
+  return chain;
+}
+
+function resolveTaskRootSessionId(
+  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
+  sessionId: string,
+): string {
+  const chain = resolveTaskSessionChain(sessionsById, sessionId);
+  return chain[chain.length - 1] ?? sessionId;
+}
+
+function countTaskChildSessionsUnderRoot(
+  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
+  rootSessionId: string,
+): number {
+  let count = 0;
+  for (const session of sessionsById.values()) {
+    if (!isTaskCreatedSessionMetadata(session.metadata)) {
+      continue;
+    }
+
+    if (resolveTaskRootSessionId(sessionsById, session.id) === rootSessionId) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function countRunningTaskChildSessionsUnderRoot(
+  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
+  rootSessionId: string,
+  excludeSessionId?: string,
+): number {
+  let count = 0;
+  for (const session of sessionsById.values()) {
+    if (session.id === excludeSessionId || session.state_status !== 'running') {
+      continue;
+    }
+
+    if (!isTaskCreatedSessionMetadata(session.metadata)) {
+      continue;
+    }
+
+    if (resolveTaskRootSessionId(sessionsById, session.id) === rootSessionId) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+export function getTaskSessionLimitError(input: {
+  currentSessionId: string;
+  excludeRunningSessionId?: string;
+  isNewChildSession: boolean;
+  userId: string;
+}): string | null {
+  const taskSessions = listParsedTaskSessionsForUser(input.userId);
+  const sessionsById = new Map(taskSessions.map((session) => [session.id, session]));
+  const nextChildDepth = resolveTaskSessionChain(sessionsById, input.currentSessionId).length;
+  const rootSessionId = resolveTaskRootSessionId(sessionsById, input.currentSessionId);
+
+  if (input.isNewChildSession && nextChildDepth > MAX_TASK_CHILD_SESSION_DEPTH) {
+    return `子代理嵌套深度已达到上限（${MAX_TASK_CHILD_SESSION_DEPTH}），请在当前会话内完成后续工作。`;
+  }
+
+  if (
+    input.isNewChildSession &&
+    countTaskChildSessionsUnderRoot(sessionsById, rootSessionId) >=
+      MAX_TASK_CHILD_SESSION_DESCENDANTS
+  ) {
+    return `当前任务树下的子代理数量已达到上限（${MAX_TASK_CHILD_SESSION_DESCENDANTS}），请先结束部分子任务再继续委派。`;
+  }
+
+  if (
+    countRunningTaskChildSessionsUnderRoot(
+      sessionsById,
+      rootSessionId,
+      input.excludeRunningSessionId,
+    ) >= MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT
+  ) {
+    return `当前任务树中正在运行的子代理已达到上限（${MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT}），请等待已有子任务完成后再继续。`;
+  }
+
+  return null;
+}
+
+function buildTaskTags(input: {
+  agentId: string;
+  category?: string;
+  requestedSkills: string[];
+}): string[] {
+  return [
+    'task-tool',
+    input.agentId,
+    ...(input.category ? [`category:${input.category}`] : []),
+    ...input.requestedSkills.map((skill) => `skill:${skill}`),
+  ];
+}
+
+function buildDelegatedChildRequestData(input: {
+  childSessionId: string;
+  executionContext?: SandboxExecutionContext;
+  prompt: string;
+  systemPrompt?: string;
+}): Record<string, unknown> | null {
+  if (
+    !input.executionContext?.requestData ||
+    typeof input.executionContext.requestData !== 'object'
+  ) {
+    return null;
+  }
+
+  return {
+    ...input.executionContext.requestData,
+    clientRequestId: `task:${input.executionContext.clientRequestId ?? 'child'}:child:${input.childSessionId}`,
+    displayMessage: input.prompt,
+    message: input.prompt,
+    ...(input.systemPrompt
+      ? { systemPrompt: input.systemPrompt }
+      : input.executionContext.requestData['systemPrompt'] !== undefined
+        ? { systemPrompt: input.executionContext.requestData['systemPrompt'] }
+        : {}),
+  };
+}
+
+export function readTaskParentToolReference(
+  metadata: Record<string, unknown>,
+): TaskParentToolReference | undefined {
+  const clientRequestId = metadata[TASK_PARENT_TOOL_REQUEST_ID_KEY];
+  const toolCallId = metadata[TASK_PARENT_TOOL_CALL_ID_KEY];
+  if (typeof clientRequestId !== 'string' || typeof toolCallId !== 'string') {
+    return undefined;
+  }
+
+  return { clientRequestId, toolCallId };
+}
+
+export function clearTaskParentToolReference(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    !(TASK_PARENT_TOOL_REQUEST_ID_KEY in metadata) &&
+    !(TASK_PARENT_TOOL_CALL_ID_KEY in metadata)
+  ) {
+    return metadata;
+  }
+
+  const nextMetadata = { ...metadata };
+  delete nextMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY];
+  delete nextMetadata[TASK_PARENT_TOOL_CALL_ID_KEY];
+  return nextMetadata;
+}
+
+function readTaskRequestedSkills(metadata: Record<string, unknown>): string[] | undefined {
+  const candidate = metadata['requestedSkills'];
+  if (!Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  const skills = candidate.filter((value): value is string => typeof value === 'string');
+  return skills.length > 0 ? skills : undefined;
+}
+
+function readTaskCategory(metadata: Record<string, unknown>): string | undefined {
+  return typeof metadata['taskCategory'] === 'string' ? metadata['taskCategory'] : undefined;
+}
+
+export async function reconcileResumedTaskChildSession(input: {
+  childSessionId: string;
+  pendingInteraction: boolean;
+  statusCode: number;
+  userId: string;
+}): Promise<void> {
+  const childSession = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.childSessionId, input.userId],
+  );
+  if (!childSession) {
+    return;
+  }
+
+  const metadata = parseSessionMetadataJson(childSession.metadata_json);
+  if (!isTaskCreatedSessionMetadata(metadata)) {
+    return;
+  }
+
+  const parentSessionId =
+    typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : null;
+  if (!parentSessionId) {
+    return;
+  }
+
+  const taskManager = new AgentTaskManagerImpl();
+  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+  const task = findTaskBySessionId(graph, input.childSessionId);
+  if (!task) {
+    return;
+  }
+
+  await finalizeChildTaskRun({
+    assignedAgent:
+      task.assignedAgent ??
+      (typeof metadata['subagentType'] === 'string' ? metadata['subagentType'] : 'task'),
+    childSessionId: input.childSessionId,
+    childTaskId: task.id,
+    parentToolReference: readTaskParentToolReference(metadata),
+    parentSessionId,
+    requestedSkills: readTaskRequestedSkills(metadata),
+    result: {
+      pendingInteraction: input.pendingInteraction,
+      statusCode: input.statusCode,
+      summary: getChildSessionSummary(input.childSessionId, input.userId),
+    },
+    taskCategory: readTaskCategory(metadata),
+    taskManager,
+    taskTitle: task.title,
+    userId: input.userId,
+  });
+}
+
+export function syncParentTaskToolResult(input: {
+  assignedAgent: string;
+  category?: string;
+  errorMessage?: string;
+  parentSessionId: string;
+  parentToolReference?: TaskParentToolReference;
+  requestedSkills?: string[];
+  result?: string;
+  sessionId: string;
+  status: TaskToolOutputStatus;
+  taskId: string;
+  userId: string;
+}): void {
+  if (!input.parentToolReference) {
+    return;
+  }
+
+  const parentSession = sqliteGet<{ id: string }>(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.parentSessionId, input.userId],
+  );
+  if (!parentSession) {
+    return;
+  }
+
+  const output = buildTaskToolOutput({
+    assignedAgent: input.assignedAgent,
+    category: input.category,
+    errorMessage: input.errorMessage,
+    requestedSkills: input.requestedSkills,
+    result: input.result,
+    sessionId: input.sessionId,
+    status: input.status,
+    taskId: input.taskId,
+  });
+  appendSessionMessage({
+    sessionId: input.parentSessionId,
+    userId: input.userId,
+    role: 'tool',
+    content: [
+      {
+        type: 'tool_result',
+        toolCallId: input.parentToolReference.toolCallId,
+        output,
+        isError: input.status === 'failed',
+      },
+    ],
+    clientRequestId: createTaskToolResultClientRequestId(
+      input.parentToolReference.clientRequestId,
+      input.parentToolReference.toolCallId,
+    ),
+    replaceExisting: true,
+  });
+
+  publishSessionRunEvent(input.parentSessionId, {
+    type: 'tool_result',
+    toolCallId: input.parentToolReference.toolCallId,
+    toolName: 'task',
+    output,
+    isError: input.status === 'failed',
+    occurredAt: Date.now(),
+  });
+}
+
+const gatewayLspDiagnosticsTool: ToolDefinition<
+  typeof lspDiagnosticsTool.inputSchema,
+  typeof lspDiagnosticsTool.outputSchema
+> = {
+  ...lspDiagnosticsTool,
+  execute: async (input) => {
+    const diagnostics = (await lspManager.diagnostics()) as Record<string, unknown[]>;
+    const requestedFilePath = input.filePath;
+
+    if (typeof requestedFilePath === 'string' && requestedFilePath.length > 0) {
+      const filePath = requestedFilePath ?? '';
+      const key = Object.keys(diagnostics).find((entry) => entry.endsWith(filePath));
+      return key ? { [key]: diagnostics[key]! } : {};
+    }
+
+    return diagnostics;
+  },
+};
+
+const gatewayLspTouchTool: ToolDefinition<
+  typeof lspTouchTool.inputSchema,
+  typeof lspTouchTool.outputSchema
+> = {
+  ...lspTouchTool,
+  execute: async (input) => {
+    await lspManager.touchFile(input.path, input.waitForDiagnostics);
+    return { ok: true };
+  },
+};
+
+function buildPermissionRequestContext(
+  sessionId: string,
+  request: ToolCallRequest,
+): PermissionRequestContext | null {
+  const rawInput = request.rawInput as Record<string, unknown>;
+  const pathValue =
+    typeof rawInput['path'] === 'string'
+      ? rawInput['path']
+      : typeof rawInput['filePath'] === 'string'
+        ? rawInput['filePath']
+        : null;
+
+  switch (request.toolName) {
+    case 'workspace_write_file': {
+      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      if (!safePath) return null;
+      return {
+        scope: safePath,
+        reason: '需要覆盖写入工作区文件',
+        riskLevel: 'medium',
+        previewAction: `覆盖写入 ${safePath}`,
+      };
+    }
+    case 'write': {
+      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      if (!safePath) return null;
+      return {
+        scope: safePath,
+        reason: '需要写入工作区文件',
+        riskLevel: 'medium',
+        previewAction: `写入 ${safePath}`,
+      };
+    }
+    case 'edit': {
+      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      if (!safePath) return null;
+      return {
+        scope: safePath,
+        reason: '需要编辑工作区文件',
+        riskLevel: 'medium',
+        previewAction: `编辑 ${safePath}`,
+      };
+    }
+    case 'skill': {
+      const name = typeof rawInput['name'] === 'string' ? rawInput['name'].trim() : '';
+      if (!name) return null;
+      return {
+        scope: `skill:${name}`,
+        reason: '需要加载技能内容并注入会话上下文',
+        riskLevel: 'medium',
+        previewAction: `加载技能 ${name}`,
+      };
+    }
+    case 'bash': {
+      const command = typeof rawInput['command'] === 'string' ? rawInput['command'].trim() : '';
+      const workdirValue =
+        typeof rawInput['workdir'] === 'string' ? rawInput['workdir'] : WORKSPACE_ROOT;
+      const safeWorkdir = validateWorkspacePath(workdirValue);
+      if (!command || !safeWorkdir) return null;
+      return {
+        scope: buildBashPermissionScope(command, safeWorkdir),
+        reason: '需要执行工作区命令',
+        riskLevel: 'high',
+        previewAction: `执行命令: ${command}`,
+      };
+    }
+    case 'apply_patch': {
+      const patchText = typeof rawInput['patchText'] === 'string' ? rawInput['patchText'] : '';
+      if (!patchText.trim()) return null;
+      return {
+        scope: buildApplyPatchPermissionScope(patchText),
+        reason: '需要批量修改工作区文件',
+        riskLevel: 'high',
+        previewAction: '应用结构化补丁到工作区文件',
+      };
+    }
+    case 'task': {
+      const description =
+        typeof rawInput['description'] === 'string' ? rawInput['description'].trim() : '';
+      if (!description) return null;
+      return {
+        scope: `task:${description}`,
+        reason: '需要创建子任务和子会话',
+        riskLevel: 'high',
+        previewAction: `创建子任务 ${description}`,
+      };
+    }
+    case 'workspace_create_file': {
+      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      if (!safePath) return null;
+      return {
+        scope: safePath,
+        reason: '需要在工作区中新建文件',
+        riskLevel: 'medium',
+        previewAction: `创建文件 ${safePath}`,
+      };
+    }
+    case 'workspace_create_directory': {
+      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      if (!safePath) return null;
+      return {
+        scope: safePath,
+        reason: '需要在工作区中新建目录',
+        riskLevel: 'medium',
+        previewAction: `创建目录 ${safePath}`,
+      };
+    }
+    case 'workspace_review_revert': {
+      const safeWorkspacePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const filePath = typeof rawInput['filePath'] === 'string' ? rawInput['filePath'] : null;
+      if (!safeWorkspacePath || !filePath) return null;
+      const relativeFilePath = resolveWorkspaceReviewFilePath(safeWorkspacePath, filePath);
+      const absoluteFilePath = join(safeWorkspacePath, relativeFilePath);
+      return {
+        scope: absoluteFilePath,
+        reason: '需要回滚工作区文件改动',
+        riskLevel: 'high',
+        previewAction: `回滚 ${absoluteFilePath}`,
+      };
+    }
+    case 'mcp_call': {
+      const serverId = typeof rawInput['serverId'] === 'string' ? rawInput['serverId'].trim() : '';
+      const toolName = typeof rawInput['toolName'] === 'string' ? rawInput['toolName'].trim() : '';
+      const argumentsValue = rawInput['arguments'];
+      if (!serverId || !toolName || !argumentsValue || typeof argumentsValue !== 'object') {
+        return null;
+      }
+      const server = getConfiguredMcpServerForSession(sessionId, serverId);
+      const serverFingerprint = getMcpServerFingerprint(server);
+      const previewArguments = JSON.stringify(argumentsValue).slice(0, 240);
+      return {
+        scope: `mcp:${serverId}:${toolName}:${serverFingerprint}`,
+        reason: '需要调用 MCP 工具',
+        riskLevel: 'high',
+        previewAction: `调用 ${serverId}/${toolName} ${previewArguments}`,
+      };
+    }
+    case 'mcp_list_tools': {
+      const serverId = typeof rawInput['serverId'] === 'string' ? rawInput['serverId'].trim() : '';
+      const selectedServers = serverId
+        ? [getConfiguredMcpServerForSession(sessionId, serverId)]
+        : getConfiguredMcpServersForSession(sessionId).filter((server) => server.enabled);
+      if (selectedServers.length === 0) {
+        return null;
+      }
+      const fingerprint = selectedServers
+        .map((server) => `${server.id}:${getMcpServerFingerprint(server)}`)
+        .sort((left, right) => left.localeCompare(right))
+        .join('|');
+      return {
+        scope: `mcp-list:${fingerprint}`,
+        reason: '需要连接 MCP 服务器并列出可用工具',
+        riskLevel: 'high',
+        previewAction: `列出 MCP 工具：${selectedServers.map((server) => server.id).join(', ')}`,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+async function executeGatewayManagedTool(
+  sandbox: ToolSandbox,
+  sessionId: string,
+  request: ToolCallRequest,
+  signal: AbortSignal,
+  executionContext?: SandboxExecutionContext,
+): Promise<ToolCallResult | null> {
+  const rawInput = request.rawInput as Record<string, unknown>;
+
+  try {
+    if (request.toolName === todoWriteTool.name) {
+      const parsed = todoWriteInputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatTodoWriteValidationError(rawInput),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = runTodoWriteTool(sessionId, parsed.data);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === todoReadTool.name) {
+      const parsed = todoReadInputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatTodoReadValidationError(rawInput ?? {}),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = runTodoReadTool(sessionId);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === subTodoWriteTool.name) {
+      const parsed = subTodoWriteInputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatSubTodoWriteValidationError(rawInput),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = runSubTodoWriteTool(sessionId, parsed.data);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === subTodoReadTool.name) {
+      const parsed = subTodoReadInputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatSubTodoReadValidationError(rawInput ?? {}),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = runSubTodoReadTool(sessionId);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'mcp_list_tools') {
+      const serverId = typeof rawInput['serverId'] === 'string' ? rawInput['serverId'] : undefined;
+      const output = await listMcpToolsForSession(sessionId, { serverId });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === readToolOutputToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = readToolOutputToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const resolvedStored = parsed.data.toolCallId
+        ? getSessionToolResultByCallId({
+            sessionId,
+            userId,
+            toolCallId: parsed.data.toolCallId,
+          })
+        : parsed.data.useLatestReferenced
+          ? getLatestReferencedToolResult({ sessionId, userId })
+          : null;
+      if (!resolvedStored) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.data.toolCallId
+            ? `Tool result ${parsed.data.toolCallId} was not found in the current session`
+            : 'No large referenced tool result was found in the current session',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const serializedOutput = (() => {
+        if (typeof resolvedStored.output === 'string') {
+          return resolvedStored.output;
+        }
+        try {
+          return JSON.stringify(resolvedStored.output);
+        } catch {
+          return String(resolvedStored.output);
+        }
+      })();
+
+      const sizeBytes = Buffer.byteLength(serializedOutput, 'utf8');
+      const response = buildReadToolOutputResponse({
+        toolCallId: resolvedStored.toolCallId,
+        output: resolvedStored.output,
+        isError: resolvedStored.isError,
+        request: parsed.data,
+        sizeBytes,
+      });
+      const latestReferenceNote =
+        !parsed.data.toolCallId && parsed.data.useLatestReferenced
+          ? `已自动解析为最近一个被引用的大输出：${resolvedStored.toolCallId}。${response.note ? ` ${response.note}` : ''}`
+          : response.note;
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: {
+          ...response,
+          note: latestReferenceNote,
+        },
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'mcp_call') {
+      const serverId = typeof rawInput['serverId'] === 'string' ? rawInput['serverId'] : '';
+      const toolName = typeof rawInput['toolName'] === 'string' ? rawInput['toolName'] : '';
+      const argumentsValue = rawInput['arguments'];
+      if (!serverId || !toolName || !argumentsValue || typeof argumentsValue !== 'object') {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'mcp_call requires serverId, toolName, and an object-shaped arguments field',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await callMcpToolForSession(sessionId, {
+        serverId,
+        toolName,
+        arguments: argumentsValue as Record<string, unknown>,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: output.isError === true,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'edit') {
+      const editTool = createEditTool(sessionId);
+      const parsed = editTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await editTool.execute(parsed.data, signal);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'batch') {
+      const toolCallsValue = rawInput['tool_calls'];
+      if (!Array.isArray(toolCallsValue) || toolCallsValue.length === 0) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'batch requires a non-empty tool_calls array',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const selectedToolCalls = toolCallsValue.slice(0, BATCH_TOOL_MAX_CALLS);
+      const droppedToolCalls = toolCallsValue.slice(BATCH_TOOL_MAX_CALLS);
+
+      let pendingRequestId: string | undefined;
+      const results = await Promise.all(
+        selectedToolCalls.map(async (entry, index) => {
+          if (!entry || typeof entry !== 'object') {
+            return {
+              tool: 'unknown',
+              isError: true,
+              output: `Invalid batch tool call at index ${index}`,
+            };
+          }
+
+          const tool = typeof entry['tool'] === 'string' ? entry['tool'] : '';
+          const parameters =
+            entry['parameters'] && typeof entry['parameters'] === 'object'
+              ? entry['parameters']
+              : null;
+          if (!tool || !parameters) {
+            return {
+              tool: tool || 'unknown',
+              isError: true,
+              output: `Batch entry ${index} requires tool and object-shaped parameters`,
+            };
+          }
+
+          if (BATCH_TOOL_DISALLOWED.has(tool)) {
+            return {
+              tool,
+              isError: true,
+              output: `Tool "${tool}" cannot be called from batch`,
+            };
+          }
+
+          const subRequest: ToolCallRequest = {
+            toolCallId: `${request.toolCallId}:${index}`,
+            toolName: tool,
+            rawInput: parameters,
+          };
+          const subResult = await sandbox.execute(subRequest, signal, sessionId, executionContext);
+          if (!pendingRequestId && subResult.pendingPermissionRequestId) {
+            pendingRequestId = subResult.pendingPermissionRequestId;
+          }
+          return {
+            tool,
+            isError: subResult.isError,
+            output: subResult.output,
+          };
+        }),
+      );
+
+      for (const [index, droppedEntry] of droppedToolCalls.entries()) {
+        const tool =
+          droppedEntry &&
+          typeof droppedEntry === 'object' &&
+          typeof droppedEntry['tool'] === 'string'
+            ? droppedEntry['tool']
+            : 'unknown';
+        results.push({
+          tool,
+          isError: true,
+          output: `Batch accepts at most ${BATCH_TOOL_MAX_CALLS} tool calls; entry ${BATCH_TOOL_MAX_CALLS + index} was ignored`,
+        });
+      }
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: { results, total: results.length },
+        isError: results.some((result) => result.isError),
+        durationMs: 0,
+        ...(pendingRequestId ? { pendingPermissionRequestId: pendingRequestId } : {}),
+      };
+    }
+
+    if (request.toolName === 'skill') {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const skillTool = createSkillTool(sessionId, userId);
+      const parsed = skillTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await skillTool.execute(parsed.data, signal);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'question') {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = questionToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const payload =
+        executionContext?.clientRequestId &&
+        executionContext.requestData &&
+        typeof executionContext.nextRound === 'number'
+          ? {
+              clientRequestId: executionContext.clientRequestId,
+              nextRound: executionContext.nextRound,
+              requestData: executionContext.requestData,
+              toolCallId: request.toolCallId,
+              rawInput,
+            }
+          : undefined;
+      const title = buildQuestionRequestTitle(parsed.data);
+      const existingPending = findPendingQuestionRequest(sessionId, title);
+      const requestId = existingPending
+        ? existingPending
+        : createPendingQuestionRequest({
+            sessionId,
+            userId,
+            title,
+            questionsJson: JSON.stringify(parsed.data.questions),
+            payload,
+          });
+      if (existingPending && payload) {
+        updatePendingQuestionPayload(existingPending, payload);
+      }
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: existingPending
+          ? `Question request ${requestId} is still pending. Ask the user to answer it, then resume the session.`
+          : `Question request ${requestId} has been created. Ask the user to answer it, then resume the session.`,
+        isError: true,
+        durationMs: 0,
+        pendingPermissionRequestId: requestId,
+      };
+    }
+
+    if (request.toolName === 'task') {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = taskToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const taskManager = new AgentTaskManagerImpl();
+      const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      const resolvedAgent = resolveDelegatedAgent(userId, parsed.data);
+      const requestedSkills = resolvedAgent.requestedSkills;
+      const category = parsed.data.category?.trim();
+      const taskTags = buildTaskTags({
+        agentId: resolvedAgent.agentId,
+        category,
+        requestedSkills,
+      });
+      const requestedTaskId = parsed.data.task_id;
+      const requestedSessionId = parsed.data.session_id;
+      const existingTask = requestedTaskId ? graph.tasks[requestedTaskId] : null;
+      const existingTaskBySession =
+        existingTask?.sessionId || !requestedSessionId
+          ? null
+          : findTaskBySessionId(graph, requestedSessionId);
+      const resumableTask = existingTask?.sessionId
+        ? existingTask
+        : existingTaskBySession?.sessionId
+          ? existingTaskBySession
+          : null;
+      const childSessionId = resumableTask?.sessionId ?? requestedSessionId ?? randomUUID();
+      const childSessionTitle = `${parsed.data.description} (@${resolvedAgent.agentId})`;
+      const childRequestData = buildDelegatedChildRequestData({
+        childSessionId,
+        executionContext,
+        prompt: parsed.data.prompt,
+        systemPrompt: resolvedAgent.systemPrompt,
+      });
+      const parentSessionRow = sqliteGet<{ metadata_json: string }>(
+        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, userId],
+      );
+      const parentSessionMetadata = parentSessionRow
+        ? parseSessionMetadataJson(parentSessionRow.metadata_json)
+        : {};
+      const canExecuteImmediately = childRequestData !== null;
+      const shouldRunInBackground =
+        canExecuteImmediately && parsed.data.run_in_background !== false;
+      const parentToolReference =
+        executionContext?.clientRequestId !== undefined
+          ? {
+              clientRequestId: executionContext.clientRequestId,
+              toolCallId: request.toolCallId,
+            }
+          : undefined;
+      const canAutoResumeParentSession =
+        shouldRunInBackground &&
+        executionContext?.requestData !== undefined &&
+        typeof executionContext.requestData === 'object' &&
+        !Array.isArray(executionContext.requestData) &&
+        parentToolReference !== undefined;
+      const childSessionMetadata: Record<string, unknown> = {
+        parentSessionId: sessionId,
+        subagentType: resolvedAgent.agentId,
+        createdByTool: 'task',
+        delegatedPromptVersion: 'v2',
+        delegatedSystemPrompt: resolvedAgent.systemPrompt,
+        requestedSkills,
+      };
+      if (parentToolReference) {
+        childSessionMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY] = parentToolReference.clientRequestId;
+        childSessionMetadata[TASK_PARENT_TOOL_CALL_ID_KEY] = parentToolReference.toolCallId;
+      }
+      if (category) {
+        childSessionMetadata['taskCategory'] = category;
+      }
+      const inheritedWorkingDirectory = parentSessionMetadata['workingDirectory'];
+      if (typeof inheritedWorkingDirectory === 'string') {
+        childSessionMetadata['workingDirectory'] = inheritedWorkingDirectory;
+      }
+      const existingChildSession = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [childSessionId, userId],
+      );
+      if (resumableTask?.sessionId && !existingChildSession) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Existing child session ${childSessionId} was not found for task ${resumableTask.id}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const taskSessionLimitError = getTaskSessionLimitError({
+        currentSessionId: sessionId,
+        excludeRunningSessionId: resumableTask?.sessionId,
+        isNewChildSession: resumableTask === null,
+        userId,
+      });
+      if (taskSessionLimitError) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: taskSessionLimitError,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      if (existingChildSession) {
+        let mergedMetadata = childSessionMetadata;
+        try {
+          const parsedExistingMetadata = JSON.parse(existingChildSession.metadata_json) as Record<
+            string,
+            unknown
+          >;
+          mergedMetadata = { ...parsedExistingMetadata, ...childSessionMetadata };
+        } catch {
+          mergedMetadata = childSessionMetadata;
+        }
+        sqliteRun(
+          "UPDATE sessions SET metadata_json = ?, title = COALESCE(title, ?), updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+          [JSON.stringify(mergedMetadata), childSessionTitle, childSessionId, userId],
+        );
+      } else {
+        sqliteRun(
+          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, title) VALUES (?, ?, '[]', ?, ?)`,
+          [childSessionId, userId, JSON.stringify(childSessionMetadata), childSessionTitle],
+        );
+      }
+
+      const buildCurrentTaskOutput = (taskState: {
+        assignedAgent?: string;
+        errorMessage?: string;
+        result?: string;
+        status: string;
+        taskId: string;
+      }) =>
+        buildTaskToolOutput({
+          assignedAgent: taskState.assignedAgent ?? resolvedAgent.agentId,
+          category,
+          errorMessage: taskState.errorMessage,
+          requestedSkills,
+          result: taskState.result,
+          sessionId: childSessionId,
+          status: mapTaskStatusToToolOutputStatus(taskState.status),
+          taskId: taskState.taskId,
+        });
+
+      if (resumableTask?.sessionId) {
+        const existingChildSessionState = sqliteGet<{ state_status: string }>(
+          'SELECT state_status FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+          [childSessionId, userId],
+        );
+        const isAlreadyRunning =
+          resumableTask.status === 'running' ||
+          existingChildSessionState?.state_status === 'running';
+
+        if (isAlreadyRunning) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: buildCurrentTaskOutput({
+              assignedAgent: resumableTask.assignedAgent,
+              errorMessage: resumableTask.errorMessage,
+              result: resumableTask.result,
+              status: resumableTask.status,
+              taskId: resumableTask.id,
+            }),
+            isError: false,
+            durationMs: 0,
+          };
+        }
+
+        sqliteRun(
+          "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+          [canExecuteImmediately ? 'running' : 'idle', childSessionId, userId],
+        );
+        if (!childRequestData) {
+          appendSessionMessage({
+            sessionId: childSessionId,
+            userId,
+            role: 'user',
+            content: [{ type: 'text', text: parsed.data.prompt }],
+            clientRequestId: `task:${request.toolCallId}`,
+          });
+        }
+
+        taskManager.updateTask(graph, resumableTask.id, {
+          assignedAgent: resolvedAgent.agentId,
+          completedAt: undefined,
+          description: parsed.data.prompt,
+          errorMessage: undefined,
+          result: undefined,
+          startedAt: canExecuteImmediately ? Date.now() : resumableTask.startedAt,
+          status: canExecuteImmediately ? 'running' : 'pending',
+          tags: taskTags,
+          title: parsed.data.description,
+        });
+        await taskManager.save(graph);
+        if (canAutoResumeParentSession) {
+          upsertTaskParentAutoResumeContext({
+            childSessionId,
+            parentSessionId: sessionId,
+            requestData: executionContext.requestData as Record<string, unknown>,
+            taskId: resumableTask.id,
+            userId,
+          });
+        } else {
+          clearTaskParentAutoResumeContext({ childSessionId, userId });
+        }
+
+        publishSessionRunEvent(sessionId, {
+          type: 'task_update',
+          taskId: resumableTask.id,
+          label: parsed.data.description,
+          status: shouldRunInBackground || canExecuteImmediately ? 'in_progress' : 'pending',
+          assignedAgent: resolvedAgent.agentId,
+          ...(category ? { category } : {}),
+          ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
+          sessionId: childSessionId,
+          parentSessionId: sessionId,
+        });
+
+        if (shouldRunInBackground && childRequestData) {
+          setTimeout(() => {
+            void runChildTaskSessionInBackground({
+              assignedAgent: resolvedAgent.agentId,
+              childSessionId,
+              childTaskId: resumableTask.id,
+              parentToolReference,
+              parentSessionId: sessionId,
+              requestData: childRequestData,
+              requestedSkills,
+              taskCategory: category,
+              taskTitle: parsed.data.description,
+              userId,
+            });
+          }, 0);
+        }
+
+        if (!shouldRunInBackground && childRequestData) {
+          await runChildTaskSessionInBackground({
+            assignedAgent: resolvedAgent.agentId,
+            childSessionId,
+            childTaskId: resumableTask.id,
+            parentToolReference,
+            parentSessionId: sessionId,
+            requestData: childRequestData,
+            requestedSkills,
+            taskCategory: category,
+            taskTitle: parsed.data.description,
+            userId,
+          });
+          const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+          const refreshedTask = refreshedGraph.tasks[resumableTask.id] ?? resumableTask;
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: buildCurrentTaskOutput({
+              assignedAgent: refreshedTask.assignedAgent,
+              errorMessage: refreshedTask.errorMessage,
+              result: refreshedTask.result,
+              status: refreshedTask.status,
+              taskId: refreshedTask.id,
+            }),
+            isError: refreshedTask.status === 'failed',
+            durationMs: 0,
+          };
+        }
+
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: buildCurrentTaskOutput({
+            assignedAgent: resolvedAgent.agentId,
+            status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
+            taskId: resumableTask.id,
+          }),
+          isError: false,
+          durationMs: 0,
+        };
+      }
+
+      sqliteRun(
+        "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+        [canExecuteImmediately ? 'running' : 'idle', childSessionId, userId],
+      );
+      if (!childRequestData) {
+        appendSessionMessage({
+          sessionId: childSessionId,
+          userId,
+          role: 'user',
+          content: [{ type: 'text', text: parsed.data.prompt }],
+          clientRequestId: `task:${request.toolCallId}`,
+        });
+      }
+
+      const childTask = taskManager.addTask(graph, {
+        title: parsed.data.description,
+        description: parsed.data.prompt,
+        status: 'pending',
+        blockedBy: [],
+        sessionId: childSessionId,
+        assignedAgent: resolvedAgent.agentId,
+        priority: 'medium',
+        tags: taskTags,
+      });
+      if (canExecuteImmediately) {
+        taskManager.startTask(graph, childTask.id);
+      }
+      await taskManager.save(graph);
+      if (canAutoResumeParentSession) {
+        upsertTaskParentAutoResumeContext({
+          childSessionId,
+          parentSessionId: sessionId,
+          requestData: executionContext.requestData as Record<string, unknown>,
+          taskId: childTask.id,
+          userId,
+        });
+      } else {
+        clearTaskParentAutoResumeContext({ childSessionId, userId });
+      }
+
+      publishSessionRunEvent(sessionId, {
+        type: 'session_child',
+        sessionId: childSessionId,
+        parentSessionId: sessionId,
+        title: childSessionTitle,
+      });
+      publishSessionRunEvent(sessionId, {
+        type: 'task_update',
+        taskId: childTask.id,
+        label: parsed.data.description,
+        status: shouldRunInBackground ? 'in_progress' : 'pending',
+        assignedAgent: resolvedAgent.agentId,
+        ...(category ? { category } : {}),
+        ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
+        sessionId: childSessionId,
+        parentSessionId: sessionId,
+      });
+
+      if (shouldRunInBackground && childRequestData) {
+        setTimeout(() => {
+          void runChildTaskSessionInBackground({
+            assignedAgent: resolvedAgent.agentId,
+            childSessionId,
+            childTaskId: childTask.id,
+            parentToolReference,
+            parentSessionId: sessionId,
+            requestData: childRequestData,
+            requestedSkills,
+            taskCategory: category,
+            taskTitle: parsed.data.description,
+            userId,
+          });
+        }, 0);
+      }
+
+      if (!shouldRunInBackground && childRequestData) {
+        await runChildTaskSessionInBackground({
+          assignedAgent: resolvedAgent.agentId,
+          childSessionId,
+          childTaskId: childTask.id,
+          parentToolReference,
+          parentSessionId: sessionId,
+          requestData: childRequestData,
+          requestedSkills,
+          taskCategory: category,
+          taskTitle: parsed.data.description,
+          userId,
+        });
+        const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+        const refreshedTask = refreshedGraph.tasks[childTask.id] ?? childTask;
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: buildTaskToolOutput({
+            assignedAgent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
+            category,
+            errorMessage: refreshedTask.errorMessage,
+            requestedSkills,
+            result: refreshedTask.result,
+            sessionId: childSessionId,
+            status: mapTaskStatusToToolOutputStatus(refreshedTask.status),
+            taskId: refreshedTask.id,
+          }),
+          isError: refreshedTask.status === 'failed',
+          durationMs: 0,
+        };
+      }
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: buildTaskToolOutput({
+          assignedAgent: resolvedAgent.agentId,
+          category,
+          requestedSkills,
+          sessionId: childSessionId,
+          status: shouldRunInBackground ? 'running' : 'pending',
+          taskId: childTask.id,
+        }),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'bash') {
+      const parsed = bashToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatValidationIssues(parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await runBashCommand(parsed.data);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: output.exitCode !== 0,
+        durationMs: 0,
+      };
+    }
+
+    return null;
+  } catch (error) {
+    return {
+      toolCallId: request.toolCallId,
+      toolName: request.toolName,
+      output: error instanceof Error ? error.message : String(error),
+      isError: true,
+      durationMs: 0,
+    };
+  }
+}
+
+export function buildTaskUpdateEvent(input: {
+  assignedAgent: string;
+  category?: string;
+  childSessionId: string;
+  errorMessage?: string;
+  parentSessionId: string;
+  requestedSkills?: string[];
+  result?: string;
+  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'cancelled';
+  taskId: string;
+  taskTitle: string;
+}): Extract<RunEvent, { type: 'task_update' }> {
+  return {
+    type: 'task_update',
+    taskId: input.taskId,
+    label: input.taskTitle,
+    status: input.status,
+    assignedAgent: input.assignedAgent,
+    ...(input.category ? { category: input.category } : {}),
+    ...(input.requestedSkills && input.requestedSkills.length > 0
+      ? { requestedSkills: input.requestedSkills }
+      : {}),
+    ...(input.result ? { result: input.result } : {}),
+    ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+    sessionId: input.childSessionId,
+    parentSessionId: input.parentSessionId,
+    eventId: `${input.parentSessionId}:${input.taskId}:${input.status}`,
+    runId: `task:${input.taskId}`,
+    occurredAt: Date.now(),
+  };
+}
+
+function formatValidationIssues(
+  issues: Array<{
+    message: string;
+    path: PropertyKey[];
+  }>,
+): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : null;
+      return path ? `${path}: ${issue.message}` : issue.message;
+    })
+    .join(', ');
+}
+
+function getChildSessionSummary(sessionId: string, userId: string): string {
+  return extractLatestChildSessionSummary(listSessionMessages({ sessionId, userId }));
+}
+
+async function runChildTaskSessionInBackground(input: {
+  assignedAgent: string;
+  childSessionId: string;
+  childTaskId: string;
+  parentToolReference?: TaskParentToolReference;
+  parentSessionId: string;
+  requestData: Record<string, unknown>;
+  requestedSkills?: string[];
+  taskCategory?: string;
+  taskTitle: string;
+  userId: string;
+}): Promise<void> {
+  const taskManager = new AgentTaskManagerImpl();
+
+  try {
+    const { runSessionInBackground } = await import('./routes/stream.js');
+    let pendingInteraction = false;
+    const result = await runSessionInBackground({
+      requestData: input.requestData,
+      sessionId: input.childSessionId,
+      userId: input.userId,
+      writeChunk: (chunk: RunEvent) => {
+        if (chunk.type === 'permission_asked') {
+          pendingInteraction = true;
+          return;
+        }
+
+        if (chunk.type === 'tool_result' && typeof chunk.pendingPermissionRequestId === 'string') {
+          pendingInteraction = true;
+        }
+      },
+    });
+
+    await finalizeChildTaskRun({
+      childSessionId: input.childSessionId,
+      childTaskId: input.childTaskId,
+      assignedAgent: input.assignedAgent,
+      parentToolReference: input.parentToolReference,
+      parentSessionId: input.parentSessionId,
+      requestedSkills: input.requestedSkills,
+      result: {
+        pendingInteraction,
+        statusCode: result.statusCode,
+        summary: getChildSessionSummary(input.childSessionId, input.userId),
+      },
+      taskCategory: input.taskCategory,
+      taskManager,
+      taskTitle: input.taskTitle,
+      userId: input.userId,
+    });
+  } catch (error) {
+    await finalizeChildTaskRun({
+      childSessionId: input.childSessionId,
+      childTaskId: input.childTaskId,
+      assignedAgent: input.assignedAgent,
+      parentToolReference: input.parentToolReference,
+      parentSessionId: input.parentSessionId,
+      requestedSkills: input.requestedSkills,
+      result: {
+        pendingInteraction: false,
+        statusCode: 500,
+        summary: error instanceof Error ? error.message : String(error),
+      },
+      taskCategory: input.taskCategory,
+      taskManager,
+      taskTitle: input.taskTitle,
+      userId: input.userId,
+    });
+  }
+}
+
+async function finalizeChildTaskRun(input: {
+  assignedAgent: string;
+  childSessionId: string;
+  childTaskId: string;
+  parentToolReference?: TaskParentToolReference;
+  parentSessionId: string;
+  requestedSkills?: string[];
+  result: TaskBackgroundRunResult;
+  taskCategory?: string;
+  taskManager: AgentTaskManagerImpl;
+  taskTitle: string;
+  userId: string;
+}): Promise<void> {
+  const summary = input.result.summary || '子代理执行已结束。';
+  sqliteRun(
+    "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [input.result.pendingInteraction ? 'paused' : 'idle', input.childSessionId, input.userId],
+  );
+
+  if (getSessionOwnerUserId(input.parentSessionId) !== input.userId) {
+    return;
+  }
+
+  const graph = await input.taskManager.loadOrCreate(WORKSPACE_ROOT, input.parentSessionId);
+  const task = graph.tasks[input.childTaskId];
+  if (!task) {
+    return;
+  }
+
+  if (task.status === 'cancelled') {
+    await input.taskManager.save(graph);
+    clearTaskParentAutoResumeContext({
+      childSessionId: input.childSessionId,
+      userId: input.userId,
+    });
+    const assignedAgent = task.assignedAgent ?? input.assignedAgent;
+    syncParentTaskToolResult({
+      assignedAgent,
+      category: input.taskCategory,
+      parentSessionId: input.parentSessionId,
+      parentToolReference: input.parentToolReference,
+      requestedSkills: input.requestedSkills,
+      sessionId: input.childSessionId,
+      status: 'cancelled',
+      taskId: task.id,
+      userId: input.userId,
+    });
+    appendParentTaskCompletionReminder({
+      assignedAgent,
+      childSessionId: input.childSessionId,
+      parentSessionId: input.parentSessionId,
+      status: 'cancelled',
+      taskId: task.id,
+      taskTitle: input.taskTitle,
+      taskUpdatedAt: task.updatedAt,
+      userId: input.userId,
+    });
+    publishSessionRunEvent(
+      input.parentSessionId,
+      buildTaskUpdateEvent({
+        assignedAgent,
+        category: input.taskCategory,
+        childSessionId: input.childSessionId,
+        parentSessionId: input.parentSessionId,
+        requestedSkills: input.requestedSkills,
+        status: 'cancelled',
+        taskId: task.id,
+        taskTitle: input.taskTitle,
+      }),
+    );
+    return;
+  }
+
+  if (input.result.pendingInteraction) {
+    input.taskManager.updateTask(graph, task.id, {
+      result: summary,
+    });
+    await input.taskManager.save(graph);
+    const nextTask = graph.tasks[input.childTaskId] ?? task;
+    syncParentTaskToolResult({
+      assignedAgent: nextTask.assignedAgent ?? input.assignedAgent,
+      category: input.taskCategory,
+      parentSessionId: input.parentSessionId,
+      parentToolReference: input.parentToolReference,
+      requestedSkills: input.requestedSkills,
+      result: nextTask.result,
+      sessionId: input.childSessionId,
+      status: mapTaskStatusToToolOutputStatus(nextTask.status),
+      taskId: task.id,
+      userId: input.userId,
+    });
+    publishSessionRunEvent(
+      input.parentSessionId,
+      buildTaskUpdateEvent({
+        assignedAgent: nextTask.assignedAgent ?? input.assignedAgent,
+        category: input.taskCategory,
+        childSessionId: input.childSessionId,
+        parentSessionId: input.parentSessionId,
+        requestedSkills: input.requestedSkills,
+        result: nextTask.result,
+        status: mapTaskStatusToUpdateStatus(nextTask.status),
+        taskId: task.id,
+        taskTitle: input.taskTitle,
+      }),
+    );
+    return;
+  }
+
+  if (task.status === 'running') {
+    if (input.result.statusCode >= 400) {
+      input.taskManager.failTask(graph, task.id, summary);
+    } else {
+      input.taskManager.completeTask(graph, task.id, summary);
+    }
+  } else {
+    input.taskManager.updateTask(graph, task.id, {
+      errorMessage: input.result.statusCode >= 400 ? summary : undefined,
+      result: input.result.statusCode >= 400 ? task.result : summary,
+    });
+  }
+
+  await input.taskManager.save(graph);
+  const nextTask = graph.tasks[input.childTaskId];
+  const eventStatus = mapTaskStatusToUpdateStatus(nextTask?.status ?? task.status);
+  const nextAssignedAgent = nextTask?.assignedAgent ?? input.assignedAgent;
+  const terminalToolOutputStatus = mapTaskStatusToToolOutputStatus(nextTask?.status ?? task.status);
+  const autoResumeContext =
+    terminalToolOutputStatus === 'done' || terminalToolOutputStatus === 'failed'
+      ? consumeTaskParentAutoResumeContext({
+          childSessionId: input.childSessionId,
+          parentSessionId: input.parentSessionId,
+          userId: input.userId,
+        })
+      : (clearTaskParentAutoResumeContext({
+          childSessionId: input.childSessionId,
+          userId: input.userId,
+        }),
+        null);
+  syncParentTaskToolResult({
+    assignedAgent: nextAssignedAgent,
+    category: input.taskCategory,
+    errorMessage: nextTask?.errorMessage,
+    parentSessionId: input.parentSessionId,
+    parentToolReference: input.parentToolReference,
+    requestedSkills: input.requestedSkills,
+    result: nextTask?.result,
+    sessionId: input.childSessionId,
+    status: terminalToolOutputStatus,
+    taskId: task.id,
+    userId: input.userId,
+  });
+  if (
+    terminalToolOutputStatus === 'done' ||
+    terminalToolOutputStatus === 'failed' ||
+    terminalToolOutputStatus === 'cancelled'
+  ) {
+    appendParentTaskCompletionReminder({
+      assignedAgent: nextAssignedAgent,
+      childSessionId: input.childSessionId,
+      errorMessage: nextTask?.errorMessage,
+      parentSessionId: input.parentSessionId,
+      result: nextTask?.result,
+      status: terminalToolOutputStatus,
+      taskId: task.id,
+      taskTitle: input.taskTitle,
+      taskUpdatedAt: nextTask?.updatedAt ?? task.updatedAt,
+      userId: input.userId,
+    });
+  }
+  if (
+    autoResumeContext &&
+    (terminalToolOutputStatus === 'done' || terminalToolOutputStatus === 'failed')
+  ) {
+    scheduleTaskParentAutoResume({
+      assignedAgent: nextAssignedAgent,
+      childSessionId: input.childSessionId,
+      errorMessage: nextTask?.errorMessage,
+      parentSessionId: input.parentSessionId,
+      requestData: autoResumeContext.requestData,
+      result: nextTask?.result,
+      status: terminalToolOutputStatus,
+      taskId: nextTask?.id ?? task.id,
+      taskTitle: input.taskTitle,
+      userId: input.userId,
+    });
+  }
+  publishSessionRunEvent(
+    input.parentSessionId,
+    buildTaskUpdateEvent({
+      assignedAgent: nextAssignedAgent,
+      category: input.taskCategory,
+      childSessionId: input.childSessionId,
+      errorMessage: nextTask?.errorMessage,
+      parentSessionId: input.parentSessionId,
+      requestedSkills: input.requestedSkills,
+      result: nextTask?.result,
+      status: eventStatus,
+      taskId: task.id,
+      taskTitle: input.taskTitle,
+    }),
+  );
+}
+
+function getSessionOwnerUserId(sessionId: string): string | null {
+  const session = sqliteGet<SessionOwnerRow>('SELECT user_id FROM sessions WHERE id = ? LIMIT 1', [
+    sessionId,
+  ]);
+  return session?.user_id ?? null;
+}
+
+function getSessionMetadata(sessionId: string): Record<string, unknown> {
+  const row = sqliteGet<SessionMetadataRow>(
+    'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+    [sessionId],
+  );
+  return parseSessionMetadataJson(row?.metadata_json ?? '{}');
+}
+
+function findApprovedPermission(
+  sessionId: string,
+  toolName: string,
+  scope: string,
+): PermissionApprovalRow | null {
+  const userId = getSessionOwnerUserId(sessionId);
+  return (
+    sqliteGet<PermissionApprovalRow>(
+      `SELECT pr.id, pr.decision
+       FROM permission_requests pr
+       JOIN sessions s ON s.id = pr.session_id
+       WHERE pr.tool_name = ?
+         AND pr.scope = ?
+         AND pr.status = 'approved'
+         AND (
+           (pr.session_id = ? AND pr.decision IN ('once', 'session'))
+           OR (s.user_id = ? AND pr.decision = 'permanent')
+         )
+       ORDER BY pr.updated_at DESC, pr.created_at DESC
+       LIMIT 1`,
+      [toolName, scope, sessionId, userId],
+    ) ?? null
+  );
+}
+
+function findPendingPermission(sessionId: string, toolName: string, scope: string): string | null {
+  const pending = sqliteGet<PermissionPendingRow>(
+    `SELECT id
+     FROM permission_requests
+     WHERE session_id = ? AND tool_name = ? AND scope = ? AND status = 'pending'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [sessionId, toolName, scope],
+  );
+  return pending?.id ?? null;
+}
+
+function updatePendingPermissionPayload(
+  requestId: string,
+  payload: PermissionRequestPayload,
+): void {
+  sqliteRun(
+    `UPDATE permission_requests
+     SET request_payload_json = ?, updated_at = datetime('now')
+     WHERE id = ? AND status = 'pending'`,
+    [JSON.stringify(payload), requestId],
+  );
+}
+
+function createPendingPermissionRequest(
+  sessionId: string,
+  toolName: string,
+  context: PermissionRequestContext,
+  payload?: PermissionRequestPayload,
+): string {
+  const requestId = randomUUID();
+  sqliteRun(
+    `INSERT INTO permission_requests
+     (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    [
+      requestId,
+      sessionId,
+      toolName,
+      context.scope,
+      context.reason,
+      context.riskLevel,
+      context.previewAction,
+      payload ? JSON.stringify(payload) : null,
+    ],
+  );
+  publishSessionRunEvent(
+    sessionId,
+    createPermissionAskedEvent({
+      requestId,
+      toolName,
+      scope: context.scope,
+      reason: context.reason,
+      riskLevel: context.riskLevel,
+      previewAction: context.previewAction,
+    }),
+  );
+  return requestId;
+}
+
+function findPendingQuestionRequest(sessionId: string, title: string): string | null {
+  const pending = sqliteGet<QuestionPendingRow>(
+    `SELECT id
+     FROM question_requests
+     WHERE session_id = ? AND title = ? AND status = 'pending'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [sessionId, title],
+  );
+  return pending?.id ?? null;
+}
+
+function updatePendingQuestionPayload(requestId: string, payload: PermissionRequestPayload): void {
+  sqliteRun(
+    `UPDATE question_requests
+     SET request_payload_json = ?, updated_at = datetime('now')
+     WHERE id = ? AND status = 'pending'`,
+    [JSON.stringify(payload), requestId],
+  );
+}
+
+function createPendingQuestionRequest(input: {
+  sessionId: string;
+  userId: string;
+  title: string;
+  questionsJson: string;
+  payload?: PermissionRequestPayload;
+}): string {
+  const requestId = randomUUID();
+  sqliteRun(
+    `INSERT INTO question_requests
+     (id, session_id, user_id, tool_name, title, questions_json, request_payload_json, status)
+     VALUES (?, ?, ?, 'question', ?, ?, ?, 'pending')`,
+    [
+      requestId,
+      input.sessionId,
+      input.userId,
+      input.title,
+      input.questionsJson,
+      input.payload ? JSON.stringify(input.payload) : null,
+    ],
+  );
+  return requestId;
+}
+
+function consumeOncePermission(requestId: string): void {
+  sqliteRun(
+    `UPDATE permission_requests
+     SET status = 'consumed', updated_at = datetime('now')
+     WHERE id = ? AND status = 'approved' AND decision = 'once'`,
+    [requestId],
+  );
+}
+
+function ensurePermissionForTool(
+  sessionId: string,
+  request: ToolCallRequest,
+  executionContext?: SandboxExecutionContext,
+): PermissionState {
+  if (!PERMISSION_GATED_TOOLS.has(request.toolName)) {
+    return { kind: 'not_needed' };
+  }
+
+  const context = buildPermissionRequestContext(sessionId, request);
+  if (!context) {
+    return { kind: 'not_needed' };
+  }
+
+  const sessionMetadata = getSessionMetadata(sessionId);
+  if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
+    return { kind: 'approved', requestId: 'channel-policy', decision: 'session' };
+  }
+
+  const requestPayload =
+    executionContext?.clientRequestId &&
+    executionContext.requestData &&
+    typeof executionContext.nextRound === 'number'
+      ? {
+          clientRequestId: executionContext.clientRequestId,
+          nextRound: executionContext.nextRound,
+          requestData: executionContext.requestData,
+          toolCallId: request.toolCallId,
+          rawInput: request.rawInput as Record<string, unknown>,
+        }
+      : undefined;
+
+  const approved = findApprovedPermission(sessionId, request.toolName, context.scope);
+  if (approved) {
+    return { kind: 'approved', requestId: approved.id, decision: approved.decision };
+  }
+
+  const pendingRequestId = findPendingPermission(sessionId, request.toolName, context.scope);
+  if (pendingRequestId) {
+    if (requestPayload) {
+      updatePendingPermissionPayload(pendingRequestId, requestPayload);
+    }
+    return { kind: 'pending', requestId: pendingRequestId, created: false };
+  }
+
+  return {
+    kind: 'pending',
+    requestId: createPendingPermissionRequest(sessionId, request.toolName, context, requestPayload),
+    created: true,
+  };
+}
+
+export interface SandboxConfig {
+  allowedTools?: string[];
+  defaultTimeoutMs?: number;
+}
+
+export class ToolSandbox {
+  private readonly registry: ToolRegistry;
+  private readonly whitelist: Set<string>;
+  private readonly defaultTimeout: number;
+
+  constructor(config: SandboxConfig = {}) {
+    this.registry = new ToolRegistry();
+    this.whitelist = config.allowedTools ? new Set(config.allowedTools) : TOOL_WHITELIST;
+    this.defaultTimeout = config.defaultTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+  }
+
+  register<TInput extends ZodTypeAny, TOutput extends ZodTypeAny>(
+    tool: ToolDefinition<TInput, TOutput>,
+  ): void {
+    this.registry.register(tool as unknown as ToolDefinition);
+    this.whitelist.add(tool.name);
+  }
+
+  async execute(
+    request: ToolCallRequest,
+    signal: AbortSignal,
+    sessionId: string,
+    executionContext?: SandboxExecutionContext,
+  ): Promise<ToolCallResult> {
+    if (!this.whitelist.has(request.toolName)) {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: `Tool "${request.toolName}" is not allowed`,
+        isError: true,
+        durationMs: 0,
+      };
+      await this.auditLog(sessionId, request, result);
+      return result;
+    }
+
+    const sessionMetadata = getSessionMetadata(sessionId);
+    if (!isGatewayToolEnabledForSessionMetadata(request.toolName, sessionMetadata)) {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: `Tool "${request.toolName}" is not enabled for this session`,
+        isError: true,
+        durationMs: 0,
+      };
+      await this.auditLog(sessionId, request, result);
+      return result;
+    }
+
+    if (FILE_TOOLS.has(request.toolName)) {
+      const rawInput = request.rawInput as Record<string, unknown>;
+      const filePath =
+        (typeof rawInput['path'] === 'string' ? rawInput['path'] : undefined) ??
+        (typeof rawInput['filePath'] === 'string' ? rawInput['filePath'] : undefined);
+      if (filePath && defaultIgnoreManager.shouldIgnore(filePath)) {
+        const result: ToolCallResult = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Access denied: file "${filePath}" is protected by agentignore rules`,
+          isError: true,
+          durationMs: 0,
+        };
+        await this.auditLog(sessionId, request, result);
+        return result;
+      }
+    }
+
+    const permissionState = ensurePermissionForTool(sessionId, request, executionContext);
+    if (permissionState.kind === 'pending') {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: permissionState.created
+          ? `Tool "${request.toolName}" requires approval before it can modify the workspace. Permission request ${permissionState.requestId} has been created. Ask the user to approve it, then retry.`
+          : `Tool "${request.toolName}" is waiting for approval. Permission request ${permissionState.requestId} is still pending. Ask the user to approve it, then retry.`,
+        isError: false,
+        durationMs: 0,
+        pendingPermissionRequestId: permissionState.requestId,
+      };
+      await this.auditLog(sessionId, request, result);
+      return result;
+    }
+
+    const gatewayManagedResult = await executeGatewayManagedTool(
+      this,
+      sessionId,
+      request,
+      signal,
+      executionContext,
+    );
+    if (gatewayManagedResult) {
+      await this.auditLog(sessionId, request, gatewayManagedResult);
+      if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
+        consumeOncePermission(permissionState.requestId);
+      }
+      return gatewayManagedResult;
+    }
+
+    const tool = this.registry.get(request.toolName);
+    if (tool && !tool.timeout) {
+      const withTimeout = { ...tool, timeout: this.defaultTimeout };
+      this.registry.register(withTimeout);
+    }
+
+    const startAt = Date.now();
+    let result: ToolCallResult;
+    try {
+      result = await this.registry.execute(request, signal);
+    } catch (error) {
+      const durationMs = Date.now() - startAt;
+      if (error instanceof ToolNotFoundError) {
+        result = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: error.message,
+          isError: true,
+          durationMs,
+        };
+      } else if (error instanceof ToolValidationError) {
+        result = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: error.message,
+          isError: true,
+          durationMs,
+        };
+      } else if (error instanceof ToolTimeoutError) {
+        result = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Tool timed out after ${error.timeoutMs}ms`,
+          isError: true,
+          durationMs,
+        };
+      } else {
+        result = {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: String(error),
+          isError: true,
+          durationMs,
+        };
+      }
+    }
+
+    await this.auditLog(sessionId, request, result);
+    if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
+      consumeOncePermission(permissionState.requestId);
+    }
+    return result;
+  }
+
+  private async auditLog(
+    sessionId: string,
+    request: ToolCallRequest,
+    result: ToolCallResult,
+  ): Promise<void> {
+    try {
+      sqliteRun(
+        'INSERT INTO audit_logs (session_id, tool_name, request_id, input_json, output_json, is_error, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          sessionId,
+          request.toolName,
+          request.toolCallId,
+          JSON.stringify(request.rawInput),
+          JSON.stringify(result.output),
+          result.isError ? 1 : 0,
+          result.durationMs ?? null,
+        ],
+      );
+    } catch {
+      return;
+    }
+  }
+}
+
+export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
+  const editTool = createEditTool('__sandbox__');
+  const sandbox = new ToolSandbox({
+    allowedTools: [...allowedTools, ...TOOL_WHITELIST],
+    defaultTimeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
+  });
+  sandbox.register<typeof webSearchTool.inputSchema, typeof webSearchTool.outputSchema>(
+    webSearchTool,
+  );
+  sandbox.register<typeof websearchTool.inputSchema, typeof websearchTool.outputSchema>(
+    websearchTool,
+  );
+  sandbox.register<typeof webfetchTool.inputSchema, typeof webfetchTool.outputSchema>(webfetchTool);
+  sandbox.register<
+    typeof applyPatchToolDefinition.inputSchema,
+    typeof applyPatchToolDefinition.outputSchema
+  >(applyPatchToolDefinition);
+  sandbox.register<typeof editTool.inputSchema, typeof editTool.outputSchema>(editTool);
+  sandbox.register<
+    typeof gatewayLspDiagnosticsTool.inputSchema,
+    typeof gatewayLspDiagnosticsTool.outputSchema
+  >(gatewayLspDiagnosticsTool);
+  sandbox.register<typeof gatewayLspTouchTool.inputSchema, typeof gatewayLspTouchTool.outputSchema>(
+    gatewayLspTouchTool,
+  );
+  sandbox.register<typeof workspaceTreeTool.inputSchema, typeof workspaceTreeTool.outputSchema>(
+    workspaceTreeTool,
+  );
+  sandbox.register<typeof listTool.inputSchema, typeof listTool.outputSchema>(listTool);
+  sandbox.register<
+    typeof workspaceReadFileTool.inputSchema,
+    typeof workspaceReadFileTool.outputSchema
+  >(workspaceReadFileTool);
+  sandbox.register<typeof readTool.inputSchema, typeof readTool.outputSchema>(readTool);
+  sandbox.register<typeof globTool.inputSchema, typeof globTool.outputSchema>(globTool);
+  sandbox.register<typeof workspaceSearchTool.inputSchema, typeof workspaceSearchTool.outputSchema>(
+    workspaceSearchTool,
+  );
+  sandbox.register<typeof grepTool.inputSchema, typeof grepTool.outputSchema>(grepTool);
+  sandbox.register<
+    typeof workspaceReviewStatusTool.inputSchema,
+    typeof workspaceReviewStatusTool.outputSchema
+  >(workspaceReviewStatusTool);
+  sandbox.register<
+    typeof workspaceReviewDiffTool.inputSchema,
+    typeof workspaceReviewDiffTool.outputSchema
+  >(workspaceReviewDiffTool);
+  sandbox.register<
+    typeof workspaceWriteFileTool.inputSchema,
+    typeof workspaceWriteFileTool.outputSchema
+  >(workspaceWriteFileTool);
+  sandbox.register<typeof writeTool.inputSchema, typeof writeTool.outputSchema>(writeTool);
+  sandbox.register<
+    typeof workspaceCreateFileTool.inputSchema,
+    typeof workspaceCreateFileTool.outputSchema
+  >(workspaceCreateFileTool);
+  sandbox.register<
+    typeof workspaceCreateDirectoryTool.inputSchema,
+    typeof workspaceCreateDirectoryTool.outputSchema
+  >(workspaceCreateDirectoryTool);
+  sandbox.register<
+    typeof workspaceReviewRevertTool.inputSchema,
+    typeof workspaceReviewRevertTool.outputSchema
+  >(workspaceReviewRevertTool);
+  return sandbox;
+}

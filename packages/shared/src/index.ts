@@ -1,0 +1,485 @@
+export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
+
+export type DialogueMode = 'clarify' | 'coding' | 'programmer';
+
+export type CommandSurface = 'composer' | 'palette';
+
+export type CapabilityKind = 'agent' | 'skill' | 'mcp' | 'tool' | 'command';
+
+export type CoreRole = 'general' | 'researcher' | 'planner' | 'executor' | 'reviewer';
+
+export type RolePreset =
+  | 'default'
+  | 'explore'
+  | 'analyst'
+  | 'librarian'
+  | 'architect'
+  | 'debugger'
+  | 'critic'
+  | 'code-review'
+  | 'test'
+  | 'verifier';
+
+export type RoleOverlay = 'writer' | 'multimodal';
+
+export type RoleAliasConfidence = 'low' | 'medium' | 'high';
+
+export interface RolePresetPack {
+  description: string;
+  supportedCoreRoles: CoreRole[];
+  overlays?: RoleOverlay[];
+}
+
+export interface CanonicalRoleDescriptor {
+  coreRole: CoreRole;
+  preset?: RolePreset;
+  overlays?: RoleOverlay[];
+  confidence?: RoleAliasConfidence;
+}
+
+export interface RoleAliasMapping extends CanonicalRoleDescriptor {
+  alias: string;
+  notes?: string;
+}
+
+export const REFERENCE_AGENT_ROLE_METADATA: Record<
+  string,
+  { aliases?: string[]; canonicalRole: CanonicalRoleDescriptor }
+> = {
+  build: { canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'high' } },
+  plan: {
+    canonicalRole: { coreRole: 'planner', preset: 'default', confidence: 'high' },
+    aliases: ['planner', '/prompts:planner', '/ccg:team-plan'],
+  },
+  general: {
+    canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'high' },
+    aliases: ['default', 'general-purpose'],
+  },
+  explore: {
+    canonicalRole: { coreRole: 'researcher', preset: 'explore', confidence: 'high' },
+    aliases: ['explorer'],
+  },
+  sisyphus: {
+    canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'low' },
+    aliases: ['coordinator'],
+  },
+  hephaestus: {
+    canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'high' },
+    aliases: ['executor', '/prompts:executor', '/ccg:team-exec'],
+  },
+  prometheus: {
+    canonicalRole: { coreRole: 'planner', preset: 'default', confidence: 'high' },
+    aliases: ['planner'],
+  },
+  oracle: {
+    canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+    aliases: ['architect', 'debugger', 'code-reviewer', 'init-architect'],
+  },
+  librarian: {
+    canonicalRole: { coreRole: 'researcher', preset: 'librarian', confidence: 'high' },
+    aliases: ['librarian'],
+  },
+  metis: {
+    canonicalRole: { coreRole: 'researcher', preset: 'analyst', confidence: 'high' },
+    aliases: ['analyst', '/prompts:analyst', '/ccg:team-research'],
+  },
+  momus: {
+    canonicalRole: { coreRole: 'reviewer', preset: 'critic', confidence: 'high' },
+    aliases: ['critic', '/prompts:critic', '/ccg:team-review'],
+  },
+  atlas: {
+    canonicalRole: { coreRole: 'reviewer', preset: 'verifier', confidence: 'low' },
+    aliases: ['verifier', '/prompts:verifier'],
+  },
+  'multimodal-looker': {
+    canonicalRole: { coreRole: 'researcher', overlays: ['multimodal'], confidence: 'medium' },
+    aliases: ['multimodal', 'ui-ux-designer'],
+  },
+  'sisyphus-junior': {
+    canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'high' },
+    aliases: ['executor'],
+  },
+};
+
+export const ROLE_PRESET_PACKS: Record<RolePreset, RolePresetPack> = {
+  default: {
+    description: '通用兜底执行与基础编排',
+    supportedCoreRoles: ['general', 'planner', 'executor'],
+  },
+  explore: {
+    description: '代码库探索与模式检索',
+    supportedCoreRoles: ['researcher'],
+  },
+  analyst: {
+    description: '需求澄清、范围分析与约束提炼',
+    supportedCoreRoles: ['researcher'],
+  },
+  librarian: {
+    description: '外部文档与参考实现检索',
+    supportedCoreRoles: ['researcher'],
+  },
+  architect: {
+    description: '架构设计、系统边界与方案评审',
+    supportedCoreRoles: ['planner'],
+  },
+  debugger: {
+    description: '故障定位、根因分析与修复落地',
+    supportedCoreRoles: ['executor'],
+  },
+  critic: {
+    description: '计划/方案挑战与风险挑刺',
+    supportedCoreRoles: ['reviewer'],
+  },
+  'code-review': {
+    description: '代码质量、安全与一致性审查',
+    supportedCoreRoles: ['reviewer'],
+  },
+  test: {
+    description: '测试设计、TDD 与回归验证',
+    supportedCoreRoles: ['reviewer'],
+  },
+  verifier: {
+    description: '完成证明、证据校验与验收把关',
+    supportedCoreRoles: ['reviewer'],
+  },
+};
+
+export function formatCanonicalRole(descriptor: CanonicalRoleDescriptor): string {
+  const preset = descriptor.preset ? `/${descriptor.preset}` : '';
+  const overlays = descriptor.overlays?.length ? `+${descriptor.overlays.join('+')}` : '';
+  return `${descriptor.coreRole}${preset}${overlays}`;
+}
+
+export type CapabilitySource =
+  | 'builtin'
+  | 'installed'
+  | 'configured'
+  | 'runtime'
+  | 'reference'
+  | 'custom';
+
+export interface CapabilityDescriptor {
+  id: string;
+  kind: CapabilityKind;
+  label: string;
+  description: string;
+  source: CapabilitySource;
+  tags?: string[];
+  enabled?: boolean;
+  callable?: boolean;
+  canonicalRole?: CanonicalRoleDescriptor;
+  aliases?: string[];
+}
+
+export type ManagedAgentOrigin = 'builtin' | 'custom';
+
+export interface ManagedAgentBody {
+  label: string;
+  description: string;
+  aliases: string[];
+  canonicalRole?: CanonicalRoleDescriptor;
+  systemPrompt?: string;
+  note?: string;
+}
+
+export interface ManagedAgentRecord extends ManagedAgentBody {
+  id: string;
+  origin: ManagedAgentOrigin;
+  source: CapabilitySource;
+  enabled: boolean;
+  removable: boolean;
+  resettable: boolean;
+  hasOverrides: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateManagedAgentInput extends ManagedAgentBody {
+  id?: string;
+  enabled?: boolean;
+}
+
+export interface UpdateManagedAgentInput {
+  label?: string;
+  description?: string;
+  aliases?: string[];
+  canonicalRole?: CanonicalRoleDescriptor;
+  systemPrompt?: string;
+  note?: string;
+  enabled?: boolean;
+}
+
+export interface AgentPreferenceRecord {
+  agentId: string;
+  displayNameOverride?: string;
+  note?: string;
+  favorite: boolean;
+  hidden: boolean;
+  updatedAt: string;
+}
+
+export interface UpdateAgentPreferenceInput {
+  displayNameOverride?: string;
+  note?: string;
+  favorite?: boolean;
+  hidden?: boolean;
+}
+
+export type CommandExecutionMode = 'client' | 'server';
+
+export type CommandAction =
+  | { kind: 'navigate'; to: '/chat' | '/sessions' | '/settings' }
+  | { kind: 'create_session' }
+  | { kind: 'create_child_session' }
+  | { kind: 'open_workspace_picker' }
+  | { kind: 'open_model_picker' }
+  | { kind: 'show_help' }
+  | { kind: 'set_dialogue_mode'; mode: DialogueMode }
+  | { kind: 'set_yolo_mode'; enabled: boolean }
+  | { kind: 'toggle_thinking' }
+  | { kind: 'compact_session' }
+  | { kind: 'toggle_theme' }
+  | { kind: 'generate_handoff' }
+  | { kind: 'init_deep' }
+  | { kind: 'start_ralph_loop' }
+  | { kind: 'start_ulw_loop' }
+  | { kind: 'verify_ulw_loop' }
+  | { kind: 'cancel_ralph_loop' }
+  | { kind: 'stop_continuation' }
+  | { kind: 'refactor_session' }
+  | { kind: 'start_work' };
+
+export interface CommandDescriptor {
+  id: string;
+  label: string;
+  description?: string;
+  shortcut?: string;
+  contexts: CommandSurface[];
+  execution: CommandExecutionMode;
+  action: CommandAction;
+}
+
+export interface StatusCommandResultCard {
+  type: 'status';
+  title: string;
+  message: string;
+  tone: 'info' | 'success' | 'warning' | 'error';
+}
+
+export interface CompactionCommandResultCard {
+  type: 'compaction';
+  title: string;
+  summary: string;
+  trigger: 'manual' | 'automatic';
+}
+
+export type CommandResultCard = StatusCommandResultCard | CompactionCommandResultCard;
+
+export interface CommandExecutionResult {
+  events: RunEvent[];
+  card?: CommandResultCard;
+  sessionId?: string;
+}
+
+export interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+export interface ToolCallContent {
+  type: 'tool_call';
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultContent {
+  type: 'tool_result';
+  toolCallId: string;
+  output: unknown;
+  isError: boolean;
+  pendingPermissionRequestId?: string;
+}
+
+export interface FileDiffContent {
+  file: string;
+  before: string;
+  after: string;
+  additions: number;
+  deletions: number;
+  status?: 'added' | 'deleted' | 'modified';
+}
+
+export interface ModifiedFilesSummaryContent {
+  type: 'modified_files_summary';
+  title: string;
+  summary: string;
+  files: FileDiffContent[];
+}
+
+export type MessageContent =
+  | TextContent
+  | ToolCallContent
+  | ToolResultContent
+  | ModifiedFilesSummaryContent;
+
+export interface Message {
+  id: string;
+  role: MessageRole;
+  content: MessageContent[];
+  createdAt: number;
+}
+
+export interface StreamTextChunk {
+  type: 'text_delta';
+  delta: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamThinkingChunk {
+  type: 'thinking_delta';
+  delta: string;
+  itemId?: string;
+  outputIndex?: number;
+  summaryIndex?: number;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamToolCallChunk {
+  type: 'tool_call_delta';
+  toolCallId: string;
+  toolName: string;
+  inputDelta: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamDoneChunk {
+  type: 'done';
+  stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled';
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamErrorChunk {
+  type: 'error';
+  code: string;
+  message: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamToolResultChunk {
+  type: 'tool_result';
+  toolCallId: string;
+  toolName: string;
+  output: unknown;
+  isError: boolean;
+  pendingPermissionRequestId?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamPermissionAskedChunk {
+  type: 'permission_asked';
+  requestId: string;
+  toolName: string;
+  scope: string;
+  reason: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  previewAction?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamPermissionRepliedChunk {
+  type: 'permission_replied';
+  requestId: string;
+  decision: 'once' | 'session' | 'permanent' | 'reject';
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamTaskUpdateChunk {
+  type: 'task_update';
+  taskId: string;
+  label: string;
+  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'cancelled';
+  assignedAgent?: string;
+  category?: string;
+  requestedSkills?: string[];
+  result?: string;
+  errorMessage?: string;
+  sessionId?: string;
+  parentTaskId?: string;
+  parentSessionId?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamSessionChildChunk {
+  type: 'session_child';
+  sessionId: string;
+  parentSessionId: string;
+  title?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamCompactionChunk {
+  type: 'compaction';
+  summary: string;
+  trigger: 'manual' | 'automatic';
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamAuditRefChunk {
+  type: 'audit_ref';
+  auditLogId: string;
+  toolName?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export type StreamChunk =
+  | StreamTextChunk
+  | StreamThinkingChunk
+  | StreamToolCallChunk
+  | StreamDoneChunk
+  | StreamErrorChunk;
+
+export type RunEvent =
+  | StreamChunk
+  | StreamToolResultChunk
+  | StreamPermissionAskedChunk
+  | StreamPermissionRepliedChunk
+  | StreamTaskUpdateChunk
+  | StreamSessionChildChunk
+  | StreamCompactionChunk
+  | StreamAuditRefChunk;
+
+export interface ApiError {
+  code: string;
+  message: string;
+  retryable: boolean;
+  statusCode?: number;
+}
+
+export function isRetryableError(error: ApiError): boolean {
+  return error.retryable;
+}

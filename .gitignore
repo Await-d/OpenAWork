@@ -12,11 +12,18 @@ dist
 
 # Tauri
 src-tauri/target
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/sidecars/
+apps/desktop/src-tauri/target/debug
+apps/desktop/src-tauri/target/
 
 # Agent/AI tooling (not for version control)
-.agentdocs/
-.serena/
 .sisyphus/
+.openawork.permissions.json
+**/.openawork.permissions.json
+.openawork.*.local.*
+.evidence/
+**/.agentdocs/tasks/
 
 # Husky hooks (auto-generated, not for version control)
 .husky/
@@ -29,6 +36,12 @@ Thumbs.db
 .idea
 *.suo
 *.user
+temp/
+
+.serena/
 
 # Test coverage
 coverage
+.agentdocs/runtime/
+/**/**/*.db
+/**/**/*.db-*

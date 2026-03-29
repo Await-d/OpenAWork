@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "outDir": "./dist",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@openAwork/shared": ["../../packages/shared/src/index.ts"],
+      "@openAwork/web-client": ["../../packages/web-client/src/index.ts"],
+      "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"]
+    }
+  },
+  "include": ["src", "../../packages/shared/src/version.d.ts"]
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/security/2",
+  "identifier": "default",
+  "description": "Default capability for OpenAWork desktop",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "node", "sidecar": true },
+        { "name": "node", "cmd": "node", "args": [{ "validator": ".+" }] }
+      ]
+    },
+    "shell:allow-kill",
+    "shell:allow-open",
+    "updater:default"
+  ]
+}

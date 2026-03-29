@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-native",
+    "outDir": "./dist",
+    "skipLibCheck": true,
+    "paths": {
+      "@openAwork/shared": ["../../packages/shared/src/index.ts"],
+      "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"]
+    }
+  },
+  "include": ["src", "app"],
+  "exclude": [
+    "node_modules",
+    "../../packages/agent-core/src/worker",
+    "../../packages/agent-core/src/orchestrator-cli",
+    "../../packages/agent-core/src/ssh"
+  ]
+}

@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: OpenAWork Chat Opencode Integration API
+  version: 0.1.0
+paths:
+  /commands:
+    get:
+      summary: List server-backed chat commands
+      responses:
+        '200':
+          description: Command descriptors
+  /sessions/{sessionId}/commands/execute:
+    post:
+      summary: Execute a server-backed chat command
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Command execution result with events and optional card
+  /sessions/{sessionId}/permissions/pending:
+    get:
+      summary: List pending permission requests for a session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pending permission requests
+  /sessions/{sessionId}/permissions/requests:
+    post:
+      summary: Create a permission request for a session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Permission request created
+  /sessions/{sessionId}/permissions/reply:
+    post:
+      summary: Reply to a permission request
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Permission reply accepted
+  /sessions/{sessionId}/children:
+    get:
+      summary: List child sessions for a parent session
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Child sessions
+  /sessions/{sessionId}/tasks:
+    get:
+      summary: List task-system tasks for a session graph
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session task graph snapshot
+  /settings/mcp-status:
+    get:
+      summary: List MCP server visibility/status data
+      responses:
+        '200':
+          description: MCP status list for chat/settings UI
+  /settings/mcp-servers:
+    get:
+      summary: Read MCP server configuration
+      responses:
+        '200':
+          description: MCP server configuration list
+    put:
+      summary: Persist MCP server configuration
+      responses:
+        '200':
+          description: MCP configuration saved

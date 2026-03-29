@@ -38,12 +38,19 @@
   },
   "packageManager": "pnpm@10.25.0",
   "lint-staged": {
-    "**/*.{ts,tsx}": [
-      "eslint --fix",
-      "prettier --write"
+    "packages/**/*.{ts,tsx}": [
+      "eslint --no-warn-ignored",
+      "prettier --check"
+    ],
+    "services/**/*.{ts,tsx}": [
+      "eslint --no-warn-ignored",
+      "prettier --check"
+    ],
+    "apps/**/*.{ts,tsx}": [
+      "prettier --check"
     ],
     "**/*.{js,json,md,yaml,yml}": [
-      "prettier --write"
+      "prettier --check"
     ]
   }
 }

@@ -1,0 +1,53 @@
+name: EAS OTA Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'EAS update channel'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+      message:
+        description: 'Update message (shown in EAS dashboard)'
+        required: false
+        default: 'Manual OTA push'
+        type: string
+
+jobs:
+  ota:
+    name: Push OTA — ${{ inputs.channel }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Push OTA update
+        working-directory: apps/mobile
+        run: |
+          eas update \
+            --channel ${{ inputs.channel }} \
+            --message "${{ inputs.message }}" \
+            --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}

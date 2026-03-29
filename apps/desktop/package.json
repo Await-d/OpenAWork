@@ -1,0 +1,38 @@
+{
+  "name": "@openAwork/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "bash src-tauri/scripts/bundle-sidecar.sh && tauri build",
+    "bundle-sidecar": "bash src-tauri/scripts/bundle-sidecar.sh",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "jsdom": "^29.0.0",
+    "tailwindcss": "^4.2.2",
+    "vite": "^6.4.1",
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "@openAwork/artifacts": "workspace:*",
+    "@openAwork/web-client": "workspace:*",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-store": "^2.4.2",
+    "@tauri-apps/plugin-updater": "^2.10.0",
+    "react-router": "^7.13.1",
+    "zustand": "^5.0.12"
+  }
+}

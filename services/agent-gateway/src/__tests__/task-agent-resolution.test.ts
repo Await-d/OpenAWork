@@ -1,0 +1,60 @@
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../agent-catalog.js', () => ({
+  listManagedAgentsForUser: vi.fn((userId: string) => {
+    if (userId !== 'user-1') {
+      return [];
+    }
+
+    return [
+      {
+        id: 'explore',
+        label: 'explore',
+        aliases: [],
+        enabled: true,
+        systemPrompt: 'Inspect the repository before changing code.',
+      },
+      {
+        id: 'sisyphus-junior',
+        label: 'sisyphus-junior',
+        aliases: [],
+        enabled: true,
+        systemPrompt: 'Execute focused work quickly.',
+      },
+    ];
+  }),
+}));
+
+import { resolveDelegatedAgent } from '../task-agent-resolution.js';
+
+describe('task agent resolution', () => {
+  it('wraps delegated system prompts with the child-session contract', () => {
+    const resolved = resolveDelegatedAgent('user-1', {
+      subagent_type: 'explore',
+      load_skills: ['frontend-design', 'frontend-design', 'webapp-testing'],
+    });
+
+    expect(resolved.agentId).toBe('explore');
+    expect(resolved.requestedSkills).toEqual(['frontend-design', 'webapp-testing']);
+    expect(resolved.systemPrompt).toContain('Inspect the repository before changing code.');
+    expect(resolved.systemPrompt).toContain('Delegation contract:');
+    expect(resolved.systemPrompt).toContain('delegated child session created by the task tool');
+    expect(resolved.systemPrompt).toContain('Requested skills:');
+    expect(resolved.systemPrompt).toContain('frontend-design, webapp-testing');
+    expect(resolved.systemPrompt).toContain('Completion requirements:');
+  });
+
+  it('adds category execution guidance to category-routed agents', () => {
+    const resolved = resolveDelegatedAgent('user-1', {
+      category: 'deep',
+      load_skills: [],
+    });
+
+    expect(resolved.agentId).toBe('sisyphus-junior');
+    expect(resolved.category).toBe('deep');
+    expect(resolved.systemPrompt).toContain('Execute focused work quickly.');
+    expect(resolved.systemPrompt).toContain('Execution style:');
+    expect(resolved.systemPrompt).toContain('Task category: deep.');
+    expect(resolved.systemPrompt).toContain('autonomous end-to-end execution');
+  });
+});

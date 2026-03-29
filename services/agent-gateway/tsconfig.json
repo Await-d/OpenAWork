@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@openAwork/shared": ["../../packages/shared/src/index.ts"],
+      "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"],
+      "@openAwork/mcp-client": ["../../packages/mcp-client/src/index.ts"],
+      "@openAwork/skill-types": ["../../packages/skill-types/src/index.ts"]
+    }
+  },
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/agent-core" },
+    { "path": "../../packages/skill-types" },
+    { "path": "../../packages/mcp-client" }
+  ],
+  "include": ["src"]
+}
