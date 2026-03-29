@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../db.js';
 import { listSessionMessages } from '../session-message-store.js';
-import { upsertTaskParentAutoResumeContext } from '../task-parent-auto-resume.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import { formatAnsweredQuestionOutput } from '../question-tools.js';
 import type { QuestionToolInput } from '../question-tools.js';
@@ -10,7 +9,6 @@ import { resumeAnsweredQuestionRequest } from '../routes/stream.js';
 import {
   assert,
   createChatCompletionsStream,
-  readLastUserMessage,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -22,15 +20,6 @@ interface PendingQuestionRow {
   request_payload_json: string | null;
 }
 
-function readSingleTextMessage(message: {
-  content: Array<{ type: string; text?: string }>;
-}): string {
-  const firstContent = message.content[0];
-  return firstContent?.type === 'text' && typeof firstContent.text === 'string'
-    ? firstContent.text
-    : '';
-}
-
 async function main(): Promise<void> {
   await withTempEnv(
     {
@@ -40,15 +29,7 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async (_url, init) => {
-          const body = typeof init?.body === 'string' ? init.body : '';
-          const lastUserMessage = readLastUserMessage(body);
-          if (lastUserMessage.includes('以下是后台子代理已完成后自动回流到主对话的结果')) {
-            return createChatCompletionsStream('我已收到问题恢复后的子代理结果，并同步回主对话。');
-          }
-
-          return createChatCompletionsStream('问题恢复后的子代理结论');
-        }) as typeof fetch,
+        (async () => createChatCompletionsStream('问题恢复后的子代理结论')) as typeof fetch,
         async () => {
           await connectDb();
           await migrate();
@@ -97,21 +78,6 @@ async function main(): Promise<void> {
               tags: ['task-tool', 'question-resume'],
             });
             await taskManager.save(graph);
-
-            upsertTaskParentAutoResumeContext({
-              childSessionId,
-              parentSessionId,
-              requestData: {
-                clientRequestId: 'parent-question-req-1',
-                message: '请在子代理问题得到回答后继续主会话',
-                model: 'gpt-4o',
-                maxTokens: 512,
-                temperature: 1,
-                webSearchEnabled: false,
-              },
-              taskId: task.id,
-              userId,
-            });
 
             const sandbox = createDefaultSandbox();
             const questionResult = await sandbox.execute(
@@ -214,17 +180,6 @@ async function main(): Promise<void> {
               nextTask.result === '问题恢复后的子代理结论',
               'parent task should store the resumed child summary after question answer',
             );
-
-            await waitFor(() => {
-              const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
-              return parentMessages.some(
-                (message) =>
-                  message.role === 'assistant' &&
-                  readSingleTextMessage(
-                    message as { content: Array<{ type: string; text?: string }> },
-                  ) === '我已收到问题恢复后的子代理结果，并同步回主对话。',
-              );
-            }, 'parent session should auto-resume after question answer resume');
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const parentToolMessage = parentMessages.find((message) => message.role === 'tool');

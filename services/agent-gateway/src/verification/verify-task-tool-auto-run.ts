@@ -5,26 +5,12 @@ import { listSessionMessages } from '../session-message-store.js';
 import { subscribeSessionRunEvents } from '../session-run-events.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import {
-  clearInFlightStreamRequest,
-  registerInFlightStreamRequest,
-} from '../routes/stream-cancellation.js';
-import {
   assert,
   createChatCompletionsStream,
-  readLastUserMessage,
   waitFor,
   withMockFetch,
   withTempEnv,
 } from './task-verification-helpers.js';
-
-function readSingleTextMessage(message: {
-  content: Array<{ type: string; text?: string }>;
-}): string {
-  const firstContent = message.content[0];
-  return firstContent?.type === 'text' && typeof firstContent.text === 'string'
-    ? firstContent.text
-    : '';
-}
 
 function isTaskToolOutput(value: unknown): value is {
   assignedAgent: string;
@@ -45,16 +31,6 @@ function isTaskToolOutput(value: unknown): value is {
   );
 }
 
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-  return { promise, resolve, reject };
-}
-
 async function main(): Promise<void> {
   const fetchCalls: string[] = [];
   await withTempEnv(
@@ -68,10 +44,6 @@ async function main(): Promise<void> {
         (async (_url, init) => {
           if (typeof init?.body === 'string') {
             fetchCalls.push(init.body);
-            const lastUserMessage = readLastUserMessage(init.body);
-            if (lastUserMessage.includes('以下是后台子代理已完成后自动回流到主对话的结果')) {
-              return createChatCompletionsStream('我已收到子代理结果，并同步回主对话。');
-            }
           }
           return createChatCompletionsStream('子代理已经执行完成。');
         }) as typeof fetch,
@@ -114,6 +86,8 @@ async function main(): Promise<void> {
                     description: '让子代理写出结论',
                     prompt: '请给出最终结论',
                     subagent_type: 'explore',
+                    load_skills: [],
+                    run_in_background: true,
                   },
                 },
                 new AbortController().signal,
@@ -171,34 +145,6 @@ async function main(): Promise<void> {
                 'parent task should store child summary',
               );
 
-              await waitFor(() => {
-                const latestParentMessages = listSessionMessages({
-                  sessionId: parentSessionId,
-                  userId,
-                });
-                return latestParentMessages.some(
-                  (message) =>
-                    message.role === 'user' &&
-                    readSingleTextMessage(
-                      message as { content: Array<{ type: string; text?: string }> },
-                    ).includes('以下是后台子代理已完成后自动回流到主对话的结果'),
-                );
-              }, 'parent session should receive an auto-resume synthetic user message');
-
-              await waitFor(() => {
-                const latestParentMessages = listSessionMessages({
-                  sessionId: parentSessionId,
-                  userId,
-                });
-                return latestParentMessages.some(
-                  (message) =>
-                    message.role === 'assistant' &&
-                    readSingleTextMessage(
-                      message as { content: Array<{ type: string; text?: string }> },
-                    ) === '我已收到子代理结果，并同步回主对话。',
-                );
-              }, 'parent session should auto-run and persist a follow-up assistant reply');
-
               const childMessages = listSessionMessages({ sessionId: output.sessionId, userId });
               assert(
                 childMessages.length === 2,
@@ -223,9 +169,27 @@ async function main(): Promise<void> {
                 'child session should persist delegated assistant output',
               );
 
+              const backgroundOutputResult = await sandbox.execute(
+                {
+                  toolCallId: 'background-output-1',
+                  toolName: 'background_output',
+                  rawInput: { task_id: output.taskId },
+                },
+                new AbortController().signal,
+                parentSessionId,
+              );
+              assert(backgroundOutputResult.isError === false, 'background_output should succeed');
+              const backgroundTaskOutput =
+                backgroundOutputResult.output && typeof backgroundOutputResult.output === 'object'
+                  ? (backgroundOutputResult.output as Record<string, unknown>)
+                  : null;
               assert(
-                fetchCalls.length >= 2,
-                'delegated child completion should also trigger a parent auto-resume upstream request',
+                backgroundTaskOutput?.['status'] === 'done',
+                'background_output should report done',
+              );
+              assert(
+                backgroundTaskOutput?.['result'] === '子代理已经执行完成。',
+                'background_output should expose delegated child summary',
               );
               const upstreamBody = JSON.parse(fetchCalls[0] ?? '{}') as {
                 tools?: Array<{ function?: { name?: string } }>;
@@ -249,20 +213,6 @@ async function main(): Promise<void> {
               );
 
               const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
-              const parentAutoResumeUserMessage = parentMessages.find(
-                (message) =>
-                  message.role === 'user' &&
-                  readSingleTextMessage(
-                    message as { content: Array<{ type: string; text?: string }> },
-                  ).includes('以下是后台子代理已完成后自动回流到主对话的结果'),
-              );
-              const parentAutoResumeAssistantMessage = parentMessages.find(
-                (message) =>
-                  message.role === 'assistant' &&
-                  readSingleTextMessage(
-                    message as { content: Array<{ type: string; text?: string }> },
-                  ) === '我已收到子代理结果，并同步回主对话。',
-              );
               const parentTaskResult = parentMessages.find((message) => message.role === 'tool');
               const parentCompletionReminder = parentMessages.find((message) => {
                 if (message.role !== 'assistant') {
@@ -315,22 +265,6 @@ async function main(): Promise<void> {
                 parentTaskOutput?.['result'] === '子代理已经执行完成。',
                 'parent session tool_result should expose the delegated child summary',
               );
-              assert(
-                parentAutoResumeUserMessage?.role === 'user',
-                'parent session should persist the synthetic auto-resume user message',
-              );
-              assert(
-                readSingleTextMessage(
-                  parentAutoResumeUserMessage as {
-                    content: Array<{ type: string; text?: string }>;
-                  },
-                ).includes(`- 会话：${output.sessionId}`),
-                'auto-resume user message should include the child session reference',
-              );
-              assert(
-                parentAutoResumeAssistantMessage?.role === 'assistant',
-                'parent session should persist the assistant reply created by the auto-resume run',
-              );
               const parentReminderText =
                 parentCompletionReminder?.content[0]?.type === 'text'
                   ? parentCompletionReminder.content[0].text
@@ -362,96 +296,6 @@ async function main(): Promise<void> {
                 'parent completion reminder should point back to the child session id',
               );
 
-              const busyParentSessionId = randomUUID();
-              sqliteRun(
-                `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
-                [busyParentSessionId, userId],
-              );
-              const busyExecution = createDeferred<{ statusCode: number }>();
-              registerInFlightStreamRequest({
-                abortController: new AbortController(),
-                clientRequestId: 'busy-parent-request',
-                execution: busyExecution.promise,
-                sessionId: busyParentSessionId,
-                userId,
-              });
-
-              const busyTaskResult = await sandbox.execute(
-                {
-                  toolCallId: 'task-call-busy',
-                  toolName: 'task',
-                  rawInput: {
-                    description: '验证父会话忙碌时自动重试',
-                    prompt: '请给出需要重试场景的子代理结论',
-                    subagent_type: 'explore',
-                  },
-                },
-                new AbortController().signal,
-                busyParentSessionId,
-                {
-                  clientRequestId: 'busy-parent-source-req',
-                  nextRound: 2,
-                  requestData: {
-                    clientRequestId: 'busy-parent-source-req',
-                    message: '请委派一个会在父会话忙碌时回流的子代理',
-                    model: 'gpt-4o',
-                    maxTokens: 512,
-                    temperature: 1,
-                    webSearchEnabled: false,
-                  },
-                },
-              );
-              assert(
-                isTaskToolOutput(busyTaskResult.output),
-                'busy-retry task should return structured task output',
-              );
-              const busyTaskOutput = busyTaskResult.output;
-
-              await waitFor(async () => {
-                const busyGraph = await taskManager.loadOrCreate(
-                  WORKSPACE_ROOT,
-                  busyParentSessionId,
-                );
-                return busyGraph.tasks[busyTaskOutput.taskId]?.status === 'completed';
-              }, 'busy parent child task should still complete');
-
-              await new Promise((resolve) => setTimeout(resolve, 900));
-              const busyParentMessagesBeforeDrain = listSessionMessages({
-                sessionId: busyParentSessionId,
-                userId,
-              });
-              assert(
-                !busyParentMessagesBeforeDrain.some(
-                  (message) =>
-                    message.role === 'user' &&
-                    readSingleTextMessage(
-                      message as { content: Array<{ type: string; text?: string }> },
-                    ).includes('以下是后台子代理已完成后自动回流到主对话的结果'),
-                ),
-                'auto-resume should wait while the parent session is busy',
-              );
-
-              busyExecution.resolve({ statusCode: 200 });
-              clearInFlightStreamRequest({
-                clientRequestId: 'busy-parent-request',
-                execution: busyExecution.promise,
-                sessionId: busyParentSessionId,
-              });
-
-              await waitFor(() => {
-                const busyParentMessages = listSessionMessages({
-                  sessionId: busyParentSessionId,
-                  userId,
-                });
-                return busyParentMessages.some(
-                  (message) =>
-                    message.role === 'assistant' &&
-                    readSingleTextMessage(
-                      message as { content: Array<{ type: string; text?: string }> },
-                    ) === '我已收到子代理结果，并同步回主对话。',
-                );
-              }, 'auto-resume should retry after the parent session becomes idle');
-
               const resumedResult = await sandbox.execute(
                 {
                   toolCallId: 'task-call-2',
@@ -460,6 +304,8 @@ async function main(): Promise<void> {
                     description: '让子代理写出结论',
                     prompt: '请基于刚才的结果继续补充第二段结论',
                     subagent_type: 'explore',
+                    load_skills: [],
+                    run_in_background: true,
                     task_id: output.taskId,
                   },
                 },
@@ -522,8 +368,10 @@ async function main(): Promise<void> {
                   JSON.stringify([{ type: 'text', text: '子代理已经执行完成。' }]),
                 'task resume should persist the follow-up assistant output into the same child session',
               );
-              const resumedFetchCount = fetchCalls.filter(() => true).length;
-              assert(resumedFetchCount >= 2, 'task resume should issue a second upstream request');
+              assert(
+                fetchCalls.length === 2,
+                'task resume should issue a second child upstream request',
+              );
 
               assert(
                 events.some(
