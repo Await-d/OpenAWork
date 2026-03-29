@@ -33,11 +33,16 @@ export class ToolValidationError extends Error {
   readonly issues: ZodIssue[];
 
   constructor(toolName: string, issues: ZodIssue[]) {
-    super(`Validation failed for tool "${toolName}": ${issues.map((i) => i.message).join(', ')}`);
+    super(`Validation failed for tool "${toolName}": ${issues.map(formatZodIssue).join(', ')}`);
     this.name = 'ToolValidationError';
     this.toolName = toolName;
     this.issues = issues;
   }
+}
+
+function formatZodIssue(issue: ZodIssue): string {
+  const path = issue.path.length > 0 ? issue.path.join('.') : null;
+  return path ? `${path}: ${issue.message}` : issue.message;
 }
 
 export class ToolNotFoundError extends Error {

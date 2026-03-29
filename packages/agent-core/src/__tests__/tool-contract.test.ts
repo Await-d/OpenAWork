@@ -80,6 +80,16 @@ describe('ToolRegistry: execute errors', () => {
     ).rejects.toBeInstanceOf(ToolValidationError);
   });
 
+  it('includes the missing field path in validation errors', async () => {
+    const registry = new ToolRegistry();
+    registry.register(echoTool);
+    const signal = new AbortController().signal;
+
+    await expect(
+      registry.execute({ toolCallId: 'tc1', toolName: 'echo', rawInput: {} }, signal),
+    ).rejects.toThrow('msg: Required');
+  });
+
   it('returns isError=true when execute throws', async () => {
     const registry = new ToolRegistry();
     const failTool: ToolDefinition<z.ZodObject<{ x: z.ZodString }>, z.ZodString> = {
