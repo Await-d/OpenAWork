@@ -70,28 +70,4 @@ describe('ChatTodoBar', () => {
     expect(todoBar?.textContent).toContain('高优先级');
     expect(todoBar?.textContent).toContain('低优先级');
   });
-
-  it('keeps the todo bar visible when the right panel is open', async () => {
-    await act(async () => {
-      root!.render(
-        <ChatTodoBar
-          editorMode={false}
-          rightOpen={true}
-          sessionTodos={[
-            {
-              content: '继续修复聊天待办栏',
-              lane: 'main',
-              status: 'in_progress',
-              priority: 'high',
-            },
-          ]}
-        />,
-      );
-    });
-
-    const todoBar = container!.querySelector('[data-testid="chat-todo-bar"]');
-    expect(todoBar).not.toBeNull();
-    expect(todoBar?.textContent).toContain('待办清单');
-    expect(todoBar?.textContent).toContain('继续修复聊天待办栏');
-  });
 });

@@ -60,6 +60,21 @@ describe('chat-stream-state', () => {
     expect(state.toolCalls[0]?.inputText).toBe('{"query":"上海天气"}');
   });
 
+  it('treats empty tool input as an empty object instead of a raw string wrapper', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '检查空工具参数');
+    const state = applyChatRightPanelChunk(started, {
+      type: 'tool_call_delta',
+      toolCallId: 'call_empty',
+      toolName: 'list',
+      inputDelta: '',
+    });
+
+    expect(state.toolCalls[0]).toMatchObject({
+      toolCallId: 'call_empty',
+      input: {},
+    });
+  });
+
   it('marks tasks complete and snapshots plan history on done', () => {
     const started = startChatRightPanelRun(createInitialChatRightPanelState(), '搜索天气');
     const running = applyChatRightPanelChunk(started, {

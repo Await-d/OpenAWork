@@ -120,7 +120,7 @@ describe('ChatMessageGroupList', () => {
     expect(container?.querySelector('[data-testid="chat-virtualized-group-list"]')).not.toBeNull();
     const initialObserveCount = observeMock.mock.calls.length;
     expect(initialObserveCount).toBeGreaterThan(0);
-    const initialUnobserveCount = unobserveMock.mock.calls.length;
+    expect(unobserveMock).not.toHaveBeenCalled();
 
     await act(async () => {
       root!.render(
@@ -136,7 +136,7 @@ describe('ChatMessageGroupList', () => {
     });
 
     expect(observeMock).toHaveBeenCalledTimes(initialObserveCount);
-    expect(unobserveMock).toHaveBeenCalledTimes(initialUnobserveCount);
+    expect(unobserveMock).not.toHaveBeenCalled();
   });
 
   it('does not rerender unchanged historical groups during parent rerenders', async () => {

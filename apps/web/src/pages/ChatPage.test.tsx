@@ -593,7 +593,9 @@ beforeEach(() => {
     value: vi.fn((query: string) => ({
       addEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
-      matches: query === '(prefers-reduced-motion: reduce)' ? reducedMotionMatches : false,
+      get matches() {
+        return query === '(prefers-reduced-motion: reduce)' ? reducedMotionMatches : false;
+      },
       media: query,
       onchange: null,
       removeEventListener: vi.fn(),
