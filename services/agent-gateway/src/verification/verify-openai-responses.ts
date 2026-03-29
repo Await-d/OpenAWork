@@ -318,9 +318,9 @@ async function verifyToolEmptyArgsScenario(input: VerificationContext): Promise<
     events,
     (event) =>
       event['type'] === 'tool_result' &&
-      event['toolName'] === 'bash' &&
+      event['toolName'] === 'list' &&
       event['isError'] === true &&
-      String(event['output']).includes('Tool "bash" was called without arguments'),
+      String(event['output']).includes('Tool "list" was called without arguments'),
     'tool empty args scenario emits malformed-args tool_result',
   );
   assertEvent(
@@ -554,10 +554,10 @@ function handleToolEmptyArgsScenario(body: Record<string, unknown>, res: ServerR
     writeResponseEvent(res, 'response.output_item.added', {
       output_index: 0,
       item: {
-        id: 'fc_empty_bash',
+        id: 'fc_empty_list',
         type: 'function_call',
-        call_id: 'call_empty_bash',
-        name: 'bash',
+        call_id: 'call_empty_list',
+        name: 'list',
         arguments: '{}',
       },
     });
@@ -565,10 +565,10 @@ function handleToolEmptyArgsScenario(body: Record<string, unknown>, res: ServerR
       response: {
         output: [
           {
-            id: 'fc_empty_bash',
+            id: 'fc_empty_list',
             type: 'function_call',
-            call_id: 'call_empty_bash',
-            name: 'bash',
+            call_id: 'call_empty_list',
+            name: 'list',
             arguments: '{}',
           },
         ],

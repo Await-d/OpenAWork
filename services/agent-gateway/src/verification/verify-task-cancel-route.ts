@@ -120,6 +120,8 @@ async function main(): Promise<void> {
                   description: '取消正在运行的子任务',
                   prompt: '持续检查大型仓库直到被取消',
                   subagent_type: 'explore',
+                  load_skills: [],
+                  run_in_background: true,
                 },
               },
               new AbortController().signal,

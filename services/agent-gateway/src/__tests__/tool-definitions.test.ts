@@ -33,6 +33,8 @@ describe('buildGatewayToolDefinitions', () => {
         'question',
         'read_tool_output',
         'task',
+        'background_output',
+        'background_cancel',
         'write',
         'workspace_review_status',
         'workspace_review_diff',
@@ -58,37 +60,10 @@ describe('buildGatewayToolDefinitions', () => {
     const definitions = buildGatewayToolDefinitions();
     const byName = new Map(definitions.map((definition) => [definition.function.name, definition]));
 
-    expect(byName.get('list')?.function.parameters.required).toEqual([]);
-    expect(byName.get('list')?.function.parameters).toMatchObject({
-      properties: {
-        ignore: {
-          type: 'array',
-        },
-      },
-    });
-    expect(byName.get('read')?.function.parameters.required).toEqual(['filePath']);
-    expect(byName.get('read')?.function.parameters).toMatchObject({
-      properties: {
-        filePath: {
-          type: 'string',
-        },
-        offset: {
-          type: 'integer',
-        },
-        limit: {
-          type: 'integer',
-        },
-      },
-    });
-    expect(byName.get('glob')?.function.parameters.required).toEqual(['pattern']);
-    expect(byName.get('grep')?.function.parameters.required).toEqual(['pattern']);
-    expect(byName.get('grep')?.function.parameters).toMatchObject({
-      properties: {
-        include: {
-          type: 'string',
-        },
-      },
-    });
+    expect(byName.get('list')?.function.parameters.required).toEqual(['path']);
+    expect(byName.get('read')?.function.parameters.required).toEqual(['path']);
+    expect(byName.get('glob')?.function.parameters.required).toEqual(['path', 'pattern']);
+    expect(byName.get('grep')?.function.parameters.required).toEqual(['path', 'query']);
     expect(byName.get('edit')?.function.parameters.required).toEqual([
       'filePath',
       'oldString',
@@ -96,7 +71,7 @@ describe('buildGatewayToolDefinitions', () => {
     ]);
     expect(byName.get('batch')?.function.parameters.required).toEqual(['tool_calls']);
     expect(byName.get('skill')?.function.parameters.required).toEqual(['name']);
-    expect(byName.get('bash')?.function.parameters.required).toEqual(['command', 'description']);
+    expect(byName.get('bash')?.function.parameters.required).toEqual(['command']);
     expect(byName.get('apply_patch')?.function.parameters.required).toEqual(['patchText']);
     expect(byName.get('question')?.function.parameters.required).toEqual(['questions']);
     expect(byName.get('read_tool_output')?.function.parameters.required).toEqual([]);
@@ -107,7 +82,12 @@ describe('buildGatewayToolDefinitions', () => {
         },
       },
     });
-    expect(byName.get('task')?.function.parameters.required).toEqual(['description', 'prompt']);
+    expect(byName.get('task')?.function.parameters.required).toEqual([
+      'description',
+      'prompt',
+      'load_skills',
+      'run_in_background',
+    ]);
     expect(byName.get('task')?.function.parameters).toMatchObject({
       properties: {
         subagent_type: {
@@ -130,6 +110,8 @@ describe('buildGatewayToolDefinitions', () => {
         },
       },
     });
+    expect(byName.get('background_output')?.function.parameters.required).toEqual(['task_id']);
+    expect(byName.get('background_cancel')?.function.parameters.required).toEqual([]);
     expect(byName.get('workspace_review_status')?.function.parameters.required).toEqual(['path']);
     expect(byName.get('workspace_review_diff')?.function.parameters.required).toEqual([
       'path',

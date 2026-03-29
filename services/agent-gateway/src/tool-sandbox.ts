@@ -42,6 +42,10 @@ import { websearchTool } from './tool-aliases.js';
 import { webfetchTool } from './web-tools.js';
 import { resolveDelegatedAgent } from './task-agent-resolution.js';
 import {
+  backgroundCancelToolDefinition,
+  backgroundOutputToolDefinition,
+} from './background-task-tools.js';
+import {
   formatSubTodoReadValidationError,
   formatSubTodoWriteValidationError,
   formatTodoReadValidationError,
@@ -87,6 +91,7 @@ import {
   getMcpServerFingerprint,
   listMcpToolsForSession,
 } from './mcp-runtime.js';
+import { stopAnyInFlightStreamRequestForSession } from './routes/stream-cancellation.js';
 import type { RunEvent } from '@openAwork/shared';
 
 const FILE_TOOLS = new Set([
@@ -125,6 +130,8 @@ const TOOL_WHITELIST = new Set<string>([
   websearchTool.name,
   webfetchTool.name,
   'question',
+  'background_output',
+  'background_cancel',
   'read_tool_output',
   'edit',
   'batch',
@@ -1374,8 +1381,7 @@ async function executeGatewayManagedTool(
         ? parseSessionMetadataJson(parentSessionRow.metadata_json)
         : {};
       const canExecuteImmediately = childRequestData !== null;
-      const shouldRunInBackground =
-        canExecuteImmediately && parsed.data.run_in_background !== false;
+      const shouldRunInBackground = canExecuteImmediately && parsed.data.run_in_background === true;
       const parentToolReference =
         executionContext?.clientRequestId !== undefined
           ? {
@@ -1383,12 +1389,8 @@ async function executeGatewayManagedTool(
               toolCallId: request.toolCallId,
             }
           : undefined;
-      const canAutoResumeParentSession =
-        shouldRunInBackground &&
-        executionContext?.requestData !== undefined &&
-        typeof executionContext.requestData === 'object' &&
-        !Array.isArray(executionContext.requestData) &&
-        parentToolReference !== undefined;
+      const autoResumeRequestData = executionContext?.requestData;
+      const canAutoResumeParentSession = false;
       const childSessionMetadata: Record<string, unknown> = {
         parentSessionId: sessionId,
         subagentType: resolvedAgent.agentId,
@@ -1529,11 +1531,11 @@ async function executeGatewayManagedTool(
           title: parsed.data.description,
         });
         await taskManager.save(graph);
-        if (canAutoResumeParentSession) {
+        if (canAutoResumeParentSession && autoResumeRequestData) {
           upsertTaskParentAutoResumeContext({
             childSessionId,
             parentSessionId: sessionId,
-            requestData: executionContext.requestData as Record<string, unknown>,
+            requestData: autoResumeRequestData,
             taskId: resumableTask.id,
             userId,
           });
@@ -1641,11 +1643,11 @@ async function executeGatewayManagedTool(
         taskManager.startTask(graph, childTask.id);
       }
       await taskManager.save(graph);
-      if (canAutoResumeParentSession) {
+      if (canAutoResumeParentSession && autoResumeRequestData) {
         upsertTaskParentAutoResumeContext({
           childSessionId,
           parentSessionId: sessionId,
-          requestData: executionContext.requestData as Record<string, unknown>,
+          requestData: autoResumeRequestData,
           taskId: childTask.id,
           userId,
         });
@@ -1737,6 +1739,183 @@ async function executeGatewayManagedTool(
       };
     }
 
+    if (request.toolName === 'background_output') {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = backgroundOutputToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatValidationIssues(parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const taskManager = new AgentTaskManagerImpl();
+      let graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      let task = graph.tasks[parsed.data.task_id];
+      if (!task) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Background task ${parsed.data.task_id} was not found in session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      if (parsed.data.block) {
+        task = await waitForTaskTerminalState({
+          sessionId,
+          taskId: parsed.data.task_id,
+          timeoutMs: parsed.data.timeout,
+          signal,
+        });
+        graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      }
+
+      if (!task) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Background task ${parsed.data.task_id} no longer exists`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const childSessionId = task.sessionId;
+      if (!childSessionId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Background task ${parsed.data.task_id} has no child session`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const baseOutput = buildTaskToolOutput({
+        assignedAgent: task.assignedAgent ?? 'task',
+        errorMessage: task.errorMessage,
+        result: task.result ?? getChildSessionSummary(childSessionId, userId),
+        sessionId: childSessionId,
+        status: mapTaskStatusToToolOutputStatus(task.status),
+        taskId: task.id,
+      });
+      const output = parsed.data.full_session
+        ? {
+            ...baseOutput,
+            messages: formatBackgroundOutputMessages({
+              includeThinking: parsed.data.include_thinking,
+              includeToolResults: parsed.data.include_tool_results,
+              limit: parsed.data.message_limit,
+              sinceMessageId: parsed.data.since_message_id,
+              thinkingMaxChars: parsed.data.thinking_max_chars,
+              userId,
+              sessionId: childSessionId,
+            }),
+          }
+        : baseOutput;
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'background_cancel') {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = backgroundCancelToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatValidationIssues(parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const taskManager = new AgentTaskManagerImpl();
+      const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+      const targetTaskIds = parsed.data.all
+        ? Object.values(graph.tasks)
+            .filter(
+              (task) => task.sessionId && (task.status === 'pending' || task.status === 'running'),
+            )
+            .map((task) => task.id)
+        : parsed.data.taskId
+          ? [parsed.data.taskId]
+          : [];
+
+      if (targetTaskIds.length === 0) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.data.all
+            ? { cancelled: [], message: 'No cancellable background tasks found' }
+            : { cancelled: [], message: `Background task ${parsed.data.taskId} was not found` },
+          isError: parsed.data.all !== true,
+          durationMs: 0,
+        };
+      }
+
+      const cancelled = [] as Array<{
+        taskId: string;
+        sessionId?: string;
+        status: string;
+        stopped: boolean;
+      }>;
+      for (const taskId of targetTaskIds) {
+        const result = await cancelBackgroundTaskEntry({
+          graph,
+          graphSessionId: sessionId,
+          taskId,
+          userId,
+        });
+        if (result) {
+          cancelled.push(result);
+        }
+      }
+      await taskManager.save(graph);
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: {
+          cancelled,
+          all: parsed.data.all,
+        },
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
     if (request.toolName === 'bash') {
       const parsed = bashToolDefinition.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
@@ -1819,6 +1998,152 @@ function formatValidationIssues(
 
 function getChildSessionSummary(sessionId: string, userId: string): string {
   return extractLatestChildSessionSummary(listSessionMessages({ sessionId, userId }));
+}
+
+function stripThinkingBlocks(value: string): string {
+  return value.replace(/`{3,}thinking\n[\s\S]*?`{3,}\n*/g, '').trim();
+}
+
+function formatBackgroundOutputMessages(input: {
+  includeThinking: boolean;
+  includeToolResults: boolean;
+  limit: number;
+  sinceMessageId?: string;
+  thinkingMaxChars: number;
+  userId: string;
+  sessionId: string;
+}) {
+  const messages = listSessionMessages({ sessionId: input.sessionId, userId: input.userId });
+  const startIndex = input.sinceMessageId
+    ? messages.findIndex((message) => message.id === input.sinceMessageId)
+    : -1;
+  const sliced = startIndex >= 0 ? messages.slice(startIndex + 1) : messages;
+  const filtered = sliced.filter((message) => input.includeToolResults || message.role !== 'tool');
+  return filtered.slice(-input.limit).map((message) => ({
+    id: message.id,
+    role: message.role,
+    createdAt: message.createdAt,
+    content: message.content.map((part) => {
+      if (part.type !== 'text' || input.includeThinking) {
+        return part;
+      }
+      const stripped = stripThinkingBlocks(part.text);
+      return {
+        ...part,
+        text:
+          stripped.length > input.thinkingMaxChars
+            ? stripped.slice(0, input.thinkingMaxChars)
+            : stripped,
+      };
+    }),
+  }));
+}
+
+async function waitForTaskTerminalState(input: {
+  sessionId: string;
+  taskId: string;
+  timeoutMs: number;
+  signal: AbortSignal;
+}) {
+  const taskManager = new AgentTaskManagerImpl();
+  const deadline = Date.now() + input.timeoutMs;
+  while (true) {
+    if (input.signal.aborted) {
+      throw new Error('Background task wait aborted');
+    }
+    const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, input.sessionId);
+    const task = graph.tasks[input.taskId];
+    if (!task || (task.status !== 'running' && task.status !== 'pending')) {
+      return task;
+    }
+    if (Date.now() >= deadline) {
+      return task;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+async function cancelBackgroundTaskEntry(input: {
+  graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
+  graphSessionId: string;
+  taskId: string;
+  userId: string;
+}) {
+  const taskEntry = input.graph.tasks[input.taskId];
+  if (!taskEntry) {
+    return null;
+  }
+
+  if (
+    taskEntry.status === 'completed' ||
+    taskEntry.status === 'failed' ||
+    taskEntry.status === 'cancelled'
+  ) {
+    return {
+      taskId: taskEntry.id,
+      sessionId: taskEntry.sessionId,
+      status: taskEntry.status,
+      stopped: false,
+    };
+  }
+
+  input.graph.tasks[input.taskId] = {
+    ...taskEntry,
+    status: 'cancelled',
+    completedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  const childSessionId = taskEntry.sessionId;
+  if (!childSessionId) {
+    return { taskId: taskEntry.id, sessionId: undefined, status: 'cancelled', stopped: false };
+  }
+
+  clearTaskParentAutoResumeContext({ childSessionId, userId: input.userId });
+  sqliteRun(
+    "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [childSessionId, input.userId],
+  );
+  const stopped = await stopAnyInFlightStreamRequestForSession({
+    sessionId: childSessionId,
+    userId: input.userId,
+  });
+  const childSession = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [childSessionId, input.userId],
+  );
+  const childMetadata = childSession ? parseSessionMetadataJson(childSession.metadata_json) : {};
+  const assignedAgent =
+    taskEntry.assignedAgent ??
+    (typeof childMetadata['subagentType'] === 'string' ? childMetadata['subagentType'] : 'task');
+  const category =
+    typeof childMetadata['taskCategory'] === 'string' ? childMetadata['taskCategory'] : undefined;
+  syncParentTaskToolResult({
+    assignedAgent,
+    category,
+    parentSessionId: input.graphSessionId,
+    parentToolReference: readTaskParentToolReference(childMetadata),
+    requestedSkills: readTaskRequestedSkills(childMetadata),
+    sessionId: childSessionId,
+    status: 'cancelled',
+    taskId: taskEntry.id,
+    userId: input.userId,
+  });
+  publishSessionRunEvent(
+    input.graphSessionId,
+    buildTaskUpdateEvent({
+      assignedAgent,
+      category,
+      childSessionId,
+      parentSessionId: input.graphSessionId,
+      requestedSkills: readTaskRequestedSkills(childMetadata),
+      status: 'cancelled',
+      taskId: taskEntry.id,
+      taskTitle: taskEntry.title,
+    }),
+  );
+
+  return { taskId: taskEntry.id, sessionId: childSessionId, status: 'cancelled', stopped };
 }
 
 async function runChildTaskSessionInBackground(input: {

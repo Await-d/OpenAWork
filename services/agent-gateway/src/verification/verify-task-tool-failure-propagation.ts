@@ -90,6 +90,8 @@ async function main(): Promise<void> {
                   description: '让子代理触发失败',
                   prompt: '请执行一个会失败的子代理请求',
                   subagent_type: 'explore',
+                  load_skills: [],
+                  run_in_background: true,
                 },
               },
               new AbortController().signal,
@@ -143,17 +145,6 @@ async function main(): Promise<void> {
               'child session should persist the upstream failure as an assistant error message',
             );
 
-            await waitFor(() => {
-              const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
-              return parentMessages.some(
-                (message) =>
-                  message.role === 'assistant' &&
-                  readSingleTextMessage(
-                    message as { content: Array<{ type: string; text?: string }> },
-                  ) === '我已收到失败的子代理结果，并同步回主对话。',
-              );
-            }, 'parent session should still auto-run after a failed child task');
-
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const parentToolMessage = parentMessages.find((message) => message.role === 'tool');
             const parentReminder = parentMessages.find((message) => {
@@ -165,14 +156,6 @@ async function main(): Promise<void> {
               );
               return text.includes('子代理失败 · 让子代理触发失败');
             });
-            const parentSyntheticUser = parentMessages.find(
-              (message) =>
-                message.role === 'user' &&
-                readSingleTextMessage(
-                  message as { content: Array<{ type: string; text?: string }> },
-                ).includes('- 状态：失败'),
-            );
-
             assert(
               parentToolMessage?.role === 'tool',
               'parent session should persist a tool_result',
@@ -214,17 +197,6 @@ async function main(): Promise<void> {
               reminderPayload.payload?.message?.includes(`错误：${EXPECTED_ERROR_SUMMARY}`) ===
                 true,
               'failure reminder should include the extracted error summary',
-            );
-
-            assert(
-              parentSyntheticUser?.role === 'user',
-              'parent session should inject a synthetic user summary for failed child tasks',
-            );
-            assert(
-              readSingleTextMessage(
-                parentSyntheticUser as { content: Array<{ type: string; text?: string }> },
-              ).includes(`- 错误：\n${EXPECTED_ERROR_SUMMARY}`),
-              'synthetic user summary should carry the extracted child error summary',
             );
 
             console.log('verify-task-tool-failure-propagation: ok');

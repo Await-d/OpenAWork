@@ -165,6 +165,16 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'task')).toBe(
         true,
       );
+      expect(
+        body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'background_output',
+        ),
+      ).toBe(true);
+      expect(
+        body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'background_cancel',
+        ),
+      ).toBe(true);
       expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'read')).toBe(
         true,
       );
@@ -189,14 +199,6 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
           (item) =>
             item.kind === 'mcp' &&
             item.label === 'context7' &&
-            (item as { callable?: boolean }).callable === false,
-        ),
-      ).toBe(true);
-      expect(
-        body.capabilities.some(
-          (item) =>
-            item.kind === 'tool' &&
-            item.label === 'skill_mcp' &&
             (item as { callable?: boolean }).callable === false,
         ),
       ).toBe(true);

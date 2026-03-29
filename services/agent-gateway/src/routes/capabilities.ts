@@ -81,48 +81,6 @@ const REFERENCE_SKILLS: CapabilityDescriptor[] = [
   },
 ];
 
-const REFERENCE_TOOLS: CapabilityDescriptor[] = [
-  'bash',
-  'list',
-  'read',
-  'glob',
-  'grep',
-  'edit',
-  'write',
-  'task',
-  'webfetch',
-  'websearch',
-  'todoread',
-  'codesearch',
-  'skill',
-  'apply_patch',
-  'lsp_goto_definition',
-  'lsp_find_references',
-  'lsp_symbols',
-  'lsp_diagnostics',
-  'lsp_prepare_rename',
-  'lsp_rename',
-  'ast_grep_search',
-  'ast_grep_replace',
-  'session_list',
-  'session_read',
-  'session_search',
-  'session_info',
-  'background_output',
-  'background_cancel',
-  'call_omo_agent',
-  'skill_mcp',
-  'interactive_bash',
-  'look_at',
-].map((name) => ({
-  id: name,
-  kind: 'tool' as const,
-  label: name,
-  description: '集成自 opencode / oh-my-openagent 的能力目录工具',
-  source: 'reference' as const,
-  callable: false,
-}));
-
 export function listCapabilitiesForUser(userId: string): CapabilityDescriptor[] {
   const installedRow = sqliteGet<{ value: string }>(
     `SELECT json_group_array(manifest_json) AS value FROM installed_skills WHERE user_id = ? AND enabled = 1`,
@@ -199,8 +157,6 @@ export function listCapabilitiesForUser(userId: string): CapabilityDescriptor[] 
     source: 'runtime',
     callable: true,
   }));
-  const runtimeToolIds = new Set(tools.map((tool) => tool.id));
-  const referenceTools = REFERENCE_TOOLS.filter((tool) => !runtimeToolIds.has(tool.id));
 
   const commands = buildCommandDescriptors().map<CapabilityDescriptor>((command) => ({
     id: command.id,
@@ -220,7 +176,6 @@ export function listCapabilitiesForUser(userId: string): CapabilityDescriptor[] 
     ...BUILTIN_MCPS,
     ...configuredMcps,
     ...tools,
-    ...referenceTools,
     ...commands,
   ];
 }

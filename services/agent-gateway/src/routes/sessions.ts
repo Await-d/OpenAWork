@@ -196,7 +196,9 @@ async function buildMergedSessionTaskProjection(input: {
 
   return {
     tasks: mergeTaskProjections(
-      graphs.map(({ graph }) => buildSessionTaskProjection(graph, input.sessionId)),
+      graphs.map(({ graph }) =>
+        buildSessionTaskProjection(graph, input.sessionId, visibleSessionIds),
+      ),
     ),
     updatedAt: graphs.reduce(
       (latestUpdatedAt, { graph }) => Math.max(latestUpdatedAt, graph.updatedAt),

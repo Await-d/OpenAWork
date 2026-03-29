@@ -81,11 +81,7 @@ function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
         typeof row.output_json === 'string'
           ? (JSON.parse(row.output_json) as Record<string, unknown>)
           : null;
-      return (
-        input?.['path'] === filePath ||
-        input?.['filePath'] === filePath ||
-        output?.['path'] === filePath
-      );
+      return input?.['path'] === filePath || output?.['path'] === filePath;
     } catch {
       return false;
     }

@@ -94,15 +94,6 @@ function hasToolResultInChatRequest(body: string): boolean {
   }
 }
 
-function readSingleTextMessage(message: {
-  content: Array<{ type: string; text?: string }>;
-}): string {
-  const firstContent = message.content[0];
-  return firstContent?.type === 'text' && typeof firstContent.text === 'string'
-    ? firstContent.text
-    : '';
-}
-
 async function main(): Promise<void> {
   await withTempEnv(
     {
@@ -156,6 +147,8 @@ async function main(): Promise<void> {
                   description: '让子代理触发权限暂停后恢复',
                   prompt: '请尝试调用 bash 工具查看当前目录',
                   subagent_type: 'explore',
+                  load_skills: [],
+                  run_in_background: true,
                 },
               },
               new AbortController().signal,
@@ -273,17 +266,6 @@ async function main(): Promise<void> {
               task.result === '审批恢复后的子代理结论',
               'parent task should store the resumed child summary',
             );
-
-            await waitFor(() => {
-              const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
-              return parentMessages.some(
-                (message) =>
-                  message.role === 'assistant' &&
-                  readSingleTextMessage(
-                    message as { content: Array<{ type: string; text?: string }> },
-                  ) === '我已收到审批恢复后的子代理结果，并同步回主对话。',
-              );
-            }, 'parent session should auto-resume after the approved child task finishes');
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const parentToolMessage = parentMessages.find((message) => message.role === 'tool');

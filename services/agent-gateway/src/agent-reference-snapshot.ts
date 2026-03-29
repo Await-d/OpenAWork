@@ -55,6 +55,33 @@ const prometheusConfig = readReferenceFile(
 const prometheusIdentity = readReferenceFile(
   path.join(OMO, 'prometheus', 'identity-constraints.ts'),
 );
+const prometheusInterviewMode = readReferenceFile(
+  path.join(OMO, 'prometheus', 'interview-mode.ts'),
+);
+const prometheusPlanGeneration = readReferenceFile(
+  path.join(OMO, 'prometheus', 'plan-generation.ts'),
+);
+const prometheusHighAccuracyMode = readReferenceFile(
+  path.join(OMO, 'prometheus', 'high-accuracy-mode.ts'),
+);
+const prometheusPlanTemplate = readReferenceFile(path.join(OMO, 'prometheus', 'plan-template.ts'));
+const prometheusBehavioralSummary = readReferenceFile(
+  path.join(OMO, 'prometheus', 'behavioral-summary.ts'),
+);
+
+function buildPrometheusSystemPrompt(): string | undefined {
+  const sections = [
+    extractNamedTemplate(prometheusIdentity, 'PROMETHEUS_IDENTITY_CONSTRAINTS'),
+    extractNamedTemplate(prometheusInterviewMode, 'PROMETHEUS_INTERVIEW_MODE'),
+    extractNamedTemplate(prometheusPlanGeneration, 'PROMETHEUS_PLAN_GENERATION'),
+    extractNamedTemplate(prometheusHighAccuracyMode, 'PROMETHEUS_HIGH_ACCURACY_MODE'),
+    extractNamedTemplate(prometheusPlanTemplate, 'PROMETHEUS_PLAN_TEMPLATE'),
+    extractNamedTemplate(prometheusBehavioralSummary, 'PROMETHEUS_BEHAVIORAL_SUMMARY'),
+  ].filter(
+    (section): section is string => typeof section === 'string' && section.trim().length > 0,
+  );
+  return sections.length > 0 ? sections.join('\n') : undefined;
+}
 
 export const BUILTIN_AGENT_REFERENCE_SNAPSHOT: Record<string, Partial<ManagedAgentBody>> = {
   build: make({ description: extractBlockDescription(opencodeAgent, 'build') }),
@@ -75,7 +102,7 @@ export const BUILTIN_AGENT_REFERENCE_SNAPSHOT: Record<string, Partial<ManagedAge
   }),
   prometheus: make({
     description: extractQuotedDescription(prometheusConfig),
-    systemPrompt: extractNamedTemplate(prometheusIdentity, 'PROMETHEUS_IDENTITY_CONSTRAINTS'),
+    systemPrompt: buildPrometheusSystemPrompt(),
   }),
   oracle: make({
     description: extractQuotedDescription(oracle),

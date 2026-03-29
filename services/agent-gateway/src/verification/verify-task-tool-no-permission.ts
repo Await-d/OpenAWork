@@ -67,6 +67,8 @@ async function main(): Promise<void> {
                     description: '让子代理写出结论',
                     prompt: '请给出最终结论',
                     subagent_type: 'explore',
+                    load_skills: [],
+                    run_in_background: true,
                   },
                 },
                 new AbortController().signal,

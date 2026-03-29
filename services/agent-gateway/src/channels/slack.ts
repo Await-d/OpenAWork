@@ -9,7 +9,7 @@ import type {
 } from './types.js';
 
 type SlackApp = {
-  start(port?: number): Promise<void>;
+  start(port?: number): Promise<unknown>;
   stop(): Promise<void>;
   message(pattern: string | RegExp, handler: SlackMessageHandler): void;
   command(cmd: string, handler: SlackCommandHandler): void;

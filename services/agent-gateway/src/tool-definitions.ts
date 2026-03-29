@@ -26,6 +26,10 @@ import { applyPatchToolDefinition } from './apply-patch-tools.js';
 import { questionToolDefinition } from './question-tools.js';
 import { taskToolDefinition } from './task-tools.js';
 import { readToolOutputToolDefinition } from './tool-output-tools.js';
+import {
+  backgroundCancelToolDefinition,
+  backgroundOutputToolDefinition,
+} from './background-task-tools.js';
 
 type GatewayToolLike = {
   name: string;
@@ -78,6 +82,8 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   questionToolDefinition,
   readToolOutputToolDefinition,
   taskToolDefinition,
+  backgroundOutputToolDefinition,
+  backgroundCancelToolDefinition,
   workspaceReviewStatusTool,
   workspaceReviewDiffTool,
   writeTool,
@@ -207,54 +213,34 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          path: {
-            type: 'string',
-            description:
-              'The absolute path to the directory to list (must be absolute, not relative)',
-          },
-          ignore: {
-            type: 'array',
-            description: 'List of glob patterns to ignore',
-            items: { type: 'string' },
+          path: { type: 'string', description: 'Absolute workspace directory path to inspect' },
+          depth: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 4,
+            description: 'Maximum directory depth to traverse',
           },
         },
-        required: [],
+        required: ['path'],
         additionalProperties: false,
       };
     case 'read':
       return {
         type: 'object',
         properties: {
-          filePath: {
-            type: 'string',
-            description: 'The absolute path to the file or directory to read',
-          },
-          offset: {
-            type: 'integer',
-            minimum: 1,
-            description: 'The line number to start reading from (1-indexed)',
-          },
-          limit: {
-            type: 'integer',
-            minimum: 1,
-            description: 'The maximum number of lines to read (defaults to 2000)',
-          },
+          path: { type: 'string', description: 'Absolute workspace file path to read' },
         },
-        required: ['filePath'],
+        required: ['path'],
         additionalProperties: false,
       };
     case 'glob':
       return {
         type: 'object',
         properties: {
-          pattern: { type: 'string', description: 'The glob pattern to match files against' },
-          path: {
-            type: 'string',
-            description:
-              'The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.',
-          },
+          path: { type: 'string', description: 'Absolute workspace directory path to search' },
+          pattern: { type: 'string', description: 'Glob pattern used to match workspace files' },
         },
-        required: ['pattern'],
+        required: ['path', 'pattern'],
         additionalProperties: false,
       };
     case 'edit':
@@ -312,25 +298,19 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          command: { type: 'string', description: 'The command to execute' },
+          command: { type: 'string', description: 'Single-line shell command to run' },
           timeout: {
             type: 'integer',
             minimum: 1,
             maximum: 120000,
-            description: 'Optional timeout in milliseconds',
+            description: 'Command timeout in milliseconds',
           },
           workdir: {
             type: 'string',
-            description:
-              "The working directory to run the command in. Defaults to /home/await/project/OpenAWork. Use this instead of 'cd' commands.",
-          },
-          description: {
-            type: 'string',
-            description:
-              "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
+            description: 'Absolute workspace directory to run the command in',
           },
         },
-        required: ['command', 'description'],
+        required: ['command'],
         additionalProperties: false,
       };
     case 'apply_patch':
@@ -427,40 +407,128 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          description: { type: 'string' },
-          prompt: { type: 'string' },
-          subagent_type: { type: 'string' },
-          category: { type: 'string' },
+          description: {
+            type: 'string',
+            description: 'Short task description (3-5 words)',
+          },
+          prompt: {
+            type: 'string',
+            description: 'Full detailed prompt for the agent. Prompts MUST be in English.',
+          },
+          subagent_type: {
+            type: 'string',
+            description:
+              'REQUIRED if category not provided. Do NOT provide both category and subagent_type.',
+          },
+          category: {
+            type: 'string',
+            description:
+              'REQUIRED if subagent_type not provided. Do NOT provide both category and subagent_type.',
+          },
           load_skills: {
             type: 'array',
+            description: 'Skill names to inject. REQUIRED - pass [] if no skills needed.',
             items: { type: 'string' },
           },
-          run_in_background: { type: 'boolean' },
-          session_id: { type: 'string' },
-          task_id: { type: 'string' },
-          command: { type: 'string' },
+          run_in_background: {
+            type: 'boolean',
+            description:
+              'REQUIRED. true=async (returns task_id), false=sync (waits). Use false for task delegation, true ONLY for parallel exploration.',
+          },
+          session_id: {
+            type: 'string',
+            description: 'Existing Task session to continue',
+          },
+          task_id: {
+            type: 'string',
+            description: 'Legacy resume task id alias for existing child task/session',
+          },
+          command: {
+            type: 'string',
+            description: 'The command that triggered this task',
+          },
         },
-        required: ['description', 'prompt'],
+        required: ['description', 'prompt', 'load_skills', 'run_in_background'],
+        additionalProperties: false,
+      };
+    case 'background_output':
+      return {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'Background task id to inspect' },
+          block: {
+            type: 'boolean',
+            description: 'Wait until the task finishes before returning',
+          },
+          full_session: {
+            type: 'boolean',
+            description: 'Return filtered child-session messages instead of only task summary',
+          },
+          include_thinking: {
+            type: 'boolean',
+            description: 'Include assistant thinking blocks when full_session=true',
+          },
+          include_tool_results: {
+            type: 'boolean',
+            description: 'Include tool result messages when full_session=true',
+          },
+          message_limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            description: 'Maximum number of messages to return',
+          },
+          since_message_id: {
+            type: 'string',
+            description: 'Only return messages after this message id',
+          },
+          thinking_max_chars: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 20000,
+            description: 'Maximum characters of thinking text to include per message',
+          },
+          timeout: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 600000,
+            description: 'Maximum wait time in milliseconds when block=true',
+          },
+        },
+        required: ['task_id'],
+        additionalProperties: false,
+      };
+    case 'background_cancel':
+      return {
+        type: 'object',
+        properties: {
+          taskId: {
+            type: 'string',
+            description: 'Task id to cancel. Required when all=false.',
+          },
+          all: {
+            type: 'boolean',
+            description:
+              'When true, cancel all cancellable background child tasks for this session.',
+          },
+        },
+        required: [],
         additionalProperties: false,
       };
     case 'grep':
       return {
         type: 'object',
         properties: {
-          pattern: {
-            type: 'string',
-            description: 'The regex pattern to search for in file contents',
-          },
-          path: {
-            type: 'string',
-            description: 'The directory to search in. Defaults to the current working directory.',
-          },
-          include: {
-            type: 'string',
-            description: 'File pattern to include in the search (e.g. "*.js", "*.{ts,tsx}")',
+          path: { type: 'string', description: 'Absolute workspace directory path to search' },
+          query: { type: 'string', description: 'Literal text to search for' },
+          maxResults: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 50,
+            description: 'Maximum number of matches to return',
           },
         },
-        required: ['pattern'],
+        required: ['path', 'query'],
         additionalProperties: false,
       };
     case 'workspace_review_status':

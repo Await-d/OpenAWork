@@ -3,7 +3,6 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { WORKSPACE_ROOT } from './db.js';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import {
   getWorkspaceReviewDiff,
@@ -38,40 +37,6 @@ const MAX_FILE_BYTES = 100 * 1024;
 const MAX_GLOB_MATCHES = 100;
 const MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
-const DEFAULT_READ_LIMIT = 2000;
-const MAX_READ_LINE_LENGTH = 2000;
-const MAX_READ_LINE_SUFFIX = `... (line truncated to ${MAX_READ_LINE_LENGTH} chars)`;
-const MAX_READ_BYTES = 50 * 1024;
-const MAX_READ_BYTES_LABEL = `${MAX_READ_BYTES / 1024} KB`;
-const MAX_GREP_MATCHES = 100;
-const MAX_GREP_LINE_LENGTH = 2000;
-
-const LIST_IGNORE_PATTERNS = [
-  'node_modules/',
-  '__pycache__/',
-  '.git/',
-  'dist/',
-  'build/',
-  'target/',
-  'vendor/',
-  'bin/',
-  'obj/',
-  '.idea/',
-  '.vscode/',
-  '.zig-cache/',
-  'zig-out',
-  '.coverage',
-  'coverage/',
-  'vendor/',
-  'tmp/',
-  'temp/',
-  '.cache/',
-  'cache/',
-  'logs/',
-  '.venv/',
-  'venv/',
-  'env/',
-] as const;
 
 const workspaceTreeInputSchema = z.object({
   path: z.string().min(1),
@@ -95,12 +60,12 @@ const workspaceReadFileOutputSchema = z.object({
   truncated: z.boolean(),
 });
 
-const _globInputSchema = z.object({
+const globInputSchema = z.object({
   path: z.string().min(1),
   pattern: z.string().min(1),
 });
 
-const _globOutputSchema = z.object({
+const globOutputSchema = z.object({
   path: z.string(),
   pattern: z.string(),
   matches: z.array(z.string()),
@@ -126,35 +91,14 @@ const workspaceSearchOutputSchema = z.object({
   skippedLargeFiles: z.number().int(),
 });
 
-const listInputSchema = z.object({
-  path: z.string().min(1).optional(),
-  ignore: z.array(z.string().min(1)).optional(),
-});
+const readInputSchema = workspaceReadFileInputSchema;
+const readOutputSchema = workspaceReadFileOutputSchema;
 
-const listOutputSchema = z.string();
+const globToolInputSchema = globInputSchema;
+const globToolOutputSchema = globOutputSchema;
 
-const readInputSchema = z.object({
-  filePath: z.string().min(1),
-  offset: z.coerce.number().int().min(1).optional(),
-  limit: z.coerce.number().int().min(1).optional(),
-});
-
-const readOutputSchema = z.string();
-
-const globToolInputSchema = z.object({
-  pattern: z.string().min(1),
-  path: z.string().min(1).optional(),
-});
-
-const globToolOutputSchema = z.string();
-
-const grepInputSchema = z.object({
-  pattern: z.string().min(1),
-  path: z.string().min(1).optional(),
-  include: z.string().min(1).optional(),
-});
-
-const grepOutputSchema = z.string();
+const grepInputSchema = workspaceSearchInputSchema;
+const grepOutputSchema = workspaceSearchOutputSchema;
 
 const workspaceReviewChangeSchema = z.object({
   path: z.string(),
@@ -348,54 +292,13 @@ function escapeRegex(text: string): string {
   return text.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
-function normalizeRelativePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/^\.\//u, '').replace(/^\/+/, '');
-}
-
-function expandGlobBraces(pattern: string): string[] {
-  const start = pattern.indexOf('{');
-  if (start === -1) {
-    return [pattern];
-  }
-
-  let depth = 0;
-  let end = -1;
-  for (let index = start; index < pattern.length; index += 1) {
-    const current = pattern[index];
-    if (current === '{') {
-      depth += 1;
-    }
-    if (current === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        end = index;
-        break;
-      }
-    }
-  }
-
-  if (end === -1) {
-    return [pattern];
-  }
-
-  const prefix = pattern.slice(0, start);
-  const suffix = pattern.slice(end + 1);
-  const body = pattern.slice(start + 1, end);
-  const parts = body.split(',');
-  const expanded: string[] = [];
-  for (const part of parts) {
-    expanded.push(...expandGlobBraces(`${prefix}${part}${suffix}`));
-  }
-  return expanded;
-}
-
 function globPatternToRegex(pattern: string): RegExp {
-  const normalizedPattern = normalizeRelativePath(pattern);
+  const normalizedPattern = pattern.replace(/\\/g, '/');
   let regex = '^';
 
   for (let index = 0; index < normalizedPattern.length; index += 1) {
     const current = normalizedPattern[index];
-    if (current === undefined) {
+    if (!current) {
       continue;
     }
 
@@ -428,80 +331,6 @@ function globPatternToRegex(pattern: string): RegExp {
 
   regex += '$';
   return new RegExp(regex);
-}
-
-function matchesGlobPattern(pattern: string, relativePath: string, isDirectory: boolean): boolean {
-  const normalizedPath = normalizeRelativePath(relativePath);
-  const baseName = normalizedPath.split('/').at(-1) ?? normalizedPath;
-  const pathWithDirectorySuffix = isDirectory
-    ? `${normalizedPath.replace(/\/+$/u, '')}/`
-    : normalizedPath;
-
-  return expandGlobBraces(pattern).some((candidate) => {
-    const normalizedPattern = normalizeRelativePath(candidate);
-    if (normalizedPattern.endsWith('/')) {
-      const prefix = normalizedPattern.slice(0, -1);
-      return normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`);
-    }
-
-    const regex = globPatternToRegex(normalizedPattern);
-    if (regex.test(normalizedPath) || (isDirectory && regex.test(pathWithDirectorySuffix))) {
-      return true;
-    }
-
-    if (!normalizedPattern.includes('/')) {
-      return regex.test(baseName);
-    }
-
-    return false;
-  });
-}
-
-function matchesIgnorePatterns(
-  patterns: readonly string[],
-  relativePath: string,
-  isDirectory: boolean,
-): boolean {
-  return patterns.some((pattern) => matchesGlobPattern(pattern, relativePath, isDirectory));
-}
-
-function resolveWorkspaceSearchPath(pathValue?: string): string {
-  return assertSearchablePath(pathValue ?? WORKSPACE_ROOT);
-}
-
-function assertAccessibleWorkspaceEntryPath(path: string): string {
-  const safePath = validateWorkspacePath(path);
-  if (!safePath) {
-    throw new Error(`Forbidden workspace path: ${path}`);
-  }
-
-  if (defaultIgnoreManager.shouldIgnore(safePath)) {
-    throw new Error(`Access denied: path "${safePath}" is protected by agentignore rules`);
-  }
-
-  return safePath;
-}
-
-function splitFileLines(content: string): string[] {
-  if (content.length === 0) {
-    return [];
-  }
-
-  const lines = content.split(/\r?\n/u);
-  if (/\r?\n$/u.test(content)) {
-    lines.pop();
-  }
-  return lines;
-}
-
-function truncateReadLine(line: string): string {
-  return line.length > MAX_READ_LINE_LENGTH
-    ? `${line.slice(0, MAX_READ_LINE_LENGTH)}${MAX_READ_LINE_SUFFIX}`
-    : line;
-}
-
-function truncateGrepLine(line: string): string {
-  return line.length > MAX_GREP_LINE_LENGTH ? `${line.slice(0, MAX_GREP_LINE_LENGTH)}...` : line;
 }
 
 export function resolveWorkspaceReviewFilePath(rootPath: string, filePath: string): string {
@@ -610,122 +439,14 @@ async function runWorkspaceSearch(input: z.infer<typeof workspaceSearchInputSche
   };
 }
 
-async function runListTool(input: z.infer<typeof listInputSchema>): Promise<string> {
-  const searchPath = resolveWorkspaceSearchPath(input.path);
-  await assertDirectory(searchPath);
-
-  const ignorePatterns = [...LIST_IGNORE_PATTERNS, ...(input.ignore ?? [])];
-  const files: string[] = [];
-
-  async function walk(dirPath: string): Promise<void> {
-    if (files.length >= MAX_GLOB_MATCHES) {
-      return;
-    }
-
-    let entries: Dirent[];
-    try {
-      entries = await fsp.readdir(dirPath, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    entries.sort((left, right) => left.name.localeCompare(right.name));
-
-    for (const entry of entries) {
-      if (files.length >= MAX_GLOB_MATCHES) {
-        return;
-      }
-
-      const fullPath = join(dirPath, entry.name);
-      if (!isPathWithinRoot(fullPath, searchPath) || defaultIgnoreManager.shouldIgnore(fullPath)) {
-        continue;
-      }
-
-      const relativePath = normalizeRelativePath(fullPath.slice(searchPath.length));
-      if (relativePath.length === 0) {
-        continue;
-      }
-
-      if (matchesIgnorePatterns(ignorePatterns, relativePath, entry.isDirectory())) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      files.push(relativePath);
-    }
-  }
-
-  await walk(searchPath);
-
-  const dirs = new Set<string>();
-  const filesByDir = new Map<string, string[]>();
-
-  for (const file of files) {
-    const fileDir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.';
-    const parts = fileDir === '.' ? [] : fileDir.split('/');
-
-    for (let index = 0; index <= parts.length; index += 1) {
-      const dirPath = index === 0 ? '.' : parts.slice(0, index).join('/');
-      dirs.add(dirPath);
-    }
-
-    if (!filesByDir.has(fileDir)) {
-      filesByDir.set(fileDir, []);
-    }
-    filesByDir.get(fileDir)?.push(file.split('/').at(-1) ?? file);
-  }
-
-  function renderDir(dirPath: string, depth: number): string {
-    const indent = '  '.repeat(depth);
-    let output = '';
-
-    if (depth > 0) {
-      output += `${indent}${dirPath.split('/').at(-1) ?? dirPath}/\n`;
-    }
-
-    const childIndent = '  '.repeat(depth + 1);
-    const children = Array.from(dirs)
-      .filter((entry) => {
-        if (entry === '.' || entry === dirPath) {
-          return false;
-        }
-
-        const parent = entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')) : '.';
-        return parent === dirPath;
-      })
-      .sort((left, right) => left.localeCompare(right));
-
-    for (const child of children) {
-      output += renderDir(child, depth + 1);
-    }
-
-    const directoryFiles = filesByDir.get(dirPath) ?? [];
-    for (const file of [...directoryFiles].sort((left, right) => left.localeCompare(right))) {
-      output += `${childIndent}${file}\n`;
-    }
-
-    return output;
-  }
-
-  return `${searchPath}/\n${renderDir('.', 0)}`;
-}
-
 async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
-  const safePath = resolveWorkspaceSearchPath(input.path);
+  const safePath = assertSearchablePath(input.path);
   await assertDirectory(safePath);
-  const matches: Array<{ path: string; modTime: number }> = [];
-  let truncated = false;
+  const patternRegex = globPatternToRegex(input.pattern);
+  const matches: string[] = [];
 
   async function walk(dirPath: string): Promise<void> {
-    if (truncated) {
+    if (matches.length >= MAX_GLOB_MATCHES) {
       return;
     }
 
@@ -739,175 +460,16 @@ async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
     entries.sort((left, right) => left.name.localeCompare(right.name));
 
     for (const entry of entries) {
-      if (truncated) {
-        return;
-      }
-
-      if (IGNORED_NAMES.has(entry.name)) {
-        continue;
-      }
-
-      const fullPath = join(dirPath, entry.name);
-      if (!isPathWithinRoot(fullPath, safePath) || defaultIgnoreManager.shouldIgnore(fullPath)) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      const relativePath = normalizeRelativePath(fullPath.slice(safePath.length));
-      if (!matchesGlobPattern(input.pattern, relativePath, false)) {
-        continue;
-      }
-
-      const stat = await fsp.stat(fullPath).catch(() => null);
       if (matches.length >= MAX_GLOB_MATCHES) {
-        truncated = true;
         return;
-      }
-      matches.push({ path: fullPath, modTime: stat?.mtime.getTime() ?? 0 });
-    }
-  }
-
-  await walk(safePath);
-  matches.sort((left, right) => right.modTime - left.modTime);
-
-  if (matches.length === 0) {
-    return 'No files found';
-  }
-
-  const output = matches.map((match) => match.path);
-  if (truncated) {
-    output.push('');
-    output.push(
-      `(Results are truncated: showing first ${MAX_GLOB_MATCHES} results. Consider using a more specific path or pattern.)`,
-    );
-  }
-
-  return output.join('\n');
-}
-
-async function runReadTool(input: z.infer<typeof readInputSchema>): Promise<string> {
-  const offset = input.offset ?? 1;
-  const limit = input.limit ?? DEFAULT_READ_LIMIT;
-  const filePath = isAbsolute(input.filePath)
-    ? input.filePath
-    : resolve(WORKSPACE_ROOT, input.filePath);
-  const safePath = assertAccessibleWorkspaceEntryPath(filePath);
-  const stat = await fsp.stat(safePath).catch(() => null);
-  if (!stat) {
-    throw new Error(`File not found: ${safePath}`);
-  }
-
-  if (stat.isDirectory()) {
-    const entries = (await fsp.readdir(safePath, { withFileTypes: true }))
-      .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
-      .sort((left, right) => left.localeCompare(right));
-
-    const start = offset - 1;
-    const sliced = entries.slice(start, start + limit);
-    const truncated = start + sliced.length < entries.length;
-    return [
-      `<path>${safePath}</path>`,
-      '<type>directory</type>',
-      '<entries>',
-      sliced.join('\n'),
-      truncated
-        ? `\n(Showing ${sliced.length} of ${entries.length} entries. Use 'offset' parameter to read beyond entry ${offset + sliced.length})`
-        : `\n(${entries.length} entries)`,
-      '</entries>',
-    ].join('\n');
-  }
-
-  if (!stat.isFile()) {
-    throw new Error(`Path is not a file: ${safePath}`);
-  }
-
-  const content = await fsp.readFile(safePath, 'utf8');
-  const lines = splitFileLines(content);
-  if (lines.length < offset && !(lines.length === 0 && offset === 1)) {
-    throw new Error(`Offset ${offset} is out of range for this file (${lines.length} lines)`);
-  }
-
-  const start = offset - 1;
-  const raw: string[] = [];
-  let bytes = 0;
-  let truncatedByBytes = false;
-  let hasMoreLines = false;
-
-  for (let index = start; index < lines.length; index += 1) {
-    if (raw.length >= limit) {
-      hasMoreLines = true;
-      break;
-    }
-
-    const line = truncateReadLine(lines[index] ?? '');
-    const size = Buffer.byteLength(line, 'utf8') + (raw.length > 0 ? 1 : 0);
-    if (bytes + size > MAX_READ_BYTES) {
-      truncatedByBytes = true;
-      hasMoreLines = true;
-      break;
-    }
-
-    raw.push(line);
-    bytes += size;
-  }
-
-  const rendered = raw.map((line, index) => `${index + offset}: ${line}`);
-  let output = [`<path>${safePath}</path>`, '<type>file</type>', '<content>'].join('\n');
-  output += rendered.join('\n');
-
-  const totalLines = lines.length;
-  const lastReadLine = offset + raw.length - 1;
-  const nextOffset = lastReadLine + 1;
-  if (truncatedByBytes) {
-    output += `\n\n(Output capped at ${MAX_READ_BYTES_LABEL}. Showing lines ${offset}-${lastReadLine}. Use offset=${nextOffset} to continue.)`;
-  } else if (hasMoreLines) {
-    output += `\n\n(Showing lines ${offset}-${lastReadLine} of ${totalLines}. Use offset=${nextOffset} to continue.)`;
-  } else {
-    output += `\n\n(End of file - total ${totalLines} lines)`;
-  }
-
-  output += '\n</content>';
-  return output;
-}
-
-async function runGrepTool(input: z.infer<typeof grepInputSchema>): Promise<string> {
-  const safePath = resolveWorkspaceSearchPath(input.path);
-  await assertDirectory(safePath);
-
-  let regex: RegExp;
-  try {
-    regex = new RegExp(input.pattern);
-  } catch (error) {
-    throw new Error(
-      `Invalid regex pattern: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  const matches: Array<{ path: string; lineNum: number; lineText: string; modTime: number }> = [];
-
-  async function walk(dirPath: string): Promise<void> {
-    let entries: Dirent[];
-    try {
-      entries = await fsp.readdir(dirPath, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (!isPathWithinRoot(fullPath, safePath) || defaultIgnoreManager.shouldIgnore(fullPath)) {
-        continue;
       }
 
       if (IGNORED_NAMES.has(entry.name)) {
+        continue;
+      }
+
+      const fullPath = join(dirPath, entry.name);
+      if (!isPathWithinRoot(fullPath, safePath) || defaultIgnoreManager.shouldIgnore(fullPath)) {
         continue;
       }
 
@@ -920,73 +482,22 @@ async function runGrepTool(input: z.infer<typeof grepInputSchema>): Promise<stri
         continue;
       }
 
-      const relativePath = normalizeRelativePath(fullPath.slice(safePath.length));
-      if (input.include && !matchesGlobPattern(input.include, relativePath, false)) {
+      const relativePath = fullPath.slice(safePath.length).replace(/^\//u, '').replace(/\\/g, '/');
+      if (!patternRegex.test(relativePath)) {
         continue;
       }
 
-      const stat = await fsp.stat(fullPath).catch(() => null);
-      if (!stat) {
-        continue;
-      }
-
-      let content: string;
-      try {
-        content = await fsp.readFile(fullPath, 'utf8');
-      } catch {
-        continue;
-      }
-
-      const lines = splitFileLines(content);
-      for (let index = 0; index < lines.length; index += 1) {
-        regex.lastIndex = 0;
-        const line = lines[index] ?? '';
-        if (!regex.test(line)) {
-          continue;
-        }
-
-        matches.push({
-          path: fullPath,
-          lineNum: index + 1,
-          lineText: line,
-          modTime: stat.mtime.getTime(),
-        });
-      }
+      matches.push(fullPath);
     }
   }
 
   await walk(safePath);
-  if (matches.length === 0) {
-    return 'No files found';
-  }
 
-  matches.sort((left, right) => right.modTime - left.modTime);
-  const truncated = matches.length > MAX_GREP_MATCHES;
-  const finalMatches = truncated ? matches.slice(0, MAX_GREP_MATCHES) : matches;
-  const output = [
-    `Found ${matches.length} matches${truncated ? ` (showing first ${MAX_GREP_MATCHES})` : ''}`,
-  ];
-
-  let currentFile = '';
-  for (const match of finalMatches) {
-    if (currentFile !== match.path) {
-      if (currentFile !== '') {
-        output.push('');
-      }
-      currentFile = match.path;
-      output.push(`${match.path}:`);
-    }
-    output.push(`  Line ${match.lineNum}: ${truncateGrepLine(match.lineText)}`);
-  }
-
-  if (truncated) {
-    output.push('');
-    output.push(
-      `(Results truncated: showing ${MAX_GREP_MATCHES} of ${matches.length} matches (${matches.length - MAX_GREP_MATCHES} hidden). Consider using a more specific path or pattern.)`,
-    );
-  }
-
-  return output.join('\n');
+  return {
+    path: safePath,
+    pattern: input.pattern,
+    matches,
+  };
 }
 
 function sanitizeReviewChanges(changes: WorkspaceReviewChange[]) {
@@ -1017,14 +528,17 @@ export const workspaceTreeTool: ToolDefinition<
   },
 };
 
-export const listTool: ToolDefinition<typeof listInputSchema, typeof listOutputSchema> = {
+export const listTool: ToolDefinition<
+  typeof workspaceTreeInputSchema,
+  typeof workspaceTreeOutputSchema
+> = {
   name: 'list',
   description:
-    'Lists files and directories in a given path. The path parameter must be absolute; omit it to use the current workspace directory. You can optionally provide an array of glob patterns to ignore with the ignore parameter. You should generally prefer the Glob and Grep tools, if you know which directories to search.',
-  inputSchema: listInputSchema,
-  outputSchema: listOutputSchema,
-  timeout: 10000,
-  execute: async (input) => runListTool(input),
+    'List files and directories in a workspace path. Use this first to inspect folder structure before reading files. Required JSON input: {"path":"/absolute/workspace/path","depth":2}.',
+  inputSchema: workspaceTreeInputSchema,
+  outputSchema: workspaceTreeOutputSchema,
+  timeout: workspaceTreeTool.timeout,
+  execute: async (input, signal) => workspaceTreeTool.execute(input, signal),
 };
 
 export const workspaceReadFileTool: ToolDefinition<
@@ -1059,34 +573,18 @@ export const workspaceReadFileTool: ToolDefinition<
 
 export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputSchema> = {
   name: 'read',
-  description: `Read a file or directory from the local filesystem. If the path does not exist, an error is returned.
-
-Usage:
-- The filePath parameter should be an absolute path.
-- By default, this tool returns up to 2000 lines from the start of the file.
-- The offset parameter is the line number to start reading from (1-indexed).
-- To read later sections, call this tool again with a larger offset.
-- Use the grep tool to find specific content in large files or files with long lines.
-- If you are unsure of the correct file path, use the glob tool to look up filenames by glob pattern.
-- Contents are returned with each line prefixed by its line number as <line>: <content>. For example, if a file has contents "foo\\n", you will receive "1: foo\\n". For directories, entries are returned one per line (without line numbers) with a trailing / for subdirectories.
-- Any line longer than 2000 characters is truncated.
-- Call this tool in parallel when you know there are multiple files you want to read.
-- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.
-- This tool can read image files and PDFs and return them as file attachments.`,
+  description:
+    'Read a UTF-8 text file from the workspace. Use list first when you need to inspect folders before choosing a file to read.',
   inputSchema: readInputSchema,
   outputSchema: readOutputSchema,
   timeout: workspaceReadFileTool.timeout,
-  execute: async (input) => runReadTool(input),
+  execute: async (input, signal) => workspaceReadFileTool.execute(input, signal),
 };
 
 export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToolOutputSchema> = {
   name: 'glob',
-  description: `- Fast file pattern matching tool that works with any codebase size
-- Supports glob patterns like "**/*.js" or "src/**/*.ts"
-- Returns matching file paths sorted by modification time
-- Use this tool when you need to find files by name patterns
-- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead
-- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.`,
+  description:
+    'Find workspace files by glob pattern. Use this when you know the filename shape or directory pattern you want to inspect.',
   inputSchema: globToolInputSchema,
   outputSchema: globToolOutputSchema,
   timeout: 10000,
@@ -1108,18 +606,12 @@ export const workspaceSearchTool: ToolDefinition<
 
 export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputSchema> = {
   name: 'grep',
-  description: `- Fast content search tool that works with any codebase size
-- Searches file contents using regular expressions
-- Supports full regex syntax (eg. "log.*Error", "function\\s+\\w+", etc.)
-- Filter files by pattern with the include parameter (eg. "*.js", "*.{ts,tsx}")
-- Returns file paths and line numbers with at least one match sorted by modification time
-- Use this tool when you need to find files containing specific patterns
-- If you need to identify/count the number of matches within files, use the Bash tool with \`rg\` (ripgrep) directly. Do NOT use \`grep\`.
-- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead`,
+  description:
+    'Search literal text within workspace files. Use this to find symbols, strings, and implementation references within the current workspace.',
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
   timeout: workspaceSearchTool.timeout,
-  execute: async (input) => runGrepTool(input),
+  execute: async (input) => runWorkspaceSearch(input),
 };
 
 export const workspaceReviewStatusTool: ToolDefinition<

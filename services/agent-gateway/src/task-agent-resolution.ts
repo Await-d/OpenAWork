@@ -1,22 +1,11 @@
 import type { ManagedAgentRecord } from '@openAwork/shared';
 import { listManagedAgentsForUser } from './agent-catalog.js';
+import {
+  getTaskCategoryDescription,
+  getTaskCategoryPromptAppend,
+} from './task-category-reference-snapshot.js';
 
 const CATEGORY_AGENT_ID = 'sisyphus-junior';
-
-const CATEGORY_GUIDANCE: Record<string, string> = {
-  'visual-engineering':
-    'Focus on UI, layout, styling, interaction polish, and frontend presentation quality.',
-  ultrabrain: 'Focus on hard logic, architecture trade-offs, and rigorous reasoning before acting.',
-  deep: 'Focus on autonomous end-to-end execution with careful research and verification.',
-  artistry:
-    'Focus on creative problem-solving and unconventional but grounded implementation approaches.',
-  quick: 'Focus on narrow, low-overhead execution for small tasks with fast turnaround.',
-  'unspecified-low':
-    'Focus on low-effort execution while keeping the result concrete and verifiable.',
-  'unspecified-high':
-    'Focus on thorough execution for higher-effort work with explicit progress and evidence.',
-  writing: 'Focus on structured writing, documentation quality, and clear communication artifacts.',
-};
 
 interface RawDelegatedTaskInput {
   category?: string;
@@ -88,14 +77,22 @@ function buildDelegatedSystemPrompt(input: {
 
   const category = normalizeOptionalText(input.category);
   if (category) {
+    const categoryDescription = getTaskCategoryDescription(category);
+    const categoryPromptAppend = getTaskCategoryPromptAppend(category);
     sections.push(
       [
         'Execution style:',
         `- Task category: ${category}.`,
-        CATEGORY_GUIDANCE[category] ??
+        categoryDescription ??
           '- Focus on the requested category and keep the execution style aligned with it.',
+        '- Prefer autonomous end-to-end execution over partial handoffs when the delegated goal is achievable inside this child session.',
       ].join(' '),
     );
+    if (categoryPromptAppend) {
+      sections.push(
+        ['Category prompt append (reference-aligned):', categoryPromptAppend].join('\n'),
+      );
+    }
   }
 
   if (input.requestedSkills.length > 0) {

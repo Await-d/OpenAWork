@@ -131,6 +131,24 @@ vi.mock('../tool-definitions.js', () => ({
     {
       type: 'function',
       function: {
+        name: 'background_output',
+        description: 'background output tool',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'background_cancel',
+        description: 'background cancel tool',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'grep',
         description: 'grep alias',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
@@ -220,6 +238,12 @@ describe('listCapabilitiesForUser', () => {
       (item) => item.kind === 'tool' && item.label === 'question',
     );
     const taskTools = capabilities.filter((item) => item.kind === 'tool' && item.label === 'task');
+    const backgroundOutputTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'background_output',
+    );
+    const backgroundCancelTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'background_cancel',
+    );
     const grepTools = capabilities.filter((item) => item.kind === 'tool' && item.label === 'grep');
     const writeTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'write',
@@ -253,6 +277,10 @@ describe('listCapabilitiesForUser', () => {
     expect(questionTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(taskTools).toHaveLength(1);
     expect(taskTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(backgroundOutputTools).toHaveLength(1);
+    expect(backgroundOutputTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(backgroundCancelTools).toHaveLength(1);
+    expect(backgroundCancelTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(grepTools).toHaveLength(1);
     expect(grepTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(writeTools).toHaveLength(1);

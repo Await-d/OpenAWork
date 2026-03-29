@@ -11,9 +11,10 @@ export type SessionTaskResponse = AgentTask & {
 export function buildSessionTaskProjection(
   graph: AgentTaskGraph,
   sessionId: string,
+  includeSessionIds: ReadonlySet<string> = new Set([sessionId]),
 ): SessionTaskResponse[] {
   const sessionTasks = Object.values(graph.tasks).filter(
-    (task) => task.sessionId === undefined || task.sessionId === sessionId,
+    (task) => task.sessionId === undefined || includeSessionIds.has(task.sessionId),
   );
   const taskById = new Map(sessionTasks.map((task) => [task.id, task]));
   const childrenByParent = new Map<string, AgentTask[]>();

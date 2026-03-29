@@ -143,4 +143,38 @@ describe('buildSessionTaskProjection', () => {
       unmetDependencyCount: 1,
     });
   });
+
+  it('includes delegated child-session tasks when parent projection opts in to descendant sessions', () => {
+    const graph = createGraph();
+    graph.tasks['delegated'] = {
+      id: 'delegated',
+      title: '委派子代理任务',
+      status: 'completed',
+      blockedBy: [],
+      sessionId: 'child-session-1',
+      assignedAgent: 'librarian',
+      priority: 'medium',
+      tags: ['task-tool', 'librarian'],
+      createdAt: 26,
+      updatedAt: 27,
+      completedAt: 27,
+      result: '文档抓取完成',
+    };
+
+    const projected = buildSessionTaskProjection(
+      graph,
+      'session-1',
+      new Set(['session-1', 'child-session-1']),
+    );
+    const delegatedTask = projected.find((task) => task.id === 'delegated');
+
+    expect(projected).toHaveLength(5);
+    expect(delegatedTask).toMatchObject({
+      id: 'delegated',
+      sessionId: 'child-session-1',
+      assignedAgent: 'librarian',
+      result: '文档抓取完成',
+      depth: 0,
+    });
+  });
 });

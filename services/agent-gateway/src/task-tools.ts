@@ -7,8 +7,8 @@ const taskInputSchema = z
     prompt: z.string().min(1),
     subagent_type: z.string().min(1).optional(),
     category: z.string().min(1).optional(),
-    load_skills: z.array(z.string().min(1)).optional().default([]),
-    run_in_background: z.boolean().optional().default(true),
+    load_skills: z.array(z.string().min(1)),
+    run_in_background: z.boolean(),
     session_id: z.string().min(1).optional(),
     task_id: z.string().min(1).optional(),
     command: z.string().min(1).optional(),
@@ -37,12 +37,15 @@ const taskOutputSchema = z.object({
   status: z.enum(['pending', 'running', 'done', 'failed', 'cancelled']),
   assignedAgent: z.string(),
   category: z.string().optional(),
+  requestedSkills: z.array(z.string()).optional(),
+  result: z.string().optional(),
+  errorMessage: z.string().optional(),
 });
 
 export const taskToolDefinition: ToolDefinition<typeof taskInputSchema, typeof taskOutputSchema> = {
   name: 'task',
   description:
-    'Create a child task and child session for delegated work. Use this when work should continue in a separate sub-session instead of the current conversation.',
+    'Spawn agent task with category-based or direct agent selection. Provide exactly one of category or subagent_type. load_skills and run_in_background are required. Use run_in_background=false for sync task execution and true only for parallel background work.',
   inputSchema: taskInputSchema,
   outputSchema: taskOutputSchema,
   timeout: 30000,

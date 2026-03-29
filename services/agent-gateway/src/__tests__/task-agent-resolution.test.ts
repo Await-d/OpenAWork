@@ -19,7 +19,7 @@ vi.mock('../agent-catalog.js', () => ({
         label: 'sisyphus-junior',
         aliases: [],
         enabled: true,
-        systemPrompt: 'Execute focused work quickly.',
+        systemPrompt: 'Sisyphus-Junior - Focused executor from OhMyOpenCode.',
       },
     ];
   }),
@@ -52,9 +52,13 @@ describe('task agent resolution', () => {
 
     expect(resolved.agentId).toBe('sisyphus-junior');
     expect(resolved.category).toBe('deep');
-    expect(resolved.systemPrompt).toContain('Execute focused work quickly.');
+    expect(resolved.systemPrompt).toContain(
+      'Sisyphus-Junior - Focused executor from OhMyOpenCode.',
+    );
     expect(resolved.systemPrompt).toContain('Execution style:');
     expect(resolved.systemPrompt).toContain('Task category: deep.');
-    expect(resolved.systemPrompt).toContain('autonomous end-to-end execution');
+    expect(resolved.systemPrompt).toContain('Goal-oriented autonomous problem-solving');
+    expect(resolved.systemPrompt).toContain('Category prompt append (reference-aligned):');
+    expect(resolved.systemPrompt).toContain('AUTONOMOUS EXECUTION MINDSET');
   });
 });
