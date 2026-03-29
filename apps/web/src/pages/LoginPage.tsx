@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Navigate } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
+import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import { login } from '@openAwork/web-client';
 
 interface LoginPageProps {
@@ -37,6 +38,7 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
       setGatewayUrl(resolvedUrl);
       const data = await login(resolvedUrl, email, password);
       setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
+      void preloadRouteModuleByPath('/chat');
       void navigate('/chat', { replace: true });
     } catch (err) {
       const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';

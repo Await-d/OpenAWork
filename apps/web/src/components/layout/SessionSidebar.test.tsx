@@ -6,10 +6,15 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionSidebar } from './SessionSidebar.js';
 import * as ToastNotification from '../ToastNotification.js';
+import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { useAuthStore } from '../../stores/auth.js';
 import { useUIStateStore } from '../../stores/uiState.js';
 import type { FileTreeNode } from '../WorkspacePickerModal.js';
 import { buildWorkspaceSessionCollections } from '../../utils/session-grouping.js';
+
+vi.mock('../../routes/preloadable-route-modules.js', () => ({
+  preloadRouteModuleByPath: vi.fn(() => null),
+}));
 
 const useSessionsMockState = {
   sessions: [] as Array<{
@@ -900,6 +905,48 @@ describe('SessionSidebar file tree actions', () => {
     expect(container?.textContent).toContain('编程');
     expect(container?.textContent).toContain('YOLO');
     expect(container?.textContent).toContain('Claude Sonnet 4');
+  });
+
+  it('preloads the chat route when hovering a session row', async () => {
+    useSessionsMockState.sessions = [
+      {
+        id: 'session-1',
+        title: '第一个会话',
+        updated_at: '2026-03-22T10:00:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+    ];
+    useSessionsMockState.groupedSessions = [
+      {
+        workspacePath: '/repo/project',
+        workspaceLabel: 'project',
+        sessions: useSessionsMockState.sessions,
+      },
+    ];
+
+    await act(async () => {
+      root!.render(
+        <MemoryRouter initialEntries={['/chat/session-1']}>
+          <SessionSidebar
+            fetchRootPath={vi.fn(async () => '/repo/project')}
+            fetchTree={vi.fn(async () => [])}
+            onOpenWorkspacePicker={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    await flushEffects();
+
+    const firstCard = container?.querySelector('[data-session-id="session-1"]');
+
+    act(() => {
+      firstCard?.dispatchEvent(
+        new MouseEvent('mouseover', { bubbles: true, clientX: 18, clientY: 28 }),
+      );
+    });
+
+    expect(preloadRouteModuleByPath).toHaveBeenCalledWith('/chat/session-1');
   });
 
   it('recomputes hovered session from pointer after deleting the hovered row', async () => {

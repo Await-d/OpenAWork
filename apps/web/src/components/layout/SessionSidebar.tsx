@@ -10,6 +10,7 @@ import { WorkspaceDeleteConfirmDialog } from './WorkspaceDeleteConfirmDialog.js'
 import { WorkspaceGitBadge, FileTreeView, type FileTreeContextTarget } from './SidebarHelpers.js';
 import type { FileTreeNode } from '../WorkspacePickerModal.js';
 import { SessionModeBadges } from '../SessionModeBadges.js';
+import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { toast } from '../ToastNotification.js';
 import { hasParentSession } from '../../utils/session-metadata.js';
 import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../utils/session-grouping.js';
@@ -95,6 +96,16 @@ export function SessionSidebar({
   onOpenWorkspacePicker,
 }: SessionSidebarProps) {
   const navigate = useNavigate();
+  const preloadChatRoute = useCallback((sessionIdToPreload: string) => {
+    void preloadRouteModuleByPath(`/chat/${sessionIdToPreload}`);
+  }, []);
+  const openChatSession = useCallback(
+    (sessionIdToOpen: string) => {
+      preloadChatRoute(sessionIdToOpen);
+      void navigate(`/chat/${sessionIdToOpen}`);
+    },
+    [navigate, preloadChatRoute],
+  );
   void fetchRootPath;
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -497,7 +508,7 @@ export function SessionSidebar({
               return;
             }
 
-            void navigate(`/chat/${s.id}`);
+            openChatSession(s.id);
           }}
           onKeyDown={(event) => {
             if (isNestedInteractiveTarget(event.target)) {
@@ -506,7 +517,7 @@ export function SessionSidebar({
 
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
-              void navigate(`/chat/${s.id}`);
+              openChatSession(s.id);
             }
           }}
           onContextMenu={(e) => {
@@ -514,6 +525,7 @@ export function SessionSidebar({
             setContextMenu({ sessionId: s.id, x: e.clientX, y: e.clientY });
           }}
           onMouseEnter={(event) => {
+            preloadChatRoute(s.id);
             lastPointerPositionRef.current = {
               x: event.clientX,
               y: event.clientY,
@@ -530,7 +542,10 @@ export function SessionSidebar({
             lastPointerPositionRef.current = null;
             setHoveredSessionId(null);
           }}
-          onFocusCapture={() => setHoveredSessionId(s.id)}
+          onFocusCapture={() => {
+            preloadChatRoute(s.id);
+            setHoveredSessionId(s.id);
+          }}
           onBlurCapture={(event) => {
             const nextTarget = event.relatedTarget;
             if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
@@ -649,7 +664,9 @@ export function SessionSidebar({
             ) : (
               <button
                 type="button"
-                onClick={() => void navigate(`/chat/${s.id}`)}
+                onPointerEnter={() => preloadChatRoute(s.id)}
+                onFocus={() => preloadChatRoute(s.id)}
+                onClick={() => openChatSession(s.id)}
                 style={{
                   flex: 1,
                   minWidth: 0,

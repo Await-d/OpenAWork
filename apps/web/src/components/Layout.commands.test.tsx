@@ -5,7 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Layout from './Layout.js';
+import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import { useAuthStore } from '../stores/auth.js';
+
+vi.mock('../routes/preloadable-route-modules.js', () => ({
+  preloadRouteModuleByPath: vi.fn(() => null),
+}));
 
 const listMock = vi.fn(async () => []);
 const listCommandsMock = vi.fn(async () => [
@@ -128,5 +133,30 @@ describe('Layout service-backed command palette', () => {
 
     expect(rendered.textContent).toContain('远端新建对话');
     expect(rendered.textContent).toContain('来自服务端命令源');
+  });
+
+  it('preloads the route before executing a command palette navigation command', async () => {
+    const rendered = await renderLayout();
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }),
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const chatCommand = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('远端新建对话'),
+    );
+
+    act(() => {
+      chatCommand?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(preloadRouteModuleByPath).toHaveBeenCalledWith('/chat');
   });
 });
