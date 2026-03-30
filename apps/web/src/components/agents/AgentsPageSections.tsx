@@ -11,6 +11,9 @@ export interface AgentEditorState {
   aliasesText: string;
   coreRole: '' | CoreRole;
   preset: '' | RolePreset;
+  model: string;
+  variant: string;
+  fallbackModelsText: string;
   systemPrompt: string;
   note: string;
   enabled: boolean;
@@ -114,6 +117,9 @@ export function emptyEditorState(): AgentEditorState {
     aliasesText: '',
     coreRole: '',
     preset: '',
+    model: '',
+    variant: '',
+    fallbackModelsText: '',
     systemPrompt: '',
     note: '',
     enabled: true,
@@ -131,6 +137,9 @@ export function toEditorState(agent: ManagedAgentRecord | null): AgentEditorStat
     aliasesText: agent.aliases.join(', '),
     coreRole: agent.canonicalRole?.coreRole ?? '',
     preset: agent.canonicalRole?.preset ?? '',
+    model: agent.model ?? '',
+    variant: agent.variant ?? '',
+    fallbackModelsText: (agent.fallbackModels ?? []).join(', '),
     systemPrompt: agent.systemPrompt ?? '',
     note: agent.note ?? '',
     enabled: agent.enabled,
@@ -579,6 +588,8 @@ export function AgentsListPanel({
                           {formatCanonicalRoleZh(agent) ?? formatCanonicalRole(agent.canonicalRole)}
                         </Tag>
                       )}
+                      {agent.model && <Tag tone="accent">默认模型 {agent.model}</Tag>}
+                      {agent.variant && <Tag>variant {agent.variant}</Tag>}
                       {agent.aliases.slice(0, 4).map((alias) => (
                         <Tag key={alias}>{alias}</Tag>
                       ))}
@@ -763,6 +774,69 @@ function AgentForm({
         </label>
       </div>
 
+      <div
+        style={{
+          borderRadius: 18,
+          border: '1px solid color-mix(in oklab, var(--accent) 24%, var(--border-subtle) 76%)',
+          background:
+            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--surface) 68%), var(--surface))',
+          padding: 14,
+          display: 'grid',
+          gap: 12,
+        }}
+      >
+        <div style={{ display: 'grid', gap: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>默认模型路由</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.7 }}>
+            为这个角色指定默认模型、variant 与 fallback 链。留空时，系统会回退到参考默认值。
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.8fr', gap: 12 }}>
+          <label style={labelStyle()}>
+            默认模型
+            <input
+              value={state.model}
+              onChange={(event) =>
+                setState((current) => ({ ...current, model: event.target.value }))
+              }
+              placeholder="例如：openai/gpt-5.4 或 gpt-5.4"
+              style={fieldStyle()}
+            />
+          </label>
+          <label style={labelStyle()}>
+            Variant
+            <input
+              value={state.variant}
+              onChange={(event) =>
+                setState((current) => ({ ...current, variant: event.target.value }))
+              }
+              placeholder="例如：high / medium / max"
+              style={fieldStyle()}
+            />
+          </label>
+        </div>
+        <label style={labelStyle()}>
+          Fallback 模型链（逗号分隔）
+          <textarea
+            value={state.fallbackModelsText}
+            onChange={(event) =>
+              setState((current) => ({ ...current, fallbackModelsText: event.target.value }))
+            }
+            placeholder="例如：claude-opus-4-6, gpt-5.4, kimi-k2.5"
+            style={{ ...fieldStyle(), minHeight: 92, resize: 'vertical' }}
+          />
+        </label>
+        {(state.model || state.variant || state.fallbackModelsText) && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {state.model && <Tag tone="accent">默认 {state.model}</Tag>}
+            {state.variant && <Tag>variant {state.variant}</Tag>}
+            {parseAliases(state.fallbackModelsText).map((fallback) => (
+              <Tag key={fallback}>fallback {fallback}</Tag>
+            ))}
+          </div>
+        )}
+      </div>
+
       <label style={labelStyle()}>
         系统提示词
         {!state.systemPrompt && (
@@ -872,6 +946,16 @@ export function AgentsEditorPanel({
               value={`${ORIGIN_LABELS[selectedAgent.origin]} / ${SOURCE_LABELS[selectedAgent.source]}`}
             />
             <InfoRow label="状态" value={selectedAgent.enabled ? '已启用' : '已禁用'} />
+            <InfoRow label="默认模型" value={selectedAgent.model ?? '未设置'} />
+            <InfoRow label="Variant" value={selectedAgent.variant ?? '未设置'} />
+            <InfoRow
+              label="Fallback"
+              value={
+                selectedAgent.fallbackModels?.length
+                  ? selectedAgent.fallbackModels.join(', ')
+                  : '未设置'
+              }
+            />
             <InfoRow label="创建时间" value={selectedAgent.createdAt} />
           </div>
           <AgentForm state={editorState} setState={setEditorState} />

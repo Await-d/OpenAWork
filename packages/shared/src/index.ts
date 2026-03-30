@@ -178,6 +178,9 @@ export interface ManagedAgentBody {
   description: string;
   aliases: string[];
   canonicalRole?: CanonicalRoleDescriptor;
+  model?: string;
+  variant?: string;
+  fallbackModels?: string[];
   systemPrompt?: string;
   note?: string;
 }
@@ -204,6 +207,9 @@ export interface UpdateManagedAgentInput {
   description?: string;
   aliases?: string[];
   canonicalRole?: CanonicalRoleDescriptor;
+  model?: string;
+  variant?: string;
+  fallbackModels?: string[];
   systemPrompt?: string;
   note?: string;
   enabled?: boolean;

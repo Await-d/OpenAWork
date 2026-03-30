@@ -155,6 +155,40 @@ describe('agentsRoutes', () => {
     });
   });
 
+  it('keeps builtin model-only overrides instead of treating them as empty', async () => {
+    const updateResponse = await app.inject({
+      method: 'PUT',
+      url: '/agents/oracle',
+      payload: {
+        model: 'openai/gpt-5.4-mini',
+        variant: 'high',
+        fallbackModels: ['claude-opus-4-6'],
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(JSON.parse(updateResponse.body)).toMatchObject({
+      agent: {
+        id: 'oracle',
+        model: 'openai/gpt-5.4-mini',
+        variant: 'high',
+        fallbackModels: ['claude-opus-4-6'],
+      },
+    });
+
+    const listResponse = await app.inject({ method: 'GET', url: '/agents' });
+    expect(JSON.parse(listResponse.body)).toMatchObject({
+      agents: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'oracle',
+          model: 'openai/gpt-5.4-mini',
+          variant: 'high',
+          fallbackModels: ['claude-opus-4-6'],
+        }),
+      ]),
+    });
+  });
+
   it('removes custom agents and reset-all restores defaults for remaining entities', async () => {
     const createResponse = await app.inject({
       method: 'POST',

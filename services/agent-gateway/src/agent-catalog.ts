@@ -11,6 +11,7 @@ import type {
 import { REFERENCE_AGENT_ROLE_METADATA } from '@openAwork/shared';
 import { sqliteGet, sqliteRun } from './db.js';
 import { BUILTIN_AGENT_REFERENCE_SNAPSHOT } from './agent-reference-snapshot.js';
+import { getReferenceAgentModelCandidates } from './task-model-reference-snapshot.js';
 
 interface UserSettingRow {
   value: string;
@@ -138,6 +139,20 @@ function normalizeAliases(value: unknown): string[] {
   );
 }
 
+function normalizeModelList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function normalizeCanonicalRole(value: unknown): CanonicalRoleDescriptor | undefined {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -176,6 +191,9 @@ function normalizeBody(
     description: normalizeOptionalText(input.description) ?? '',
     aliases: normalizeAliases(input.aliases),
     canonicalRole: normalizeCanonicalRole(input.canonicalRole),
+    model: normalizeOptionalText(input.model),
+    variant: normalizeOptionalText(input.variant),
+    fallbackModels: normalizeModelList(input.fallbackModels),
     systemPrompt: normalizeOptionalText(input.systemPrompt),
     note: normalizeOptionalText(input.note),
   };
@@ -227,6 +245,9 @@ function parseStoredCatalog(value: string | undefined): StoredAgentCatalog {
             description: normalizeOptionalText(record['description']),
             aliases: normalizeAliases(record['aliases']),
             canonicalRole: normalizeCanonicalRole(record['canonicalRole']),
+            model: normalizeOptionalText(record['model']),
+            variant: normalizeOptionalText(record['variant']),
+            fallbackModels: normalizeModelList(record['fallbackModels']),
             systemPrompt: normalizeOptionalText(record['systemPrompt']),
             note: normalizeOptionalText(record['note']),
             enabled: typeof record['enabled'] === 'boolean' ? record['enabled'] : undefined,
@@ -283,6 +304,9 @@ function isEmptyBuiltinOverride(override: StoredBuiltinOverride): boolean {
     !override.description &&
     !override.aliases?.length &&
     !override.canonicalRole &&
+    !override.model &&
+    !override.variant &&
+    !override.fallbackModels?.length &&
     !override.systemPrompt &&
     !override.note &&
     override.enabled === undefined
@@ -325,11 +349,15 @@ function defaultBodyForBuiltin(id: string): ManagedAgentBody {
   const metadata = REFERENCE_AGENT_ROLE_METADATA[id];
   const reference = BUILTIN_AGENT_REFERENCE_SNAPSHOT[id];
   const hasReference = Object.prototype.hasOwnProperty.call(BUILTIN_AGENT_REFERENCE_SNAPSHOT, id);
+  const modelCandidates = getReferenceAgentModelCandidates(id);
   return {
     label: reference?.label ?? builtin.label,
     description: reference?.description ?? builtin.description,
     aliases: metadata?.aliases ?? [],
     canonicalRole: metadata?.canonicalRole,
+    model: modelCandidates[0],
+    variant: undefined,
+    fallbackModels: modelCandidates.slice(1),
     systemPrompt: hasReference ? reference?.systemPrompt : BUILTIN_AGENT_FALLBACK_PROMPTS[id],
     note: undefined,
   };
@@ -347,6 +375,9 @@ function buildBuiltinAgentRecord(id: string, override?: StoredBuiltinOverride): 
     description: override?.description ?? defaultBody.description,
     aliases: override?.aliases ?? defaultBody.aliases,
     canonicalRole: override?.canonicalRole ?? defaultBody.canonicalRole,
+    model: override?.model ?? defaultBody.model,
+    variant: override?.variant ?? defaultBody.variant,
+    fallbackModels: override?.fallbackModels ?? defaultBody.fallbackModels,
     systemPrompt: override?.systemPrompt ?? defaultBody.systemPrompt,
     note: override?.note ?? defaultBody.note,
   });
@@ -496,6 +527,12 @@ export function updateManagedAgentForUser(
         : current.description,
     aliases: input.aliases !== undefined ? normalizeAliases(input.aliases) : current.aliases,
     canonicalRole: input.canonicalRole !== undefined ? input.canonicalRole : current.canonicalRole,
+    model: input.model !== undefined ? normalizeOptionalText(input.model) : current.model,
+    variant: input.variant !== undefined ? normalizeOptionalText(input.variant) : current.variant,
+    fallbackModels:
+      input.fallbackModels !== undefined
+        ? normalizeModelList(input.fallbackModels)
+        : current.fallbackModels,
     systemPrompt:
       input.systemPrompt !== undefined
         ? normalizeOptionalText(input.systemPrompt)
@@ -513,6 +550,10 @@ export function updateManagedAgentForUser(
       JSON.stringify(builtinDefault.aliases) &&
     JSON.stringify(next.canonicalRole ?? builtinDefault.canonicalRole) ===
       JSON.stringify(builtinDefault.canonicalRole) &&
+    (next.model ?? builtinDefault.model) === builtinDefault.model &&
+    (next.variant ?? builtinDefault.variant) === builtinDefault.variant &&
+    JSON.stringify(next.fallbackModels ?? builtinDefault.fallbackModels) ===
+      JSON.stringify(builtinDefault.fallbackModels) &&
     (next.systemPrompt ?? builtinDefault.systemPrompt) === builtinDefault.systemPrompt &&
     (next.note ?? builtinDefault.note) === builtinDefault.note &&
     (next.enabled ?? true) === true;

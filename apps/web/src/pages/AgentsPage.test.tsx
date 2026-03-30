@@ -33,6 +33,9 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
             description: '只读顾问 agent',
             aliases: ['architect', 'debugger'],
             canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+            model: 'gpt-5.4',
+            variant: 'high',
+            fallbackModels: ['claude-opus-4-6', 'kimi-k2.5'],
             note: '优先用于方案评审',
             systemPrompt: 'Review architecture carefully',
           },
@@ -50,6 +53,7 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
             description: '自定义评审 agent',
             aliases: ['review-bot'],
             canonicalRole: { coreRole: 'reviewer', preset: 'critic', confidence: 'medium' },
+            model: 'claude-sonnet-4-6',
             note: '已禁用',
           },
         ],
@@ -77,6 +81,9 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
           description: body['description'] ?? '',
           aliases: body['aliases'] ?? [],
           canonicalRole: body['canonicalRole'],
+          model: body['model'],
+          variant: body['variant'],
+          fallbackModels: body['fallbackModels'] ?? [],
           systemPrompt: body['systemPrompt'],
           note: body['note'],
         },
@@ -108,6 +115,9 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
             preset: 'architect',
             confidence: 'medium',
           },
+          model: body['model'] ?? 'gpt-5.4',
+          variant: body['variant'] ?? 'high',
+          fallbackModels: body['fallbackModels'] ?? ['claude-opus-4-6', 'kimi-k2.5'],
           systemPrompt: body['systemPrompt'] ?? 'Review architecture carefully',
           note: body['note'] ?? '优先用于方案评审',
         },
@@ -139,6 +149,9 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
           description: '只读顾问 agent',
           aliases: ['architect', 'debugger', 'code-reviewer', 'init-architect'],
           canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+          model: 'gpt-5.4',
+          variant: 'high',
+          fallbackModels: ['claude-opus-4-6', 'kimi-k2.5'],
         },
       }),
     } as Response;
@@ -229,6 +242,7 @@ describe('AgentsPage', () => {
     expect(rendered.textContent).toContain('Agent 管理');
     expect(rendered.textContent).toContain('架构顾问');
     expect(rendered.textContent).toContain('规划 / 架构');
+    expect(rendered.textContent).toContain('默认模型 gpt-5.4');
 
     const nameInput = rendered.querySelector(
       'input[placeholder="例如：架构顾问"]',
@@ -239,6 +253,28 @@ describe('AgentsPage', () => {
       descriptor?.set?.call(nameInput, '首席架构顾问');
       nameInput!.dispatchEvent(new Event('input', { bubbles: true }));
       nameInput!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const modelInput = rendered.querySelector(
+      'input[placeholder="例如：openai/gpt-5.4 或 gpt-5.4"]',
+    ) as HTMLInputElement | null;
+    expect(modelInput).not.toBeNull();
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      descriptor?.set?.call(modelInput, 'openai/gpt-5.4-mini');
+      modelInput!.dispatchEvent(new Event('input', { bubbles: true }));
+      modelInput!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const fallbackInput = rendered.querySelector(
+      'textarea[placeholder="例如：claude-opus-4-6, gpt-5.4, kimi-k2.5"]',
+    ) as HTMLTextAreaElement | null;
+    expect(fallbackInput).not.toBeNull();
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(fallbackInput, 'claude-opus-4-6, kimi-k2.5');
+      fallbackInput!.dispatchEvent(new Event('input', { bubbles: true }));
+      fallbackInput!.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
     const saveButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
@@ -252,6 +288,16 @@ describe('AgentsPage', () => {
 
     expect(
       requestLog.some((entry) => entry.method === 'PUT' && entry.path === '/agents/oracle'),
+    ).toBe(true);
+    expect(
+      requestLog.some(
+        (entry) =>
+          entry.method === 'PUT' &&
+          entry.path === '/agents/oracle' &&
+          entry.body?.['model'] === 'openai/gpt-5.4-mini' &&
+          JSON.stringify(entry.body?.['fallbackModels']) ===
+            JSON.stringify(['claude-opus-4-6', 'kimi-k2.5']),
+      ),
     ).toBe(true);
     expect(rendered.textContent).toContain('首席架构顾问');
 

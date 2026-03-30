@@ -68,12 +68,42 @@ export interface MCPToolResult {
   isError?: boolean;
 }
 
+export interface MCPResourceDef {
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface MCPResourceReadResult {
+  contents: unknown[];
+}
+
+export interface MCPPromptDef {
+  name: string;
+  description?: string;
+  arguments?: Array<{ name: string; description?: string; required?: boolean }>;
+}
+
+export interface MCPPromptResult {
+  messages: unknown[];
+  description?: string;
+}
+
 export type MCPConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 
 export interface MCPClientAdapter {
   connect(server: MCPServerRef): Promise<void>;
   disconnect(serverId: string): Promise<void>;
   listTools(serverId: string): Promise<MCPToolDef[]>;
+  listResources(serverId: string): Promise<MCPResourceDef[]>;
+  readResource(serverId: string, uri: string): Promise<MCPResourceReadResult>;
+  listPrompts(serverId: string): Promise<MCPPromptDef[]>;
+  getPrompt(
+    serverId: string,
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<MCPPromptResult>;
   callTool(
     serverId: string,
     toolName: string,
