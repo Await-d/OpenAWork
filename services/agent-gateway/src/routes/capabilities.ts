@@ -8,6 +8,11 @@ import { buildCommandDescriptors } from './command-descriptors.js';
 import { buildGatewayToolDefinitions } from '../tool-definitions.js';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listEnabledAgentCapabilitiesForUser } from '../agent-catalog.js';
+import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+
+interface SessionMetadataRow {
+  metadata_json: string;
+}
 
 const BUILTIN_MCPS: CapabilityDescriptor[] = [
   {
@@ -81,7 +86,10 @@ const REFERENCE_SKILLS: CapabilityDescriptor[] = [
   },
 ];
 
-export function listCapabilitiesForUser(userId: string): CapabilityDescriptor[] {
+export function listCapabilitiesForUser(
+  userId: string,
+  sessionId?: string,
+): CapabilityDescriptor[] {
   const installedRow = sqliteGet<{ value: string }>(
     `SELECT json_group_array(manifest_json) AS value FROM installed_skills WHERE user_id = ? AND enabled = 1`,
     [userId],
@@ -149,7 +157,20 @@ export function listCapabilitiesForUser(userId: string): CapabilityDescriptor[] 
     }
   })();
 
-  const tools = buildGatewayToolDefinitions().map<CapabilityDescriptor>((tool) => ({
+  const sessionMetadataRow = sessionId
+    ? sqliteGet<SessionMetadataRow>(
+        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, userId],
+      )
+    : undefined;
+  const visibleTools = sessionMetadataRow?.metadata_json
+    ? filterEnabledGatewayToolsForSession(
+        buildGatewayToolDefinitions(),
+        sessionMetadataRow.metadata_json,
+      )
+    : buildGatewayToolDefinitions();
+
+  const tools = visibleTools.map<CapabilityDescriptor>((tool) => ({
     id: tool.function.name,
     kind: 'tool',
     label: tool.function.name,
@@ -216,7 +237,8 @@ export async function capabilitiesRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'capabilities.list');
       const user = request.user as { sub: string };
-      const capabilities = listCapabilitiesForUser(user.sub);
+      const query = (request.query ?? {}) as { sessionId?: string };
+      const capabilities = listCapabilitiesForUser(user.sub, query.sessionId);
 
       step.succeed(undefined, { count: capabilities.length });
       return reply.send({ capabilities });

@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sqliteGetMock = vi.fn();
@@ -17,6 +18,9 @@ vi.mock('@openAwork/shared', () => ({
 
 vi.mock('../db.js', () => ({
   sqliteGet: sqliteGetMock,
+  WORKSPACE_ACCESS_RESTRICTED: true,
+  WORKSPACE_ROOT: tmpdir(),
+  WORKSPACE_ROOTS: [tmpdir()],
 }));
 
 vi.mock('../auth.js', () => ({
@@ -318,6 +322,35 @@ describe('listCapabilitiesForUser', () => {
         confidence: 'high',
       },
     });
+  });
+
+  it('filters session-disabled tools when a sessionId is provided', async () => {
+    sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('installed_skills')) {
+        return { value: '[]' };
+      }
+
+      if (query.includes("key = 'mcp_servers'")) {
+        return { value: '[]' };
+      }
+
+      if (query.includes('FROM sessions WHERE id = ? AND user_id = ? LIMIT 1')) {
+        return {
+          metadata_json: JSON.stringify({ createdByTool: 'task', parentSessionId: 'parent-1' }),
+        };
+      }
+
+      return undefined;
+    });
+
+    const { listCapabilitiesForUser } = await import('../routes/capabilities.js');
+    const capabilities = listCapabilitiesForUser('user-1', 'child-session-1');
+
+    expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'task')).toBe(false);
+    expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'question')).toBe(
+      false,
+    );
+    expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'read')).toBe(true);
   });
 
   it('includes enabled custom agents and omits disabled builtin agents', async () => {

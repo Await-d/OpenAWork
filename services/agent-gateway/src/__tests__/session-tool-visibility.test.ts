@@ -99,6 +99,7 @@ describe('session tool visibility', () => {
       createToolDefinition('question'),
       createToolDefinition('read'),
       createToolDefinition('edit'),
+      createToolDefinition('workspace_review_diff'),
       createToolDefinition('mcp_call'),
     ];
     const metadata = {
@@ -127,12 +128,20 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('websearch', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('webfetch', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('read', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('workspace_review_diff', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('mcp_call', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('edit', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
     expect(isTaskToolEnabledForSessionMetadata(metadata)).toBe(true);
     expect(isQuestionToolEnabledForSessionMetadata(metadata)).toBe(false);
-    expect(visibleToolNames).toEqual(['websearch', 'webfetch', 'task', 'read', 'mcp_call']);
+    expect(visibleToolNames).toEqual([
+      'websearch',
+      'webfetch',
+      'task',
+      'read',
+      'workspace_review_diff',
+      'mcp_call',
+    ]);
   });
 
   it('marks enabled channel tools as auto-approved runtime actions', () => {

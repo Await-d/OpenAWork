@@ -126,5 +126,9 @@ function isNotGitRepositoryError(error: unknown): boolean {
     parts.push(error.stderr);
   }
 
-  return code === '128' && parts.some((part) => part.includes('not a git repository'));
+  const normalizedParts = parts.map((part) => part.toLowerCase());
+  return (
+    (code === '128' || code === '129') &&
+    normalizedParts.some((part) => part.includes('not a git repository'))
+  );
 }

@@ -65,9 +65,10 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'workspace_write_file':
     case 'workspace_create_file':
     case 'workspace_create_directory':
-    case 'workspace_review_diff':
     case 'workspace_review_revert':
       return 'edit';
+    case 'workspace_review_diff':
+      return 'read';
     case 'bash':
       return 'bash';
     case 'mcp_list_tools':
