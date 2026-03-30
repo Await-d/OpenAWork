@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { extractNamedTemplate, readReferenceFile } from './agent-reference-parser.js';
+import { resolveReferencePath } from './reference-paths.js';
 
-const ROOT = '/home/await/project/OpenAWork/temp/oh-my-openagent/src/tools/delegate-task';
+const ROOT = resolveReferencePath('temp', 'oh-my-openagent', 'src', 'tools', 'delegate-task');
 const CONSTANTS = readReferenceFile(path.join(ROOT, 'constants.ts'));
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {

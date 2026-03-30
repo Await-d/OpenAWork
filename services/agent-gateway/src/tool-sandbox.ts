@@ -45,6 +45,22 @@ import {
   backgroundCancelToolDefinition,
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
+import { selectDelegatedModelForUser } from './task-model-selection.js';
+import {
+  runSessionInfoTool,
+  runSessionListTool,
+  runSessionReadTool,
+  runSessionSearchTool,
+  sessionInfoToolDefinition,
+  sessionListToolDefinition,
+  sessionReadToolDefinition,
+  sessionSearchToolDefinition,
+} from './session-manager-tools.js';
+import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
+import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
+import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
+import { runSkillMcpTool, skillMcpToolDefinition } from './skill-mcp-tools.js';
+import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
 import {
   formatSubTodoReadValidationError,
   formatSubTodoWriteValidationError,
@@ -112,8 +128,10 @@ const FILE_TOOLS = new Set([
 const PERMISSION_GATED_TOOLS = new Set([
   'apply_patch',
   'bash',
+  'interactive_bash',
   'edit',
   'skill',
+  'skill_mcp',
   'mcp_list_tools',
   'write',
   'workspace_write_file',
@@ -132,6 +150,16 @@ const TOOL_WHITELIST = new Set<string>([
   'question',
   'background_output',
   'background_cancel',
+  sessionListToolDefinition.name,
+  sessionReadToolDefinition.name,
+  sessionSearchToolDefinition.name,
+  sessionInfoToolDefinition.name,
+  astGrepSearchToolDefinition.name,
+  astGrepReplaceToolDefinition.name,
+  interactiveBashToolDefinition.name,
+  callOmoAgentToolDefinition.name,
+  skillMcpToolDefinition.name,
+  lookAtToolDefinition.name,
   'read_tool_output',
   'edit',
   'batch',
@@ -523,6 +551,11 @@ function buildTaskTags(input: {
 function buildDelegatedChildRequestData(input: {
   childSessionId: string;
   executionContext?: SandboxExecutionContext;
+  modelSelection?: {
+    modelId: string;
+    providerId?: string;
+    variant?: string;
+  };
   prompt: string;
   systemPrompt?: string;
 }): Record<string, unknown> | null {
@@ -538,6 +571,9 @@ function buildDelegatedChildRequestData(input: {
     clientRequestId: `task:${input.executionContext.clientRequestId ?? 'child'}:child:${input.childSessionId}`,
     displayMessage: input.prompt,
     message: input.prompt,
+    ...(input.modelSelection?.modelId ? { model: input.modelSelection.modelId } : {}),
+    ...(input.modelSelection?.providerId ? { providerId: input.modelSelection.providerId } : {}),
+    ...(input.modelSelection?.variant ? { variant: input.modelSelection.variant } : {}),
     ...(input.systemPrompt
       ? { systemPrompt: input.systemPrompt }
       : input.executionContext.requestData['systemPrompt'] !== undefined
@@ -788,6 +824,24 @@ function buildPermissionRequestContext(
         previewAction: `加载技能 ${name}`,
       };
     }
+    case 'skill_mcp': {
+      const mcpName = typeof rawInput['mcp_name'] === 'string' ? rawInput['mcp_name'].trim() : '';
+      const operation =
+        typeof rawInput['tool_name'] === 'string'
+          ? rawInput['tool_name'].trim()
+          : typeof rawInput['resource_name'] === 'string'
+            ? rawInput['resource_name'].trim()
+            : typeof rawInput['prompt_name'] === 'string'
+              ? rawInput['prompt_name'].trim()
+              : '';
+      if (!mcpName || !operation) return null;
+      return {
+        scope: `skill_mcp:${mcpName}:${operation}`,
+        reason: '需要调用技能内嵌的 MCP 能力',
+        riskLevel: 'high',
+        previewAction: `调用 skill MCP ${mcpName}/${operation}`,
+      };
+    }
     case 'bash': {
       const command = typeof rawInput['command'] === 'string' ? rawInput['command'].trim() : '';
       const workdirValue =
@@ -799,6 +853,17 @@ function buildPermissionRequestContext(
         reason: '需要执行工作区命令',
         riskLevel: 'high',
         previewAction: `执行命令: ${command}`,
+      };
+    }
+    case 'interactive_bash': {
+      const tmuxCommand =
+        typeof rawInput['tmux_command'] === 'string' ? rawInput['tmux_command'].trim() : '';
+      if (!tmuxCommand) return null;
+      return {
+        scope: `interactive_bash:${tmuxCommand}`,
+        reason: '需要执行 tmux 交互式命令',
+        riskLevel: 'high',
+        previewAction: `执行 tmux 命令: ${tmuxCommand}`,
       };
     }
     case 'apply_patch': {
@@ -1003,6 +1068,313 @@ async function executeGatewayManagedTool(
         output,
         isError: false,
         durationMs: 0,
+      };
+    }
+
+    if (request.toolName === sessionListToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = sessionListToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: runSessionListTool(userId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === sessionReadToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = sessionReadToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: runSessionReadTool(userId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === sessionSearchToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = sessionSearchToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: runSessionSearchTool(userId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === sessionInfoToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = sessionInfoToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: runSessionInfoTool(userId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === skillMcpToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = skillMcpToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runSkillMcpTool(userId, parsed.data),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === lookAtToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = lookAtToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runLookAtTool({
+            filePath: parsed.data.file_path,
+            goal: parsed.data.goal,
+            imageData: parsed.data.image_data,
+            parentSessionId: sessionId,
+            userId,
+          }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === callOmoAgentToolDefinition.name) {
+      const parsed = callOmoAgentToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const normalizedAgent = parsed.data.subagent_type.trim().toLowerCase();
+      if (
+        !CALL_OMO_ALLOWED_AGENTS.includes(
+          normalizedAgent as (typeof CALL_OMO_ALLOWED_AGENTS)[number],
+        )
+      ) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: Invalid agent type "${parsed.data.subagent_type}". Only ${CALL_OMO_ALLOWED_AGENTS.join(', ')} are allowed.`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      if (parsed.data.run_in_background && parsed.data.session_id) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output:
+            'Error: session_id is not supported in background mode. Use run_in_background=false to continue an existing session.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const delegatedRequest: ToolCallRequest = {
+        ...request,
+        toolName: taskToolDefinition.name,
+        rawInput: {
+          description: parsed.data.description,
+          prompt: parsed.data.prompt,
+          subagent_type: normalizedAgent,
+          load_skills: [],
+          run_in_background: parsed.data.run_in_background,
+          ...(parsed.data.session_id ? { session_id: parsed.data.session_id } : {}),
+        },
+      };
+      const taskResult = await executeGatewayManagedTool(
+        sandbox,
+        sessionId,
+        delegatedRequest,
+        signal,
+        executionContext,
+      );
+      if (!taskResult) {
+        return null;
+      }
+      if (
+        taskResult.output &&
+        typeof taskResult.output === 'object' &&
+        !Array.isArray(taskResult.output) &&
+        'sessionId' in taskResult.output &&
+        'taskId' in taskResult.output
+      ) {
+        const taskOutput = taskResult.output as {
+          sessionId: string;
+          taskId: string;
+          status?: string;
+          result?: string;
+        };
+        const output = parsed.data.run_in_background
+          ? [
+              `Background task started for ${normalizedAgent}.`,
+              `Task ID: ${taskOutput.taskId}`,
+              `Session ID: ${taskOutput.sessionId}`,
+              `Use background_output with task_id="${taskOutput.taskId}" to retrieve results.`,
+            ].join('\n')
+          : [
+              taskOutput.result ?? `Completed ${normalizedAgent} session ${taskOutput.sessionId}.`,
+              '',
+              '<task_metadata>',
+              `session_id: ${taskOutput.sessionId}`,
+              '</task_metadata>',
+            ].join('\n');
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output,
+          isError: taskResult.isError,
+          durationMs: taskResult.durationMs,
+        };
+      }
+      return {
+        ...taskResult,
+        toolName: request.toolName,
       };
     }
 
@@ -1346,6 +1718,16 @@ async function executeGatewayManagedTool(
       const taskManager = new AgentTaskManagerImpl();
       const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
       const resolvedAgent = resolveDelegatedAgent(userId, parsed.data);
+      const selectedDelegatedModel = selectDelegatedModelForUser(
+        userId,
+        resolvedAgent.modelEntries,
+      );
+      const delegatedModel = selectedDelegatedModel
+        ? {
+            ...selectedDelegatedModel,
+            ...(resolvedAgent.modelVariant ? { variant: resolvedAgent.modelVariant } : {}),
+          }
+        : undefined;
       const requestedSkills = resolvedAgent.requestedSkills;
       const category = parsed.data.category?.trim();
       const taskTags = buildTaskTags({
@@ -1370,6 +1752,7 @@ async function executeGatewayManagedTool(
       const childRequestData = buildDelegatedChildRequestData({
         childSessionId,
         executionContext,
+        modelSelection: delegatedModel,
         prompt: parsed.data.prompt,
         systemPrompt: resolvedAgent.systemPrompt,
       });
@@ -1397,8 +1780,18 @@ async function executeGatewayManagedTool(
         createdByTool: 'task',
         delegatedPromptVersion: 'v2',
         delegatedSystemPrompt: resolvedAgent.systemPrompt,
+        delegatedModelCandidates: resolvedAgent.modelCandidates,
         requestedSkills,
       };
+      if (delegatedModel?.modelId) {
+        childSessionMetadata['modelId'] = delegatedModel.modelId;
+      }
+      if (delegatedModel?.providerId) {
+        childSessionMetadata['providerId'] = delegatedModel.providerId;
+      }
+      if (delegatedModel?.variant) {
+        childSessionMetadata['variant'] = delegatedModel.variant;
+      }
       if (parentToolReference) {
         childSessionMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY] = parentToolReference.clientRequestId;
         childSessionMetadata[TASK_PARENT_TOOL_CALL_ID_KEY] = parentToolReference.toolCallId;
@@ -2847,6 +3240,14 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
   );
   sandbox.register<typeof grepTool.inputSchema, typeof grepTool.outputSchema>(grepTool);
   sandbox.register<
+    typeof astGrepSearchToolDefinition.inputSchema,
+    typeof astGrepSearchToolDefinition.outputSchema
+  >(astGrepSearchToolDefinition);
+  sandbox.register<
+    typeof astGrepReplaceToolDefinition.inputSchema,
+    typeof astGrepReplaceToolDefinition.outputSchema
+  >(astGrepReplaceToolDefinition);
+  sandbox.register<
     typeof workspaceReviewStatusTool.inputSchema,
     typeof workspaceReviewStatusTool.outputSchema
   >(workspaceReviewStatusTool);
@@ -2871,5 +3272,9 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
     typeof workspaceReviewRevertTool.inputSchema,
     typeof workspaceReviewRevertTool.outputSchema
   >(workspaceReviewRevertTool);
+  sandbox.register<
+    typeof interactiveBashToolDefinition.inputSchema,
+    typeof interactiveBashToolDefinition.outputSchema
+  >(interactiveBashToolDefinition);
   return sandbox;
 }

@@ -39,6 +39,7 @@ import {
   parseUpstreamFrame,
   ResponsesUpstreamEventError,
 } from './stream-protocol.js';
+import { isEnabledToolName } from './tool-name-compat.js';
 import { resolveEofRoundDecision } from './stream-completion.js';
 import { readUpstreamError } from './upstream-error.js';
 import { buildUpstreamRequestBody } from './upstream-request.js';
@@ -170,6 +171,7 @@ interface SessionUserRow {
 interface SessionProviderSelection {
   modelId?: string;
   providerId?: string;
+  variant?: string;
   systemPrompt?: string;
 }
 
@@ -302,7 +304,7 @@ function buildAssistantContent(
 
 function getEnabledTools(webSearchEnabled: boolean) {
   return buildGatewayToolDefinitions().filter((tool) => {
-    if (tool.function.name !== 'web_search') return true;
+    if (tool.function.name !== 'websearch') return true;
     return webSearchEnabled;
   });
 }
@@ -538,6 +540,12 @@ function parseSessionProviderSelection(metadataJson: string): SessionProviderSel
           : typeof channelRecord?.['model'] === 'string'
             ? channelRecord['model']
             : undefined,
+      variant:
+        typeof parsed['variant'] === 'string'
+          ? parsed['variant']
+          : typeof channelRecord?.['variant'] === 'string'
+            ? channelRecord['variant']
+            : undefined,
       systemPrompt:
         typeof parsed['delegatedSystemPrompt'] === 'string'
           ? parsed['delegatedSystemPrompt']
@@ -575,6 +583,7 @@ async function resolveStreamModelRoute(input: {
   const sessionSelection = parseSessionProviderSelection(input.metadataJson);
   const resolvedRequestData: StreamRequest = {
     ...input.requestData,
+    variant: input.requestData.variant ?? sessionSelection.variant,
     systemPrompt: input.requestData.systemPrompt ?? sessionSelection.systemPrompt,
   };
   const providerConfig = await getProviderConfigForSelection(
@@ -652,7 +661,7 @@ async function executeToolCalls(input: {
           isError: true,
           durationMs: 0,
         }
-      : input.enabledToolNames.has(toolCall.toolName)
+      : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
         ? await sandbox.execute(request, input.signal, input.sessionId, input.executionContext)
         : {
             toolCallId,
@@ -756,6 +765,7 @@ async function runModelRound(input: {
   const upstreamBody = buildUpstreamRequestBody({
     protocol: input.route.upstreamProtocol,
     model: input.route.model,
+    variant: input.route.variant,
     maxTokens: input.route.maxTokens,
     temperature: input.route.temperature,
     messages: upstreamMessages,
@@ -1743,104 +1753,106 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       connectionLogger.succeed(connectionStep, undefined, { sessionId });
       connectionLogger.flush(connectionContext, 101);
 
-      socket.on('message', async (raw: Buffer | string) => {
-        const requestRunId = randomUUID();
-        const wl = new WorkflowLogger();
-        const ctx = createRequestContext(
-          'WS',
-          `/sessions/${sessionId}/stream`,
-          request.headers as Record<string, string | string[] | undefined>,
-          request.ip,
-        );
-
-        const text = raw.toString();
-        let parsed: unknown;
-        const stepRoute = wl.start('stream.message.handle', undefined, { sessionId });
-        const stepParse = wl.startChild(stepRoute, 'stream.parse');
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          wl.fail(stepParse, 'invalid JSON');
-          wl.fail(stepRoute, 'invalid JSON');
-          wl.flush(ctx, 400);
-          socket.send(
-            JSON.stringify(createStreamErrorChunk('INVALID_JSON', 'Invalid JSON', requestRunId)),
+      socket.on('message', (raw: Buffer | string) => {
+        void (async () => {
+          const requestRunId = randomUUID();
+          const wl = new WorkflowLogger();
+          const ctx = createRequestContext(
+            'WS',
+            `/sessions/${sessionId}/stream`,
+            request.headers as Record<string, string | string[] | undefined>,
+            request.ip,
           );
-          return;
-        }
 
-        const body = streamRequestSchema.safeParse(parsed);
-        if (!body.success) {
-          wl.fail(stepParse, 'invalid request schema');
-          wl.fail(stepRoute, 'invalid request schema');
-          wl.flush(ctx, 400);
-          socket.send(
-            JSON.stringify({
-              ...createStreamErrorChunk('INVALID_REQUEST', 'Invalid request', requestRunId),
-              issues: body.error.issues,
-            }),
-          );
-          return;
-        }
-        wl.succeed(stepParse);
-
-        const stepSession = wl.startChild(stepRoute, 'stream.session-check', undefined, {
-          sessionId,
-        });
-
-        const sessionContext = loadSessionContext(sessionId, user.sub);
-        if (!sessionContext) {
-          wl.fail(stepSession, 'session not found');
-          wl.fail(stepRoute, 'session not found');
-          wl.flush(ctx, 404);
-          socket.send(
-            JSON.stringify({
-              type: 'error',
-              code: 'SESSION_NOT_FOUND',
-              message: 'Session not found',
-            }),
-          );
-          return;
-        }
-        wl.succeed(stepSession);
-
-        try {
-          const streamResult = await handleStreamRequest({
-            method: 'WS',
-            path: `/sessions/${sessionId}/stream`,
-            headers: request.headers as Record<string, string | string[] | undefined>,
-            ip: request.ip,
-            requestData: body.data,
-            sessionContext,
-            sessionId,
-            transport: 'WS',
-            user,
-            writeChunk: (chunk) => {
-              socket.send(JSON.stringify(chunk));
-            },
-          });
-          if (streamResult.statusCode >= 400) {
-            wl.fail(stepRoute, 'stream request completed with error status', {
-              sessionId,
-              clientRequestId: body.data.clientRequestId,
-              statusCode: streamResult.statusCode,
-            });
-            wl.flush(ctx, streamResult.statusCode);
-          } else {
-            wl.succeed(stepRoute, undefined, {
-              sessionId,
-              clientRequestId: body.data.clientRequestId,
-            });
-            wl.flush(ctx, streamResult.statusCode);
+          const text = raw.toString();
+          let parsed: unknown;
+          const stepRoute = wl.start('stream.message.handle', undefined, { sessionId });
+          const stepParse = wl.startChild(stepRoute, 'stream.parse');
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            wl.fail(stepParse, 'invalid JSON');
+            wl.fail(stepRoute, 'invalid JSON');
+            wl.flush(ctx, 400);
+            socket.send(
+              JSON.stringify(createStreamErrorChunk('INVALID_JSON', 'Invalid JSON', requestRunId)),
+            );
+            return;
           }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          wl.fail(stepRoute, message, {
+
+          const body = streamRequestSchema.safeParse(parsed);
+          if (!body.success) {
+            wl.fail(stepParse, 'invalid request schema');
+            wl.fail(stepRoute, 'invalid request schema');
+            wl.flush(ctx, 400);
+            socket.send(
+              JSON.stringify({
+                ...createStreamErrorChunk('INVALID_REQUEST', 'Invalid request', requestRunId),
+                issues: body.error.issues,
+              }),
+            );
+            return;
+          }
+          wl.succeed(stepParse);
+
+          const stepSession = wl.startChild(stepRoute, 'stream.session-check', undefined, {
             sessionId,
-            clientRequestId: body.data.clientRequestId,
           });
-          wl.flush(ctx, 500);
-        }
+
+          const sessionContext = loadSessionContext(sessionId, user.sub);
+          if (!sessionContext) {
+            wl.fail(stepSession, 'session not found');
+            wl.fail(stepRoute, 'session not found');
+            wl.flush(ctx, 404);
+            socket.send(
+              JSON.stringify({
+                type: 'error',
+                code: 'SESSION_NOT_FOUND',
+                message: 'Session not found',
+              }),
+            );
+            return;
+          }
+          wl.succeed(stepSession);
+
+          try {
+            const streamResult = await handleStreamRequest({
+              method: 'WS',
+              path: `/sessions/${sessionId}/stream`,
+              headers: request.headers as Record<string, string | string[] | undefined>,
+              ip: request.ip,
+              requestData: body.data,
+              sessionContext,
+              sessionId,
+              transport: 'WS',
+              user,
+              writeChunk: (chunk) => {
+                socket.send(JSON.stringify(chunk));
+              },
+            });
+            if (streamResult.statusCode >= 400) {
+              wl.fail(stepRoute, 'stream request completed with error status', {
+                sessionId,
+                clientRequestId: body.data.clientRequestId,
+                statusCode: streamResult.statusCode,
+              });
+              wl.flush(ctx, streamResult.statusCode);
+            } else {
+              wl.succeed(stepRoute, undefined, {
+                sessionId,
+                clientRequestId: body.data.clientRequestId,
+              });
+              wl.flush(ctx, streamResult.statusCode);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            wl.fail(stepRoute, message, {
+              sessionId,
+              clientRequestId: body.data.clientRequestId,
+            });
+            wl.flush(ctx, 500);
+          }
+        })();
       });
     },
   );

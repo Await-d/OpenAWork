@@ -12,6 +12,8 @@ vi.mock('../agent-catalog.js', () => ({
         label: 'explore',
         aliases: [],
         enabled: true,
+        model: 'xai/grok-code-fast-1',
+        fallbackModels: ['opencode/gpt-5-nano'],
         systemPrompt: 'Inspect the repository before changing code.',
       },
       {
@@ -42,6 +44,8 @@ describe('task agent resolution', () => {
     expect(resolved.systemPrompt).toContain('Requested skills:');
     expect(resolved.systemPrompt).toContain('frontend-design, webapp-testing');
     expect(resolved.systemPrompt).toContain('Completion requirements:');
+    expect(resolved.modelCandidates).toContain('grok-code-fast-1');
+    expect(resolved.modelCandidates).toContain('gpt-5-nano');
   });
 
   it('adds category execution guidance to category-routed agents', () => {
@@ -60,5 +64,6 @@ describe('task agent resolution', () => {
     expect(resolved.systemPrompt).toContain('Goal-oriented autonomous problem-solving');
     expect(resolved.systemPrompt).toContain('Category prompt append (reference-aligned):');
     expect(resolved.systemPrompt).toContain('AUTONOMOUS EXECUTION MINDSET');
+    expect(resolved.modelCandidates[0]).toBe('gpt-5.3-codex');
   });
 });

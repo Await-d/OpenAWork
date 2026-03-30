@@ -30,6 +30,17 @@ import {
   backgroundCancelToolDefinition,
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
+import {
+  sessionInfoToolDefinition,
+  sessionListToolDefinition,
+  sessionReadToolDefinition,
+  sessionSearchToolDefinition,
+} from './session-manager-tools.js';
+import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
+import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
+import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
+import { skillMcpToolDefinition } from './skill-mcp-tools.js';
+import { lookAtToolDefinition } from './look-at-tools.js';
 
 type GatewayToolLike = {
   name: string;
@@ -84,6 +95,16 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   taskToolDefinition,
   backgroundOutputToolDefinition,
   backgroundCancelToolDefinition,
+  sessionListToolDefinition,
+  sessionReadToolDefinition,
+  sessionSearchToolDefinition,
+  sessionInfoToolDefinition,
+  astGrepSearchToolDefinition,
+  astGrepReplaceToolDefinition,
+  interactiveBashToolDefinition,
+  callOmoAgentToolDefinition,
+  skillMcpToolDefinition,
+  lookAtToolDefinition,
   workspaceReviewStatusTool,
   workspaceReviewDiffTool,
   writeTool,
@@ -513,6 +534,127 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: [],
+        additionalProperties: false,
+      };
+    case 'session_list':
+      return {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', minimum: 1, maximum: 100 },
+          from_date: { type: 'string' },
+          to_date: { type: 'string' },
+          project_path: { type: 'string' },
+        },
+        required: [],
+        additionalProperties: false,
+      };
+    case 'session_read':
+      return {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string' },
+          include_todos: { type: 'boolean' },
+          include_transcript: { type: 'boolean' },
+          limit: { type: 'integer', minimum: 1, maximum: 500 },
+        },
+        required: ['session_id'],
+        additionalProperties: false,
+      };
+    case 'session_search':
+      return {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          session_id: { type: 'string' },
+          case_sensitive: { type: 'boolean' },
+          limit: { type: 'integer', minimum: 1, maximum: 100 },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      };
+    case 'session_info':
+      return {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string' },
+        },
+        required: ['session_id'],
+        additionalProperties: false,
+      };
+    case 'ast_grep_search':
+      return {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string' },
+          lang: { type: 'string' },
+          paths: { type: 'array', items: { type: 'string' } },
+          globs: { type: 'array', items: { type: 'string' } },
+          context: { type: 'integer', minimum: 0, maximum: 20 },
+        },
+        required: ['pattern', 'lang'],
+        additionalProperties: false,
+      };
+    case 'ast_grep_replace':
+      return {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string' },
+          rewrite: { type: 'string' },
+          lang: { type: 'string' },
+          paths: { type: 'array', items: { type: 'string' } },
+          globs: { type: 'array', items: { type: 'string' } },
+          dryRun: { type: 'boolean' },
+        },
+        required: ['pattern', 'rewrite', 'lang'],
+        additionalProperties: false,
+      };
+    case 'interactive_bash':
+      return {
+        type: 'object',
+        properties: {
+          tmux_command: { type: 'string' },
+        },
+        required: ['tmux_command'],
+        additionalProperties: false,
+      };
+    case 'call_omo_agent':
+      return {
+        type: 'object',
+        properties: {
+          description: { type: 'string' },
+          prompt: { type: 'string' },
+          subagent_type: { type: 'string' },
+          run_in_background: { type: 'boolean' },
+          session_id: { type: 'string' },
+        },
+        required: ['description', 'prompt', 'subagent_type', 'run_in_background'],
+        additionalProperties: false,
+      };
+    case 'skill_mcp':
+      return {
+        type: 'object',
+        properties: {
+          mcp_name: { type: 'string' },
+          tool_name: { type: 'string' },
+          resource_name: { type: 'string' },
+          prompt_name: { type: 'string' },
+          arguments: {
+            anyOf: [{ type: 'string' }, { type: 'object' }],
+          },
+          grep: { type: 'string' },
+        },
+        required: ['mcp_name'],
+        additionalProperties: false,
+      };
+    case 'look_at':
+      return {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string' },
+          image_data: { type: 'string' },
+          goal: { type: 'string' },
+        },
+        required: ['goal'],
         additionalProperties: false,
       };
     case 'grep':

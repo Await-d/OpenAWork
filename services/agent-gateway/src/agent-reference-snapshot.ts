@@ -9,8 +9,9 @@ import {
   extractReturnedTemplate,
   readReferenceFile,
 } from './agent-reference-parser.js';
+import { resolveReferencePath } from './reference-paths.js';
 
-const ROOT = '/home/await/project/OpenAWork/temp';
+const ROOT = resolveReferencePath('temp');
 const OMO = path.join(ROOT, 'oh-my-openagent', 'src', 'agents');
 const OPCODE = path.join(ROOT, 'opencode', 'packages', 'opencode', 'src', 'agent');
 

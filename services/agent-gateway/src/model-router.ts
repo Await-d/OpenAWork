@@ -16,6 +16,7 @@ export type SupportedModel = (typeof SUPPORTED_MODELS)[number];
 
 export const modelRequestSchema = z.object({
   model: z.string().min(1).max(200).optional().default('gpt-4o'),
+  variant: z.string().min(1).max(80).optional(),
   systemPrompt: z.string().max(4000).optional(),
   maxTokens: z.number().int().min(1).max(16384).optional().default(2048),
   temperature: z.number().min(0).max(2).optional().default(1),
@@ -25,6 +26,7 @@ export type ModelRequest = z.infer<typeof modelRequestSchema>;
 
 export interface ModelRouteConfig {
   model: string;
+  variant?: string;
   apiBaseUrl: string;
   apiKey: string;
   maxTokens: number;
@@ -109,6 +111,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
 
   return {
     model,
+    variant: request.variant,
     apiBaseUrl,
     apiKey,
     maxTokens: requestOverrides.maxTokens ?? request.maxTokens,
@@ -139,6 +142,7 @@ export function resolveModelRouteFromProvider(
 
   return {
     model: modelId,
+    variant: request.variant,
     apiBaseUrl:
       normalizeBaseUrl(provider.baseUrl) ||
       normalizeBaseUrl(PROVIDER_DEFAULT_BASE_URL[provider.type]),

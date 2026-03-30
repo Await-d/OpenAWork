@@ -35,6 +35,16 @@ describe('buildGatewayToolDefinitions', () => {
         'task',
         'background_output',
         'background_cancel',
+        'session_list',
+        'session_read',
+        'session_search',
+        'session_info',
+        'ast_grep_search',
+        'ast_grep_replace',
+        'interactive_bash',
+        'call_omo_agent',
+        'skill_mcp',
+        'look_at',
         'write',
         'workspace_review_status',
         'workspace_review_diff',
@@ -112,6 +122,28 @@ describe('buildGatewayToolDefinitions', () => {
     });
     expect(byName.get('background_output')?.function.parameters.required).toEqual(['task_id']);
     expect(byName.get('background_cancel')?.function.parameters.required).toEqual([]);
+    expect(byName.get('session_list')?.function.parameters.required).toEqual([]);
+    expect(byName.get('session_read')?.function.parameters.required).toEqual(['session_id']);
+    expect(byName.get('session_search')?.function.parameters.required).toEqual(['query']);
+    expect(byName.get('session_info')?.function.parameters.required).toEqual(['session_id']);
+    expect(byName.get('ast_grep_search')?.function.parameters.required).toEqual([
+      'pattern',
+      'lang',
+    ]);
+    expect(byName.get('ast_grep_replace')?.function.parameters.required).toEqual([
+      'pattern',
+      'rewrite',
+      'lang',
+    ]);
+    expect(byName.get('interactive_bash')?.function.parameters.required).toEqual(['tmux_command']);
+    expect(byName.get('call_omo_agent')?.function.parameters.required).toEqual([
+      'description',
+      'prompt',
+      'subagent_type',
+      'run_in_background',
+    ]);
+    expect(byName.get('skill_mcp')?.function.parameters.required).toEqual(['mcp_name']);
+    expect(byName.get('look_at')?.function.parameters.required).toEqual(['goal']);
     expect(byName.get('workspace_review_status')?.function.parameters.required).toEqual(['path']);
     expect(byName.get('workspace_review_diff')?.function.parameters.required).toEqual([
       'path',
@@ -159,7 +191,6 @@ describe('buildGatewayToolDefinitions', () => {
     const definitions = buildGatewayToolDefinitions();
     const toolNames = definitions.map((definition) => definition.function.name);
 
-    expect(toolNames).not.toContain('skill_mcp');
     expect(toolNames.some((name) => name.startsWith('mcp:'))).toBe(false);
     expect(
       toolNames

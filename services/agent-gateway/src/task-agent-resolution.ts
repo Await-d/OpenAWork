@@ -4,6 +4,13 @@ import {
   getTaskCategoryDescription,
   getTaskCategoryPromptAppend,
 } from './task-category-reference-snapshot.js';
+import {
+  getReferenceAgentModelCandidates,
+  getReferenceAgentModelEntries,
+  getReferenceCategoryModelEntries,
+  getReferenceCategoryModelCandidates,
+  type ReferenceModelEntry,
+} from './task-model-reference-snapshot.js';
 
 const CATEGORY_AGENT_ID = 'sisyphus-junior';
 
@@ -16,6 +23,9 @@ interface RawDelegatedTaskInput {
 export interface ResolvedDelegatedAgent {
   agentId: string;
   category?: string;
+  modelCandidates: string[];
+  modelEntries: ReferenceModelEntry[];
+  modelVariant?: string;
   requestedSkills: string[];
   systemPrompt?: string;
 }
@@ -52,6 +62,34 @@ function findManagedAgent(userId: string, identifier: string): ManagedAgentRecor
 
     return agent.aliases.some((alias) => alias.trim().toLowerCase() === normalizedIdentifier);
   });
+}
+
+function normalizeModelCandidate(value: string): string {
+  return value.includes('/') ? (value.split('/').at(-1) ?? value) : value;
+}
+
+function getManagedAgentModelCandidates(agent: ManagedAgentRecord | undefined): string[] {
+  if (!agent) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      [agent.model, ...(agent.fallbackModels ?? [])]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => normalizeModelCandidate(value.trim())),
+    ),
+  );
+}
+
+function getManagedAgentModelEntries(agent: ManagedAgentRecord | undefined): ReferenceModelEntry[] {
+  if (!agent) {
+    return [];
+  }
+  return getManagedAgentModelCandidates(agent).map((modelId) => ({
+    modelId,
+    providerHints: [],
+    variant: agent.variant,
+  }));
 }
 
 function buildDelegatedSystemPrompt(input: {
@@ -130,8 +168,18 @@ export function resolveDelegatedAgent(
 
   if (subagentType) {
     const matchedAgent = findManagedAgent(userId, subagentType);
+    const agentId = matchedAgent?.id ?? subagentType;
+    const managedModelCandidates = getManagedAgentModelCandidates(matchedAgent);
+    const managedModelEntries = getManagedAgentModelEntries(matchedAgent);
+    const referenceModelEntries = getReferenceAgentModelEntries(agentId);
     return {
-      agentId: matchedAgent?.id ?? subagentType,
+      agentId,
+      modelCandidates:
+        managedModelCandidates.length > 0
+          ? managedModelCandidates
+          : getReferenceAgentModelCandidates(agentId),
+      modelEntries: managedModelEntries.length > 0 ? managedModelEntries : referenceModelEntries,
+      modelVariant: matchedAgent?.variant,
       requestedSkills,
       systemPrompt: buildDelegatedSystemPrompt({
         agentPrompt: matchedAgent?.systemPrompt,
@@ -141,9 +189,18 @@ export function resolveDelegatedAgent(
   }
 
   const categoryAgent = findManagedAgent(userId, CATEGORY_AGENT_ID);
+  const categoryManagedEntries = getManagedAgentModelEntries(categoryAgent);
+  const categoryReferenceEntries = getReferenceCategoryModelEntries(category);
   return {
     agentId: categoryAgent?.id ?? CATEGORY_AGENT_ID,
     category,
+    modelCandidates:
+      getManagedAgentModelCandidates(categoryAgent).length > 0
+        ? getManagedAgentModelCandidates(categoryAgent)
+        : getReferenceCategoryModelCandidates(category),
+    modelEntries:
+      categoryManagedEntries.length > 0 ? categoryManagedEntries : categoryReferenceEntries,
+    modelVariant: categoryAgent?.variant,
     requestedSkills,
     systemPrompt: buildDelegatedSystemPrompt({
       agentPrompt: categoryAgent?.systemPrompt,

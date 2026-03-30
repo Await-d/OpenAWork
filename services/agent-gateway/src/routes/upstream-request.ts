@@ -118,6 +118,7 @@ function applyThinkingConfigToBody(
 export function buildUpstreamRequestBody(input: {
   protocol: UpstreamProtocol;
   model: string;
+  variant?: string;
   maxTokens: number;
   temperature: number;
   messages: UpstreamChatMessage[];
@@ -129,6 +130,7 @@ export function buildUpstreamRequestBody(input: {
     input.protocol === 'responses'
       ? {
           model: input.model,
+          ...(input.variant ? { variant: input.variant } : {}),
           input: convertConversationToResponsesInput(input.messages, input.model),
           max_output_tokens: input.maxTokens,
           temperature: input.temperature,
@@ -142,6 +144,7 @@ export function buildUpstreamRequestBody(input: {
         }
       : {
           model: input.model,
+          ...(input.variant ? { variant: input.variant } : {}),
           messages: input.messages,
           max_tokens: input.maxTokens,
           temperature: input.temperature,
