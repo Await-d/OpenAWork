@@ -3,6 +3,10 @@ import type {
   MCPServerRef,
   MCPToolDef,
   MCPToolResult,
+  MCPResourceDef,
+  MCPResourceReadResult,
+  MCPPromptDef,
+  MCPPromptResult,
   MCPCallOptions,
   MCPConnectionStatus,
   JSONSchema,
@@ -22,6 +26,19 @@ type SDKClient = {
     tools: Array<{ name: string; description?: string; inputSchema: unknown }>;
     nextCursor?: string;
   }>;
+  listResources?(opts?: { cursor?: string }): Promise<{
+    resources: MCPResourceDef[];
+    nextCursor?: string;
+  }>;
+  readResource?(params: { uri: string }): Promise<MCPResourceReadResult>;
+  listPrompts?(opts?: { cursor?: string }): Promise<{
+    prompts: MCPPromptDef[];
+    nextCursor?: string;
+  }>;
+  getPrompt?(params: {
+    name: string;
+    arguments?: Record<string, string>;
+  }): Promise<MCPPromptResult>;
   callTool(
     params: { name: string; arguments: Record<string, unknown> },
     opts?: {
@@ -159,6 +176,56 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
       cursor = nextCursor;
     } while (cursor);
     return all;
+  }
+
+  async listResources(serverId: string): Promise<MCPResourceDef[]> {
+    const client = this.getClient(serverId);
+    if (typeof client.listResources !== 'function') {
+      throw new Error(`MCP server ${serverId} does not support listResources`);
+    }
+    const all: MCPResourceDef[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await client.listResources({ cursor });
+      all.push(...(result.resources ?? []));
+      cursor = result.nextCursor;
+    } while (cursor);
+    return all;
+  }
+
+  async readResource(serverId: string, uri: string): Promise<MCPResourceReadResult> {
+    const client = this.getClient(serverId);
+    if (typeof client.readResource !== 'function') {
+      throw new Error(`MCP server ${serverId} does not support readResource`);
+    }
+    return client.readResource({ uri });
+  }
+
+  async listPrompts(serverId: string): Promise<MCPPromptDef[]> {
+    const client = this.getClient(serverId);
+    if (typeof client.listPrompts !== 'function') {
+      throw new Error(`MCP server ${serverId} does not support listPrompts`);
+    }
+    const all: MCPPromptDef[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await client.listPrompts({ cursor });
+      all.push(...(result.prompts ?? []));
+      cursor = result.nextCursor;
+    } while (cursor);
+    return all;
+  }
+
+  async getPrompt(
+    serverId: string,
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<MCPPromptResult> {
+    const client = this.getClient(serverId);
+    if (typeof client.getPrompt !== 'function') {
+      throw new Error(`MCP server ${serverId} does not support getPrompt`);
+    }
+    return client.getPrompt({ name, arguments: args });
   }
 
   setServerDisabledTools(serverId: string, toolNames: string[]): void {
