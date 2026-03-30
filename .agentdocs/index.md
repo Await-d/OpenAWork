@@ -2,6 +2,8 @@
 
 ## 活跃工作流
 
+- [260329-全工具特殊功能子代理模型复审方案](./workflow/260329-全工具特殊功能子代理模型复审方案.md) — 再次对照 `temp/opencode` 与 `temp/oh-my-openagent`，复审当前仓库的全部工具、特殊功能使用方式与子代理模型路由是否一致，并继续收口残余关键偏差
+
 - [260327-聊天-html-tsx-效果预览方案](./workflow/260327-聊天-html-tsx-效果预览方案.md) — 为聊天界面补充 HTML / TSX 文件效果预览能力的最优实施路线，先冻结“聊天中低摩擦看效果”的产品目标，再在受信/不受信隔离、Web/Tauri 兼容与分阶段 rollout 上收敛
 
 - [260327-opencode任务体系对齐方案](./workflow/260327-opencode任务体系对齐方案.md) — 对齐 `temp/opencode` 的任务创建、子任务 agent 选择、完成回调、主线程结果接收与主界面子代理运行状态展示，目标是把现有 child session + task graph 升级为更接近参考实现的完整子代理执行闭环
@@ -31,6 +33,8 @@
 - [260319-四开发者任务分配方案](./workflow/260319-四开发者任务分配方案.md) — 85个任务全部 ✅，待归档
 
 ## 归档工作流（已完成）
+
+- [260329-剩余参考能力全部补齐方案](./workflow/done/260329-剩余参考能力全部补齐方案.md) — 已完成：补齐 `session_*`、`ast_grep_*`、`skill_mcp`、`interactive_bash`、`call_omo_agent`、`look_at` 等剩余 reference tool family，并让 Agents 页面支持 `model / variant / fallbackModels` 的可视化配置与运行时生效
 
 - [260327-子代理任务默认权限收敛](./workflow/done/260327-子代理任务默认权限收敛.md) — 已完成：task 创建的 child session 默认不再暴露 `task` 工具，子代理不能继续默认递归委派；新增 session 级工具可见性过滤、单测与端到端验证证据
 
@@ -80,6 +84,8 @@
 - [260319-opencowork-补充借鉴方案](./workflow/260319-opencowork-补充借鉴方案.md)
 
 ## Architecture Decisions
+
+- [2026-03-29] Agent 默认模型配置收敛为“页面可编辑 + runtime 真消费”：managed agent 支持 `model / variant / fallbackModels`，builtin 默认值来自 reference 候选，`task` / category delegation 与 `look_at` 优先读取 managed 配置，再回退到 reference fallback。
 
 - [2026-03-27] 聊天内 HTML / TSX 效果预览路线优先收敛为“HTML 先走 `iframe + srcdoc + sandbox`、TSX 后走 `Worker + esbuild-wasm + iframe`”，先满足聊天中的效果证据而非完整在线 IDE；同上下文执行与 `allow-scripts + allow-same-origin` 组合均列为红线。
 
