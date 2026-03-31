@@ -23,6 +23,15 @@ describe('createSessionSchema', () => {
     if (result.success) expect(result.data.metadata).toEqual({ tag: 'test' });
   });
 
+  it('accepts toolSurfaceProfile in metadata', () => {
+    const result = createSessionSchema.safeParse({
+      metadata: { toolSurfaceProfile: 'claude_code_simple' },
+    });
+    expect(result.success).toBe(true);
+    if (result.success)
+      expect(result.data.metadata['toolSurfaceProfile']).toBe('claude_code_simple');
+  });
+
   it('accepts null body (undefined metadata defaults to {})', () => {
     const result = createSessionSchema.safeParse(undefined);
     expect(result.success).toBe(false);

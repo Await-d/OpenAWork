@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { validateWorkspacePath } from './workspace-paths.js';
 
+export const TOOL_SURFACE_PROFILES = [
+  'openawork',
+  'claude_code_simple',
+  'claude_code_default',
+] as const;
+export type ToolSurfaceProfile = (typeof TOOL_SURFACE_PROFILES)[number];
+
 const sessionMetadataPatchSchema = z
   .object({
     dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
@@ -10,6 +17,7 @@ const sessionMetadataPatchSchema = z
     providerId: z.string().min(1).max(200).optional(),
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
     thinkingEnabled: z.boolean().optional(),
+    toolSurfaceProfile: z.enum(TOOL_SURFACE_PROFILES).optional(),
     webSearchEnabled: z.boolean().optional(),
     workingDirectory: z.string().optional(),
     yoloMode: z.boolean().optional(),
@@ -111,4 +119,12 @@ export function isSessionWorkspaceRebindingAttempt(
   }
 
   return currentWorkingDirectory !== nextWorkingDirectory;
+}
+
+export function extractToolSurfaceProfile(metadata: Record<string, unknown>): ToolSurfaceProfile {
+  const raw = metadata['toolSurfaceProfile'];
+  if (typeof raw === 'string' && (TOOL_SURFACE_PROFILES as readonly string[]).includes(raw)) {
+    return raw as ToolSurfaceProfile;
+  }
+  return 'openawork';
 }
