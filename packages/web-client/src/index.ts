@@ -17,6 +17,9 @@ export type {
 } from './permissions.js';
 export { createSessionsClient, HttpError } from './sessions.js';
 export type {
+  DeleteSessionBlockReason,
+  DeleteSessionErrorData,
+  DeleteSessionResult,
   Session,
   SessionTask,
   SessionTodo,

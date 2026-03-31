@@ -11,11 +11,14 @@ export interface MarketSkill {
   downloads: number;
   verified: boolean;
   installable?: boolean;
+  actionLabel?: string;
 }
 
 export interface SkillMarketHomeProps {
   skills: MarketSkill[];
   categories: string[];
+  title?: string;
+  subtitle?: string;
   loading?: boolean;
   error?: string | null;
   onSearch?: (query: string, category?: string) => void;
@@ -149,6 +152,8 @@ function buildVisiblePages(currentPage: number, totalPages: number): number[] {
 export function SkillMarketHome({
   skills,
   categories,
+  title = '技能市场',
+  subtitle = '发现并安装适合你 AI 工作流的技能',
   loading,
   error,
   onSearch,
@@ -214,8 +219,8 @@ export function SkillMarketHome({
   return (
     <div style={s.root}>
       <div style={s.header}>
-        <h1 style={s.title}>技能市场</h1>
-        <p style={s.subtitle}>发现并安装适合你 AI 工作流的技能</p>
+        <h1 style={s.title}>{title}</h1>
+        <p style={s.subtitle}>{subtitle}</p>
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: '1.5rem' }}>
         <input
@@ -392,7 +397,7 @@ function SkillCard({
             onInstall(skill.id);
           }}
         >
-          {skill.installable === false ? '仅浏览' : '安装'}
+          {skill.installable === false ? '仅浏览' : (skill.actionLabel ?? '安装')}
         </button>
       </div>
     </article>

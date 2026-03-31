@@ -12,6 +12,7 @@ export interface ToolDiffFileView {
 
 export interface ToolDiffCollectionProps {
   activePath?: string;
+  chrome?: 'default' | 'minimal';
   files: ToolDiffFileView[];
   maxHeight?: number;
   onActivePathChange?: (path: string) => void;
@@ -25,6 +26,7 @@ function trimFilePath(value: string): string {
 
 export function ToolDiffCollection({
   activePath,
+  chrome = 'default',
   files,
   maxHeight = 360,
   onActivePathChange,
@@ -125,6 +127,7 @@ export function ToolDiffCollection({
       <UnifiedCodeDiff
         beforeText={activeFile.beforeText}
         afterText={activeFile.afterText}
+        chrome={chrome}
         filePath={activeFile.filePath}
         maxHeight={maxHeight}
         viewMode={viewMode}

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { StatusPill } from './primitives/index.js';
 import { tokens } from './tokens.js';
 import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { ToolDiffCollection } from './ToolDiffCollection.js';
@@ -45,7 +44,7 @@ interface StatusMeta {
   label: string;
 }
 
-type ToolKind = 'agent' | 'mcp' | 'skill' | 'tool';
+export type ToolKind = 'agent' | 'mcp' | 'skill' | 'tool';
 type PillTone = 'danger' | 'info' | 'muted' | 'success' | 'warning';
 
 export interface ToolCallCardDisplayData {
@@ -68,7 +67,7 @@ export interface ToolCallCardDisplayData {
   toolKind: ToolKind;
 }
 
-function ToolKindIcon({ kind }: { kind: ToolKind }) {
+export function ToolKindIcon({ kind }: { kind: ToolKind }) {
   const common = {
     width: 12,
     height: 12,
@@ -913,9 +912,35 @@ function TaskMetaBadge({
   label: string;
   tone?: 'default' | PillTone;
 }) {
-  const color = tone === 'default' ? 'muted' : tone;
+  const color =
+    tone === 'danger'
+      ? tokens.color.danger
+      : tone === 'info'
+        ? tokens.color.info
+        : tone === 'success'
+          ? tokens.color.success
+          : tone === 'warning'
+            ? tokens.color.warning
+            : tokens.color.muted;
 
-  return <StatusPill label={label} color={color} />;
+  return (
+    <span
+      data-tool-card-meta-label={tone === 'default' ? 'muted' : tone}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        minWidth: 0,
+        whiteSpace: 'nowrap',
+        fontSize: 10,
+        fontWeight: 600,
+        lineHeight: 1.35,
+        letterSpacing: '0.01em',
+        color,
+      }}
+    >
+      {label}
+    </span>
+  );
 }
 
 function TaskMetaHighlights({ meta }: { meta: TaskToolMeta }) {
@@ -931,12 +956,8 @@ function TaskMetaHighlights({ meta }: { meta: TaskToolMeta }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
+        gap: 3,
         flexWrap: 'wrap',
-        padding: '8px 10px',
-        borderRadius: tokens.radius.md,
-        background: 'color-mix(in srgb, transparent 82%, var(--color-surface, #111827))',
-        border: '1px solid color-mix(in srgb, transparent 84%, var(--color-border, #1e2d3d))',
       }}
     >
       <TaskMetaBadge label="子代理" />
@@ -1047,7 +1068,7 @@ function TaskSummaryCard({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        gap: 10,
+        gap: 5,
         width: '100%',
       }}
     >
@@ -1057,31 +1078,28 @@ function TaskSummaryCard({
         aria-expanded={open}
         style={{
           appearance: 'none',
-          border: '1px solid color-mix(in srgb, transparent 78%, var(--color-border, #1e2d3d))',
-          background:
-            'linear-gradient(180deg, rgba(15, 23, 42, 0.34) 0%, rgba(15, 23, 42, 0.16) 100%)',
-          padding: '10px 12px',
+          border: 'none',
+          background: 'transparent',
+          padding: '1px 0',
           margin: 0,
           display: 'flex',
           alignItems: 'stretch',
-          gap: 10,
+          gap: 5,
           flex: 1,
           minWidth: 0,
           textAlign: 'left',
           color: 'inherit',
           cursor: 'pointer',
-          borderRadius: tokens.radius.lg,
-          boxShadow: open ? tokens.shadow.sm : 'none',
         }}
       >
         <span
           aria-hidden="true"
           style={{
             position: 'relative',
-            width: 10,
-            minWidth: 10,
-            marginTop: 5,
-            height: 10,
+            width: 7,
+            minWidth: 7,
+            marginTop: 2,
+            height: 7,
             borderRadius: '50%',
             flexShrink: 0,
             background: statusMeta.dot,
@@ -1091,17 +1109,17 @@ function TaskSummaryCard({
                 : 'none',
           }}
         />
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <div
             style={{
               display: 'flex',
               alignItems: 'flex-start',
               justifyContent: 'space-between',
-              gap: 10,
+              gap: 5,
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
                 <TaskMetaBadge label={toolKindLabel} />
                 {meta.agentType && <TaskMetaBadge label={meta.agentType} />}
                 {meta.readonly && <TaskMetaBadge label="只读" tone="success" />}
@@ -1111,8 +1129,8 @@ function TaskSummaryCard({
               </div>
               <div
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
+                  fontSize: 12,
+                  fontWeight: 600,
                   color: 'var(--color-text, #f8fafc)',
                   lineHeight: 1.4,
                   wordBreak: 'break-word',
@@ -1138,7 +1156,7 @@ function TaskSummaryCard({
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'flex-end',
-                gap: 2,
+                gap: 1,
                 flexShrink: 0,
               }}
             >
@@ -1157,7 +1175,7 @@ function TaskSummaryCard({
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 5,
                   fontSize: 10,
                   fontWeight: 700,
                   letterSpacing: '0.04em',
@@ -1186,7 +1204,7 @@ function TaskSummaryCard({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: 10,
+              gap: 3,
               flexWrap: 'wrap',
             }}
           >
@@ -1230,15 +1248,15 @@ function ToolField({
   value: string;
 }) {
   const color = tone === 'danger' ? '#fecaca' : 'var(--color-text, #e2e8f0)';
-  const background =
+  const borderLeft =
     tone === 'danger'
-      ? 'rgba(127, 29, 29, 0.18)'
+      ? '2px solid rgba(248, 113, 113, 0.45)'
       : tone === 'muted'
-        ? 'rgba(15, 23, 42, 0.18)'
-        : 'rgba(15, 23, 42, 0.26)';
+        ? '1px solid rgba(148, 163, 184, 0.16)'
+        : '1px solid rgba(148, 163, 184, 0.22)';
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <div
         style={{
           fontSize: 10,
@@ -1253,9 +1271,10 @@ function ToolField({
       <pre
         style={{
           margin: 0,
-          padding: '8px 10px',
-          borderRadius: 10,
-          background,
+          padding: '3px 0 3px 10px',
+          borderRadius: 0,
+          borderLeft,
+          background: 'transparent',
           color,
           fontSize: 11,
           lineHeight: 1.55,
@@ -1264,7 +1283,7 @@ function ToolField({
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           overflowX: 'auto',
-          maxHeight: 260,
+          maxHeight: 200,
         }}
       >
         {value}
@@ -1372,7 +1391,13 @@ export function ToolCallCard({
   return (
     <div
       data-tool-card-root="true"
-      style={{ display: 'flex', flexDirection: 'column', gap: hasDetails ? 0 : 8, ...style }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: hasDetails ? 4 : 2,
+        padding: 0,
+        ...style,
+      }}
     >
       {hasDetails && displayData.taskMeta && taskSummary ? (
         <TaskSummaryCard
@@ -1391,7 +1416,7 @@ export function ToolCallCard({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            gap: 5,
             width: '100%',
             minWidth: 0,
           }}
@@ -1406,11 +1431,12 @@ export function ToolCallCard({
               border: 'none',
               background: 'transparent',
               padding: '2px 0',
+              borderRadius: 0,
               margin: 0,
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              flex: 1,
+              gap: 5,
+              width: '100%',
               minWidth: 0,
               textAlign: 'left',
               color: 'inherit',
@@ -1421,8 +1447,8 @@ export function ToolCallCard({
               aria-hidden="true"
               style={{
                 position: 'relative',
-                width: 8,
-                height: 8,
+                width: 7,
+                height: 7,
                 borderRadius: '50%',
                 flexShrink: 0,
                 background: statusMeta.dot,
@@ -1437,11 +1463,11 @@ export function ToolCallCard({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 18,
-                height: 18,
-                borderRadius: 6,
-                background: 'rgba(148, 163, 184, 0.12)',
-                border: '1px solid rgba(148, 163, 184, 0.16)',
+                width: 16,
+                height: 16,
+                borderRadius: 5,
+                background: 'transparent',
+                border: 'none',
                 color: 'var(--color-text, #f8fafc)',
                 flexShrink: 0,
               }}
@@ -1502,7 +1528,7 @@ export function ToolCallCard({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            gap: 5,
             width: '100%',
             minWidth: 0,
           }}
@@ -1511,7 +1537,7 @@ export function ToolCallCard({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
+              gap: 5,
               minWidth: 0,
               flex: 1,
             }}
@@ -1531,11 +1557,11 @@ export function ToolCallCard({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 18,
-                height: 18,
-                borderRadius: 6,
-                background: 'rgba(148, 163, 184, 0.12)',
-                border: '1px solid rgba(148, 163, 184, 0.16)',
+                width: 16,
+                height: 16,
+                borderRadius: 5,
+                background: 'transparent',
+                border: 'none',
                 color: 'var(--color-text, #f8fafc)',
                 flexShrink: 0,
               }}
@@ -1584,14 +1610,31 @@ export function ToolCallCard({
 
       {hasInlineDiff &&
         (displayData.diffView?.files && displayData.diffView.files.length > 1 ? (
-          <div style={{ padding: '6px 0 0 34px' }}>
-            <ToolDiffCollection files={displayData.diffView.files} maxHeight={320} />
+          <div
+            style={{
+              padding: '8px 0 0 22px',
+              borderTop: `1px dashed color-mix(in oklch, ${tokens.color.borderSubtle} 72%, transparent)`,
+              marginTop: 4,
+            }}
+          >
+            <ToolDiffCollection
+              chrome="minimal"
+              files={displayData.diffView.files}
+              maxHeight={320}
+            />
           </div>
         ) : (
-          <div style={{ padding: '6px 0 0 34px' }}>
+          <div
+            style={{
+              padding: '8px 0 0 22px',
+              borderTop: `1px dashed color-mix(in oklch, ${tokens.color.borderSubtle} 72%, transparent)`,
+              marginTop: 4,
+            }}
+          >
             <UnifiedCodeDiff
               beforeText={displayData.diffView?.beforeText}
               afterText={displayData.diffView?.afterText}
+              chrome="minimal"
               diffText={displayData.diffView?.diffText}
               filePath={displayData.diffView?.filePath}
               maxHeight={320}
@@ -1602,10 +1645,12 @@ export function ToolCallCard({
       {hasDetails && effectiveOpen && (
         <div
           style={{
-            padding: '6px 0 0 34px',
+            padding: '8px 0 2px 18px',
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
+            borderTop: `1px solid color-mix(in oklch, ${tokens.color.borderSubtle} 72%, transparent)`,
+            marginTop: 4,
           }}
         >
           {displayData.taskMeta && <TaskMetaHighlights meta={displayData.taskMeta} />}

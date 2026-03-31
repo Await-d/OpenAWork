@@ -302,6 +302,7 @@ export interface ToolCallContent {
 export interface ToolResultContent {
   type: 'tool_result';
   toolCallId: string;
+  toolName?: string;
   output: unknown;
   isError: boolean;
   pendingPermissionRequestId?: string;
@@ -416,6 +417,25 @@ export interface StreamPermissionRepliedChunk {
   occurredAt?: number;
 }
 
+export interface StreamQuestionAskedChunk {
+  type: 'question_asked';
+  requestId: string;
+  toolName: string;
+  title: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamQuestionRepliedChunk {
+  type: 'question_replied';
+  requestId: string;
+  status: 'answered' | 'dismissed';
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
 export interface StreamTaskUpdateChunk {
   type: 'task_update';
   taskId: string;
@@ -474,6 +494,8 @@ export type RunEvent =
   | StreamToolResultChunk
   | StreamPermissionAskedChunk
   | StreamPermissionRepliedChunk
+  | StreamQuestionAskedChunk
+  | StreamQuestionRepliedChunk
   | StreamTaskUpdateChunk
   | StreamSessionChildChunk
   | StreamCompactionChunk

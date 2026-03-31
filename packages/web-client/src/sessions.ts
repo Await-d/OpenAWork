@@ -47,6 +47,19 @@ export interface SessionTask {
   errorMessage?: string;
 }
 
+export interface DeleteSessionResult {
+  deletedSessionIds: string[];
+}
+
+export type DeleteSessionBlockReason = 'pendingInteraction' | 'runtimeThread' | 'state' | 'stream';
+
+export interface DeleteSessionErrorData {
+  blockReason?: DeleteSessionBlockReason;
+  error?: string;
+  sessionId?: string;
+  state_status?: string;
+}
+
 export interface SessionsClient {
   list(token: string): Promise<Session[]>;
   create(
@@ -74,7 +87,7 @@ export interface SessionsClient {
     sessionId: string,
     options?: { signal?: AbortSignal },
   ): Promise<SessionTodoLanes>;
-  delete(token: string, sessionId: string): Promise<void>;
+  delete(token: string, sessionId: string): Promise<DeleteSessionResult>;
   rename(token: string, sessionId: string, title: string): Promise<void>;
   updateMetadata(
     token: string,
@@ -96,10 +109,11 @@ export interface SessionsClient {
   importSession(token: string, data: unknown): Promise<{ sessionId: string }>;
 }
 
-export class HttpError extends Error {
+export class HttpError<T = unknown> extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly data?: T,
   ) {
     super(message);
     this.name = 'HttpError';
@@ -197,7 +211,23 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         method: 'DELETE',
         headers: authHeader(token),
       });
-      if (!res.ok) throw new HttpError(`Failed to delete session: ${res.status}`, res.status);
+      if (!res.ok) {
+        const errorData = (await res.json().catch(() => null)) as DeleteSessionErrorData | null;
+        throw new HttpError<DeleteSessionErrorData>(
+          `Failed to delete session: ${res.status}`,
+          res.status,
+          errorData ?? undefined,
+        );
+      }
+      const data = (await res.json().catch(() => null)) as Partial<DeleteSessionResult> | null;
+      return {
+        deletedSessionIds: Array.isArray(data?.deletedSessionIds)
+          ? data.deletedSessionIds.filter(
+              (deletedSessionId): deletedSessionId is string =>
+                typeof deletedSessionId === 'string' && deletedSessionId.length > 0,
+            )
+          : [],
+      };
     },
 
     async rename(token, sessionId, title) {

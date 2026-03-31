@@ -24,6 +24,7 @@ export interface UnifiedCodeDiffSummary {
 export interface UnifiedCodeDiffProps {
   afterText?: string;
   beforeText?: string;
+  chrome?: 'default' | 'minimal';
   diffText?: string;
   filePath?: string;
   maxHeight?: number;
@@ -489,11 +490,13 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
 export function UnifiedCodeDiff({
   afterText,
   beforeText,
+  chrome = 'default',
   diffText,
   filePath,
   maxHeight = 360,
   viewMode = 'unified',
 }: UnifiedCodeDiffProps) {
+  const isMinimalChrome = chrome === 'minimal';
   const usingSnapshot = typeof beforeText === 'string' || typeof afterText === 'string';
   const normalizedBefore = beforeText ?? '';
   const normalizedAfter = afterText ?? '';
@@ -508,10 +511,12 @@ export function UnifiedCodeDiff({
     return (
       <div
         style={{
-          border: '1px solid var(--color-border, #334155)',
-          borderRadius: tokens.radius.lg,
-          background: 'color-mix(in srgb, var(--color-surface, #111827) 86%, transparent)',
-          padding: '10px 12px',
+          border: isMinimalChrome ? 'none' : '1px solid var(--color-border, #334155)',
+          borderRadius: isMinimalChrome ? 0 : tokens.radius.lg,
+          background: isMinimalChrome
+            ? 'transparent'
+            : 'color-mix(in srgb, var(--color-surface, #111827) 86%, transparent)',
+          padding: isMinimalChrome ? '6px 0' : '10px 12px',
           fontSize: 12,
           color: 'var(--color-muted, #94a3b8)',
         }}
@@ -527,9 +532,13 @@ export function UnifiedCodeDiff({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        border: '1px solid color-mix(in srgb, var(--color-border, #334155) 88%, transparent)',
-        borderRadius: tokens.radius.md,
-        background: 'color-mix(in srgb, var(--color-surface, #111827) 96%, transparent)',
+        border: isMinimalChrome
+          ? 'none'
+          : '1px solid color-mix(in srgb, var(--color-border, #334155) 88%, transparent)',
+        borderRadius: isMinimalChrome ? 0 : tokens.radius.md,
+        background: isMinimalChrome
+          ? 'transparent'
+          : 'color-mix(in srgb, var(--color-surface, #111827) 96%, transparent)',
       }}
     >
       {(filePath || summary.added > 0 || summary.removed > 0) && (
@@ -539,9 +548,9 @@ export function UnifiedCodeDiff({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 12,
-            padding: '8px 12px',
+            padding: isMinimalChrome ? '4px 0 8px' : '8px 12px',
             borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
-            background: 'rgba(15, 23, 42, 0.12)',
+            background: isMinimalChrome ? 'transparent' : 'rgba(15, 23, 42, 0.12)',
           }}
         >
           <div
@@ -581,7 +590,7 @@ export function UnifiedCodeDiff({
             color: 'var(--color-muted, #94a3b8)',
             fontWeight: 700,
             borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
-            background: 'rgba(15, 23, 42, 0.08)',
+            background: isMinimalChrome ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
           }}
         >
           <div style={{ padding: '6px 10px', borderRight: '1px solid rgba(148, 163, 184, 0.08)' }}>
@@ -598,9 +607,9 @@ export function UnifiedCodeDiff({
             fontSize: 11,
             color: 'var(--color-muted, #94a3b8)',
             fontWeight: 700,
-            padding: '0 0 0 1px',
+            padding: isMinimalChrome ? 0 : '0 0 0 1px',
             borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
-            background: 'rgba(15, 23, 42, 0.08)',
+            background: isMinimalChrome ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
           }}
         >
           <div style={{ padding: '6px', textAlign: 'right' }}>旧</div>
