@@ -93,7 +93,7 @@ OpenAWork/
 - 标题最大长度：100 字符
 - 示例：`feat(gateway): 新增GitHub路由支持`
 - scope 统一使用**小写**，优先采用模块 / 包 / 应用名（如 `gateway`、`web`、`shared-ui`、`agentdocs`）
-- 正文 / 尾注可选；若使用 Sisyphus 协作尾注，必须使用仓库约定的标准 footer 与 `Co-authored-by` trailer 成对出现
+- 正文 / 尾注可选；**禁止**出现任何 Sisyphus 协作尾注或相关协作痕迹
 - 详细说明与示例见：`docs/commit-convention.md`
 
 ### 代码风格（Prettier）

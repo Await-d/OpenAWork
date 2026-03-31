@@ -109,6 +109,12 @@ eas channel:rollout --channel production --percent 0
 # 4. Push hotfix OTA (does not require App Store review for JS-only fixes):
 # Fix the issue, then:
 eas update --branch production --message "hotfix: {description}"
+
+# 5. If the hotfix requires a new native/app version, do NOT edit version files manually.
+# Use GitHub Actions > Prepare Release
+#   - mobile-production   (store/native release)
+#   - mobile-preview      (preview validation)
+#   - fill release_notes in Chinese so the workflow can generate a temporary release draft
 ```
 
 **Rollback time target:** ≤ 15 minutes (OTA), ≤ 7 days (native/store)
@@ -125,6 +131,10 @@ curl https://github.com/openwork/openAwork/releases/latest/download/latest.json
 
 # 2. If JSON is malformed or missing, re-run the release workflow:
 # GitHub Actions > Release Desktop > Re-run
+
+# If a brand new desktop version must be cut, do NOT manually edit version files.
+# Use GitHub Actions > Prepare Release > desktop-preview / desktop-stable
+# Prepare Release will also require Chinese release_notes and generate a temporary release draft for the workflow
 
 # 3. If signing cert expired:
 # Renew TAURI_SIGNING_PRIVATE_KEY in GitHub Secrets

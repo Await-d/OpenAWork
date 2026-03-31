@@ -2,7 +2,12 @@
 
 ## 活跃工作流
 
-- [260330-工具移植与格式加强复检](./workflow/260330-工具移植与格式加强复检.md) — 对当前仓库再次执行工具是否仍有未移植、schema/description/required 字段是否仍与参考库不一致的加强复检，并继续收口尾差
+- [260331-claude-code-五人并行开发方案](./workflow/260331-claude-code-五人并行开发方案.md) — 基于已冻结的 Claude Code 风格工具环境接入方案，按 `tool-definitions / stream / tool-sandbox / session metadata / capabilities / tests` 五条主线设计五人可并行推进的详细实施计划、依赖 DAG 与阶段验收策略
+
+- [260331-手机端功能补全方案](./workflow/260331-手机端功能补全方案.md) — 修复 P0 Bug（AppNavigator 登录跳转/token 过期写入/Host 模式 URL/历史消息加载）并接通已有但未挂载的 AgentActivityPanel/MobileVoiceRecorder/MobileAttachmentBar/DialogueModeSelector 组件
+
+- [260330-agent-gateway云端部署方案](./workflow/260330-agent-gateway云端部署方案.md) — 将 agent-gateway 升级为可独立云端部署的生产级服务：新建 Dockerfile、接入真实 Redis、安全加固（JWT/CORS/Admin 默认值）、CloudWorkerConnection stub 收口、Desktop 云端引导对齐，附完整 cloud-deployment.md 文档
+
 
 - [260329-全工具特殊功能子代理模型复审方案](./workflow/260329-全工具特殊功能子代理模型复审方案.md) — 再次对照 `temp/opencode` 与 `temp/oh-my-openagent`，复审当前仓库的全部工具、特殊功能使用方式与子代理模型路由是否一致，并继续收口残余关键偏差
 
@@ -35,6 +40,22 @@
 - [260319-四开发者任务分配方案](./workflow/260319-四开发者任务分配方案.md) — 85个任务全部 ✅，待归档
 
 ## 归档工作流（已完成）
+
+- [260331-claude-code-工具环境集成方案](./workflow/done/260331-claude-code-工具环境集成方案.md) — 已完成：冻结 OpenAWork 对齐 `claude-code-sourcemap` 的推荐路线为“保留 canonical 小写工具不动，在 gateway 增加 Claude Code 风格兼容 surface + session-scoped profile + input adapter”，并明确 P1/P2/P3 rollout 与高/中/低语义兼容分层
+
+- [260330-发布前质量门禁补齐方案](./workflow/done/260330-发布前质量门禁补齐方案.md) — 已完成：`Prepare Release` 现会在 bump / tag / dispatch 之前执行格式检查、全量类型检查、Web 生产构建、Gateway 单元测试、Mobile 单元测试和发布稿 dry-run 校验；明确暂不纳入 Desktop/Gateway 开发中的 P0 构建红项
+
+- [260330-后台保险操作对齐复检](./workflow/done/260330-后台保险操作对齐复检.md) — 已完成：补齐项目 ignore 规则真加载、durable request workflow logs、durable session file diffs、workspace 权限文件桥接、permission decision logs 与 durable session run events
+
+- [260330-工具移植与格式加强复检](./workflow/done/260330-工具移植与格式加强复检.md) — 已完成：加强复检并继续收口 `codesearch`、canonical `read/write`、canonical `grep/glob`、legacy 文件工具参数形状、完整 LSP 套件与 task CRUD 工具面
+
+- [260330-中文发布日志强制方案](./workflow/done/260330-中文发布日志强制方案.md) — 已完成：`Prepare Release` 现强制要求中文 `release_notes`，发布稿仅在 GitHub workflow 运行时临时生成；desktop/mobile 发布流统一消费同一份 runtime-only 发布稿，desktop 还会在构建完成后自动把各平台安装包下载链接追加到 GitHub Release body 中
+
+- [260330-skills工作区动态加载实现方案](./workflow/done/260330-skills工作区动态加载实现方案.md) — 已完成：新增工作区本地 skills 扫描与安装路由、Skills 页面“本地”视图，以及基于 `installed_skills` 的运行时即时生效闭环；本地技能首版支持手动扫描与重新加载，不含文件监听热更新
+
+- [260330-自动版本调整方案](./workflow/done/260330-自动版本调整方案.md) — 已完成：新增 `scripts/release-version.mjs` + `prepare-release.yml` 自动版本调整链路；支持 conventional commits 自动推断 bump、同步 monorepo 版本文件，并按 desktop/mobile 现有发布链自动创建 tag 或 dispatch preview；版本号采用 9 进 1 进位规则
+
+- [260330-统一系统版本来源方案](./workflow/done/260330-统一系统版本来源方案.md) — 已完成：统一 Web / Desktop / Gateway / Mobile 的系统版本来源；Web/Desktop 共用 Vite 版本插件，Gateway 改为根包优先/当前包兜底的版本发现，Mobile 改为 `app.config.ts + expo-constants`；typecheck 全绿，Web build、Gateway unit、Mobile test 均通过
 
 - [260329-剩余参考能力全部补齐方案](./workflow/done/260329-剩余参考能力全部补齐方案.md) — 已完成：补齐 `session_*`、`ast_grep_*`、`skill_mcp`、`interactive_bash`、`call_omo_agent`、`look_at` 等剩余 reference tool family，并让 Agents 页面支持 `model / variant / fallbackModels` 的可视化配置与运行时生效
 
@@ -86,6 +107,28 @@
 - [260319-opencowork-补充借鉴方案](./workflow/260319-opencowork-补充借鉴方案.md)
 
 ## Architecture Decisions
+
+- [2026-03-31] Claude Code 风格工具环境接入 OpenAWork 时，保留现有 canonical 小写工具名作为执行真相源；在 `services/agent-gateway` 的模型可见层引入 session-scoped compatibility surface（`openawork / claude_code_simple / claude_code_default`），统一承担名称与入参适配，避免破坏现有 runtime/contracts。
+
+- [2026-03-30] `services/agent-gateway/src/routes/stream.ts` 已按职责拆分：核心流执行逻辑保留在 `stream.ts`，恢复/后台运行迁至 `stream-runtime.ts`，路由注册迁至 `stream-routes-plugin.ts`，以满足单文件 ≤1500 行约束并降低后续耦合。
+
+- [2026-03-30] request-scoped chat replay 继续收敛：`session_run_events` 以 `session_id + client_request_id + seq` 形成 durable 请求级事件序列；只有存在终止事件时才直接 replay durable events，权限请求与权限回复都必须绑定同一 `clientRequestId`，避免跨请求事件串入回放。
+
+- [2026-03-30] Chat 运行时协议的 replay 主真相源收敛为 request-scoped `session_run_events`：按 `session_id + client_request_id + seq` 顺序持久化并优先回放，`session_messages` 仅保留为兼容降级路径；`docs/chat-runtime-ssot.md` 是该协议层的当前规范文档。
+
+- [2026-03-30] backend 安全与留痕优先采用“在现有 SQLite 主事实上增量扩表”而非重做 event-sourcing：新增 `request_workflow_logs`、`session_file_diffs`、`permission_decision_logs`、`session_run_events`，并让 workspace 权限文件与 `.gitignore/.agentignore` 真正进入 gateway 运行时决策链。
+
+- [2026-03-30] 工作区本地 skills 采用独立 `/skills/local/discover` 与 `/skills/local/install` 路由接入，继续复用 `installed_skills` 作为运行时事实源；不把本地目录扫描混入远程 registry search/sync 缓存链路。
+
+- [2026-03-30] `Prepare Release` 必须先跑发布前质量门禁再 bump/tag/dispatch；当前纳入门禁的只包含已验证绿色的 `format:check`、`typecheck`、`web build`、`agent-gateway test:unit`、`mobile test` 与发布稿 dry-run，开发中已知红项明确排除。
+
+- [2026-03-30] 每次版本发布必须有中文更新日志：发布稿不再落本地仓库，统一由 `Prepare Release` 在 workflow 运行时临时生成；基础中文摘要人工必填，变更条目可由最近一段 git 提交历史自动提取；desktop/mobile 发布流只消费 runtime-only 发布稿，不再接受旁路说明。
+- [2026-03-30] Desktop 版本日志在多平台构建完成后自动追加安装包下载链接；Mobile 在 EAS CLI 返回可用 URL 时会把 iOS / Android 构建产物链接追加到 workflow summary；GitHub Release body / workflow summary 负责承载最终可下载的版本日志，仓库内不再存储发布稿文件。
+
+- [2026-03-30] 版本调整统一走 `scripts/release-version.mjs` + `prepare-release.yml`：脚本负责推断与同步版本，workflow 负责 commit/push 与触发现有 desktop/mobile 发布链，不再手工逐个改 `package.json` / `app.json` / `Cargo.toml`。
+- [2026-03-30] 仓库版本号采用 9 进 1 进位规则而非无限 patch 增长：`0.0.9 → 0.1.0`、`0.9.9 → 1.0.0`；显式输入超出单段上限的版本（如 `0.0.10`）会被规范化。
+
+- [2026-03-30] 系统版本展示统一以仓库根 `package.json` 的 semver 作为事实源：`__APP_VERSION__` 用于用户可见版本，git hash/tag/dirty 仅保留在 `buildVersion` / `__APP_BUILD_VERSION__` 等调试字段中。
 
 - [2026-03-29] Agent 默认模型配置收敛为“页面可编辑 + runtime 真消费”：managed agent 支持 `model / variant / fallbackModels`，builtin 默认值来自 reference 候选，`task` / category delegation 与 `look_at` 优先读取 managed 配置，再回退到 reference fallback。
 
@@ -149,6 +192,20 @@
 - 规划文档统一放置在 `.agentdocs/workflow/`，使用 `YYMMDD-任务名.md` 命名。
 
 ## Known Pitfalls
+
+- [2026-03-31] 参考风格工具环境不能只做名字映射：`/capabilities`、stream 下发工具集、sandbox 入站执行、session metadata allowlist 与历史 `toolName` 留痕必须一起设计；否则极易出现“展示可用但运行不可用”或“reference 名称与 canonical 名称混淆无法排障”的漂移。
+- [2026-03-31] Claude Code 风格工具环境实施时，不能把“每对话文件变更记录与日志”当成后置补丁：`request_workflow_logs`、`session_file_diffs`、`session_run_events` 必须与 profile/reference surface 同步设计，否则对话、工具调用、文件 diff 与运行日志会断链。
+
+- [2026-03-30] `apps/web` 若直接消费 `@openAwork/shared-ui` 的包导出，Vitest/Vite 可能继续读取旧的 `dist` 产物，导致跨包 UI 源码改动“看起来没生效”；已通过 `apps/web/vite.config.ts` alias 到 `packages/shared-ui/src/index.ts` 保持开发/测试与源码一致。
+
+- [2026-03-30] `release-mobile.yml` 的 preview OTA 不能只在 step 级判断 `inputs.profile == 'preview'`：如果 job 级 `if` 不放开 preview dispatch，prepare-release 触发的 mobile preview 会构建成功但永远不推 OTA。
+
+- [2026-03-30] 如果 runtime-only 发布稿没有通过 annotated tag、workflow input 或临时文件 artifact 在 job 间正确传递，就会重新引入“Action 输入有说明、下游 workflow 丢失正文”的漂移；发布说明必须以 workflow 运行时携带的正文为准。
+
+- [2026-03-30] 发布前门禁不要盲目照搬 CI 的全部检查：当前 `packages/lsp-client` lint 仍为红，`apps/desktop` 独立构建与 `agent-gateway build:binary` 也处于开发中红项；若未先收口这些基线问题，直接纳入 `Prepare Release` 只会把可用发布链整体锁死。
+
+- [2026-03-30] Gateway/sidecar 读取版本时不要依赖源文件相对路径去找仓库根 `package.json`：编译后 `dist/` 和桌面 sidecar 的暂存目录层级会变，正确做法是以 `process.cwd()` 向上探测根包，找不到时回退到当前包版本或环境变量。
+- [2026-03-30] Expo 移动端不要在运行时代码里跨 workspace 边界直接 import 根 `package.json` 取版本；更稳的做法是用 `app.config.ts` 注入版本，再通过 `expo-constants` 在 UI 里读取。
 
 - [2026-03-27] `workspace-review.ts` 会同时被 `/workspace/review/status` 路由与 workspace review tool 复用；对“目标目录不是 Git 仓库”的 git 128 错误必须在 helper 层统一降级为空变更，否则 HTTP 和 tool 两条链路都会一起冒泡成 500/执行失败。
 

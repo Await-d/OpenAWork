@@ -68,9 +68,9 @@ feat(Gateway): 新增工作流路由鉴权
 - footer / trailer 前保留空行
 - 每行尽量控制在 100 个字符以内
 
-## Sisyphus 协作尾注
+## 协作尾注限制
 
-若本次提交明确需要保留 Sisyphus 协作痕迹，只允许使用以下标准文案，且必须 **footer + trailer 成对出现**：
+本仓库提交信息**不允许出现任何 Sisyphus 协作尾注**，包括但不限于以下内容：
 
 ```text
 Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-openagent)
@@ -78,11 +78,11 @@ Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-openagent)
 Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
 ```
 
-以下写法会被视为不规范：
+以下写法均视为不规范，提交前应删除：
 
-- 只写 `Ultraworked with ...`，不写 `Co-authored-by`
-- 只写 `Co-authored-by: Sisyphus ...`，不写 `Ultraworked with ...`
-- 使用非仓库约定的 Sisyphus 文案变体
+- `Ultraworked with ...`
+- `Co-authored-by: Sisyphus ...`
+- 任何变体、拆分写法或其他 Sisyphus 协作痕迹
 
 ## 本地触发方式
 

@@ -52,4 +52,29 @@ The minimum runtime event set for Chat remains:
 - `compaction`
 - `audit_ref`
 
-Realtime updates are delivered through stream events; refresh-time recovery comes from gateway-backed session/task/permission reads.
+Realtime updates are delivered through stream events.
+
+### Protocol SSOT
+
+- **Primary replay source**: `services/agent-gateway/src/session-run-events.ts`
+- **Request scope key**: `session_id + client_request_id + seq`
+- **Primary replay path**: `services/agent-gateway/src/routes/stream.ts#replayPersistedAssistantResponse`
+
+Rules:
+
+1. Request-scoped `session_run_events` are the first-class replay source for a single chat request.
+2. A request may be replayed directly from durable events only when that request has a terminal event (`done` or `error`).
+3. `session_messages` remain a compatibility fallback for older data and partial recovery only; they are not the primary protocol SSOT.
+4. Permission or task events from other requests must not be injected into a request-scoped replay path.
+5. Durable `tool_result` and stream `tool_result` must share the same payload core (`toolCallId`, `toolName`, `output`, `isError`, optional `pendingPermissionRequestId`).
+
+### Refresh / Recovery Surfaces
+
+- **Primary event replay**: request-scoped durable events
+- **Secondary durable reads**: gateway-backed `session/task/permission/children` reads
+- **Browser normalization**: `apps/web/src/pages/chat-page/support.ts`
+
+Rules:
+
+1. Browser refresh recovery may use gateway snapshots for side panels, but protocol replay should prefer durable request-scoped events.
+2. Golden transcript tests should lock representative tool_call/tool_result/pending-permission sequences to prevent protocol drift.
