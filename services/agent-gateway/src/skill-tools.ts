@@ -31,6 +31,7 @@ interface SkillManifestLike {
   name?: string;
   displayName?: string;
   description?: string;
+  descriptionForModel?: string;
   permissions?: Array<{ type?: string; scope?: string }>;
   capabilities?: string[];
 }
@@ -57,6 +58,7 @@ function matchesRequestedSkill(
 function buildBuiltinSkillContent(manifest: SkillManifestLike): string {
   const title = manifest.displayName ?? manifest.name ?? manifest.id ?? 'unknown-skill';
   const description = manifest.description ?? 'No description available.';
+  const descriptionForModel = manifest.descriptionForModel?.trim();
   const capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
   const permissions = Array.isArray(manifest.permissions)
     ? manifest.permissions
@@ -69,6 +71,7 @@ function buildBuiltinSkillContent(manifest: SkillManifestLike): string {
     `# ${title}`,
     '',
     description,
+    ...(descriptionForModel ? ['', 'Instructions for model:', descriptionForModel] : []),
     ...(capabilities.length > 0 ? ['', `Capabilities: ${capabilities.join(', ')}`] : []),
     ...(permissions.length > 0 ? ['', `Permissions: ${permissions}`] : []),
     '</skill_content>',

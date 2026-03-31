@@ -139,7 +139,7 @@ describe('stream stop route', () => {
 
     const [{ default: Fastify }, { streamRoutes }, streamCancellationModule] = await Promise.all([
       import('fastify'),
-      import('../routes/stream.js'),
+      import('../routes/stream-routes-plugin.js'),
       import('../routes/stream-cancellation.js'),
     ]);
 

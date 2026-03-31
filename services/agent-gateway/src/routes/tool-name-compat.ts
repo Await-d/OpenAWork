@@ -5,6 +5,10 @@ const LEGACY_ENABLED_TOOL_NAME_MAP = {
   workspace_search: 'grep',
   workspace_write_file: 'write',
   workspace_create_file: 'write',
+  file_read: 'read',
+  read_file: 'read',
+  file_write: 'write',
+  write_file: 'write',
 } as const;
 
 export function isEnabledToolName(

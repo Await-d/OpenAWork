@@ -7,7 +7,7 @@ import authPlugin from '../auth.js';
 import { connectDb, closeDb, migrate, sqliteGet, sqliteRun } from '../db.js';
 import requestWorkflowPlugin from '../request-workflow.js';
 import { sessionsRoutes } from '../routes/sessions.js';
-import { streamRoutes } from '../routes/stream.js';
+import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { withTempEnv } from './task-verification-helpers.js';
 
 type ScenarioName =

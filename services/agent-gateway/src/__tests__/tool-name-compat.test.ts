@@ -19,6 +19,10 @@ describe('isEnabledToolName', () => {
     expect(isEnabledToolName('workspace_search', enabledToolNames)).toBe(true);
     expect(isEnabledToolName('workspace_write_file', enabledToolNames)).toBe(true);
     expect(isEnabledToolName('workspace_create_file', enabledToolNames)).toBe(true);
+    expect(isEnabledToolName('file_read', enabledToolNames)).toBe(true);
+    expect(isEnabledToolName('read_file', enabledToolNames)).toBe(true);
+    expect(isEnabledToolName('file_write', enabledToolNames)).toBe(true);
+    expect(isEnabledToolName('write_file', enabledToolNames)).toBe(true);
   });
 
   it('rejects legacy tool names when the mapped reference tool is not enabled', () => {

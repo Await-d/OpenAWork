@@ -1,5 +1,10 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../request-workflow-log-store.js', () => ({
+  persistRequestWorkflowLog: () => undefined,
+}));
+
 import requestWorkflowPlugin, { startRequestWorkflow } from '../request-workflow.js';
 
 describe('request workflow helper', () => {

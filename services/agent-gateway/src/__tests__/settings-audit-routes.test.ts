@@ -37,6 +37,25 @@ describe('settings audit routes', () => {
 
   it('returns sanitized dev logs scoped to the current user', async () => {
     sqliteAllMock.mockImplementation((query: string, params: unknown[]) => {
+      if (query.includes('FROM request_workflow_logs')) {
+        expect(params).toEqual(['user-a', 100]);
+        return [
+          {
+            id: 9,
+            request_id: 'wf-a',
+            user_id: 'user-a',
+            session_id: 'session-a',
+            method: 'GET',
+            path: '/sessions/session-a/stream',
+            status_code: 500,
+            ip: '127.0.0.1',
+            user_agent: 'test-agent',
+            workflow_json: JSON.stringify([{ name: 'request.handle', status: 'error' }]),
+            created_at: '2026-03-26T12:00:01.000Z',
+          },
+        ];
+      }
+
       expect(query).toContain('INNER JOIN sessions ON sessions.id = audit_logs.session_id');
       expect(query).toContain('WHERE sessions.user_id = ?');
       expect(query).toContain('SELECT audit_logs.id');
@@ -80,8 +99,8 @@ describe('settings audit routes', () => {
       }>;
     };
 
-    expect(payload.logs).toHaveLength(1);
-    expect(payload.logs[0]).toMatchObject({
+    expect(payload.logs).toHaveLength(2);
+    expect(payload.logs.find((entry) => entry.toolName === 'web_search')).toMatchObject({
       toolName: 'web_search',
       requestId: 'req-a',
       input: {
@@ -90,7 +109,16 @@ describe('settings audit routes', () => {
       },
       output: { secret: '[REDACTED]' },
     });
-    expect(payload.logs[0]?.output.long?.endsWith('…[truncated]')).toBe(true);
+    expect(
+      payload.logs
+        .find((entry) => entry.toolName === 'web_search')
+        ?.output.long?.endsWith('…[truncated]'),
+    ).toBe(true);
+    expect(payload.logs.find((entry) => entry.toolName === 'request_workflow')).toMatchObject({
+      requestId: 'wf-a',
+      source: 'workflow',
+      isError: true,
+    });
 
     await app.close();
   });

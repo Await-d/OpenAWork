@@ -1,11 +1,8 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import type { WebSocket } from '@fastify/websocket';
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
-import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
+import type { FileDiffContent, MessageContent, RunEvent } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
 import { sqliteGet, sqliteRun } from '../db.js';
 import {
   modelRequestSchema,
@@ -16,37 +13,26 @@ import { getProviderConfigForSelection } from '../provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import {
   appendSessionMessage,
-  buildUpstreamConversation,
   getSessionMessageByRequestId,
-  hasToolOutputReference,
   listSessionMessagesByRequestScope,
-  listSessionMessages,
-  truncateSessionMessagesAfter,
 } from '../session-message-store.js';
 import { persistStreamUserMessage } from '../stream-session-title.js';
-import { listSessionPermissionRunEvents } from '../session-permission-events.js';
-import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session-run-events.js';
+import { buildCapabilityContext } from './capabilities.js';
+import { buildRequestScopedSystemPrompts } from './stream-system-prompts.js';
 import {
-  buildModifiedFilesSummaryContent,
-  collectFileDiffsFromToolOutput,
-  mergeFileDiffs,
-} from '../modified-files-summary.js';
-import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tool-sandbox.js';
+  hasPersistedRunEvent,
+  listSessionRunEventsByRequest,
+  persistSessionRunEventForRequest,
+  subscribeSessionRunEvents,
+} from '../session-run-events.js';
+import { collectFileDiffsFromToolOutput, mergeFileDiffs } from '../modified-files-summary.js';
+import { persistSessionFileDiffs } from '../session-file-diff-store.js';
+import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
+import { createDefaultSandbox } from '../tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tool-sandbox.js';
-import {
-  buildGatewayToolDefinitions,
-  createStreamParseState,
-  parseUpstreamFrame,
-  ResponsesUpstreamEventError,
-} from './stream-protocol.js';
+import { buildGatewayToolDefinitions } from './stream-protocol.js';
 import { isEnabledToolName } from './tool-name-compat.js';
-import { resolveEofRoundDecision } from './stream-completion.js';
-import { readUpstreamError } from './upstream-error.js';
-import { buildUpstreamRequestBody } from './upstream-request.js';
-import {
-  parseSessionMetadataJson,
-  sanitizeSessionMetadataJson,
-} from '../session-workspace-metadata.js';
+import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace-paths.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
 import {
@@ -54,23 +40,22 @@ import {
   getAnyInFlightStreamRequestForSession,
   getInFlightStreamRequest,
   registerInFlightStreamRequest,
-  stopInFlightStreamRequest,
 } from './stream-cancellation.js';
 import {
-  clearPendingTaskParentAutoResumesForSession,
   isTaskParentAutoResumeClientRequestId,
   noteManualSessionInteraction,
 } from '../task-parent-auto-resume.js';
-
-type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
-type StreamStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled';
+import { runModelRound } from './stream-model-round.js';
+import {
+  clearSessionRuntimeThread,
+  SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
+  touchSessionRuntimeThread,
+  upsertSessionRuntimeThread,
+} from '../session-runtime-thread-store.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
-const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
-  '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量用 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。';
-
-function setPersistedSessionStateStatus(input: {
+export function setPersistedSessionStateStatus(input: {
   sessionId: string;
   status: PersistedSessionStateStatus;
   userId: string;
@@ -81,7 +66,7 @@ function setPersistedSessionStateStatus(input: {
   );
 }
 
-async function buildWorkspaceContext(metadataJson: string): Promise<string | null> {
+export async function buildWorkspaceContext(metadataJson: string): Promise<string | null> {
   let wd: string | null = null;
   try {
     const meta = JSON.parse(metadataJson) as Record<string, unknown>;
@@ -108,7 +93,7 @@ async function buildWorkspaceContext(metadataJson: string): Promise<string | nul
   }
 }
 
-function isWebSearchEnabled(metadataJson: string): boolean {
+export function isWebSearchEnabled(metadataJson: string): boolean {
   try {
     const meta = JSON.parse(metadataJson) as Record<string, unknown>;
     if (meta['webSearchEnabled'] === true) {
@@ -129,7 +114,7 @@ function isWebSearchEnabled(metadataJson: string): boolean {
   }
 }
 
-const streamRequestSchema = modelRequestSchema.extend({
+export const streamRequestSchema = modelRequestSchema.extend({
   displayMessage: z.string().min(1).max(32768).optional(),
   message: z.string().min(1).max(32768),
   providerId: z.string().min(1).max(200).optional(),
@@ -144,11 +129,11 @@ const streamRequestSchema = modelRequestSchema.extend({
     .optional(),
 });
 
-const stopStreamSchema = z.object({
+export const stopStreamSchema = z.object({
   clientRequestId: z.string().min(1).max(128),
 });
 
-type StreamRequest = z.infer<typeof streamRequestSchema>;
+export type StreamRequest = z.infer<typeof streamRequestSchema>;
 
 export interface ApprovedPermissionResumePayload {
   clientRequestId: string;
@@ -159,7 +144,7 @@ export interface ApprovedPermissionResumePayload {
   rawInput: Record<string, unknown>;
 }
 
-interface SessionStreamContext {
+export interface SessionStreamContext {
   legacyMessagesJson: string;
   metadataJson: string;
 }
@@ -176,57 +161,20 @@ interface SessionProviderSelection {
 }
 
 interface StreamAccumulationState {
-  assistantThinking: string;
-  assistantText: string;
   toolCalls: Map<string, { toolName: string; inputText: string }>;
 }
 
-interface TaskRuntimeGuardContext {
+export interface TaskRuntimeGuardContext {
   lastToolSignature: string | null;
   maxConsecutiveRepeatedToolCalls: number;
   repeatedToolSignatureCount: number;
 }
 
-const DEFAULT_TASK_RUNTIME_GUARDS = {
-  maxConsecutiveRepeatedToolCalls: 4,
-};
-
-function createAccumulationState(): StreamAccumulationState {
-  return {
-    assistantThinking: '',
-    assistantText: '',
-    toolCalls: new Map(),
-  };
-}
-
-function buildAssistantTextWithThinking(text: string, thinking: string): string {
-  const normalizedThinking = thinking.trim();
-  const normalizedText = text.trim();
-
-  if (normalizedThinking.length === 0) {
-    return text;
-  }
-
-  const fenceMatches = normalizedThinking.match(/`{3,}/g);
-  const longestFence = fenceMatches?.reduce((max, value) => Math.max(max, value.length), 2) ?? 2;
-  const fence = '`'.repeat(longestFence + 1);
-  const thinkingBlock = `${fence}thinking\n${normalizedThinking}\n${fence}`;
-  return normalizedText.length > 0 ? `${thinkingBlock}\n\n${text}` : thinkingBlock;
-}
-
 export function createTaskRuntimeGuardContext(
   metadataJson: string,
 ): TaskRuntimeGuardContext | null {
-  const metadata = parseSessionMetadataJson(metadataJson);
-  if (metadata['createdByTool'] !== 'task') {
-    return null;
-  }
-
-  return {
-    lastToolSignature: null,
-    maxConsecutiveRepeatedToolCalls: DEFAULT_TASK_RUNTIME_GUARDS.maxConsecutiveRepeatedToolCalls,
-    repeatedToolSignatureCount: 0,
-  };
+  void metadataJson;
+  return null;
 }
 
 export function recordTaskToolCallOrThrow(
@@ -253,56 +201,7 @@ export function recordTaskToolCallOrThrow(
   }
 }
 
-function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): void {
-  if (chunk.type === 'text_delta') {
-    state.assistantText += chunk.delta;
-    return;
-  }
-
-  if (chunk.type === 'thinking_delta') {
-    state.assistantThinking += chunk.delta;
-    return;
-  }
-
-  if (chunk.type !== 'tool_call_delta') return;
-  const existing = state.toolCalls.get(chunk.toolCallId);
-  state.toolCalls.set(chunk.toolCallId, {
-    toolName: chunk.toolName,
-    inputText: `${existing?.inputText ?? ''}${chunk.inputDelta}`,
-  });
-}
-
-function buildAssistantContent(
-  state: StreamAccumulationState,
-  turnFileDiffs?: Map<string, FileDiffContent>,
-): MessageContent[] {
-  const content: MessageContent[] = [];
-  const assistantText = buildAssistantTextWithThinking(
-    state.assistantText,
-    state.assistantThinking,
-  );
-  if (assistantText.trim().length > 0) {
-    content.push({ type: 'text', text: assistantText });
-  }
-
-  state.toolCalls.forEach((toolCall, toolCallId) => {
-    content.push({
-      type: 'tool_call',
-      toolCallId,
-      toolName: toolCall.toolName,
-      input: parseToolInput(toolCall.inputText),
-    });
-  });
-
-  const summary = turnFileDiffs ? buildModifiedFilesSummaryContent(turnFileDiffs) : null;
-  if (summary) {
-    content.push(summary);
-  }
-
-  return content.length > 0 ? content : [{ type: 'text', text: '' }];
-}
-
-function getEnabledTools(webSearchEnabled: boolean) {
+export function getEnabledTools(webSearchEnabled: boolean) {
   return buildGatewayToolDefinitions().filter((tool) => {
     if (tool.function.name !== 'websearch') return true;
     return webSearchEnabled;
@@ -315,7 +214,7 @@ function createAbortError(): Error {
   return error;
 }
 
-function createRunEventMeta(runId: string, sequence: { value: number }) {
+export function createRunEventMeta(runId: string, sequence: { value: number }) {
   const eventId = `${runId}:evt:${sequence.value}`;
   sequence.value += 1;
   return {
@@ -353,17 +252,28 @@ function isMissingRequiredToolArguments(
   return Object.keys(rawInput).length === 0;
 }
 
-function isToolUseStopReason(reason: StreamStopReason): boolean {
-  return reason === 'tool_use';
+function hasTerminalRunEvent(events: RunEvent[]): boolean {
+  return events.some((event) => event.type === 'done' || event.type === 'error');
 }
 
-function replayPersistedAssistantResponse(input: {
+export function replayPersistedAssistantResponse(input: {
   clientRequestId: string;
   runId: string;
   sessionId: string;
   userId: string;
   writeChunk: (chunk: RunEvent) => void;
 }): boolean {
+  const durableEvents = listSessionRunEventsByRequest({
+    sessionId: input.sessionId,
+    clientRequestId: input.clientRequestId,
+  });
+  if (durableEvents.length > 0 && hasTerminalRunEvent(durableEvents)) {
+    durableEvents.forEach((event) => {
+      input.writeChunk(event);
+    });
+    return true;
+  }
+
   const stored = getSessionMessageByRequestId({
     sessionId: input.sessionId,
     userId: input.userId,
@@ -377,7 +287,6 @@ function replayPersistedAssistantResponse(input: {
     userId: input.userId,
     clientRequestId: input.clientRequestId,
   });
-  const permissionEvents = listSessionPermissionRunEvents(input.sessionId);
   const toolNames = new Map<string, string>();
   scopedMessages.forEach((message) => {
     if (message.role !== 'assistant' && message.role !== 'tool') {
@@ -390,14 +299,6 @@ function replayPersistedAssistantResponse(input: {
     });
   });
   let sequence = 1;
-  permissionEvents.forEach((event) => {
-    input.writeChunk({
-      ...event,
-      eventId: event.eventId ?? `${input.runId}:replay:${sequence++}`,
-      runId: event.runId ?? input.runId,
-      occurredAt: event.occurredAt ?? Date.now(),
-    });
-  });
   scopedMessages.forEach((message) => {
     if (message.role !== 'assistant' && message.role !== 'tool') {
       return;
@@ -406,17 +307,20 @@ function replayPersistedAssistantResponse(input: {
     if (message.role === 'tool') {
       message.content.forEach((content) => {
         if (content.type !== 'tool_result') return;
-        input.writeChunk({
-          type: 'tool_result',
-          toolCallId: content.toolCallId,
-          toolName: toolNames.get(content.toolCallId) ?? 'tool',
-          output: content.output,
-          isError: content.isError,
-          pendingPermissionRequestId: content.pendingPermissionRequestId,
-          eventId: `${input.runId}:replay:${sequence++}`,
-          runId: input.runId,
-          occurredAt: Date.now(),
-        });
+        input.writeChunk(
+          buildToolResultRunEvent({
+            toolCallId: content.toolCallId,
+            toolName: content.toolName ?? toolNames.get(content.toolCallId) ?? 'tool',
+            output: content.output,
+            isError: content.isError,
+            pendingPermissionRequestId: content.pendingPermissionRequestId,
+            eventMeta: {
+              eventId: `${input.runId}:replay:${sequence++}`,
+              runId: input.runId,
+              occurredAt: Date.now(),
+            },
+          }),
+        );
       });
       return;
     }
@@ -489,7 +393,7 @@ function buildErrorContent(code: string, message: string): MessageContent[] {
   return [{ type: 'text', text: `[错误: ${code}] ${message}`.trim() }];
 }
 
-function loadSessionContext(sessionId: string, userId: string): SessionStreamContext | null {
+export function loadSessionContext(sessionId: string, userId: string): SessionStreamContext | null {
   const session = sqliteGet<{ metadata_json: string; messages_json: string }>(
     'SELECT metadata_json, messages_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [sessionId, userId],
@@ -501,7 +405,7 @@ function loadSessionContext(sessionId: string, userId: string): SessionStreamCon
   };
 }
 
-function loadSessionUser(sessionId: string, userId: string): JwtPayload | null {
+export function loadSessionUser(sessionId: string, userId: string): JwtPayload | null {
   const user = sqliteGet<SessionUserRow>(
     `SELECT u.email
      FROM users u
@@ -567,7 +471,7 @@ function parseStoredJson<T>(value: string | undefined): T | undefined {
   }
 }
 
-async function resolveStreamModelRoute(input: {
+export async function resolveStreamModelRoute(input: {
   metadataJson: string;
   requestData: StreamRequest;
   userId: string;
@@ -606,15 +510,11 @@ async function resolveStreamModelRoute(input: {
   return resolveModelRoute(resolvedRequestData);
 }
 
-function createIntermediateAssistantRequestId(clientRequestId: string, round: number): string {
-  return `${clientRequestId}:assistant:${round}`;
-}
-
-function createToolResultRequestId(clientRequestId: string, toolCallId: string): string {
+export function createToolResultRequestId(clientRequestId: string, toolCallId: string): string {
   return `${clientRequestId}:tool:${toolCallId}`;
 }
 
-async function executeToolCalls(input: {
+export async function executeToolCalls(input: {
   clientRequestId: string;
   executionContext?: SandboxExecutionContext;
   enabledToolNames: Set<string>;
@@ -676,35 +576,46 @@ async function executeToolCalls(input: {
       userId: input.userId,
       role: 'tool',
       content: [
-        {
-          type: 'tool_result',
+        buildToolResultContent({
           toolCallId,
+          toolName: toolCall.toolName,
           output: result.output,
           isError: result.isError,
           pendingPermissionRequestId: result.pendingPermissionRequestId,
-        },
+        }),
       ],
       legacyMessagesJson: input.sessionContext.legacyMessagesJson,
       clientRequestId: createToolResultRequestId(input.clientRequestId, toolCallId),
     });
 
     if (input.turnFileDiffs) {
-      mergeFileDiffs(input.turnFileDiffs, collectFileDiffsFromToolOutput(result.output));
+      const fileDiffs = collectFileDiffsFromToolOutput(result.output);
+      mergeFileDiffs(input.turnFileDiffs, fileDiffs);
+      if (fileDiffs.length > 0) {
+        persistSessionFileDiffs({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          requestId: createToolResultRequestId(input.clientRequestId, toolCallId),
+          toolName: toolCall.toolName,
+          diffs: fileDiffs,
+        });
+      }
     }
 
-    input.writeChunk({
-      type: 'tool_result',
-      toolCallId,
-      toolName: toolCall.toolName,
-      output: result.output,
-      isError: result.isError,
-      pendingPermissionRequestId: result.pendingPermissionRequestId,
-      ...createRunEventMeta(input.runId, input.eventSequence),
-    });
+    input.writeChunk(
+      buildToolResultRunEvent({
+        toolCallId,
+        toolName: toolCall.toolName,
+        output: result.output,
+        isError: result.isError,
+        pendingPermissionRequestId: result.pendingPermissionRequestId,
+        eventMeta: createRunEventMeta(input.runId, input.eventSequence),
+      }),
+    );
   }
 }
 
-function createStreamExecutionContext(
+export function createStreamExecutionContext(
   clientRequestId: string,
   nextRound: number,
   requestData: StreamRequest,
@@ -716,346 +627,9 @@ function createStreamExecutionContext(
   };
 }
 
-async function runModelRound(input: {
-  clientRequestId: string;
-  enabledTools: ReturnType<typeof getEnabledTools>;
-  eventSequence: { value: number };
-  requestData: StreamRequest;
-  round: number;
-  route: ReturnType<typeof resolveModelRoute>;
-  runId: string;
-  signal: AbortSignal;
-  sessionContext: SessionStreamContext;
-  sessionId: string;
-  transport: 'SSE' | 'WS';
-  turnFileDiffs?: Map<string, FileDiffContent>;
-  userId: string;
-  wl: WorkflowLogger;
-  ctx: ReturnType<typeof createRequestContext>;
-  workspaceCtx: string | null;
-  writeChunk: (chunk: RunEvent) => void;
-}): Promise<{
-  shouldContinue: boolean;
-  shouldStop: boolean;
-  stopReason: StreamStopReason;
-  statusCode: number;
-  state: StreamAccumulationState;
-}> {
-  const conversation = buildUpstreamConversation(
-    listSessionMessages({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-      statuses: ['final'],
-    }),
-  );
-  const shouldGuideToolOutputReadback = hasToolOutputReference(conversation);
-  const upstreamMessages = [
-    ...(input.workspaceCtx ? [{ role: 'system' as const, content: input.workspaceCtx }] : []),
-    ...(input.route.systemPrompt
-      ? [{ role: 'system' as const, content: input.route.systemPrompt }]
-      : []),
-    ...(shouldGuideToolOutputReadback
-      ? [{ role: 'system' as const, content: TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT }]
-      : []),
-    ...conversation,
-  ];
-  const upstreamPath =
-    input.route.upstreamProtocol === 'responses' ? '/responses' : '/chat/completions';
-  const upstreamBody = buildUpstreamRequestBody({
-    protocol: input.route.upstreamProtocol,
-    model: input.route.model,
-    variant: input.route.variant,
-    maxTokens: input.route.maxTokens,
-    temperature: input.route.temperature,
-    messages: upstreamMessages,
-    tools: input.enabledTools,
-    requestOverrides: input.route.requestOverrides,
-  });
+export { runModelRound } from './stream-model-round.js';
 
-  const stepUpstream = input.wl.start(`upstream.fetch.${input.round}`, undefined, {
-    model: input.route.model,
-    upstreamProtocol: input.route.upstreamProtocol,
-    round: input.round,
-    stream: true,
-  });
-  const state = createAccumulationState();
-  let stepStream: WorkflowStepHandle | undefined;
-
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(input.route.apiKey ? { Authorization: `Bearer ${input.route.apiKey}` } : {}),
-      ...(input.route.requestOverrides.headers ?? {}),
-    };
-
-    const response = await fetch(`${input.route.apiBaseUrl}${upstreamPath}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(upstreamBody),
-      signal: input.signal,
-    });
-
-    if (!response.ok || !response.body) {
-      const upstreamError = await readUpstreamError(response);
-      input.wl.fail(stepUpstream, undefined, { status: response.status });
-      appendSessionMessage({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: 'assistant',
-        content: buildErrorContent(upstreamError.code, upstreamError.message),
-        legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-        clientRequestId: input.clientRequestId,
-        status: 'error',
-      });
-      input.writeChunk({
-        ...createStreamErrorChunk(upstreamError.code, upstreamError.message, input.runId),
-        status: response.status,
-      } as RunEvent);
-      input.wl.flush(input.ctx, response.status);
-      return {
-        shouldContinue: false,
-        shouldStop: true,
-        stopReason: 'error',
-        statusCode: response.status,
-        state,
-      };
-    }
-    input.wl.succeed(stepUpstream, undefined, { status: response.status });
-
-    stepStream = input.wl.start('upstream.stream', undefined, {
-      protocol: input.transport,
-      upstreamProtocol: input.route.upstreamProtocol,
-      round: input.round,
-    });
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const streamState = createStreamParseState(input.runId);
-    streamState.nextEventSequence = input.eventSequence.value;
-    let buffer = '';
-    let stopReason: StreamStopReason = 'end_turn';
-
-    const finalizeAssistant = (reason: StreamStopReason) => {
-      if (
-        reason === 'cancelled' &&
-        state.assistantThinking.trim().length === 0 &&
-        state.assistantText.trim().length === 0 &&
-        state.toolCalls.size === 0
-      ) {
-        return;
-      }
-      appendSessionMessage({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: 'assistant',
-        content: buildAssistantContent(
-          state,
-          reason === 'tool_use' ? undefined : input.turnFileDiffs,
-        ),
-        legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-        clientRequestId:
-          reason === 'tool_use'
-            ? createIntermediateAssistantRequestId(input.clientRequestId, input.round)
-            : input.clientRequestId,
-      });
-    };
-
-    const completeRound = (
-      reason: StreamStopReason,
-      doneChunk?: {
-        type: 'done';
-        stopReason: StreamStopReason;
-        eventId?: string;
-        runId?: string;
-        occurredAt?: number;
-      },
-    ) => {
-      stopReason = reason;
-      finalizeAssistant(stopReason);
-      if (stopReason !== 'tool_use' || state.toolCalls.size === 0) {
-        input.writeChunk(
-          doneChunk ?? {
-            type: 'done',
-            stopReason,
-            ...createRunEventMeta(input.runId, input.eventSequence),
-          },
-        );
-      }
-      if (stepStream) {
-        input.wl.succeed(stepStream, undefined, { round: input.round, stopReason });
-      }
-
-      const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
-      return {
-        shouldContinue,
-        shouldStop: !shouldContinue,
-        stopReason,
-        statusCode: 200,
-        state,
-      };
-    };
-
-    const applyParsedChunks = (parsedChunks: StreamChunk[]) => {
-      for (const parsedChunk of parsedChunks) {
-        input.eventSequence.value = streamState.nextEventSequence;
-        if (parsedChunk.type === 'done') {
-          return completeRound(parsedChunk.stopReason, parsedChunk);
-        }
-
-        accumulateChunk(state, parsedChunk);
-        input.writeChunk(parsedChunk);
-      }
-
-      return null;
-    };
-
-    const processBuffer = () => {
-      let normalized = buffer.replace(/\r\n/g, '\n');
-      let boundary = normalized.indexOf('\n\n');
-      while (boundary !== -1) {
-        const frame = normalized.slice(0, boundary);
-        buffer = normalized.slice(boundary + 2);
-        normalized = buffer.replace(/\r\n/g, '\n');
-        boundary = normalized.indexOf('\n\n');
-
-        const parsedChunks = parseUpstreamFrame(frame, input.route.upstreamProtocol, streamState);
-        const result = applyParsedChunks(parsedChunks);
-        if (result) {
-          return result;
-        }
-      }
-
-      input.eventSequence.value = streamState.nextEventSequence;
-      return null;
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      try {
-        const result = processBuffer();
-        if (result) {
-          return result;
-        }
-      } catch (error) {
-        const errorCode = error instanceof ResponsesUpstreamEventError ? error.code : 'PARSE_ERROR';
-        const errorMessage =
-          error instanceof ResponsesUpstreamEventError
-            ? error.message
-            : 'Failed to parse upstream stream chunk';
-        if (stepStream.status === 'pending') {
-          input.wl.fail(stepStream, errorMessage, {
-            round: input.round,
-          });
-        }
-        appendSessionMessage({
-          sessionId: input.sessionId,
-          userId: input.userId,
-          role: 'assistant',
-          content: buildErrorContent(errorCode, errorMessage),
-          legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-          clientRequestId: input.clientRequestId,
-          status: 'error',
-        });
-        input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
-        input.wl.flush(input.ctx, 502);
-        return {
-          shouldContinue: false,
-          shouldStop: true,
-          stopReason: 'error',
-          statusCode: 502,
-          state,
-        };
-      }
-
-      if (done) break;
-    }
-
-    try {
-      const trailingFrame = buffer.replace(/\r\n/g, '\n').trim();
-      if (trailingFrame.length > 0) {
-        const trailingResult = applyParsedChunks(
-          parseUpstreamFrame(trailingFrame, input.route.upstreamProtocol, streamState),
-        );
-        if (trailingResult) {
-          return trailingResult;
-        }
-      }
-    } catch (error) {
-      const errorCode = error instanceof ResponsesUpstreamEventError ? error.code : 'PARSE_ERROR';
-      const errorMessage =
-        error instanceof ResponsesUpstreamEventError
-          ? error.message
-          : 'Failed to parse upstream stream chunk';
-      if (stepStream.status === 'pending') {
-        input.wl.fail(stepStream, errorMessage, {
-          round: input.round,
-        });
-      }
-      appendSessionMessage({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: 'assistant',
-        content: buildErrorContent(errorCode, errorMessage),
-        legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-        clientRequestId: input.clientRequestId,
-        status: 'error',
-      });
-      input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
-      input.wl.flush(input.ctx, 502);
-      return {
-        shouldContinue: false,
-        shouldStop: true,
-        stopReason: 'error',
-        statusCode: 502,
-        state,
-      };
-    }
-
-    const eofResolution = resolveEofRoundDecision({
-      sawFinishReason: streamState.sawFinishReason,
-      stopReason: streamState.stopReason,
-      toolCallCount: state.toolCalls.size,
-    });
-    return completeRound(eofResolution.stopReason);
-  } catch (err) {
-    if (input.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
-      input.writeChunk({
-        type: 'done',
-        stopReason: 'cancelled',
-        ...createRunEventMeta(input.runId, input.eventSequence),
-      });
-      return {
-        shouldContinue: false,
-        shouldStop: true,
-        stopReason: 'cancelled',
-        statusCode: 200,
-        state,
-      };
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    if (stepStream && stepStream.status === 'pending') {
-      input.wl.fail(stepStream, message, { round: input.round });
-    }
-    if (stepUpstream.status === 'pending') {
-      input.wl.fail(stepUpstream, message);
-    }
-    appendSessionMessage({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      role: 'assistant',
-      content: buildErrorContent('STREAM_ERROR', message),
-      legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-      clientRequestId: input.clientRequestId,
-      status: 'error',
-    });
-    input.writeChunk(createStreamErrorChunk('STREAM_ERROR', message, input.runId));
-    input.wl.flush(input.ctx, 500);
-    return { shouldContinue: false, shouldStop: true, stopReason: 'error', statusCode: 500, state };
-  }
-}
-
-async function handleStreamRequest(input: {
+export async function handleStreamRequest(input: {
   headers: Record<string, string | string[] | undefined>;
   ip: string;
   method: string;
@@ -1090,6 +664,10 @@ async function handleStreamRequest(input: {
   }
 
   const workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson);
+  const requestSystemPrompts = buildRequestScopedSystemPrompts(
+    input.requestData.message,
+    buildCapabilityContext(input.user.sub, input.sessionId),
+  );
   const webSearchEnabled =
     input.requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
 
@@ -1150,14 +728,44 @@ async function handleStreamRequest(input: {
   const abortController = new AbortController();
   const eventSequence = { value: 1 };
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(input.sessionContext.metadataJson);
+  const emitChunk = (chunk: RunEvent) => {
+    persistSessionRunEventForRequest(input.sessionId, chunk, {
+      clientRequestId: input.requestData.clientRequestId,
+    });
+    input.writeChunk(chunk);
+  };
   const execution = (async () => {
     let shouldKeepPausedState = false;
+    const runtimeThreadStartedAt = Date.now();
     setPersistedSessionStateStatus({
       sessionId: input.sessionId,
       status: 'running',
       userId: input.user.sub,
     });
+    upsertSessionRuntimeThread({
+      clientRequestId: input.requestData.clientRequestId,
+      heartbeatAtMs: runtimeThreadStartedAt,
+      sessionId: input.sessionId,
+      startedAtMs: runtimeThreadStartedAt,
+      userId: input.user.sub,
+    });
+    const runtimeThreadHeartbeat = setInterval(() => {
+      touchSessionRuntimeThread({
+        clientRequestId: input.requestData.clientRequestId,
+        sessionId: input.sessionId,
+        userId: input.user.sub,
+      });
+    }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
     const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
+      if (event.type === 'question_asked') {
+        shouldKeepPausedState = true;
+        setPersistedSessionStateStatus({
+          sessionId: input.sessionId,
+          status: 'paused',
+          userId: input.user.sub,
+        });
+      }
+
       if (event.type === 'permission_asked') {
         shouldKeepPausedState = true;
         setPersistedSessionStateStatus({
@@ -1176,7 +784,20 @@ async function handleStreamRequest(input: {
         });
       }
 
-      input.writeChunk(event);
+      if (event.type === 'question_replied' && event.status === 'answered') {
+        shouldKeepPausedState = false;
+        setPersistedSessionStateStatus({
+          sessionId: input.sessionId,
+          status: 'running',
+          userId: input.user.sub,
+        });
+      }
+
+      if (hasPersistedRunEvent(event)) {
+        input.writeChunk(event);
+        return;
+      }
+      emitChunk(event);
     });
 
     try {
@@ -1218,7 +839,8 @@ async function handleStreamRequest(input: {
           wl,
           ctx,
           workspaceCtx,
-          writeChunk: input.writeChunk,
+          requestSystemPrompts,
+          writeChunk: emitChunk,
         });
 
         if (result.stopReason === 'error' || result.shouldStop) {
@@ -1252,15 +874,21 @@ async function handleStreamRequest(input: {
           taskRuntimeGuardContext,
           turnFileDiffs,
           userId: input.user.sub,
-          writeChunk: input.writeChunk,
+          writeChunk: emitChunk,
         });
       }
     } finally {
+      clearInterval(runtimeThreadHeartbeat);
+      clearSessionRuntimeThread({
+        clientRequestId: input.requestData.clientRequestId,
+        sessionId: input.sessionId,
+        userId: input.user.sub,
+      });
       unsubscribeSessionEvents();
     }
   })().catch((err) => {
     if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
-      input.writeChunk({
+      emitChunk({
         type: 'done',
         stopReason: 'cancelled',
         ...createRunEventMeta(runId, eventSequence),
@@ -1288,7 +916,7 @@ async function handleStreamRequest(input: {
       clientRequestId: input.requestData.clientRequestId,
       status: 'error',
     });
-    input.writeChunk(createStreamErrorChunk('STREAM_ERROR', String(err), runId));
+    emitChunk(createStreamErrorChunk('STREAM_ERROR', String(err), runId));
     wl.flush(ctx, 500);
     throw err;
   });
@@ -1311,641 +939,7 @@ async function handleStreamRequest(input: {
   }
 }
 
-export async function resumeApprovedPermissionRequest(input: {
-  payload: ApprovedPermissionResumePayload;
-  sessionId: string;
-  userId: string;
-}): Promise<void> {
-  let resumeResult: { pendingInteraction: boolean; statusCode: number };
-  try {
-    const sandbox = createDefaultSandbox();
-    const toolResult = await sandbox.execute(
-      {
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-        rawInput: input.payload.rawInput,
-      },
-      new AbortController().signal,
-      input.sessionId,
-      createStreamExecutionContext(
-        input.payload.clientRequestId,
-        input.payload.nextRound,
-        streamRequestSchema.parse(input.payload.requestData),
-      ),
-    );
-
-    resumeResult = await continueFromApprovedToolResult({
-      initialToolResult: {
-        isError: toolResult.isError,
-        output: toolResult.output,
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-      },
-      payload: input.payload,
-      sessionId: input.sessionId,
-      userId: input.userId,
-    });
-    await reconcileResumedTaskChildSession({
-      childSessionId: input.sessionId,
-      pendingInteraction: resumeResult.pendingInteraction,
-      statusCode: resumeResult.statusCode,
-      userId: input.userId,
-    });
-  } catch (error) {
-    await reconcileResumedTaskChildSession({
-      childSessionId: input.sessionId,
-      pendingInteraction: false,
-      statusCode: 500,
-      userId: input.userId,
-    });
-    throw error;
-  }
-}
-
-export async function runSessionInBackground(input: {
-  requestData: Record<string, unknown>;
-  sessionId: string;
-  userId: string;
-  writeChunk?: (chunk: RunEvent) => void;
-}): Promise<{ statusCode: number }> {
-  const sessionContext = loadSessionContext(input.sessionId, input.userId);
-  if (!sessionContext) {
-    throw new Error(`Session not found: ${input.sessionId}`);
-  }
-
-  const user = loadSessionUser(input.sessionId, input.userId);
-  if (!user) {
-    throw new Error(`Session user not found: ${input.userId}`);
-  }
-
-  return handleStreamRequest({
-    headers: {},
-    ip: 'internal',
-    method: 'INTERNAL',
-    path: `/sessions/${input.sessionId}/stream/background`,
-    requestData: streamRequestSchema.parse(input.requestData),
-    sessionContext,
-    sessionId: input.sessionId,
-    transport: 'SSE',
-    user,
-    writeChunk: input.writeChunk ?? (() => undefined),
-  });
-}
-
-async function continueFromApprovedToolResult(input: {
-  initialToolResult: {
-    isError: boolean;
-    output: unknown;
-    toolCallId: string;
-    toolName: string;
-  };
-  payload: ApprovedPermissionResumePayload;
-  sessionId: string;
-  userId: string;
-}): Promise<{ pendingInteraction: boolean; statusCode: number }> {
-  const requestData = streamRequestSchema.parse(input.payload.requestData);
-  const sessionContext = loadSessionContext(input.sessionId, input.userId);
-  if (!sessionContext) {
-    throw new Error('Session not found');
-  }
-
-  const runId = randomUUID();
-  const eventSequence = { value: 1 };
-  const writeChunk = (chunk: RunEvent) => {
-    publishSessionRunEvent(input.sessionId, chunk);
-  };
-  const route = await resolveStreamModelRoute({
-    metadataJson: sessionContext.metadataJson,
-    requestData,
-    userId: input.userId,
-  });
-  const workspaceCtx = await buildWorkspaceContext(sessionContext.metadataJson);
-  const webSearchEnabled =
-    requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);
-  const enabledTools = filterEnabledGatewayToolsForSession(
-    getEnabledTools(webSearchEnabled),
-    sessionContext.metadataJson,
-  );
-  const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
-  const turnFileDiffs = new Map<string, FileDiffContent>();
-  const abortController = new AbortController();
-  const taskRuntimeGuardContext = createTaskRuntimeGuardContext(sessionContext.metadataJson);
-  const wl = new WorkflowLogger();
-  const ctx = createRequestContext(
-    'INTERNAL',
-    `/sessions/${input.sessionId}/stream/resume`,
-    {},
-    'local',
-  );
-
-  const execution = (async (): Promise<{ pendingInteraction: boolean; statusCode: number }> => {
-    let shouldKeepPausedState = false;
-    setPersistedSessionStateStatus({
-      sessionId: input.sessionId,
-      status: 'running',
-      userId: input.userId,
-    });
-
-    if (
-      getAnyInFlightStreamRequestForSession({
-        excludeClientRequestId: input.payload.clientRequestId,
-        sessionId: input.sessionId,
-        userId: input.userId,
-      })
-    ) {
-      throw new Error('Another request is already running for this session.');
-    }
-
-    const toolResultMessage = appendSessionMessage({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      role: 'tool',
-      content: [
-        {
-          type: 'tool_result',
-          toolCallId: input.initialToolResult.toolCallId,
-          output: input.initialToolResult.output,
-          isError: input.initialToolResult.isError,
-          pendingPermissionRequestId: undefined,
-        },
-      ],
-      legacyMessagesJson: sessionContext.legacyMessagesJson,
-      clientRequestId: createToolResultRequestId(
-        input.payload.clientRequestId,
-        input.initialToolResult.toolCallId,
-      ),
-      replaceExisting: true,
-    });
-
-    truncateSessionMessagesAfter({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      messageId: toolResultMessage.id,
-      legacyMessagesJson: sessionContext.legacyMessagesJson,
-      inclusive: false,
-    });
-
-    writeChunk({
-      type: 'tool_result',
-      toolCallId: input.initialToolResult.toolCallId,
-      toolName: input.initialToolResult.toolName,
-      output: input.initialToolResult.output,
-      isError: input.initialToolResult.isError,
-      ...createRunEventMeta(runId, eventSequence),
-    });
-    mergeFileDiffs(turnFileDiffs, collectFileDiffsFromToolOutput(input.initialToolResult.output));
-
-    const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
-      if (event.type === 'permission_asked') {
-        shouldKeepPausedState = true;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'paused',
-          userId: input.userId,
-        });
-      }
-
-      if (event.type === 'permission_replied' && event.decision !== 'reject') {
-        shouldKeepPausedState = false;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'running',
-          userId: input.userId,
-        });
-      }
-    });
-
-    try {
-      for (let round = input.payload.nextRound; ; round += 1) {
-        const result = await runModelRound({
-          clientRequestId: input.payload.clientRequestId,
-          enabledTools,
-          eventSequence,
-          requestData,
-          round,
-          route,
-          runId,
-          signal: abortController.signal,
-          sessionContext,
-          sessionId: input.sessionId,
-          transport: 'SSE',
-          turnFileDiffs,
-          userId: input.userId,
-          wl,
-          ctx,
-          workspaceCtx,
-          writeChunk,
-        });
-
-        if (result.stopReason === 'error' || result.shouldStop) {
-          if (result.stopReason !== 'error') {
-            wl.flush(ctx, 200);
-          }
-          if (!shouldKeepPausedState) {
-            setPersistedSessionStateStatus({
-              sessionId: input.sessionId,
-              status: 'idle',
-              userId: input.userId,
-            });
-          }
-          return { pendingInteraction: shouldKeepPausedState, statusCode: result.statusCode };
-        }
-
-        await executeToolCalls({
-          clientRequestId: input.payload.clientRequestId,
-          executionContext: createStreamExecutionContext(
-            input.payload.clientRequestId,
-            round + 1,
-            requestData,
-          ),
-          enabledToolNames,
-          eventSequence,
-          runId,
-          signal: abortController.signal,
-          sessionContext,
-          sessionId: input.sessionId,
-          state: result.state,
-          taskRuntimeGuardContext,
-          turnFileDiffs,
-          userId: input.userId,
-          writeChunk,
-        });
-      }
-    } finally {
-      unsubscribeSessionEvents();
-    }
-  })().catch((err) => {
-    if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
-      writeChunk({
-        type: 'done',
-        stopReason: 'cancelled',
-        ...createRunEventMeta(runId, eventSequence),
-      });
-      wl.flush(ctx, 200);
-      setPersistedSessionStateStatus({
-        sessionId: input.sessionId,
-        status: 'idle',
-        userId: input.userId,
-      });
-      return { pendingInteraction: false, statusCode: 200 };
-    }
-
-    setPersistedSessionStateStatus({
-      sessionId: input.sessionId,
-      status: 'idle',
-      userId: input.userId,
-    });
-    throw err;
-  });
-
-  registerInFlightStreamRequest({
-    abortController,
-    clientRequestId: input.payload.clientRequestId,
-    execution,
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-  try {
-    return await execution;
-  } finally {
-    clearInFlightStreamRequest({
-      clientRequestId: input.payload.clientRequestId,
-      execution,
-      sessionId: input.sessionId,
-    });
-  }
-}
-
-export async function resumeAnsweredQuestionRequest(input: {
-  payload: ApprovedPermissionResumePayload;
-  answerOutput: string;
-  sessionId: string;
-  userId: string;
-}): Promise<void> {
-  let resumeResult: { pendingInteraction: boolean; statusCode: number };
-  try {
-    resumeResult = await continueFromApprovedToolResult({
-      initialToolResult: {
-        isError: false,
-        output: input.answerOutput,
-        toolCallId: input.payload.toolCallId,
-        toolName: input.payload.toolName,
-      },
-      payload: input.payload,
-      sessionId: input.sessionId,
-      userId: input.userId,
-    });
-  } catch (error) {
-    await reconcileResumedTaskChildSession({
-      childSessionId: input.sessionId,
-      pendingInteraction: false,
-      statusCode: 500,
-      userId: input.userId,
-    });
-    throw error;
-  }
-  await reconcileResumedTaskChildSession({
-    childSessionId: input.sessionId,
-    pendingInteraction: resumeResult.pendingInteraction,
-    statusCode: resumeResult.statusCode,
-    userId: input.userId,
-  });
-}
-
-export async function streamRoutes(app: FastifyInstance): Promise<void> {
-  app.post(
-    '/sessions/:id/stream/stop',
-    { onRequest: [requireAuth] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const user = request.user as JwtPayload;
-      const body = stopStreamSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
-      }
-
-      const sessionId = (request.params as { id: string }).id;
-      const sessionRow = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-        [sessionId, user.sub],
-      );
-      if (!sessionRow) {
-        return reply.status(404).send({ error: 'Session not found' });
-      }
-
-      const stopped = await stopInFlightStreamRequest({
-        clientRequestId: body.data.clientRequestId,
-        sessionId,
-        userId: user.sub,
-      });
-      if (stopped) {
-        clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
-      }
-      return reply.status(200).send({ stopped });
-    },
-  );
-
-  app.get(
-    '/sessions/:id/stream',
-    { websocket: true },
-    async (socket: WebSocket, request: FastifyRequest) => {
-      const connectionLogger = new WorkflowLogger();
-      const connectionContext = createRequestContext(
-        'WS',
-        `/sessions/${(request.params as { id: string }).id}/stream`,
-        request.headers as Record<string, string | string[] | undefined>,
-        request.ip,
-      );
-      const connectionStep = connectionLogger.start('stream.socket.connect');
-      const authStep = connectionLogger.startChild(connectionStep, 'stream.socket.auth');
-      const queryToken = (request.query as Record<string, string>)['token'];
-      let user: JwtPayload | null = null;
-      if (queryToken) {
-        try {
-          user = request.server.jwt.verify<JwtPayload>(queryToken);
-        } catch {
-          connectionLogger.fail(authStep, 'unauthorized');
-          connectionLogger.fail(connectionStep, 'unauthorized');
-          connectionLogger.flush(connectionContext, 401);
-          socket.send(
-            JSON.stringify({ type: 'error', code: 'UNAUTHORIZED', message: 'Unauthorized' }),
-          );
-          socket.close(1008);
-          return;
-        }
-      } else {
-        connectionLogger.fail(authStep, 'unauthorized');
-        connectionLogger.fail(connectionStep, 'unauthorized');
-        connectionLogger.flush(connectionContext, 401);
-        socket.send(
-          JSON.stringify({ type: 'error', code: 'UNAUTHORIZED', message: 'Unauthorized' }),
-        );
-        socket.close(1008);
-        return;
-      }
-      connectionLogger.succeed(authStep);
-      const { id: sessionId } = request.params as { id: string };
-
-      const sessionStep = connectionLogger.startChild(
-        connectionStep,
-        'stream.socket.session-check',
-        undefined,
-        { sessionId },
-      );
-      const sessionRow = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-        [sessionId, user.sub],
-      );
-      if (!sessionRow) {
-        connectionLogger.fail(sessionStep, 'session not found');
-        connectionLogger.fail(connectionStep, 'session not found');
-        connectionLogger.flush(connectionContext, 404);
-        socket.send(
-          JSON.stringify({
-            type: 'error',
-            code: 'SESSION_NOT_FOUND',
-            message: 'Session not found',
-          }),
-        );
-        socket.close(1008);
-        return;
-      }
-      connectionLogger.succeed(sessionStep);
-      connectionLogger.succeed(connectionStep, undefined, { sessionId });
-      connectionLogger.flush(connectionContext, 101);
-
-      socket.on('message', (raw: Buffer | string) => {
-        void (async () => {
-          const requestRunId = randomUUID();
-          const wl = new WorkflowLogger();
-          const ctx = createRequestContext(
-            'WS',
-            `/sessions/${sessionId}/stream`,
-            request.headers as Record<string, string | string[] | undefined>,
-            request.ip,
-          );
-
-          const text = raw.toString();
-          let parsed: unknown;
-          const stepRoute = wl.start('stream.message.handle', undefined, { sessionId });
-          const stepParse = wl.startChild(stepRoute, 'stream.parse');
-          try {
-            parsed = JSON.parse(text);
-          } catch {
-            wl.fail(stepParse, 'invalid JSON');
-            wl.fail(stepRoute, 'invalid JSON');
-            wl.flush(ctx, 400);
-            socket.send(
-              JSON.stringify(createStreamErrorChunk('INVALID_JSON', 'Invalid JSON', requestRunId)),
-            );
-            return;
-          }
-
-          const body = streamRequestSchema.safeParse(parsed);
-          if (!body.success) {
-            wl.fail(stepParse, 'invalid request schema');
-            wl.fail(stepRoute, 'invalid request schema');
-            wl.flush(ctx, 400);
-            socket.send(
-              JSON.stringify({
-                ...createStreamErrorChunk('INVALID_REQUEST', 'Invalid request', requestRunId),
-                issues: body.error.issues,
-              }),
-            );
-            return;
-          }
-          wl.succeed(stepParse);
-
-          const stepSession = wl.startChild(stepRoute, 'stream.session-check', undefined, {
-            sessionId,
-          });
-
-          const sessionContext = loadSessionContext(sessionId, user.sub);
-          if (!sessionContext) {
-            wl.fail(stepSession, 'session not found');
-            wl.fail(stepRoute, 'session not found');
-            wl.flush(ctx, 404);
-            socket.send(
-              JSON.stringify({
-                type: 'error',
-                code: 'SESSION_NOT_FOUND',
-                message: 'Session not found',
-              }),
-            );
-            return;
-          }
-          wl.succeed(stepSession);
-
-          try {
-            const streamResult = await handleStreamRequest({
-              method: 'WS',
-              path: `/sessions/${sessionId}/stream`,
-              headers: request.headers as Record<string, string | string[] | undefined>,
-              ip: request.ip,
-              requestData: body.data,
-              sessionContext,
-              sessionId,
-              transport: 'WS',
-              user,
-              writeChunk: (chunk) => {
-                socket.send(JSON.stringify(chunk));
-              },
-            });
-            if (streamResult.statusCode >= 400) {
-              wl.fail(stepRoute, 'stream request completed with error status', {
-                sessionId,
-                clientRequestId: body.data.clientRequestId,
-                statusCode: streamResult.statusCode,
-              });
-              wl.flush(ctx, streamResult.statusCode);
-            } else {
-              wl.succeed(stepRoute, undefined, {
-                sessionId,
-                clientRequestId: body.data.clientRequestId,
-              });
-              wl.flush(ctx, streamResult.statusCode);
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            wl.fail(stepRoute, message, {
-              sessionId,
-              clientRequestId: body.data.clientRequestId,
-            });
-            wl.flush(ctx, 500);
-          }
-        })();
-      });
-    },
-  );
-
-  app.get('/sessions/:id/stream/sse', async (request: FastifyRequest, reply: FastifyReply) => {
-    const wl = new WorkflowLogger();
-    const ctx = createRequestContext(
-      request.method,
-      request.url,
-      request.headers as Record<string, string | string[] | undefined>,
-      request.ip,
-    );
-    const routeStep = wl.start('stream.sse.connect');
-    const authStep = wl.startChild(routeStep, 'stream.sse.auth');
-    const rawQuery = request.query as Record<string, string>;
-    const sseToken = rawQuery['token'];
-    let user: JwtPayload;
-    try {
-      user = request.server.jwt.verify<JwtPayload>(sseToken ?? '');
-    } catch {
-      wl.fail(authStep, 'unauthorized');
-      wl.fail(routeStep, 'unauthorized');
-      wl.flush(ctx, 401);
-      return reply.status(401).send({ error: 'Unauthorized' });
-    }
-    wl.succeed(authStep);
-    const { id: sessionId } = request.params as { id: string };
-    const parseStep = wl.startChild(routeStep, 'stream.sse.parse-query', undefined, { sessionId });
-    const query = streamRequestSchema.safeParse(request.query);
-
-    if (!query.success) {
-      wl.fail(parseStep, 'invalid query');
-      wl.fail(routeStep, 'invalid query');
-      wl.flush(ctx, 400);
-      return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
-    }
-    wl.succeed(parseStep);
-
-    const stepSession = wl.startChild(routeStep, 'stream.sse.session-check', undefined, {
-      sessionId,
-    });
-    const sessionContext = loadSessionContext(sessionId, user.sub);
-    if (!sessionContext) {
-      wl.fail(stepSession, 'session not found');
-      wl.fail(routeStep, 'session not found');
-      wl.flush(ctx, 404);
-      return reply.status(404).send({ error: 'Session not found' });
-    }
-    wl.succeed(stepSession);
-
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    try {
-      const streamResult = await handleStreamRequest({
-        method: request.method,
-        path: request.url,
-        headers: request.headers as Record<string, string | string[] | undefined>,
-        ip: request.ip,
-        requestData: query.data,
-        sessionContext,
-        sessionId,
-        transport: 'SSE',
-        user,
-        writeChunk: (chunk) => {
-          reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        },
-      });
-      if (streamResult.statusCode >= 400) {
-        wl.fail(routeStep, 'stream request completed with error status', {
-          sessionId,
-          statusCode: streamResult.statusCode,
-        });
-        wl.flush(ctx, streamResult.statusCode);
-      } else {
-        wl.succeed(routeStep, undefined, { sessionId });
-        wl.flush(ctx, streamResult.statusCode);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      wl.fail(routeStep, message);
-      wl.flush(ctx, 500);
-      throw error;
-    } finally {
-      reply.raw.end();
-    }
-  });
-}
-
-function createStreamErrorChunk(code: string, message: string, runId: string) {
+export function createStreamErrorChunk(code: string, message: string, runId: string) {
   return {
     type: 'error' as const,
     code,

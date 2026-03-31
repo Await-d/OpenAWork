@@ -7,7 +7,7 @@ import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { extractMessageText, listSessionMessages } from '../session-message-store.js';
 import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
-import { runSessionInBackground } from '../routes/stream.js';
+import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
 import { resolveSendableChannel } from './channel-access.js';
 import { CHANNEL_DESCRIPTORS } from './descriptors.js';

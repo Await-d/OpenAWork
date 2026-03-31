@@ -95,29 +95,19 @@ describe('task tool guardrails', () => {
 
   it('does not cap total tool calls for task-created sessions', () => {
     const guard = createTaskRuntimeGuardContext(JSON.stringify({ createdByTool: 'task' }));
-    expect(guard).not.toBeNull();
-    if (!guard) {
-      throw new Error('expected task runtime guard context');
-    }
+    expect(guard).toBeNull();
 
     for (let index = 0; index < 40; index += 1) {
       recordTaskToolCallOrThrow(guard, `tool-${index}`, '{}');
     }
   });
 
-  it('detects consecutive repetitive tool loops for task-created sessions', () => {
+  it('allows repetitive tool loops for task-created sessions', () => {
     const guard = createTaskRuntimeGuardContext(JSON.stringify({ createdByTool: 'task' }));
-    expect(guard).not.toBeNull();
-    if (!guard) {
-      throw new Error('expected task runtime guard context');
-    }
+    expect(guard).toBeNull();
 
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       recordTaskToolCallOrThrow(guard, 'read', '{"file":"README.md"}');
     }
-
-    expect(() => recordTaskToolCallOrThrow(guard, 'read', '{"file":"README.md"}')).toThrow(
-      '子代理连续重复调用同一工具已达到上限',
-    );
   });
 });

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { parse, resolve } from 'node:path';
+import { dirname, parse, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import {
   dedupeWorkspaceRoots,
@@ -8,8 +8,9 @@ import {
   parseWorkspaceAccessMode,
 } from './workspace-config.js';
 
-const DB_PATH =
-  globalThis.process?.env['DATABASE_URL'] ?? resolve(process.cwd(), 'data', 'openAwork.db');
+function resolveDbPath(): string {
+  return globalThis.process?.env['DATABASE_URL'] ?? resolve(process.cwd(), 'data', 'openAwork.db');
+}
 
 const configuredWorkspaceRoots = parseConfiguredWorkspaceRoots(process.env['WORKSPACE_ROOTS']);
 const explicitWorkspaceRoot = process.env['WORKSPACE_ROOT'];
@@ -30,13 +31,19 @@ export const WORKSPACE_ACCESS_RESTRICTED = WORKSPACE_ACCESS_MODE === 'restricted
 export const WORKSPACE_BROWSER_ROOT =
   parse(WORKSPACE_ROOT).root || parse(process.cwd()).root || resolve('/');
 
-const dbDir = DB_PATH === ':memory:' ? null : DB_PATH.replace(/\/[^/]+$/, '');
-if (dbDir) mkdirSync(dbDir, { recursive: true });
+function createDatabase(dbPath: string): DatabaseSync {
+  const dbDir = dbPath === ':memory:' ? null : dirname(dbPath);
+  if (dbDir) mkdirSync(dbDir, { recursive: true });
+  const database = new DatabaseSync(dbPath);
+  database.exec('PRAGMA journal_mode=WAL');
+  database.exec('PRAGMA foreign_keys=ON');
+  return database;
+}
 
-export const db = new DatabaseSync(DB_PATH);
+let currentDbPath = resolveDbPath();
+let dbClosed = false;
 
-db.exec('PRAGMA journal_mode=WAL');
-db.exec('PRAGMA foreign_keys=ON');
+export let db = createDatabase(currentDbPath);
 
 const sessionStore = new Map<string, boolean>();
 
@@ -53,11 +60,23 @@ export const redis = {
 };
 
 export async function connectDb(): Promise<void> {
+  const desiredPath = resolveDbPath();
+  if (dbClosed || desiredPath !== currentDbPath) {
+    if (!dbClosed) {
+      db.close();
+    }
+    currentDbPath = desiredPath;
+    db = createDatabase(currentDbPath);
+    dbClosed = false;
+  }
   db.exec('SELECT 1');
 }
 
 export async function closeDb(): Promise<void> {
-  db.close();
+  if (!dbClosed) {
+    db.close();
+    dbClosed = true;
+  }
 }
 
 export async function migrate(): Promise<void> {
@@ -128,6 +147,94 @@ export async function migrate(): Promise<void> {
       is_error INTEGER NOT NULL DEFAULT 0,
       duration_ms INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_file_diffs (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      request_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      before_text TEXT NOT NULL,
+      after_text TEXT NOT NULL,
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      status TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, request_id, file_path)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS permission_decision_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      tool_name TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      workspace_root TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS request_workflow_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      status_code INTEGER NOT NULL,
+      ip TEXT,
+      user_agent TEXT,
+      workflow_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_run_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      client_request_id TEXT,
+      seq INTEGER,
+      event_type TEXT NOT NULL,
+      event_id TEXT,
+      run_id TEXT,
+      occurred_at_ms INTEGER,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  ensureColumn('session_run_events', 'client_request_id', 'TEXT');
+  ensureColumn('session_run_events', 'seq', 'INTEGER');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_runtime_threads (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT NOT NULL,
+      started_at_ms INTEGER NOT NULL,
+      heartbeat_at_ms INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_snapshots (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT NOT NULL,
+      summary_json TEXT NOT NULL,
+      files_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, client_request_id)
     )
   `);
 

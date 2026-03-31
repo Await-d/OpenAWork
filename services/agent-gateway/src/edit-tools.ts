@@ -65,7 +65,7 @@ function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
      FROM audit_logs
      WHERE session_id = ?
        AND is_error = 0
-       AND tool_name IN ('read', 'workspace_read_file')
+       AND tool_name IN ('read', 'workspace_read_file', 'file_read', 'read_file')
      ORDER BY id DESC
      LIMIT 50`,
     [sessionId],

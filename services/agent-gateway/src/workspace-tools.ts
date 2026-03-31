@@ -3,6 +3,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { WORKSPACE_ROOT } from './db.js';
+import { ensureIgnoreRulesLoadedForPath } from './workspace-safety.js';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import {
   getWorkspaceReviewDiff,
@@ -50,9 +52,20 @@ const workspaceTreeOutputSchema = z.object({
   nodes: z.array(z.any()),
 });
 
-const workspaceReadFileInputSchema = z.object({
-  path: z.string().min(1),
-});
+const workspaceReadFileInputSchema = z
+  .object({
+    path: z.string().min(1).optional(),
+    filePath: z.string().min(1).optional(),
+  })
+  .superRefine((value, context) => {
+    if (!value.path && !value.filePath) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either path or filePath is required',
+        path: ['path'],
+      });
+    }
+  });
 
 const workspaceReadFileOutputSchema = z.object({
   path: z.string(),
@@ -61,15 +74,11 @@ const workspaceReadFileOutputSchema = z.object({
 });
 
 const globInputSchema = z.object({
-  path: z.string().min(1),
+  path: z.string().min(1).optional(),
   pattern: z.string().min(1),
 });
 
-const globOutputSchema = z.object({
-  path: z.string(),
-  pattern: z.string(),
-  matches: z.array(z.string()),
-});
+const globOutputSchema = z.string();
 
 const workspaceSearchInputSchema = z.object({
   path: z.string().min(1),
@@ -97,8 +106,17 @@ const readOutputSchema = workspaceReadFileOutputSchema;
 const globToolInputSchema = globInputSchema;
 const globToolOutputSchema = globOutputSchema;
 
-const grepInputSchema = workspaceSearchInputSchema;
-const grepOutputSchema = workspaceSearchOutputSchema;
+const grepInputSchema = z.object({
+  pattern: z.string().min(1),
+  path: z.string().min(1).optional(),
+  include: z.string().min(1).optional(),
+  output_mode: z
+    .enum(['content', 'files_with_matches', 'count'])
+    .optional()
+    .default('files_with_matches'),
+  head_limit: z.number().int().min(0).max(500).optional().default(0),
+});
+const grepOutputSchema = z.string();
 
 const workspaceReviewChangeSchema = z.object({
   path: z.string(),
@@ -128,10 +146,21 @@ const workspaceReviewDiffOutputSchema = z.object({
   diff: z.string(),
 });
 
-const workspaceWriteFileInputSchema = z.object({
-  path: z.string().min(1),
-  content: z.string(),
-});
+const workspaceWriteFileInputSchema = z
+  .object({
+    path: z.string().min(1).optional(),
+    filePath: z.string().min(1).optional(),
+    content: z.string(),
+  })
+  .superRefine((value, context) => {
+    if (!value.path && !value.filePath) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either path or filePath is required',
+        path: ['path'],
+      });
+    }
+  });
 
 const workspaceWriteFileOutputSchema = z.object({
   after: z.string(),
@@ -214,6 +243,14 @@ function assertSearchablePath(path: string): string {
   }
 
   return safePath;
+}
+
+function pickPathInput(input: { path?: string; filePath?: string }): string {
+  const value = input.path ?? input.filePath;
+  if (!value) {
+    throw new Error('Either path or filePath is required');
+  }
+  return value;
 }
 
 async function assertDirectory(path: string): Promise<void> {
@@ -359,6 +396,7 @@ export function resolveWorkspaceReviewFilePath(rootPath: string, filePath: strin
 
 async function runWorkspaceSearch(input: z.infer<typeof workspaceSearchInputSchema>) {
   const safePath = assertSearchablePath(input.path);
+  await ensureIgnoreRulesLoadedForPath(safePath);
   await assertDirectory(safePath);
 
   const results: Array<{ path: string; line: number; text: string }> = [];
@@ -440,7 +478,8 @@ async function runWorkspaceSearch(input: z.infer<typeof workspaceSearchInputSche
 }
 
 async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
-  const safePath = assertSearchablePath(input.path);
+  const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
+  await ensureIgnoreRulesLoadedForPath(safePath);
   await assertDirectory(safePath);
   const patternRegex = globPatternToRegex(input.pattern);
   const matches: string[] = [];
@@ -493,11 +532,102 @@ async function runGlobTool(input: z.infer<typeof globToolInputSchema>) {
 
   await walk(safePath);
 
-  return {
-    path: safePath,
-    pattern: input.pattern,
-    matches,
-  };
+  if (matches.length === 0) {
+    return 'No files found';
+  }
+  return matches.join('\n');
+}
+
+async function runCanonicalGrep(input: z.infer<typeof grepInputSchema>) {
+  const safePath = assertSearchablePath(input.path ?? WORKSPACE_ROOT);
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  await assertDirectory(safePath);
+  const matcher = new RegExp(input.pattern);
+  const includeRegex = input.include ? globPatternToRegex(input.include) : null;
+  const matches: Array<{ path: string; line: number; text: string }> = [];
+  const counts = new Map<string, number>();
+
+  async function searchDirectory(dirPath: string): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await fsp.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (
+        input.head_limit > 0 &&
+        input.output_mode !== 'count' &&
+        matches.length >= input.head_limit
+      ) {
+        return;
+      }
+      if (IGNORED_NAMES.has(entry.name)) {
+        continue;
+      }
+      const fullPath = join(dirPath, entry.name);
+      if (defaultIgnoreManager.shouldIgnore(fullPath)) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        await searchDirectory(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      const relativePath = fullPath.slice(safePath.length).replace(/^\//u, '').replace(/\\/g, '/');
+      if (includeRegex && !includeRegex.test(relativePath)) {
+        continue;
+      }
+      let stat: Stats;
+      try {
+        stat = await fsp.stat(fullPath);
+      } catch {
+        continue;
+      }
+      if (stat.size > MAX_SEARCH_FILE_BYTES) {
+        continue;
+      }
+      let content: string;
+      try {
+        content = await fsp.readFile(fullPath, 'utf8');
+      } catch {
+        continue;
+      }
+      const lines = content.split('\n');
+      for (let index = 0; index < lines.length; index += 1) {
+        const text = lines[index] ?? '';
+        if (!matcher.test(text)) {
+          continue;
+        }
+        counts.set(fullPath, (counts.get(fullPath) ?? 0) + 1);
+        if (input.output_mode === 'count') {
+          continue;
+        }
+        matches.push({ path: fullPath, line: index + 1, text: text.trim() });
+        if (input.head_limit > 0 && matches.length >= input.head_limit) {
+          return;
+        }
+      }
+    }
+  }
+
+  await searchDirectory(safePath);
+  if (input.output_mode === 'count') {
+    if (counts.size === 0) {
+      return 'No files found';
+    }
+    return [...counts.entries()].map(([filePath, count]) => `${filePath}: ${count}`).join('\n');
+  }
+  if (input.output_mode === 'files_with_matches') {
+    const files = [...new Set(matches.map((match) => match.path))];
+    return files.length > 0 ? files.join('\n') : 'No files found';
+  }
+  return matches.length > 0
+    ? matches.map((match) => `${match.path}:${match.line}: ${match.text}`).join('\n')
+    : 'No files found';
 }
 
 function sanitizeReviewChanges(changes: WorkspaceReviewChange[]) {
@@ -552,7 +682,8 @@ export const workspaceReadFileTool: ToolDefinition<
   outputSchema: workspaceReadFileOutputSchema,
   timeout: 10000,
   execute: async (input) => {
-    const safePath = assertAccessibleWorkspacePath(input.path, 'file');
+    const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file');
+    await ensureIgnoreRulesLoadedForPath(safePath);
     const stat = await assertFile(safePath);
     const truncated = stat.size > MAX_FILE_BYTES;
     const fd = await fsp.open(safePath, 'r');
@@ -583,8 +714,7 @@ export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputS
 
 export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToolOutputSchema> = {
   name: 'glob',
-  description:
-    'Find workspace files by glob pattern. Use this when you know the filename shape or directory pattern you want to inspect.',
+  description: 'Fast file pattern matching tool with safety limits (60s timeout, 100 file limit).',
   inputSchema: globToolInputSchema,
   outputSchema: globToolOutputSchema,
   timeout: 10000,
@@ -606,12 +736,11 @@ export const workspaceSearchTool: ToolDefinition<
 
 export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputSchema> = {
   name: 'grep',
-  description:
-    'Search literal text within workspace files. Use this to find symbols, strings, and implementation references within the current workspace.',
+  description: 'Fast content search tool with safety limits (60s timeout, 256KB output).',
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
   timeout: workspaceSearchTool.timeout,
-  execute: async (input) => runWorkspaceSearch(input),
+  execute: async (input) => runCanonicalGrep(input),
 };
 
 export const workspaceReviewStatusTool: ToolDefinition<
@@ -626,6 +755,7 @@ export const workspaceReviewStatusTool: ToolDefinition<
   timeout: 10000,
   execute: async (input) => {
     const safePath = assertSearchablePath(input.path);
+    await ensureIgnoreRulesLoadedForPath(safePath);
     await assertDirectory(safePath);
     const changes = await listWorkspaceReviewChanges(safePath);
     return {
@@ -646,6 +776,7 @@ export const workspaceReviewDiffTool: ToolDefinition<
   timeout: 10000,
   execute: async (input) => {
     const safePath = assertSearchablePath(input.path);
+    await ensureIgnoreRulesLoadedForPath(safePath);
     await assertDirectory(safePath);
     const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
     const absoluteFilePath = join(safePath, relativeFilePath);
@@ -674,7 +805,8 @@ export const workspaceWriteFileTool: ToolDefinition<
   outputSchema: workspaceWriteFileOutputSchema,
   timeout: 10000,
   execute: async (input) => {
-    const safePath = assertWritableWorkspacePath(input.path, 'file');
+    const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
+    await ensureIgnoreRulesLoadedForPath(safePath);
     await assertFile(safePath);
     const previousContent = await fsp.readFile(safePath, 'utf8');
     await fsp.writeFile(safePath, input.content, 'utf8');
@@ -698,7 +830,8 @@ export const writeTool: ToolDefinition<typeof writeInputSchema, typeof writeOutp
   outputSchema: writeOutputSchema,
   timeout: workspaceWriteFileTool.timeout,
   execute: async (input, signal) => {
-    const safePath = assertWritableWorkspacePath(input.path, 'file');
+    const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
+    await ensureIgnoreRulesLoadedForPath(safePath);
     const stat = await fsp.stat(safePath).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
@@ -730,6 +863,7 @@ export const workspaceCreateFileTool: ToolDefinition<
   timeout: 10000,
   execute: async (input) => {
     const safePath = assertWritableWorkspacePath(input.path, 'file');
+    await ensureIgnoreRulesLoadedForPath(safePath);
     const parentPath = resolve(join(safePath, '..'));
     const parentStat = await fsp.stat(parentPath);
     if (!parentStat.isDirectory()) {
@@ -766,6 +900,7 @@ export const workspaceCreateDirectoryTool: ToolDefinition<
   timeout: 10000,
   execute: async (input) => {
     const safePath = assertWritableWorkspacePath(input.path, 'directory');
+    await ensureIgnoreRulesLoadedForPath(safePath);
     const parentPath = resolve(join(safePath, '..'));
     const parentStat = await fsp.stat(parentPath);
     if (!parentStat.isDirectory()) {
@@ -791,6 +926,7 @@ export const workspaceReviewRevertTool: ToolDefinition<
   timeout: 10000,
   execute: async (input) => {
     const safePath = assertSearchablePath(input.path);
+    await ensureIgnoreRulesLoadedForPath(safePath);
     await assertDirectory(safePath);
     const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
     const absoluteFilePath = join(safePath, relativeFilePath);

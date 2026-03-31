@@ -63,7 +63,7 @@ describe('task agent resolution', () => {
     expect(resolved.systemPrompt).toContain('Task category: deep.');
     expect(resolved.systemPrompt).toContain('Goal-oriented autonomous problem-solving');
     expect(resolved.systemPrompt).toContain('Category prompt append (reference-aligned):');
-    expect(resolved.systemPrompt).toContain('AUTONOMOUS EXECUTION MINDSET');
+    expect(resolved.systemPrompt).toContain('GOAL-ORIENTED AUTONOMOUS tasks');
     expect(resolved.modelCandidates[0]).toBe('gpt-5.3-codex');
   });
 });

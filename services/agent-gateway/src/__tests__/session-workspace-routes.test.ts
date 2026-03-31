@@ -430,6 +430,233 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
 
       expect(deleteRes.statusCode).toBe(200);
       expect(existsSync(graphPath)).toBe(false);
+      expect(existsSync(workspaceRoot)).toBe(true);
+    });
+
+    it('deletes descendant child session graphs together with the parent session', async () => {
+      const loginRes = await app!.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'admin@openAwork.local', password: 'admin123456' },
+      });
+      const { accessToken } = JSON.parse(loginRes.body) as { accessToken: string };
+
+      const parentRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { metadata: { workingDirectory: workspaceRoot } },
+      });
+      const { sessionId: parentSessionId } = JSON.parse(parentRes.body) as { sessionId: string };
+
+      const childRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { metadata: { parentSessionId } },
+      });
+      const { sessionId: childSessionId } = JSON.parse(childRes.body) as { sessionId: string };
+
+      const grandchildRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { metadata: { parentSessionId: childSessionId } },
+      });
+      const { sessionId: grandchildSessionId } = JSON.parse(grandchildRes.body) as {
+        sessionId: string;
+      };
+
+      const taskManager = new AgentTaskManagerImpl();
+      for (const id of [parentSessionId, childSessionId, grandchildSessionId]) {
+        const graph = await taskManager.loadOrCreate(workspaceRoot, id);
+        taskManager.addTask(graph, {
+          title: `待删除任务-${id}`,
+          status: 'pending',
+          blockedBy: [],
+          sessionId: id,
+          priority: 'high',
+          tags: ['cascade-delete'],
+        });
+        await taskManager.save(graph);
+      }
+
+      const graphPaths = [parentSessionId, childSessionId, grandchildSessionId].map((id) =>
+        path.join(workspaceRoot, '.agentdocs', 'tasks', `${id}.json`),
+      );
+      expect(graphPaths.every((graphPath) => existsSync(graphPath))).toBe(true);
+
+      const deleteRes = await app!.inject({
+        method: 'DELETE',
+        url: `/sessions/${parentSessionId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+
+      expect(deleteRes.statusCode).toBe(200);
+      expect(JSON.parse(deleteRes.body)).toMatchObject({
+        deletedSessionIds: expect.arrayContaining([
+          parentSessionId,
+          childSessionId,
+          grandchildSessionId,
+        ]),
+        ok: true,
+      });
+      expect(graphPaths.every((graphPath) => !existsSync(graphPath))).toBe(true);
+      expect(
+        (await import('../db.js')).sqliteGet('SELECT id FROM sessions WHERE id = ? LIMIT 1', [
+          parentSessionId,
+        ]),
+      ).toBeUndefined();
+      expect(
+        (await import('../db.js')).sqliteGet('SELECT id FROM sessions WHERE id = ? LIMIT 1', [
+          childSessionId,
+        ]),
+      ).toBeUndefined();
+      expect(
+        (await import('../db.js')).sqliteGet('SELECT id FROM sessions WHERE id = ? LIMIT 1', [
+          grandchildSessionId,
+        ]),
+      ).toBeUndefined();
+      expect(existsSync(workspaceRoot)).toBe(true);
+    });
+
+    it('stops in-flight stream requests before deleting the session tree', async () => {
+      const loginRes = await app!.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'admin@openAwork.local', password: 'admin123456' },
+      });
+      const { accessToken } = JSON.parse(loginRes.body) as { accessToken: string };
+
+      const sessionRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {},
+      });
+      const { sessionId } = JSON.parse(sessionRes.body) as { sessionId: string };
+
+      const { sqliteGet } = await import('../db.js');
+      const userRow = sqliteGet<{ id: string }>('SELECT id FROM users WHERE email = ? LIMIT 1', [
+        'admin@openAwork.local',
+      ]);
+      expect(userRow).toBeDefined();
+      const userId = userRow?.id;
+      if (!userId) {
+        throw new Error('admin user should exist');
+      }
+
+      const {
+        clearInFlightStreamRequest,
+        getAnyInFlightStreamRequestForSession,
+        registerInFlightStreamRequest,
+      } = await import('../routes/stream-cancellation.js');
+      const abortController = new AbortController();
+      let abortCount = 0;
+      let execution!: Promise<{ statusCode: number }>;
+      execution = new Promise((resolve) => {
+        abortController.signal.addEventListener(
+          'abort',
+          () => {
+            abortCount += 1;
+            clearInFlightStreamRequest({
+              clientRequestId: 'delete-test-request',
+              execution,
+              sessionId,
+            });
+            resolve({ statusCode: 499 });
+          },
+          { once: true },
+        );
+      });
+      registerInFlightStreamRequest({
+        abortController,
+        clientRequestId: 'delete-test-request',
+        execution,
+        sessionId,
+        userId,
+      });
+
+      const deleteRes = await app!.inject({
+        method: 'DELETE',
+        url: `/sessions/${sessionId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+
+      expect(deleteRes.statusCode).toBe(200);
+      expect(abortCount).toBe(1);
+      expect(getAnyInFlightStreamRequestForSession({ sessionId, userId })).toBeUndefined();
+      expect(
+        sqliteGet('SELECT id FROM sessions WHERE id = ? LIMIT 1', [sessionId]),
+      ).toBeUndefined();
+    });
+
+    it('rejects deleting a session tree when any related session has pending interaction', async () => {
+      const loginRes = await app!.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'admin@openAwork.local', password: 'admin123456' },
+      });
+      const { accessToken } = JSON.parse(loginRes.body) as { accessToken: string };
+
+      const parentRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {},
+      });
+      const { sessionId: parentSessionId } = JSON.parse(parentRes.body) as { sessionId: string };
+
+      const childRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { metadata: { parentSessionId } },
+      });
+      const { sessionId: childSessionId } = JSON.parse(childRes.body) as { sessionId: string };
+
+      const { sqliteGet, sqliteRun } = await import('../db.js');
+      const userRow = sqliteGet<{ id: string }>('SELECT id FROM users WHERE email = ? LIMIT 1', [
+        'admin@openAwork.local',
+      ]);
+      expect(userRow).toBeDefined();
+      const userId = userRow?.id;
+      if (!userId) {
+        throw new Error('admin user should exist');
+      }
+      sqliteRun(
+        `INSERT INTO question_requests
+         (id, session_id, user_id, tool_name, title, questions_json, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          randomUUID(),
+          childSessionId,
+          userId,
+          'ask_question',
+          '等待确认',
+          JSON.stringify([{ id: 'q-1', label: '继续吗？', kind: 'text' }]),
+        ],
+      );
+
+      const deleteRes = await app!.inject({
+        method: 'DELETE',
+        url: `/sessions/${parentSessionId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+
+      expect(deleteRes.statusCode).toBe(409);
+      expect(JSON.parse(deleteRes.body)).toEqual({
+        blockReason: 'pendingInteraction',
+        error: 'Session can only be deleted when every related session is idle',
+        sessionId: childSessionId,
+        state_status: 'paused',
+      });
+      expect(sqliteGet('SELECT id FROM sessions WHERE id = ? LIMIT 1', [parentSessionId])).toEqual({
+        id: parentSessionId,
+      });
+      expect(sqliteGet('SELECT id FROM sessions WHERE id = ? LIMIT 1', [childSessionId])).toEqual({
+        id: childSessionId,
+      });
     });
 
     it('does not delete a task graph when the session does not belong to the caller', async () => {

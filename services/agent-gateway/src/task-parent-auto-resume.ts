@@ -198,7 +198,7 @@ async function drainPendingTaskParentAutoResumes(sessionKey: string): Promise<vo
 
     pendingTaskParentAutoResumes.delete(sessionKey);
     const requestData = buildAutoResumeRequestData(sample.requestData, items);
-    const { runSessionInBackground } = await import('./routes/stream.js');
+    const { runSessionInBackground } = await import('./routes/stream-runtime.js');
     const result = await runSessionInBackground({
       requestData,
       sessionId: sample.parentSessionId,

@@ -38,7 +38,13 @@ import { buildQuestionRequestTitle, questionToolDefinition } from './question-to
 import { createSkillTool } from './skill-tools.js';
 import { taskToolDefinition } from './task-tools.js';
 import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
-import { websearchTool } from './tool-aliases.js';
+import {
+  fileReadTool,
+  fileWriteTool,
+  readFileTool,
+  websearchTool,
+  writeFileTool,
+} from './tool-aliases.js';
 import { webfetchTool } from './web-tools.js';
 import { resolveDelegatedAgent } from './task-agent-resolution.js';
 import {
@@ -61,6 +67,29 @@ import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { runSkillMcpTool, skillMcpToolDefinition } from './skill-mcp-tools.js';
 import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
+import { codesearchToolDefinition } from './codesearch-tools.js';
+import {
+  ensureIgnoreRulesLoadedForPath,
+  hasWorkspacePermanentPermission,
+} from './workspace-safety.js';
+import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
+import {
+  lspFindReferencesToolDefinition,
+  lspGotoDefinitionToolDefinition,
+  lspPrepareRenameToolDefinition,
+  lspRenameToolDefinition,
+  lspSymbolsToolDefinition,
+} from './lsp-tools.js';
+import {
+  runTaskCreateTool,
+  runTaskGetTool,
+  runTaskListTool,
+  runTaskUpdateTool,
+  taskCreateToolDefinition,
+  taskGetToolDefinition,
+  taskListToolDefinition,
+  taskUpdateToolDefinition,
+} from './task-crud-tools.js';
 import {
   formatSubTodoReadValidationError,
   formatSubTodoWriteValidationError,
@@ -80,7 +109,9 @@ import {
   todoWriteTool,
 } from './todo-tools.js';
 import { createPermissionAskedEvent } from './session-permission-events.js';
+import { createQuestionAskedEvent } from './session-question-events.js';
 import { publishSessionRunEvent } from './session-run-events.js';
+import { reconcileSessionStateStatus } from './session-runtime-state.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import {
   isGatewayToolEnabledForSessionMetadata,
@@ -128,12 +159,15 @@ const FILE_TOOLS = new Set([
 const PERMISSION_GATED_TOOLS = new Set([
   'apply_patch',
   'bash',
+  'codesearch',
   'interactive_bash',
   'edit',
+  'file_write',
   'skill',
   'skill_mcp',
   'mcp_list_tools',
   'write',
+  'write_file',
   'workspace_write_file',
   'workspace_create_file',
   'workspace_create_directory',
@@ -144,6 +178,11 @@ const PERMISSION_GATED_TOOLS = new Set([
 const TOOL_WHITELIST = new Set<string>([
   'apply_patch',
   'bash',
+  'codesearch',
+  'file_read',
+  'read_file',
+  'file_write',
+  'write_file',
   'web_search',
   websearchTool.name,
   webfetchTool.name,
@@ -167,6 +206,15 @@ const TOOL_WHITELIST = new Set<string>([
   'task',
   'lsp_diagnostics',
   'lsp_touch',
+  'lsp_goto_definition',
+  'lsp_find_references',
+  'lsp_symbols',
+  'lsp_prepare_rename',
+  'lsp_rename',
+  'task_create',
+  'task_get',
+  'task_list',
+  'task_update',
   subTodoReadTool.name,
   subTodoWriteTool.name,
   todoReadTool.name,
@@ -717,12 +765,12 @@ export function syncParentTaskToolResult(input: {
     userId: input.userId,
     role: 'tool',
     content: [
-      {
-        type: 'tool_result',
+      buildToolResultContent({
         toolCallId: input.parentToolReference.toolCallId,
+        toolName: 'task',
         output,
         isError: input.status === 'failed',
-      },
+      }),
     ],
     clientRequestId: createTaskToolResultClientRequestId(
       input.parentToolReference.clientRequestId,
@@ -731,14 +779,20 @@ export function syncParentTaskToolResult(input: {
     replaceExisting: true,
   });
 
-  publishSessionRunEvent(input.parentSessionId, {
-    type: 'tool_result',
-    toolCallId: input.parentToolReference.toolCallId,
-    toolName: 'task',
-    output,
-    isError: input.status === 'failed',
-    occurredAt: Date.now(),
-  });
+  publishSessionRunEvent(
+    input.parentSessionId,
+    buildToolResultRunEvent({
+      toolCallId: input.parentToolReference.toolCallId,
+      toolName: 'task',
+      output,
+      isError: input.status === 'failed',
+      eventMeta: {
+        eventId: `${input.parentSessionId}:${input.parentToolReference.toolCallId}:tool_result`,
+        runId: `task:${input.taskId}`,
+        occurredAt: Date.now(),
+      },
+    }),
+  );
 }
 
 const gatewayLspDiagnosticsTool: ToolDefinition<
@@ -784,7 +838,9 @@ function buildPermissionRequestContext(
         : null;
 
   switch (request.toolName) {
-    case 'workspace_write_file': {
+    case 'workspace_write_file':
+    case 'file_write':
+    case 'write_file': {
       const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
       if (!safePath) return null;
       return {
@@ -840,6 +896,16 @@ function buildPermissionRequestContext(
         reason: '需要调用技能内嵌的 MCP 能力',
         riskLevel: 'high',
         previewAction: `调用 skill MCP ${mcpName}/${operation}`,
+      };
+    }
+    case 'codesearch': {
+      const query = typeof rawInput['query'] === 'string' ? rawInput['query'].trim() : '';
+      if (!query) return null;
+      return {
+        scope: `codesearch:${query}`,
+        reason: '需要联网搜索真实代码上下文',
+        riskLevel: 'medium',
+        previewAction: `代码搜索: ${query}`,
       };
     }
     case 'bash': {
@@ -1095,7 +1161,7 @@ async function executeGatewayManagedTool(
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: runSessionListTool(userId, parsed.data),
+        output: await runSessionListTool(userId, parsed.data),
         isError: false,
         durationMs: 0,
       };
@@ -1185,7 +1251,77 @@ async function executeGatewayManagedTool(
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: runSessionInfoTool(userId, parsed.data),
+        output: await runSessionInfoTool(userId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === taskCreateToolDefinition.name) {
+      const parsed = taskCreateToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: await runTaskCreateTool(sessionId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === taskGetToolDefinition.name) {
+      const parsed = taskGetToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: await runTaskGetTool(sessionId, parsed.data),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === taskListToolDefinition.name) {
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: await runTaskListTool(sessionId),
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === taskUpdateToolDefinition.name) {
+      const parsed = taskUpdateToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: await runTaskUpdateTool(sessionId, parsed.data),
         isError: false,
         durationMs: 0,
       };
@@ -2199,6 +2335,30 @@ async function executeGatewayManagedTool(
         };
       }
 
+      const runtimeReconciliation = reconcileSessionStateStatus({
+        sessionId: childSessionId,
+        userId,
+      });
+      if (runtimeReconciliation.wasReset) {
+        await reconcileResumedTaskChildSession({
+          childSessionId,
+          pendingInteraction: false,
+          statusCode: 500,
+          userId,
+        });
+        graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
+        task = graph.tasks[parsed.data.task_id];
+        if (!task) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: `Background task ${parsed.data.task_id} no longer exists`,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+      }
+
       const baseOutput = buildTaskToolOutput({
         assignedAgent: task.assignedAgent ?? 'task',
         errorMessage: task.errorMessage,
@@ -2554,7 +2714,7 @@ async function runChildTaskSessionInBackground(input: {
   const taskManager = new AgentTaskManagerImpl();
 
   try {
-    const { runSessionInBackground } = await import('./routes/stream.js');
+    const { runSessionInBackground } = await import('./routes/stream-runtime.js');
     let pendingInteraction = false;
     const result = await runSessionInBackground({
       requestData: input.requestData,
@@ -2909,6 +3069,7 @@ function createPendingPermissionRequest(
       riskLevel: context.riskLevel,
       previewAction: context.previewAction,
     }),
+    payload ? { clientRequestId: payload.clientRequestId } : undefined,
   );
   return requestId;
 }
@@ -2955,6 +3116,15 @@ function createPendingQuestionRequest(input: {
       input.payload ? JSON.stringify(input.payload) : null,
     ],
   );
+  publishSessionRunEvent(
+    input.sessionId,
+    createQuestionAskedEvent({
+      requestId,
+      title: input.title,
+      toolName: 'question',
+    }),
+    input.payload ? { clientRequestId: input.payload.clientRequestId } : undefined,
+  );
   return requestId;
 }
 
@@ -2984,6 +3154,10 @@ function ensurePermissionForTool(
   const sessionMetadata = getSessionMetadata(sessionId);
   if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
     return { kind: 'approved', requestId: 'channel-policy', decision: 'session' };
+  }
+
+  if (hasWorkspacePermanentPermission(sessionId, request.toolName, context.scope)) {
+    return { kind: 'approved', requestId: 'workspace-policy', decision: 'permanent' };
   }
 
   const requestPayload =
@@ -3078,6 +3252,9 @@ export class ToolSandbox {
       const filePath =
         (typeof rawInput['path'] === 'string' ? rawInput['path'] : undefined) ??
         (typeof rawInput['filePath'] === 'string' ? rawInput['filePath'] : undefined);
+      if (filePath) {
+        await ensureIgnoreRulesLoadedForPath(filePath);
+      }
       if (filePath && defaultIgnoreManager.shouldIgnore(filePath)) {
         const result: ToolCallResult = {
           toolCallId: request.toolCallId,
@@ -3212,6 +3389,10 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
   sandbox.register<typeof websearchTool.inputSchema, typeof websearchTool.outputSchema>(
     websearchTool,
   );
+  sandbox.register<
+    typeof codesearchToolDefinition.inputSchema,
+    typeof codesearchToolDefinition.outputSchema
+  >(codesearchToolDefinition);
   sandbox.register<typeof webfetchTool.inputSchema, typeof webfetchTool.outputSchema>(webfetchTool);
   sandbox.register<
     typeof applyPatchToolDefinition.inputSchema,
@@ -3225,6 +3406,26 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
   sandbox.register<typeof gatewayLspTouchTool.inputSchema, typeof gatewayLspTouchTool.outputSchema>(
     gatewayLspTouchTool,
   );
+  sandbox.register<
+    typeof lspGotoDefinitionToolDefinition.inputSchema,
+    typeof lspGotoDefinitionToolDefinition.outputSchema
+  >(lspGotoDefinitionToolDefinition);
+  sandbox.register<
+    typeof lspFindReferencesToolDefinition.inputSchema,
+    typeof lspFindReferencesToolDefinition.outputSchema
+  >(lspFindReferencesToolDefinition);
+  sandbox.register<
+    typeof lspSymbolsToolDefinition.inputSchema,
+    typeof lspSymbolsToolDefinition.outputSchema
+  >(lspSymbolsToolDefinition);
+  sandbox.register<
+    typeof lspPrepareRenameToolDefinition.inputSchema,
+    typeof lspPrepareRenameToolDefinition.outputSchema
+  >(lspPrepareRenameToolDefinition);
+  sandbox.register<
+    typeof lspRenameToolDefinition.inputSchema,
+    typeof lspRenameToolDefinition.outputSchema
+  >(lspRenameToolDefinition);
   sandbox.register<typeof workspaceTreeTool.inputSchema, typeof workspaceTreeTool.outputSchema>(
     workspaceTreeTool,
   );
@@ -3234,6 +3435,8 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
     typeof workspaceReadFileTool.outputSchema
   >(workspaceReadFileTool);
   sandbox.register<typeof readTool.inputSchema, typeof readTool.outputSchema>(readTool);
+  sandbox.register<typeof fileReadTool.inputSchema, typeof fileReadTool.outputSchema>(fileReadTool);
+  sandbox.register<typeof readFileTool.inputSchema, typeof readFileTool.outputSchema>(readFileTool);
   sandbox.register<typeof globTool.inputSchema, typeof globTool.outputSchema>(globTool);
   sandbox.register<typeof workspaceSearchTool.inputSchema, typeof workspaceSearchTool.outputSchema>(
     workspaceSearchTool,
@@ -3260,6 +3463,12 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
     typeof workspaceWriteFileTool.outputSchema
   >(workspaceWriteFileTool);
   sandbox.register<typeof writeTool.inputSchema, typeof writeTool.outputSchema>(writeTool);
+  sandbox.register<typeof fileWriteTool.inputSchema, typeof fileWriteTool.outputSchema>(
+    fileWriteTool,
+  );
+  sandbox.register<typeof writeFileTool.inputSchema, typeof writeFileTool.outputSchema>(
+    writeFileTool,
+  );
   sandbox.register<
     typeof workspaceCreateFileTool.inputSchema,
     typeof workspaceCreateFileTool.outputSchema

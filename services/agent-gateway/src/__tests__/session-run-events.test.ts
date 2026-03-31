@@ -1,8 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  sqliteGetMock: vi.fn(),
+  sqliteRunMock: vi.fn(),
+  sqliteAllMock: vi.fn(),
+}));
+
+vi.mock('../db.js', () => ({
+  sqliteGet: mocks.sqliteGetMock,
+  sqliteRun: mocks.sqliteRunMock,
+  sqliteAll: mocks.sqliteAllMock,
+}));
+
 import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session-run-events.js';
 
 describe('session run events', () => {
   it('publishes events to active subscribers and stops after unsubscribe', () => {
+    mocks.sqliteGetMock.mockReturnValue({ user_id: 'user-a' });
     const handler = vi.fn();
     const unsubscribe = subscribeSessionRunEvents('session-1', handler);
 
@@ -25,5 +39,6 @@ describe('session run events', () => {
     });
 
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(mocks.sqliteRunMock).toHaveBeenCalledTimes(2);
   });
 });

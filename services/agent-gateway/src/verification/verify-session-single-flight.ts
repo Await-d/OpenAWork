@@ -42,7 +42,7 @@ async function main(): Promise<void> {
           const [dbModule, { runSessionInBackground }, { stopAnyInFlightStreamRequestForSession }] =
             await Promise.all([
               import('../db.js'),
-              import('../routes/stream.js'),
+              import('../routes/stream-runtime.js'),
               import('../routes/stream-cancellation.js'),
             ]);
 
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
             },
             sessionId,
             userId,
-            writeChunk: (chunk) => {
+            writeChunk: (chunk: { code?: string; type: string }) => {
               secondEvents.push(chunk as { code?: string; type: string });
             },
           });

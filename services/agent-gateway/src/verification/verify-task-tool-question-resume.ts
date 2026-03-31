@@ -5,7 +5,7 @@ import { listSessionMessages } from '../session-message-store.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import { formatAnsweredQuestionOutput } from '../question-tools.js';
 import type { QuestionToolInput } from '../question-tools.js';
-import { resumeAnsweredQuestionRequest } from '../routes/stream.js';
+import { resumeAnsweredQuestionRequest } from '../routes/stream-runtime.js';
 import {
   assert,
   createChatCompletionsStream,

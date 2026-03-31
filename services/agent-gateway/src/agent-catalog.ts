@@ -348,7 +348,6 @@ function defaultBodyForBuiltin(id: string): ManagedAgentBody {
   }
   const metadata = REFERENCE_AGENT_ROLE_METADATA[id];
   const reference = BUILTIN_AGENT_REFERENCE_SNAPSHOT[id];
-  const hasReference = Object.prototype.hasOwnProperty.call(BUILTIN_AGENT_REFERENCE_SNAPSHOT, id);
   const modelCandidates = getReferenceAgentModelCandidates(id);
   return {
     label: reference?.label ?? builtin.label,
@@ -358,7 +357,7 @@ function defaultBodyForBuiltin(id: string): ManagedAgentBody {
     model: modelCandidates[0],
     variant: undefined,
     fallbackModels: modelCandidates.slice(1),
-    systemPrompt: hasReference ? reference?.systemPrompt : BUILTIN_AGENT_FALLBACK_PROMPTS[id],
+    systemPrompt: reference?.systemPrompt ?? BUILTIN_AGENT_FALLBACK_PROMPTS[id],
     note: undefined,
   };
 }

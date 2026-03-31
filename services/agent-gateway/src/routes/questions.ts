@@ -5,7 +5,10 @@ import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../question-tools.js';
-import { resumeAnsweredQuestionRequest, type ApprovedPermissionResumePayload } from './stream.js';
+import { createQuestionRepliedEvent } from '../session-question-events.js';
+import { publishSessionRunEvent } from '../session-run-events.js';
+import { type ApprovedPermissionResumePayload } from './stream.js';
+import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
 
 const replyQuestionSchema = z.object({
   requestId: z.string().min(1),
@@ -116,6 +119,18 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         ],
       );
 
+      const requestClientRequestId = parseQuestionRequestClientRequestId(
+        questionRequest.request_payload_json,
+      );
+      publishSessionRunEvent(
+        sessionId,
+        createQuestionRepliedEvent({
+          requestId: body.data.requestId,
+          status: body.data.status,
+        }),
+        requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
+      );
+
       if (body.data.status === 'answered') {
         const payload = parseQuestionResumePayload(questionRequest.request_payload_json);
         if (payload) {
@@ -196,6 +211,19 @@ function parseQuestionResumePayload(
       rawInput,
       requestData: requestDataCandidate,
     } as Omit<ApprovedPermissionResumePayload, 'toolName'>;
+  } catch {
+    return null;
+  }
+}
+
+function parseQuestionRequestClientRequestId(payloadJson: string | null): string | null {
+  if (!payloadJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
+    return typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
   } catch {
     return null;
   }

@@ -24,14 +24,24 @@ import {
 } from '../session-workspace-metadata.js';
 import { listSessionTodoLanes, listSessionTodos } from '../todo-tools.js';
 import {
-  clearTaskParentToolReference,
   buildTaskUpdateEvent,
   readTaskParentToolReference,
   syncParentTaskToolResult,
 } from '../tool-sandbox.js';
-import { clearTaskParentAutoResumeContext } from '../task-parent-auto-resume.js';
+import {
+  clearPendingTaskParentAutoResumesForSession,
+  clearTaskParentAutoResumeContext,
+} from '../task-parent-auto-resume.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
-import { stopAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
+import {
+  getAnyInFlightStreamRequestForSession,
+  stopAllInFlightStreamRequestsForSession,
+} from './stream-cancellation.js';
+import { reconcileSessionRuntime } from '../session-runtime-reconciler.js';
+import { deleteSessionWithMalformedRecovery } from '../session-delete-recovery.js';
+import { isSqliteMalformedError } from '../sqlite-error-utils.js';
+import { hasFreshSessionRuntimeThread } from '../session-runtime-thread-store.js';
+import { hasPendingSessionInteraction } from '../session-runtime-state.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
@@ -104,30 +114,94 @@ function collectAncestorSessionIds(
   return collectedSessionIds;
 }
 
-function detachDirectChildSessions(userId: string, parentSessionId: string): void {
-  const sessions = sqliteAll<Pick<SessionRow, 'id' | 'metadata_json'>>(
-    'SELECT id, metadata_json FROM sessions WHERE user_id = ?',
-    [userId],
-  );
+function buildSessionDeletionRows(sessions: SessionRow[], rootSessionId: string): SessionRow[] {
+  const rowsById = new Map(sessions.map((session) => [session.id, session]));
+  const childrenByParent = new Map<string, string[]>();
 
   for (const session of sessions) {
-    if (parseParentSessionId(session.metadata_json) !== parentSessionId) {
+    const parentSessionId = parseParentSessionId(session.metadata_json);
+    if (!parentSessionId) {
       continue;
     }
 
-    const metadata = parseSessionMetadataJson(session.metadata_json);
-    if (extractParentSessionIdFromMetadata(metadata) !== parentSessionId) {
+    const existingChildren = childrenByParent.get(parentSessionId) ?? [];
+    existingChildren.push(session.id);
+    childrenByParent.set(parentSessionId, existingChildren);
+  }
+
+  const queue: Array<{ depth: number; sessionId: string }> = [
+    { depth: 0, sessionId: rootSessionId },
+  ];
+  const visited = new Set<string>();
+  const deletionRows: Array<{ depth: number; row: SessionRow }> = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current.sessionId)) {
       continue;
     }
 
-    const detachedMetadata = clearTaskParentToolReference({ ...metadata });
-    delete detachedMetadata['parentSessionId'];
-    clearTaskParentAutoResumeContext({ childSessionId: session.id, userId });
+    visited.add(current.sessionId);
+    const row = rowsById.get(current.sessionId);
+    if (!row) {
+      continue;
+    }
 
-    sqliteRun(
-      "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-      [JSON.stringify(detachedMetadata), session.id, userId],
-    );
+    deletionRows.push({ depth: current.depth, row });
+    for (const childSessionId of childrenByParent.get(current.sessionId) ?? []) {
+      queue.push({ depth: current.depth + 1, sessionId: childSessionId });
+    }
+  }
+
+  return deletionRows.sort((left, right) => right.depth - left.depth).map(({ row }) => row);
+}
+
+function findSessionDeletionBlocker(
+  sessionsToDelete: ReadonlyArray<SessionRow>,
+  userId: string,
+): {
+  reason: 'pendingInteraction' | 'runtimeThread' | 'state' | 'stream';
+  session: SessionRow;
+} | null {
+  for (const session of sessionsToDelete) {
+    if (getAnyInFlightStreamRequestForSession({ sessionId: session.id, userId })) {
+      return { reason: 'stream', session };
+    }
+
+    if (hasFreshSessionRuntimeThread({ sessionId: session.id, userId })) {
+      return { reason: 'runtimeThread', session };
+    }
+
+    if (hasPendingSessionInteraction(session.id)) {
+      return { reason: 'pendingInteraction', session };
+    }
+
+    if (session.state_status !== 'idle') {
+      return { reason: 'state', session };
+    }
+  }
+
+  return null;
+}
+
+async function deleteSessionTree(input: {
+  sessionsToDelete: ReadonlyArray<SessionRow>;
+  userId: string;
+}): Promise<void> {
+  for (const session of input.sessionsToDelete) {
+    clearPendingTaskParentAutoResumesForSession({ sessionId: session.id, userId: input.userId });
+
+    try {
+      sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [session.id, input.userId]);
+    } catch (error) {
+      if (!isSqliteMalformedError(error)) {
+        throw error;
+      }
+
+      deleteSessionWithMalformedRecovery({ sessionId: session.id, userId: input.userId });
+    }
+
+    await taskStore.deleteGraph(WORKSPACE_ROOT, session.id);
   }
 }
 
@@ -260,6 +334,31 @@ const taskStore = new AgentTaskStoreImpl();
 const SESSION_WORKSPACE_IMMUTABLE_ERROR = 'Session workspace cannot be moved after binding';
 const SESSION_PARENT_IMMUTABLE_ERROR = 'Session parent cannot be changed after binding';
 
+async function reconcileSessionRuntimeForResponse(
+  session: SessionRow,
+  userId: string,
+): Promise<SessionRow> {
+  const reconciliation = await reconcileSessionRuntime({ sessionId: session.id, userId });
+
+  if (!reconciliation.status || reconciliation.status === session.state_status) {
+    return session;
+  }
+
+  return {
+    ...session,
+    state_status: reconciliation.status,
+  };
+}
+
+async function reconcileSessionRuntimeRowsForResponse(
+  sessions: SessionRow[],
+  userId: string,
+): Promise<SessionRow[]> {
+  return Promise.all(
+    sessions.map((session) => reconcileSessionRuntimeForResponse(session, userId)),
+  );
+}
+
 export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/sessions',
@@ -333,13 +432,16 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { limit, offset } = query.data;
-      const sessions = sqliteAll<SessionRow>(
-        'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
-        [user.sub, limit, offset],
-      ).map((session) => ({
-        ...session,
-        metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
-      }));
+      const sessions = await reconcileSessionRuntimeRowsForResponse(
+        sqliteAll<SessionRow>(
+          'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+          [user.sub, limit, offset],
+        ).map((session) => ({
+          ...session,
+          metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
+        })),
+        user.sub,
+      );
       step.succeed(undefined, { count: sessions.length });
       return reply.send({ sessions });
     },
@@ -362,12 +464,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         step.fail('not found');
         return reply.status(404).send({ error: 'Session not found' });
       }
+      const reconciledSession = await reconcileSessionRuntimeForResponse(session, user.sub);
       step.succeed();
       const todos = listSessionTodos(sessionId);
       const response = toPublicSessionResponse(
         {
-          ...session,
-          metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
+          ...reconciledSession,
+          metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
         },
         listSessionMessages({
           sessionId,
@@ -489,11 +592,41 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      detachDirectChildSessions(user.sub, sessionId);
-      sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [sessionId, user.sub]);
-      await taskStore.deleteGraph(WORKSPACE_ROOT, sessionId);
-      step.succeed();
-      return reply.send({ ok: true });
+      const sessions = sqliteAll<SessionRow>(
+        'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        [user.sub],
+      );
+      const sessionsToDelete = buildSessionDeletionRows(sessions, sessionId);
+      await Promise.all(
+        sessionsToDelete.map((candidate) =>
+          stopAllInFlightStreamRequestsForSession({ sessionId: candidate.id, userId: user.sub }),
+        ),
+      );
+      const reconciledSessionsToDelete = await reconcileSessionRuntimeRowsForResponse(
+        sessionsToDelete,
+        user.sub,
+      );
+      const blockingSession = findSessionDeletionBlocker(reconciledSessionsToDelete, user.sub);
+      if (blockingSession) {
+        step.fail('session not deletable', {
+          blockReason: blockingSession.reason,
+          blockingSessionId: blockingSession.session.id,
+          blockingSessionState: blockingSession.session.state_status,
+        });
+        return reply.status(409).send({
+          blockReason: blockingSession.reason,
+          error: 'Session can only be deleted when every related session is idle',
+          sessionId: blockingSession.session.id,
+          state_status: blockingSession.session.state_status,
+        });
+      }
+
+      await deleteSessionTree({ sessionsToDelete: reconciledSessionsToDelete, userId: user.sub });
+      step.succeed(undefined, { deletedCount: reconciledSessionsToDelete.length });
+      return reply.send({
+        deletedSessionIds: reconciledSessionsToDelete.map((candidate) => candidate.id),
+        ok: true,
+      });
     },
   );
 
@@ -705,23 +838,29 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         (childSessionId) => childSessionId !== sessionId,
       );
 
-      const children = descendantSessionIds
-        .map((childSessionId) => sessions.find((session) => session.id === childSessionId) ?? null)
-        .filter((session): session is SessionRow => session !== null)
-        .slice(query.data.offset, query.data.offset + query.data.limit)
-        .map((session) =>
-          toPublicSessionResponse(
-            {
-              ...session,
-              metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
-            },
-            listSessionMessages({
-              sessionId: session.id,
-              userId: user.sub,
-              legacyMessagesJson: session.messages_json,
-            }),
-          ),
-        );
+      const childRows = await reconcileSessionRuntimeRowsForResponse(
+        descendantSessionIds
+          .map(
+            (childSessionId) => sessions.find((session) => session.id === childSessionId) ?? null,
+          )
+          .filter((session): session is SessionRow => session !== null)
+          .slice(query.data.offset, query.data.offset + query.data.limit),
+        user.sub,
+      );
+
+      const children = childRows.map((session) =>
+        toPublicSessionResponse(
+          {
+            ...session,
+            metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
+          },
+          listSessionMessages({
+            sessionId: session.id,
+            userId: user.sub,
+            legacyMessagesJson: session.messages_json,
+          }),
+        ),
+      );
 
       step.succeed(undefined, { count: children.length });
       return reply.send({ sessions: children });
@@ -749,6 +888,15 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const sessions = sqliteAll<SessionRow>(
         'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
         [user.sub],
+      );
+      const sessionsById = new Map(sessions.map((candidate) => [candidate.id, candidate]));
+      const visibleSessionIds = new Set<string>([
+        ...collectAncestorSessionIds(sessionsById, sessionId),
+        ...collectDescendantSessionIds(sessions, sessionId),
+      ]);
+      await reconcileSessionRuntimeRowsForResponse(
+        sessions.filter((candidate) => visibleSessionIds.has(candidate.id)),
+        user.sub,
       );
       const includedSessionIds = collectDescendantSessionIds(sessions, sessionId);
       const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
@@ -819,10 +967,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const stopped = childSessionId
-        ? await stopAnyInFlightStreamRequestForSession({
+        ? (await stopAllInFlightStreamRequestsForSession({
             sessionId: childSessionId,
             userId: user.sub,
-          })
+          })) > 0
         : false;
 
       if (!stopped && childSessionId) {

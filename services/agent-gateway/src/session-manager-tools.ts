@@ -5,6 +5,9 @@ import { sqliteAll, sqliteGet } from './db.js';
 import { extractMessageText, listSessionMessages } from './session-message-store.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { listSessionTodoLanes } from './todo-tools.js';
+import { listSessionFileDiffs } from './session-file-diff-store.js';
+import { listSessionRunEvents } from './session-run-events.js';
+import { listSessionSnapshots } from './session-snapshot-store.js';
 
 interface SessionRow {
   id: string;
@@ -206,10 +209,15 @@ function listSessionTranscriptRows(userId: string, sessionId: string): SessionTr
   );
 }
 
-export function runSessionListTool(
+async function loadSessionRuntimeStatus(input: { sessionId: string; userId: string }) {
+  const { reconcileSessionRuntime } = await import('./session-runtime-reconciler.js');
+  return reconcileSessionRuntime(input);
+}
+
+export async function runSessionListTool(
   userId: string,
   input: z.infer<typeof sessionListInputSchema>,
-): string {
+): Promise<string> {
   const sessions = listUserSessions(userId)
     .filter((session) => sessionMatchesProjectPath(session, input.project_path))
     .filter((session) => sessionWithinDateRange(session, input.from_date, input.to_date));
@@ -218,10 +226,13 @@ export function runSessionListTool(
     return 'No sessions found.';
   }
 
-  const rows = limited.map((session) => {
-    const messageCount = listSessionMessages({ sessionId: session.id, userId }).length;
-    return `| ${session.id} | ${messageCount} | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${session.state_status} | ${truncateText(session.title ?? '')} |`;
-  });
+  const rows = await Promise.all(
+    limited.map(async (session) => {
+      const messageCount = listSessionMessages({ sessionId: session.id, userId }).length;
+      const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
+      return `| ${session.id} | ${messageCount} | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${runtime.status ?? session.state_status} | ${truncateText(session.title ?? '')} |`;
+    }),
+  );
 
   return [
     '| Session ID | Messages | First | Last | Status | Title |',
@@ -273,6 +284,32 @@ export function runSessionReadTool(
         );
       });
     }
+    const runEvents = listSessionRunEvents(session.id);
+    if (runEvents.length > 0) {
+      lines.push('Run Events:');
+      runEvents.slice(0, 50).forEach((event, index) => {
+        lines.push(
+          `${index + 1}. [${formatDate(event.occurredAt)}] ${event.type}${event.runId ? ` · ${event.runId}` : ''}${event.eventId ? ` · ${event.eventId}` : ''}`,
+        );
+      });
+    }
+  }
+
+  const fileDiffs = listSessionFileDiffs({ sessionId: session.id, userId });
+  const snapshots = listSessionSnapshots({ sessionId: session.id, userId });
+  if (fileDiffs.length > 0) {
+    lines.push('File Diffs:');
+    fileDiffs.slice(0, 20).forEach((diff) => {
+      lines.push(`- ${diff.file} (+${diff.additions} / -${diff.deletions})`);
+    });
+  }
+  if (snapshots.length > 0) {
+    lines.push('Snapshots:');
+    snapshots.slice(0, 20).forEach((snapshot) => {
+      lines.push(
+        `- ${snapshot.clientRequestId} · files=${snapshot.summary.files} · +${snapshot.summary.additions} / -${snapshot.summary.deletions}`,
+      );
+    });
   }
 
   return lines.join('\n').trim();
@@ -318,10 +355,10 @@ export function runSessionSearchTool(
   return `Found ${results.length} matches:\n\n${results.join('\n\n')}`;
 }
 
-export function runSessionInfoTool(
+export async function runSessionInfoTool(
   userId: string,
   input: z.infer<typeof sessionInfoInputSchema>,
-): string {
+): Promise<string> {
   const session = getUserSession(userId, input.session_id);
   if (!session) {
     return `Session not found: ${input.session_id}`;
@@ -330,14 +367,19 @@ export function runSessionInfoTool(
   const messages = listSessionMessages({ sessionId: session.id, userId });
   const lanes = listSessionTodoLanes(session.id);
   const metadata = parseSessionMetadataJson(session.metadata_json);
+  const fileDiffs = listSessionFileDiffs({ sessionId: session.id, userId });
+  const snapshots = listSessionSnapshots({ sessionId: session.id, userId });
   const firstMessage = messages[0];
   const lastMessage = messages.at(-1);
+  const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
   return [
     `Session ID: ${session.id}`,
     `Messages: ${messages.length}`,
     `Date Range: ${formatDate(firstMessage?.createdAt ?? session.created_at)} to ${formatDate(lastMessage?.createdAt ?? session.updated_at)}`,
-    `Status: ${session.state_status}`,
+    `Status: ${runtime.status ?? session.state_status}`,
     `Has Todos: ${lanes.main.length + lanes.temp.length > 0 ? 'Yes' : 'No'} (${lanes.main.length + lanes.temp.length} items)`,
+    `File Diffs: ${fileDiffs.length}`,
+    `Snapshots: ${snapshots.length}`,
     `Children: ${countChildSessions(userId, session.id)}`,
     `Parent Session: ${typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : 'None'}`,
   ].join('\n');

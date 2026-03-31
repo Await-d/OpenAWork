@@ -56,6 +56,7 @@ const toolCallContentSchema = z.object({
 const toolResultContentSchema = z.object({
   type: z.literal('tool_result'),
   toolCallId: z.string(),
+  toolName: z.string().optional(),
   output: z.unknown(),
   isError: z.boolean(),
 });
@@ -369,8 +370,8 @@ async function executeInitDeepCommand(params: {
   const fileCount = entries.length;
   const summary =
     fileCount > 0
-      ? `已注入 ${fileCount} 个 AGENTS.md 上下文文件到会话。`
-      : '未找到 AGENTS.md 文件，会话上下文未更新。';
+      ? `已注入 ${fileCount} 条 Instructions 上下文到会话。`
+      : '未找到可注入的 Instructions 文件，会话上下文未更新。';
 
   const metadata = mergeMetadata(params.metadataJson, {
     initDeepContext: injectionBlock,
@@ -380,7 +381,7 @@ async function executeInitDeepCommand(params: {
   const card = {
     type: 'status' as const,
     title: '/init-deep 完成',
-    message: `${summary}\n\n注入内容摘要（前 300 字符）：\n${injectionBlock.slice(0, 300)}${injectionBlock.length > 300 ? '…' : ''}`,
+    message: `${summary}\n\nInstructions 摘要（前 300 字符）：\n${injectionBlock.slice(0, 300)}${injectionBlock.length > 300 ? '…' : ''}`,
     tone: 'info' as const,
   };
   const storedMessages = appendCommandCardArtifacts({
@@ -1378,6 +1379,7 @@ function normalizeMessageSnapshots(
       return {
         type: 'tool_result' as const,
         toolCallId: content.toolCallId,
+        toolName: content.toolName,
         output: content.output,
         isError: content.isError,
       };

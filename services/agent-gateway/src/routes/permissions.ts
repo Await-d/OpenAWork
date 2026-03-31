@@ -11,7 +11,9 @@ import {
 } from '../session-permission-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { resumeApprovedPermissionRequest, type ApprovedPermissionResumePayload } from './stream.js';
+import { type ApprovedPermissionResumePayload } from './stream.js';
+import { resumeApprovedPermissionRequest } from './stream-runtime.js';
+import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
 
 const permissionResumeRequestSchema = modelRequestSchema.extend({
   displayMessage: z.string().min(1).max(32768).optional(),
@@ -27,6 +29,7 @@ const createPermissionRequestSchema = z.object({
   reason: z.string().min(1),
   riskLevel: z.enum(['low', 'medium', 'high']),
   previewAction: z.string().optional(),
+  clientRequestId: z.string().min(1).max(128).optional(),
 });
 
 const replyPermissionSchema = z.object({
@@ -104,10 +107,11 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const requestId = randomUUID();
+      const clientRequestId = body.data.clientRequestId ?? `permission:${requestId}`;
       sqliteRun(
         `INSERT INTO permission_requests
-         (id, session_id, tool_name, scope, reason, risk_level, preview_action, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           requestId,
           sessionId,
@@ -116,6 +120,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           body.data.reason,
           body.data.riskLevel,
           body.data.previewAction ?? null,
+          JSON.stringify({ clientRequestId }),
         ],
       );
 
@@ -129,6 +134,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           riskLevel: body.data.riskLevel,
           previewAction: body.data.previewAction,
         }),
+        { clientRequestId },
       );
 
       step.succeed(undefined, { requestId });
@@ -195,18 +201,42 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         ],
       );
 
+      sqliteRun(
+        `INSERT INTO permission_decision_logs
+         (request_id, session_id, tool_name, scope, decision, workspace_root, created_at)
+         VALUES (?, ?, ?, ?, ?, NULL, datetime('now'))`,
+        [
+          body.data.requestId,
+          sessionId,
+          permissionRequest.tool_name,
+          permissionRequest.scope,
+          body.data.decision,
+        ],
+      );
+
+      if (body.data.decision === 'permanent') {
+        persistWorkspacePermanentPermission({
+          sessionId,
+          toolName: permissionRequest.tool_name,
+          scope: permissionRequest.scope,
+        });
+      }
+
+      const requestClientRequestId = parsePermissionRequestClientRequestId(
+        permissionRequest.request_payload_json,
+      );
+      const resumePayload =
+        body.data.decision === 'reject'
+          ? null
+          : parseApprovedPermissionResumePayload(permissionRequest.request_payload_json);
       publishSessionRunEvent(
         sessionId,
         createPermissionRepliedEvent({
           requestId: body.data.requestId,
           decision: body.data.decision,
         }),
+        requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
-
-      const resumePayload =
-        body.data.decision === 'reject'
-          ? null
-          : parseApprovedPermissionResumePayload(permissionRequest.request_payload_json);
       if (resumePayload) {
         void resumeApprovedPermissionRequest({
           payload: {
@@ -292,6 +322,19 @@ function parseApprovedPermissionResumePayload(
       toolCallId,
       rawInput,
     };
+  } catch {
+    return null;
+  }
+}
+
+function parsePermissionRequestClientRequestId(payloadJson: string | null): string | null {
+  if (!payloadJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
+    return typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
   } catch {
     return null;
   }

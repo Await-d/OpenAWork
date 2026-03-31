@@ -6,6 +6,7 @@ import {
   type RequestContext,
   type WorkflowStep,
 } from '@openAwork/logger';
+import { persistRequestWorkflowLog } from './request-workflow-log-store.js';
 
 type WorkflowFields = Record<string, string | number | boolean>;
 
@@ -184,6 +185,17 @@ function flushRequestWorkflow(request: FastifyRequest, statusCode: number, messa
     message,
     fields,
   );
+
+  const userId =
+    typeof (request as { user?: { sub?: unknown } }).user?.sub === 'string'
+      ? ((request as { user?: { sub?: string } }).user?.sub ?? null)
+      : null;
+  persistRequestWorkflowLog({
+    context: workflow.workflowContext,
+    steps: [workflow.workflowRequestStep],
+    statusCode,
+    userId,
+  });
 
   workflow.workflowLogger.flush(workflow.workflowContext, statusCode);
   workflow.workflowLogFlushed = true;

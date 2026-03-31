@@ -468,6 +468,7 @@ describe('session message store', () => {
         {
           type: 'tool_result',
           toolCallId: 'call-1',
+          toolName: 'task',
           output: 'waiting for approval',
           isError: false,
           pendingPermissionRequestId: 'perm-1',
@@ -484,6 +485,7 @@ describe('session message store', () => {
           {
             type: 'tool_result',
             toolCallId: 'call-1',
+            toolName: 'task',
             output: 'waiting for approval',
             isError: false,
             pendingPermissionRequestId: 'perm-1',
@@ -491,6 +493,35 @@ describe('session message store', () => {
         ],
       },
     ]);
+  });
+
+  it('round-trips toolName inside persisted tool results', async () => {
+    const { appendSessionMessage, listSessionMessages } =
+      await import('../session-message-store.js');
+
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'tool',
+      clientRequestId: 'req-tool-2',
+      content: [
+        {
+          type: 'tool_result',
+          toolCallId: 'call-2',
+          toolName: 'codesearch',
+          output: 'snippet',
+          isError: false,
+        },
+      ],
+    });
+
+    expect(
+      listSessionMessages({ sessionId: 'session-1', userId: 'user-1' })[0]?.content[0],
+    ).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-2',
+      toolName: 'codesearch',
+    });
   });
 
   it('round-trips modified_files_summary content from stored assistant messages', async () => {

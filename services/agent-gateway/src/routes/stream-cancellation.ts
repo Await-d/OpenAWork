@@ -93,3 +93,16 @@ export async function stopAnyInFlightStreamRequestForSession(input: {
   await current.execution.catch(() => undefined);
   return true;
 }
+
+export async function stopAllInFlightStreamRequestsForSession(input: {
+  sessionId: string;
+  userId: string;
+}): Promise<number> {
+  let stoppedCount = 0;
+
+  while (await stopAnyInFlightStreamRequestForSession(input)) {
+    stoppedCount += 1;
+  }
+
+  return stoppedCount;
+}

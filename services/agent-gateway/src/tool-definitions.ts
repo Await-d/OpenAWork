@@ -15,7 +15,14 @@ import {
   workspaceWriteFileTool,
   writeTool,
 } from './workspace-tools.js';
-import { websearchTool } from './tool-aliases.js';
+import {
+  fileReadTool,
+  fileWriteTool,
+  readFileTool,
+  websearchTool,
+  writeFileTool,
+} from './tool-aliases.js';
+import { codesearchToolDefinition } from './codesearch-tools.js';
 import { subTodoReadTool, subTodoWriteTool, todoReadTool, todoWriteTool } from './todo-tools.js';
 import { webfetchTool } from './web-tools.js';
 import { createEditTool } from './edit-tools.js';
@@ -41,6 +48,19 @@ import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from './skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
+import {
+  lspFindReferencesToolDefinition,
+  lspGotoDefinitionToolDefinition,
+  lspPrepareRenameToolDefinition,
+  lspRenameToolDefinition,
+  lspSymbolsToolDefinition,
+} from './lsp-tools.js';
+import {
+  taskCreateToolDefinition,
+  taskGetToolDefinition,
+  taskListToolDefinition,
+  taskUpdateToolDefinition,
+} from './task-crud-tools.js';
 
 type GatewayToolLike = {
   name: string;
@@ -79,8 +99,18 @@ const skillTool = createSkillTool('__tool-definitions__', '__tool-definitions__'
 
 const MODEL_VISIBLE_GATEWAY_TOOLS = [
   websearchTool,
+  codesearchToolDefinition,
   webfetchTool,
   ...LSP_TOOLS,
+  lspGotoDefinitionToolDefinition,
+  lspFindReferencesToolDefinition,
+  lspSymbolsToolDefinition,
+  lspPrepareRenameToolDefinition,
+  lspRenameToolDefinition,
+  taskCreateToolDefinition,
+  taskGetToolDefinition,
+  taskListToolDefinition,
+  taskUpdateToolDefinition,
   listTool,
   readTool,
   globTool,
@@ -120,6 +150,10 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
 
 const LEGACY_COMPATIBILITY_TOOLS = [
   webSearchTool,
+  fileReadTool,
+  readFileTool,
+  fileWriteTool,
+  writeFileTool,
   workspaceTreeTool,
   workspaceReadFileTool,
   workspaceSearchTool,
@@ -208,6 +242,21 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         required: ['url'],
         additionalProperties: false,
       };
+    case 'codesearch':
+      return {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Code search query' },
+          tokensNum: {
+            type: 'integer',
+            minimum: 1000,
+            maximum: 50000,
+            description: 'Approximate number of tokens to return',
+          },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      };
     case 'lsp_diagnostics':
       return {
         type: 'object',
@@ -230,6 +279,110 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         required: ['path'],
         additionalProperties: false,
       };
+    case 'lsp_goto_definition':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+        },
+        required: ['filePath', 'line', 'character'],
+        additionalProperties: false,
+      };
+    case 'lsp_find_references':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+          includeDeclaration: { type: 'boolean' },
+        },
+        required: ['filePath', 'line', 'character'],
+        additionalProperties: false,
+      };
+    case 'lsp_symbols':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          scope: { type: 'string', enum: ['document', 'workspace'] },
+          query: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 200 },
+        },
+        required: ['filePath'],
+        additionalProperties: false,
+      };
+    case 'lsp_prepare_rename':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+        },
+        required: ['filePath', 'line', 'character'],
+        additionalProperties: false,
+      };
+    case 'lsp_rename':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+          newName: { type: 'string' },
+        },
+        required: ['filePath', 'line', 'character', 'newName'],
+        additionalProperties: false,
+      };
+    case 'task_create':
+      return {
+        type: 'object',
+        properties: {
+          subject: { type: 'string' },
+          description: { type: 'string' },
+          blockedBy: { type: 'array', items: { type: 'string' } },
+          blocks: { type: 'array', items: { type: 'string' } },
+          metadata: { type: 'object' },
+          parentID: { type: 'string' },
+        },
+        required: ['subject'],
+        additionalProperties: false,
+      };
+    case 'task_get':
+      return {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      };
+    case 'task_list':
+      return {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      };
+    case 'task_update':
+      return {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          subject: { type: 'string' },
+          description: { type: 'string' },
+          status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'deleted'] },
+          addBlocks: { type: 'array', items: { type: 'string' } },
+          addBlockedBy: { type: 'array', items: { type: 'string' } },
+          owner: { type: 'string' },
+          metadata: { type: 'object' },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      };
     case 'list':
       return {
         type: 'object',
@@ -250,18 +403,19 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Absolute workspace file path to read' },
+          filePath: { type: 'string', description: 'Legacy alias for path' },
         },
-        required: ['path'],
+        required: [],
         additionalProperties: false,
       };
     case 'glob':
       return {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Absolute workspace directory path to search' },
+          path: { type: 'string', description: 'Optional workspace directory path to search' },
           pattern: { type: 'string', description: 'Glob pattern used to match workspace files' },
         },
-        required: ['path', 'pattern'],
+        required: ['pattern'],
         additionalProperties: false,
       };
     case 'edit':
@@ -661,16 +815,16 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Absolute workspace directory path to search' },
-          query: { type: 'string', description: 'Literal text to search for' },
-          maxResults: {
-            type: 'integer',
-            minimum: 1,
-            maximum: 50,
-            description: 'Maximum number of matches to return',
+          pattern: { type: 'string', description: 'Regex pattern to search for in file contents' },
+          path: { type: 'string', description: 'Optional workspace directory path to search' },
+          include: {
+            type: 'string',
+            description: 'Optional glob pattern to include matching files',
           },
+          output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] },
+          head_limit: { type: 'integer', minimum: 0, maximum: 500 },
         },
-        required: ['path', 'query'],
+        required: ['pattern'],
         additionalProperties: false,
       };
     case 'workspace_review_status':
@@ -707,12 +861,13 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             type: 'string',
             description: 'Absolute workspace file path to write, creating the file if missing',
           },
+          filePath: { type: 'string', description: 'Legacy alias for path' },
           content: {
             type: 'string',
             description: 'UTF-8 content to write into the file. Overwrites existing files.',
           },
         },
-        required: ['path', 'content'],
+        required: ['content'],
         additionalProperties: false,
       };
     case 'workspace_create_directory':

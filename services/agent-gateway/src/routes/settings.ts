@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
@@ -10,7 +12,50 @@ import {
   providerSettingsQuerySchema,
 } from '../provider-config.js';
 import { startRequestWorkflow } from '../request-workflow.js';
+import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
 import { z } from 'zod';
+
+interface RootPackageJson {
+  name?: string;
+  version?: string;
+}
+
+function readPackageJsonVersion(filePath: string): RootPackageJson | null {
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    return JSON.parse(content) as RootPackageJson;
+  } catch {
+    return null;
+  }
+}
+
+function loadAppVersion(): string {
+  const cwd = process.cwd();
+  const currentPackage = readPackageJsonVersion(resolve(cwd, 'package.json'));
+  let cursor = cwd;
+
+  while (true) {
+    const candidate = readPackageJsonVersion(resolve(cursor, 'package.json'));
+    if (candidate?.name === 'openAwork' && typeof candidate.version === 'string') {
+      return candidate.version;
+    }
+
+    const parent = dirname(cursor);
+    if (parent === cursor) {
+      break;
+    }
+
+    cursor = parent;
+  }
+
+  if (typeof currentPackage?.version === 'string') {
+    return currentPackage.version;
+  }
+
+  return process.env['OPENAWORK_APP_VERSION'] ?? process.env['npm_package_version'] ?? '0.0.1';
+}
+
+const APP_VERSION = loadAppVersion();
 
 interface AuditLogRow {
   id: number;
@@ -286,7 +331,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           );
       queryStep.succeed(undefined, { rows: rows.length });
 
-      const appVersion = process.env['npm_package_version'] ?? '0.0.1';
+      const appVersion = APP_VERSION;
 
       const mapStep = child('map');
       const diagnostics = rows.map((row) => {
@@ -658,7 +703,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       queryStep.succeed(undefined, { rows: rows.length });
 
       const mapStep = child('map');
-      const logs = rows.map((row) => {
+      const auditLogs = rows.map((row) => {
         const input = sanitizeAuditPayload(parseStoredJson(row.input_json ?? undefined));
         const output = sanitizeAuditPayload(parseStoredJson(row.output_json ?? undefined));
         const summary = extractAuditSummary(output);
@@ -676,8 +721,26 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           input,
           output,
           isError: row.is_error === 1,
+          source: 'tool',
         };
       });
+      const workflowLogs = listRequestWorkflowLogs(user.sub, 100).map((row) => ({
+        id: `workflow-${row.id}`,
+        sessionId: row.session_id,
+        requestId: row.request_id,
+        level: row.status_code >= 400 ? 'error' : 'info',
+        message: `${row.method} ${row.path} → ${row.status_code}`,
+        toolName: 'request_workflow',
+        durationMs: undefined,
+        createdAt: row.created_at,
+        input: undefined,
+        output: sanitizeAuditPayload(parseStoredJson(row.workflow_json)),
+        isError: row.status_code >= 400,
+        source: 'workflow',
+      }));
+      const logs = [...auditLogs, ...workflowLogs].sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt),
+      );
       mapStep.succeed(undefined, { logs: logs.length });
       step.succeed(undefined, { logs: logs.length });
 
@@ -726,7 +789,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(_request, 'settings.version.get');
-      const currentVersion = process.env['npm_package_version'] ?? '0.0.1';
+      const currentVersion = APP_VERSION;
 
       let latestVersion: string | null = null;
       let updateAvailable = false;

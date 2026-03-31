@@ -150,55 +150,19 @@ async function main(): Promise<void> {
         assert(deleteRes.statusCode === 200, `delete should succeed: ${deleteRes.body}`);
 
         assert(!existsSync(parentGraphPath), 'parent graph should be removed after delete');
-        assert(existsSync(childGraphPath), 'child graph should remain after parent delete');
+        assert(!existsSync(childGraphPath), 'child graph should be removed after parent delete');
 
-        const childRow = dbModule.sqliteGet<{ metadata_json: string }>(
-          'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+        const childRow = dbModule.sqliteGet<{ id: string }>(
+          'SELECT id FROM sessions WHERE id = ? LIMIT 1',
           [childSessionId],
         );
-        assert(childRow, 'child session should still exist');
-        const childMetadata = JSON.parse(childRow.metadata_json) as Record<string, unknown>;
-        assert(
-          childMetadata['parentSessionId'] === undefined,
-          'child parentSessionId should be removed',
-        );
-        assert(
-          childMetadata['taskParentToolCallId'] === undefined,
-          'child taskParentToolCallId should be removed',
-        );
-        assert(
-          childMetadata['taskParentToolRequestId'] === undefined,
-          'child taskParentToolRequestId should be removed',
-        );
-        assert(
-          childMetadata['createdByTool'] === 'task',
-          'child createdByTool should be preserved',
-        );
-        assert(
-          childMetadata['subagentType'] === 'explore',
-          'child subagentType should be preserved',
-        );
+        assert(!childRow, 'child session should be deleted with the parent');
 
-        const grandchildRow = dbModule.sqliteGet<{ metadata_json: string }>(
-          'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+        const grandchildRow = dbModule.sqliteGet<{ id: string }>(
+          'SELECT id FROM sessions WHERE id = ? LIMIT 1',
           [grandchildSessionId],
         );
-        assert(grandchildRow, 'grandchild session should still exist');
-        const grandchildMetadata = JSON.parse(grandchildRow.metadata_json) as Record<
-          string,
-          unknown
-        >;
-        assert(
-          grandchildMetadata['parentSessionId'] === childSessionId,
-          'grandchild should remain attached to child session',
-        );
-
-        const childGetRes = await app.inject({
-          method: 'GET',
-          url: `/sessions/${childSessionId}`,
-          headers: { authorization: `Bearer ${accessToken}` },
-        });
-        assert(childGetRes.statusCode === 200, `child get should succeed: ${childGetRes.body}`);
+        assert(!grandchildRow, 'grandchild session should be deleted with the parent');
 
         const listRes = await app.inject({
           method: 'GET',
@@ -208,16 +172,20 @@ async function main(): Promise<void> {
         assert(listRes.statusCode === 200, `list should succeed: ${listRes.body}`);
         const listPayload = JSON.parse(listRes.body) as { sessions: Array<{ id: string }> };
         assert(
-          listPayload.sessions.some((session) => session.id === childSessionId),
-          'session list should still contain child session',
-        );
-        assert(
-          listPayload.sessions.some((session) => session.id === grandchildSessionId),
-          'session list should still contain grandchild session',
+          !listPayload.sessions.some((session) => session.id === childSessionId),
+          'session list should no longer contain child session',
         );
         assert(
           !listPayload.sessions.some((session) => session.id === parentSessionId),
           'session list should no longer contain parent session',
+        );
+        assert(
+          !listPayload.sessions.some((session) => session.id === grandchildSessionId),
+          'session list should no longer contain grandchild session',
+        );
+        assert(
+          existsSync(workspaceRoot),
+          'workspace root should remain after deleting the session tree',
         );
 
         console.log('verify-session-delete-child-detach: ok');

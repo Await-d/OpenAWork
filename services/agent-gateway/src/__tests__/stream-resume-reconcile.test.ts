@@ -38,7 +38,7 @@ describe('resume reconcile fallback', () => {
     executeMock.mockRejectedValue(new Error('resume execute failed'));
     reconcileMock.mockResolvedValue(undefined);
 
-    const { resumeApprovedPermissionRequest } = await import('../routes/stream.js');
+    const { resumeApprovedPermissionRequest } = await import('../routes/stream-runtime.js');
 
     await expect(
       resumeApprovedPermissionRequest({

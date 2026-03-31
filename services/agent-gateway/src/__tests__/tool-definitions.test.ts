@@ -20,7 +20,13 @@ describe('buildGatewayToolDefinitions', () => {
     expect(toolNames).toEqual(
       expect.arrayContaining([
         'websearch',
+        'codesearch',
         'webfetch',
+        'lsp_goto_definition',
+        'lsp_find_references',
+        'lsp_symbols',
+        'lsp_prepare_rename',
+        'lsp_rename',
         'list',
         'read',
         'glob',
@@ -71,9 +77,9 @@ describe('buildGatewayToolDefinitions', () => {
     const byName = new Map(definitions.map((definition) => [definition.function.name, definition]));
 
     expect(byName.get('list')?.function.parameters.required).toEqual(['path']);
-    expect(byName.get('read')?.function.parameters.required).toEqual(['path']);
-    expect(byName.get('glob')?.function.parameters.required).toEqual(['path', 'pattern']);
-    expect(byName.get('grep')?.function.parameters.required).toEqual(['path', 'query']);
+    expect(byName.get('read')?.function.parameters.required).toEqual([]);
+    expect(byName.get('glob')?.function.parameters.required).toEqual(['pattern']);
+    expect(byName.get('grep')?.function.parameters.required).toEqual(['pattern']);
     expect(byName.get('edit')?.function.parameters.required).toEqual([
       'filePath',
       'oldString',
@@ -122,6 +128,28 @@ describe('buildGatewayToolDefinitions', () => {
     });
     expect(byName.get('background_output')?.function.parameters.required).toEqual(['task_id']);
     expect(byName.get('background_cancel')?.function.parameters.required).toEqual([]);
+    expect(byName.get('lsp_goto_definition')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
+    ]);
+    expect(byName.get('lsp_find_references')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
+    ]);
+    expect(byName.get('lsp_symbols')?.function.parameters.required).toEqual(['filePath']);
+    expect(byName.get('lsp_prepare_rename')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
+    ]);
+    expect(byName.get('lsp_rename')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
+      'newName',
+    ]);
     expect(byName.get('session_list')?.function.parameters.required).toEqual([]);
     expect(byName.get('session_read')?.function.parameters.required).toEqual(['session_id']);
     expect(byName.get('session_search')?.function.parameters.required).toEqual(['query']);
@@ -149,7 +177,28 @@ describe('buildGatewayToolDefinitions', () => {
       'path',
       'filePath',
     ]);
-    expect(byName.get('write')?.function.parameters.required).toEqual(['path', 'content']);
+    expect(byName.get('write')?.function.parameters.required).toEqual(['content']);
+    expect(byName.get('read')?.function.parameters).toMatchObject({
+      properties: {
+        filePath: {
+          type: 'string',
+        },
+      },
+    });
+    expect(byName.get('write')?.function.parameters).toMatchObject({
+      properties: {
+        filePath: {
+          type: 'string',
+        },
+      },
+    });
+    expect(byName.get('grep')?.function.parameters).toMatchObject({
+      properties: {
+        include: { type: 'string' },
+        output_mode: { type: 'string' },
+        head_limit: { type: 'integer' },
+      },
+    });
     expect(byName.get('workspace_create_directory')?.function.parameters.required).toEqual([
       'path',
     ]);
@@ -178,6 +227,7 @@ describe('buildGatewayToolDefinitions', () => {
     expect(byName.get('subtodowrite')?.function.parameters.required).toEqual(['todos']);
     expect(byName.get('subtodoread')?.function.parameters.required).toEqual([]);
     expect(byName.get('websearch')?.function.parameters.required).toEqual(['query']);
+    expect(byName.get('codesearch')?.function.parameters.required).toEqual(['query']);
     expect(byName.get('webfetch')?.function.parameters.required).toEqual(['url']);
     expect(byName.get('mcp_list_tools')?.function.parameters.required).toEqual([]);
     expect(byName.get('mcp_call')?.function.parameters.required).toEqual([
@@ -197,5 +247,9 @@ describe('buildGatewayToolDefinitions', () => {
         .filter((name) => name.startsWith('mcp_'))
         .sort((left, right) => left.localeCompare(right)),
     ).toEqual(['mcp_call', 'mcp_list_tools']);
+    expect(toolNames).not.toContain('file_read');
+    expect(toolNames).not.toContain('read_file');
+    expect(toolNames).not.toContain('file_write');
+    expect(toolNames).not.toContain('write_file');
   });
 });

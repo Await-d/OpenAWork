@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../auth.js';
+import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
   WORKSPACE_ACCESS_MODE,
   WORKSPACE_ACCESS_RESTRICTED,
@@ -12,6 +13,7 @@ import {
 } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { validateWorkspacePath, validateWorkspaceRelativePath } from '../workspace-paths.js';
+import { ensureIgnoreRulesLoadedForPath } from '../workspace-safety.js';
 import {
   getWorkspaceReviewDiff,
   listWorkspaceReviewChanges,
@@ -53,6 +55,7 @@ async function readTree(
     if (counter.count >= MAX_ENTRIES) break;
 
     const fullPath = join(dirPath, entry.name);
+    if (defaultIgnoreManager.shouldIgnore(fullPath)) continue;
     const isDirectory = entry.isDirectory();
     counter.count++;
 
@@ -121,6 +124,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ valid: false, path: parsed.data.path, error: 'Forbidden' });
       }
       pathStep.succeed();
+      await ensureIgnoreRulesLoadedForPath(safePath);
+      if (defaultIgnoreManager.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+      }
+      await ensureIgnoreRulesLoadedForPath(safePath);
 
       const statStep = child('stat');
       try {
@@ -168,6 +177,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ nodes: [] });
       }
       pathStep.succeed();
+      await ensureIgnoreRulesLoadedForPath(safePath);
+      if (defaultIgnoreManager.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+      }
+      await ensureIgnoreRulesLoadedForPath(safePath);
 
       const statStep = child('stat');
       try {
@@ -222,6 +237,16 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ error: 'Forbidden' });
       }
       pathStep.succeed();
+      await ensureIgnoreRulesLoadedForPath(safePath);
+      if (defaultIgnoreManager.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+      }
+      await ensureIgnoreRulesLoadedForPath(safePath);
+      if (defaultIgnoreManager.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+      }
 
       const statStep = child('stat');
       let stat: Stats;
@@ -279,6 +304,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         step.fail('forbidden path');
         return reply.status(403).send({ error: 'Forbidden' });
       }
+      await ensureIgnoreRulesLoadedForPath(safePath);
       pathStep.succeed();
 
       const writeStep = child('write');
@@ -479,6 +505,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         step.fail('invalid filePath');
         return reply.status(400).send({ diff: '' });
       }
+      if (defaultIgnoreManager.shouldIgnore(join(safePath, relativeFilePath))) {
+        step.fail('ignored path');
+        return reply.status(403).send({ diff: '', error: 'Forbidden by agentignore rules' });
+      }
       pathStep.succeed();
 
       const diffStep = child('load-diff');
@@ -508,12 +538,17 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         step.fail('forbidden path');
         return reply.status(403).send({ ok: false });
       }
+      await ensureIgnoreRulesLoadedForPath(safePath);
 
       const relativeFilePath = validateWorkspaceRelativePath(safePath, parsed.data.filePath);
       if (!relativeFilePath) {
         pathStep.fail('invalid filePath');
         step.fail('invalid filePath');
         return reply.status(400).send({ ok: false });
+      }
+      if (defaultIgnoreManager.shouldIgnore(join(safePath, relativeFilePath))) {
+        step.fail('ignored path');
+        return reply.status(403).send({ ok: false, error: 'Forbidden by agentignore rules' });
       }
       pathStep.succeed();
 
@@ -553,6 +588,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ results: [] });
       }
       pathStep.succeed();
+      await ensureIgnoreRulesLoadedForPath(safePath);
 
       const { maxResults, q } = parsed.data;
       const results: Array<{ path: string; line: number; text: string }> = [];
@@ -575,6 +611,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
           if (IGNORED.has(entry.name)) continue;
 
           const fullPath = join(dirPath, entry.name);
+          if (defaultIgnoreManager.shouldIgnore(fullPath)) continue;
           if (entry.isDirectory()) {
             await searchDirectory(fullPath);
           } else if (entry.isFile()) {

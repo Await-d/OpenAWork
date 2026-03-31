@@ -201,12 +201,31 @@ export function listCapabilitiesForUser(
   ];
 }
 
-export function buildCapabilityContext(userId: string): string {
-  const capabilities = listCapabilitiesForUser(userId);
+export function buildCapabilityContext(userId: string, sessionId?: string): string {
+  const capabilities = listCapabilitiesForUser(userId, sessionId);
+  const webSearchEnabled = sessionId
+    ? (() => {
+        const sessionMetadataRow = sqliteGet<SessionMetadataRow>(
+          'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+          [sessionId, userId],
+        );
+        try {
+          const metadata = sessionMetadataRow?.metadata_json
+            ? (JSON.parse(sessionMetadataRow.metadata_json) as Record<string, unknown>)
+            : {};
+          return metadata['webSearchEnabled'] === true;
+        } catch {
+          return false;
+        }
+      })()
+    : true;
   const section = (kind: CapabilityDescriptor['kind'], title: string, callableOnly = false) => {
-    const items = capabilities.filter(
-      (cap) => cap.kind === kind && (!callableOnly || cap.callable === true),
-    );
+    const items = capabilities.filter((cap) => {
+      if (cap.kind !== kind) return false;
+      if (callableOnly && cap.callable !== true) return false;
+      if (kind === 'tool' && cap.label === 'websearch' && !webSearchEnabled) return false;
+      return true;
+    });
     if (items.length === 0) return '';
     return `## ${title}\n${items
       .map((item) => {

@@ -47,6 +47,7 @@ export interface StoredToolResult {
   output: unknown;
   pendingPermissionRequestId?: string;
   toolCallId: string;
+  toolName?: string;
 }
 
 export function isAssistantUiEventText(value: string): boolean {
@@ -268,6 +269,7 @@ export function getSessionToolResultByCallId(input: {
 
       return {
         toolCallId: content.toolCallId,
+        toolName: content.toolName,
         output: content.output,
         isError: content.isError,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
@@ -303,6 +305,7 @@ export function getLatestReferencedToolResult(input: {
 
       return {
         toolCallId: content.toolCallId,
+        toolName: content.toolName,
         output: content.output,
         isError: content.isError,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
@@ -645,6 +648,7 @@ function parseMessageContentArray(raw: unknown[]): MessageContent[] {
       items.push({
         type: 'tool_result',
         toolCallId: record['toolCallId'],
+        toolName: typeof record['toolName'] === 'string' ? record['toolName'] : undefined,
         output: record['output'],
         isError: record['isError'],
         pendingPermissionRequestId:

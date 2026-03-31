@@ -206,5 +206,30 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
         body.capabilities.some((item) => item.kind === 'command' && item.label === '/compact'),
       ).toBe(true);
     });
+
+    it('builds capability context with session-level tool visibility when sessionId is provided', async () => {
+      const [{ buildCapabilityContext }, dbModule] = await Promise.all([
+        import('../routes/capabilities.js'),
+        import('../db.js'),
+      ]);
+
+      const userId = randomUUID();
+      const sessionId = randomUUID();
+      dbModule.sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+        userId,
+        'scoped@openAwork.local',
+        createHash('sha256').update('scoped123456').digest('hex'),
+      ]);
+      dbModule.sqliteRun(
+        `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
+        [sessionId, userId, JSON.stringify({ createdByTool: 'task', parentSessionId: 'parent-1' })],
+      );
+
+      const scopedContext = buildCapabilityContext(userId, sessionId);
+      expect(scopedContext).toContain('聊天可调用工具');
+      expect(scopedContext).toContain('read');
+      expect(scopedContext).not.toContain('task:');
+      expect(scopedContext).not.toContain('question:');
+    });
   },
 );
