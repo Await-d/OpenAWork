@@ -9,6 +9,7 @@ import {
   Alert,
   Switch,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../src/store/auth';
@@ -24,6 +25,10 @@ const MODELS = [
 
 const MODEL_KEY = 'openwork_selected_model';
 const MCP_SERVERS_KEY = 'openwork_mcp_servers';
+
+const rawAppVersion =
+  Constants.expoConfig?.extra?.['appVersion'] ?? Constants.expoConfig?.version ?? '0.0.1';
+const APP_VERSION = typeof rawAppVersion === 'string' ? rawAppVersion : '0.0.1';
 
 interface McpServer {
   id: string;
@@ -79,49 +84,45 @@ export default function SettingsScreen() {
     await SecureStore.setItemAsync(MCP_SERVERS_KEY, JSON.stringify(servers));
   }, []);
 
-  const addMcpServer = useCallback(async () => {
+  const addServer = useCallback(async () => {
     if (!newMcpName.trim() || !newMcpUrl.trim()) return;
-    const updated = [
-      ...mcpServers,
-      { id: crypto.randomUUID(), name: newMcpName.trim(), url: newMcpUrl.trim(), enabled: true },
-    ];
-    setMcpServers(updated);
+    const server: McpServer = {
+      id: `${Date.now()}`,
+      name: newMcpName.trim(),
+      url: newMcpUrl.trim(),
+      enabled: true,
+    };
+    const next = [...mcpServers, server];
+    setMcpServers(next);
     setNewMcpName('');
     setNewMcpUrl('');
-    await persistServers(updated);
+    await persistServers(next);
   }, [mcpServers, newMcpName, newMcpUrl, persistServers]);
 
-  const toggleMcpServer = useCallback(
+  const toggleServer = useCallback(
     async (id: string) => {
-      const updated = mcpServers.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s));
-      setMcpServers(updated);
-      await persistServers(updated);
+      const next = mcpServers.map((server) =>
+        server.id === id ? { ...server, enabled: !server.enabled } : server,
+      );
+      setMcpServers(next);
+      await persistServers(next);
     },
     [mcpServers, persistServers],
   );
 
-  const removeMcpServer = useCallback(
+  const removeServer = useCallback(
     async (id: string) => {
-      const updated = mcpServers.filter((s) => s.id !== id);
-      setMcpServers(updated);
-      await persistServers(updated);
+      const next = mcpServers.filter((server) => server.id !== id);
+      setMcpServers(next);
+      await persistServers(next);
     },
     [mcpServers, persistServers],
   );
 
-  async function handleLogout() {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          await logout();
-          router.replace('/login');
-        },
-      },
-    ]);
-  }
+  const handleLogout = useCallback(async () => {
+    await logout();
+    router.replace('/');
+  }, [logout]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -129,28 +130,27 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>Gateway</Text>
         <Text style={styles.label}>Gateway URL</Text>
         <TextInput
-          style={styles.input}
           value={urlInput}
           onChangeText={setUrlInput}
-          placeholder="http://localhost:3000"
+          style={styles.input}
+          placeholder="http://192.168.1.10:3000"
           placeholderTextColor="#64748b"
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType="url"
         />
         <TouchableOpacity
           style={[styles.button, saving && styles.buttonDisabled]}
           onPress={() => void saveGatewayUrl()}
           disabled={saving}
         >
-          <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save'}</Text>
+          <Text style={styles.buttonText}>{saving ? 'Saving...' : 'Save Gateway URL'}</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Model</Text>
         {MODELS.map((model) => {
-          const selected = model === selectedModel;
+          const selected = selectedModel === model;
           return (
             <TouchableOpacity
               key={model}
@@ -158,7 +158,7 @@ export default function SettingsScreen() {
               onPress={() => void selectModel(model)}
             >
               <Text style={[styles.modelName, selected && styles.modelNameSelected]}>{model}</Text>
-              {selected ? <Text style={styles.checkmark}>✓</Text> : null}
+              {selected && <Text style={styles.checkmark}>✓</Text>}
             </TouchableOpacity>
           );
         })}
@@ -168,53 +168,41 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>MCP Servers</Text>
         <View style={styles.mcpInputRow}>
           <TextInput
-            style={[styles.input, styles.mcpNameInput]}
             value={newMcpName}
             onChangeText={setNewMcpName}
+            style={[styles.input, styles.mcpNameInput]}
             placeholder="Name"
             placeholderTextColor="#64748b"
           />
           <TextInput
-            style={[styles.input, styles.mcpUrlInput]}
             value={newMcpUrl}
             onChangeText={setNewMcpUrl}
-            placeholder="wss://host/mcp"
+            style={[styles.input, styles.mcpUrlInput]}
+            placeholder="https://example.com/mcp"
             placeholderTextColor="#64748b"
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="url"
           />
         </View>
-        <TouchableOpacity
-          style={[
-            styles.button,
-            (!newMcpName.trim() || !newMcpUrl.trim()) && styles.buttonDisabled,
-          ]}
-          onPress={() => void addMcpServer()}
-          disabled={!newMcpName.trim() || !newMcpUrl.trim()}
-        >
-          <Text style={styles.buttonText}>Add Server</Text>
+        <TouchableOpacity style={styles.button} onPress={() => void addServer()}>
+          <Text style={styles.buttonText}>Add MCP Server</Text>
         </TouchableOpacity>
 
         {mcpServers.length === 0 ? (
-          <Text style={styles.emptyText}>No MCP servers configured.</Text>
+          <Text style={styles.emptyText}>No MCP servers configured</Text>
         ) : (
-          mcpServers.map((s) => (
-            <View key={s.id} style={styles.mcpServerRow}>
-              <Switch
-                value={s.enabled}
-                onValueChange={() => void toggleMcpServer(s.id)}
-                trackColor={{ false: '#334155', true: '#6366f1' }}
-                thumbColor="#f8fafc"
-              />
+          mcpServers.map((server) => (
+            <View key={server.id} style={styles.mcpServerRow}>
               <View style={styles.mcpServerInfo}>
-                <Text style={styles.mcpServerName}>{s.name}</Text>
-                <Text style={styles.mcpServerUrl} numberOfLines={1}>
-                  {s.url}
-                </Text>
+                <Text style={styles.label}>{server.name}</Text>
+                <Text style={styles.serverUrl}>{server.url}</Text>
               </View>
-              <TouchableOpacity onPress={() => void removeMcpServer(s.id)}>
-                <Text style={styles.removeButton}>×</Text>
+              <Switch value={server.enabled} onValueChange={() => void toggleServer(server.id)} />
+              <TouchableOpacity
+                style={styles.removeButton}
+                onPress={() => void removeServer(server.id)}
+              >
+                <Text style={styles.removeButtonText}>Remove</Text>
               </TouchableOpacity>
             </View>
           ))
@@ -228,7 +216,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.version}>OpenAWork Mobile v0.0.1</Text>
+      <Text style={styles.version}>OpenAWork Mobile v{APP_VERSION}</Text>
     </ScrollView>
   );
 }
@@ -299,20 +287,23 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#334155',
-    padding: 10,
+    padding: 12,
   },
-  mcpServerInfo: { flex: 1, minWidth: 0 },
-  mcpServerName: { color: '#f8fafc', fontSize: 13, fontWeight: '600', marginBottom: 2 },
-  mcpServerUrl: { color: '#64748b', fontSize: 11 },
-  removeButton: { color: '#64748b', fontSize: 20, paddingHorizontal: 4 },
+  mcpServerInfo: { flex: 1, gap: 4 },
+  serverUrl: { color: '#64748b', fontSize: 12 },
+  removeButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#7f1d1d',
+  },
+  removeButtonText: { color: '#fecaca', fontSize: 12, fontWeight: '600' },
   dangerButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#ef4444',
+    backgroundColor: '#991b1b',
     borderRadius: 8,
     padding: 12,
     alignItems: 'center',
   },
-  dangerButtonText: { color: '#ef4444', fontSize: 14, fontWeight: '600' },
+  dangerButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   version: { color: '#475569', fontSize: 12, textAlign: 'center', marginTop: 8 },
 });

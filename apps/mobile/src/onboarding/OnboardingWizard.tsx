@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import * as SecureStore from 'expo-secure-store';
+import { useAuthStore } from '../store/auth';
+
+function parseExpIn(expiresIn: string): number {
+  const m = /^(\d+)(s|m|h)?$/.exec(expiresIn);
+  if (!m) return 15 * 60 * 1000;
+  const n = parseInt(m[1] ?? '15', 10);
+  const u = m[2] ?? 'm';
+  if (u === 's') return n * 1000;
+  if (u === 'h') return n * 3600 * 1000;
+  return n * 60 * 1000;
+}
 import {
   ActivityIndicator,
   ScrollView,
@@ -13,9 +25,12 @@ type OnboardingStep =
   | { type: 'select-mode' }
   | { type: 'host-provider' }
   | { type: 'host-workspace' }
+  | { type: 'host-gateway' }
   | { type: 'host-health' }
+  | { type: 'host-login' }
   | { type: 'host-done' }
   | { type: 'client-scan' }
+  | { type: 'client-login' }
   | { type: 'cloud-login' };
 
 type Mode = 'host' | 'client' | 'cloud';
@@ -24,6 +39,7 @@ interface HostConfig {
   provider: string;
   apiKey: string;
   workspace: string;
+  gatewayUrl: string;
 }
 
 interface OnboardingWizardProps {
@@ -44,15 +60,21 @@ function getProgress(step: OnboardingStep): { current: number; total: number } {
     case 'select-mode':
       return { current: 1, total: 1 };
     case 'host-provider':
-      return { current: 2, total: 5 };
+      return { current: 2, total: 7 };
     case 'host-workspace':
-      return { current: 3, total: 5 };
+      return { current: 3, total: 7 };
+    case 'host-gateway':
+      return { current: 4, total: 7 };
     case 'host-health':
-      return { current: 4, total: 5 };
+      return { current: 5, total: 7 };
+    case 'host-login':
+      return { current: 6, total: 7 };
     case 'host-done':
-      return { current: 5, total: 5 };
+      return { current: 7, total: 7 };
     case 'client-scan':
-      return { current: 2, total: 2 };
+      return { current: 2, total: 3 };
+    case 'client-login':
+      return { current: 3, total: 3 };
     case 'cloud-login':
       return { current: 2, total: 2 };
   }
@@ -65,11 +87,18 @@ function getNextStep(step: OnboardingStep): OnboardingStep | 'complete' {
     case 'host-provider':
       return { type: 'host-workspace' };
     case 'host-workspace':
+      return { type: 'host-gateway' };
+    case 'host-gateway':
       return { type: 'host-health' };
     case 'host-health':
+      return { type: 'host-login' };
+    case 'host-login':
       return { type: 'host-done' };
     case 'host-done':
+      return 'complete';
     case 'client-scan':
+      return { type: 'client-login' };
+    case 'client-login':
     case 'cloud-login':
       return 'complete';
   }
@@ -81,12 +110,18 @@ function getPreviousStep(step: OnboardingStep): OnboardingStep {
     case 'client-scan':
     case 'cloud-login':
       return { type: 'select-mode' };
+    case 'client-login':
+      return { type: 'client-scan' };
     case 'host-workspace':
       return { type: 'host-provider' };
-    case 'host-health':
+    case 'host-gateway':
       return { type: 'host-workspace' };
-    case 'host-done':
+    case 'host-health':
+      return { type: 'host-gateway' };
+    case 'host-login':
       return { type: 'host-health' };
+    case 'host-done':
+      return { type: 'host-login' };
     case 'select-mode':
       return step;
   }
@@ -210,16 +245,143 @@ function HostWorkspaceStep({ step, hostConfig, onNext, onBack }: StepProps) {
   );
 }
 
-function HostHealthStep({ step, onNext, onBack }: StepProps) {
-  const [status, setStatus] = useState<'checking' | 'success'>('checking');
+function HostGatewayStep({ step, onNext, onBack }: StepProps) {
+  const [gatewayUrl, setGatewayUrlInput] = useState('http://');
+  const isDisabled = gatewayUrl.trim().length < 8;
+
+  return (
+    <StepScreen step={step} onBack={onBack}>
+      <Text style={styles.heading}>Gateway 地址</Text>
+      <Text style={styles.subheading}>填写本机或局域网 Gateway 服务地址。</Text>
+
+      <Text style={styles.label}>Gateway URL</Text>
+      <TextInput
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        placeholder="http://192.168.1.100:3000"
+        placeholderTextColor={MUTED}
+        style={styles.input}
+        value={gatewayUrl}
+        onChangeText={setGatewayUrlInput}
+      />
+
+      <TouchableOpacity
+        disabled={isDisabled}
+        style={[styles.primaryButton, isDisabled && styles.disabledButton]}
+        onPress={() => onNext({ gatewayUrl: gatewayUrl.trim().replace(/\/$/, '') })}
+      >
+        <Text style={styles.primaryButtonText}>下一步</Text>
+      </TouchableOpacity>
+    </StepScreen>
+  );
+}
+
+function HostLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
+  const { setTokens, setGatewayUrl } = useAuthStore();
+  const gUrl = hostConfig.gatewayUrl;
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isDisabled = loading || !gUrl || email.trim().length === 0 || password.trim().length === 0;
+
+  async function handleLogin() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${gUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status === 401) throw new Error('邮箱或密码错误');
+      if (!res.ok) throw new Error(`服务器错误 (${res.status})`);
+      const data = (await res.json()) as {
+        accessToken: string;
+        refreshToken: string;
+        expiresIn?: string;
+      };
+      await setGatewayUrl(gUrl);
+      await setTokens(data.accessToken, data.refreshToken);
+      const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
+      await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
+      onNext();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '登录失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <StepScreen step={step} onBack={onBack}>
+      <Text style={styles.heading}>登录账号</Text>
+      <Text style={styles.subheading}>已连接到 {gUrl}，请输入账号密码完成登录。</Text>
+
+      <Text style={styles.label}>邮箱</Text>
+      <TextInput
+        autoCapitalize="none"
+        keyboardType="email-address"
+        placeholder="user@example.com"
+        placeholderTextColor={MUTED}
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+      />
+
+      <Text style={styles.label}>密码</Text>
+      <TextInput
+        placeholder="••••••••"
+        placeholderTextColor={MUTED}
+        secureTextEntry
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+      />
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      <TouchableOpacity
+        disabled={isDisabled}
+        style={[styles.primaryButton, isDisabled && styles.disabledButton]}
+        onPress={() => void handleLogin()}
+      >
+        <Text style={styles.primaryButtonText}>{loading ? '登录中…' : '登录'}</Text>
+      </TouchableOpacity>
+    </StepScreen>
+  );
+}
+
+function HostHealthStep({ step, hostConfig, onNext, onBack }: StepProps) {
+  const [status, setStatus] = useState<'checking' | 'success' | 'error'>('checking');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setStatus('success');
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, []);
+    let cancelled = false;
+    const gatewayUrl =
+      (hostConfig.gatewayUrl || hostConfig.workspace).trim().replace(/\/$/, '') ||
+      'http://localhost:3000';
+    void fetch(`${gatewayUrl}/health`, { signal: AbortSignal.timeout(5000) })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setStatus('success');
+        } else {
+          setStatus('error');
+          setErrorMsg(`Gateway 返回 ${res.status}，请检查服务是否正常运行`);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setStatus('error');
+        setErrorMsg(err instanceof Error ? err.message : '无法连接 Gateway');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostConfig.workspace, hostConfig.gatewayUrl]);
 
   return (
     <StepScreen step={step} onBack={onBack}>
@@ -228,14 +390,28 @@ function HostHealthStep({ step, onNext, onBack }: StepProps) {
         {status === 'checking' ? (
           <>
             <ActivityIndicator color={ACCENT} size="large" />
-            <Text style={styles.subheading}>检查中...</Text>
+            <Text style={styles.subheading}>正在连接 Gateway…</Text>
+          </>
+        ) : status === 'success' ? (
+          <>
+            <Text style={styles.successMark}>✓</Text>
+            <Text style={styles.subheading}>Gateway 连接正常，配置校验通过。</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => onNext()}>
+              <Text style={styles.primaryButtonText}>下一步</Text>
+            </TouchableOpacity>
           </>
         ) : (
           <>
-            <Text style={styles.successMark}>✓</Text>
-            <Text style={styles.subheading}>Provider 与工作区配置校验通过。</Text>
-            <TouchableOpacity style={styles.primaryButton} onPress={() => onNext()}>
-              <Text style={styles.primaryButtonText}>下一步</Text>
+            <Text style={[styles.successMark, { color: '#f87171' }]}>✗</Text>
+            <Text style={styles.errorText}>{errorMsg}</Text>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                setStatus('checking');
+                setErrorMsg(null);
+              }}
+            >
+              <Text style={styles.primaryButtonText}>重试</Text>
             </TouchableOpacity>
           </>
         )}
@@ -262,46 +438,160 @@ function HostDoneStep({ step, onNext, onBack }: StepProps) {
 
 function ClientScanStep({ step, onNext, onBack }: StepProps) {
   const [pairingCode, setPairingCode] = useState('');
-  const isDisabled = pairingCode.trim().length === 0;
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isDisabled = loading || pairingCode.trim().length === 0;
+  const isConfirmDisabled = loading || !resolvedUrl || resolvedUrl.trim().length < 8;
+
+  async function handleVerify() {
+    setLoading(true);
+    setError(null);
+    setResolvedUrl(null);
+    try {
+      let parsed: { hostUrl?: string; token?: string };
+      try {
+        parsed = JSON.parse(pairingCode.trim()) as { hostUrl?: string; token?: string };
+      } catch {
+        throw new Error('JSON 格式错误，请检查粘贴内容');
+      }
+      const { hostUrl, token } = parsed;
+      if (!hostUrl || !token) throw new Error('缺少 hostUrl 或 token 字段');
+      const url = hostUrl.trim().replace(/\/$/, '');
+      const res = await fetch(`${url}/pairing/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, deviceName: 'Mobile', platform: 'android' }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) throw new Error(`配对验证失败 (${res.status})`);
+      setResolvedUrl(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '连接失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleConfirm() {
+    if (!resolvedUrl) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${resolvedUrl}/health`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error(`Gateway 健康检查失败 (${res.status})`);
+      onNext({ workspace: resolvedUrl });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '地址不可达，请修改后重试');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <StepScreen step={step} onBack={onBack}>
       <Text style={styles.heading}>连接已有 Host</Text>
-      <Text style={styles.subheading}>移动端扫码能力后续接入，当前先粘贴 QR 中的配对 JSON。</Text>
+      <Text style={styles.subheading}>
+        粘贴终端二维码对应的 JSON 配对码，验证后可修正地址再确认。
+      </Text>
 
       <Text style={styles.label}>Pairing JSON</Text>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
         multiline
-        numberOfLines={6}
-        placeholder='{"hostUrl":"http://...","token":"..."}'
+        numberOfLines={4}
+        placeholder='{"hostUrl":"http://192.168.1.100:3000","token":"abc123"}'
         placeholderTextColor={MUTED}
         style={[styles.input, styles.multilineInput]}
         value={pairingCode}
-        onChangeText={setPairingCode}
+        onChangeText={(v) => {
+          setPairingCode(v);
+          setResolvedUrl(null);
+          setError(null);
+        }}
       />
 
       <TouchableOpacity
         disabled={isDisabled}
         style={[styles.primaryButton, isDisabled && styles.disabledButton]}
-        onPress={() => onNext()}
+        onPress={() => void handleVerify()}
       >
-        <Text style={styles.primaryButtonText}>连接 Host</Text>
+        <Text style={styles.primaryButtonText}>
+          {loading && !resolvedUrl ? '验证中…' : '验证配对码'}
+        </Text>
       </TouchableOpacity>
+
+      {resolvedUrl !== null ? (
+        <View style={{ marginTop: 16, gap: 8 }}>
+          <Text style={styles.label}>Gateway 地址（可修改）</Text>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholderTextColor={MUTED}
+            style={styles.input}
+            value={resolvedUrl}
+            onChangeText={setResolvedUrl}
+          />
+          <TouchableOpacity
+            disabled={isConfirmDisabled}
+            style={[styles.primaryButton, isConfirmDisabled && styles.disabledButton]}
+            onPress={() => void handleConfirm()}
+          >
+            <Text style={styles.primaryButtonText}>
+              {loading && resolvedUrl ? '确认中…' : '确认并继续'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </StepScreen>
   );
 }
 
-function CloudLoginStep({ step, onNext, onBack }: StepProps) {
+function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
+  const { setTokens, setGatewayUrl } = useAuthStore();
+  const gatewayUrl = hostConfig.workspace;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const isDisabled = email.trim().length === 0 || password.trim().length === 0;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isDisabled = loading || email.trim().length === 0 || password.trim().length === 0;
+
+  async function handleLogin() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${gatewayUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status === 401) throw new Error('邮箱或密码错误');
+      if (!res.ok) throw new Error(`服务器错误 (${res.status})`);
+      const data = (await res.json()) as {
+        accessToken: string;
+        refreshToken: string;
+        expiresIn?: string;
+      };
+      await setGatewayUrl(gatewayUrl);
+      await setTokens(data.accessToken, data.refreshToken);
+      const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
+      await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
+      onNext();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '登录失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <StepScreen step={step} onBack={onBack}>
-      <Text style={styles.heading}>登录云端账号</Text>
-      <Text style={styles.subheading}>这里先使用 mock 登录表单，后续再接真实鉴权。</Text>
+      <Text style={styles.heading}>登录账号</Text>
+      <Text style={styles.subheading}>已连接到 {gatewayUrl}，请输入账号密码完成登录。</Text>
 
       <Text style={styles.label}>邮箱</Text>
       <TextInput
@@ -324,12 +614,107 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
         onChangeText={setPassword}
       />
 
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
       <TouchableOpacity
         disabled={isDisabled}
         style={[styles.primaryButton, isDisabled && styles.disabledButton]}
-        onPress={() => onNext()}
+        onPress={() => void handleLogin()}
       >
-        <Text style={styles.primaryButtonText}>继续</Text>
+        <Text style={styles.primaryButtonText}>{loading ? '登录中…' : '登录'}</Text>
+      </TouchableOpacity>
+    </StepScreen>
+  );
+}
+
+function CloudLoginStep({ step, onNext, onBack }: StepProps) {
+  const { setGatewayUrl, setTokens } = useAuthStore();
+  const [gatewayUrl, setGatewayUrlInput] = useState('http://');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isDisabled =
+    loading ||
+    gatewayUrl.trim().length < 8 ||
+    email.trim().length === 0 ||
+    password.trim().length === 0;
+
+  async function handleLogin() {
+    setLoading(true);
+    setError(null);
+    const url = gatewayUrl.trim().replace(/\/$/, '');
+    try {
+      const res = await fetch(`${url}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      if (res.status === 401) throw new Error('邮箱或密码错误');
+      if (!res.ok) throw new Error(`服务器错误 (${res.status})`);
+      const data = (await res.json()) as {
+        accessToken: string;
+        refreshToken: string;
+        expiresIn?: string;
+      };
+      await setGatewayUrl(url);
+      await setTokens(data.accessToken, data.refreshToken);
+      const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
+      await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
+      onNext();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '网络错误，请检查 Gateway 是否运行');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <StepScreen step={step} onBack={onBack}>
+      <Text style={styles.heading}>登录云端账号</Text>
+      <Text style={styles.subheading}>填写 Gateway 地址与账号信息以连接云端服务。</Text>
+
+      <Text style={styles.label}>Gateway 地址</Text>
+      <TextInput
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        placeholder="http://192.168.1.100:3000"
+        placeholderTextColor={MUTED}
+        style={styles.input}
+        value={gatewayUrl}
+        onChangeText={setGatewayUrlInput}
+      />
+
+      <Text style={styles.label}>邮箱</Text>
+      <TextInput
+        autoCapitalize="none"
+        keyboardType="email-address"
+        placeholder="user@example.com"
+        placeholderTextColor={MUTED}
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+      />
+
+      <Text style={styles.label}>密码</Text>
+      <TextInput
+        placeholder="••••••••"
+        placeholderTextColor={MUTED}
+        secureTextEntry
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+      />
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      <TouchableOpacity
+        disabled={isDisabled}
+        style={[styles.primaryButton, isDisabled && styles.disabledButton]}
+        onPress={() => void handleLogin()}
+      >
+        <Text style={styles.primaryButtonText}>{loading ? '登录中…' : '登录'}</Text>
       </TouchableOpacity>
     </StepScreen>
   );
@@ -365,6 +750,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     provider: '',
     apiKey: '',
     workspace: '',
+    gatewayUrl: '',
   });
 
   const handleSelectMode = useCallback((mode: Mode) => {
@@ -416,9 +802,12 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       {step.type === 'select-mode' ? <SelectModeStep onSelect={handleSelectMode} /> : null}
       {step.type === 'host-provider' ? <HostProviderStep {...stepProps} /> : null}
       {step.type === 'host-workspace' ? <HostWorkspaceStep {...stepProps} /> : null}
+      {step.type === 'host-gateway' ? <HostGatewayStep {...stepProps} /> : null}
       {step.type === 'host-health' ? <HostHealthStep {...stepProps} /> : null}
+      {step.type === 'host-login' ? <HostLoginStep {...stepProps} /> : null}
       {step.type === 'host-done' ? <HostDoneStep {...stepProps} /> : null}
       {step.type === 'client-scan' ? <ClientScanStep {...stepProps} /> : null}
+      {step.type === 'client-login' ? <ClientLoginStep {...stepProps} /> : null}
       {step.type === 'cloud-login' ? <CloudLoginStep {...stepProps} /> : null}
     </View>
   );
@@ -569,5 +958,10 @@ const styles = StyleSheet.create({
     color: SUCCESS,
     fontSize: 52,
     fontWeight: '800',
+  },
+  errorText: {
+    color: '#f87171',
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

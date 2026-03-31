@@ -5,11 +5,14 @@ export interface MobileAttachmentItem {
   name: string;
   type: 'image' | 'audio' | 'file';
   sizeBytes: number;
+  uri?: string;
+  mimeType?: string;
+  artifactId?: string;
 }
 
 interface MobileAttachmentBarProps {
   attachments: MobileAttachmentItem[];
-  onRemove: (id: string) => void;
+  onRemove?: (id: string) => void;
 }
 
 const TYPE_ICON: Record<MobileAttachmentItem['type'], string> = {
@@ -52,12 +55,14 @@ export function MobileAttachmentBar({ attachments, onRemove }: MobileAttachmentB
               {a.name}
             </Text>
             <Text style={styles.chipSize}>{fmtSize(a.sizeBytes)}</Text>
-            <TouchableOpacity
-              onPress={() => onRemove(a.id)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.chipRemove}>✕</Text>
-            </TouchableOpacity>
+            {onRemove ? (
+              <TouchableOpacity
+                onPress={() => onRemove(a.id)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.chipRemove}>✕</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         );
       })}

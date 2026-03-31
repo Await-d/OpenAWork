@@ -1,11 +1,16 @@
 import { useRef, useEffect, useCallback } from 'react';
-import type { StreamChunk } from '@openAwork/shared';
+import type { RunEvent } from '@openAwork/shared';
 import { extractRuntimeTextDelta } from '../chat-message-content.js';
+
+export type ActivityEvent =
+  | { kind: 'tool_start'; id: string; name: string }
+  | { kind: 'tool_result'; id: string; name: string; isError: boolean };
 
 export type StreamHandlers = {
   onDelta: (delta: string) => void;
   onDone: (stopReason: string) => void;
   onError: (code: string, message: string) => void;
+  onActivity?: (event: ActivityEvent) => void;
 };
 
 export class MobileGatewayClient {
@@ -39,7 +44,7 @@ export class MobileGatewayClient {
     };
 
     this.ws.onmessage = (ev) => {
-      const chunk = JSON.parse(ev.data as string) as StreamChunk;
+      const chunk = JSON.parse(ev.data as string) as RunEvent;
       if (!this.handlers) return;
       if (chunk.type === 'text_delta') {
         this.handlers.onDelta(extractRuntimeTextDelta(chunk.delta));
@@ -47,6 +52,19 @@ export class MobileGatewayClient {
         this.handlers.onDone(chunk.stopReason);
       } else if (chunk.type === 'error') {
         this.handlers.onError(chunk.code, chunk.message);
+      } else if (chunk.type === 'tool_call_delta') {
+        this.handlers.onActivity?.({
+          kind: 'tool_start',
+          id: chunk.toolCallId,
+          name: chunk.toolName,
+        });
+      } else if (chunk.type === 'tool_result') {
+        this.handlers.onActivity?.({
+          kind: 'tool_result',
+          id: chunk.toolCallId,
+          name: chunk.toolName,
+          isError: chunk.isError,
+        });
       }
     };
 
@@ -108,5 +126,9 @@ export function useGatewayClient(gatewayUrl: string, token: string | null) {
     setTimeout(() => client.send(message), WS_HANDSHAKE_DELAY_MS);
   }, []);
 
-  return { stream };
+  const disconnect = useCallback(() => {
+    clientRef.current?.disconnect();
+  }, []);
+
+  return { stream, disconnect };
 }
