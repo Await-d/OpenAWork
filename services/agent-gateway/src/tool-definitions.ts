@@ -61,6 +61,12 @@ import {
   taskListToolDefinition,
   taskUpdateToolDefinition,
 } from './task-crud-tools.js';
+import {
+  buildToolSurface,
+  filterToolDefinitionsForSurface,
+  isValidProfileName,
+} from './claude-code-tool-surface.js';
+import type { ClaudeCodeProfileName } from './claude-code-tool-surface-profiles.js';
 
 type GatewayToolLike = {
   name: string;
@@ -179,6 +185,14 @@ export function forEachDefaultGatewayTool(
   for (const tool of MODEL_VISIBLE_GATEWAY_TOOLS) {
     register(tool);
   }
+}
+
+export function buildGatewayToolDefinitionsForProfile(profile: string): GatewayToolDefinition[] {
+  const resolvedProfile: ClaudeCodeProfileName = isValidProfileName(profile)
+    ? profile
+    : 'openawork';
+  const surface = buildToolSurface(resolvedProfile);
+  return filterToolDefinitionsForSurface(buildGatewayToolDefinitions(), surface);
 }
 
 export function forEachLegacyCompatibilityTool(
