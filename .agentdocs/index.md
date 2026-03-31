@@ -2,6 +2,10 @@
 
 ## 活跃工作流
 
+- [260331-聊天刷新恢复与运行控制方案](./workflow/260331-聊天刷新恢复与运行控制方案.md) — 为 Chat 对话页冻结“待发队列持久化 + 刷新后运行控制恢复 + stopCapability 三态 + UI 明示可控性”的正式实施方案，优先解决刷新后队列丢失与无法管理 running 会话的问题
+
+- [260331-claude-code-工具环境并行实施](./workflow/260331-claude-code-工具环境并行实施.md) — 按五人并行方案正式启动 Claude Code 风格工具环境接入实施，采用子开发流分工、每个小功能完成即复查与 git 提交，并把每对话文件变更记录与日志闭环作为强制交付项
+
 - [260331-claude-code-五人并行开发方案](./workflow/260331-claude-code-五人并行开发方案.md) — 基于已冻结的 Claude Code 风格工具环境接入方案，按 `tool-definitions / stream / tool-sandbox / session metadata / capabilities / tests` 五条主线设计五人可并行推进的详细实施计划、依赖 DAG 与阶段验收策略
 
 - [260331-手机端功能补全方案](./workflow/260331-手机端功能补全方案.md) — 修复 P0 Bug（AppNavigator 登录跳转/token 过期写入/Host 模式 URL/历史消息加载）并接通已有但未挂载的 AgentActivityPanel/MobileVoiceRecorder/MobileAttachmentBar/DialogueModeSelector 组件
@@ -108,7 +112,10 @@
 
 ## Architecture Decisions
 
+- [2026-03-31] Chat 刷新恢复与运行管理采用“三轴分离”方案：`runtimeState`（后端真相源）与 `stopCapability`（precise / best_effort / observe_only）必须分开建模，queued messages 先做客户端分层持久化（文本/附件元信息）而非直接持久化 `File[]`；Phase 1 不追求跨设备精确接管。
+
 - [2026-03-31] Claude Code 风格工具环境接入 OpenAWork 时，保留现有 canonical 小写工具名作为执行真相源；在 `services/agent-gateway` 的模型可见层引入 session-scoped compatibility surface（`openawork / claude_code_simple / claude_code_default`），统一承担名称与入参适配，避免破坏现有 runtime/contracts。
+- [2026-03-31] 实施阶段进一步收敛后，基础工具（`bash/read/edit/write/glob/grep/todowrite/task_*`）继续以 OpenCode 合同为主；非基础工具允许直接采用本地 `claude-code-sourcemap` 的 Claude-first 合同，其中 `Skill` 与 `AskUserQuestion` 已作为首批样板落地。
 
 - [2026-03-30] `services/agent-gateway/src/routes/stream.ts` 已按职责拆分：核心流执行逻辑保留在 `stream.ts`，恢复/后台运行迁至 `stream-runtime.ts`，路由注册迁至 `stream-routes-plugin.ts`，以满足单文件 ≤1500 行约束并降低后续耦合。
 
@@ -195,6 +202,8 @@
 
 - [2026-03-31] 参考风格工具环境不能只做名字映射：`/capabilities`、stream 下发工具集、sandbox 入站执行、session metadata allowlist 与历史 `toolName` 留痕必须一起设计；否则极易出现“展示可用但运行不可用”或“reference 名称与 canonical 名称混淆无法排障”的漂移。
 - [2026-03-31] Claude Code 风格工具环境实施时，不能把“每对话文件变更记录与日志”当成后置补丁：`request_workflow_logs`、`session_file_diffs`、`session_run_events` 必须与 profile/reference surface 同步设计，否则对话、工具调用、文件 diff 与运行日志会断链。
+- [2026-03-31] 当前项目在对齐 Claude Code 行为时，参考真相源统一锁定为本地 `temp/claude-code-sourcemap`；并行子代理若失败，必须沿用原 `session_id` 续跑，避免丢失上下文与重复摸索。
+- [2026-03-31] 在“基础工具 OpenCode-first、非基础工具 Claude-first”的混合路线下，最容易出问题的是展示层和执行层不同步：任何新切到 Claude-first 的工具，都必须同时更新 `tool-definitions`、`tool-sandbox`、`capabilities` 与对应测试，否则会出现 capability 名称已变、sandbox 仍按旧名执行的断裂。
 
 - [2026-03-30] `apps/web` 若直接消费 `@openAwork/shared-ui` 的包导出，Vitest/Vite 可能继续读取旧的 `dist` 产物，导致跨包 UI 源码改动“看起来没生效”；已通过 `apps/web/vite.config.ts` alias 到 `packages/shared-ui/src/index.ts` 保持开发/测试与源码一致。
 
