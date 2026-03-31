@@ -14,10 +14,45 @@ on:
         options:
           - preview
           - stable
+      release_notes_body:
+        description: '完整发布稿正文（手动触发时必填；标准流程由 Prepare Release 自动传入）'
+        required: true
+        type: string
 
 jobs:
+  resolve-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Materialize release notes body
+        env:
+          RELEASE_NOTES_BODY: ${{ inputs.release_notes_body }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > release-notes.md
+          else
+            printf '%s' "$RELEASE_NOTES_BODY" > release-notes.md
+          fi
+
+      - name: Validate release notes body
+        run: node scripts/release-notes.mjs inspect --body-file release-notes.md
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-notes
+          path: release-notes.md
+
   build:
     name: Build ${{ matrix.platform }}
+    needs: resolve-release-notes
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +75,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-notes
+          path: temp/release-notes
 
       - name: Install Linux system deps
         if: matrix.platform == 'ubuntu-22.04'
@@ -65,6 +105,16 @@ jobs:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
+      - name: Read release notes body from repository
+        id: notes_body
+        shell: bash
+        run: |
+          NOTES_FILE="temp/release-notes/release-notes.md"
+          DELIMITER=$(node -e "process.stdout.write('EOF_' + Math.random().toString(16).slice(2))")
+          echo "notes<<${DELIMITER}" >> "$GITHUB_OUTPUT"
+          cat "$NOTES_FILE" >> "$GITHUB_OUTPUT"
+          echo "${DELIMITER}" >> "$GITHUB_OUTPUT"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -82,6 +132,50 @@ jobs:
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
           releaseName: OpenAWork Desktop ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes_body.outputs.notes || inputs.channel }}
           releaseDraft: false
           prerelease: ${{ inputs.channel == 'preview' || (github.event_name == 'push' && contains(github.ref_name, '-preview')) }}
           includeUpdaterJson: true
+
+  publish-release-notes:
+    name: Append Installer Links to Release Notes
+    runs-on: ubuntu-latest
+    needs: [resolve-release-notes, build]
+    if: ${{ startsWith(github.ref, 'refs/tags/desktop-v') }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-notes
+          path: temp/release-notes
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build final release notes body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES_FILE: temp/release-notes/release-notes.md
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > release.json
+          node - <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const baseBody = readFileSync(process.env.NOTES_FILE, 'utf8').trimEnd();
+          const release = JSON.parse(readFileSync('release.json', 'utf8'));
+          const assets = (release.assets ?? []).filter((asset) => {
+            const name = String(asset.name ?? '');
+            return !name.endsWith('.sig') && !name.endsWith('.json');
+          });
+
+          const installerSection = assets.length > 0
+            ? assets.map((asset) => `- [${asset.name}](${asset.browser_download_url})`).join('\n')
+            : '- 当前未发现安装包附件。';
+
+          const finalBody = `${baseBody}\n\n## 平台安装包下载\n\n${installerSection}\n`;
+          writeFileSync('release-body-final.md', finalBody, 'utf8');
+          NODE
+
+      - name: Update GitHub release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --notes-file release-body-final.md

@@ -1,0 +1,217 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_target:
+        description: 'Release target'
+        required: true
+        default: 'desktop-preview'
+        type: choice
+        options:
+          - desktop-preview
+          - desktop-stable
+          - mobile-preview
+          - mobile-production
+          - all-preview
+          - all-production
+      bump:
+        description: 'Semantic version bump'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      mobile_platform:
+        description: 'Mobile platform when target includes mobile preview'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      release_notes:
+        description: '中文发布摘要（必填，将写入 GitHub Release body 和 OTA message）'
+        required: true
+        type: string
+
+concurrency:
+  group: prepare-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Ensure workflow runs from a branch
+        run: |
+          if [ "${GITHUB_REF_TYPE}" != "branch" ]; then
+            echo "Prepare Release must run from a branch ref, got: ${GITHUB_REF_TYPE}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build web
+        run: pnpm --filter @openAwork/web build
+
+      - name: Gateway unit tests
+        run: pnpm --filter @openAwork/agent-gateway test:unit
+
+      - name: Mobile unit tests
+        run: pnpm --filter @openAwork/mobile test
+
+      - name: Preview next version
+        id: next_version
+        run: |
+          NEXT_VERSION=$(node -e "const { execSync } = require('node:child_process'); const result = JSON.parse(execSync('node scripts/release-version.mjs --bump ${{ inputs.bump }} --dry-run --json', { encoding: 'utf8' })); process.stdout.write(result.nextVersion);")
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release notes draft
+        env:
+          NEXT_VERSION: ${{ steps.next_version.outputs.next_version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_TARGET: ${{ inputs.release_target }}
+        run: |
+          node scripts/release-notes.mjs write \
+            --version "$NEXT_VERSION" \
+            --target "$RELEASE_TARGET" \
+            --summary "$RELEASE_NOTES" \
+            --dry-run
+
+      - name: Bump synchronized versions
+        run: node scripts/release-version.mjs --bump "${{ inputs.bump }}"
+
+      - name: Read next version
+        id: version
+        run: |
+          VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Write Chinese release notes file
+        env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_TARGET: ${{ inputs.release_target }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node scripts/release-notes.mjs write \
+            --version "$VERSION" \
+            --target "$RELEASE_TARGET" \
+            --summary "$RELEASE_NOTES" \
+            --output-file release-notes.md
+
+      - name: Commit and push version bump
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git add package.json apps packages services apps/mobile/app.json apps/desktop/src-tauri/Cargo.toml
+          if git diff --cached --quiet; then
+            echo "No version changes staged."
+            exit 1
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "build(release): 自动提升版本到 v${VERSION}"
+          git push origin HEAD:${GITHUB_REF_NAME}
+
+      - name: Build release trigger plan
+        id: plan
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          case "${{ inputs.release_target }}" in
+            desktop-preview)
+              echo "desktop_tag=desktop-v${VERSION}-preview" >> "$GITHUB_OUTPUT"
+              ;;
+            desktop-stable)
+              echo "desktop_tag=desktop-v${VERSION}" >> "$GITHUB_OUTPUT"
+              ;;
+            mobile-preview)
+              echo "mobile_preview=true" >> "$GITHUB_OUTPUT"
+              ;;
+            mobile-production)
+              echo "mobile_tag=mobile-v${VERSION}" >> "$GITHUB_OUTPUT"
+              ;;
+            all-preview)
+              echo "desktop_tag=desktop-v${VERSION}-preview" >> "$GITHUB_OUTPUT"
+              echo "mobile_preview=true" >> "$GITHUB_OUTPUT"
+              ;;
+            all-production)
+              echo "desktop_tag=desktop-v${VERSION}" >> "$GITHUB_OUTPUT"
+              echo "mobile_tag=mobile-v${VERSION}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported release target: ${{ inputs.release_target }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Create desktop release tag
+        if: ${{ steps.plan.outputs.desktop_tag != '' }}
+        env:
+          TAG_NAME: ${{ steps.plan.outputs.desktop_tag }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG_NAME"
+            exit 1
+          fi
+          git tag -a "$TAG_NAME" -F release-notes.md
+          git push origin "$TAG_NAME"
+
+      - name: Create mobile production tag
+        if: ${{ steps.plan.outputs.mobile_tag != '' }}
+        env:
+          TAG_NAME: ${{ steps.plan.outputs.mobile_tag }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG_NAME"
+            exit 1
+          fi
+          git tag -a "$TAG_NAME" -F release-notes.md
+          git push origin "$TAG_NAME"
+
+      - name: Dispatch mobile preview release
+        if: ${{ steps.plan.outputs.mobile_preview == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const releaseNotesBody = fs.readFileSync('release-notes.md', 'utf8');
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-mobile.yml',
+              ref: context.ref.replace('refs/heads/', ''),
+              inputs: {
+                profile: 'preview',
+                platform: '${{ inputs.mobile_platform }}',
+                release_notes_body: releaseNotesBody,
+              },
+            });

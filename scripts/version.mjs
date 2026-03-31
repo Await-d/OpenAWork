@@ -31,12 +31,14 @@ export function getVersionInfo() {
   const branch = git('git rev-parse --abbrev-ref HEAD') || 'unknown';
   const buildTime = new Date().toISOString();
 
-  // If on an exact tag, use it; otherwise base version + commit
-  const version = gitTag || `${baseVersion}+${gitHash}${isDirty ? '.dirty' : ''}`;
+  // User-facing version stays semver from package.json.
+  // Build identity keeps git metadata for debugging and traceability.
+  const buildVersion = gitTag || `${baseVersion}+${gitHash}${isDirty ? '.dirty' : ''}`;
 
   return {
-    version,
+    version: baseVersion,
     baseVersion,
+    buildVersion,
     gitHash,
     gitTag,
     branch,

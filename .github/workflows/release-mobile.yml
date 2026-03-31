@@ -23,11 +23,59 @@ on:
           - all
           - ios
           - android
-
+      release_notes_body:
+        description: '完整发布稿正文（手动触发时必填；标准流程由 Prepare Release 自动传入）'
+        required: true
+        type: string
 jobs:
+  resolve-release-notes:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.notes.outputs.version }}
+      summary_line: ${{ steps.notes.outputs.summary_line }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Materialize release notes body
+        env:
+          RELEASE_NOTES_BODY: ${{ inputs.release_notes_body }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > release-notes.md
+          else
+            printf '%s' "$RELEASE_NOTES_BODY" > release-notes.md
+          fi
+
+      - name: Resolve release notes metadata
+        id: notes
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION=$(node -e "const match = /mobile-v(\\d+\\.\\d+\\.\\d+)(?:-preview)?/.exec(process.env.GITHUB_REF_NAME || ''); if (!match) process.exit(1); process.stdout.write(match[1]);")
+          else
+            VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('apps/mobile/package.json', 'utf8')).version")
+          fi
+          NOTES_JSON=$(node scripts/release-notes.mjs inspect --body-file release-notes.md)
+          SUMMARY_LINE=$(node -e "const data = JSON.parse(process.argv[1]); process.stdout.write(data.summaryLine);" "$NOTES_JSON")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "summary_line=$SUMMARY_LINE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-notes
+          path: release-notes.md
+
   build:
     name: EAS Build (${{ inputs.platform || 'all' }})
     runs-on: ubuntu-latest
+    needs: resolve-release-notes
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +87,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-release-notes
+          path: temp/release-notes
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -54,18 +107,25 @@ jobs:
         run: |
           PROFILE=${{ inputs.profile || 'preview' }}
           PLATFORM=${{ inputs.platform || 'all' }}
-          eas build --profile $PROFILE --platform $PLATFORM --non-interactive
+          eas build --profile $PROFILE --platform $PLATFORM --non-interactive --json > eas-build-results.json
+          cat eas-build-results.json
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      - name: Upload EAS build results
+        uses: actions/upload-artifact@v4
+        with:
+          name: eas-build-results
+          path: apps/mobile/eas-build-results.json
+
   ota:
     name: Push OTA Update
     runs-on: ubuntu-latest
-    needs: build
-    if: ${{ inputs.profile == 'production' || startsWith(github.ref, 'refs/tags/mobile-v') }}
+    needs: [resolve-release-notes, build]
+    if: ${{ inputs.profile == 'preview' || inputs.profile == 'production' || startsWith(github.ref, 'refs/tags/mobile-v') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,21 +150,21 @@ jobs:
       - name: Push OTA to preview channel
         if: ${{ inputs.profile == 'preview' }}
         working-directory: apps/mobile
-        run: eas update --channel preview --message "${{ github.ref_name }}" --non-interactive
+        run: eas update --channel preview --message "${{ needs.resolve-release-notes.outputs.summary_line }}" --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Push OTA to production channel
         if: ${{ inputs.profile == 'production' || startsWith(github.ref, 'refs/tags/mobile-v') }}
         working-directory: apps/mobile
-        run: eas update --channel production --message "${{ github.ref_name }}" --non-interactive
+        run: eas update --channel production --message "${{ needs.resolve-release-notes.outputs.summary_line }}" --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
   submit:
     name: Submit to Stores
     runs-on: ubuntu-latest
-    needs: build
+    needs: [resolve-release-notes, build]
     if: ${{ inputs.profile == 'production' || startsWith(github.ref, 'refs/tags/mobile-v') }}
     steps:
       - uses: actions/checkout@v4
@@ -141,3 +201,55 @@ jobs:
         run: eas submit --platform android --latest --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+  publish-release-notes:
+    name: Publish Release Notes Summary
+    runs-on: ubuntu-latest
+    needs: [resolve-release-notes, build]
+    if: ${{ always() }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-release-notes
+          path: temp/release-notes
+
+      - uses: actions/download-artifact@v4
+        with:
+          if-no-files-found: ignore
+          name: eas-build-results
+          path: temp/eas-build-results
+
+      - name: Append Chinese release notes to workflow summary
+        run: |
+          cat "temp/release-notes/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const { existsSync, readFileSync } = require('node:fs');
+
+          const resultPath = 'temp/eas-build-results/eas-build-results.json';
+          if (!existsSync(resultPath)) {
+            process.stdout.write('\n## 移动端安装包 / 构建产物\n\n- 当前未找到 EAS 构建结果文件，可能是构建失败或未生成可下载产物。\n');
+            process.exit(0);
+          }
+
+          const raw = JSON.parse(readFileSync(resultPath, 'utf8'));
+          const builds = Array.isArray(raw) ? raw : [raw];
+          const lines = builds
+            .map((build) => {
+              const platform = String(build.platform ?? 'unknown');
+              const url =
+                build.artifacts?.buildUrl ??
+                build.artifacts?.applicationArchiveUrl ??
+                build.buildDetailsPageUrl ??
+                build.logs?.buildLogsUrl ??
+                '';
+
+              if (!url) {
+                return `- ${platform}: 未返回可公开访问的构建产物链接`;
+              }
+
+              return `- ${platform}: ${url}`;
+            })
+            .join('\n');
+
+          process.stdout.write(`\n## 移动端安装包 / 构建产物\n\n${lines}\n`);
+          NODE

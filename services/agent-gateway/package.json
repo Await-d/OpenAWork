@@ -1,6 +1,6 @@
 {
   "name": "@openAwork/agent-gateway",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -27,10 +27,12 @@
     "@fastify/websocket": "^11.0.0",
     "@octokit/rest": "^22.0.1",
     "@openAwork/agent-core": "workspace:*",
+    "@openAwork/artifacts": "workspace:*",
     "@openAwork/browser-automation": "workspace:*",
     "@openAwork/logger": "workspace:*",
     "@openAwork/lsp-client": "workspace:*",
     "@openAwork/mcp-client": "workspace:*",
+    "@openAwork/pairing": "workspace:*",
     "@openAwork/shared": "workspace:*",
     "@openAwork/skill-registry": "workspace:*",
     "@openAwork/skills": "workspace:*",
@@ -39,10 +41,14 @@
     "fastify": "^5.0.0",
     "fastify-plugin": "^5.1.0",
     "pdf-parse": "^2.4.5",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
     "turndown": "^7.2.2",
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.0.0",
     "vitest": "^2.1.9"
   }

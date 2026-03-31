@@ -12,9 +12,8 @@ on:
           - preview
           - production
       message:
-        description: 'Update message (shown in EAS dashboard)'
-        required: false
-        default: 'Manual OTA push'
+        description: '中文更新说明（将显示在 EAS 控制台及用户 OTA 通知中，必填）'
+        required: true
         type: string
 
 jobs:

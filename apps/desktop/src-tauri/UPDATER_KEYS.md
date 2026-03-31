@@ -38,6 +38,10 @@ If the keypair needs rotation:
 
 The `release-desktop.yml` workflow sets `prerelease: true` for tags containing `-preview`, keeping stable and preview channels isolated.
 
+Preferred release entrypoint: use GitHub Actions `Prepare Release` to bump versions, require a Chinese release summary, generate the release draft inside the workflow, and create the correct desktop tag automatically, instead of manually editing version files or hand-creating tags.
+
+Desktop GitHub Release body now reads from the workflow-generated release draft (via annotated tag on tag-based releases), keeping updater notes and release notes consistent without storing the draft in the repository.
+
 ## Security Notes
 
 - Never commit the private key to source control.
