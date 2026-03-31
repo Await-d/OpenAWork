@@ -306,6 +306,7 @@ export interface ToolResultContent {
   output: unknown;
   isError: boolean;
   pendingPermissionRequestId?: string;
+  observability?: ToolCallObservabilityAnnotation;
 }
 
 export interface FileDiffContent {
@@ -315,6 +316,10 @@ export interface FileDiffContent {
   additions: number;
   deletions: number;
   status?: 'added' | 'deleted' | 'modified';
+  requestId?: string;
+  toolName?: string;
+  toolCallId?: string;
+  observability?: ToolCallObservabilityAnnotation;
 }
 
 export interface ModifiedFilesSummaryContent {
@@ -390,6 +395,7 @@ export interface StreamToolResultChunk {
   output: unknown;
   isError: boolean;
   pendingPermissionRequestId?: string;
+  observability?: ToolCallObservabilityAnnotation;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -510,4 +516,68 @@ export interface ApiError {
 
 export function isRetryableError(error: ApiError): boolean {
   return error.retryable;
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code 工具环境可观测性类型骨架（Phase 1 — 仅类型，无运行时变更）
+// ---------------------------------------------------------------------------
+
+/**
+ * 工具呈现层（Claude Code 工具面）标识符。
+ * 用于区分 Claude Code 原生工具名 vs OpenAWork 内部规范名。
+ */
+export type ToolSurfaceProfile = 'openawork' | 'claude_code_simple' | 'claude_code_default';
+
+/**
+ * 工具调用的可观测性标注，附加在对话/请求的工具调用追踪条目上。
+ * 所有字段均可选——缺失时退化为无标注，不影响现有运行时逻辑。
+ */
+export interface ToolCallObservabilityAnnotation {
+  /**
+   * 呈现给模型的工具名（Claude Code 侧可见名称，可能为别名）。
+   * 例："bash"（Claude Code 侧）vs "execute_bash"（内部规范名）
+   */
+  presentedToolName?: string;
+
+  /**
+   * 系统内部规范化工具名（tool-contract 注册名）。
+   */
+  canonicalToolName?: string;
+
+  /**
+   * 工具调用来源的工具面剖面。
+   */
+  toolSurfaceProfile?: ToolSurfaceProfile;
+
+  /**
+   * 适配器版本号，用于在多版本 Claude Code 适配器共存时区分行为差异。
+   * 语义版本字符串，如 "1.0.0"。
+   */
+  adapterVersion?: string;
+}
+
+/**
+ * 关联模型：将一次工具调用追踪条目锚定到 session + request + toolCall 三元组。
+ *
+ * sessionId        —— 会话唯一 ID（来自 sessions 表）
+ * clientRequestId  —— 客户端请求 ID（session_messages.client_request_id 或
+ *                      session_run_events.client_request_id）
+ * requestId        —— 网关侧请求 ID（request_workflow_logs.request_id）
+ * toolCallId       —— 工具调用 ID（ToolCallContent.toolCallId）
+ *
+ * 三元组完整时可做精确跨表 JOIN；部分缺失时按已有字段降级查询。
+ */
+export interface ToolCallTraceKey {
+  sessionId: string;
+  toolCallId: string;
+  clientRequestId?: string;
+  requestId?: string;
+}
+
+/**
+ * 可被可观测性层消费的工具调用追踪条目（完整描述一次工具调用）。
+ */
+export interface ToolCallTraceEntry extends ToolCallTraceKey, ToolCallObservabilityAnnotation {
+  /** 工具调用发生的毫秒时间戳（来源：session_run_events.occurred_at_ms）*/
+  occurredAt?: number;
 }

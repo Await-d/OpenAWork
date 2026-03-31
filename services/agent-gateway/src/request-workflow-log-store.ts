@@ -1,4 +1,5 @@
 import type { RequestContext, WorkflowStep } from '@openAwork/logger';
+import type { ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { sqliteAll, sqliteRun } from './db.js';
 import { isSqliteMalformedError } from './sqlite-error-utils.js';
 
@@ -14,6 +15,12 @@ interface RequestWorkflowLogRow {
   user_agent: string | null;
   workflow_json: string;
   created_at: string;
+}
+
+export interface RequestWorkflowToolCallRef {
+  toolCallId: string;
+  clientRequestId?: string;
+  observability?: ToolCallObservabilityAnnotation;
 }
 
 let requestWorkflowLogStoreDisabled = false;
@@ -34,11 +41,34 @@ function detectSessionId(path: string): string | null {
   return match?.[1] ?? null;
 }
 
+function buildPersistedWorkflowSteps(input: {
+  steps: WorkflowStep[];
+  toolCallRefs?: RequestWorkflowToolCallRef[];
+}): Array<Omit<WorkflowStep, '_startedAt'>> {
+  const persistedSteps = input.steps.map(stripPrivateWorkflowFields);
+  if (!input.toolCallRefs || input.toolCallRefs.length === 0) {
+    return persistedSteps;
+  }
+
+  return [
+    ...persistedSteps,
+    {
+      name: 'tool.call.refs',
+      status: 'success',
+      fields: {
+        toolCallRefsCount: input.toolCallRefs.length,
+        toolCallRefsJson: JSON.stringify(input.toolCallRefs),
+      },
+    },
+  ];
+}
+
 export function persistRequestWorkflowLog(input: {
   context: RequestContext;
   steps: WorkflowStep[];
   statusCode: number;
   userId?: string | null;
+  toolCallRefs?: RequestWorkflowToolCallRef[];
 }): void {
   if (requestWorkflowLogStoreDisabled) {
     return;
@@ -58,7 +88,7 @@ export function persistRequestWorkflowLog(input: {
         input.statusCode,
         input.context.ip ?? null,
         input.context.userAgent ?? null,
-        JSON.stringify(input.steps.map(stripPrivateWorkflowFields)),
+        JSON.stringify(buildPersistedWorkflowSteps(input)),
       ],
     );
   } catch (error) {

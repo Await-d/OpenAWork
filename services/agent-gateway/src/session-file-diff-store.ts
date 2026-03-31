@@ -1,4 +1,4 @@
-import type { FileDiffContent } from '@openAwork/shared';
+import type { FileDiffContent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { sqliteAll, sqliteRun } from './db.js';
 
 interface SessionFileDiffRow {
@@ -19,6 +19,8 @@ export function persistSessionFileDiffs(input: {
   requestId: string;
   toolName: string;
   diffs: FileDiffContent[];
+  toolCallId?: string;
+  observability?: ToolCallObservabilityAnnotation;
 }): void {
   for (const diff of input.diffs) {
     sqliteRun(
@@ -57,6 +59,8 @@ export function listSessionFileDiffs(input: {
     after: row.after_text,
     additions: row.additions,
     deletions: row.deletions,
+    requestId: row.request_id,
+    toolName: row.tool_name,
     ...(row.status === 'added' || row.status === 'deleted' || row.status === 'modified'
       ? { status: row.status }
       : {}),

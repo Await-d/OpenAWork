@@ -69,6 +69,8 @@ describe('session-file-diff-store', () => {
         additions: 1,
         deletions: 1,
         status: 'modified',
+        requestId: 'req-a',
+        toolName: 'write',
       },
     ]);
   });

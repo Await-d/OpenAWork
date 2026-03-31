@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   sqliteGetMock: vi.fn(),
@@ -12,9 +12,19 @@ vi.mock('../db.js', () => ({
   sqliteAll: mocks.sqliteAllMock,
 }));
 
-import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session-run-events.js';
+import {
+  listSessionRunEventsByRequest,
+  publishSessionRunEvent,
+  subscribeSessionRunEvents,
+} from '../session-run-events.js';
 
 describe('session run events', () => {
+  beforeEach(() => {
+    mocks.sqliteGetMock.mockReset();
+    mocks.sqliteRunMock.mockReset();
+    mocks.sqliteAllMock.mockReset();
+  });
+
   it('publishes events to active subscribers and stops after unsubscribe', () => {
     mocks.sqliteGetMock.mockReturnValue({ user_id: 'user-a' });
     const handler = vi.fn();
@@ -40,5 +50,75 @@ describe('session run events', () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(mocks.sqliteRunMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists tool_result observability in payload_json for request-scoped replay', () => {
+    mocks.sqliteGetMock.mockReturnValue({ user_id: 'user-a' });
+
+    publishSessionRunEvent(
+      'session-2',
+      {
+        type: 'tool_result',
+        toolCallId: 'call-1',
+        toolName: 'write',
+        output: { ok: true },
+        isError: false,
+        observability: {
+          presentedToolName: 'Write',
+          canonicalToolName: 'write',
+          toolSurfaceProfile: 'claude_code_default',
+          adapterVersion: '1.0.0',
+        },
+      },
+      { clientRequestId: 'req-1' },
+    );
+
+    const params = mocks.sqliteRunMock.mock.calls[0]?.[1] as unknown[];
+    expect(JSON.parse(String(params?.[8]))).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-1',
+      observability: {
+        presentedToolName: 'Write',
+        canonicalToolName: 'write',
+        toolSurfaceProfile: 'claude_code_default',
+        adapterVersion: '1.0.0',
+      },
+    });
+
+    mocks.sqliteAllMock.mockReturnValue([
+      {
+        payload_json: JSON.stringify({
+          type: 'tool_result',
+          toolCallId: 'call-1',
+          toolName: 'write',
+          output: { ok: true },
+          isError: false,
+          observability: {
+            presentedToolName: 'Write',
+            canonicalToolName: 'write',
+            toolSurfaceProfile: 'claude_code_default',
+            adapterVersion: '1.0.0',
+          },
+        }),
+      },
+    ]);
+
+    expect(
+      listSessionRunEventsByRequest({ sessionId: 'session-2', clientRequestId: 'req-1' }),
+    ).toEqual([
+      {
+        type: 'tool_result',
+        toolCallId: 'call-1',
+        toolName: 'write',
+        output: { ok: true },
+        isError: false,
+        observability: {
+          presentedToolName: 'Write',
+          canonicalToolName: 'write',
+          toolSurfaceProfile: 'claude_code_default',
+          adapterVersion: '1.0.0',
+        },
+      },
+    ]);
   });
 });

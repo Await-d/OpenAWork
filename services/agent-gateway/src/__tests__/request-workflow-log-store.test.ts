@@ -59,6 +59,56 @@ describe('request-workflow-log-store', () => {
     ]);
   });
 
+  it('appends tool call refs into the persisted workflow payload when provided', () => {
+    persistRequestWorkflowLog({
+      context: {
+        requestId: 'req-tool',
+        method: 'POST',
+        path: '/sessions/session-9/stream',
+        startTime: 1,
+      },
+      steps: [{ name: 'request.handle', status: 'success', _startedAt: 1 }],
+      statusCode: 200,
+      userId: 'user-a',
+      toolCallRefs: [
+        {
+          toolCallId: 'call-1',
+          clientRequestId: 'req-client-1',
+          observability: {
+            presentedToolName: 'Write',
+            canonicalToolName: 'write',
+            toolSurfaceProfile: 'claude_code_default',
+            adapterVersion: '1.0.0',
+          },
+        },
+      ],
+    });
+
+    const params = mocks.sqliteRunMock.mock.calls[0]?.[1] as unknown[];
+    expect(JSON.parse(String(params?.[8]))).toEqual([
+      { name: 'request.handle', status: 'success' },
+      {
+        name: 'tool.call.refs',
+        status: 'success',
+        fields: {
+          toolCallRefsCount: 1,
+          toolCallRefsJson: JSON.stringify([
+            {
+              toolCallId: 'call-1',
+              clientRequestId: 'req-client-1',
+              observability: {
+                presentedToolName: 'Write',
+                canonicalToolName: 'write',
+                toolSurfaceProfile: 'claude_code_default',
+                adapterVersion: '1.0.0',
+              },
+            },
+          ]),
+        },
+      },
+    ]);
+  });
+
   it('lists persisted workflow logs by user', () => {
     mocks.sqliteAllMock.mockReturnValue([{ id: 1 }]);
     const rows = listRequestWorkflowLogs('user-a', 10);

@@ -1,4 +1,4 @@
-import type { RunEvent } from '@openAwork/shared';
+import type { RunEvent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 
 type RunEventHandler = (event: RunEvent) => void;
@@ -17,9 +17,11 @@ interface SessionRunEventSeqRow {
   max_seq: number | null;
 }
 
-interface PublishRunEventMeta {
+export interface PublishRunEventMeta {
   clientRequestId?: string;
   seq?: number;
+  toolCallId?: string;
+  observability?: ToolCallObservabilityAnnotation;
 }
 
 const PERSISTED_RUN_EVENT = Symbol('persistedRunEvent');

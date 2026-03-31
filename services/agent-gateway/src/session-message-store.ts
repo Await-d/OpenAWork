@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { FileDiffContent, Message, MessageContent, MessageRole } from '@openAwork/shared';
+import type {
+  FileDiffContent,
+  Message,
+  MessageContent,
+  MessageRole,
+  ToolCallObservabilityAnnotation,
+} from '@openAwork/shared';
 import { buildReadToolOutputHint } from './tool-output-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 
@@ -46,6 +52,7 @@ export interface StoredToolResult {
   isError: boolean;
   output: unknown;
   pendingPermissionRequestId?: string;
+  observability?: ToolCallObservabilityAnnotation;
   toolCallId: string;
   toolName?: string;
 }
@@ -273,6 +280,7 @@ export function getSessionToolResultByCallId(input: {
         output: content.output,
         isError: content.isError,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
+        observability: content.observability,
       };
     }
   }
@@ -309,6 +317,7 @@ export function getLatestReferencedToolResult(input: {
         output: content.output,
         isError: content.isError,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
+        observability: content.observability,
       };
     }
   }

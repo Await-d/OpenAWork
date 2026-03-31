@@ -10,6 +10,12 @@ describe('tool-result-contract', () => {
         toolName: 'write',
         output: { ok: true },
         isError: false,
+        observability: {
+          presentedToolName: 'Write',
+          canonicalToolName: 'write',
+          toolSurfaceProfile: 'claude_code_default',
+          adapterVersion: '1.0.0',
+        },
       }),
     ).toEqual({
       type: 'tool_result',
@@ -17,6 +23,12 @@ describe('tool-result-contract', () => {
       toolName: 'write',
       output: { ok: true },
       isError: false,
+      observability: {
+        presentedToolName: 'Write',
+        canonicalToolName: 'write',
+        toolSurfaceProfile: 'claude_code_default',
+        adapterVersion: '1.0.0',
+      },
     });
   });
 
@@ -28,6 +40,12 @@ describe('tool-result-contract', () => {
         output: 'done',
         isError: false,
         pendingPermissionRequestId: 'perm-1',
+        observability: {
+          presentedToolName: 'Agent',
+          canonicalToolName: 'task',
+          toolSurfaceProfile: 'claude_code_default',
+          adapterVersion: '1.0.0',
+        },
         eventMeta: {
           eventId: 'evt-1',
           runId: 'run-1',
@@ -41,6 +59,12 @@ describe('tool-result-contract', () => {
       output: 'done',
       isError: false,
       pendingPermissionRequestId: 'perm-1',
+      observability: {
+        presentedToolName: 'Agent',
+        canonicalToolName: 'task',
+        toolSurfaceProfile: 'claude_code_default',
+        adapterVersion: '1.0.0',
+      },
       eventId: 'evt-1',
       runId: 'run-1',
       occurredAt: 1,

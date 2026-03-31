@@ -1,4 +1,8 @@
-import type { RunEvent, ToolResultContent } from '@openAwork/shared';
+import type {
+  RunEvent,
+  ToolCallObservabilityAnnotation,
+  ToolResultContent,
+} from '@openAwork/shared';
 
 export interface ToolResultPayloadInput {
   toolCallId: string;
@@ -6,6 +10,7 @@ export interface ToolResultPayloadInput {
   output: unknown;
   isError: boolean;
   pendingPermissionRequestId?: string;
+  observability?: ToolCallObservabilityAnnotation;
 }
 
 export function buildToolResultContent(input: ToolResultPayloadInput): ToolResultContent {
@@ -15,6 +20,7 @@ export function buildToolResultContent(input: ToolResultPayloadInput): ToolResul
     toolName: input.toolName,
     output: input.output,
     isError: input.isError,
+    ...(input.observability ? { observability: input.observability } : {}),
     ...(input.pendingPermissionRequestId
       ? { pendingPermissionRequestId: input.pendingPermissionRequestId }
       : {}),
@@ -32,6 +38,7 @@ export function buildToolResultRunEvent(
     toolName: input.toolName,
     output: input.output,
     isError: input.isError,
+    ...(input.observability ? { observability: input.observability } : {}),
     ...(input.pendingPermissionRequestId
       ? { pendingPermissionRequestId: input.pendingPermissionRequestId }
       : {}),
