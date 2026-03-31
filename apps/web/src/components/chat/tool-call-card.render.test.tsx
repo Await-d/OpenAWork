@@ -26,6 +26,12 @@ describe('ToolCallCard rendering', () => {
     expect(html).toContain('完成');
     expect(html).toContain('子任务 · 待执行');
     expect(html).toContain('只读');
+    expect(html).toContain('data-tool-card-meta-label="muted"');
+    expect(html).toContain('data-tool-card-meta-label="success"');
+    expect(html).toContain('data-tool-card-meta-label="warning"');
+    expect(html).not.toContain(
+      'data-tool-card-meta-label="warning" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px',
+    );
     expect(html).toContain('创建一个子代理会话，执行只读检查并返回结果');
     expect(html).toContain('复制');
   });
@@ -49,6 +55,10 @@ describe('ToolCallCard rendering', () => {
 
     expect(html).toContain('工具状态');
     expect(html).toContain('子任务 · 失败');
+    expect(html).toContain('data-tool-card-meta-label="danger"');
+    expect(html).not.toContain(
+      'data-tool-card-meta-label="danger" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px',
+    );
   });
 
   it('renders read_tool_output suggestions for large tool outputs', () => {

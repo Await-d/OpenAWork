@@ -4,13 +4,17 @@ import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
 import type { TokenStore } from '@openAwork/web-client';
+import { toast } from '../components/ToastNotification.js';
 import { exportSession } from '../utils/session-transfer.js';
 import {
   buildWorkspaceSessionCollections,
   filterSessionTreeGroupsByQuery,
 } from '../utils/session-grouping.js';
 import { subscribeSessionListRefresh } from '../utils/session-list-events.js';
-import { isSessionAlreadyDeletedError } from '../utils/session-delete.js';
+import {
+  getSessionDeleteErrorMessage,
+  isSessionAlreadyDeletedError,
+} from '../utils/session-delete.js';
 import {
   buildSavedChatSessionMetadata,
   loadSavedChatSessionDefaults,
@@ -23,6 +27,17 @@ export interface Session {
   title: string | null;
   updated_at: string;
   metadata_json?: string;
+}
+
+function resolveDeletedSessionIds(
+  result: { deletedSessionIds?: string[] } | void,
+  fallbackSessionId: string,
+): string[] {
+  if (Array.isArray(result?.deletedSessionIds) && result.deletedSessionIds.length > 0) {
+    return result.deletedSessionIds;
+  }
+
+  return [fallbackSessionId];
 }
 
 const MISSING_PARENT_SESSION_CACHE_TTL_MS = 60_000;
@@ -175,7 +190,7 @@ export function useSessions() {
   }, []);
 
   const quickDeleteSession = useCallback(
-    async (sessionIdToDelete: string) => {
+    async (sessionIdToDelete: string, options?: { suppressToast?: boolean }) => {
       if (!accessToken) return false;
       if (deletingSessionIdsRef.current.has(sessionIdToDelete)) {
         return false;
@@ -189,22 +204,41 @@ export function useSessions() {
       });
 
       try {
-        await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
+        const result = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
           createSessionsClient(gatewayUrl).delete(token, sessionIdToDelete),
         );
-        parentSessionCacheRef.current.delete(sessionIdToDelete);
-        setSessions((prev) => prev.filter((s) => s.id !== sessionIdToDelete));
-        if (sessionId === sessionIdToDelete) void navigate('/chat');
+        const deletedSessionIds = new Set(resolveDeletedSessionIds(result, sessionIdToDelete));
+        for (const deletedSessionId of deletedSessionIds) {
+          parentSessionCacheRef.current.delete(deletedSessionId);
+          parentSessionInFlightRef.current.delete(deletedSessionId);
+          missingParentSessionExpiryRef.current.set(
+            deletedSessionId,
+            Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
+          );
+        }
+        setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
+        if (sessionId && deletedSessionIds.has(sessionId)) {
+          void navigate('/chat');
+        }
         return true;
       } catch (err) {
         if (isSessionAlreadyDeletedError(err)) {
           parentSessionCacheRef.current.delete(sessionIdToDelete);
+          parentSessionInFlightRef.current.delete(sessionIdToDelete);
+          missingParentSessionExpiryRef.current.set(
+            sessionIdToDelete,
+            Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
+          );
           setSessions((prev) => prev.filter((s) => s.id !== sessionIdToDelete));
           if (sessionId === sessionIdToDelete) void navigate('/chat');
+          void fetchSessions();
           return true;
         }
 
         logger.error('Failed to delete session:', err);
+        if (!options?.suppressToast) {
+          toast(getSessionDeleteErrorMessage(err), 'error', 4200);
+        }
         return false;
       } finally {
         deletingSessionIdsRef.current.delete(sessionIdToDelete);
@@ -219,7 +253,7 @@ export function useSessions() {
         });
       }
     },
-    [accessToken, gatewayUrl, tokenStore, sessionId, navigate],
+    [accessToken, gatewayUrl, tokenStore, sessionId, navigate, fetchSessions],
   );
 
   const isDeletingSession = useCallback(
@@ -399,6 +433,10 @@ async function hydrateMissingParentSessions(
             const parentSession = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
               createSessionsClient(gatewayUrl).get(token, parentSessionId),
             );
+            const blockedParentExpiry = missingParentSessionExpiry.get(parentSessionId);
+            if (blockedParentExpiry && blockedParentExpiry > Date.now()) {
+              return null;
+            }
             const normalizedParentSession = normalizeSessionSummary(parentSession, parentSessionId);
             parentSessionCache.set(normalizedParentSession.id, normalizedParentSession);
             missingParentSessionExpiry.delete(parentSessionId);

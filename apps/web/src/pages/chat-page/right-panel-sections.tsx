@@ -123,29 +123,31 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
   const activeCount = props.sessionTodos.filter((todo) => todo.status !== 'completed').length;
 
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        background: 'var(--surface)',
-        padding: '10px 12px',
-      }}
-    >
+    <div>
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 8,
-          marginBottom: 8,
+          gap: 7,
+          marginBottom: 2,
         }}
       >
-        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{props.title}</div>
+        <div
+          style={{
+            fontSize: 10,
+            color: 'var(--text-3)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {props.title}
+        </div>
         <div
           style={{
             fontSize: 10,
             lineHeight: 1,
-            padding: '3px 6px',
+            padding: '1px 4px',
             borderRadius: 999,
             border: '1px solid var(--border)',
             color: 'var(--text-3)',
@@ -155,30 +157,22 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
           {activeCount}/{props.sessionTodos.length}
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {props.sessionTodos.map((todo, index) => {
           const tone = getSessionTodoBadgeTone(todo);
           return (
             <div
               key={`${todo.content}-${index}`}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid color-mix(in srgb, var(--border) 82%, transparent)',
-                background: 'color-mix(in srgb, var(--surface) 76%, transparent)',
-              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '1px 0' }}
             >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                 <span style={{ color: todo.status === 'completed' ? '#34d399' : '#fbbf24' }}>
                   {todo.status === 'completed' ? '●' : todo.status === 'in_progress' ? '◐' : '○'}
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: 12,
+                      fontSize: 11,
                       color: 'var(--text)',
                       fontWeight: 600,
                       textDecoration:
@@ -191,12 +185,12 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
                   </div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 18 }}>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', paddingLeft: 18 }}>
                 <span
                   style={{
                     fontSize: 10,
                     lineHeight: 1,
-                    padding: '3px 6px',
+                    padding: '1px 4px',
                     borderRadius: 999,
                     ...tone,
                   }}
@@ -207,7 +201,7 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
                   style={{
                     fontSize: 10,
                     lineHeight: 1,
-                    padding: '3px 6px',
+                    padding: '1px 4px',
                     borderRadius: 999,
                     border: '1px solid var(--border)',
                     color: 'var(--text-3)',
@@ -248,19 +242,27 @@ export function ChatHistoryTabContent(props: {
   const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
 
   return (
-    <div style={{ ...sharedUiThemeVars, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ ...sharedUiThemeVars, display: 'flex', flexDirection: 'column', gap: 7 }}>
       {compactions.length > 0 && (
         <div
           style={{
-            border: '1px solid var(--border)',
-            borderRadius: 10,
-            background: 'var(--surface)',
-            padding: '10px 12px',
+            borderBottom: '1px solid var(--border-subtle)',
+            paddingBottom: 6,
           }}
         >
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>会话压缩</div>
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--text-3)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 3,
+            }}
+          >
+            会话压缩
+          </div>
           {compactions.map((item) => (
-            <div key={item.id} style={{ fontSize: 12, color: 'var(--text)', marginBottom: 6 }}>
+            <div key={item.id} style={{ fontSize: 12, color: 'var(--text)', marginBottom: 5 }}>
               <div style={{ fontWeight: 600, marginBottom: 2 }}>
                 {item.trigger === 'manual' ? '手动压缩' : '自动压缩'}
               </div>
@@ -272,13 +274,21 @@ export function ChatHistoryTabContent(props: {
       {childSessions.length > 0 && (
         <div
           style={{
-            border: '1px solid var(--border)',
-            borderRadius: 10,
-            background: 'var(--surface)',
-            padding: '10px 12px',
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: 6,
           }}
         >
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>子会话</div>
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--text-3)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 2,
+            }}
+          >
+            子会话
+          </div>
           {childSessions.map((session) => (
             <button
               key={session.id}
@@ -290,9 +300,16 @@ export function ChatHistoryTabContent(props: {
                 border: 'none',
                 background: 'transparent',
                 color: 'var(--text)',
-                padding: '4px 0',
+                padding: '2px 0',
                 cursor: 'pointer',
                 fontSize: 12,
+                textDecoration: 'none',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none';
               }}
             >
               {session.title ?? '未命名'} · {session.id.slice(0, 8)}…
@@ -303,24 +320,32 @@ export function ChatHistoryTabContent(props: {
       {sessionTasks.length > 0 && (
         <div
           style={{
-            border: '1px solid var(--border)',
-            borderRadius: 10,
-            background: 'var(--surface)',
-            padding: '10px 12px',
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: 6,
           }}
         >
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>任务状态</div>
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--text-3)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 2,
+            }}
+          >
+            任务状态
+          </div>
           {sessionTasks.map((task) => (
             <div
               key={task.id}
               style={{
                 fontSize: 12,
                 color: 'var(--text)',
-                marginBottom: 6,
+                marginBottom: 3,
                 paddingLeft: (task.depth ?? 0) * 14,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                 <span
                   style={{
                     width: task.depth && task.depth > 0 ? 8 : 0,
@@ -339,7 +364,7 @@ export function ChatHistoryTabContent(props: {
                       fontSize: 9,
                       fontWeight: 700,
                       lineHeight: 1,
-                      padding: '2px 6px',
+                      padding: '1px 4px',
                       borderRadius: 999,
                       border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))',
                       color: 'color-mix(in oklch, var(--accent) 80%, var(--text-3))',
@@ -355,7 +380,7 @@ export function ChatHistoryTabContent(props: {
                     style={{
                       fontSize: 10,
                       lineHeight: 1,
-                      padding: '3px 6px',
+                      padding: '1px 4px',
                       borderRadius: 999,
                       border: '1px solid var(--border)',
                       color: 'var(--text-3)',
@@ -370,7 +395,7 @@ export function ChatHistoryTabContent(props: {
                     style={{
                       fontSize: 10,
                       lineHeight: 1,
-                      padding: '3px 6px',
+                      padding: '1px 4px',
                       borderRadius: 999,
                       border: '1px solid color-mix(in srgb, #f59e0b 55%, var(--border))',
                       color: '#fbbf24',
@@ -416,21 +441,37 @@ export function ChatHistoryTabContent(props: {
       {pendingPermissions.length > 0 && (
         <div
           style={{
-            border: '1px solid var(--border)',
-            borderRadius: 10,
-            background: 'var(--surface)',
-            padding: '10px 12px',
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: 6,
           }}
         >
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>待处理审批</div>
-          {pendingPermissions.map((permission) => (
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--text-3)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 2,
+            }}
+          >
+            待处理审批
+          </div>
+          {pendingPermissions.map((permission, idx) => (
             <div
               key={permission.requestId}
-              style={{ fontSize: 12, color: 'var(--text)', marginBottom: 8 }}
+              style={{
+                paddingTop: idx > 0 ? 5 : 0,
+                marginTop: idx > 0 ? 5 : 0,
+                borderTop: idx > 0 ? '1px solid var(--border-subtle)' : 'none',
+              }}
             >
-              <div style={{ fontWeight: 600 }}>{permission.toolName}</div>
-              <div style={{ color: 'var(--text-2)' }}>{permission.reason}</div>
-              <div style={{ color: 'var(--text-3)', fontSize: 11 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>
+                {permission.toolName}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>
+                {permission.reason}
+              </div>
+              <div style={{ color: 'var(--text-3)', fontSize: 10, marginTop: 1 }}>
                 {permission.scope} · {permission.riskLevel}
                 {permission.previewAction ? ` · ${permission.previewAction}` : ''}
               </div>
@@ -475,82 +516,92 @@ export function ChatOverviewTabContent(props: {
   const mainActiveCount = mainTodos.filter((todo) => todo.status !== 'completed').length;
   const tempActiveCount = tempTodos.filter((todo) => todo.status !== 'completed').length;
 
+  const overviewRows = [
+    { label: '会话 ID', value: currentSessionId ? `${currentSessionId.slice(0, 8)}…` : '—' },
+    { label: '消息数量', value: `${messages.length} 条` },
+    { label: '工作区', value: effectiveWorkingDirectory ?? '未绑定' },
+    {
+      label: '对话模式',
+      value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
+    },
+    { label: 'YOLO 模式', value: yoloMode ? '开启' : '关闭' },
+    {
+      label: 'Token 估算',
+      value: `~${Math.round(messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4).toLocaleString()} tokens`,
+    },
+    { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
+    { label: '子会话', value: `${childSessions.length} 个` },
+    { label: '任务', value: `${sessionTasks.length} 项` },
+    { label: '主待办', value: `${mainActiveCount}/${mainTodos.length} 项` },
+    { label: '临时待办', value: `${tempActiveCount}/${tempTodos.length} 项` },
+    { label: '待处理审批', value: `${pendingPermissions.length} 项` },
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[
-        { label: '会话 ID', value: currentSessionId ? `${currentSessionId.slice(0, 8)}…` : '—' },
-        { label: '消息数量', value: `${messages.length} 条` },
-        { label: '工作区', value: effectiveWorkingDirectory ?? '未绑定' },
-        {
-          label: '对话模式',
-          value:
-            dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
-        },
-        { label: 'YOLO 模式', value: yoloMode ? '开启' : '关闭' },
-        {
-          label: 'Token 估算',
-          value: `~${Math.round(messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4).toLocaleString()} tokens`,
-        },
-        { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
-        { label: '子会话', value: `${childSessions.length} 个` },
-        { label: '任务', value: `${sessionTasks.length} 项` },
-        { label: '主待办', value: `${mainActiveCount}/${mainTodos.length} 项` },
-        { label: '临时待办', value: `${tempActiveCount}/${tempTodos.length} 项` },
-        { label: '待处理审批', value: `${pendingPermissions.length} 项` },
-      ].map(({ label, value }) => (
-        <div
-          key={label}
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'baseline',
-            padding: '5px 8px',
-            borderRadius: 6,
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{label}</span>
-          <span
-            style={{
-              fontSize: 11,
-              color: 'var(--text)',
-              wordBreak: 'break-all',
-              textAlign: 'right',
-              maxWidth: '55%',
-            }}
-          >
-            {value}
-          </span>
-        </div>
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
       <div
         style={{
-          padding: '8px 10px',
-          borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'var(--surface)',
-          marginTop: 4,
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
         }}
       >
+        {overviewRows.map(({ label, value }, idx) => (
+          <div
+            key={label}
+            style={{
+              display: 'contents',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--text-3)',
+                padding: '2px 5px',
+                background:
+                  idx % 2 === 0
+                    ? 'color-mix(in oklch, var(--surface) 60%, transparent)'
+                    : 'transparent',
+              }}
+            >
+              {label}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--text)',
+                padding: '2px 5px',
+                wordBreak: 'break-all',
+                textAlign: 'right',
+                background:
+                  idx % 2 === 0
+                    ? 'color-mix(in oklch, var(--surface) 60%, transparent)'
+                    : 'transparent',
+              }}
+            >
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 6 }}>
         <div
           style={{
             fontSize: 10,
             color: 'var(--text-3)',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            marginBottom: 6,
+            marginBottom: 2,
           }}
         >
           上下文注入
         </div>
         {yoloMode && (
-          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 2 }}>
             ⚡ YOLO 模式已开启
           </div>
         )}
         {attachmentItems.length > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 3 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 2 }}>
             📎 引用文件 {attachmentItems.length} 个
           </div>
         )}

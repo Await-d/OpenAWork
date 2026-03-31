@@ -42,7 +42,10 @@ describe('chat task tool rendering', () => {
     expect(html).toContain('data-chat-task-inline="true"');
     expect(html).toContain('data-chat-task-inline-detail="true"');
     expect(html).toContain('data-clickable="false"');
-    expect(html).toContain('子代理');
+    expect(html).toContain('data-chat-task-inline-kind-icon="agent"');
+    expect(html).toContain('data-chat-task-inline-meta-label="info"');
+    expect(html).not.toContain('border-radius:999px');
+    expect(html).toContain('aria-label="子代理工具"');
     expect(html).toContain('子任务待执行');
     expect(html).toContain('创建一个子代理会话，执行只读检查并返回结果');
     expect(html).toContain('会话 session-render-1');
@@ -78,6 +81,9 @@ describe('chat task tool rendering', () => {
     );
 
     expect(html).toContain('data-chat-task-inline="true"');
+    expect(html).toContain('data-chat-task-inline-kind-icon="agent"');
+    expect(html).toContain('data-chat-task-inline-meta-label="info"');
+    expect(html).not.toContain('border-radius:999px');
     expect(html).toContain('explore');
     expect(html).toContain('子任务失败');
     expect(html).not.toContain('data-tool-card-root');
@@ -219,6 +225,9 @@ describe('chat task tool rendering', () => {
 
     expect(html).toContain('data-chat-task-inline="true"');
     expect(html).toContain('data-tool-card-root="true"');
+    expect(html).toContain('data-chat-task-inline-meta-label="info"');
+    expect(html).toContain('工具执行中');
+    expect(html).toContain('explore');
     expect(html).toContain('pnpm test');
   });
 

@@ -237,6 +237,31 @@ describe('chat-stream-state', () => {
     ]);
   });
 
+  it('records question asked and replied events for waiting states', () => {
+    const withQuestion = applyChatRightPanelEvent(createInitialChatRightPanelState(), {
+      type: 'question_asked',
+      requestId: 'question-1',
+      toolName: 'question',
+      title: '请选择要查看的目录',
+      eventId: 'evt-question-1',
+      runId: 'run-question-1',
+      occurredAt: 200,
+    });
+    const withAnswer = applyChatRightPanelEvent(withQuestion, {
+      type: 'question_replied',
+      requestId: 'question-1',
+      status: 'answered',
+      eventId: 'evt-question-2',
+      runId: 'run-question-1',
+      occurredAt: 201,
+    });
+
+    expect(withAnswer.agentEvents.map((event) => event.label)).toEqual([
+      '等待回答：请选择要查看的目录',
+      '问题已响应：已回答',
+    ]);
+  });
+
   it('records compaction events for overview/history rendering', () => {
     const state = applyChatRightPanelEvent(createInitialChatRightPanelState(), {
       type: 'compaction',

@@ -3574,7 +3574,15 @@ ${content}
                 </button>
               ))}
             </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
+            <div
+              style={{
+                flex: 1,
+                overflow: rightTab === 'agent' ? 'hidden' : 'auto',
+                padding: rightTab === 'agent' ? 0 : 8,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
               {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
               {rightTab === 'tools' &&
                 (() => {
@@ -3730,16 +3738,27 @@ ${content}
                 </div>
               )}
               {rightTab === 'agent' && (
-                <SubSessionDetailPanel
-                  childSessionId={selectedChildSessionId}
-                  currentUserEmail={currentUserEmail}
-                  gatewayUrl={gatewayUrl}
-                  onOpenFullSession={(nextSessionId) => {
-                    void navigate(`/chat/${nextSessionId}`);
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    padding: 8,
                   }}
-                  parentTaskRuntimeLookup={taskToolRuntimeLookup}
-                  token={token}
-                />
+                >
+                  <SubSessionDetailPanel
+                    childSessionId={selectedChildSessionId}
+                    currentUserEmail={currentUserEmail}
+                    gatewayUrl={gatewayUrl}
+                    onOpenFullSession={(nextSessionId) => {
+                      void navigate(`/chat/${nextSessionId}`);
+                    }}
+                    parentTaskRuntimeLookup={taskToolRuntimeLookup}
+                    token={token}
+                  />
+                </div>
               )}
             </div>
           </div>

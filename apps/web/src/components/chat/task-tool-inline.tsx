@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { StatusPill, resolveToolCallCardDisplayData } from '@openAwork/shared-ui';
+import { ToolKindIcon, resolveToolCallCardDisplayData, tokens } from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import type { TaskToolRuntimeSnapshot } from '../../pages/chat-page/task-tool-runtime.js';
 
@@ -20,6 +20,8 @@ interface TaskInlineDetailItem {
   kind: 'footer' | 'hint' | 'summary';
   text: string;
 }
+
+type TaskInlineMetaTone = 'danger' | 'info' | 'muted' | 'success' | 'warning';
 
 function resolveTaskStatusBadge(status: string | undefined): {
   color: 'danger' | 'info' | 'muted' | 'success' | 'warning';
@@ -180,6 +182,40 @@ function renderDetailItems(items: TaskInlineDetailItem[]) {
   );
 }
 
+function resolveMetaLabelColor(tone: TaskInlineMetaTone): string {
+  if (tone === 'danger') return tokens.color.danger;
+  if (tone === 'info') return tokens.color.info;
+  if (tone === 'success') return tokens.color.success;
+  if (tone === 'warning') return tokens.color.warning;
+  return tokens.color.muted;
+}
+
+function TaskInlineMetaLabel({ label, tone }: { label: string; tone: TaskInlineMetaTone }) {
+  return (
+    <span
+      className="chat-task-inline-meta-label"
+      data-chat-task-inline-meta-label={tone}
+      style={{ color: resolveMetaLabelColor(tone) }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function TaskToolKindBadge() {
+  return (
+    <span
+      className="chat-task-inline-kind-icon"
+      data-chat-task-inline-kind-icon="agent"
+      role="img"
+      aria-label="子代理工具"
+      title="子代理工具"
+    >
+      <ToolKindIcon kind="agent" />
+    </span>
+  );
+}
+
 export function TaskToolInline(props: TaskToolInlineProps) {
   const displayData = resolveToolCallCardDisplayData({
     toolCallId: props.toolCallId,
@@ -201,10 +237,10 @@ export function TaskToolInline(props: TaskToolInlineProps) {
         <div className="chat-task-inline-rail" aria-hidden="true" />
         <div className="chat-task-inline-main">
           <div className="chat-task-inline-meta">
-            <StatusPill label="子代理" color="muted" />
+            <TaskToolKindBadge />
             {typeof props.input['subagent_type'] === 'string' &&
             props.input['subagent_type'].trim() ? (
-              <StatusPill label={props.input['subagent_type'].trim()} color="info" />
+              <TaskInlineMetaLabel label={props.input['subagent_type'].trim()} tone="info" />
             ) : null}
           </div>
           <div className="chat-task-inline-title" title={fallbackTitle}>
@@ -257,16 +293,16 @@ export function TaskToolInline(props: TaskToolInlineProps) {
       <div className="chat-task-inline-rail" aria-hidden="true" />
       <div className="chat-task-inline-main">
         <div className="chat-task-inline-meta">
-          <StatusPill label="子代理" color="muted" />
+          <TaskToolKindBadge />
           {displayData.taskMeta.agentType && (
-            <StatusPill label={displayData.taskMeta.agentType} color="info" />
+            <TaskInlineMetaLabel label={displayData.taskMeta.agentType} tone="info" />
           )}
-          {displayData.taskMeta.readonly && <StatusPill label="只读" color="success" />}
+          {displayData.taskMeta.readonly && <TaskInlineMetaLabel label="只读" tone="success" />}
           {toolStatusBadge && (
-            <StatusPill label={toolStatusBadge.label} color={toolStatusBadge.color} />
+            <TaskInlineMetaLabel label={toolStatusBadge.label} tone={toolStatusBadge.color} />
           )}
           {taskStatusBadge && (
-            <StatusPill label={taskStatusBadge.label} color={taskStatusBadge.color} />
+            <TaskInlineMetaLabel label={taskStatusBadge.label} tone={taskStatusBadge.color} />
           )}
         </div>
         <div className="chat-task-inline-title" title={titleText}>

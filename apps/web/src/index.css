@@ -1,26 +1,26 @@
 @import 'tailwindcss';
 
 :root {
-  --nav-rail-bg: oklch(0.095 0.012 50);
-  --header-bg: oklch(0.11 0.013 50);
-  --card-bg: oklch(0.13 0.014 50);
-  --card-border: oklch(0.19 0.016 50);
-  --bg: oklch(0.08 0.012 50);
-  --bg-2: oklch(0.11 0.013 50);
-  --bg-3: oklch(0.14 0.016 50);
-  --bg-glass: oklch(0.12 0.013 50 / 0.75);
-  --bg-glass-border: oklch(0.28 0.022 50 / 0.45);
-  --surface: oklch(0.13 0.014 50);
-  --surface-2: oklch(0.17 0.016 50);
-  --surface-hover: oklch(0.2 0.016 50);
-  --border: oklch(0.22 0.016 50);
-  --border-subtle: oklch(0.16 0.013 50);
+  --nav-rail-bg: oklch(0.105 0.012 50);
+  --header-bg: oklch(0.13 0.013 50);
+  --card-bg: oklch(0.15 0.014 50);
+  --card-border: oklch(0.21 0.016 50);
+  --bg: oklch(0.1 0.012 50);
+  --bg-2: oklch(0.13 0.014 50);
+  --bg-3: oklch(0.16 0.016 50);
+  --bg-glass: oklch(0.13 0.013 50 / 0.75);
+  --bg-glass-border: oklch(0.3 0.022 50 / 0.45);
+  --surface: oklch(0.15 0.015 50);
+  --surface-2: oklch(0.19 0.016 50);
+  --surface-hover: oklch(0.22 0.016 50);
+  --border: oklch(0.24 0.016 50);
+  --border-subtle: oklch(0.18 0.013 50);
   --text: oklch(0.95 0.008 70);
   --text-2: oklch(0.72 0.01 60);
   --text-3: oklch(0.5 0.008 60);
-  --accent: oklch(0.58 0.018 255);
-  --accent-hover: oklch(0.64 0.02 255);
-  --accent-muted: oklch(0.58 0.018 255 / 0.18);
+  --accent: oklch(0.62 0.18 255);
+  --accent-hover: oklch(0.68 0.2 255);
+  --accent-muted: oklch(0.62 0.18 255 / 0.15);
   --accent-text: oklch(0.98 0.006 70);
   --success: oklch(0.6 0.16 155);
   --warning: oklch(0.6 0.11 95);
@@ -55,22 +55,22 @@
   --header-bg: oklch(0.97 0.005 60);
   --card-bg: oklch(0.995 0.003 70);
   --card-border: oklch(0.87 0.014 55);
-  --bg: oklch(0.975 0.007 65);
+  --bg: oklch(0.975 0.01 65);
   --bg-2: oklch(0.95 0.01 60);
   --bg-3: oklch(0.92 0.013 58);
   --bg-glass: oklch(0.98 0.006 65 / 0.82);
   --bg-glass-border: oklch(0.78 0.018 55 / 0.5);
-  --surface: oklch(0.995 0.003 70);
+  --surface: oklch(0.995 0.005 70);
   --surface-2: oklch(0.955 0.009 62);
   --surface-hover: oklch(0.93 0.012 60);
-  --border: oklch(0.84 0.016 58);
-  --border-subtle: oklch(0.9 0.01 62);
+  --border: oklch(0.88 0.012 58);
+  --border-subtle: oklch(0.93 0.007 62);
   --text: oklch(0.16 0.018 40);
   --text-2: oklch(0.4 0.014 45);
   --text-3: oklch(0.58 0.01 50);
-  --accent: oklch(0.58 0.18 35);
-  --accent-hover: oklch(0.53 0.18 35);
-  --accent-muted: oklch(0.58 0.18 35 / 0.12);
+  --accent: oklch(0.52 0.2 35);
+  --accent-hover: oklch(0.47 0.2 35);
+  --accent-muted: oklch(0.52 0.2 35 / 0.12);
   --accent-text: oklch(0.99 0.005 70);
   --success: oklch(0.48 0.16 155);
   --warning: oklch(0.54 0.18 75);
@@ -577,18 +577,29 @@ textarea {
   width: 100%;
   align-items: flex-start;
   gap: 12px;
-  padding: 2px 0;
+  padding: 6px 0;
+  transition: transform 140ms ease;
 }
 
 .chat-message-group {
   display: flex;
   width: 100%;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  padding: 0;
+}
+
+.chat-message-group[data-role='user'] {
+  background: transparent;
+}
+
+.chat-message-group[data-role='assistant'] {
+  background: transparent;
 }
 
 .chat-message-row.is-grouped {
   padding-top: 0;
+  margin-top: -2px;
 }
 
 .chat-message-avatar-frame {
@@ -616,7 +627,7 @@ textarea {
   min-width: 0;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .chat-message-title-group {
@@ -635,22 +646,27 @@ textarea {
   white-space: nowrap;
   color: var(--text);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 650;
   letter-spacing: -0.01em;
 }
 
 .chat-message-provider-pill {
   display: inline-flex;
   align-items: center;
-  height: 15px;
-  padding: 0 5px;
+  height: 18px;
+  padding: 0 7px;
   border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: color-mix(in oklch, var(--surface) 86%, var(--bg-2) 14%);
-  color: var(--text-3);
-  font-size: 8.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  border: 1px solid color-mix(in oklch, var(--accent) 16%, var(--border) 84%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--accent) 18%, var(--surface) 82%),
+    color-mix(in oklch, var(--surface) 92%, var(--bg-2) 8%)
+  );
+  color: color-mix(in oklch, var(--accent) 82%, white 18%);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .chat-message-timestamp {
@@ -673,12 +689,24 @@ textarea {
 
 .chat-message-content-shell {
   min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-message-content-shell[data-role='user'] {
+  background: transparent;
+}
+
+.chat-message-content-shell[data-role='assistant'] {
+  background: transparent;
 }
 
 .chat-message-content-shell[data-status='error'] {
   margin-top: 2px;
-  padding-left: 10px;
-  border-left: 3px solid color-mix(in oklch, var(--danger) 72%, transparent);
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in oklch, var(--danger) 72%, transparent);
 }
 
 .chat-message-content {
@@ -722,9 +750,9 @@ textarea {
 
 .chat-message-error-title {
   min-width: 0;
-  color: color-mix(in oklch, var(--danger) 46%, var(--text) 54%);
-  font-size: 12px;
-  font-weight: 600;
+  color: color-mix(in oklch, var(--danger) 54%, var(--text) 46%);
+  font-size: 12.5px;
+  font-weight: 700;
   line-height: 1.45;
 }
 
@@ -732,7 +760,7 @@ textarea {
   min-width: 0;
   color: color-mix(in oklch, var(--danger) 26%, var(--text) 74%);
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.74;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -764,12 +792,12 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  margin-top: 6px;
-  padding-left: 1px;
-  color: color-mix(in oklch, var(--text-3) 82%, transparent);
-  font-size: 10px;
+  margin-top: 8px;
+  padding-left: 2px;
+  color: color-mix(in oklch, var(--text-3) 78%, transparent);
+  font-size: 10.5px;
   line-height: 1.4;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -779,6 +807,7 @@ textarea {
 
 .chat-message-meta-item {
   color: inherit;
+  padding: 1px 0;
 }
 
 .chat-message-meta-item.is-accent {
@@ -1164,7 +1193,7 @@ textarea {
 .assistant-rich-content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .assistant-rich-content-body {
@@ -1253,6 +1282,29 @@ textarea {
   gap: 6px;
   flex-shrink: 0;
   min-width: 0;
+}
+
+.chat-task-inline-meta-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+
+.chat-task-inline-kind-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: transparent;
+  flex-shrink: 0;
+  color: var(--text);
 }
 
 .chat-task-inline-title {
@@ -1447,27 +1499,36 @@ textarea {
   display: inline-block;
   margin: 0 0.1em;
   padding: 0.1em 0.42em;
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-  background: color-mix(in oklch, var(--surface) 88%, var(--bg-2) 12%);
+  border-radius: 7px;
+  border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border) 90%);
+  background: color-mix(in oklch, var(--surface) 82%, var(--bg-2) 18%);
   color: var(--text);
   font-size: 0.92em;
   line-height: 1.5;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .chat-markdown-code-block {
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-2);
+  border: 1px solid color-mix(in oklch, var(--accent) 14%, var(--border) 86%);
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface) 72%, var(--bg-2) 28%),
+    color-mix(in oklch, var(--bg-2) 92%, transparent)
+  );
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
 }
 
 .chat-markdown-thinking-block {
   overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--accent) 16%, var(--border) 84%);
-  border-radius: 12px;
-  background: color-mix(in oklch, var(--surface) 86%, var(--bg-2) 14%);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border) 78%);
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface) 80%, var(--bg-2) 20%),
+    color-mix(in oklch, var(--surface) 92%, transparent)
+  );
 }
 
 .chat-markdown-thinking-summary {
@@ -1494,10 +1555,10 @@ textarea {
 }
 
 .chat-markdown-thinking-label {
-  color: color-mix(in oklch, var(--accent) 74%, white 26%);
+  color: color-mix(in oklch, var(--accent) 82%, white 18%);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -1544,10 +1605,10 @@ textarea {
 }
 
 .chat-markdown-code-label {
-  color: var(--text-3);
+  color: color-mix(in oklch, var(--accent) 72%, white 28%);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -1596,8 +1657,8 @@ textarea {
   display: block;
   color: var(--text);
   font-size: 12px;
-  line-height: 1.6;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.68;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .chat-markdown-table-wrap {

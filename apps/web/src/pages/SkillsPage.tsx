@@ -1,12 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuthStore } from '../stores/auth.js';
-import {
-  SkillMarketHome,
-  SkillDetailPage,
-  InstalledSkillsManager,
-  RegistrySourceManager,
-  InstallProgressUI,
-} from '@openAwork/shared-ui';
+import { SkillDetailPage, InstallProgressUI } from '@openAwork/shared-ui';
 import type {
   MarketSkill,
   MarketSkillDetail,
@@ -22,7 +16,7 @@ import {
   sharedUiThemeVars,
 } from '../components/skills/SkillsPageSections.js';
 
-type ActiveTab = 'market' | 'installed';
+type ActiveTab = 'market' | 'local' | 'installed';
 
 const MARKET_PAGE_SIZE = 24;
 
@@ -54,6 +48,23 @@ interface MarketSearchResult {
   total: number;
 }
 
+interface LocalSkillEntryDto extends SkillEntryDto {
+  dirPath: string;
+  manifestPath: string;
+  workspaceRelativePath: string;
+  installed?: boolean;
+}
+
+type InstallTarget =
+  | { mode: 'market'; skillId: string; sourceId?: string }
+  | { mode: 'local'; skillId: string; dirPath: string };
+
+type LocalWorkspaceSkill = (MarketSkill & Partial<MarketSkillDetail>) & {
+  dirPath: string;
+  manifestPath: string;
+  workspaceRelativePath: string;
+};
+
 function toMarketSkill(entry: SkillEntryDto): MarketSkill & Partial<MarketSkillDetail> {
   const installable = !(
     entry.sourceId === 'builtin' || (entry.sourceId ? entry.sourceId.startsWith('github:') : false)
@@ -73,6 +84,41 @@ function toMarketSkill(entry: SkillEntryDto): MarketSkill & Partial<MarketSkillD
     permissions: entry.permissions,
     changelog: entry.changelog,
   };
+}
+
+function toLocalSkill(entry: LocalSkillEntryDto): LocalWorkspaceSkill {
+  const base = toMarketSkill({
+    ...entry,
+    downloads: entry.downloads ?? 0,
+    sourceId: entry.sourceId ?? 'local-workspace',
+    verified: false,
+  });
+  const location =
+    entry.workspaceRelativePath && entry.workspaceRelativePath !== '.'
+      ? `路径：${entry.workspaceRelativePath}`
+      : '路径：工作区根目录';
+  return {
+    ...base,
+    description:
+      base.description.trim().length > 0 ? `${base.description} · ${location}` : location,
+    dirPath: entry.dirPath,
+    manifestPath: entry.manifestPath,
+    workspaceRelativePath: entry.workspaceRelativePath,
+  };
+}
+
+function matchesLocalSkill(skill: LocalWorkspaceSkill, query?: string, category?: string): boolean {
+  if (category && skill.category !== category) {
+    return false;
+  }
+  const normalizedQuery = query?.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+  return [skill.id, skill.name, skill.description, skill.workspaceRelativePath, ...skill.tags]
+    .join(' ')
+    .toLowerCase()
+    .includes(normalizedQuery);
 }
 
 function useSkillsApi() {
@@ -158,6 +204,32 @@ function useSkillsApi() {
         headers: getHeaders(),
       });
       if (!res.ok) throw new Error(`Uninstall failed: ${res.status}`);
+    },
+    [gatewayUrl, getHeaders],
+  );
+
+  const discoverLocalSkills = useCallback(async (): Promise<LocalSkillEntryDto[]> => {
+    const res = await fetch(`${gatewayUrl}/skills/local/discover`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(`Failed to discover local skills: ${res.status}`);
+    const data = (await res.json()) as { skills: LocalSkillEntryDto[] };
+    return data.skills;
+  }, [gatewayUrl, getHeaders]);
+
+  const installLocalSkill = useCallback(
+    async (dirPath: string): Promise<void> => {
+      const res = await fetch(`${gatewayUrl}/skills/local/install`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ dirPath }),
+      });
+      if (!res.ok) {
+        const err = (await res
+          .json()
+          .catch(() => ({ error: `Install failed: ${res.status}` }))) as {
+          error?: string;
+        };
+        throw new Error(err.error ?? `Install failed: ${res.status}`);
+      }
     },
     [gatewayUrl, getHeaders],
   );
@@ -267,6 +339,8 @@ function useSkillsApi() {
     removeSource,
     toggleSource,
     fetchSkillDetail,
+    discoverLocalSkills,
+    installLocalSkill,
   };
 }
 
@@ -275,6 +349,7 @@ export default function SkillsPage() {
   const [tabChanging, setTabChanging] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MarketSkillDetail | null>(null);
+  const [selectedInstallTarget, setSelectedInstallTarget] = useState<InstallTarget | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const didInitMarketRef = useRef(false);
   const marketRequestSeqRef = useRef(0);
@@ -289,6 +364,12 @@ export default function SkillsPage() {
   const [marketCategory, setMarketCategory] = useState<string | undefined>(undefined);
   const [marketPage, setMarketPage] = useState(1);
   const [marketTotal, setMarketTotal] = useState(0);
+
+  const [localCatalog, setLocalCatalog] = useState<LocalWorkspaceSkill[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [localQuery, setLocalQuery] = useState<string | undefined>(undefined);
+  const [localCategory, setLocalCategory] = useState<string | undefined>(undefined);
 
   const [installedSkills, setInstalledSkills] = useState<MarketInstalledSkill[]>([]);
   const [installedLoading, setInstalledLoading] = useState(false);
@@ -309,6 +390,8 @@ export default function SkillsPage() {
     removeSource,
     toggleSource,
     fetchSkillDetail,
+    discoverLocalSkills,
+    installLocalSkill,
   } = useSkillsApi();
 
   const loadMarket = useCallback(
@@ -369,6 +452,20 @@ export default function SkillsPage() {
     }
   }, [fetchInstalled]);
 
+  const loadLocalCatalog = useCallback(async () => {
+    setLocalLoading(true);
+    setLocalError(null);
+    try {
+      const skills = await discoverLocalSkills();
+      setLocalCatalog(skills.map(toLocalSkill));
+    } catch (err) {
+      setLocalCatalog([]);
+      setLocalError(err instanceof Error ? err.message : 'Failed to discover local skills');
+    } finally {
+      setLocalLoading(false);
+    }
+  }, [discoverLocalSkills]);
+
   const loadSources = useCallback(async () => {
     const sources = await fetchSources();
     setRegistrySources(sources);
@@ -399,39 +496,102 @@ export default function SkillsPage() {
   }, [loadMarket, loadSources]);
 
   useEffect(() => {
-    if (activeTab === 'installed') {
+    if (activeTab === 'installed' || activeTab === 'local') {
       void loadInstalled();
     }
-  }, [activeTab, loadInstalled]);
+    if (activeTab === 'local') {
+      void loadLocalCatalog();
+    }
+  }, [activeTab, loadInstalled, loadLocalCatalog]);
 
-  async function handleInstall(id: string) {
-    setInstallingSkillId(id);
-    setInstallSteps([
-      { label: '解析依赖', status: 'running' },
-      { label: '下载中', status: 'pending' },
-      { label: '校验', status: 'pending' },
-    ]);
-    const sourceId = marketSkillSources.get(id);
+  const installedSkillIds = useMemo(
+    () => new Set(installedSkills.map((skill) => skill.id)),
+    [installedSkills],
+  );
+
+  const localSkills = useMemo(
+    () =>
+      localCatalog
+        .filter((skill) => matchesLocalSkill(skill, localQuery, localCategory))
+        .map((skill) => ({
+          ...skill,
+          actionLabel: installedSkillIds.has(skill.id) ? '重新加载' : '安装',
+        })),
+    [installedSkillIds, localCatalog, localCategory, localQuery],
+  );
+
+  const combinedSkillIndex = useMemo(
+    () => [...marketSkills, ...localSkills],
+    [localSkills, marketSkills],
+  );
+
+  async function handleInstall(target: InstallTarget) {
+    const isLocalSkill = target.mode === 'local';
+    setInstallingSkillId(target.skillId);
+    setInstallSteps(
+      isLocalSkill
+        ? [
+            { label: '解析清单', status: 'running' },
+            { label: '加载本地技能', status: 'pending' },
+            { label: '校验', status: 'pending' },
+          ]
+        : [
+            { label: '解析依赖', status: 'running' },
+            { label: '下载中', status: 'pending' },
+            { label: '校验', status: 'pending' },
+          ],
+    );
     try {
-      setInstallSteps([
-        { label: '解析依赖', status: 'done' },
-        { label: '下载中', status: 'running' },
-        { label: '校验', status: 'pending' },
-      ]);
-      await installSkill(id, sourceId);
-      setInstallSteps([
-        { label: '解析依赖', status: 'done' },
-        { label: '下载中', status: 'done' },
-        { label: '校验', status: 'done' },
-      ]);
+      setInstallSteps(
+        isLocalSkill
+          ? [
+              { label: '解析清单', status: 'done' },
+              { label: '加载本地技能', status: 'running' },
+              { label: '校验', status: 'pending' },
+            ]
+          : [
+              { label: '解析依赖', status: 'done' },
+              { label: '下载中', status: 'running' },
+              { label: '校验', status: 'pending' },
+            ],
+      );
+      if (target.mode === 'local') {
+        await installLocalSkill(target.dirPath);
+      } else {
+        await installSkill(target.skillId, target.sourceId);
+      }
+      setInstallSteps(
+        isLocalSkill
+          ? [
+              { label: '解析清单', status: 'done' },
+              { label: '加载本地技能', status: 'done' },
+              { label: '校验', status: 'done' },
+            ]
+          : [
+              { label: '解析依赖', status: 'done' },
+              { label: '下载中', status: 'done' },
+              { label: '校验', status: 'done' },
+            ],
+      );
       void loadInstalled();
+      if (isLocalSkill) {
+        void loadLocalCatalog();
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Install failed';
-      setInstallSteps([
-        { label: '解析依赖', status: 'done' },
-        { label: '下载中', status: 'error', message: msg },
-        { label: '校验', status: 'pending' },
-      ]);
+      setInstallSteps(
+        isLocalSkill
+          ? [
+              { label: '解析清单', status: 'done' },
+              { label: '加载本地技能', status: 'error', message: msg },
+              { label: '校验', status: 'pending' },
+            ]
+          : [
+              { label: '解析依赖', status: 'done' },
+              { label: '下载中', status: 'error', message: msg },
+              { label: '校验', status: 'pending' },
+            ],
+      );
     } finally {
       setTimeout(() => {
         setInstallingSkillId(null);
@@ -446,33 +606,56 @@ export default function SkillsPage() {
   }
 
   function handleUpdate(id: string) {
-    void handleInstall(id);
+    const installedSkill = installedSkills.find((skill) => skill.id === id);
+    if (!installedSkill) {
+      return;
+    }
+
+    if (installedSkill.source === 'local-workspace') {
+      void (async () => {
+        const latestLocalSkills = await discoverLocalSkills();
+        const matchingLocalSkill = latestLocalSkills.find((skill) => skill.id === id);
+        if (!matchingLocalSkill) {
+          return;
+        }
+        await handleInstall({
+          mode: 'local',
+          skillId: id,
+          dirPath: matchingLocalSkill.dirPath,
+        });
+      })();
+      return;
+    }
+
+    void handleInstall({ mode: 'market', skillId: id, sourceId: installedSkill.source });
   }
 
   function handleCheckUpdates() {
     void loadInstalled();
   }
 
-  function handleSelectSkill(id: string) {
+  function handleSelectSkill(
+    id: string,
+    fallbackBase: (MarketSkill & Partial<MarketSkillDetail>) | LocalWorkspaceSkill,
+    installTarget: InstallTarget,
+  ) {
     setSelectedSkillId(id);
     setSelectedDetail(null);
+    setSelectedInstallTarget(installTarget);
     setDetailLoading(true);
     fetchSkillDetail(id)
       .then((detail) => {
         setSelectedDetail(detail);
       })
       .catch(() => {
-        const base = marketSkills.find((s) => s.id === id);
-        if (base) {
-          setSelectedDetail({
-            ...base,
-            author: base.author ?? '',
-            license: base.license ?? '',
-            readme: base.readme ?? '',
-            permissions: base.permissions ?? [],
-            changelog: base.changelog,
-          });
-        }
+        setSelectedDetail({
+          ...fallbackBase,
+          author: fallbackBase.author ?? '',
+          license: fallbackBase.license ?? '',
+          readme: fallbackBase.readme ?? '',
+          permissions: fallbackBase.permissions ?? [],
+          changelog: fallbackBase.changelog,
+        });
       })
       .finally(() => {
         setDetailLoading(false);
@@ -493,10 +676,15 @@ export default function SkillsPage() {
         ) : (
           <SkillDetailPage
             skill={selectedDetail}
-            onInstall={() => void handleInstall(selectedSkillId)}
+            onInstall={() => {
+              if (selectedInstallTarget) {
+                void handleInstall(selectedInstallTarget);
+              }
+            }}
             onBack={() => {
               setSelectedSkillId(null);
               setSelectedDetail(null);
+              setSelectedInstallTarget(null);
             }}
             isInstalled={installedSkills.some((s) => s.id === selectedSkillId)}
           />
@@ -522,7 +710,8 @@ export default function SkillsPage() {
           <div style={sharedUiThemeVars}>
             <InstallProgressUI
               skillName={
-                marketSkills.find((s) => s.id === installingSkillId)?.name ?? installingSkillId
+                combinedSkillIndex.find((s) => s.id === installingSkillId)?.name ??
+                installingSkillId
               }
               steps={installSteps}
               onCancel={() => setInstallingSkillId(null)}
@@ -559,10 +748,13 @@ export default function SkillsPage() {
 
           <SkillsToolbar
             activeTab={activeTab}
-            busy={marketLoading || installedLoading}
+            busy={marketLoading || localLoading || installedLoading}
             onRefresh={() => {
               if (activeTab === 'market') void refreshMarket();
-              else {
+              else if (activeTab === 'local') {
+                void loadLocalCatalog();
+                void loadInstalled();
+              } else {
                 void loadInstalled();
                 void loadSources();
               }
@@ -588,8 +780,64 @@ export default function SkillsPage() {
                 void loadMarket({ query: q, category: cat, page: 1 })
               }
               onPageChange={(page: number) => void loadMarket({ page })}
-              onInstall={(id) => void handleInstall(id)}
-              onSelect={(id) => handleSelectSkill(id)}
+              onInstall={(id) => {
+                const base = marketSkills.find((skill) => skill.id === id);
+                if (!base) {
+                  return;
+                }
+                void handleInstall({
+                  mode: 'market',
+                  skillId: id,
+                  sourceId: marketSkillSources.get(id),
+                });
+              }}
+              onSelect={(id) => {
+                const base = marketSkills.find((skill) => skill.id === id);
+                if (!base) {
+                  return;
+                }
+                handleSelectSkill(id, base, {
+                  mode: 'market',
+                  skillId: id,
+                  sourceId: marketSkillSources.get(id),
+                });
+              }}
+            />
+          )}
+
+          {activeTab === 'local' && (
+            <SkillsMarketSection
+              skills={localSkills}
+              title="本地工作区技能"
+              subtitle="扫描当前工作区中的 skill.yaml，并支持直接安装或重新加载。"
+              loading={localLoading}
+              error={localError}
+              currentPage={1}
+              pageSize={Math.max(localSkills.length, 1)}
+              total={localSkills.length}
+              onSearch={(q: string, cat?: string) => {
+                setLocalQuery(q);
+                setLocalCategory(cat);
+              }}
+              onPageChange={() => undefined}
+              onInstall={(id) => {
+                const base = localSkills.find((skill) => skill.id === id);
+                if (!base) {
+                  return;
+                }
+                void handleInstall({ mode: 'local', skillId: id, dirPath: base.dirPath });
+              }}
+              onSelect={(id) => {
+                const base = localSkills.find((skill) => skill.id === id);
+                if (!base) {
+                  return;
+                }
+                handleSelectSkill(id, base, {
+                  mode: 'local',
+                  skillId: id,
+                  dirPath: base.dirPath,
+                });
+              }}
             />
           )}
 

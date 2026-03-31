@@ -181,6 +181,29 @@ export function applyChatRightPanelEvent(
     };
   }
 
+  if (event.type === 'question_asked') {
+    return {
+      ...state,
+      agentEvents: [
+        ...state.agentEvents,
+        createEvent('agent_thinking', `等待回答：${event.title}`),
+      ],
+    };
+  }
+
+  if (event.type === 'question_replied') {
+    return {
+      ...state,
+      agentEvents: [
+        ...state.agentEvents,
+        createEvent(
+          'agent_done',
+          `问题已响应：${event.status === 'answered' ? '已回答' : '已忽略'}`,
+        ),
+      ],
+    };
+  }
+
   if (event.type === 'session_child') {
     return {
       ...state,

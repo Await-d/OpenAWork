@@ -12,7 +12,10 @@ import {
   getWorkspaceGroupKey,
 } from '../utils/session-grouping.js';
 import { subscribeSessionListRefresh } from '../utils/session-list-events.js';
-import { isSessionAlreadyDeletedError } from '../utils/session-delete.js';
+import {
+  getSessionDeleteErrorMessage,
+  isSessionAlreadyDeletedError,
+} from '../utils/session-delete.js';
 import { extractWorkingDirectory } from '../utils/session-metadata.js';
 import {
   buildSavedChatSessionMetadata,
@@ -33,6 +36,17 @@ interface SessionRow {
   state_status: string;
   updated_at: string;
   metadata_json?: string;
+}
+
+function resolveDeletedSessionIds(
+  result: { deletedSessionIds?: string[] } | void,
+  fallbackSessionId: string,
+): string[] {
+  if (Array.isArray(result?.deletedSessionIds) && result.deletedSessionIds.length > 0) {
+    return result.deletedSessionIds;
+  }
+
+  return [fallbackSessionId];
 }
 
 const PULSE_CSS = `
@@ -423,12 +437,15 @@ export default function SessionsPage() {
       });
 
       try {
-        await withTokenRefresh(gatewayUrl, tokenStore, (activeToken) =>
+        const result = await withTokenRefresh(gatewayUrl, tokenStore, (activeToken) =>
           createSessionsClient(gatewayUrl).delete(activeToken, id),
         );
+        const deletedSessionIds = new Set(resolveDeletedSessionIds(result, id));
         logger.info('session deleted', id);
-        setSessions((prev) => prev.filter((s) => s.id !== id));
-        if (selectedId === id) setSelectedId(null);
+        setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
+        if (selectedId && deletedSessionIds.has(selectedId)) {
+          setSelectedId(null);
+        }
         if (!options?.suppressToast) {
           toast('会话已删除', 'success');
         }
@@ -437,6 +454,7 @@ export default function SessionsPage() {
         if (isSessionAlreadyDeletedError(err)) {
           setSessions((prev) => prev.filter((s) => s.id !== id));
           if (selectedId === id) setSelectedId(null);
+          void loadSessions(true);
           if (!options?.suppressToast) {
             toast('会话已删除', 'success');
           }
@@ -445,7 +463,7 @@ export default function SessionsPage() {
 
         logger.error('session delete failed', err);
         if (!options?.suppressToast) {
-          toast('删除失败，请重试', 'error');
+          toast(getSessionDeleteErrorMessage(err), 'error', 4200);
         }
         return false;
       } finally {
@@ -461,7 +479,7 @@ export default function SessionsPage() {
         });
       }
     },
-    [gatewayUrl, selectedId, token, tokenStore],
+    [gatewayUrl, loadSessions, selectedId, token, tokenStore],
   );
 
   const handleDeleteWorkspaceGroup = useCallback(

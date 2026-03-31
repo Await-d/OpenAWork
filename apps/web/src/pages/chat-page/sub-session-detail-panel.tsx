@@ -142,7 +142,7 @@ function buildGroupedMessages(
   return groups;
 }
 
-export function SubSessionDetailPanel({
+const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   childSessionId,
   currentUserEmail,
   gatewayUrl,
@@ -426,6 +426,12 @@ export function SubSessionDetailPanel({
     streaming,
   ]);
 
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToLatest('auto', 'latest-edge');
+    }
+  }, [messages.length, scrollToLatest]);
+
   async function handleSend() {
     if (!childSessionId || !input.trim() || isChildSessionBusy || cancellingTask) {
       return;
@@ -560,336 +566,278 @@ export function SubSessionDetailPanel({
 
   if (!childSessionId) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>子代理详情</div>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          padding: '32px 16px',
+          minHeight: 120,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: 'var(--accent)',
+            opacity: 0.5,
+          }}
+        />
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>等待查看子代理</div>
         <div
           style={{
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 16,
-            background:
-              'linear-gradient(180deg, color-mix(in oklch, var(--surface) 94%, transparent) 0%, color-mix(in oklch, var(--surface) 88%, var(--bg)) 100%)',
-            padding: '16px 14px',
-            fontSize: 11,
+            fontSize: 10,
             color: 'var(--text-3)',
-            lineHeight: 1.7,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
+            textAlign: 'center',
+            lineHeight: 1.6,
+            maxWidth: 220,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span
-              aria-hidden="true"
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                background: 'var(--accent)',
-                boxShadow: '0 0 0 6px color-mix(in oklch, var(--accent) 14%, transparent)',
-              }}
-            />
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
-              等待查看子代理
-            </span>
-          </div>
-          <div>点击输入框上方的子代理卡片，就可以在这里查看它的对话、任务状态和干预入口。</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div>· 先看概览，快速判断子代理当前是运行中、待执行还是已完成</div>
-            <div>· 再看任务轨迹，确认它最近执行了什么</div>
-            <div>· 最后可以直接发送一条干预消息，而不用切走主会话</div>
-          </div>
+          点击子代理卡片，在此查看对话、任务状态和干预入口。
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, height: '100%', minHeight: 0 }}>
       <div
         style={{
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 16,
-          background:
-            'linear-gradient(180deg, color-mix(in oklch, var(--surface) 78%, var(--accent) 22%) 0%, color-mix(in oklch, var(--surface) 92%, var(--bg)) 100%)',
-          padding: '12px 14px',
           display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
+          alignItems: 'center',
+          gap: 5,
+          flexWrap: 'wrap',
+          padding: '1px 0',
         }}
       >
         <div
           style={{
+            fontSize: 12,
+            fontWeight: 800,
+            color: 'var(--text)',
+            minWidth: 0,
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {session?.title?.trim() || `子代理 ${childSessionId.slice(0, 8)}`}
+        </div>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '2px 6px',
+            borderRadius: 999,
+            fontSize: 10,
+            fontWeight: 700,
+            flexShrink: 0,
+            ...getTaskStatusStyle(headlineStatus),
+          }}
+        >
+          {formatTaskStatus(headlineStatus)}
+        </span>
+        <div style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }} title={childSessionId}>
+          {compactSessionId(childSessionId)}
+        </div>
+        <button
+          type="button"
+          onClick={() => onOpenFullSession(childSessionId)}
+          style={{
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 6,
+            background: 'transparent',
+            color: 'var(--text-3)',
+            cursor: 'pointer',
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '3px 7px',
+            flexShrink: 0,
+          }}
+        >
+          打开完整会话
+        </button>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          height: 20,
+          fontSize: 10,
+          color: 'var(--text-3)',
+          flexWrap: 'nowrap',
+          overflow: 'hidden',
+        }}
+      >
+        {[
+          { label: '消息', value: String(messages.length) },
+          { label: '任务', value: String(tasks.length) },
+          { label: '运行中', value: String(runningTaskCount) },
+          { label: '已完成', value: String(completedTaskCount) },
+        ].map((item, i) => (
+          <React.Fragment key={item.label}>
+            {i > 0 && <span style={{ margin: '0 3px', opacity: 0.35 }}>·</span>}
+            <span style={{ fontWeight: 600, color: 'var(--text-2)' }}>{item.label}</span>
+            <span style={{ margin: '0 2px', opacity: 0.35 }}>·</span>
+            <span>{item.value}</span>
+          </React.Fragment>
+        ))}
+      </div>
+      {pendingPermissions.some((permission) => permission.status === 'pending') && (
+        <div
+          role="alert"
+          aria-label="子代理正在等待权限审批"
+          style={{
             display: 'flex',
             alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 10,
-            flexWrap: 'wrap',
+            gap: 7,
+            padding: '5px 8px',
+            borderRadius: 10,
+            border: '1px solid color-mix(in srgb, #f59e0b 40%, var(--border-subtle))',
+            background: 'color-mix(in srgb, #f59e0b 8%, var(--surface))',
           }}
         >
-          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
-                {session?.title?.trim() || `子代理 ${childSessionId.slice(0, 8)}`}
-              </div>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '4px 8px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  ...getTaskStatusStyle(headlineStatus),
-                }}
-              >
-                {formatTaskStatus(headlineStatus)}
-              </span>
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--text-3)' }} title={childSessionId}>
-              会话 ID · {compactSessionId(childSessionId)}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => onOpenFullSession(childSessionId)}
+          <span
+            aria-hidden="true"
             style={{
-              border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-subtle))',
-              borderRadius: 10,
-              background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-              color: 'var(--text-2)',
-              cursor: 'pointer',
-              fontSize: 10,
-              fontWeight: 700,
-              padding: '7px 10px',
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#f59e0b',
               flexShrink: 0,
+              marginTop: 3,
             }}
-          >
-            打开完整会话
-          </button>
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#fcd34d' }}>等待权限审批</div>
+            {pendingPermissions
+              .filter((permission) => permission.status === 'pending')
+              .slice(0, 2)
+              .map((permission) => (
+                <div
+                  key={permission.requestId}
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--text-2)',
+                    lineHeight: 1.5,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={`${permission.toolName}：${permission.reason}`}
+                >
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {permission.toolName}
+                  </span>
+                  {permission.reason ? ` · ${permission.reason}` : ''}
+                </div>
+              ))}
+          </div>
         </div>
+      )}
+      {tasks.length > 0 && (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-            gap: 8,
+            borderLeft: '2px solid var(--border-subtle)',
+            paddingLeft: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
           }}
         >
-          {[
-            { label: '消息', value: String(messages.length) },
-            { label: '任务', value: String(tasks.length) },
-            { label: '运行中', value: String(runningTaskCount) },
-            { label: '已完成', value: String(completedTaskCount) },
-          ].map((item) => (
-            <div
-              key={item.label}
-              style={{
-                border:
-                  '1px solid color-mix(in oklch, var(--border-subtle) 86%, var(--accent) 14%)',
-                borderRadius: 12,
-                background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-                padding: '10px 11px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700 }}>
-                {item.label}
-              </span>
-              <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
-                {item.value}
-              </span>
-            </div>
-          ))}
-        </div>
-        {pendingPermissions.some((permission) => permission.status === 'pending') && (
           <div
-            role="alert"
-            aria-label="子代理正在等待权限审批"
             style={{
               display: 'flex',
-              alignItems: 'flex-start',
-              gap: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              border: '1px solid color-mix(in srgb, #f59e0b 40%, var(--border-subtle))',
-              background: 'color-mix(in srgb, #f59e0b 8%, var(--surface))',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 7,
+              marginBottom: 3,
             }}
           >
-            <span
-              aria-hidden="true"
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: '#f59e0b',
-                boxShadow: '0 0 0 4px color-mix(in srgb, #f59e0b 20%, transparent)',
-                flexShrink: 0,
-                marginTop: 4,
-              }}
-            />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#fcd34d' }}>等待权限审批</div>
-              {pendingPermissions
-                .filter((permission) => permission.status === 'pending')
-                .slice(0, 2)
-                .map((permission) => (
-                  <div
-                    key={permission.requestId}
-                    style={{
-                      fontSize: 10,
-                      color: 'var(--text-2)',
-                      lineHeight: 1.5,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title={`${permission.toolName}：${permission.reason}`}
-                  >
-                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-                      {permission.toolName}
-                    </span>
-                    {permission.reason ? ` · ${permission.reason}` : ''}
-                  </div>
-                ))}
-            </div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)' }}>任务轨迹</div>
+            {failedTaskCount > 0 && (
+              <div style={{ fontSize: 10, color: '#fca5a5', fontWeight: 700 }}>
+                {failedTaskCount} 个失败
+              </div>
+            )}
           </div>
-        )}
-        {tasks.length > 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              paddingTop: 2,
-            }}
-          >
+          {tasks.slice(0, VISIBLE_TASK_COUNT).map((task, index) => (
             <div
+              key={task.id}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: 8,
+                gap: 1,
+                padding: '2px 0',
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>任务轨迹</div>
-              {failedTaskCount > 0 && (
-                <div style={{ fontSize: 10, color: '#fca5a5', fontWeight: 700 }}>
-                  {failedTaskCount} 个任务失败
-                </div>
-              )}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {tasks.slice(0, VISIBLE_TASK_COUNT).map((task, index) => (
-                <div
-                  key={task.id}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}>
+                <span
+                  aria-hidden="true"
                   style={{
-                    display: 'flex',
+                    width: 14,
+                    height: 14,
+                    borderRadius: 999,
+                    background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                    color: 'var(--accent)',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    padding: '8px 10px',
-                    borderRadius: 12,
-                    border:
-                      '1px solid color-mix(in oklch, var(--border-subtle) 92%, var(--accent) 8%)',
-                    background: 'color-mix(in oklch, var(--surface) 86%, transparent)',
+                    justifyContent: 'center',
+                    fontSize: 9,
+                    fontWeight: 800,
+                    flexShrink: 0,
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 8,
-                      minWidth: 0,
-                      flex: 1,
-                    }}
-                  >
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 999,
-                        background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                        color: 'var(--accent)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        flexShrink: 0,
-                        marginTop: 1,
-                      }}
-                    >
-                      {index + 1}
-                    </span>
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 3,
-                        minWidth: 0,
-                        flex: 1,
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: 'var(--text)',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                        title={task.title}
-                      >
-                        {task.title}
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-                        {task.sessionId === childSessionId ? '当前子会话任务' : '父链关联任务'}
-                      </div>
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '4px 8px',
-                      borderRadius: 999,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      ...getTaskStatusStyle(task.status),
-                    }}
-                  >
-                    {formatTaskStatus(task.status)}
-                  </span>
-                </div>
-              ))}
-              {tasks.length > VISIBLE_TASK_COUNT && (
+                  {index + 1}
+                </span>
                 <div
                   style={{
-                    fontSize: 10,
-                    color: 'var(--text-3)',
-                    padding: '2px 2px 0',
+                    fontSize: 11,
+                    color: 'var(--text)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    minWidth: 0,
                   }}
+                  title={task.title}
                 >
-                  还有 {tasks.length - VISIBLE_TASK_COUNT}{' '}
-                  条任务未展开显示，可打开完整会话查看全部上下文。
+                  {task.title}
                 </div>
-              )}
+              </div>
+              <span
+                style={{
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  ...getTaskStatusStyle(task.status),
+                }}
+              >
+                {formatTaskStatus(task.status)}
+              </span>
             </div>
-          </div>
-        ) : null}
-      </div>
+          ))}
+          {tasks.length > VISIBLE_TASK_COUNT && (
+            <div style={{ fontSize: 10, color: 'var(--text-3)', paddingTop: 2 }}>
+              还有 {tasks.length - VISIBLE_TASK_COUNT} 条，打开完整会话查看。
+            </div>
+          )}
+        </div>
+      )}
 
       <div
         style={{
           flex: 1,
-          minHeight: 240,
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 16,
-          background: 'color-mix(in oklab, var(--surface) 92%, transparent)',
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -901,16 +849,15 @@ export function SubSessionDetailPanel({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 8,
-            padding: '10px 12px',
+            gap: 7,
+            padding: '3px 0',
             borderBottom: '1px solid var(--border-subtle)',
-            background: 'color-mix(in oklch, var(--surface) 84%, var(--bg) 16%)',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>子代理对话</div>
             <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-              {streaming ? '正在接收最新响应…' : `共 ${renderedMessages.length} 组消息`}
+              {streaming ? '正在接收…' : `${renderedMessages.length} 组`}
             </div>
           </div>
           <button
@@ -918,13 +865,13 @@ export function SubSessionDetailPanel({
             onClick={() => void refresh()}
             style={{
               border: '1px solid var(--border-subtle)',
-              borderRadius: 9,
+              borderRadius: 6,
               background: 'transparent',
-              color: 'var(--text-2)',
+              color: 'var(--text-3)',
               cursor: 'pointer',
               fontSize: 10,
-              fontWeight: 700,
-              padding: '6px 9px',
+              fontWeight: 600,
+              padding: '3px 7px',
               flexShrink: 0,
             }}
           >
@@ -939,7 +886,7 @@ export function SubSessionDetailPanel({
             flex: 1,
             minHeight: 0,
             overflowY: 'auto',
-            padding: '12px 12px 16px',
+            padding: '6px 8px 10px',
             scrollPaddingBottom: SUB_SESSION_SCROLL_BOTTOM_SPACER_HEIGHT,
           }}
         >
@@ -1065,23 +1012,20 @@ export function SubSessionDetailPanel({
 
       <div
         style={{
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 16,
-          background: 'color-mix(in oklab, var(--surface) 96%, transparent)',
-          padding: '12px 14px',
+          borderTop: '1px solid var(--border-subtle)',
+          paddingTop: 6,
           display: 'flex',
           flexDirection: 'column',
-          gap: 10,
+          gap: 4,
+          flexShrink: 0,
         }}
       >
         <div
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7 }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>干预子代理</div>
-            <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-              直接补充指令、纠偏，或要求它说明当前卡住的位置。
-            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)' }}>直接补充指令或纠偏</div>
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>
             {input.trim().length} 字
@@ -1093,19 +1037,27 @@ export function SubSessionDetailPanel({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: 8,
-              padding: '10px 12px',
-              borderRadius: 12,
+              gap: 7,
+              padding: '5px 8px',
+              borderRadius: 8,
               border: '1px solid color-mix(in srgb, #ef4444 28%, var(--border-subtle))',
               background: 'color-mix(in srgb, #ef4444 6%, var(--surface))',
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>
                 停止当前子任务
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
-                当前活跃任务：{currentTaskSelection.title}
+              <div
+                style={{
+                  fontSize: 10,
+                  color: 'var(--text-3)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {currentTaskSelection.title}
               </div>
             </div>
             <button
@@ -1114,13 +1066,13 @@ export function SubSessionDetailPanel({
               disabled={cancellingTask}
               style={{
                 border: '1px solid color-mix(in srgb, #ef4444 30%, var(--border-subtle))',
-                borderRadius: 10,
+                borderRadius: 6,
                 background: 'transparent',
                 color: '#fca5a5',
                 cursor: cancellingTask ? 'not-allowed' : 'pointer',
                 fontSize: 10,
                 fontWeight: 700,
-                padding: '7px 10px',
+                padding: '4px 8px',
                 opacity: cancellingTask ? 0.55 : 1,
                 flexShrink: 0,
               }}
@@ -1142,7 +1094,7 @@ export function SubSessionDetailPanel({
           placeholder="向这个子代理追加一条消息…"
           style={{
             width: '100%',
-            minHeight: 82,
+            minHeight: 44,
             resize: 'vertical',
             border: '1px solid var(--border-subtle)',
             borderRadius: 12,
@@ -1155,7 +1107,7 @@ export function SubSessionDetailPanel({
           }}
         />
         <div
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7 }}
         >
           <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
             {cancellingTask
@@ -1187,4 +1139,6 @@ export function SubSessionDetailPanel({
       </div>
     </div>
   );
-}
+});
+
+export { SubSessionDetailPanel };

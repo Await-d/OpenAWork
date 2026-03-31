@@ -32,7 +32,7 @@ const listMock = vi.fn(async () => [
 
 const createMock = vi.fn(async () => ({ id: 'session-new' }));
 const getMock = vi.fn(async () => ({ messages: [] }));
-const deleteMock = vi.fn(async () => undefined);
+const deleteMock = vi.fn(async () => undefined as { deletedSessionIds?: string[] } | undefined);
 
 vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: vi.fn(() => ({
@@ -681,6 +681,16 @@ describe('SessionsPage file review integration', () => {
 
   it('treats a 404 delete response as already deleted and removes the session from the list', async () => {
     const { HttpError } = await import('@openAwork/web-client');
+    listMock.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        title: '代码评审',
+        state_status: 'running',
+        updated_at: '2026-03-22T10:00:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+    ]);
+    listMock.mockResolvedValueOnce([]);
     deleteMock.mockRejectedValueOnce(new HttpError('Failed to delete session: 404', 404));
 
     const rendered = await renderSessionsPage();
@@ -712,6 +722,160 @@ describe('SessionsPage file review integration', () => {
 
     expect(deleteMock).toHaveBeenCalledWith('token-123', 'session-1');
     expect(rendered.textContent).not.toContain('代码评审');
+  });
+
+  it('refreshes the list after a 404 delete so descendant sessions do not linger', async () => {
+    const { HttpError } = await import('@openAwork/web-client');
+    listMock
+      .mockResolvedValueOnce([
+        {
+          id: 'session-1',
+          title: '主会话',
+          state_status: 'idle',
+          updated_at: '2026-03-22T10:00:00.000Z',
+          metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+        },
+        {
+          id: 'session-2',
+          title: '子代理会话',
+          state_status: 'idle',
+          updated_at: '2026-03-22T09:59:00.000Z',
+          metadata_json: JSON.stringify({ parentSessionId: 'session-1' }),
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    deleteMock.mockRejectedValueOnce(new HttpError('Failed to delete session: 404', 404));
+
+    const rendered = await renderSessionsPage();
+    const sessionTitleButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('主会话'),
+    );
+    const sessionCard = sessionTitleButton?.closest('li');
+
+    act(() => {
+      sessionCard?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const deleteButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '删除',
+    );
+
+    act(() => {
+      deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteMock).toHaveBeenCalledWith('token-123', 'session-1');
+    expect(listMock).toHaveBeenCalledTimes(2);
+    expect(rendered.textContent).not.toContain('主会话');
+    expect(rendered.textContent).not.toContain('子代理会话');
+  });
+
+  it('shows a specific toast when delete is blocked by pending interaction', async () => {
+    const { HttpError } = await import('@openAwork/web-client');
+    const toastSpy = vi.spyOn(ToastNotification, 'toast').mockImplementation(() => undefined);
+    const deleteError = Object.assign(new HttpError('Failed to delete session: 409', 409), {
+      data: {
+        blockReason: 'pendingInteraction',
+        error: 'Session can only be deleted when every related session is idle',
+        sessionId: 'session-2',
+        state_status: 'paused',
+      },
+    });
+    deleteMock.mockRejectedValueOnce(deleteError);
+
+    const rendered = await renderSessionsPage();
+    const sessionTitleButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('代码评审'),
+    );
+    const sessionCard = sessionTitleButton?.closest('li');
+
+    act(() => {
+      sessionCard?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const deleteButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '删除',
+    );
+
+    act(() => {
+      deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(toastSpy).toHaveBeenCalledWith(
+      '请先处理相关会话中的待确认问题或权限请求，再删除会话',
+      'error',
+      4200,
+    );
+  });
+
+  it('removes descendant child sessions from the list when deleting a parent session', async () => {
+    listMock.mockResolvedValueOnce([
+      {
+        id: 'session-1',
+        title: '主会话',
+        state_status: 'idle',
+        updated_at: '2026-03-22T10:00:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+      {
+        id: 'session-2',
+        title: '子代理会话',
+        state_status: 'idle',
+        updated_at: '2026-03-22T09:59:00.000Z',
+        metadata_json: JSON.stringify({ parentSessionId: 'session-1' }),
+      },
+    ]);
+    deleteMock.mockResolvedValueOnce({ deletedSessionIds: ['session-1', 'session-2'] });
+
+    const rendered = await renderSessionsPage();
+    const sessionTitleButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('主会话'),
+    );
+    const sessionCard = sessionTitleButton?.closest('li');
+
+    act(() => {
+      sessionCard?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const deleteButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '删除',
+    );
+
+    act(() => {
+      deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteMock).toHaveBeenCalledWith('token-123', 'session-1');
+    expect(rendered.textContent).not.toContain('主会话');
+    expect(rendered.textContent).not.toContain('子代理会话');
   });
 
   it('ignores repeated delete clicks while the same session delete is in flight', async () => {

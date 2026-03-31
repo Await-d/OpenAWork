@@ -237,6 +237,24 @@ export function createAssistantEventContent(
     });
   }
 
+  if (event.type === 'question_asked') {
+    return createAssistantEventCardContent({
+      kind: options?.kindOverride ?? 'task',
+      title: `等待回答 · ${event.toolName}`,
+      message: event.title,
+      status: 'paused',
+    });
+  }
+
+  if (event.type === 'question_replied') {
+    return createAssistantEventCardContent({
+      kind: options?.kindOverride ?? 'task',
+      title: '问题已响应',
+      message: event.status === 'answered' ? '已回答，继续执行。' : '已忽略，等待进一步处理。',
+      status: event.status === 'answered' ? 'success' : 'paused',
+    });
+  }
+
   if (event.type === 'task_update') {
     const messageParts: string[] = [];
     if (event.assignedAgent) messageParts.push(`代理：${event.assignedAgent}`);
@@ -1092,7 +1110,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           toolCalls: [
             {
               toolCallId: toolResult.toolCallId,
-              toolName: toolCall?.toolName ?? 'tool',
+              toolName: toolResult.toolName ?? toolCall?.toolName ?? 'tool',
               input: toolCall?.input ?? {},
               output: toolResult.output,
               isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
@@ -1233,6 +1251,7 @@ function extractToolCalls(
 
 function extractToolResults(rawContent: unknown[]): Array<{
   toolCallId: string;
+  toolName?: string;
   output: unknown;
   isError: boolean;
   pendingPermissionRequestId?: string;
@@ -1244,6 +1263,7 @@ function extractToolResults(rawContent: unknown[]): Array<{
       return [
         {
           toolCallId: content['toolCallId'],
+          toolName: typeof content['toolName'] === 'string' ? content['toolName'] : undefined,
           output: content['output'],
           isError: content['isError'] === true,
           pendingPermissionRequestId:

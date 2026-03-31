@@ -135,10 +135,10 @@ export function SkillsToolbar({
   onRefresh,
   onTabChange,
 }: {
-  activeTab: 'market' | 'installed';
+  activeTab: 'market' | 'local' | 'installed';
   busy: boolean;
   onRefresh: () => void;
-  onTabChange: (tab: 'market' | 'installed') => void;
+  onTabChange: (tab: 'market' | 'local' | 'installed') => void;
 }) {
   return (
     <section
@@ -155,7 +155,7 @@ export function SkillsToolbar({
       <div style={{ display: 'grid', gap: 4 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>技能工作区</div>
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-          在市场与已安装视图间切换，并随时刷新当前数据。
+          在市场、本地与已安装视图间切换，并随时刷新当前数据。
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -177,7 +177,7 @@ export function SkillsToolbar({
             border: '1px solid var(--border-subtle)',
           }}
         >
-          {(['market', 'installed'] as const).map((tab) => (
+          {(['market', 'local', 'installed'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -191,7 +191,7 @@ export function SkillsToolbar({
                     }
               }
             >
-              {tab === 'market' ? '市场' : '已安装'}
+              {tab === 'market' ? '市场' : tab === 'local' ? '本地' : '已安装'}
             </button>
           ))}
         </div>
@@ -202,6 +202,8 @@ export function SkillsToolbar({
 
 export function SkillsMarketSection({
   skills,
+  title,
+  subtitle,
   loading,
   error,
   currentPage,
@@ -213,6 +215,8 @@ export function SkillsMarketSection({
   onSelect,
 }: {
   skills: MarketSkill[];
+  title?: string;
+  subtitle?: string;
   loading: boolean;
   error: string | null;
   currentPage: number;
@@ -225,6 +229,16 @@ export function SkillsMarketSection({
 }) {
   return (
     <section style={{ ...HEADER_PANEL, overflow: 'hidden' }}>
+      {(title || subtitle) && (
+        <div style={{ padding: '18px 20px 0', display: 'grid', gap: 6 }}>
+          {title ? (
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{title}</div>
+          ) : null}
+          {subtitle ? (
+            <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.6 }}>{subtitle}</div>
+          ) : null}
+        </div>
+      )}
       <div style={sharedUiThemeVars}>
         <SkillMarketHome
           skills={skills}

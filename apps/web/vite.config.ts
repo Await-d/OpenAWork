@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -5,6 +6,13 @@ import { VitePWA } from 'vite-plugin-pwa';
 import versionPlugin from '../../scripts/vite-plugin-version.mjs';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@openAwork/shared-ui': fileURLToPath(
+        new URL('../../packages/shared-ui/src/index.ts', import.meta.url),
+      ),
+    },
+  },
   plugins: [
     versionPlugin(),
     react(),

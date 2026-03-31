@@ -444,7 +444,7 @@ export function SessionSidebar({
 
       try {
         for (const sessionId of sessionIds) {
-          const deleted = await quickDeleteSession(sessionId);
+          const deleted = await quickDeleteSession(sessionId, { suppressToast: true });
           if (deleted) {
             successCount += 1;
           } else {

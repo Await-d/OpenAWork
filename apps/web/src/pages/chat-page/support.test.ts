@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createAssistantEventContent,
   normalizeChatMessages,
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
@@ -104,6 +105,7 @@ describe('normalizeChatMessages', () => {
           {
             type: 'tool_result',
             toolCallId: 'call-1',
+            toolName: 'task',
             output: 'waiting for approval',
             isError: false,
             pendingPermissionRequestId: 'perm-1',
@@ -124,6 +126,32 @@ describe('normalizeChatMessages', () => {
         status: 'paused',
       },
     ]);
+  });
+
+  it('uses durable tool_result.toolName when no matching tool_call exists', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'tool-only',
+        role: 'tool',
+        createdAt: 2,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-tool-only',
+            toolName: 'codesearch',
+            output: 'snippet',
+            isError: false,
+          },
+        ],
+      },
+    ]);
+
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls[0]).toMatchObject({
+      toolCallId: 'call-tool-only',
+      toolName: 'codesearch',
+      output: 'snippet',
+    });
   });
 
   it('matches tool results by toolCallId even when the same tool repeats with identical input', () => {
@@ -318,5 +346,36 @@ describe('normalizeChatMessages', () => {
         status: 'completed',
       },
     ]);
+  });
+});
+
+describe('createAssistantEventContent', () => {
+  it('renders question waiting events as paused assistant cards', () => {
+    const content = createAssistantEventContent({
+      type: 'question_asked',
+      requestId: 'question-1',
+      toolName: 'question',
+      title: '请选择要查看的目录',
+      eventId: 'evt-question-1',
+      runId: 'run-question-1',
+      occurredAt: 10,
+    });
+
+    expect(content).toContain('等待回答 · question');
+    expect(content).toContain('请选择要查看的目录');
+  });
+
+  it('renders answered question events as success assistant cards', () => {
+    const content = createAssistantEventContent({
+      type: 'question_replied',
+      requestId: 'question-1',
+      status: 'answered',
+      eventId: 'evt-question-2',
+      runId: 'run-question-1',
+      occurredAt: 11,
+    });
+
+    expect(content).toContain('问题已响应');
+    expect(content).toContain('已回答，继续执行。');
   });
 });
