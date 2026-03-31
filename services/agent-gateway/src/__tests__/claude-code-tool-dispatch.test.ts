@@ -76,6 +76,62 @@ describe('dispatchClaudeCodeTool', () => {
     });
   });
 
+  it('normalizes Skill input to the local skill contract', () => {
+    const result = dispatchClaudeCodeTool('Skill', {
+      skill: 'using-superpowers',
+      args: 'ignored for now',
+    });
+
+    expect(result).toEqual({
+      kind: 'resolved',
+      normalized: {
+        canonicalName: 'skill',
+        normalizedFields: {
+          name: 'using-superpowers',
+        },
+        remapped: true,
+      },
+    });
+  });
+
+  it('normalizes AskUserQuestion input to the local question contract', () => {
+    const result = dispatchClaudeCodeTool('AskUserQuestion', {
+      questions: [
+        {
+          question: 'Choose one',
+          header: 'Mode',
+          multiSelect: true,
+          options: [
+            { label: 'A', description: 'Option A', preview: '<b>A</b>' },
+            { label: 'B', description: 'Option B' },
+          ],
+        },
+      ],
+      annotations: { source: 'ui' },
+    });
+
+    expect(result).toEqual({
+      kind: 'resolved',
+      normalized: {
+        canonicalName: 'question',
+        normalizedFields: {
+          questions: [
+            {
+              question: 'Choose one',
+              header: 'Mode',
+              multiple: true,
+              options: [
+                { label: 'A', description: 'Option A' },
+                { label: 'B', description: 'Option B' },
+              ],
+            },
+          ],
+        },
+        remapped: true,
+      },
+    });
+  });
+
   it('returns unsupported for low-compat tools', () => {
     const result = dispatchClaudeCodeTool('WebFetch', {
       url: 'https://example.com',

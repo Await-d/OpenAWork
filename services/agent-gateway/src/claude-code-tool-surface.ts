@@ -40,7 +40,9 @@ export function filterToolDefinitionsForSurface(
   surface: ClaudeCodeToolSurface,
 ): GatewayToolDefinition[] {
   if (surface.policy === 'allow-all') return [...definitions];
-  return definitions.filter((def) => isToolAllowed(surface, def.function.name));
+  return definitions.filter((def) =>
+    isToolAllowed(surface, resolveCanonicalName(def.function.name)),
+  );
 }
 
 export function isValidProfileName(name: string): name is ClaudeCodeProfileName {

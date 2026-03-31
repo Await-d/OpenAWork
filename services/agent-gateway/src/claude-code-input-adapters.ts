@@ -59,14 +59,14 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
   {
     presentedName: 'Skill',
     canonicalName: 'skill',
-    compatLevel: 'low',
-    note: 'The local skill tool expects name/user_message rather than skill/args.',
+    compatLevel: 'medium',
+    note: 'The local skill tool expects name only; args are ignored for now.',
   },
   {
     presentedName: 'AskUserQuestion',
     canonicalName: 'question',
-    compatLevel: 'low',
-    note: 'The local question tool exposes a simplified schema.',
+    compatLevel: 'medium',
+    note: 'The local question tool uses a simplified schema and strips preview-specific fields.',
   },
   {
     presentedName: 'Agent',
@@ -282,6 +282,66 @@ export function normalizeInputForCanonical(
             : {}),
         },
         remapped: taskId !== undefined || activeForm !== undefined,
+      };
+    }
+    case 'Skill': {
+      const { name, skill } = rawInput;
+      return {
+        canonicalName: 'skill',
+        normalizedFields: {
+          name: typeof name === 'string' && name.length > 0 ? name : skill,
+        },
+        remapped: true,
+      };
+    }
+    case 'AskUserQuestion': {
+      const normalizedQuestions = Array.isArray(rawInput.questions)
+        ? rawInput.questions.map((entry) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+              return entry;
+            }
+
+            const question = entry as Record<string, unknown>;
+            const normalizedOptions = Array.isArray(question.options)
+              ? question.options.map((option) => {
+                  if (!option || typeof option !== 'object' || Array.isArray(option)) {
+                    return option;
+                  }
+
+                  const normalizedOption = option as Record<string, unknown>;
+                  return {
+                    ...(normalizedOption.label !== undefined
+                      ? { label: normalizedOption.label }
+                      : {}),
+                    ...(normalizedOption.description !== undefined
+                      ? { description: normalizedOption.description }
+                      : {}),
+                  };
+                })
+              : question.options;
+
+            const multiple =
+              typeof question.multiple === 'boolean'
+                ? question.multiple
+                : typeof question.multiSelect === 'boolean'
+                  ? question.multiSelect
+                  : undefined;
+
+            return {
+              ...(question.question !== undefined ? { question: question.question } : {}),
+              ...(question.header !== undefined ? { header: question.header } : {}),
+              ...(multiple !== undefined ? { multiple } : {}),
+              ...(normalizedOptions !== undefined ? { options: normalizedOptions } : {}),
+            };
+          })
+        : rawInput.questions;
+
+      return {
+        canonicalName: 'question',
+        normalizedFields: {
+          ...(normalizedQuestions !== undefined ? { questions: normalizedQuestions } : {}),
+        },
+        remapped: true,
       };
     }
     default: {

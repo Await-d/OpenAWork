@@ -68,6 +68,19 @@ import {
 } from './claude-code-tool-surface.js';
 import type { ClaudeCodeProfileName } from './claude-code-tool-surface-profiles.js';
 
+const CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES = {
+  skill: 'Skill',
+  question: 'AskUserQuestion',
+} as const;
+
+export function getVisibleToolName(toolName: string): string {
+  return (
+    CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES[
+      toolName as keyof typeof CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES
+    ] ?? toolName
+  );
+}
+
 type GatewayToolLike = {
   name: string;
   description: string;
@@ -171,9 +184,9 @@ export function buildGatewayToolDefinitions(): GatewayToolDefinition[] {
   return MODEL_VISIBLE_GATEWAY_TOOLS.map((tool) => ({
     type: 'function',
     function: {
-      name: tool.name,
+      name: getVisibleToolName(tool.name),
       description: tool.description,
-      parameters: buildParameters(tool),
+      parameters: buildParameters({ ...tool, name: getVisibleToolName(tool.name) }),
       strict: false,
     },
   }));
@@ -254,6 +267,57 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['url'],
+        additionalProperties: false,
+      };
+    case 'Skill':
+      return {
+        type: 'object',
+        properties: {
+          skill: { type: 'string', description: 'Installed skill name to execute' },
+          args: {
+            type: 'string',
+            description: 'Optional freeform args string passed by the model',
+          },
+        },
+        required: ['skill'],
+        additionalProperties: false,
+      };
+    case 'AskUserQuestion':
+      return {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                question: { type: 'string' },
+                header: { type: 'string' },
+                multiSelect: { type: 'boolean' },
+                options: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      label: { type: 'string' },
+                      description: { type: 'string' },
+                      preview: { type: 'string' },
+                    },
+                    required: ['label', 'description'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['question', 'header', 'options'],
+              additionalProperties: false,
+            },
+          },
+          annotations: {
+            type: 'object',
+            description: 'Optional metadata or UI annotations for the question flow',
+          },
+        },
+        required: ['questions'],
         additionalProperties: false,
       };
     case 'codesearch':

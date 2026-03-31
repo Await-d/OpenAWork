@@ -157,7 +157,7 @@ export function isGatewayToolEnabledForSessionMetadata(
     return isTaskToolEnabledForSessionMetadata(metadata);
   }
 
-  if (toolName === 'question') {
+  if (toolName === 'question' || toolName === 'AskUserQuestion') {
     return isQuestionToolEnabledForSessionMetadata(metadata);
   }
 

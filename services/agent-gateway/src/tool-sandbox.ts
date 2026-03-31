@@ -73,6 +73,7 @@ import {
   hasWorkspacePermanentPermission,
 } from './workspace-safety.js';
 import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
+import { dispatchClaudeCodeTool } from './claude-code-tool-dispatch.js';
 import {
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
@@ -3222,7 +3223,31 @@ export class ToolSandbox {
     sessionId: string,
     executionContext?: SandboxExecutionContext,
   ): Promise<ToolCallResult> {
-    if (!this.whitelist.has(request.toolName)) {
+    const dispatchedRequest = dispatchClaudeCodeTool(
+      request.toolName,
+      (request.rawInput && typeof request.rawInput === 'object' && !Array.isArray(request.rawInput)
+        ? request.rawInput
+        : {}) as Record<string, unknown>,
+    );
+    if (dispatchedRequest.kind === 'unsupported') {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: dispatchedRequest.result.hint ?? dispatchedRequest.result.message,
+        isError: true,
+        durationMs: 0,
+      };
+      await this.auditLog(sessionId, request, result);
+      return result;
+    }
+
+    const normalizedRequest: ToolCallRequest = {
+      ...request,
+      toolName: dispatchedRequest.normalized.canonicalName,
+      rawInput: dispatchedRequest.normalized.normalizedFields,
+    };
+
+    if (!this.whitelist.has(normalizedRequest.toolName)) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -3235,7 +3260,7 @@ export class ToolSandbox {
     }
 
     const sessionMetadata = getSessionMetadata(sessionId);
-    if (!isGatewayToolEnabledForSessionMetadata(request.toolName, sessionMetadata)) {
+    if (!isGatewayToolEnabledForSessionMetadata(normalizedRequest.toolName, sessionMetadata)) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -3247,8 +3272,8 @@ export class ToolSandbox {
       return result;
     }
 
-    if (FILE_TOOLS.has(request.toolName)) {
-      const rawInput = request.rawInput as Record<string, unknown>;
+    if (FILE_TOOLS.has(normalizedRequest.toolName)) {
+      const rawInput = normalizedRequest.rawInput as Record<string, unknown>;
       const filePath =
         (typeof rawInput['path'] === 'string' ? rawInput['path'] : undefined) ??
         (typeof rawInput['filePath'] === 'string' ? rawInput['filePath'] : undefined);
@@ -3268,7 +3293,7 @@ export class ToolSandbox {
       }
     }
 
-    const permissionState = ensurePermissionForTool(sessionId, request, executionContext);
+    const permissionState = ensurePermissionForTool(sessionId, normalizedRequest, executionContext);
     if (permissionState.kind === 'pending') {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
@@ -3287,11 +3312,12 @@ export class ToolSandbox {
     const gatewayManagedResult = await executeGatewayManagedTool(
       this,
       sessionId,
-      request,
+      normalizedRequest,
       signal,
       executionContext,
     );
     if (gatewayManagedResult) {
+      gatewayManagedResult.toolName = request.toolName;
       await this.auditLog(sessionId, request, gatewayManagedResult);
       if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
         consumeOncePermission(permissionState.requestId);
@@ -3299,7 +3325,7 @@ export class ToolSandbox {
       return gatewayManagedResult;
     }
 
-    const tool = this.registry.get(request.toolName);
+    const tool = this.registry.get(normalizedRequest.toolName);
     if (tool && !tool.timeout) {
       const withTimeout = { ...tool, timeout: this.defaultTimeout };
       this.registry.register(withTimeout);
@@ -3308,7 +3334,8 @@ export class ToolSandbox {
     const startAt = Date.now();
     let result: ToolCallResult;
     try {
-      result = await this.registry.execute(request, signal);
+      result = await this.registry.execute(normalizedRequest, signal);
+      result.toolName = request.toolName;
     } catch (error) {
       const durationMs = Date.now() - startAt;
       if (error instanceof ToolNotFoundError) {

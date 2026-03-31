@@ -49,10 +49,10 @@ describe('buildGatewayToolDefinitions', () => {
         'grep',
         'edit',
         'batch',
-        'skill',
+        'Skill',
         'bash',
         'apply_patch',
-        'question',
+        'AskUserQuestion',
         'read_tool_output',
         'task',
         'background_output',
@@ -102,10 +102,10 @@ describe('buildGatewayToolDefinitions', () => {
       'newString',
     ]);
     expect(byName.get('batch')?.function.parameters.required).toEqual(['tool_calls']);
-    expect(byName.get('skill')?.function.parameters.required).toEqual(['name']);
+    expect(byName.get('Skill')?.function.parameters.required).toEqual(['skill']);
     expect(byName.get('bash')?.function.parameters.required).toEqual(['command']);
     expect(byName.get('apply_patch')?.function.parameters.required).toEqual(['patchText']);
-    expect(byName.get('question')?.function.parameters.required).toEqual(['questions']);
+    expect(byName.get('AskUserQuestion')?.function.parameters.required).toEqual(['questions']);
     expect(byName.get('read_tool_output')?.function.parameters.required).toEqual([]);
     expect(byName.get('read_tool_output')?.function.parameters).toMatchObject({
       properties: {
@@ -289,8 +289,8 @@ describe('buildGatewayToolDefinitions', () => {
         'task_get',
         'task_list',
         'task_update',
-        'skill',
-        'question',
+        'Skill',
+        'AskUserQuestion',
         'task',
       ]),
     );
@@ -470,8 +470,8 @@ describe('claude-code-tool-surface helpers', () => {
         'task_get',
         'task_list',
         'task_update',
-        'skill',
-        'question',
+        'Skill',
+        'AskUserQuestion',
         'task',
       ]),
     );

@@ -5,7 +5,7 @@ import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
-import { buildGatewayToolDefinitions } from '../tool-definitions.js';
+import { buildGatewayToolDefinitions, getVisibleToolName } from '../tool-definitions.js';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listEnabledAgentCapabilitiesForUser } from '../agent-catalog.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
@@ -171,9 +171,9 @@ export function listCapabilitiesForUser(
     : buildGatewayToolDefinitions();
 
   const tools = visibleTools.map<CapabilityDescriptor>((tool) => ({
-    id: tool.function.name,
+    id: getVisibleToolName(tool.function.name),
     kind: 'tool',
-    label: tool.function.name,
+    label: getVisibleToolName(tool.function.name),
     description: tool.function.description,
     source: 'runtime',
     callable: true,

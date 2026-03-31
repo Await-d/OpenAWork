@@ -32,6 +32,7 @@ vi.mock('../routes/command-descriptors.js', () => ({
 }));
 
 vi.mock('../tool-definitions.js', () => ({
+  getVisibleToolName: (toolName: string) => toolName,
   buildGatewayToolDefinitions: () => [
     {
       type: 'function',
@@ -90,7 +91,7 @@ vi.mock('../tool-definitions.js', () => ({
     {
       type: 'function',
       function: {
-        name: 'skill',
+        name: 'Skill',
         description: 'skill tool',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
         strict: false,
@@ -117,7 +118,7 @@ vi.mock('../tool-definitions.js', () => ({
     {
       type: 'function',
       function: {
-        name: 'question',
+        name: 'AskUserQuestion',
         description: 'question tool',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
         strict: false,
@@ -232,14 +233,14 @@ describe('listCapabilitiesForUser', () => {
       (item) => item.kind === 'tool' && item.label === 'batch',
     );
     const skillTools = capabilities.filter(
-      (item) => item.kind === 'tool' && item.label === 'skill',
+      (item) => item.kind === 'tool' && item.label === 'Skill',
     );
     const bashTools = capabilities.filter((item) => item.kind === 'tool' && item.label === 'bash');
     const applyPatchTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'apply_patch',
     );
     const questionTools = capabilities.filter(
-      (item) => item.kind === 'tool' && item.label === 'question',
+      (item) => item.kind === 'tool' && item.label === 'AskUserQuestion',
     );
     const taskTools = capabilities.filter((item) => item.kind === 'tool' && item.label === 'task');
     const backgroundOutputTools = capabilities.filter(
