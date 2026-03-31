@@ -61,6 +61,14 @@ export { SQLiteSessionStore } from './sqlite-session-store.js';
 
 export type { AgentIgnoreManager, IgnoreRuleSet } from './filesystem/ignore.js';
 export { createAgentIgnoreManager, defaultIgnoreManager } from './filesystem/ignore.js';
+export {
+  SYSTEM_DIRECTIVE_PREFIX,
+  SystemDirectiveTypes,
+  createSystemDirective,
+  hasSystemReminder,
+  isSystemDirective,
+  removeSystemReminders,
+} from './hooks/system-directive.js';
 
 export { lspDiagnosticsTool, lspTouchTool, LSP_TOOLS } from './tools/lsp.js';
 export { webSearchTool, WEB_SEARCH_TOOLS } from './tools/web-search.js';

@@ -68,13 +68,9 @@ export class DirectoryAgentsInjectorImpl implements DirectoryAgentsInjector {
 
   buildInjectionBlock(entries: AgentsContextEntry[]): string {
     if (entries.length === 0) return '';
-    const blocks = entries.map(
-      (e) => `<!-- AGENTS.md from ${e.filePath} (depth: ${e.depth}) -->
-${e.content}`,
-    );
-    return `<agents_context>
-${blocks.join('\n\n')}
-</agents_context>`;
+    return entries
+      .map((entry) => `Instructions from: ${entry.filePath}\n${entry.content}`)
+      .join('\n\n');
   }
 
   private async fileExists(filePath: string): Promise<boolean> {

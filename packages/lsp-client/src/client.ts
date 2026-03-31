@@ -186,6 +186,43 @@ export async function createLSPClient(input: {
       return Array.isArray(result) ? result : [];
     },
 
+    async documentSymbols({ file }) {
+      const result = await connection
+        .sendRequest('textDocument/documentSymbol', {
+          textDocument: { uri: pathToFileURL(file).href },
+        })
+        .catch(() => []);
+      return Array.isArray(result) ? result : result ? [result] : [];
+    },
+
+    async workspaceSymbols({ query }) {
+      const result = await connection
+        .sendRequest('workspace/symbol', {
+          query,
+        })
+        .catch(() => []);
+      return Array.isArray(result) ? result : result ? [result] : [];
+    },
+
+    async prepareRename({ file, line, character }) {
+      return connection
+        .sendRequest('textDocument/prepareRename', {
+          textDocument: { uri: pathToFileURL(file).href },
+          position: { line, character },
+        })
+        .catch(() => null);
+    },
+
+    async rename({ file, line, character, newName }) {
+      return connection
+        .sendRequest('textDocument/rename', {
+          textDocument: { uri: pathToFileURL(file).href },
+          position: { line, character },
+          newName,
+        })
+        .catch(() => null);
+    },
+
     async shutdown() {
       try {
         await connection.sendRequest('shutdown');

@@ -1,8 +1,29 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
-import type { PairingSession, ClientInfo, PairingManager } from './types.js';
 
-const TOKEN_TTL_MS = 30_000;
+export interface PairingSession {
+  token: string;
+  qrData: string;
+  hostUrl: string;
+  expiresAt: number;
+}
+
+export interface ClientInfo {
+  deviceName: string;
+  platform: 'ios' | 'android' | 'web';
+  connectedAt: number;
+}
+
+export interface PairingManager {
+  generatePairingCode(): Promise<PairingSession>;
+  waitForClient(token: string, timeoutMs?: number): Promise<ClientInfo>;
+  connectWithToken(hostUrl: string, token: string): Promise<void>;
+  verifyConnection(): Promise<boolean>;
+  disconnect(): Promise<void>;
+}
+
+export type PairingStatus = 'idle' | 'waiting' | 'connecting' | 'connected' | 'expired' | 'failed';
+
 const PAIRING_PROTOCOL_VERSION = '1';
 
 function generateToken(): string {
@@ -31,59 +52,51 @@ function detectLocalAddress(): string {
 
 export class PairingManagerImpl implements PairingManager {
   private port: number;
-  private pendingClients = new Map<
-    string,
-    { resolve: (c: ClientInfo) => void; timer: ReturnType<typeof setTimeout> }
-  >();
+  private activeSession: PairingSession | null = null;
   private connectedHost: string | null = null;
   private connectionVerified = false;
+  private pendingClients = new Map<string, Array<(client: ClientInfo) => void>>();
 
   constructor(port = 3000) {
     this.port = port;
   }
 
   async generatePairingCode(): Promise<PairingSession> {
+    if (this.activeSession) {
+      return this.activeSession;
+    }
     const token = generateToken();
     const hostUrl = `http://${detectLocalAddress()}:${this.port}`;
     const qrData = buildQRData(hostUrl, token);
-    const expiresAt = Date.now() + TOKEN_TTL_MS;
-
-    const timer = setTimeout(() => {
-      const pending = this.pendingClients.get(token);
-      if (pending) {
-        clearTimeout(pending.timer);
-        this.pendingClients.delete(token);
-      }
-    }, TOKEN_TTL_MS);
-
-    this.pendingClients.set(token, {
-      resolve: () => undefined,
-      timer,
-    });
-
-    return { token, qrData, hostUrl, expiresAt };
+    this.activeSession = { token, qrData, hostUrl, expiresAt: Infinity };
+    return this.activeSession;
   }
 
-  async waitForClient(token: string, timeoutMs = TOKEN_TTL_MS): Promise<ClientInfo> {
-    return new Promise((resolve, reject) => {
-      const existing = this.pendingClients.get(token);
-      if (existing) clearTimeout(existing.timer);
+  verifyToken(token: string): boolean {
+    return this.activeSession?.token === token;
+  }
 
-      const timer = setTimeout(() => {
-        this.pendingClients.delete(token);
-        reject(new Error('Pairing timeout — QR code expired'));
-      }, timeoutMs);
+  getActiveSession(): PairingSession | null {
+    return this.activeSession ? { ...this.activeSession } : null;
+  }
 
-      this.pendingClients.set(token, { resolve, timer });
+  async waitForClient(token: string, _timeoutMs?: number): Promise<ClientInfo> {
+    return new Promise((resolve) => {
+      const pending = this.pendingClients.get(token) ?? [];
+      pending.push(resolve);
+      this.pendingClients.set(token, pending);
     });
   }
 
   confirmClient(token: string, client: ClientInfo): boolean {
-    const pending = this.pendingClients.get(token);
-    if (!pending) return false;
-    clearTimeout(pending.timer);
+    if (!this.verifyToken(token)) {
+      return false;
+    }
+    const pending = this.pendingClients.get(token) ?? [];
+    for (const resolve of pending) {
+      resolve(client);
+    }
     this.pendingClients.delete(token);
-    pending.resolve(client);
     return true;
   }
 
@@ -112,7 +125,6 @@ export class PairingManagerImpl implements PairingManager {
   async disconnect(): Promise<void> {
     this.connectedHost = null;
     this.connectionVerified = false;
-    for (const { timer } of this.pendingClients.values()) clearTimeout(timer);
     this.pendingClients.clear();
   }
 
@@ -120,5 +132,3 @@ export class PairingManagerImpl implements PairingManager {
     return this.connectionVerified;
   }
 }
-
-export type { PairingSession, ClientInfo };

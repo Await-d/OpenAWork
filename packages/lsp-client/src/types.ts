@@ -29,6 +29,15 @@ export interface LSPClientInfo {
   hover(input: { file: string; line: number; character: number }): Promise<unknown>;
   definition(input: { file: string; line: number; character: number }): Promise<unknown[]>;
   references(input: { file: string; line: number; character: number }): Promise<unknown[]>;
+  documentSymbols(input: { file: string }): Promise<unknown[]>;
+  workspaceSymbols(input: { query: string }): Promise<unknown[]>;
+  prepareRename(input: { file: string; line: number; character: number }): Promise<unknown>;
+  rename(input: {
+    file: string;
+    line: number;
+    character: number;
+    newName: string;
+  }): Promise<unknown>;
   shutdown(): Promise<void>;
 }
 

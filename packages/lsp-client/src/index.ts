@@ -121,6 +121,31 @@ export class LSPManager {
     return client?.references(input) ?? [];
   }
 
+  async documentSymbols(input: { file: string }): Promise<unknown[]> {
+    const client = await this.clientForFile(input.file);
+    return client?.documentSymbols(input) ?? [];
+  }
+
+  async workspaceSymbols(input: { file: string; query: string }): Promise<unknown[]> {
+    const client = await this.clientForFile(input.file);
+    return client?.workspaceSymbols({ query: input.query }) ?? [];
+  }
+
+  async prepareRename(input: { file: string; line: number; character: number }): Promise<unknown> {
+    const client = await this.clientForFile(input.file);
+    return client?.prepareRename(input) ?? null;
+  }
+
+  async rename(input: {
+    file: string;
+    line: number;
+    character: number;
+    newName: string;
+  }): Promise<unknown> {
+    const client = await this.clientForFile(input.file);
+    return client?.rename(input) ?? null;
+  }
+
   async status(): Promise<LSPServerStatus[]> {
     return this.clients.map((c) => ({
       id: c.serverID,
