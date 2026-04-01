@@ -29,6 +29,12 @@ interface GatewayClient {
   stopStream: () => Promise<boolean>;
 }
 
+interface ActiveStreamSnapshot {
+  clientRequestId: string;
+  sessionId: string;
+  startedAt: number;
+}
+
 interface ThinkingDeltaChunkLike {
   type: 'thinking_delta';
   delta: string;
@@ -61,11 +67,62 @@ function isThinkingDeltaChunk(value: unknown): value is ThinkingDeltaChunkLike {
   return record['type'] === 'thinking_delta' && typeof record['delta'] === 'string';
 }
 
+function getActiveStreamStorageKey(): string {
+  const email = useAuthStore.getState().email?.trim().toLowerCase() ?? 'anonymous';
+  return `openAwork-active-stream:${email}`;
+}
+
+function readPersistedActiveStreamSnapshot(): ActiveStreamSnapshot | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const rawValue = window.sessionStorage.getItem(getActiveStreamStorageKey());
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as Record<string, unknown>;
+    if (
+      typeof parsed['clientRequestId'] !== 'string' ||
+      typeof parsed['sessionId'] !== 'string' ||
+      typeof parsed['startedAt'] !== 'number'
+    ) {
+      window.sessionStorage.removeItem(getActiveStreamStorageKey());
+      return null;
+    }
+
+    return {
+      clientRequestId: parsed['clientRequestId'],
+      sessionId: parsed['sessionId'],
+      startedAt: parsed['startedAt'],
+    };
+  } catch {
+    window.sessionStorage.removeItem(getActiveStreamStorageKey());
+    return null;
+  }
+}
+
+function persistActiveStreamSnapshot(snapshot: ActiveStreamSnapshot | null): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const storageKey = getActiveStreamStorageKey();
+  if (!snapshot) {
+    window.sessionStorage.removeItem(storageKey);
+    return;
+  }
+
+  window.sessionStorage.setItem(storageKey, JSON.stringify(snapshot));
+}
+
 export function useGatewayClient(token: string | null): GatewayClient {
   const wsRef = useRef<WebSocket | null>(null);
   const sseRef = useRef<EventSource | null>(null);
   const callbacksRef = useRef<StreamCallbacks | null>(null);
-  const activeRequestRef = useRef<{ clientRequestId: string; sessionId: string } | null>(null);
+  const activeRequestRef = useRef<ActiveStreamSnapshot | null>(readPersistedActiveStreamSnapshot());
   const stopRequestedRef = useRef(false);
 
   const stopStream = useCallback(async (): Promise<boolean> => {
@@ -77,7 +134,27 @@ export function useGatewayClient(token: string | null): GatewayClient {
     stopRequestedRef.current = true;
     const gatewayUrl = useAuthStore.getState().gatewayUrl;
     const sessionsClient = createSessionsClient(gatewayUrl);
-    return sessionsClient.stopStream(token, activeRequest.sessionId, activeRequest.clientRequestId);
+    const stopped = await sessionsClient.stopStream(
+      token,
+      activeRequest.sessionId,
+      activeRequest.clientRequestId,
+    );
+    if (!stopped) {
+      activeRequestRef.current = null;
+      persistActiveStreamSnapshot(null);
+      stopRequestedRef.current = false;
+      callbacksRef.current = null;
+      return false;
+    }
+
+    if (!wsRef.current && !sseRef.current) {
+      activeRequestRef.current = null;
+      persistActiveStreamSnapshot(null);
+      stopRequestedRef.current = false;
+      callbacksRef.current = null;
+    }
+
+    return stopped;
   }, [token]);
 
   const getActiveStreamSessionId = useCallback((): string | null => {
@@ -90,7 +167,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
       const clientRequestId = crypto.randomUUID();
-      activeRequestRef.current = { clientRequestId, sessionId };
+      activeRequestRef.current = { clientRequestId, sessionId, startedAt: Date.now() };
+      persistActiveStreamSnapshot(activeRequestRef.current);
       stopRequestedRef.current = false;
       const model = callbacks.model ?? 'default';
       const providerId = callbacks.providerId;
@@ -112,7 +190,9 @@ export function useGatewayClient(token: string | null): GatewayClient {
         sseRef.current?.close();
         wsRef.current = null;
         sseRef.current = null;
+        callbacksRef.current = null;
         activeRequestRef.current = null;
+        persistActiveStreamSnapshot(null);
         stopRequestedRef.current = false;
       };
 

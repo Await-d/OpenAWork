@@ -11,23 +11,23 @@ function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CSSProper
   switch (source) {
     case 'agent':
       return {
-        background: 'rgba(234, 179, 8, 0.12)',
-        color: 'rgb(250, 204, 21)',
+        background: 'color-mix(in oklch, var(--warning) 14%, transparent)',
+        color: 'color-mix(in oklch, var(--warning) 84%, white 16%)',
       };
     case 'mcp':
       return {
-        background: 'rgba(59, 130, 246, 0.12)',
-        color: 'rgb(96, 165, 250)',
+        background: 'color-mix(in oklch, var(--info, #3b82f6) 14%, transparent)',
+        color: 'color-mix(in oklch, var(--info, #3b82f6) 82%, white 18%)',
       };
     case 'skill':
       return {
-        background: 'rgba(139, 92, 246, 0.12)',
-        color: 'rgb(167, 139, 250)',
+        background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
+        color: 'color-mix(in oklch, var(--accent) 80%, white 20%)',
       };
     case 'tool':
       return {
-        background: 'rgba(20, 184, 166, 0.12)',
-        color: 'rgb(45, 212, 191)',
+        background: 'color-mix(in oklch, var(--success, #10b981) 14%, transparent)',
+        color: 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)',
       };
     default:
       return {
@@ -62,17 +62,25 @@ interface ChatComposerProps {
   activeModelTooltip?: string;
   modelPickerRef: React.RefObject<HTMLButtonElement | null>;
   modelSettingsRef: React.RefObject<HTMLButtonElement | null>;
+  showModelPicker: boolean;
+  showModelSettings: boolean;
   activeModelSupportsThinking: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   input: string;
   streaming: boolean;
   canStopSession?: boolean;
+  stopCapability?: 'none' | 'precise' | 'best_effort' | 'observe_only';
   sessionBusyState?: 'running' | 'paused' | null;
   stoppingStream?: boolean;
   attachedFiles: File[];
   attachmentItems: AttachmentItem[];
-  queuedMessages?: Array<{ id: string; label: string; title?: string }>;
+  queuedMessages?: Array<{
+    id: string;
+    label: string;
+    requiresAttachmentRebind?: boolean;
+    title?: string;
+  }>;
   showVoice: boolean;
   composerMenu: ComposerMenuState;
   slashCommandItems: SlashCommandItem[];
@@ -91,6 +99,7 @@ interface ChatComposerProps {
   onVoiceTranscript: (text: string) => void;
   onQueueMessage?: () => void | Promise<void>;
   onRemoveQueuedMessage: (id: string) => void;
+  onRestoreQueuedMessage?: (id: string) => void;
   onSend: () => void | Promise<void>;
   onStop: () => void | Promise<void>;
   onRequestFiles: () => void;
@@ -135,12 +144,15 @@ export function ChatComposer({
   activeModelTooltip,
   modelPickerRef,
   modelSettingsRef,
+  showModelPicker,
+  showModelSettings,
   activeModelSupportsThinking,
   webSearchEnabled,
   thinkingEnabled,
   input,
   streaming,
   canStopSession = false,
+  stopCapability = 'none',
   sessionBusyState = null,
   stoppingStream = false,
   attachedFiles,
@@ -164,6 +176,7 @@ export function ChatComposer({
   onVoiceTranscript,
   onQueueMessage,
   onRemoveQueuedMessage,
+  onRestoreQueuedMessage,
   onSend,
   onStop,
   onRequestFiles,
@@ -197,7 +210,10 @@ export function ChatComposer({
   const currentItems = composerMenu?.type === 'slash' ? slashCommandItems : mentionItems;
   const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
   const canSubmit = input.trim().length > 0 || attachedFiles.length > 0;
-  const showStopAction = streaming || canStopSession;
+  const effectiveStopCapability =
+    stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
+  const showStopAction =
+    streaming || effectiveStopCapability === 'precise' || effectiveStopCapability === 'best_effort';
   const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
   const showQueueAction =
     Boolean(onQueueMessage) && (showStopAction || hasRemoteSessionBusyState) && canSubmit;
@@ -492,12 +508,19 @@ export function ChatComposer({
                       gap: 6,
                       padding: '3px 8px',
                       borderRadius: 999,
-                      border: '1px solid color-mix(in oklch, var(--accent) 18%, var(--border))',
-                      background:
-                        index === 0
+                      border: item.requiresAttachmentRebind
+                        ? '1px solid color-mix(in srgb, #f59e0b 28%, var(--border))'
+                        : '1px solid color-mix(in oklch, var(--accent) 18%, var(--border))',
+                      background: item.requiresAttachmentRebind
+                        ? 'color-mix(in srgb, #f59e0b 12%, transparent)'
+                        : index === 0
                           ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                           : 'color-mix(in oklch, var(--surface) 80%, transparent)',
-                      color: index === 0 ? 'var(--accent)' : 'var(--text-2)',
+                      color: item.requiresAttachmentRebind
+                        ? '#fcd34d'
+                        : index === 0
+                          ? 'var(--accent)'
+                          : 'var(--text-2)',
                       minWidth: 0,
                     }}
                     title={item.title ?? item.label}
@@ -514,6 +537,30 @@ export function ChatComposer({
                     >
                       {index === 0 ? `下一条：${item.label}` : item.label}
                     </span>
+                    {onRestoreQueuedMessage && (
+                      <button
+                        type="button"
+                        onClick={() => onRestoreQueuedMessage(item.id)}
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: 10,
+                          lineHeight: 1,
+                          flexShrink: 0,
+                          fontWeight: 700,
+                        }}
+                        title={
+                          item.requiresAttachmentRebind
+                            ? '恢复到输入框，并重新选择附件后发送'
+                            : '恢复到输入框继续编辑'
+                        }
+                      >
+                        恢复
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onRemoveQueuedMessage?.(item.id)}
@@ -621,6 +668,9 @@ export function ChatComposer({
                     onClick={onToggleModelPicker}
                     title={activeModelTooltip ?? '当前使用模型'}
                     aria-label="打开模型选择"
+                    aria-haspopup="dialog"
+                    aria-expanded={showModelPicker}
+                    aria-controls="chat-model-picker-dialog"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -672,13 +722,23 @@ export function ChatComposer({
                     type="button"
                     onClick={onToggleModelSettings}
                     title={activeModelSupportsThinking ? '思考等级与模型设置' : '模型能力设置'}
+                    aria-label={
+                      activeModelSupportsThinking ? '打开模型设置与思考等级' : '打开模型能力设置'
+                    }
+                    aria-haspopup="dialog"
+                    aria-expanded={showModelSettings}
+                    aria-controls="chat-model-settings-dialog"
                     style={{
                       width: 26,
                       height: 26,
                       border: 'none',
                       borderLeft: '1px solid var(--border-subtle)',
-                      background: thinkingEnabled ? 'rgba(139, 92, 246, 0.10)' : 'transparent',
-                      color: thinkingEnabled ? 'rgb(167, 139, 250)' : 'var(--text-3)',
+                      background: thinkingEnabled
+                        ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                        : 'transparent',
+                      color: thinkingEnabled
+                        ? 'color-mix(in oklch, var(--accent) 80%, white 20%)'
+                        : 'var(--text-3)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -736,8 +796,12 @@ export function ChatComposer({
                     alignItems: 'center',
                     justifyContent: 'center',
                     opacity: streaming ? 0.45 : 1,
-                    background: webSearchEnabled ? 'rgba(59, 130, 246, 0.10)' : 'var(--surface)',
-                    color: webSearchEnabled ? 'rgb(96, 165, 250)' : 'var(--text-3)',
+                    background: webSearchEnabled
+                      ? 'color-mix(in oklch, var(--info, #3b82f6) 10%, transparent)'
+                      : 'var(--surface)',
+                    color: webSearchEnabled
+                      ? 'color-mix(in oklch, var(--info, #3b82f6) 82%, white 18%)'
+                      : 'var(--text-3)',
                     transition:
                       'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
                   }}
@@ -881,7 +945,9 @@ export function ChatComposer({
                       ? '正在停止…'
                       : streaming
                         ? '正在生成… · Esc 停止'
-                        : '当前运行流仍受此页控制 · 可直接停止'
+                        : effectiveStopCapability === 'best_effort'
+                          ? '当前页未接管原始请求 · 将尝试停止本会话的当前运行'
+                          : '当前运行流仍受此页控制 · 可直接停止'
                     : showQueueAction
                       ? `可先追加到队列${queuedMessages.length > 0 ? ` · 已排队 ${queuedMessages.length} 条` : ''}`
                       : sessionBusyState === 'running'
@@ -912,14 +978,18 @@ export function ChatComposer({
                     opacity: primaryButtonDisabled ? 0.5 : 1,
                     transition: 'height 220ms ease, padding 220ms ease, opacity 150ms ease',
                     background: showStopAction
-                      ? 'rgba(239, 68, 68, 0.14)'
+                      ? effectiveStopCapability === 'best_effort'
+                        ? 'color-mix(in srgb, #f59e0b 14%, transparent)'
+                        : 'rgba(239, 68, 68, 0.14)'
                       : sessionBusyState === 'running'
                         ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
                         : sessionBusyState === 'paused'
                           ? 'rgba(245, 158, 11, 0.14)'
                           : undefined,
                     color: showStopAction
-                      ? 'rgb(252, 165, 165)'
+                      ? effectiveStopCapability === 'best_effort'
+                        ? '#fcd34d'
+                        : 'rgb(252, 165, 165)'
                       : sessionBusyState === 'running'
                         ? 'var(--accent)'
                         : sessionBusyState === 'paused'
@@ -931,7 +1001,9 @@ export function ChatComposer({
                     {showStopAction
                       ? stoppingStream
                         ? '停止中'
-                        : '停止'
+                        : effectiveStopCapability === 'best_effort'
+                          ? '尝试停止'
+                          : '停止'
                       : sessionBusyState === 'running'
                         ? '运行中'
                         : sessionBusyState === 'paused'

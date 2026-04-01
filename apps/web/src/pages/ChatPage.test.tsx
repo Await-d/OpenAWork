@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import type { Message } from '@openAwork/shared';
 import { useAuthStore } from '../stores/auth.js';
+import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { logger } from '../utils/logger.js';
 
@@ -146,6 +147,8 @@ const streamMock = vi.fn();
 const activeStreamSessionIdRef: { current: string | null } = { current: null };
 const getActiveStreamSessionIdMock = vi.fn(() => activeStreamSessionIdRef.current);
 const stopStreamMock = vi.fn(async () => true);
+const stopActiveStreamMock = vi.fn(async () => true);
+const queuedAttachmentBlobStore = new Map<string, File[]>();
 const cancelTaskMock = vi.fn(async () => ({ cancelled: true, stopped: true }));
 const createSessionMock = vi.fn(async () => ({ id: 'session-1' }));
 const truncateMessagesMock = vi.fn(
@@ -229,6 +232,46 @@ vi.mock('../utils/logger.js', () => ({
   logger: { error: vi.fn(), info: vi.fn() },
 }));
 
+vi.mock('./chat-page/queued-composer-file-store.js', () => ({
+  persistQueuedComposerFiles: vi.fn(
+    async ({
+      files,
+      queueId,
+      scope,
+    }: {
+      attachmentItems: Array<{ id: string }>;
+      files: File[];
+      queueId: string;
+      scope: string;
+    }) => {
+      queuedAttachmentBlobStore.set(`${scope}:${queueId}`, [...files]);
+      return true;
+    },
+  ),
+  restoreQueuedComposerFiles: vi.fn(
+    async ({
+      attachmentItems,
+      queueId,
+      scope,
+    }: {
+      attachmentItems: Array<{ id: string }>;
+      queueId: string;
+      scope: string;
+    }) => {
+      const files = queuedAttachmentBlobStore.get(`${scope}:${queueId}`) ?? [];
+      return {
+        files,
+        restored: files.length > 0 && files.length === attachmentItems.length,
+      };
+    },
+  ),
+  deleteQueuedComposerFiles: vi.fn(
+    async ({ queueId, scope }: { queueId: string; scope: string }) => {
+      queuedAttachmentBlobStore.delete(`${scope}:${queueId}`);
+    },
+  ),
+}));
+
 vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: vi.fn(() => ({
     list: listSessionsMock,
@@ -239,6 +282,7 @@ vi.mock('@openAwork/web-client', () => ({
     getTodos: getTodosMock,
     getTasks: getTasksMock,
     cancelTask: cancelTaskMock,
+    stopActiveStream: stopActiveStreamMock,
     truncateMessages: truncateMessagesMock,
     importSession: importSessionMock,
     updateMetadata: updateMetadataMock,
@@ -446,6 +490,16 @@ vi.mock('@openAwork/shared-ui', async () => {
     AgentVizPanel: () => null,
     canConfigureThinkingForModel: () => true,
     StatusPill: ({ label }: { label: string }) => React.createElement('span', null, label),
+    ToolKindIcon: ({ kind }: { kind?: string }) =>
+      React.createElement('span', { 'data-testid': 'mock-tool-kind-icon' }, kind ?? 'tool'),
+    tokens: {
+      color: {
+        danger: '#ef4444',
+        info: '#60a5fa',
+        success: '#34d399',
+        warning: '#f59e0b',
+      },
+    },
     resolveToolCallCardDisplayData: ({ output }: { output?: unknown }) =>
       resolveMockDiffView(output),
     GenerativeUIRenderer: ({ message }: { message: unknown }) => {
@@ -618,6 +672,9 @@ beforeEach(() => {
     activeStreamSessionIdRef.current = null;
     return true;
   });
+  stopActiveStreamMock.mockReset();
+  stopActiveStreamMock.mockImplementation(async () => true);
+  queuedAttachmentBlobStore.clear();
   cancelTaskMock.mockClear();
   providerFetchUrls.length = 0;
   fetchMock.mockClear();
@@ -645,6 +702,8 @@ beforeEach(() => {
     value: { writeText: writeClipboardMock },
   });
   writeClipboardMock.mockClear();
+  window.sessionStorage.clear();
+  useChatQueueStore.setState({ queuesByScope: {} });
   useUIStateStore.setState({
     leftSidebarOpen: true,
     sidebarTab: 'sessions',
@@ -1396,6 +1455,218 @@ describe('ChatPage', () => {
     expect(String(streamMock.mock.calls[1]?.[1] ?? '')).toContain('排队的第二条');
   });
 
+  it('persists queued messages across a refresh and restores best-effort session controls', async () => {
+    getSessionMock.mockImplementation(async (_token: string, requestedSessionId: string) => ({
+      messages:
+        requestedSessionId === 'session-1'
+          ? [
+              {
+                id: 'assistant-running',
+                role: 'assistant',
+                content: '会话仍在运行中',
+                createdAt: 1,
+                status: 'completed',
+              },
+            ]
+          : [],
+      state_status: requestedSessionId === 'session-1' ? 'running' : 'idle',
+    }));
+
+    useChatQueueStore.setState({
+      queuesByScope: {
+        'anonymous:session-1': [
+          {
+            attachmentItems: [],
+            enqueuedAt: Date.now(),
+            id: 'queued-1',
+            requiresAttachmentRebind: false,
+            text: '刷新后仍应保留',
+          },
+        ],
+      },
+    });
+    activeStreamSessionIdRef.current = null;
+
+    const refreshed = await renderChatPage('/chat/session-1');
+    expect(refreshed.textContent).toContain('下一条：刷新后仍应保留');
+    expect(refreshed.textContent).toContain('可尝试停止');
+    const attemptStopButton = Array.from(refreshed.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('尝试停止') === true,
+    ) as HTMLButtonElement | undefined;
+    expect(attemptStopButton).toBeDefined();
+  });
+
+  it('restores queued attachments after refresh when binary blobs are available locally', async () => {
+    const restoredFile = new File(['恢复后的附件内容'], 'notes.txt', { type: 'text/plain' });
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'assistant-running',
+          role: 'assistant',
+          content: '会话仍在运行中',
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      state_status: 'running',
+    }));
+    useChatQueueStore.setState({
+      queuesByScope: {
+        'anonymous:session-1': [
+          {
+            attachmentItems: [
+              {
+                id: 'attachment-1',
+                name: 'notes.txt',
+                sizeBytes: restoredFile.size,
+                type: 'file',
+              },
+            ],
+            enqueuedAt: Date.now(),
+            id: 'queued-with-file',
+            requiresAttachmentRebind: false,
+            text: '把附件一起继续发出去',
+          },
+        ],
+      },
+    });
+    queuedAttachmentBlobStore.set('anonymous:session-1:queued-with-file', [restoredFile]);
+
+    const rendered = await renderChatPage('/chat/session-1');
+    expect(rendered.textContent).toContain('1 个附件');
+    expect(rendered.textContent).not.toContain('需重新选择附件');
+
+    const restoreButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '恢复',
+    ) as HTMLButtonElement | undefined;
+    expect(restoreButton).toBeDefined();
+
+    act(() => {
+      restoreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    const attachmentBar = rendered.querySelector(
+      '[data-testid="attachment-bar"]',
+    ) as HTMLDivElement | null;
+    expect(attachmentBar?.textContent).toContain('notes.txt');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(textarea?.value).toContain('把附件一起继续发出去');
+    expect(rendered.textContent).not.toContain('需要重新选择附件');
+  });
+
+  it('marks queued attachments as requiring rebind when binary blobs cannot be restored after refresh', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'assistant-running',
+          role: 'assistant',
+          content: '会话仍在运行中',
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      state_status: 'running',
+    }));
+    useChatQueueStore.setState({
+      queuesByScope: {
+        'anonymous:session-1': [
+          {
+            attachmentItems: [
+              {
+                id: 'attachment-missing',
+                name: 'missing.txt',
+                sizeBytes: 9,
+                type: 'file',
+              },
+            ],
+            enqueuedAt: Date.now(),
+            id: 'queued-missing-file',
+            requiresAttachmentRebind: false,
+            text: '这个附件需要重新选择',
+          },
+        ],
+      },
+    });
+
+    const rendered = await renderChatPage('/chat/session-1');
+    expect(rendered.textContent).toContain('需重新选择附件');
+
+    const restoreButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '恢复',
+    ) as HTMLButtonElement | undefined;
+    expect(restoreButton).toBeDefined();
+
+    act(() => {
+      restoreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(rendered.textContent).toContain('原有 1 个附件需要重新选择后再发送');
+    const attachmentBar = rendered.querySelector(
+      '[data-testid="attachment-bar"]',
+    ) as HTMLDivElement | null;
+    expect(attachmentBar?.textContent ?? '').toBe('');
+  });
+
+  it('uses best-effort stop for refreshed running sessions without local stream control', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'assistant-running',
+          role: 'assistant',
+          content: '会话仍在运行中',
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      state_status: 'running',
+    }));
+    activeStreamSessionIdRef.current = null;
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const stopButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('尝试停止') === true,
+    ) as HTMLButtonElement | undefined;
+
+    expect(stopButton).toBeDefined();
+    expect(stopButton?.disabled).toBe(false);
+
+    act(() => {
+      stopButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(stopActiveStreamMock).toHaveBeenCalledWith('token-123', 'session-1');
+    expect(stopStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps queued messages visible when the refreshed session snapshot cannot be loaded', async () => {
+    getSessionMock.mockRejectedValueOnce(new Error('network unavailable'));
+    useChatQueueStore.setState({
+      queuesByScope: {
+        'anonymous:session-1': [
+          {
+            attachmentItems: [],
+            enqueuedAt: Date.now(),
+            id: 'queued-network-1',
+            requiresAttachmentRebind: false,
+            text: '快照失败时不要误发送',
+          },
+        ],
+      },
+    });
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await flushEffects();
+
+    expect(rendered.textContent).toContain('下一条：快照失败时不要误发送');
+    expect(streamMock).not.toHaveBeenCalled();
+  });
+
   it('switches the primary action to stop during streaming and calls the stop handler', async () => {
     let pendingCallbacks: Record<string, unknown> | null = null;
     streamMock.mockImplementationOnce(
@@ -1520,6 +1791,8 @@ describe('ChatPage', () => {
     act(() => {
       sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+
+    await flushEffects();
 
     await act(async () => {
       (pendingCallbacks?.['onDelta'] as ((delta: string) => void) | undefined)?.(
@@ -3521,9 +3794,9 @@ describe('ChatPage', () => {
       ).not.toBeNull();
       expect(rendered.textContent).toContain('会话持续运行中');
       const runningButton = Array.from(rendered.querySelectorAll('button')).find(
-        (button) => button.textContent?.includes('运行中') === true,
+        (button) => button.textContent?.includes('尝试停止') === true,
       ) as HTMLButtonElement | undefined;
-      expect(runningButton?.disabled).toBe(true);
+      expect(runningButton?.disabled).toBe(false);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000);

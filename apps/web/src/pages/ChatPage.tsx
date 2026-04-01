@@ -21,6 +21,7 @@ import {
 } from '../components/chat/ChatPageSections.js';
 import { useFileEditorContext } from '../App.js';
 import { useUIStateStore } from '../stores/uiState.js';
+import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useLocation, useParams, useNavigate } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
 import { useGatewayClient } from '../hooks/useGatewayClient.js';
@@ -112,10 +113,22 @@ import {
   calculateStreamingRevealStep,
 } from './chat-page/streaming-reveal.js';
 import {
+  createQueuedComposerPreview,
+  hydrateQueuedComposerMessage,
+  toPersistedQueuedComposerMessage,
+  type QueuedComposerMessage,
+} from './chat-page/queued-composer-state.js';
+import {
+  deleteQueuedComposerFiles,
+  persistQueuedComposerFiles,
+  restoreQueuedComposerFiles,
+} from './chat-page/queued-composer-file-store.js';
+import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
 } from '../utils/chat-session-defaults.js';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js';
+import { CompanionStage } from '../components/chat/companion/companion-stage.js';
 
 interface ModelPriceEntry {
   modelName: string;
@@ -135,13 +148,6 @@ interface LiveToolCallState {
   toolName: string;
 }
 
-interface QueuedComposerMessage {
-  attachmentItems: AttachmentItem[];
-  files: File[];
-  id: string;
-  text: string;
-}
-
 const SESSION_SWITCH_DEFER_THRESHOLD = 32;
 const CHAT_SCROLL_BOTTOM_PADDING = '0.95rem';
 const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
@@ -154,29 +160,14 @@ function normalizeModelLookupKey(value: string | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
 
-function summarizeQueuedComposerMessage(input: {
-  attachmentItems: AttachmentItem[];
-  text: string;
-}): { label: string; title: string } {
-  const normalizedText = input.text.trim().replace(/\s+/g, ' ');
-  const attachmentCount = input.attachmentItems.length;
-  const attachmentLabel = attachmentCount > 0 ? `${attachmentCount} 个附件` : '';
-
-  if (normalizedText.length === 0) {
-    return {
-      label: attachmentLabel || '空白消息',
-      title: attachmentLabel || '空白消息',
-    };
-  }
-
-  const clippedText =
-    normalizedText.length > 42 ? `${normalizedText.slice(0, 41).trimEnd()}…` : normalizedText;
-
-  return {
-    label: attachmentLabel ? `${clippedText} · ${attachmentLabel}` : clippedText,
-    title: attachmentLabel ? `${normalizedText}\n${attachmentLabel}` : normalizedText,
-  };
+function buildQueuedComposerScopeKey(email: string, sessionId: string): string {
+  const normalizedEmail = email.trim().toLowerCase() || 'anonymous';
+  return `${normalizedEmail}:${sessionId}`;
 }
+
+type SessionsClientWithActiveStop = ReturnType<typeof createSessionsClient> & {
+  stopActiveStream: (token: string, sessionId: string) => Promise<boolean>;
+};
 
 function buildAssistantTextWithThinking(text: string, thinking: string): string {
   const normalizedThinking = thinking.trim();
@@ -386,6 +377,7 @@ export default function ChatPage() {
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
+  const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const [historyEditPrompt, setHistoryEditPrompt] = useState<{
     hasCodeMarkers: boolean;
     messageId: string;
@@ -421,13 +413,13 @@ export default function ChatPage() {
   const splitDragging = useRef(false);
   const rightOpenRef = useRef(rightOpen);
   const queueFlushInFlightRef = useRef(false);
+  const queueHydratingRef = useRef(false);
   const stoppingStreamRef = useRef(false);
   const streamRevealTargetRef = useRef('');
   const streamRevealVisibleRef = useRef('');
   const streamRevealTargetCodePointsRef = useRef<string[]>([]);
   const streamRevealVisibleCodePointCountRef = useRef(0);
   const streamRevealNextAllowedAtRef = useRef(0);
-  const previousQueueScopeRef = useRef<string | null>(currentSessionId);
   const sendMessageRef = useRef<
     (
       overrideText?: string,
@@ -435,6 +427,7 @@ export default function ChatPage() {
         forcedSessionId?: string;
         queuedAttachmentItems?: AttachmentItem[];
         queuedFiles?: File[];
+        queuedMessageId?: string;
       },
     ) => Promise<boolean>
   >(async () => false);
@@ -443,10 +436,18 @@ export default function ChatPage() {
   const fileEditor = useFileEditor();
   const [saving, setSaving] = useState(false);
   const openFileRef = useFileEditorContext();
+  const replacePersistedQueue = useChatQueueStore((state) => state.replaceQueue);
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog(Boolean(token));
+  const queuedComposerScope = useMemo(() => {
+    if (!currentSessionId) {
+      return null;
+    }
+
+    return buildQueuedComposerScopeKey(currentUserEmail, currentSessionId);
+  }, [currentSessionId, currentUserEmail]);
 
   const buildSessionMetadata = useCallback(
     (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
@@ -615,14 +616,90 @@ export default function ChatPage() {
   }, [currentSessionId, sessionId]);
 
   useEffect(() => {
-    if (previousQueueScopeRef.current === currentSessionId) {
+    let cancelled = false;
+    queueHydratingRef.current = true;
+    queueFlushInFlightRef.current = false;
+
+    const persistedQueue = queuedComposerScope
+      ? (useChatQueueStore.getState().queuesByScope[queuedComposerScope] ?? [])
+      : [];
+
+    const finishHydration = (items: QueuedComposerMessage[]) => {
+      if (cancelled) {
+        return;
+      }
+      setQueuedComposerMessages(items);
+      queueHydratingRef.current = false;
+    };
+
+    if (!queuedComposerScope || persistedQueue.length === 0) {
+      finishHydration([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.all(
+      persistedQueue.map(async (item) => {
+        const hydratedItem = hydrateQueuedComposerMessage(item);
+        if (item.attachmentItems.length === 0) {
+          return hydratedItem;
+        }
+
+        const restoredFiles = await restoreQueuedComposerFiles({
+          attachmentItems: item.attachmentItems,
+          queueId: item.id,
+          scope: queuedComposerScope,
+        });
+
+        if (restoredFiles.restored) {
+          return {
+            ...hydratedItem,
+            files: restoredFiles.files,
+            requiresAttachmentRebind: false,
+          } satisfies QueuedComposerMessage;
+        }
+
+        return {
+          ...hydratedItem,
+          requiresAttachmentRebind:
+            hydratedItem.requiresAttachmentRebind || item.attachmentItems.length > 0,
+        } satisfies QueuedComposerMessage;
+      }),
+    )
+      .then((items) => {
+        finishHydration(items);
+      })
+      .catch(() => {
+        finishHydration(
+          persistedQueue.map((item) => ({
+            ...hydrateQueuedComposerMessage(item),
+            requiresAttachmentRebind:
+              item.requiresAttachmentRebind || item.attachmentItems.length > 0,
+          })),
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queuedComposerScope]);
+
+  useEffect(() => {
+    if (!queuedComposerScope) {
       return;
     }
 
-    previousQueueScopeRef.current = currentSessionId;
-    queueFlushInFlightRef.current = false;
-    setQueuedComposerMessages([]);
-  }, [currentSessionId]);
+    if (queueHydratingRef.current) {
+      queueHydratingRef.current = false;
+      return;
+    }
+
+    replacePersistedQueue(
+      queuedComposerScope,
+      queuedComposerMessages.map((item) => toPersistedQueuedComposerMessage(item)),
+    );
+  }, [queuedComposerMessages, queuedComposerScope, replacePersistedQueue]);
 
   useEffect(() => {
     return subscribeCurrentSessionRefresh((targetSessionId) => {
@@ -832,6 +909,7 @@ export default function ChatPage() {
       setMessages(normalizeChatMessages(session.messages));
       setSessionTodos(Array.isArray(session.todos) ? session.todos : []);
       setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+      setIsSessionSnapshotReady(true);
     },
     [gatewayUrl, token],
   );
@@ -851,18 +929,35 @@ export default function ChatPage() {
     return null;
   }, [sessionStateStatus, streaming]);
   const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
+  const isCurrentSessionRunning = sessionStateStatus === 'running';
   const canStopCurrentSessionStream = Boolean(
-    currentSessionId && activeGatewayStreamSessionId === currentSessionId,
+    currentSessionId &&
+    activeGatewayStreamSessionId === currentSessionId &&
+    (streaming || isCurrentSessionRunning),
   );
+  const stopCapability = useMemo<'none' | 'precise' | 'best_effort' | 'observe_only'>(() => {
+    if (streaming || canStopCurrentSessionStream) {
+      return 'precise';
+    }
+
+    if (currentSessionId && sessionStateStatus === 'running') {
+      return 'best_effort';
+    }
+
+    if (remoteSessionBusyState !== null) {
+      return 'observe_only';
+    }
+
+    return 'none';
+  }, [
+    canStopCurrentSessionStream,
+    currentSessionId,
+    remoteSessionBusyState,
+    sessionStateStatus,
+    streaming,
+  ]);
   const queuedComposerPreviews = useMemo(
-    () =>
-      queuedComposerMessages.map((item) => ({
-        id: item.id,
-        ...summarizeQueuedComposerMessage({
-          attachmentItems: item.attachmentItems,
-          text: item.text,
-        }),
-      })),
+    () => queuedComposerMessages.map((item) => createQueuedComposerPreview(item)),
     [queuedComposerMessages],
   );
 
@@ -1022,6 +1117,7 @@ export default function ChatPage() {
       setSessionTasks([]);
       setPendingPermissions([]);
       setSessionStateStatus(null);
+      setIsSessionSnapshotReady(true);
       setSessionModesHydrated(false);
       setSessionMetadataDirty(false);
       lastPersistedSessionMetadataSnapshotRef.current = null;
@@ -1040,6 +1136,7 @@ export default function ChatPage() {
     if (shouldPreserveBootstrapState) {
       pendingBootstrapSessionRef.current = null;
       setIsSessionLoading(false);
+      setIsSessionSnapshotReady(true);
       setSessionMetadataDirty(false);
       setSessionModesHydrated(true);
       return () => {
@@ -1053,6 +1150,7 @@ export default function ChatPage() {
     setSessionTasks([]);
     setPendingPermissions([]);
     setSessionStateStatus(null);
+    setIsSessionSnapshotReady(false);
     setSessionModesHydrated(false);
     setSessionMetadataDirty(false);
     lastPersistedSessionMetadataSnapshotRef.current = null;
@@ -1085,6 +1183,7 @@ export default function ChatPage() {
             setMessages(normalizedMessages);
             setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
             setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+            setIsSessionSnapshotReady(true);
             setDialogueMode(metadata.dialogueMode);
             setYoloMode(metadata.yoloMode);
             setWebSearchEnabled(metadata.webSearchEnabled);
@@ -1134,6 +1233,7 @@ export default function ChatPage() {
         }
         setSessionTodos([]);
         setSessionStateStatus(null);
+        setIsSessionSnapshotReady(false);
         setSessionMetadataDirty(false);
         setSessionModesHydrated(true);
         setIsSessionLoading(false);
@@ -1792,7 +1892,7 @@ export default function ChatPage() {
     });
   }, []);
 
-  const enqueueComposerMessage = useCallback(() => {
+  const enqueueComposerMessage = useCallback(async () => {
     const nextText = input.trim();
     if (nextText.length === 0 && attachedFiles.length === 0) {
       return false;
@@ -1802,16 +1902,69 @@ export default function ChatPage() {
       attachmentItems: attachmentItems.map((item) => ({ ...item })),
       files: [...attachedFiles],
       id: crypto.randomUUID(),
+      requiresAttachmentRebind: attachedFiles.length > 0 && !queuedComposerScope,
       text: nextText,
     };
     setQueuedComposerMessages((previous) => [...previous, queueItem]);
     clearComposerDraft();
-    return true;
-  }, [attachedFiles, attachmentItems, clearComposerDraft, input]);
 
-  const removeQueuedComposerMessage = useCallback((messageId: string) => {
-    setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
-  }, []);
+    if (attachedFiles.length > 0 && queuedComposerScope) {
+      const persisted = await persistQueuedComposerFiles({
+        attachmentItems: queueItem.attachmentItems,
+        files: queueItem.files,
+        queueId: queueItem.id,
+        scope: queuedComposerScope,
+      });
+      if (!persisted) {
+        setQueuedComposerMessages((previous) =>
+          previous.map((item) =>
+            item.id === queueItem.id ? { ...item, requiresAttachmentRebind: true } : item,
+          ),
+        );
+      }
+    }
+
+    return true;
+  }, [attachedFiles, attachmentItems, clearComposerDraft, input, queuedComposerScope]);
+
+  const removeQueuedComposerMessage = useCallback(
+    (messageId: string) => {
+      if (queuedComposerScope) {
+        void deleteQueuedComposerFiles({ queueId: messageId, scope: queuedComposerScope });
+      }
+      setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
+    },
+    [queuedComposerScope],
+  );
+
+  const restoreQueuedComposerMessage = useCallback(
+    (messageId: string) => {
+      const queueItem = queuedComposerMessages.find((item) => item.id === messageId);
+      if (!queueItem) {
+        return;
+      }
+
+      if (queuedComposerScope) {
+        void deleteQueuedComposerFiles({ queueId: messageId, scope: queuedComposerScope });
+      }
+      setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
+      setInput((previous) =>
+        previous.trim().length > 0 ? `${queueItem.text}\n\n${previous}` : queueItem.text,
+      );
+      setAttachedFiles(queueItem.files);
+      setAttachmentItems(queueItem.files.length > 0 ? queueItem.attachmentItems : []);
+      setComposerMenu(null);
+      setStreamError(
+        queueItem.requiresAttachmentRebind && queueItem.attachmentItems.length > 0
+          ? `已恢复待发文本，原有 ${queueItem.attachmentItems.length} 个附件需要重新选择后再发送。`
+          : null,
+      );
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
+    },
+    [queuedComposerMessages, queuedComposerScope],
+  );
 
   async function sendMessage(
     overrideText?: string,
@@ -1819,6 +1972,7 @@ export default function ChatPage() {
       forcedSessionId?: string;
       queuedAttachmentItems?: AttachmentItem[];
       queuedFiles?: File[];
+      queuedMessageId?: string;
     },
   ): Promise<boolean> {
     const sourceInput = overrideText ?? input;
@@ -1974,6 +2128,13 @@ ${content}
 
     if (activeSessionRef.current !== sid) {
       return false;
+    }
+
+    if (options?.queuedMessageId && queuedComposerScope) {
+      void deleteQueuedComposerFiles({
+        queueId: options.queuedMessageId,
+        scope: queuedComposerScope,
+      });
     }
 
     const requestText = applyChatModesToMessage(dialogueMode, yoloMode, text);
@@ -2514,7 +2675,7 @@ ${content}
   }
 
   const stopActiveMessage = useCallback(async () => {
-    if ((!streaming && !canStopCurrentSessionStream) || stoppingStream) {
+    if (stopCapability === 'none' || stopCapability === 'observe_only' || stoppingStream) {
       return;
     }
 
@@ -2530,10 +2691,36 @@ ${content}
     setStoppingStream(true);
     setStreamError(null);
     try {
-      const stopped = await client.stopStream();
+      const sessionsClient = createSessionsClient(gatewayUrl) as SessionsClientWithActiveStop;
+      const stopped =
+        stopCapability === 'best_effort'
+          ? Boolean(
+              currentSessionId &&
+              token &&
+              (await sessionsClient.stopActiveStream(token, currentSessionId)),
+            )
+          : await client.stopStream();
       if (!stopped) {
         stoppingStreamRef.current = false;
         setStoppingStream(false);
+        void (currentSessionId
+          ? loadCurrentSessionSnapshot(currentSessionId).catch(() => undefined)
+          : Promise.resolve());
+        if (stopCapability === 'best_effort') {
+          setStreamError('当前会话没有可停止的活动运行，正在刷新状态。');
+        } else {
+          setStreamError('当前运行控制句柄已失效，正在刷新会话状态。');
+        }
+        return;
+      }
+
+      if (stopCapability === 'best_effort' || !streaming) {
+        stoppingStreamRef.current = false;
+        setStoppingStream(false);
+        void (currentSessionId
+          ? loadCurrentSessionSnapshot(currentSessionId).catch(() => undefined)
+          : Promise.resolve());
+        requestSessionListRefresh();
       }
     } catch (error) {
       stoppingStreamRef.current = false;
@@ -2541,11 +2728,22 @@ ${content}
       setStoppingStream(false);
       setStreamError(error instanceof Error ? error.message : '停止对话失败');
     }
-  }, [canStopCurrentSessionStream, client, stoppingStream, streaming]);
+  }, [
+    client,
+    currentSessionId,
+    gatewayUrl,
+    loadCurrentSessionSnapshot,
+    stopCapability,
+    stoppingStream,
+    streaming,
+    token,
+  ]);
 
   useEffect(() => {
     if (
       queuedComposerMessages.length === 0 ||
+      isSessionLoading ||
+      (currentSessionId !== null && !isSessionSnapshotReady) ||
       streaming ||
       stoppingStream ||
       canStopCurrentSessionStream ||
@@ -2560,6 +2758,10 @@ ${content}
       return;
     }
 
+    if (nextQueuedMessage.requiresAttachmentRebind) {
+      return;
+    }
+
     queueFlushInFlightRef.current = true;
     setQueuedComposerMessages((previous) => previous.slice(1));
 
@@ -2567,6 +2769,7 @@ ${content}
       .current(nextQueuedMessage.text, {
         queuedAttachmentItems: nextQueuedMessage.attachmentItems,
         queuedFiles: nextQueuedMessage.files,
+        queuedMessageId: nextQueuedMessage.id,
       })
       .then((sent) => {
         if (sent) {
@@ -2583,6 +2786,9 @@ ${content}
       });
   }, [
     canStopCurrentSessionStream,
+    currentSessionId,
+    isSessionLoading,
+    isSessionSnapshotReady,
     queuedComposerMessages,
     remoteSessionBusyState,
     stoppingStream,
@@ -2634,7 +2840,7 @@ ${content}
         return;
       }
     }
-    if (canStopCurrentSessionStream && e.key === 'Escape') {
+    if ((stopCapability === 'precise' || stopCapability === 'best_effort') && e.key === 'Escape') {
       e.preventDefault();
       void stopActiveMessage();
       return;
@@ -3092,7 +3298,7 @@ ${content}
               activeProviderId={activeProviderId}
               activeModelId={activeModelId}
               anchorRef={modelPickerBtnRef}
-              onSelect={async (pid, mid) => {
+              onSelect={async (pid: string, mid: string) => {
                 setActiveProviderId(pid);
                 setActiveModelId(mid);
                 if (!currentSessionId) {
@@ -3237,7 +3443,10 @@ ${content}
                       onOpenWorkspace={() => setShowWorkspaceSelector(true)}
                     />
                   ) : messages.length === 0 && remoteSessionBusyState ? (
-                    <SessionRunStatePlaceholder status={remoteSessionBusyState} />
+                    <SessionRunStatePlaceholder
+                      status={remoteSessionBusyState}
+                      stopCapability={stopCapability}
+                    />
                   ) : null}
                   {!showSessionSwitchSkeleton ? (
                     <ChatMessageGroupList
@@ -3395,7 +3604,9 @@ ${content}
             </div>
           )}
 
-          {remoteSessionBusyState && <SessionRunStateBar status={remoteSessionBusyState} />}
+          {remoteSessionBusyState && (
+            <SessionRunStateBar status={remoteSessionBusyState} stopCapability={stopCapability} />
+          )}
 
           <SubAgentRunList
             items={subAgentRunItems}
@@ -3405,6 +3616,22 @@ ${content}
 
           <ChatTodoBar sessionTodos={sessionTodos} editorMode={editorMode} rightOpen={rightOpen} />
 
+          <CompanionStage
+            attachedCount={attachmentItems.length}
+            currentUserEmail={currentUserEmail}
+            editorMode={editorMode}
+            input={input}
+            pendingPermissionCount={pendingPermissions.length}
+            prefersReducedMotion={prefersReducedMotion}
+            queuedCount={queuedComposerPreviews.length}
+            rightOpen={rightOpen}
+            sessionBusyState={remoteSessionBusyState}
+            sessionId={currentSessionId}
+            showVoice={showVoice}
+            streaming={streaming}
+            todoCount={sessionTodos.length}
+          />
+
           <ChatComposer
             variant={composerVariant}
             editorMode={editorMode}
@@ -3412,11 +3639,14 @@ ${content}
             activeModelTooltip={activeModelTooltip}
             modelPickerRef={modelPickerBtnRef}
             modelSettingsRef={modelSettingsBtnRef}
+            showModelPicker={showModelPicker}
+            showModelSettings={showModelSettings}
             activeModelSupportsThinking={activeModelOption?.supportsThinking === true}
             webSearchEnabled={webSearchEnabled}
             thinkingEnabled={thinkingEnabled}
             input={input}
             canStopSession={canStopCurrentSessionStream}
+            stopCapability={stopCapability}
             sessionBusyState={remoteSessionBusyState}
             streaming={streaming}
             stoppingStream={stoppingStream}
@@ -3446,6 +3676,7 @@ ${content}
             }}
             onQueueMessage={() => void enqueueComposerMessage()}
             onRemoveQueuedMessage={removeQueuedComposerMessage}
+            onRestoreQueuedMessage={restoreQueuedComposerMessage}
             onSend={() => void sendMessage()}
             onStop={() => void stopActiveMessage()}
             onRequestFiles={() => fileInputRef.current?.click()}

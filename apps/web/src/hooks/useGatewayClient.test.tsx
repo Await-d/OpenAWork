@@ -101,6 +101,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock as typeof fetch);
   useAuthStore.setState({ gatewayUrl: 'http://localhost:3000' });
   fetchMock.mockReset();
+  window.sessionStorage.clear();
 
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -322,6 +323,70 @@ describe('useGatewayClient', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       clientRequestId: expect.any(String),
     });
+  });
+
+  it('restores a persisted active snapshot and clears it when precise stop succeeds without a live transport', async () => {
+    let client: ReturnType<typeof useGatewayClient> | null = null;
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ stopped: true }),
+    } satisfies Partial<Response>);
+    window.sessionStorage.setItem(
+      'openAwork-active-stream:anonymous',
+      JSON.stringify({
+        clientRequestId: 'req-restored-1',
+        sessionId: 'session-restored',
+        startedAt: Date.now(),
+      }),
+    );
+
+    await act(async () => {
+      root!.render(
+        <HookHarness
+          token="token-123"
+          onReady={(value) => {
+            client = value;
+          }}
+        />,
+      );
+    });
+
+    expect(client!.getActiveStreamSessionId()).toBe('session-restored');
+    await expect(client!.stopStream()).resolves.toBe(true);
+    expect(client!.getActiveStreamSessionId()).toBeNull();
+    expect(window.sessionStorage.getItem('openAwork-active-stream:anonymous')).toBeNull();
+  });
+
+  it('clears a stale persisted active snapshot when precise stop no longer matches the backend', async () => {
+    let client: ReturnType<typeof useGatewayClient> | null = null;
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ stopped: false }),
+    } satisfies Partial<Response>);
+    window.sessionStorage.setItem(
+      'openAwork-active-stream:anonymous',
+      JSON.stringify({
+        clientRequestId: 'req-stale-1',
+        sessionId: 'session-stale',
+        startedAt: Date.now(),
+      }),
+    );
+
+    await act(async () => {
+      root!.render(
+        <HookHarness
+          token="token-123"
+          onReady={(value) => {
+            client = value;
+          }}
+        />,
+      );
+    });
+
+    expect(client!.getActiveStreamSessionId()).toBe('session-stale');
+    await expect(client!.stopStream()).resolves.toBe(false);
+    expect(client!.getActiveStreamSessionId()).toBeNull();
+    expect(window.sessionStorage.getItem('openAwork-active-stream:anonymous')).toBeNull();
   });
 
   it('settles as cancelled when stop was requested and websocket closes before done arrives', async () => {

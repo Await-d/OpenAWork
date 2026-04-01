@@ -1,5 +1,7 @@
 import type { SessionStateStatus } from './session-runtime.js';
 
+type StopCapability = 'none' | 'precise' | 'best_effort' | 'observe_only';
+
 function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 'paused'>): {
   badge: string;
   description: string;
@@ -26,12 +28,104 @@ function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 
   };
 }
 
+function getStopCapabilityCopy(capability: StopCapability): {
+  badge: string;
+  description: string;
+} | null {
+  if (capability === 'precise') {
+    return {
+      badge: '可直接停止',
+      description: '当前页仍持有这次运行的控制句柄，可直接停止并继续同步结果。',
+    };
+  }
+
+  if (capability === 'best_effort') {
+    return {
+      badge: '可尝试停止',
+      description: '当前页已恢复会话状态，但未接管原始请求；可尝试停止本会话的活动运行。',
+    };
+  }
+
+  if (capability === 'observe_only') {
+    return {
+      badge: '仅可观察',
+      description: '当前页只会继续同步运行状态，无法直接停止这次运行。',
+    };
+  }
+
+  return null;
+}
+
+function getStopCapabilityTone(capability: StopCapability): {
+  background: string;
+  border: string;
+  color: string;
+} {
+  if (capability === 'best_effort') {
+    return {
+      background: 'color-mix(in srgb, #f59e0b 12%, transparent)',
+      border: '1px solid color-mix(in srgb, #f59e0b 28%, var(--border))',
+      color: '#fcd34d',
+    };
+  }
+
+  if (capability === 'precise') {
+    return {
+      background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+      border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))',
+      color: 'var(--accent)',
+    };
+  }
+
+  return {
+    background: 'transparent',
+    border: '1px solid var(--border-subtle)',
+    color: 'var(--text-3)',
+  };
+}
+
+function StatusBadge({
+  background,
+  border,
+  color,
+  label,
+}: {
+  background: string;
+  border: string;
+  color: string;
+  label: string;
+}) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 22,
+        padding: '0 8px',
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 700,
+        color,
+        border,
+        background,
+        flexShrink: 0,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function SessionRunStateBar({
   status,
+  stopCapability = 'observe_only',
 }: {
   status: Extract<SessionStateStatus, 'running' | 'paused'>;
+  stopCapability?: StopCapability;
 }) {
   const meta = getSessionRunStateMeta(status);
+  const capabilityCopy = getStopCapabilityCopy(stopCapability);
+  const capabilityTone = getStopCapabilityTone(stopCapability);
 
   return (
     <div
@@ -91,38 +185,50 @@ export function SessionRunStateBar({
                 fontSize: 10,
                 lineHeight: 1.35,
                 color: 'var(--text-3)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
               }}
             >
-              {meta.description}
+              <div
+                style={{
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {meta.description}
+              </div>
+              {capabilityCopy && (
+                <div
+                  style={{
+                    marginTop: 3,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    color: capabilityTone.color,
+                  }}
+                >
+                  {capabilityCopy.description}
+                </div>
+              )}
             </div>
           </div>
         </div>
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            height: 22,
-            padding: '0 8px',
-            borderRadius: 999,
-            fontSize: 10,
-            fontWeight: 700,
-            color: status === 'paused' ? '#fcd34d' : 'var(--accent)',
-            border:
-              status === 'paused'
-                ? '1px solid color-mix(in srgb, #f59e0b 28%, var(--border))'
-                : '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))',
-            background:
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <StatusBadge
+            background={
               status === 'paused'
                 ? 'color-mix(in srgb, #f59e0b 12%, transparent)'
-                : 'color-mix(in oklch, var(--accent) 10%, transparent)',
-            flexShrink: 0,
-          }}
-        >
-          {meta.badge}
-        </span>
+                : 'color-mix(in oklch, var(--accent) 10%, transparent)'
+            }
+            border={
+              status === 'paused'
+                ? '1px solid color-mix(in srgb, #f59e0b 28%, var(--border))'
+                : '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))'
+            }
+            color={status === 'paused' ? '#fcd34d' : 'var(--accent)'}
+            label={meta.badge}
+          />
+          {capabilityCopy && <StatusBadge {...capabilityTone} label={capabilityCopy.badge} />}
+        </div>
       </div>
     </div>
   );
@@ -130,10 +236,14 @@ export function SessionRunStateBar({
 
 export function SessionRunStatePlaceholder({
   status,
+  stopCapability = 'observe_only',
 }: {
   status: Extract<SessionStateStatus, 'running' | 'paused'>;
+  stopCapability?: StopCapability;
 }) {
   const meta = getSessionRunStateMeta(status);
+  const capabilityCopy = getStopCapabilityCopy(stopCapability);
+  const capabilityTone = getStopCapabilityTone(stopCapability);
 
   return (
     <div
@@ -171,6 +281,25 @@ export function SessionRunStatePlaceholder({
       >
         会话{meta.badge}
       </span>
+      {capabilityCopy && (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            height: 20,
+            padding: '0 7px',
+            borderRadius: 999,
+            fontSize: 10,
+            fontWeight: 700,
+            color: capabilityTone.color,
+            border: capabilityTone.border,
+            background: capabilityTone.background,
+          }}
+          title={capabilityCopy.description}
+        >
+          {capabilityCopy.badge}
+        </span>
+      )}
     </div>
   );
 }
