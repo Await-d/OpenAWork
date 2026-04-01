@@ -25,6 +25,7 @@
     "expo-file-system": "^55.0.12",
     "expo-router": "~4.0.22",
     "expo-secure-store": "~14.0.1",
+    "expo-speech-recognition": "^3.1.2",
     "expo-sqlite": "~15.0.6",
     "expo-status-bar": "~2.0.1",
     "expo-updates": "~0.26.13",

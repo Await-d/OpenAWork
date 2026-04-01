@@ -183,7 +183,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       setAttachments([]);
       setInput('');
       setSending(true);
-      void loadArtifactHistory();
+      await loadArtifactHistory();
 
       stream(sessionId, finalText, {
         onDelta: (delta) => {
@@ -352,7 +352,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       {showVoice ? (
         <MobileVoiceRecorder
           onTranscript={(text) => {
-            setInput((prev) => prev + text);
+            setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
             setShowVoice(false);
           }}
           onClose={() => setShowVoice(false)}

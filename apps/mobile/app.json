@@ -21,6 +21,16 @@
       "package": "com.openAwork.mobile",
       "adaptiveIcon": { "backgroundColor": "#ffffff" }
     },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "允许 OpenAWork 使用麦克风进行语音输入。",
+          "speechRecognitionPermission": "允许 OpenAWork 使用语音识别将语音转换为文本。",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
+    ],
     "extra": {
       "eas": { "projectId": "5d5fee00-cf47-4452-a6b3-238c1b84eb0c" }
     }
