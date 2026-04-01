@@ -150,7 +150,7 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'batch')).toBe(
         true,
       );
-      expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'skill')).toBe(
+      expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'Skill')).toBe(
         true,
       );
       expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'bash')).toBe(
@@ -160,7 +160,7 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
         body.capabilities.some((item) => item.kind === 'tool' && item.label === 'apply_patch'),
       ).toBe(true);
       expect(
-        body.capabilities.some((item) => item.kind === 'tool' && item.label === 'question'),
+        body.capabilities.some((item) => item.kind === 'tool' && item.label === 'AskUserQuestion'),
       ).toBe(true);
       expect(body.capabilities.some((item) => item.kind === 'tool' && item.label === 'task')).toBe(
         true,
@@ -229,7 +229,7 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       expect(scopedContext).toContain('聊天可调用工具');
       expect(scopedContext).toContain('read');
       expect(scopedContext).not.toContain('task:');
-      expect(scopedContext).not.toContain('question:');
+      expect(scopedContext).not.toContain('AskUserQuestion:');
     });
   },
 );

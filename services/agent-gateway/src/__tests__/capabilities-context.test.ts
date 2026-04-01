@@ -9,11 +9,16 @@ vi.mock('../db.js', () => ({
 }));
 
 vi.mock('../tool-definitions.js', () => ({
+  getVisibleToolName: (toolName: string) => toolName,
   buildGatewayToolDefinitions: () => [
     { function: { name: 'read', description: 'read tool', parameters: { type: 'object' } } },
     { function: { name: 'task', description: 'task tool', parameters: { type: 'object' } } },
     {
-      function: { name: 'question', description: 'question tool', parameters: { type: 'object' } },
+      function: {
+        name: 'AskUserQuestion',
+        description: 'question tool',
+        parameters: { type: 'object' },
+      },
     },
   ],
 }));
@@ -52,6 +57,6 @@ describe('buildCapabilityContext', () => {
     expect(context).toContain('聊天可调用工具');
     expect(context).toContain('- read: read tool');
     expect(context).not.toContain('- task: task tool');
-    expect(context).not.toContain('- question: question tool');
+    expect(context).not.toContain('- AskUserQuestion: question tool');
   });
 });
