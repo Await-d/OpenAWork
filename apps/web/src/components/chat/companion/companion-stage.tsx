@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildCompanionIntroText,
   createCompanionProfile,
+  deriveCompanionOutputPolicy,
   deriveCompanionFocusTags,
   deriveCompanionReaction,
   deriveCompanionStatus,
@@ -9,6 +10,8 @@ import {
   type CompanionUtteranceSeed,
 } from './companion-display-model.js';
 import { CompanionTerminalSprite } from './companion-terminal-sprite.js';
+import { useBuddyVoicePreferences } from './use-buddy-voice-preferences.js';
+import { useBuddyVoiceOutput } from './use-buddy-voice-output.js';
 
 export interface CompanionStageProps extends CompanionActivitySnapshot {
   editorMode: boolean;
@@ -20,6 +23,8 @@ interface CompanionOutputEntry extends CompanionUtteranceSeed {
   id: string;
 }
 
+type CompanionSyncState = 'local' | 'loading' | 'saving' | 'synced' | 'error';
+
 const LIVE_OUTPUT_FADE_MS = 7000;
 const LIVE_OUTPUT_CLEAR_MS = 10000;
 const OUTPUT_HISTORY_LIMIT = 3;
@@ -27,11 +32,13 @@ const OUTPUT_HISTORY_LIMIT = 3;
 function CompanionModeButton({
   active,
   ariaLabel,
+  disabled = false,
   label,
   onClick,
 }: {
   active: boolean;
   ariaLabel?: string;
+  disabled?: boolean;
   label: string;
   onClick: () => void;
 }) {
@@ -40,17 +47,20 @@ function CompanionModeButton({
       type="button"
       aria-label={ariaLabel ?? label}
       aria-pressed={active}
+      disabled={disabled}
       onClick={onClick}
       style={{
         height: 22,
         padding: '0 7px',
         borderRadius: 999,
         border: '1px solid var(--border-subtle)',
-        background: active ? 'var(--accent-muted)' : 'transparent',
-        color: active ? 'var(--accent)' : 'var(--text-3)',
+        background: disabled ? 'transparent' : active ? 'var(--accent-muted)' : 'transparent',
+        color: disabled ? 'var(--text-3)' : active ? 'var(--accent)' : 'var(--text-3)',
         fontSize: 8.5,
         fontWeight: active ? 700 : 600,
         whiteSpace: 'nowrap',
+        opacity: disabled ? 0.52 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
       }}
     >
       {label}
@@ -101,6 +111,61 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
         {value}
       </div>
     </div>
+  );
+}
+
+function CompanionSyncBadge({ label, state }: { label: string; state: CompanionSyncState }) {
+  const background =
+    state === 'synced'
+      ? 'color-mix(in oklch, var(--success) 14%, transparent)'
+      : state === 'saving' || state === 'loading'
+        ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
+        : state === 'error'
+          ? 'color-mix(in oklch, var(--danger) 14%, transparent)'
+          : 'var(--bg-2)';
+  const color =
+    state === 'synced'
+      ? 'var(--success)'
+      : state === 'saving' || state === 'loading'
+        ? 'var(--warning)'
+        : state === 'error'
+          ? 'var(--danger)'
+          : 'var(--text-3)';
+
+  return (
+    <output
+      data-testid="companion-sync-badge"
+      aria-live="polite"
+      aria-atomic="true"
+      style={{
+        height: 18,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: '0 6px',
+        borderRadius: 999,
+        background,
+        color,
+        fontSize: 8,
+        fontWeight: 700,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: 'currentColor',
+          boxShadow:
+            state === 'saving' || state === 'loading'
+              ? '0 0 0 2px color-mix(in oklch, currentColor 12%, transparent)'
+              : 'none',
+          opacity: state === 'local' ? 0.7 : 1,
+        }}
+      />
+      <span>{label}</span>
+    </output>
   );
 }
 
@@ -211,8 +276,6 @@ export function CompanionStage({
   todoCount,
 }: CompanionStageProps) {
   const [panelOpen, setPanelOpen] = useState<boolean>(() => sessionId === null);
-  const [muted, setMuted] = useState(false);
-  const [quietMode, setQuietMode] = useState(false);
   const [liveOutputId, setLiveOutputId] = useState<string | null>(null);
   const [fadingOutputId, setFadingOutputId] = useState<string | null>(null);
   const [outputHistory, setOutputHistory] = useState<CompanionOutputEntry[]>([]);
@@ -258,11 +321,39 @@ export function CompanionStage({
     () => createCompanionProfile((currentUserEmail || sessionId) ?? 'guest'),
     [currentUserEmail, sessionId],
   );
+  const {
+    companionFeatureMode,
+    isVoiceOutputFeatureReady,
+    isVoiceOutputFeatureEnabled,
+    muted,
+    quietMode,
+    syncStatus,
+    syncStatusLabel,
+    setMuted,
+    setQuietMode,
+    voiceOutputEnabled,
+    setVoiceOutputEnabled,
+  } = useBuddyVoicePreferences(currentUserEmail || sessionId || 'guest');
   const introText = useMemo(() => buildCompanionIntroText(profile), [profile]);
   const reaction = useMemo(() => deriveCompanionReaction(snapshot), [snapshot]);
   const statusText = useMemo(() => deriveCompanionStatus(snapshot), [snapshot]);
   const focusTags = useMemo(() => deriveCompanionFocusTags(snapshot), [snapshot]);
-  const shouldAnnounceReaction = !muted && (!quietMode || reaction.importance !== 'ambient');
+  const introOutputPolicy = useMemo(
+    () =>
+      deriveCompanionOutputPolicy(
+        { badge: '初次亮相', text: introText, tone: 'intro' },
+        { muted, quietMode },
+      ),
+    [introText, muted, quietMode],
+  );
+  const reactionOutputPolicy = useMemo(
+    () =>
+      deriveCompanionOutputPolicy(
+        { badge: reaction.badge, text: reaction.text, tone: reaction.importance },
+        { muted, quietMode },
+      ),
+    [muted, quietMode, reaction.badge, reaction.importance, reaction.text],
+  );
   const baseTransition = prefersReducedMotion
     ? 'none'
     : 'transform 220ms ease, opacity 220ms ease, box-shadow 220ms ease, background 220ms ease';
@@ -297,9 +388,16 @@ export function CompanionStage({
         text: introText,
         tone: 'intro',
       },
-      !muted,
+      introOutputPolicy.shouldShowLiveOutput,
     );
-  }, [introText, muted, profile.name, profile.species, pushOutput, sessionId]);
+  }, [
+    introOutputPolicy.shouldShowLiveOutput,
+    introText,
+    profile.name,
+    profile.species,
+    pushOutput,
+    sessionId,
+  ]);
 
   useEffect(() => {
     const outputKey = `${sessionId ?? 'home'}:${reaction.badge}:${reaction.text}`;
@@ -313,15 +411,15 @@ export function CompanionStage({
         text: reaction.text,
         tone: reaction.importance,
       },
-      shouldAnnounceReaction,
+      reactionOutputPolicy.shouldShowLiveOutput,
     );
   }, [
     pushOutput,
     reaction.badge,
     reaction.importance,
     reaction.text,
+    reactionOutputPolicy.shouldShowLiveOutput,
     sessionId,
-    shouldAnnounceReaction,
   ]);
 
   useEffect(() => {
@@ -347,6 +445,18 @@ export function CompanionStage({
     () => outputHistory.find((entry) => entry.id === liveOutputId) ?? null,
     [liveOutputId, outputHistory],
   );
+  const voiceOutputEffectiveEnabled = voiceOutputEnabled && isVoiceOutputFeatureEnabled;
+  const { isSpeaking, isVoiceOutputAvailable, speechStatusLabel } = useBuddyVoiceOutput({
+    enabled: voiceOutputEffectiveEnabled,
+    featureEnabled: isVoiceOutputFeatureEnabled,
+    featureReady: isVoiceOutputFeatureReady,
+    liveOutput,
+    liveOutputId,
+    muted,
+    profileName: profile.name,
+    quietMode,
+    voiceInputVisible: showVoice,
+  });
 
   useEffect(() => {
     const mentionsBuddy = input.includes('/buddy');
@@ -488,6 +598,42 @@ export function CompanionStage({
             }}
           >
             <CompanionModeButton
+              active={voiceOutputEffectiveEnabled && isVoiceOutputAvailable}
+              ariaLabel={
+                !isVoiceOutputFeatureReady
+                  ? '正在读取 Buddy 远端设置'
+                  : !isVoiceOutputFeatureEnabled
+                    ? '远端已关闭 Buddy 播报功能'
+                    : isVoiceOutputAvailable
+                      ? voiceOutputEnabled
+                        ? '关闭 Buddy 本地播报'
+                        : '开启 Buddy 本地播报'
+                      : '当前环境不支持 Buddy 本地播报'
+              }
+              disabled={
+                !isVoiceOutputAvailable ||
+                !isVoiceOutputFeatureReady ||
+                !isVoiceOutputFeatureEnabled
+              }
+              label={
+                !isVoiceOutputFeatureReady
+                  ? '读取中'
+                  : !isVoiceOutputFeatureEnabled
+                    ? companionFeatureMode === 'off'
+                      ? '功能关闭'
+                      : '远端关闭'
+                    : !isVoiceOutputAvailable
+                      ? '无播报'
+                      : isSpeaking
+                        ? '播报中'
+                        : voiceOutputEnabled
+                          ? '播报开'
+                          : '播报关'
+              }
+              onClick={() => setVoiceOutputEnabled((value) => !value)}
+            />
+            <CompanionSyncBadge label={syncStatusLabel} state={syncStatus} />
+            <CompanionModeButton
               active={quietMode}
               ariaLabel={quietMode ? '关闭安静模式' : '开启安静模式'}
               label={quietMode ? '安静模式' : '低打扰'}
@@ -577,6 +723,10 @@ export function CompanionStage({
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               <CompanionMetaCard label="当前状态" value={statusText} />
               <CompanionMetaCard
+                label="语音播报"
+                value={`${speechStatusLabel} · ${syncStatusLabel}`}
+              />
+              <CompanionMetaCard
                 label="关注范围"
                 value={
                   <span style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
@@ -603,7 +753,7 @@ export function CompanionStage({
               />
               <CompanionMetaCard
                 label="当前阶段"
-                value="终端同款精灵壳层；后续再接设置与 prompt 注入。"
+                value="终端同款精灵壳层；本地 TTS MVP 只播稳定短句。"
               />
             </div>
 

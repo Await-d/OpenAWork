@@ -44,6 +44,11 @@ export interface CompanionUtteranceSeed {
   tone: 'intro' | CompanionReaction['importance'];
 }
 
+export interface CompanionOutputPolicy {
+  shouldShowLiveOutput: boolean;
+  shouldSpeak: boolean;
+}
+
 const COMPANION_NAMES = ['雾灯', '回声', '稜镜', '潮汐', '灰羽', '柏舟', '松针', '折光'];
 const COMPANION_ARCHETYPES = [
   '低打扰观察员',
@@ -286,4 +291,42 @@ export function buildCompanionIntroText(
   profile: Pick<CompanionProfile, 'name' | 'species'>,
 ): string {
   return `${profile.name} 会以一只${profile.species}的身份坐在输入框旁边轻声陪跑。除非你点名，不然我会把话让给主助手。`;
+}
+
+export function deriveCompanionOutputPolicy(
+  output: CompanionUtteranceSeed,
+  options: { muted: boolean; quietMode: boolean },
+): CompanionOutputPolicy {
+  if (options.muted) {
+    return {
+      shouldShowLiveOutput: false,
+      shouldSpeak: false,
+    };
+  }
+
+  if (output.tone === 'intro') {
+    return {
+      shouldShowLiveOutput: true,
+      shouldSpeak: false,
+    };
+  }
+
+  if (output.tone === 'ambient') {
+    return {
+      shouldShowLiveOutput: !options.quietMode,
+      shouldSpeak: false,
+    };
+  }
+
+  if (output.tone === 'notice') {
+    return {
+      shouldShowLiveOutput: true,
+      shouldSpeak: !options.quietMode,
+    };
+  }
+
+  return {
+    shouldShowLiveOutput: true,
+    shouldSpeak: true,
+  };
 }

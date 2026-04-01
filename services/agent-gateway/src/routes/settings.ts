@@ -86,6 +86,66 @@ interface UserSettingRow {
   value: string;
 }
 
+const companionInjectionModeSchema = z.enum(['off', 'mention_only', 'always']);
+const companionVerbositySchema = z.enum(['minimal', 'normal']);
+const companionThemeVariantSchema = z.enum(['default', 'playful']);
+const companionVoiceOutputModeSchema = z.enum(['off', 'buddy_only', 'important_only']);
+const companionVoiceVariantSchema = z.enum(['system', 'bright', 'calm']);
+
+const companionPreferencesSchema = z.object({
+  enabled: z.boolean().default(true),
+  muted: z.boolean().default(false),
+  reducedMotion: z.boolean().default(false),
+  verbosity: companionVerbositySchema.default('normal'),
+  injectionMode: companionInjectionModeSchema.default('mention_only'),
+  themeVariant: companionThemeVariantSchema.default('default'),
+  voiceOutputEnabled: z.boolean().default(false),
+  voiceOutputMode: companionVoiceOutputModeSchema.default('buddy_only'),
+  voiceRate: z.number().min(0.5).max(2).default(1.02),
+  voiceVariant: companionVoiceVariantSchema.default('system'),
+});
+
+const companionSettingsStoredSchema = z.object({
+  preferences: companionPreferencesSchema,
+  profile: z.null().default(null),
+  updatedAt: z.string().optional(),
+});
+
+const companionSettingsUpdateSchema = z.object({
+  preferences: companionPreferencesSchema.partial(),
+});
+
+const DEFAULT_COMPANION_PREFERENCES = companionPreferencesSchema.parse({});
+
+type CompanionSettingsRecord = {
+  preferences: z.infer<typeof companionPreferencesSchema>;
+  profile: null;
+  updatedAt?: string;
+};
+
+function readCompanionSettings(value: string | undefined): CompanionSettingsRecord {
+  const parsed = companionSettingsStoredSchema.safeParse(parseStoredJson(value));
+  if (parsed.success) {
+    return {
+      preferences: parsed.data.preferences,
+      profile: parsed.data.profile,
+      ...(parsed.data.updatedAt ? { updatedAt: parsed.data.updatedAt } : {}),
+    };
+  }
+
+  return {
+    preferences: DEFAULT_COMPANION_PREFERENCES,
+    profile: null,
+  };
+}
+
+function buildCompanionFeatureState(preferences: z.infer<typeof companionPreferencesSchema>): {
+  enabled: boolean;
+  mode: 'off' | 'beta';
+} {
+  return preferences.enabled ? { enabled: true, mode: 'beta' } : { enabled: false, mode: 'off' };
+}
+
 const AUDIT_PAYLOAD_MAX_STRING_LENGTH = 1000;
 const AUDIT_PAYLOAD_MAX_DEPTH = 4;
 const AUDIT_PAYLOAD_MAX_ARRAY_ITEMS = 20;
@@ -197,6 +257,84 @@ function sanitizeAuditPayload(payload: unknown, depth = 0): unknown {
 }
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
+  app.get(
+    '/settings/companion',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.companion.get');
+      const user = request.user as JwtPayload;
+
+      const loadStep = child('load');
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'companion_preferences_v1'`,
+        [user.sub],
+      );
+      loadStep.succeed(undefined, { found: row !== undefined });
+
+      const settings = readCompanionSettings(row?.value);
+      step.succeed(undefined, { voiceOutputEnabled: settings.preferences.voiceOutputEnabled });
+      return reply.send({
+        feature: buildCompanionFeatureState(settings.preferences),
+        preferences: settings.preferences,
+        profile: settings.profile,
+      });
+    },
+  );
+
+  app.put(
+    '/settings/companion',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.companion.put');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const parsed = companionSettingsUpdateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        parseStep.fail('invalid companion body');
+        step.fail('invalid companion body');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid companion settings', issues: parsed.error.issues });
+      }
+      parseStep.succeed(undefined, { keys: Object.keys(parsed.data.preferences).length });
+
+      const loadStep = child('load-existing');
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'companion_preferences_v1'`,
+        [user.sub],
+      );
+      loadStep.succeed(undefined, { found: row !== undefined });
+
+      const existing = readCompanionSettings(row?.value);
+      const nextSettings = {
+        preferences: {
+          ...existing.preferences,
+          ...parsed.data.preferences,
+        },
+        profile: existing.profile,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const saveStep = child('save');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'companion_preferences_v1', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(nextSettings)],
+      );
+      saveStep.succeed(undefined, {
+        voiceOutputEnabled: nextSettings.preferences.voiceOutputEnabled,
+      });
+      step.succeed(undefined, { saved: true });
+
+      return reply.send({
+        feature: buildCompanionFeatureState(nextSettings.preferences),
+        preferences: nextSettings.preferences,
+        profile: nextSettings.profile,
+      });
+    },
+  );
+
   app.get(
     '/settings/mcp-status',
     { onRequest: [requireAuth] },
