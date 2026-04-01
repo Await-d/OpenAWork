@@ -479,8 +479,42 @@ function mapCopiedToolCardStatus(value: string | undefined): AssistantTraceToolC
   if (normalized === '完成') return 'completed';
   if (normalized === '失败') return 'failed';
   if (normalized === '执行中') return 'running';
-  if (normalized === '等待权限' || normalized === '等待处理') return 'paused';
+  if (
+    normalized === '等待权限' ||
+    normalized === '等待处理' ||
+    normalized === '等待回答' ||
+    normalized === '等待确认'
+  )
+    return 'paused';
   return undefined;
+}
+
+function normalizeCopiedToolCardName(rawToolName: string): string {
+  if (rawToolName === '子代理任务') {
+    return 'task';
+  }
+
+  if (rawToolName === '技能') {
+    return 'Skill';
+  }
+
+  if (rawToolName === '询问用户') {
+    return 'AskUserQuestion';
+  }
+
+  if (rawToolName === '代理委派') {
+    return 'Agent';
+  }
+
+  if (rawToolName === '进入规划模式') {
+    return 'EnterPlanMode';
+  }
+
+  if (rawToolName === '退出规划模式') {
+    return 'ExitPlanMode';
+  }
+
+  return rawToolName;
 }
 
 function parseCopiedToolCardSections(content: string): CopiedToolCardSections | null {
@@ -561,7 +595,7 @@ function parseCopiedToolCardSections(content: string): CopiedToolCardSections | 
     kind: mapCopiedToolCardKind(typeLine.slice('类型：'.length)),
     outputText,
     status: mapCopiedToolCardStatus(statusLine.slice('状态：'.length)),
-    toolName: rawToolName === '子代理任务' ? 'task' : rawToolName,
+    toolName: normalizeCopiedToolCardName(rawToolName),
   };
 }
 

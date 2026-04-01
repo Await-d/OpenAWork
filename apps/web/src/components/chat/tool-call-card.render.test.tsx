@@ -29,9 +29,6 @@ describe('ToolCallCard rendering', () => {
     expect(html).toContain('data-tool-card-meta-label="muted"');
     expect(html).toContain('data-tool-card-meta-label="success"');
     expect(html).toContain('data-tool-card-meta-label="warning"');
-    expect(html).not.toContain(
-      'data-tool-card-meta-label="warning" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px',
-    );
     expect(html).toContain('创建一个子代理会话，执行只读检查并返回结果');
     expect(html).toContain('复制');
   });
@@ -56,9 +53,6 @@ describe('ToolCallCard rendering', () => {
     expect(html).toContain('工具状态');
     expect(html).toContain('子任务 · 失败');
     expect(html).toContain('data-tool-card-meta-label="danger"');
-    expect(html).not.toContain(
-      'data-tool-card-meta-label="danger" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px',
-    );
   });
 
   it('renders read_tool_output suggestions for large tool outputs', () => {
@@ -117,5 +111,49 @@ describe('ToolCallCard rendering', () => {
     expect(html).toContain('旧');
     expect(html).toContain('新');
     expect(html).not.toContain('&quot;before&quot;');
+  });
+
+  it('renders localized Claude-first tool labels and question waiting state', () => {
+    const html = renderToStaticMarkup(
+      <ToolCallCard
+        toolName="AskUserQuestion"
+        status="paused"
+        input={{
+          questions: [
+            {
+              question: '请选择继续方式',
+              header: '执行策略',
+              options: [
+                { label: '继续', description: '继续执行' },
+                { label: '暂停', description: '暂停执行' },
+              ],
+            },
+          ],
+        }}
+        output="waiting for answer"
+      />,
+    );
+
+    expect(html).toContain('询问用户');
+    expect(html).toContain('执行策略');
+    expect(html).toContain('等待回答');
+  });
+
+  it('renders plan mode approval cards with localized labels', () => {
+    const html = renderToStaticMarkup(
+      <ToolCallCard
+        toolName="ExitPlanMode"
+        status="paused"
+        input={{
+          plan: '1. 查看能力\n2. 开始实现',
+          allowedPrompts: [{ tool: 'Bash', prompt: 'pnpm test' }],
+        }}
+        output="waiting for approval"
+      />,
+    );
+
+    expect(html).toContain('退出规划模式');
+    expect(html).toContain('提交计划审批');
+    expect(html).toContain('等待确认');
   });
 });

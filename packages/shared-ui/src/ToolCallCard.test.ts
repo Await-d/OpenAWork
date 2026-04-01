@@ -127,6 +127,73 @@ describe('resolveToolCallCardDisplayData', () => {
     expect(displayData.toolKind).toBe('tool');
   });
 
+  it('maps Claude-first skill and agent tools to localized names and summaries', () => {
+    const skillDisplay = resolveToolCallCardDisplayData({
+      toolName: 'Skill',
+      input: {
+        skill: 'frontend-design',
+        args: '整理聊天工具卡片展示',
+      },
+    });
+    const agentDisplay = resolveToolCallCardDisplayData({
+      toolName: 'Agent',
+      input: {
+        description: '让代理总结当前变更',
+        prompt: '请输出最终结论',
+        subagent_type: 'explore',
+        run_in_background: true,
+      },
+    });
+
+    expect(skillDisplay.displayToolName).toBe('技能');
+    expect(skillDisplay.summary).toBe('加载 · frontend-design · 整理聊天工具卡片展示');
+    expect(skillDisplay.toolKind).toBe('skill');
+
+    expect(agentDisplay.displayToolName).toBe('代理委派');
+    expect(agentDisplay.summary).toBe('后台 · explore · 让代理总结当前变更');
+    expect(agentDisplay.toolKind).toBe('agent');
+  });
+
+  it('maps Claude-first question and plan mode tools to localized display text', () => {
+    const questionDisplay = resolveToolCallCardDisplayData({
+      toolName: 'AskUserQuestion',
+      input: {
+        questions: [
+          {
+            question: '请选择继续方式',
+            header: '执行策略',
+            options: [
+              { label: '继续', description: '继续执行' },
+              { label: '暂停', description: '暂停执行' },
+            ],
+          },
+        ],
+      },
+    });
+    const enterPlanDisplay = resolveToolCallCardDisplayData({
+      toolName: 'EnterPlanMode',
+      input: {},
+    });
+    const exitPlanDisplay = resolveToolCallCardDisplayData({
+      toolName: 'ExitPlanMode',
+      input: {
+        plan: '1. 查看能力\n2. 开始实现',
+        allowedPrompts: [{ tool: 'Bash', prompt: 'pnpm test' }],
+      },
+    });
+
+    expect(questionDisplay.displayToolName).toBe('询问用户');
+    expect(questionDisplay.summary).toBe('执行策略 · 请选择继续方式 · 2 个选项 · 单选');
+
+    expect(enterPlanDisplay.displayToolName).toBe('进入规划模式');
+    expect(enterPlanDisplay.summary).toBe('进入只读规划阶段');
+
+    expect(exitPlanDisplay.displayToolName).toBe('退出规划模式');
+    expect(exitPlanDisplay.summary).toContain('提交计划审批');
+    expect(exitPlanDisplay.summary).toContain('查看能力');
+    expect(exitPlanDisplay.summary).toContain('1 条允许提示');
+  });
+
   it('formats read summaries with path window parameters only', () => {
     const displayData = resolveToolCallCardDisplayData({
       toolName: 'read',

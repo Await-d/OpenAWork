@@ -52,6 +52,9 @@ const s: Record<string, CSSProperties> = {
     color: 'var(--color-muted, #94a3b8)',
     lineHeight: 1.6,
   },
+  bodyText: {
+    margin: 0,
+  },
   list: {
     margin: '0.5rem 0 0',
     paddingLeft: '1.1rem',
@@ -129,8 +132,8 @@ export function TelemetryConsentDialog({
           帮助改进 {appName}
         </h3>
 
-        <p style={s.body}>
-          我们希望收集匿名使用数据，以了解功能使用情况并持续改进产品。
+        <div style={s.body}>
+          <p style={s.bodyText}>我们希望收集匿名使用数据，以了解功能使用情况并持续改进产品。</p>
           <ul style={s.list}>
             <li style={s.listItem}>
               仅收集匿名使用数据（会话启动、工具调用次数、模型切换等元数据）
@@ -141,7 +144,7 @@ export function TelemetryConsentDialog({
               关闭
             </li>
           </ul>
-        </p>
+        </div>
 
         <div style={s.divider} />
 

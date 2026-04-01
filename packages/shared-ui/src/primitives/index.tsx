@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
 import { tokens } from '../tokens.js';
 
 export interface ShellCardProps {
@@ -10,11 +10,11 @@ export function ShellCard({ children, style }: ShellCardProps) {
   return (
     <div
       style={{
-        background: 'rgba(17,24,39,0.8)',
-        border: '1px solid #1e2d3d',
-        borderRadius: 16,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
-        backdropFilter: 'blur(16px)',
+        background: tokens.color.surfaceGlass,
+        border: `1px solid ${tokens.color.border}`,
+        borderRadius: tokens.radius.lg,
+        boxShadow: tokens.shadow.glass,
+        backdropFilter: tokens.blur.md,
         ...style,
       }}
     >
@@ -42,12 +42,14 @@ export function RailButton({ icon, label, isActive, onClick }: RailButtonProps) 
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+        background: isActive
+          ? `color-mix(in srgb, ${tokens.color.accent} 15%, transparent)`
+          : 'transparent',
         border: 'none',
-        borderLeft: isActive ? '2px solid #6366f1' : '2px solid transparent',
+        borderLeft: isActive ? `2px solid ${tokens.color.accent}` : '2px solid transparent',
         cursor: 'pointer',
         fontSize: 15,
-        color: isActive ? '#6366f1' : '#64748b',
+        color: isActive ? tokens.color.accent : tokens.color.muted,
         transition: 'background 0.15s, color 0.15s',
         flexShrink: 0,
       }}
@@ -83,7 +85,7 @@ export function PanelSection({
             fontWeight: 600,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: '#64748b',
+            color: tokens.color.muted,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -105,7 +107,7 @@ export function PanelSection({
             fontWeight: 600,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: '#64748b',
+            color: tokens.color.muted,
           }}
         >
           {title}
@@ -146,14 +148,19 @@ const colorMap: Record<StatusColor, { bg: string; text: string }> = {
   },
 };
 
-export function StatusPill({ label, color }: StatusPillProps) {
+export function StatusPill({
+  label,
+  color,
+  ...rest
+}: StatusPillProps & HTMLAttributes<HTMLSpanElement>) {
   const c = colorMap[color];
   return (
     <span
+      {...rest}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '2px 8px',
+        padding: `${tokens.spacing.xxs}px ${tokens.spacing.sm}px`,
         borderRadius: 999,
         fontSize: 11,
         fontWeight: 600,

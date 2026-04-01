@@ -3,29 +3,21 @@ import { tokens } from './tokens.js';
 import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { ToolDiffCollection } from './ToolDiffCollection.js';
 import { UnifiedCodeDiff, summarizeSnapshotDiff, summarizeUnifiedDiff } from './UnifiedCodeDiff.js';
-
-type ToolCardStatus = 'running' | 'paused' | 'completed' | 'failed';
-
-interface TaskToolMeta {
-  agentType?: string;
-  command?: string;
-  description?: string;
-  prompt?: string;
-  requestedTaskId?: string;
-  outputTaskId?: string;
-  outputSessionId?: string;
-  outputStatus?: string;
-  readonly: boolean;
-  extraOutput?: unknown;
-  hasAdditionalInputFields: boolean;
-}
-
-interface TaskSummaryData {
-  footer?: string;
-  preview?: string;
-  subtitle?: string;
-  title: string;
-}
+import {
+  Chevron,
+  CopyActionButton,
+  TaskMetaHighlights,
+  TaskSummaryCard,
+  ToolField,
+} from './tool-call-card-parts.js';
+import type {
+  PillTone,
+  StatusMeta,
+  TaskSummaryData,
+  TaskToolMeta,
+  ToolCardStatus,
+  ToolKind,
+} from './tool-call-card-shared.js';
 
 export interface ToolCallCardProps {
   kind?: ToolKind;
@@ -38,14 +30,7 @@ export interface ToolCallCardProps {
   style?: CSSProperties;
 }
 
-interface StatusMeta {
-  color: string;
-  dot: string;
-  label: string;
-}
-
-export type ToolKind = 'agent' | 'mcp' | 'skill' | 'tool';
-type PillTone = 'danger' | 'info' | 'muted' | 'success' | 'warning';
+export type { ToolKind } from './tool-call-card-shared.js';
 
 export interface ToolCallCardDisplayData {
   displayToolName: string;
@@ -152,6 +137,32 @@ function trimInputPath(value: string): string {
   return segments.length > 7 ? segments.slice(-7).join('/') : segments.join('/');
 }
 
+function normalizeToolName(toolName: string): string {
+  return toolName.trim().toLowerCase();
+}
+
+const TOOL_DISPLAY_NAME_MAP: Record<string, string> = {
+  skill: '技能',
+  askuserquestion: '询问用户',
+  question: '询问用户',
+  agent: '代理委派',
+  call_omo_agent: '代理委派',
+  enterplanmode: '进入规划模式',
+  exitplanmode: '退出规划模式',
+};
+
+function normalizeSummaryText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function resolveDisplayToolName(toolName: string, taskMeta?: TaskToolMeta): string {
+  if (taskMeta) {
+    return '子代理任务';
+  }
+
+  return TOOL_DISPLAY_NAME_MAP[normalizeToolName(toolName)] ?? toolName;
+}
+
 function quoteSummaryValue(value: string): string {
   return /[\s,[\]=]/u.test(value) ? JSON.stringify(value) : value;
 }
@@ -178,6 +189,110 @@ function buildParamSuffix(entries: Array<[label: string, value: unknown]>): stri
     .filter((item): item is string => Boolean(item));
 
   return parts.length > 0 ? ` [${parts.join(', ')}]` : '';
+}
+
+function summarizeSkillTool(input: Record<string, unknown>): string | undefined {
+  const skillName = readNonEmptyString(input['skill']) ?? readNonEmptyString(input['name']);
+  const args = readNonEmptyString(input['args']) ?? readNonEmptyString(input['user_message']);
+
+  if (!skillName && !args) {
+    return undefined;
+  }
+
+  const detail = args ? truncateText(normalizeSummaryText(args), 88) : undefined;
+  return skillName
+    ? ['加载', skillName, detail].filter((item): item is string => Boolean(item)).join(' · ')
+    : detail;
+}
+
+function summarizeQuestionTool(input: Record<string, unknown>): string | undefined {
+  const questions = Array.isArray(input['questions']) ? input['questions'] : undefined;
+  if (!questions || questions.length === 0) {
+    return undefined;
+  }
+
+  const first = asRecord(questions[0]);
+  const header = readNonEmptyString(first?.['header']);
+  const question = readNonEmptyString(first?.['question']);
+  const options = Array.isArray(first?.['options']) ? first['options'].length : undefined;
+  const multiple = first?.['multiple'] === true || first?.['multiSelect'] === true;
+
+  const parts = [
+    header,
+    question ? truncateText(normalizeSummaryText(question), 88) : undefined,
+    options ? `${options} 个选项` : undefined,
+    questions.length > 1 ? `${questions.length} 题` : multiple ? '多选' : '单选',
+  ].filter((item): item is string => Boolean(item));
+
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+function summarizeAgentTool(input: Record<string, unknown>): string | undefined {
+  const description = readNonEmptyString(input['description']);
+  const prompt = readNonEmptyString(input['prompt']);
+  const agentType = readNonEmptyString(input['subagent_type']);
+  const mode = input['run_in_background'] === true ? '后台' : undefined;
+  const focus = description ?? prompt;
+
+  const parts = [
+    mode,
+    agentType,
+    focus ? truncateText(normalizeSummaryText(focus), 96) : undefined,
+  ].filter((item): item is string => Boolean(item));
+
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+function summarizePlanModeTool(
+  toolName: string,
+  input: Record<string, unknown>,
+): string | undefined {
+  const normalizedToolName = normalizeToolName(toolName);
+  if (normalizedToolName === 'enterplanmode') {
+    return '进入只读规划阶段';
+  }
+
+  if (normalizedToolName !== 'exitplanmode') {
+    return undefined;
+  }
+
+  const plan = readNonEmptyString(input['plan']);
+  const allowedPrompts = Array.isArray(input['allowedPrompts'])
+    ? input['allowedPrompts'].length
+    : 0;
+
+  return [
+    '提交计划审批',
+    plan ? truncateText(normalizeSummaryText(plan), 96) : undefined,
+    allowedPrompts > 0 ? `${allowedPrompts} 条允许提示` : undefined,
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join(' · ');
+}
+
+function summarizeSpecialToolInput(
+  toolName: string,
+  input: Record<string, unknown>,
+): string | undefined {
+  const normalizedToolName = normalizeToolName(toolName);
+
+  if (normalizedToolName === 'skill') {
+    return summarizeSkillTool(input);
+  }
+
+  if (normalizedToolName === 'askuserquestion' || normalizedToolName === 'question') {
+    return summarizeQuestionTool(input);
+  }
+
+  if (normalizedToolName === 'agent' || normalizedToolName === 'call_omo_agent') {
+    return summarizeAgentTool(input);
+  }
+
+  if (normalizedToolName === 'enterplanmode' || normalizedToolName === 'exitplanmode') {
+    return summarizePlanModeTool(toolName, input);
+  }
+
+  return undefined;
 }
 
 function buildSnapshotSummary(
@@ -561,7 +676,11 @@ function buildTaskSummaryData(meta: TaskToolMeta): TaskSummaryData {
 }
 
 function summarizeInput(toolName: string, input: Record<string, unknown>): string {
-  const normalizedToolName = toolName.trim().toLowerCase();
+  const normalizedToolName = normalizeToolName(toolName);
+  const specialSummary = summarizeSpecialToolInput(toolName, input);
+  if (specialSummary) {
+    return specialSummary;
+  }
   const fileLikePath = input['filePath'] ?? input['file_path'] ?? input['path'];
   const displayPath = typeof fileLikePath === 'string' ? trimInputPath(fileLikePath) : undefined;
 
@@ -777,40 +896,54 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
   } as ToolCallCardDisplayData['diffView'];
 }
 
-function resolveStatusMeta(status: ToolCardStatus): StatusMeta {
+function resolvePausedStatusLabel(toolName: string): string {
+  const normalizedToolName = normalizeToolName(toolName);
+
+  if (normalizedToolName === 'askuserquestion' || normalizedToolName === 'question') {
+    return '等待回答';
+  }
+
+  if (normalizedToolName === 'exitplanmode') {
+    return '等待确认';
+  }
+
+  return '等待权限';
+}
+
+function resolveStatusMeta(status: ToolCardStatus, toolName: string): StatusMeta {
   if (status === 'paused') {
     return {
-      color: '#fcd34d',
-      dot: '#f59e0b',
-      label: '等待权限',
+      color: tokens.color.warning,
+      dot: tokens.color.warning,
+      label: resolvePausedStatusLabel(toolName),
     };
   }
 
   if (status === 'failed') {
     return {
-      color: '#fca5a5',
-      dot: '#ef4444',
+      color: tokens.color.danger,
+      dot: tokens.color.danger,
       label: '失败',
     };
   }
 
   if (status === 'completed') {
     return {
-      color: '#86efac',
-      dot: '#10b981',
+      color: tokens.color.success,
+      dot: tokens.color.success,
       label: '完成',
     };
   }
 
   return {
-    color: '#93c5fd',
-    dot: '#3b82f6',
+    color: tokens.color.info,
+    dot: tokens.color.info,
     label: '执行中',
   };
 }
 
 function inferToolKind(toolName: string): ToolKind {
-  const normalized = toolName.trim().toLowerCase();
+  const normalized = normalizeToolName(toolName);
   if (normalized === 'task') {
     return 'agent';
   }
@@ -836,168 +969,6 @@ function iconForToolKind(kind: ToolKind): string {
   if (kind === 'skill') return 'SKILL';
   if (kind === 'agent') return 'AGENT';
   return 'TOOL';
-}
-
-export function resolveToolCallCardDisplayData(input: {
-  includeOutputDetails?: boolean;
-  input: Record<string, unknown>;
-  output?: unknown;
-  toolCallId?: string;
-  toolName: string;
-}): ToolCallCardDisplayData {
-  const taskMeta = isTaskTool(input.toolName)
-    ? resolveTaskToolMeta(input.input, input.output)
-    : undefined;
-  const diffView = taskMeta ? undefined : resolveDiffView(input.output);
-  const displayToolName = taskMeta ? '子代理任务' : input.toolName;
-  const summary = taskMeta
-    ? summarizeTaskTool(taskMeta)
-    : (diffView?.summary ?? summarizeInput(input.toolName, input.input));
-  const includeOutputDetails = input.includeOutputDetails !== false;
-  const outputPreview =
-    taskMeta || !includeOutputDetails ? undefined : summarizeOutputPreview(input.output);
-  const outputReadHints = taskMeta
-    ? undefined
-    : includeOutputDetails
-      ? buildOutputReadHints(input.toolCallId, input.output)
-      : undefined;
-  const showInputField = !(
-    (taskMeta && !taskMeta.hasAdditionalInputFields) ||
-    (input.toolName === '—' && Object.keys(input.input).length === 1 && summary.length > 0)
-  );
-  const hasDetails = showInputField || input.output !== undefined || taskMeta !== undefined;
-
-  return {
-    displayToolName,
-    diffView,
-    summary,
-    outputPreview,
-    outputReadHints,
-    showInputField,
-    hasDetails,
-    taskMeta,
-    taskSummary: taskMeta ? buildTaskSummaryData(taskMeta) : undefined,
-    toolKind: inferToolKind(input.toolName),
-  };
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{
-        flexShrink: 0,
-        opacity: 0.55,
-        transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-        transition: 'transform 160ms ease',
-      }}
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function TaskMetaBadge({
-  label,
-  tone = 'default',
-}: {
-  label: string;
-  tone?: 'default' | PillTone;
-}) {
-  const color =
-    tone === 'danger'
-      ? tokens.color.danger
-      : tone === 'info'
-        ? tokens.color.info
-        : tone === 'success'
-          ? tokens.color.success
-          : tone === 'warning'
-            ? tokens.color.warning
-            : tokens.color.muted;
-
-  return (
-    <span
-      data-tool-card-meta-label={tone === 'default' ? 'muted' : tone}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        minWidth: 0,
-        whiteSpace: 'nowrap',
-        fontSize: 10,
-        fontWeight: 600,
-        lineHeight: 1.35,
-        letterSpacing: '0.01em',
-        color,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function TaskMetaHighlights({ meta }: { meta: TaskToolMeta }) {
-  const executionStatus = formatTaskExecutionStatus(meta.outputStatus);
-  const executionTone = resolveTaskStatusTone(meta.outputStatus);
-
-  if (!meta.agentType && !meta.readonly && !executionStatus) {
-    return null;
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 3,
-        flexWrap: 'wrap',
-      }}
-    >
-      <TaskMetaBadge label="子代理" />
-      {meta.agentType && <TaskMetaBadge label={meta.agentType} />}
-      {meta.readonly && <TaskMetaBadge label="只读" tone="success" />}
-      {executionStatus && (
-        <TaskMetaBadge label={`子任务 · ${executionStatus}`} tone={executionTone} />
-      )}
-    </div>
-  );
-}
-
-function CopyActionButton({ copied, onClick }: { copied: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      data-tool-card-copy="true"
-      aria-label={copied ? '已复制工具内容' : '复制工具内容'}
-      title={copied ? '已复制工具内容' : '复制工具内容'}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      style={{
-        appearance: 'none',
-        border: '1px solid rgba(148, 163, 184, 0.18)',
-        background: copied ? 'rgba(16, 185, 129, 0.14)' : 'rgba(15, 23, 42, 0.18)',
-        color: copied ? '#86efac' : 'var(--color-muted, #94a3b8)',
-        borderRadius: 999,
-        padding: '2px 8px',
-        fontSize: 10,
-        fontWeight: 700,
-        lineHeight: 1.4,
-        cursor: 'pointer',
-        flexShrink: 0,
-      }}
-    >
-      {copied ? '已复制' : '复制'}
-    </button>
-  );
 }
 
 function buildToolCopyText({
@@ -1039,257 +1010,47 @@ function buildToolCopyText({
   return sections.join('\n');
 }
 
-function TaskSummaryCard({
-  copied,
-  meta,
-  onCopy,
-  open,
-  statusMeta,
-  summary,
-  summaryData,
-  toggle,
-  toolKindLabel,
-}: {
-  copied: boolean;
-  meta: TaskToolMeta;
-  onCopy: () => void;
-  open: boolean;
-  statusMeta: StatusMeta;
-  summary: string;
-  summaryData: TaskSummaryData;
-  toggle: () => void;
-  toolKindLabel: string;
-}) {
-  const childStatus = formatTaskExecutionStatus(meta.outputStatus);
-  const childStatusTone = resolveTaskStatusTone(meta.outputStatus);
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'stretch',
-        gap: 5,
-        width: '100%',
-      }}
-    >
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        style={{
-          appearance: 'none',
-          border: 'none',
-          background: 'transparent',
-          padding: '1px 0',
-          margin: 0,
-          display: 'flex',
-          alignItems: 'stretch',
-          gap: 5,
-          flex: 1,
-          minWidth: 0,
-          textAlign: 'left',
-          color: 'inherit',
-          cursor: 'pointer',
-        }}
-      >
-        <span
-          aria-hidden="true"
-          style={{
-            position: 'relative',
-            width: 7,
-            minWidth: 7,
-            marginTop: 2,
-            height: 7,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background: statusMeta.dot,
-            boxShadow:
-              statusMeta.label === '执行中'
-                ? `0 0 0 5px color-mix(in oklab, ${statusMeta.dot} 18%, transparent)`
-                : 'none',
-          }}
-        />
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 5,
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
-                <TaskMetaBadge label={toolKindLabel} />
-                {meta.agentType && <TaskMetaBadge label={meta.agentType} />}
-                {meta.readonly && <TaskMetaBadge label="只读" tone="success" />}
-                {childStatus && (
-                  <TaskMetaBadge label={`子任务 · ${childStatus}`} tone={childStatusTone} />
-                )}
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'var(--color-text, #f8fafc)',
-                  lineHeight: 1.4,
-                  wordBreak: 'break-word',
-                }}
-              >
-                {summaryData.title}
-              </div>
-              {summaryData.subtitle && (
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--color-text, #cbd5e1)',
-                    lineHeight: 1.5,
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {summaryData.subtitle}
-                </div>
-              )}
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-end',
-                gap: 1,
-                flexShrink: 0,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  color: 'var(--color-muted, #94a3b8)',
-                }}
-              >
-                工具状态
-              </span>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
-                  color: statusMeta.color,
-                }}
-              >
-                {statusMeta.label}
-                <Chevron open={open} />
-              </span>
-            </div>
-          </div>
-          {summaryData.preview && (
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--color-muted, #94a3b8)',
-                lineHeight: 1.55,
-                wordBreak: 'break-word',
-              }}
-            >
-              {summaryData.preview}
-            </div>
-          )}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 3,
-              flexWrap: 'wrap',
-            }}
-          >
-            <span
-              style={{
-                fontSize: 10,
-                color: 'var(--color-muted, #94a3b8)',
-                letterSpacing: '0.03em',
-              }}
-            >
-              {summaryData.footer ?? '展开查看子代理任务详情'}
-            </span>
-            <span
-              style={{
-                fontSize: 10,
-                color: 'var(--color-muted, #64748b)',
-                maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={summary}
-            >
-              {summary}
-            </span>
-          </div>
-        </div>
-      </button>
-      <CopyActionButton copied={copied} onClick={onCopy} />
-    </div>
+export function resolveToolCallCardDisplayData(input: {
+  includeOutputDetails?: boolean;
+  input: Record<string, unknown>;
+  output?: unknown;
+  toolCallId?: string;
+  toolName: string;
+}): ToolCallCardDisplayData {
+  const taskMeta = isTaskTool(input.toolName)
+    ? resolveTaskToolMeta(input.input, input.output)
+    : undefined;
+  const diffView = taskMeta ? undefined : resolveDiffView(input.output);
+  const displayToolName = resolveDisplayToolName(input.toolName, taskMeta);
+  const summary = taskMeta
+    ? summarizeTaskTool(taskMeta)
+    : (diffView?.summary ?? summarizeInput(input.toolName, input.input));
+  const includeOutputDetails = input.includeOutputDetails !== false;
+  const outputPreview =
+    taskMeta || !includeOutputDetails ? undefined : summarizeOutputPreview(input.output);
+  const outputReadHints = taskMeta
+    ? undefined
+    : includeOutputDetails
+      ? buildOutputReadHints(input.toolCallId, input.output)
+      : undefined;
+  const showInputField = !(
+    (taskMeta && !taskMeta.hasAdditionalInputFields) ||
+    (input.toolName === '—' && Object.keys(input.input).length === 1 && summary.length > 0)
   );
-}
+  const hasDetails = showInputField || input.output !== undefined || taskMeta !== undefined;
 
-function ToolField({
-  label,
-  tone = 'default',
-  value,
-}: {
-  label: string;
-  tone?: 'default' | 'danger' | 'muted';
-  value: string;
-}) {
-  const color = tone === 'danger' ? '#fecaca' : 'var(--color-text, #e2e8f0)';
-  const borderLeft =
-    tone === 'danger'
-      ? '2px solid rgba(248, 113, 113, 0.45)'
-      : tone === 'muted'
-        ? '1px solid rgba(148, 163, 184, 0.16)'
-        : '1px solid rgba(148, 163, 184, 0.22)';
-
-  return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: 'var(--color-muted, #94a3b8)',
-        }}
-      >
-        {label}
-      </div>
-      <pre
-        style={{
-          margin: 0,
-          padding: '3px 0 3px 10px',
-          borderRadius: 0,
-          borderLeft,
-          background: 'transparent',
-          color,
-          fontSize: 11,
-          lineHeight: 1.55,
-          fontFamily:
-            'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          overflowX: 'auto',
-          maxHeight: 200,
-        }}
-      >
-        {value}
-      </pre>
-    </section>
-  );
+  return {
+    displayToolName,
+    diffView,
+    summary,
+    outputPreview,
+    outputReadHints,
+    showInputField,
+    hasDetails,
+    taskMeta,
+    taskSummary: taskMeta ? buildTaskSummaryData(taskMeta) : undefined,
+    toolKind: inferToolKind(input.toolName),
+  };
 }
 
 export function ToolCallCard({
@@ -1303,7 +1064,7 @@ export function ToolCallCard({
   style,
 }: ToolCallCardProps) {
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const normalizedStatus = useMemo<ToolCardStatus>(() => {
     if (status) {
       return status;
@@ -1317,7 +1078,10 @@ export function ToolCallCard({
     return 'running';
   }, [isError, output, status]);
 
-  const statusMeta = useMemo(() => resolveStatusMeta(normalizedStatus), [normalizedStatus]);
+  const statusMeta = useMemo(
+    () => resolveStatusMeta(normalizedStatus, toolName),
+    [normalizedStatus, toolName],
+  );
   const displayData = useMemo(
     () =>
       resolveToolCallCardDisplayData({
@@ -1369,23 +1133,31 @@ export function ToolCallCard({
   );
 
   useEffect(() => {
-    if (!copied) {
+    if (copyState === 'idle') {
       return undefined;
     }
 
-    const timer = window.setTimeout(() => setCopied(false), 1200);
+    const timer = window.setTimeout(
+      () => setCopyState('idle'),
+      copyState === 'failed' ? 1800 : 1200,
+    );
     return () => window.clearTimeout(timer);
-  }, [copied]);
+  }, [copyState]);
 
   const handleCopy = () => {
     if (!navigator.clipboard) {
+      setCopyState('failed');
       return;
     }
 
     const copyRequest = navigator.clipboard.writeText(copyText);
-    void copyRequest.then(() => {
-      setCopied(true);
-    });
+    void copyRequest
+      .then(() => {
+        setCopyState('copied');
+      })
+      .catch(() => {
+        setCopyState('failed');
+      });
   };
 
   return (
@@ -1401,8 +1173,7 @@ export function ToolCallCard({
     >
       {hasDetails && displayData.taskMeta && taskSummary ? (
         <TaskSummaryCard
-          copied={copied}
-          meta={displayData.taskMeta}
+          copyState={copyState}
           onCopy={handleCopy}
           open={effectiveOpen}
           statusMeta={statusMeta}
@@ -1410,6 +1181,10 @@ export function ToolCallCard({
           summaryData={taskSummary}
           toggle={() => setOpen((previous) => !previous)}
           toolKindLabel={toolKindLabel}
+          agentType={displayData.taskMeta.agentType}
+          readonly={displayData.taskMeta.readonly}
+          childStatus={formatTaskExecutionStatus(displayData.taskMeta.outputStatus)}
+          childStatusTone={resolveTaskStatusTone(displayData.taskMeta.outputStatus)}
         />
       ) : hasDetails ? (
         <div
@@ -1468,7 +1243,7 @@ export function ToolCallCard({
                 borderRadius: 5,
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--color-text, #f8fafc)',
+                color: tokens.color.text,
                 flexShrink: 0,
               }}
             >
@@ -1478,7 +1253,7 @@ export function ToolCallCard({
               style={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: 'var(--color-text, #f8fafc)',
+                color: tokens.color.text,
                 flexShrink: 0,
               }}
             >
@@ -1490,7 +1265,7 @@ export function ToolCallCard({
                 fontSize: 9,
                 fontWeight: 700,
                 letterSpacing: '0.06em',
-                color: 'var(--color-muted, #94a3b8)',
+                color: tokens.color.muted,
               }}
             >
               {toolKindLabel}
@@ -1500,7 +1275,7 @@ export function ToolCallCard({
                 minWidth: 0,
                 flex: 1,
                 fontSize: 11,
-                color: 'var(--color-muted, #94a3b8)',
+                color: tokens.color.muted,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -1521,7 +1296,7 @@ export function ToolCallCard({
             </span>
             <Chevron open={effectiveOpen} />
           </button>
-          <CopyActionButton copied={copied} onClick={handleCopy} />
+          <CopyActionButton state={copyState} onClick={handleCopy} />
         </div>
       ) : (
         <div
@@ -1562,7 +1337,7 @@ export function ToolCallCard({
                 borderRadius: 5,
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--color-text, #f8fafc)',
+                color: tokens.color.text,
                 flexShrink: 0,
               }}
             >
@@ -1572,7 +1347,7 @@ export function ToolCallCard({
               style={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: 'var(--color-text, #f8fafc)',
+                color: tokens.color.text,
                 flexShrink: 0,
               }}
             >
@@ -1584,7 +1359,7 @@ export function ToolCallCard({
                 fontSize: 9,
                 fontWeight: 700,
                 letterSpacing: '0.06em',
-                color: 'var(--color-muted, #94a3b8)',
+                color: tokens.color.muted,
               }}
             >
               {toolKindLabel}
@@ -1594,7 +1369,7 @@ export function ToolCallCard({
                 minWidth: 0,
                 flex: 1,
                 fontSize: 11,
-                color: 'var(--color-muted, #94a3b8)',
+                color: tokens.color.muted,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -1604,7 +1379,7 @@ export function ToolCallCard({
               {compactSummary}
             </span>
           </div>
-          <CopyActionButton copied={copied} onClick={handleCopy} />
+          <CopyActionButton state={copyState} onClick={handleCopy} />
         </div>
       )}
 
@@ -1653,7 +1428,14 @@ export function ToolCallCard({
             marginTop: 4,
           }}
         >
-          {displayData.taskMeta && <TaskMetaHighlights meta={displayData.taskMeta} />}
+          {displayData.taskMeta && (
+            <TaskMetaHighlights
+              agentType={displayData.taskMeta.agentType}
+              readonly={displayData.taskMeta.readonly}
+              executionStatus={formatTaskExecutionStatus(displayData.taskMeta.outputStatus)}
+              executionTone={resolveTaskStatusTone(displayData.taskMeta.outputStatus)}
+            />
+          )}
           {displayData.taskMeta?.command && (
             <ToolField label="命令" tone="muted" value={displayData.taskMeta.command} />
           )}

@@ -347,6 +347,43 @@ describe('normalizeChatMessages', () => {
       },
     ]);
   });
+
+  it('normalizes localized Claude-first copied tool names back to canonical names', () => {
+    const copiedText = `工具：询问用户
+类型：TOOL
+状态：等待回答
+摘要：执行策略 · 请选择继续方式 · 2 个选项 · 单选
+
+输入
+{
+  "questions": [
+    {
+      "question": "请选择继续方式",
+      "header": "执行策略",
+      "options": [
+        { "label": "继续", "description": "继续执行" },
+        { "label": "暂停", "description": "暂停执行" }
+      ]
+    }
+  ]
+}
+
+输出
+"waiting for answer"`;
+
+    expect(parseCopiedToolCardContent(copiedText)).toMatchObject({
+      toolName: 'AskUserQuestion',
+      status: 'paused',
+      input: {
+        questions: [
+          {
+            question: '请选择继续方式',
+            header: '执行策略',
+          },
+        ],
+      },
+    });
+  });
 });
 
 describe('createAssistantEventContent', () => {
