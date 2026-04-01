@@ -117,6 +117,7 @@
 - [2026-03-31] Claude Code 风格工具环境接入 OpenAWork 时，保留现有 canonical 小写工具名作为执行真相源；在 `services/agent-gateway` 的模型可见层引入 session-scoped compatibility surface（`openawork / claude_code_simple / claude_code_default`），统一承担名称与入参适配，避免破坏现有 runtime/contracts。
 - [2026-03-31] 实施阶段进一步收敛后，基础工具（`bash/read/edit/write/glob/grep/todowrite/task_*`）继续以 OpenCode 合同为主；非基础工具允许直接采用本地 `claude-code-sourcemap` 的 Claude-first 合同，其中 `Skill` 与 `AskUserQuestion` 已作为首批样板落地。
 - [2026-03-31] 在新边界下，`WebFetch` 与 `WebSearch` 明确保留 OpenCode/现有合同，不再按 Claude Code 迁移；剩余候选中 `Agent` 与 `PlanMode` 属于高风险交互级能力，不适合作为下一批低风险切换目标。
+- [2026-03-31] 进一步实施后，`Agent` 已以“对外 `Agent`、对内复用 `call_omo_agent`”的最小闭环落地；这允许保持基础 `task` 工具不变，同时把非基础代理调用收口为 Claude-first 合同。
 
 - [2026-03-30] `services/agent-gateway/src/routes/stream.ts` 已按职责拆分：核心流执行逻辑保留在 `stream.ts`，恢复/后台运行迁至 `stream-runtime.ts`，路由注册迁至 `stream-routes-plugin.ts`，以满足单文件 ≤1500 行约束并降低后续耦合。
 

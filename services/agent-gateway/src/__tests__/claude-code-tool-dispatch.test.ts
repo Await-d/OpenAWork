@@ -132,6 +132,31 @@ describe('dispatchClaudeCodeTool', () => {
     });
   });
 
+  it('normalizes Agent input to call_omo_agent', () => {
+    const result = dispatchClaudeCodeTool('Agent', {
+      description: 'Review gateway',
+      prompt: 'Inspect the gateway implementation for tool drift',
+      subagent_type: 'oracle',
+      run_in_background: false,
+      session_id: 'ses_123',
+    });
+
+    expect(result).toEqual({
+      kind: 'resolved',
+      normalized: {
+        canonicalName: 'call_omo_agent',
+        normalizedFields: {
+          description: 'Review gateway',
+          prompt: 'Inspect the gateway implementation for tool drift',
+          subagent_type: 'oracle',
+          run_in_background: false,
+          session_id: 'ses_123',
+        },
+        remapped: true,
+      },
+    });
+  });
+
   it('returns unsupported for low-compat tools', () => {
     const result = dispatchClaudeCodeTool('WebFetch', {
       url: 'https://example.com',

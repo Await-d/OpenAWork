@@ -64,7 +64,7 @@ describe('buildGatewayToolDefinitions', () => {
         'ast_grep_search',
         'ast_grep_replace',
         'interactive_bash',
-        'call_omo_agent',
+        'Agent',
         'skill_mcp',
         'look_at',
         'write',
@@ -180,7 +180,7 @@ describe('buildGatewayToolDefinitions', () => {
       'lang',
     ]);
     expect(byName.get('interactive_bash')?.function.parameters.required).toEqual(['tmux_command']);
-    expect(byName.get('call_omo_agent')?.function.parameters.required).toEqual([
+    expect(byName.get('Agent')?.function.parameters.required).toEqual([
       'description',
       'prompt',
       'subagent_type',
@@ -340,7 +340,7 @@ describe('ClaudeCodeToolSurface profiles', () => {
     expect(PRESENTED_TO_CANONICAL['TaskUpdate']).toBe('task_update');
     expect(PRESENTED_TO_CANONICAL['Skill']).toBe('skill');
     expect(PRESENTED_TO_CANONICAL['AskUserQuestion']).toBe('question');
-    expect(PRESENTED_TO_CANONICAL['Agent']).toBe('task');
+    expect(PRESENTED_TO_CANONICAL['Agent']).toBe('call_omo_agent');
   });
 
   it('CANONICAL_TO_PRESENTED is the inverse of PRESENTED_TO_CANONICAL (first occurrence)', () => {
@@ -371,7 +371,7 @@ describe('ClaudeCodeToolSurface profiles', () => {
     expect(defaults?.has('write')).toBe(true);
     expect(defaults?.has('task_create')).toBe(true);
     expect(defaults?.has('question')).toBe(true);
-    expect(defaults?.has('call_omo_agent')).toBe(false);
+    expect(defaults?.has('call_omo_agent')).toBe(true);
   });
 
   it('isValidProfileName returns true for valid profiles', () => {
@@ -473,6 +473,7 @@ describe('claude-code-tool-surface helpers', () => {
         'Skill',
         'AskUserQuestion',
         'task',
+        'Agent',
       ]),
     );
     expect(names).not.toContain('call_omo_agent');

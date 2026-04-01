@@ -62,5 +62,5 @@
 - 所有子开发流在需要参考 Claude Code 工具行为、名称或入参格式时，只能读取本地 `temp/claude-code-sourcemap`，不得使用网络资料。
 - 子开发流失败恢复策略：保留上下文，沿用原 `session_id` 续跑，先检查上次是否已有部分落地，再继续修复。
 - 当前已切回主线程直接实施；子代理路线终止，不再继续扩散并行子会话。
-- 当前执行策略：基础工具保持 OpenCode-first，非基础工具按 Claude-first 逐把推进。已完成：`Skill`、`AskUserQuestion`；`WebFetch`、`WebSearch` 已冻结为保留现有合同。
-- 路线进一步冻结后：`WebFetch`、`WebSearch` 保持 OpenCode/现有合同，不作为 Claude-first 迁移目标；剩余 `Agent`、`EnterPlanMode`、`ExitPlanMode` 因为牵涉子任务运行时与交互模型，当前仅保留分析结论，不作为下一批低风险实现项。
+- 当前执行策略：基础工具保持 OpenCode-first，非基础工具按 Claude-first 逐把推进。已完成：`Skill`、`AskUserQuestion`、`Agent`；`WebFetch`、`WebSearch` 已冻结为保留现有合同。
+- 路线进一步冻结后：`WebFetch`、`WebSearch` 保持 OpenCode/现有合同，不作为 Claude-first 迁移目标；`Agent` 已以“对外单一 Agent 合同、对内复用 call_omo_agent”的最小闭环落地；剩余 `EnterPlanMode`、`ExitPlanMode` 仍因交互模型复杂度较高，仅保留分析结论。

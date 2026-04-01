@@ -71,6 +71,7 @@ import type { ClaudeCodeProfileName } from './claude-code-tool-surface-profiles.
 const CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES = {
   skill: 'Skill',
   question: 'AskUserQuestion',
+  call_omo_agent: 'Agent',
 } as const;
 
 export function getVisibleToolName(toolName: string): string {
@@ -849,7 +850,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         required: ['tmux_command'],
         additionalProperties: false,
       };
-    case 'call_omo_agent':
+    case 'Agent':
       return {
         type: 'object',
         properties: {

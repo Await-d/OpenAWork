@@ -127,6 +127,15 @@ vi.mock('../tool-definitions.js', () => ({
     {
       type: 'function',
       function: {
+        name: 'Agent',
+        description: 'agent tool',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'task',
         description: 'task tool',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
@@ -242,6 +251,9 @@ describe('listCapabilitiesForUser', () => {
     const questionTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'AskUserQuestion',
     );
+    const agentTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'Agent',
+    );
     const taskTools = capabilities.filter((item) => item.kind === 'tool' && item.label === 'task');
     const backgroundOutputTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'background_output',
@@ -280,6 +292,8 @@ describe('listCapabilitiesForUser', () => {
     expect(applyPatchTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(questionTools).toHaveLength(1);
     expect(questionTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(agentTools).toHaveLength(1);
+    expect(agentTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(taskTools).toHaveLength(1);
     expect(taskTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(backgroundOutputTools).toHaveLength(1);

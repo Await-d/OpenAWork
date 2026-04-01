@@ -70,9 +70,9 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
   },
   {
     presentedName: 'Agent',
-    canonicalName: null,
-    compatLevel: 'low',
-    note: 'The current gateway uses task/call_omo_agent instead of a direct Agent equivalent.',
+    canonicalName: 'call_omo_agent',
+    compatLevel: 'medium',
+    note: 'The current gateway supports a subset of the Claude Code Agent contract via call_omo_agent.',
   },
   {
     presentedName: 'EnterPlanMode',
@@ -340,6 +340,20 @@ export function normalizeInputForCanonical(
         canonicalName: 'question',
         normalizedFields: {
           ...(normalizedQuestions !== undefined ? { questions: normalizedQuestions } : {}),
+        },
+        remapped: true,
+      };
+    }
+    case 'Agent': {
+      const { description, prompt, subagent_type, run_in_background, session_id } = rawInput;
+      return {
+        canonicalName: 'call_omo_agent',
+        normalizedFields: {
+          ...(description !== undefined ? { description } : {}),
+          ...(prompt !== undefined ? { prompt } : {}),
+          ...(subagent_type !== undefined ? { subagent_type } : {}),
+          ...(run_in_background !== undefined ? { run_in_background } : {}),
+          ...(session_id !== undefined ? { session_id } : {}),
         },
         remapped: true,
       };
