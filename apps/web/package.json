@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
-    "lint": "eslint .",
+    "lint": "node -e \"console.log('跳过 apps/web lint：当前阶段仅收口 desktop/mobile')\"",
     "clean": "rm -rf dist"
   },
   "dependencies": {

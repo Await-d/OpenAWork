@@ -63,13 +63,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" lint
+        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" lint
 
       - name: Format check
         run: pnpm format:check
 
       - name: Typecheck
-        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" typecheck
+        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" typecheck
 
   test:
     name: Unit Tests

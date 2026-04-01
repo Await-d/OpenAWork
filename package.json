@@ -48,7 +48,15 @@
       "eslint --no-warn-ignored",
       "prettier --check"
     ],
-    "apps/**/*.{ts,tsx}": [
+    "apps/desktop/**/*.{ts,tsx}": [
+      "eslint --no-warn-ignored",
+      "prettier --check"
+    ],
+    "apps/mobile/**/*.{ts,tsx}": [
+      "eslint --no-warn-ignored",
+      "prettier --check"
+    ],
+    "apps/web/**/*.{ts,tsx}": [
       "prettier --check"
     ],
     "**/*.{js,json,md,yaml,yml}": [

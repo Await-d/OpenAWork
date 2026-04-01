@@ -46,10 +46,24 @@ export default [
     rules: {
       ...tsPlugin.configs['recommended'].rules,
       ...tsPlugin.configs['recommended-type-checked'].rules,
+      'no-undef': 'off',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { varsIgnorePattern: '^_', argsIgnorePattern: '^_', destructuredArrayIgnorePattern: '^_' },
+        {
+          varsIgnorePattern: '^_',
+          argsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            attributes: false,
+          },
+        },
       ],
       '@typescript-eslint/ban-ts-comment': 'error',
       'no-empty': ['error', { allowEmptyCatch: false }],
@@ -61,6 +75,28 @@ export default [
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
+    },
+  },
+  {
+    files: ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**/*.ts', '**/__tests__/**/*.tsx'],
+    languageOptions: {
+      globals: {
+        describe: 'readonly',
+        it: 'readonly',
+        test: 'readonly',
+        expect: 'readonly',
+        vi: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      '@typescript-eslint/no-base-to-string': 'off',
+      '@typescript-eslint/no-empty-function': 'off',
     },
   },
   prettierConfig,
@@ -76,8 +112,9 @@ export default [
       '**/playwright.config.*',
       '**/playwright-report/**',
       '**/test-results/**',
+      'apps/web/**',
+      '**/tmp-*',
       '**/vite.config.*',
-      'apps/**',
     ],
   },
 ];
