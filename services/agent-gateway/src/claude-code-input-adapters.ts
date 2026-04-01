@@ -48,13 +48,13 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
     presentedName: 'WebFetch',
     canonicalName: 'webfetch',
     compatLevel: 'low',
-    note: 'Reference WebFetch uses prompt-driven semantics that the local webfetch tool does not match yet.',
+    note: 'WebFetch is intentionally kept on the OpenCode/local contract and is not migrated to the Claude-first prompt-driven variant.',
   },
   {
     presentedName: 'WebSearch',
     canonicalName: 'websearch',
     compatLevel: 'low',
-    note: 'Reference WebSearch supports allowed/blocked domains semantics not implemented locally.',
+    note: 'WebSearch is intentionally kept on the OpenCode/local contract and is not migrated to the Claude-first search semantics.',
   },
   {
     presentedName: 'Skill',

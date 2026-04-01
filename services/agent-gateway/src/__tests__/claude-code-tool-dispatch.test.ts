@@ -141,7 +141,7 @@ describe('dispatchClaudeCodeTool', () => {
     expect(result.kind).toBe('unsupported');
     if (result.kind === 'unsupported') {
       expect(result.result.presentedName).toBe('WebFetch');
-      expect(result.result.hint).toContain('prompt-driven semantics');
+      expect(result.result.hint).toContain('kept on the OpenCode/local contract');
     }
   });
 });
