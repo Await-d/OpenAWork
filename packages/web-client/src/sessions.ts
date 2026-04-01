@@ -105,6 +105,7 @@ export interface SessionsClient {
     sessionId: string,
     taskId: string,
   ): Promise<{ cancelled: boolean; stopped: boolean }>;
+  stopActiveStream(token: string, sessionId: string): Promise<boolean>;
   stopStream(token: string, sessionId: string, clientRequestId: string): Promise<boolean>;
   importSession(token: string, data: unknown): Promise<{ sessionId: string }>;
 }
@@ -271,6 +272,18 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       });
       if (!res.ok) {
         throw new HttpError(`Failed to stop stream: ${res.status}`, res.status);
+      }
+      const data = (await res.json()) as { stopped?: boolean };
+      return data.stopped === true;
+    },
+
+    async stopActiveStream(token, sessionId) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/stream/stop-active`, {
+        method: 'POST',
+        headers: authHeader(token),
+      });
+      if (!res.ok) {
+        throw new HttpError(`Failed to stop active stream: ${res.status}`, res.status);
       }
       const data = (await res.json()) as { stopped?: boolean };
       return data.stopped === true;

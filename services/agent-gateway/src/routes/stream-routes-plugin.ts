@@ -13,7 +13,10 @@ import {
   createStreamErrorChunk,
 } from './stream.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
-import { stopInFlightStreamRequest } from './stream-cancellation.js';
+import {
+  stopAnyInFlightStreamRequestForSession,
+  stopInFlightStreamRequest,
+} from './stream-cancellation.js';
 
 export async function streamRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -43,6 +46,32 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       if (stopped) {
         clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
       }
+      return reply.status(200).send({ stopped });
+    },
+  );
+
+  app.post(
+    '/sessions/:id/stream/stop-active',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const sessionId = (request.params as { id: string }).id;
+      const sessionRow = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!sessionRow) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const stopped = await stopAnyInFlightStreamRequestForSession({
+        sessionId,
+        userId: user.sub,
+      });
+      if (stopped) {
+        clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
+      }
+
       return reply.status(200).send({ stopped });
     },
   );

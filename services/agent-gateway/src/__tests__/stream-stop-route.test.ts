@@ -209,6 +209,54 @@ describe('stream stop route', () => {
     expect(JSON.parse(stopRes.body)).toEqual({ stopped: false });
   });
 
+  it('aborts any active in-flight stream for the authenticated session owner', async () => {
+    const abortController = new AbortController();
+    const execution = new Promise<{ statusCode: number }>((resolve) => {
+      abortController.signal.addEventListener(
+        'abort',
+        () => {
+          resolve({ statusCode: 200 });
+        },
+        { once: true },
+      );
+    });
+
+    registerInFlightStreamRequest({
+      abortController,
+      clientRequestId: 'req-stop-active-1',
+      execution,
+      sessionId: 'session-1',
+      userId: 'user-1',
+    });
+
+    const stopRes = await app!.inject({
+      method: 'POST',
+      url: '/sessions/session-1/stream/stop-active',
+      headers: { authorization: 'Bearer token-123' },
+    });
+
+    expect(stopRes.statusCode).toBe(200);
+    expect(JSON.parse(stopRes.body)).toEqual({ stopped: true });
+    expect(abortController.signal.aborted).toBe(true);
+
+    clearInFlightStreamRequest({
+      clientRequestId: 'req-stop-active-1',
+      execution,
+      sessionId: 'session-1',
+    });
+  });
+
+  it('returns stopped=false when stop-active finds no running request', async () => {
+    const stopRes = await app!.inject({
+      method: 'POST',
+      url: '/sessions/session-1/stream/stop-active',
+      headers: { authorization: 'Bearer token-123' },
+    });
+
+    expect(stopRes.statusCode).toBe(200);
+    expect(JSON.parse(stopRes.body)).toEqual({ stopped: false });
+  });
+
   it('rejects stop requests for sessions not owned by the current user', async () => {
     const stopRes = await app!.inject({
       method: 'POST',
