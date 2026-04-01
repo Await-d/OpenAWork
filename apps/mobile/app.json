@@ -2,6 +2,7 @@
   "expo": {
     "name": "OpenAWork",
     "slug": "openAwork",
+    "scheme": "openawork",
     "version": "0.2.0",
     "orientation": "portrait",
     "platforms": ["ios", "android"],

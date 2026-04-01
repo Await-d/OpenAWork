@@ -5,11 +5,13 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-native",
+    "baseUrl": ".",
     "outDir": "./dist",
     "skipLibCheck": true,
     "paths": {
       "@openAwork/shared": ["../../packages/shared/src/index.ts"],
-      "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"]
+      "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"],
+      "@openAwork/web-client": ["../../packages/web-client/src/index.ts"]
     }
   },
   "include": ["src", "app", "app.config.ts"],
