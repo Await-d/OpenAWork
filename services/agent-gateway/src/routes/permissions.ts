@@ -315,12 +315,39 @@ function parseApprovedPermissionResumePayload(
     }
 
     const requestData = permissionResumeRequestSchema.parse(requestDataCandidate);
+    const observabilityCandidate =
+      parsed['observability'] && typeof parsed['observability'] === 'object'
+        ? (parsed['observability'] as Record<string, unknown>)
+        : null;
     return {
       clientRequestId,
       nextRound,
       requestData,
       toolCallId,
       rawInput,
+      ...(observabilityCandidate
+        ? {
+            observability: {
+              presentedToolName:
+                typeof observabilityCandidate['presentedToolName'] === 'string'
+                  ? observabilityCandidate['presentedToolName']
+                  : 'unknown',
+              canonicalToolName:
+                typeof observabilityCandidate['canonicalToolName'] === 'string'
+                  ? observabilityCandidate['canonicalToolName']
+                  : 'unknown',
+              toolSurfaceProfile:
+                observabilityCandidate['toolSurfaceProfile'] === 'claude_code_simple' ||
+                observabilityCandidate['toolSurfaceProfile'] === 'claude_code_default'
+                  ? observabilityCandidate['toolSurfaceProfile']
+                  : 'openawork',
+              adapterVersion:
+                typeof observabilityCandidate['adapterVersion'] === 'string'
+                  ? observabilityCandidate['adapterVersion']
+                  : '1.0.0',
+            },
+          }
+        : {}),
     };
   } catch {
     return null;

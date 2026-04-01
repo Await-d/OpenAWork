@@ -118,7 +118,10 @@ import { createPermissionAskedEvent } from './session-permission-events.js';
 import { createQuestionAskedEvent } from './session-question-events.js';
 import { publishSessionRunEvent } from './session-run-events.js';
 import { reconcileSessionStateStatus } from './session-runtime-state.js';
-import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import {
+  extractToolSurfaceProfile,
+  parseSessionMetadataJson,
+} from './session-workspace-metadata.js';
 import {
   isGatewayToolEnabledForSessionMetadata,
   isPlanModeToolEnabledForSessionMetadata,
@@ -279,6 +282,12 @@ interface PermissionRequestPayload {
   requestData: Record<string, unknown>;
   toolCallId: string;
   rawInput: Record<string, unknown>;
+  observability?: {
+    presentedToolName: string;
+    canonicalToolName: string;
+    toolSurfaceProfile: 'openawork' | 'claude_code_simple' | 'claude_code_default';
+    adapterVersion: string;
+  };
 }
 
 interface TaskBackgroundRunResult {
@@ -1806,6 +1815,11 @@ async function executeGatewayManagedTool(
               requestData: executionContext.requestData,
               toolCallId: request.toolCallId,
               rawInput,
+              observability: buildToolObservability({
+                canonicalToolName: 'question',
+                metadata: getSessionMetadata(sessionId),
+                presentedToolName: request.toolName,
+              }),
             }
           : undefined;
       const title = buildQuestionRequestTitle(parsed.data);
@@ -1943,6 +1957,11 @@ async function executeGatewayManagedTool(
               requestData: executionContext.requestData,
               toolCallId: request.toolCallId,
               rawInput,
+              observability: buildToolObservability({
+                canonicalToolName: exitPlanModeToolDefinition.name,
+                metadata,
+                presentedToolName: request.toolName,
+              }),
             }
           : undefined;
 
@@ -3146,6 +3165,19 @@ function isPlanModeEnabled(metadata: Record<string, unknown>): boolean {
   return metadata['planMode'] === true;
 }
 
+function buildToolObservability(input: {
+  canonicalToolName: string;
+  metadata: Record<string, unknown>;
+  presentedToolName: string;
+}): NonNullable<PermissionRequestPayload['observability']> {
+  return {
+    presentedToolName: input.presentedToolName,
+    canonicalToolName: input.canonicalToolName,
+    toolSurfaceProfile: extractToolSurfaceProfile(input.metadata),
+    adapterVersion: '1.0.0',
+  };
+}
+
 function findApprovedPermission(
   sessionId: string,
   toolName: string,
@@ -3331,6 +3363,11 @@ function ensurePermissionForTool(
           requestData: executionContext.requestData,
           toolCallId: request.toolCallId,
           rawInput: request.rawInput as Record<string, unknown>,
+          observability: buildToolObservability({
+            canonicalToolName: request.toolName,
+            metadata: sessionMetadata,
+            presentedToolName: request.toolName,
+          }),
         }
       : undefined;
 

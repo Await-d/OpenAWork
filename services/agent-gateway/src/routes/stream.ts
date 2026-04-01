@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
-import type { FileDiffContent, MessageContent, RunEvent } from '@openAwork/shared';
+import type {
+  FileDiffContent,
+  MessageContent,
+  RunEvent,
+  ToolCallObservabilityAnnotation,
+} from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { sqliteGet, sqliteRun } from '../db.js';
@@ -142,6 +147,7 @@ export interface ApprovedPermissionResumePayload {
   toolCallId: string;
   toolName: string;
   rawInput: Record<string, unknown>;
+  observability?: ToolCallObservabilityAnnotation;
 }
 
 export interface SessionStreamContext {

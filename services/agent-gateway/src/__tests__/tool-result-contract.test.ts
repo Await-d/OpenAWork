@@ -36,13 +36,13 @@ describe('tool-result-contract', () => {
     expect(
       buildToolResultRunEvent({
         toolCallId: 'call-1',
-        toolName: 'task',
+        toolName: 'Agent',
         output: 'done',
         isError: false,
         pendingPermissionRequestId: 'perm-1',
         observability: {
           presentedToolName: 'Agent',
-          canonicalToolName: 'task',
+          canonicalToolName: 'call_omo_agent',
           toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
@@ -55,13 +55,13 @@ describe('tool-result-contract', () => {
     ).toEqual({
       type: 'tool_result',
       toolCallId: 'call-1',
-      toolName: 'task',
+      toolName: 'Agent',
       output: 'done',
       isError: false,
       pendingPermissionRequestId: 'perm-1',
       observability: {
         presentedToolName: 'Agent',
-        canonicalToolName: 'task',
+        canonicalToolName: 'call_omo_agent',
         toolSurfaceProfile: 'claude_code_default',
         adapterVersion: '1.0.0',
       },

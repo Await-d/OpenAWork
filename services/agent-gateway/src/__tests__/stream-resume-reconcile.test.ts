@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { executeMock, reconcileMock } = vi.hoisted(() => ({
-  executeMock: vi.fn(),
-  reconcileMock: vi.fn(),
-}));
+const { appendSessionMessageMock, executeMock, persistRunEventMock, reconcileMock } = vi.hoisted(
+  () => ({
+    appendSessionMessageMock: vi.fn(() => ({ id: 'msg-1' })),
+    executeMock: vi.fn(),
+    persistRunEventMock: vi.fn(),
+    reconcileMock: vi.fn(),
+  }),
+);
 
 vi.mock('../db.js', () => {
   return {
@@ -28,9 +32,61 @@ vi.mock('../tool-sandbox.js', () => ({
   reconcileResumedTaskChildSession: reconcileMock,
 }));
 
+vi.mock('../session-message-store.js', () => ({
+  appendSessionMessage: appendSessionMessageMock,
+  truncateSessionMessagesAfter: vi.fn(),
+}));
+
+vi.mock('../session-run-events.js', () => ({
+  persistSessionRunEventForRequest: persistRunEventMock,
+  subscribeSessionRunEvents: vi.fn(() => () => undefined),
+}));
+
+vi.mock('../routes/capabilities.js', () => ({
+  buildCapabilityContext: vi.fn(() => ''),
+}));
+
+vi.mock('../routes/stream-system-prompts.js', () => ({
+  buildRequestScopedSystemPrompts: vi.fn(() => []),
+}));
+
+vi.mock('../routes/stream.js', () => ({
+  buildWorkspaceContext: vi.fn(async () => null),
+  createRunEventMeta: vi.fn(() => ({ eventId: 'evt-1', runId: 'run-1', occurredAt: 1 })),
+  createStreamExecutionContext: vi.fn((clientRequestId, nextRound, requestData) => ({
+    clientRequestId,
+    nextRound,
+    requestData,
+  })),
+  createTaskRuntimeGuardContext: vi.fn(() => ({
+    lastToolSignature: null,
+    maxConsecutiveRepeatedToolCalls: 0,
+    repeatedToolSignatureCount: 0,
+  })),
+  createToolResultRequestId: vi.fn(() => 'tool-result-request-1'),
+  executeToolCalls: vi.fn(),
+  getEnabledTools: vi.fn(() => []),
+  handleStreamRequest: vi.fn(),
+  isWebSearchEnabled: vi.fn(() => false),
+  loadSessionContext: vi.fn(() => ({ legacyMessagesJson: '[]', metadataJson: '{}' })),
+  loadSessionUser: vi.fn(() => ({ email: 'user-1@example.com' })),
+  resolveStreamModelRoute: vi.fn(),
+  setPersistedSessionStateStatus: vi.fn(),
+  streamRequestSchema: {
+    parse: (value: unknown) => value,
+  },
+}));
+
+vi.mock('../routes/stream-model-round.js', () => ({
+  runModelRound: vi.fn(async () => ({ shouldStop: true, stopReason: 'end_turn', statusCode: 200 })),
+}));
+
 describe('resume reconcile fallback', () => {
   beforeEach(() => {
+    appendSessionMessageMock.mockReset();
+    appendSessionMessageMock.mockReturnValue({ id: 'msg-1' });
     executeMock.mockReset();
+    persistRunEventMock.mockReset();
     reconcileMock.mockReset();
   });
 
@@ -62,5 +118,68 @@ describe('resume reconcile fallback', () => {
       statusCode: 500,
       userId: 'user-1',
     });
+  });
+
+  it('preserves observability when resuming an approved tool result', async () => {
+    executeMock.mockResolvedValue({
+      toolCallId: 'tool-call-1',
+      toolName: 'Agent',
+      output: { ok: true },
+      isError: false,
+      durationMs: 1,
+    });
+    reconcileMock.mockResolvedValue(undefined);
+
+    const { resumeApprovedPermissionRequest } = await import('../routes/stream-runtime.js');
+
+    await resumeApprovedPermissionRequest({
+      payload: {
+        clientRequestId: 'resume-client-2',
+        nextRound: 2,
+        rawInput: { description: 'delegate' },
+        requestData: { clientRequestId: 'resume-client-2', message: 'resume child task' },
+        toolCallId: 'tool-call-1',
+        toolName: 'Agent',
+        observability: {
+          presentedToolName: 'Agent',
+          canonicalToolName: 'call_omo_agent',
+          toolSurfaceProfile: 'claude_code_default',
+          adapterVersion: '1.0.0',
+        },
+      },
+      sessionId: 'child-session-2',
+      userId: 'user-1',
+    });
+
+    expect(appendSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({
+            type: 'tool_result',
+            toolName: 'Agent',
+            observability: {
+              presentedToolName: 'Agent',
+              canonicalToolName: 'call_omo_agent',
+              toolSurfaceProfile: 'claude_code_default',
+              adapterVersion: '1.0.0',
+            },
+          }),
+        ],
+      }),
+    );
+    expect(persistRunEventMock).toHaveBeenCalledWith(
+      'child-session-2',
+      expect.objectContaining({
+        type: 'tool_result',
+        toolName: 'Agent',
+        observability: {
+          presentedToolName: 'Agent',
+          canonicalToolName: 'call_omo_agent',
+          toolSurfaceProfile: 'claude_code_default',
+          adapterVersion: '1.0.0',
+        },
+      }),
+      { clientRequestId: 'resume-client-2' },
+    );
   });
 });

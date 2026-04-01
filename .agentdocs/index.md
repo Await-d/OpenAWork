@@ -123,6 +123,7 @@
 - [2026-03-31] PlanMode 还需要双层 gating：不仅 capability/visible-tools 层要在 task-created 与 channel 会话中隐藏 `EnterPlanMode/ExitPlanMode`，sandbox 运行时也要再次拒绝，防止模型绕过工具列表直接调用。
 - [2026-03-31] `Agent` 与 `PlanMode` 这类高阶工具都需要 session-scoped 双层 gating：capability 列表和 sandbox 运行时必须同时限制 task-created 子会话与 channel 会话，否则会出现 UI 层已隐藏但模型仍可硬调的后端一致性漏洞。
 - [2026-03-31] 对 `ExitPlanMode` 这类基于 `question_requests` 的审批工具，后端检查不能只停在 definition 和 questions route：还需要确认 `session-delete-recovery`、`session-runtime-state`、以及阻止删除的 pending interaction 分支都继续按普通 pending question 处理，否则删除/恢复链会悄悄偏离。
+- [2026-03-31] stream 的恢复链也需要显式保存 observability：如果 `permission_requests` / `question_requests` 的 resume payload 不带 `presentedToolName/canonicalToolName/toolSurfaceProfile`，恢复执行时补写出的 `tool_result` 和 `run_event` 会退化成只有 toolName 的旧语义，导致 Claude-first 工具链在流式事件中丢失可追溯性。
 
 - [2026-03-30] `services/agent-gateway/src/routes/stream.ts` 已按职责拆分：核心流执行逻辑保留在 `stream.ts`，恢复/后台运行迁至 `stream-runtime.ts`，路由注册迁至 `stream-routes-plugin.ts`，以满足单文件 ≤1500 行约束并降低后续耦合。
 

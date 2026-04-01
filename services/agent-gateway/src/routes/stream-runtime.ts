@@ -112,6 +112,7 @@ async function continueFromApprovedToolResult(input: {
           toolName: input.initialToolResult.toolName,
           output: input.initialToolResult.output,
           isError: input.initialToolResult.isError,
+          observability: input.payload.observability,
         }),
       ],
       legacyMessagesJson: sessionContext.legacyMessagesJson,
@@ -136,6 +137,7 @@ async function continueFromApprovedToolResult(input: {
         toolName: input.initialToolResult.toolName,
         output: input.initialToolResult.output,
         isError: input.initialToolResult.isError,
+        observability: input.payload.observability,
         eventMeta: createRunEventMeta(runId, eventSequence),
       }),
     );

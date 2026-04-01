@@ -68,3 +68,4 @@
 - PlanMode 后端 gating 已补齐：对 `createdByTool='task'` 的子会话以及 channel 会话，`EnterPlanMode/ExitPlanMode` 在 capability 过滤和 sandbox 执行两层都被明确禁用，避免误暴露和绕过调用。
 - Agent 后端 gating 现也补齐到同一层级：`Agent` 在 task-created 子会话与 channel 会话中都会被 capability 过滤和 sandbox 运行时同时限制，防止嵌套子代理链在不受支持的会话上下文里继续扩散。
 - 后端运行态回归已延伸到 delete/recovery 与 pending interaction：`session-delete-recovery` 显式覆盖 `question_requests` 清理路径，`session-runtime-state` 显式覆盖 pending ExitPlanMode question 视为 paused 交互；`session-workspace-routes` 也已把待删除会话上的 pending question 示例更新为 `ExitPlanMode` 记录。
+- stream 恢复链的一致性也已补齐：permission/question resume payload 现在会携带 observability，`stream-runtime` 在补写 `tool_result` / `run_event` 时会保留 `presentedToolName/canonicalToolName/toolSurfaceProfile`，不再在恢复执行时丢失 Claude-first 工具语义。

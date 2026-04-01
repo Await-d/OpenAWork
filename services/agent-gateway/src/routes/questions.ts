@@ -239,6 +239,42 @@ function parseQuestionResumePayload(
       toolCallId,
       rawInput,
       requestData: requestDataCandidate,
+      ...(parsed['observability'] && typeof parsed['observability'] === 'object'
+        ? {
+            observability: {
+              presentedToolName:
+                typeof (parsed['observability'] as Record<string, unknown>)['presentedToolName'] ===
+                'string'
+                  ? ((parsed['observability'] as Record<string, unknown>)[
+                      'presentedToolName'
+                    ] as string)
+                  : 'unknown',
+              canonicalToolName:
+                typeof (parsed['observability'] as Record<string, unknown>)['canonicalToolName'] ===
+                'string'
+                  ? ((parsed['observability'] as Record<string, unknown>)[
+                      'canonicalToolName'
+                    ] as string)
+                  : 'unknown',
+              toolSurfaceProfile:
+                (parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] ===
+                  'claude_code_simple' ||
+                (parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] ===
+                  'claude_code_default'
+                  ? ((parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] as
+                      | 'claude_code_simple'
+                      | 'claude_code_default')
+                  : 'openawork',
+              adapterVersion:
+                typeof (parsed['observability'] as Record<string, unknown>)['adapterVersion'] ===
+                'string'
+                  ? ((parsed['observability'] as Record<string, unknown>)[
+                      'adapterVersion'
+                    ] as string)
+                  : '1.0.0',
+            },
+          }
+        : {}),
     } as Omit<ApprovedPermissionResumePayload, 'toolName'>;
   } catch {
     return null;
