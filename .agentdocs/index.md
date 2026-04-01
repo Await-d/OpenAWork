@@ -2,6 +2,8 @@
 
 ## 活跃工作流
 
+- [260402-对话级文件变更记录保障融合方案](./workflow/260402-对话级文件变更记录保障融合方案.md) — 为 OpenAWork 冻结“SQLite 主真相源 + 写前原文备份兜底 + 统一读模型/恢复链”的对话级文件变更详细记录与保障实施方案
+
 - [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout
 
 - [260331-聊天刷新恢复与运行控制方案](./workflow/260331-聊天刷新恢复与运行控制方案.md) — 为 Chat 对话页冻结“待发队列持久化 + 刷新后运行控制恢复 + stopCapability 三态 + UI 明示可控性”的正式实施方案，优先解决刷新后队列丢失与无法管理 running 会话的问题
@@ -23,6 +25,9 @@
 
 ## 归档工作流（已完成）
 
+- [260402-usage持久化回归修复](./workflow/done/260402-usage持久化回归修复.md) — 按既有 usage 方案设计修复 `verify-openai-responses.ts` 的 usage persistence 回归：`runModelRound` 现向上返回 round usage，`stream.ts`/`stream-runtime.ts` 已恢复 `usage_records` 月度写入，`agent-gateway` 全量测试重新通过
+- [260402-opencode-claude-任务体系修复收口](./workflow/done/260402-opencode-claude-任务体系修复收口.md) — 修复 OpenCode/Claude 任务体系主线的 shared/gateway 合同断裂、replay/bookend durable replay 判定与 session runtime state 测试漂移；相关类型检查、构建与定点验证已恢复为绿，完整 gateway 套件仍受 usage 链路的现有失败阻塞
+- [260402-opencode-claude-任务体系完成度核查](./workflow/done/260402-opencode-claude-任务体系完成度核查.md) — 对 `260401-opencode-claude-任务体系完整融合方案` 做仓库级完成度审计后确认：当前工作树并非“全部完成”，主要反证为 shared/gateway 合同断裂、stream replay 验证失败、以及 agent-gateway 的 typecheck/build/test 未全绿
 - [260401-opencode-claude-任务体系完整融合方案](./workflow/done/260401-opencode-claude-任务体系完整融合方案.md) — 以 fusion-native first 完成 OpenCode 与 Claude Code 任务体系主线实施：D-01～D-11 已落地并通过验证；D-12 importer/translator 因“旧版本不需要兼容”决策而未开启
 - [260401-usage写入闭环实现](./workflow/done/260401-usage写入闭环实现.md) — usage 月度记录闭环收口：为 chat-completions 流式请求显式启用 `stream_options.include_usage`，并以真实 Responses/chat 验收证明 `usage_records` 会按月累计写入
 - [260401-apps-真正纳入lint](./workflow/done/260401-apps-真正纳入lint.md) — 让 `apps/desktop`、`apps/mobile` 真正参与 ESLint 检查、lint-staged 与 CI quality 门禁；`apps/web` 按当前阶段性策略暂缓 lint 收口
@@ -32,6 +37,10 @@
 
 ## Architecture Decisions
 
+- [2026-04-02] 对话级文件变更保障方案采用 **`session_run_events + session_file_diffs + session_snapshots` 作为唯一真相源，写前原文备份仅作为恢复兜底层**；不要把独立 snapshot repo、transcript JSONL 或 `structuredPatch` 展示语义升级成并列主事实源。
+
+- [2026-04-02] usage 月度累计的真实写入点必须挂在 **`runModelRound` 的公共调用链** 上：`stream-model-round.ts` 负责产出 round usage，`stream.ts` 与 `stream-runtime.ts` 负责按 round 调用 `persistMonthlyUsageRecord()`；不要把 usage 持久化只绑在单一路由，否则 resume/background 会继续漏账。
+- [2026-04-02] request-scoped durable replay 的 gating 必须以 **最新 durable event 的 `bookend.replayable`** 为准，而不能再用“是否出现 done/error”这种粗粒度终态判断；否则 `interaction_wait` 无法直接回放，而 `tool_handoff` 会被误回放。
 - [2026-04-01] OpenCode 与 Claude Code 的任务体系融合应以 **Task Entity** 为主域对象；OpenCode `task` 与 Claude `Agent` 都降级为 `TaskRun` 执行动作，不能继续把工具名本身当作域核心。
 - [2026-04-01] 融合后的统一核心只吸收 `Task lifecycle / TaskRun / Interaction / PlanTransition / 最小后台运行控制面`；OpenCode 的 session-level `todowrite`、Claude 的文件型 tasks 与 `diskOutput/polling/eviction` 都保留为扩展层，而不是核心标准。
 - [2026-04-01] 任务体系后续实施采用 **fusion-native first**：旧版本 OpenCode / Claude Code surface 只作为语义来源与迁移输入，不再作为长期兼容目标；先定义新合同，再按需编写 importer / translator。
@@ -126,6 +135,12 @@
 
 ## Known Pitfalls
 
+- [2026-04-02] 做对话级文件变更记录时，最容易犯的错误不是“记得不够多”，而是**让展示层反客为主**：`structuredPatch`、tool result 摘要、甚至 transcript/JSONL 都适合展示和诊断，但不能替代 SQLite durable 主链；否则恢复、审计和 request-scoped replay 会很快漂移。
+
+- [2026-04-02] `.agentdocs/workflow/done/260401-usage写入闭环实现.md` 这类归档文档即使写着“主链已接通”，也不能替代对当前代码的复验；本次实际代码已经回退到“`stream-model-round` 不再返回 usage、`stream.ts/stream-runtime.ts` 不再写 `usage_records`”，直到重新验证 `verify-openai-responses.ts + pnpm run test` 才确认真正恢复。
+- [2026-04-02] 当 `packages/shared` 的导出合同变更后，若 `services/agent-gateway` 仍只跑裸 `tsc`，TypeScript 很容易继续吃旧声明；gateway 已切到 `tsc -b`，后续独立构建应保持 build mode，避免把“过期声明”误判成代码未修复。
+- [2026-04-02] 如果 `tool_result` 只保存 `output` 而不把 `clientRequestId/fileDiffs/observability` 一起持久化，`stream replay` 与会话消息重载时会天然丢掉 request → tool → file 的 trace 语义；`tool_result` 必须被视为 durable trace 载体，而不只是展示结果。
+- [2026-04-02] `.agentdocs/workflow/done` 与 `index.md` 中的“已完成”只能证明文档流程已归档，不能证明当前工作树真实完成；审计时必须同时检查 `git status`、`typecheck/build/test` 与关键 verification 脚本，尤其是 shared 合同导出与 stream replay/bookend 链路。
 - [2026-04-01] Chat Completions 的流式 usage 不能只实现解析逻辑：OpenAI 语义要求请求体显式带 `stream_options.include_usage=true`，否则最后的 usage chunk 默认不会返回；如果只在 `stream-protocol.ts` 里写了解析，但没在 `upstream-request.ts` 打开这个选项，`usage_records` 在 chat 路径上仍会长期缺数。
 - [2026-04-01] 即使已经在 chat 请求默认值里加入 `stream_options.include_usage=true`，也不能假设它会一直保留：`applyRequestOverridesToBody()` 若先合并外部 `requestOverrides.body.stream_options`，后续没有再做强制 merge，就可能把 `include_usage` 悄悄覆盖掉，导致 usage 写入回归失效。
 - [2026-04-01] usage 相关能力不能只看页面是否已挂载：当前 `UsagePage` / `Settings usage` 虽已接通读取接口，但 `usage_records` 仍无写入实现，`/usage/breakdown` 固定返回空明细，`ModelPriceConfig` 在 settings 中也是 `onUpdate={() => undefined}` 的假可编辑状态，极易误判为“功能已完整落地”。

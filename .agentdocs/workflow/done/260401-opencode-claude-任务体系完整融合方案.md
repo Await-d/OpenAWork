@@ -737,6 +737,15 @@ D-08 + D-09 + D-10
 - Memory sync: completed
 - 该方案故意不把任何一侧的存储形态写入核心模型，避免过早锁死实现。
 - 若后续进入实施，应先出“统一类型定义草案”，再进入 gateway/runtime/UI 接线。
+- 当前代码进度已推进到 D-09：`packages/shared/src/index.ts` 新增 `RunEventEnvelope/bookend` 合同，`services/agent-gateway/src/run-event-envelope.ts` 与 `session-run-events.ts` 开始按 fusion-native envelope 组装 durable run event，`routes/stream.ts` durable replay 改为根据最新 bookend 判断是否可回放，从而覆盖终态 replay 与等待中的 permission/question 交互回放。
+- 当前代码进度已推进到 D-10：`services/agent-gateway/src/tool-definitions.ts` 以 profile-aware 方式统一生成 canonical/presented surface，`routes/capabilities.ts`、`routes/tools.ts`、`routes/stream.ts`、`routes/stream-runtime.ts` 改为按 session `toolSurfaceProfile` 选择 surface；`session-tool-visibility.ts` 与 `routes/tool-name-compat.ts` 统一按 canonical 归一化后再做启用判定；同时已补齐 `claude_code_*` profile 下 `Read/WebFetch/WebSearch` 的 adapter，确保 profile 暴露名真正可执行。
+- 当前代码进度已推进到 D-11：`services/agent-gateway/src/verification/verify-claude-first-tools.ts` 新增 `/tools`、`/capabilities`、stream surface 与 `Read/WebFetch/WebSearch` 的 ATDD 覆盖；`verify-stream-replay-bookend.ts` 覆盖 `interaction_wait` vs `tool_handoff` 的 replay/bookend gating；`verify-session-delete-child-detach.ts` 现在显式验证删除 session 树前会停止 descendant in-flight stream；`package.json` 已把 `verify-session-single-flight.ts` 与 `verify-stream-replay-bookend.ts` 纳入 `test:responses`。
+- 归档后又追加了一轮“检测 / 复查 / 到 ATDD”补强：`verify-claude-first-tools.ts` 现补充 session-scoped `/capabilities` 的 canonical 缺席断言，以及 stream surface 在 `webSearchEnabled=true` 时仍保持 presented names、不泄露 canonical names 的断言；`verify-stream-replay-bookend.ts` 现补充 `interaction_resumed` 非 replay 分支；`verify-session-single-flight.ts` 现显式证明第二次冲突请求不会命中 upstream，且 cancel 后第三次请求可重新启动。
+- 仍然保留的环境 gate：`tools-routes.test.ts`、`capabilities-routes.test.ts`、`capabilities-canonical-role.integration.test.ts` 在当前 Node/vitest 解析 `sqlite` 受限条件下继续 skip，但其关键行为已由 D-11 verification 脚本替代覆盖。
+- D-11 完成后，主线实施已闭环；由于用户已明确“对于旧版本的不需要兼容进行整体的调整即可，优先方案融合第一”，D-12 importer / translator 本轮明确标记为**不执行**，不作为完成门槛。
 - 本轮复核后，方案已显式补入：Session 作为执行边界、Task 与 TaskRun 的 `1:N` 关系、Permission/Question 双阻塞源、delivery/cursor/bookend、以及 OpenCode/Claude Code 两侧的兼容验收清单。
 - 最新决策已明确：后续实现采用 **fusion-native first**，不再以旧版本接口兼容为目标；旧体系只保留为语义来源与迁移输入。
-- `T-11` 已展开为可执行 DAG；下一步不再需要继续抽象讨论，应直接进入 `D-01` 合同冻结实施。
+- `T-11` 已展开为可执行 DAG，并已沿 D-01～D-11 全部落地完成；若未来真的出现旧数据导入需求，应另开独立 workflow 处理 D-12，而不是重新打开本主线。
+- 当前实现进度：**Wave 1 已完成**（shared fusion-native contract、agent-core task-system 扩展、gateway task/run contract 与 run-event cursor 骨架已落地并通过 typecheck / gateway 测试）；**Wave 2 已完成最小映射骨架**（SessionContext / Interaction / PlanTransition 的 helper 与 metadata/runtime projection 已落地并通过 gateway 定向测试、typecheck 与 build）。
+- 当前实现进度补充：**D-08 最小实现已落地**（`session-task-projection` 与 `start-work-subtasks` 已开始输出 `subject / kind / revision / idempotencyKey` 等 fusion-native 字段），后续重点转向 D-09 stream/replay 主链与 D-10 对外 surface 收口。
+- 当前归档结论：本 workflow 以 **D-01～D-11 完成并验证通过** 收尾；D-12 因不再需要旧版本兼容/导入而保持未开启状态。
