@@ -287,6 +287,102 @@ export interface CommandExecutionResult {
   sessionId?: string;
 }
 
+export interface TaskOwnership {
+  principalKind: 'user' | 'agent' | 'system' | 'service' | 'session' | 'tool';
+  principalId: string;
+  scope?: string;
+}
+
+export interface TaskEntityRecord {
+  id: string;
+  kind: string;
+  subject: string;
+  description?: string;
+  status: string;
+  ownership?: TaskOwnership;
+  createdBy?: TaskOwnership;
+  assignedBy?: TaskOwnership;
+  executor?: TaskOwnership;
+  parentTaskId?: string;
+  blockedBy: string[];
+  blocks?: string[];
+  revision: number;
+  idempotencyKey?: string;
+  causationId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TaskRunRecord {
+  runId: string;
+  taskId?: string;
+  mode: 'sync' | 'async' | 'background' | 'remote' | 'worktree';
+  presentationMode: 'foreground' | 'background';
+  executorType: 'subagent' | 'shell' | 'remote' | 'teammate';
+  sessionRef: string;
+  status:
+    | 'pending'
+    | 'running'
+    | 'waiting'
+    | 'cancel_requested'
+    | 'completed'
+    | 'failed'
+    | 'cancelled';
+  deliveryState: 'pending_delivery' | 'delivered' | 'suppressed';
+  outputRef?: string;
+  outputOffset: number;
+  revision: number;
+  idempotencyKey?: string;
+  causationId?: string;
+  bindTaskPolicy?: 'bind-immediately' | 'bind-later' | 'ephemeral-only';
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export interface InteractionRecord {
+  interactionId: string;
+  taskId?: string;
+  runId: string;
+  type: 'question' | 'permission' | 'approval' | 'rejection' | 'clarification';
+  toolCallRef?: string;
+  channel: 'local' | 'mailbox' | 'leader-relay' | 'api';
+  payload?: Record<string, unknown>;
+  feedback?: string;
+  approvalId?: string;
+  approver?: TaskOwnership;
+  decision?: 'approved' | 'rejected' | 'dismissed' | 'expired';
+  planVersion?: string;
+  planHash?: string;
+  causationId?: string;
+  status: 'pending' | 'answered' | 'rejected' | 'expired' | 'dismissed';
+  answeredAt?: number;
+}
+
+export interface PlanTransitionRecord {
+  planRef: string;
+  prePlanMode: boolean;
+  permissionSnapshot?: Record<string, unknown>;
+  approvalChannel?: InteractionRecord['channel'];
+  approvalId?: string;
+  planVersion?: string;
+  planHash?: string;
+  metadata?: Record<string, unknown>;
+  occurredAt?: number;
+}
+
+export interface SessionContextRecord {
+  sessionId: string;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  status: 'idle' | 'busy' | 'retry' | 'paused';
+  currentRunId?: string;
+  planRef?: string;
+  clientSurface?: string;
+  revision: number;
+  updatedAt: number;
+}
+
 export interface TextContent {
   type: 'text';
   text: string;
@@ -303,10 +399,31 @@ export interface ToolResultContent {
   type: 'tool_result';
   toolCallId: string;
   toolName?: string;
+  clientRequestId?: string;
   output: unknown;
   isError: boolean;
+  fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   observability?: ToolCallObservabilityAnnotation;
+}
+
+export type FileChangeGuaranteeLevel = 'strong' | 'medium' | 'weak';
+
+export type FileChangeSourceKind =
+  | 'structured_tool_diff'
+  | 'session_snapshot'
+  | 'restore_replay'
+  | 'workspace_reconcile'
+  | 'manual_revert';
+
+export type FileBackupKind = 'before_write' | 'after_write' | 'snapshot_base';
+
+export interface FileBackupRef {
+  backupId: string;
+  kind: FileBackupKind;
+  storagePath?: string;
+  artifactId?: string;
+  contentHash?: string;
 }
 
 export interface FileDiffContent {
@@ -316,9 +433,14 @@ export interface FileDiffContent {
   additions: number;
   deletions: number;
   status?: 'added' | 'deleted' | 'modified';
+  clientRequestId?: string;
   requestId?: string;
   toolName?: string;
   toolCallId?: string;
+  sourceKind?: FileChangeSourceKind;
+  guaranteeLevel?: FileChangeGuaranteeLevel;
+  backupBeforeRef?: FileBackupRef;
+  backupAfterRef?: FileBackupRef;
   observability?: ToolCallObservabilityAnnotation;
 }
 
@@ -392,8 +514,10 @@ export interface StreamToolResultChunk {
   type: 'tool_result';
   toolCallId: string;
   toolName: string;
+  clientRequestId?: string;
   output: unknown;
   isError: boolean;
+  fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   observability?: ToolCallObservabilityAnnotation;
   eventId?: string;
@@ -506,6 +630,72 @@ export type RunEvent =
   | StreamSessionChildChunk
   | StreamCompactionChunk
   | StreamAuditRefChunk;
+
+export interface RunEventCursor {
+  clientRequestId: string;
+  seq: number;
+}
+
+export type RunEventBookend =
+  | {
+      kind: 'run_completed';
+      terminal: true;
+      replayable: true;
+      stopReason: StreamDoneChunk['stopReason'];
+    }
+  | {
+      kind: 'run_cancelled';
+      terminal: true;
+      replayable: true;
+      stopReason: 'cancelled';
+    }
+  | {
+      kind: 'run_failed';
+      terminal: true;
+      replayable: true;
+    }
+  | {
+      kind: 'interaction_wait';
+      terminal: false;
+      replayable: true;
+      interactionType: 'permission' | 'question';
+      requestId: string;
+    }
+  | {
+      kind: 'interaction_resumed';
+      terminal: false;
+      replayable: false;
+      interactionType: 'permission' | 'question';
+      requestId: string;
+    }
+  | {
+      kind: 'tool_handoff';
+      terminal: false;
+      replayable: false;
+      stopReason: 'tool_use';
+    };
+
+export interface EventEnvelope<TPayload = unknown, TAggregateType extends string = string> {
+  eventId: string;
+  aggregateType: TAggregateType;
+  aggregateId: string;
+  seq: number;
+  version: number;
+  causationId?: string;
+  timestamp: number;
+  payload: TPayload;
+}
+
+export interface RunEventEnvelopePayload {
+  clientRequestId?: string;
+  cursor?: RunEventCursor;
+  deliveryState: TaskRunRecord['deliveryState'];
+  outputOffset: number;
+  bookend?: RunEventBookend;
+  event: RunEvent;
+}
+
+export type RunEventEnvelope = EventEnvelope<RunEventEnvelopePayload, 'run'>;
 
 export interface ApiError {
   code: string;
