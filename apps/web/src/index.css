@@ -351,10 +351,15 @@ textarea {
     background 150ms ease,
     color 150ms ease;
   cursor: pointer;
+  touch-action: manipulation;
 }
 .toolbar-btn:hover {
   background: var(--surface-hover) !important;
   color: var(--text-2) !important;
+}
+.toolbar-btn:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 78%, white 8%);
+  outline-offset: 1px;
 }
 
 .mode-pill-btn {

@@ -3253,8 +3253,8 @@ ${content}
 
   const rightPanelWidth = rightOpen
     ? rightTab === 'agent'
-      ? 'clamp(260px, 34vw, 420px)'
-      : 'clamp(220px, 24vw, 280px)'
+      ? 'clamp(360px, 40vw, 520px)'
+      : 'clamp(320px, 32vw, 400px)'
     : 0;
   const rightPanelMaxWidth = rightOpen ? 'calc(100vw - 88px)' : 0;
 
@@ -3761,57 +3761,115 @@ ${content}
               width: rightPanelWidth,
               maxWidth: rightPanelMaxWidth,
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: 'row',
               height: '100%',
+              minWidth: 0,
+              minHeight: 0,
+              background: 'color-mix(in oklch, var(--surface) 96%, var(--bg) 4%)',
             }}
           >
             <div
+              data-testid="chat-right-nav-rail"
               style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 2,
-                padding: '5px 6px',
-                borderBottom: '1px solid var(--border)',
-                flexShrink: 0,
-              }}
-            >
-              {(
-                [
-                  { id: 'overview', label: '概览' },
-                  { id: 'plan', label: '计划' },
-                  { id: 'tools', label: '工具' },
-                  { id: 'history', label: '历史' },
-                  { id: 'viz', label: '可视化' },
-                  { id: 'mcp', label: 'MCP' },
-                  { id: 'agent', label: '代理' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setRightTab(tab.id)}
-                  className={`toolbar-btn${rightTab === tab.id ? ' active' : ''}`}
-                  style={{
-                    flex: 'none',
-                    height: 24,
-                    padding: '0 6px',
-                    borderRadius: 5,
-                    fontSize: 11,
-                    fontWeight: rightTab === tab.id ? 600 : 400,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflow: rightTab === 'agent' ? 'hidden' : 'auto',
-                padding: rightTab === 'agent' ? 0 : 8,
                 display: 'flex',
                 flexDirection: 'column',
+                alignItems: 'stretch',
+                gap: 6,
+                width: 76,
+                minWidth: 76,
+                padding: '8px 5px',
+                borderRight: '1px solid var(--border)',
+                flexShrink: 0,
+                background:
+                  'linear-gradient(180deg, color-mix(in oklch, var(--surface) 92%, var(--bg) 8%), color-mix(in oklch, var(--surface) 88%, var(--bg) 12%))',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-3)',
+                  padding: '0 5px',
+                }}
+              >
+                面板
+              </div>
+              <div
+                role="tablist"
+                aria-label="右侧面板切换"
+                aria-orientation="vertical"
+                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+              >
+                {(
+                  [
+                    { id: 'overview', label: '概览' },
+                    { id: 'plan', label: '计划' },
+                    { id: 'tools', label: '工具' },
+                    { id: 'history', label: '历史' },
+                    { id: 'viz', label: '可视化' },
+                    { id: 'mcp', label: 'MCP' },
+                    { id: 'agent', label: '代理' },
+                  ] as const
+                ).map((tab) => {
+                  const isActive = rightTab === tab.id;
+
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      aria-controls={`chat-right-panel-${tab.id}`}
+                      id={`chat-right-tab-${tab.id}`}
+                      tabIndex={isActive ? 0 : -1}
+                      onClick={() => setRightTab(tab.id)}
+                      className={`toolbar-btn${isActive ? ' active' : ''}`}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'flex-start',
+                        minHeight: 30,
+                        padding: '6px 7px',
+                        borderRadius: 8,
+                        border: isActive
+                          ? '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))'
+                          : '1px solid transparent',
+                        background: isActive
+                          ? 'color-mix(in oklch, var(--accent) 16%, var(--surface))'
+                          : 'transparent',
+                        color: isActive ? 'var(--accent)' : 'var(--text-2)',
+                        boxShadow: isActive
+                          ? 'inset 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent)'
+                          : 'none',
+                        fontSize: 11,
+                        fontWeight: isActive ? 600 : 500,
+                        whiteSpace: 'nowrap',
+                        textAlign: 'left',
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div
+              role="tabpanel"
+              id={`chat-right-panel-${rightTab}`}
+              aria-labelledby={`chat-right-tab-${rightTab}`}
+              style={{
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+                overflow: rightTab === 'agent' ? 'hidden' : 'auto',
+                padding: rightTab === 'agent' ? 0 : 12,
+                display: 'flex',
+                flexDirection: 'column',
+                background: 'color-mix(in oklch, var(--surface) 98%, var(--bg) 2%)',
               }}
             >
               {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}

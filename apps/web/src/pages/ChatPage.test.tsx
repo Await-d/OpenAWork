@@ -1007,6 +1007,46 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('待办清单');
   });
 
+  it('renders the right panel switcher as a left-side vertical tab rail', async () => {
+    const rendered = await renderChatPage('/chat/session-1');
+    const openPanelButton = rendered.querySelector('button[title="展开面板"]');
+
+    act(() => {
+      openPanelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    const tabList = rendered.querySelector(
+      '[role="tablist"][aria-label="右侧面板切换"]',
+    ) as HTMLDivElement | null;
+    const navRail = rendered.querySelector(
+      '[data-testid="chat-right-nav-rail"]',
+    ) as HTMLDivElement | null;
+    const overviewTab = rendered.querySelector(
+      '#chat-right-tab-overview',
+    ) as HTMLButtonElement | null;
+    const overviewPanel = rendered.querySelector(
+      '#chat-right-panel-overview',
+    ) as HTMLDivElement | null;
+    const panelShell = navRail?.parentElement as HTMLDivElement | null;
+
+    expect(tabList).not.toBeNull();
+    expect(navRail).not.toBeNull();
+    expect(tabList?.getAttribute('aria-orientation')).toBe('vertical');
+    expect(panelShell?.style.flexDirection).toBe('row');
+    expect(navRail?.style.width).toBe('76px');
+    expect(navRail?.textContent).toContain('面板');
+    expect(tabList?.style.flexDirection).toBe('column');
+    expect(overviewTab?.getAttribute('role')).toBe('tab');
+    expect(overviewTab?.getAttribute('aria-selected')).toBe('true');
+    expect(overviewTab?.style.width).toBe('100%');
+    expect(overviewTab?.style.justifyContent).toBe('flex-start');
+    expect(overviewTab?.style.textAlign).toBe('left');
+    expect(overviewPanel?.getAttribute('role')).toBe('tabpanel');
+    expect(overviewPanel?.style.padding).toBe('12px');
+  });
+
   it('syncs the sidebar file tree root with the current session workspace', async () => {
     workspaceMock.workingDirectory = '/repo/alpha';
 
@@ -5077,7 +5117,7 @@ describe('ChatPage', () => {
     const toolsTab = Array.from(rendered.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === '工具',
     );
-    expect(toolsTab?.className).toContain('active');
+    expect(toolsTab?.getAttribute('aria-selected')).toBe('true');
     expect(getMessageRows()).toHaveLength(2);
     const toolRow = getMessageRows().find((row) => row.textContent?.includes('web_search'));
     expect(toolRow?.querySelectorAll('.assistant-rich-content')).toHaveLength(1);
@@ -5169,7 +5209,7 @@ describe('ChatPage', () => {
     const toolsTab = Array.from(rendered.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === '工具',
     );
-    expect(toolsTab?.className).toContain('active');
+    expect(toolsTab?.getAttribute('aria-selected')).toBe('true');
     expect(rendered.textContent).toContain('子代理已经执行完成。');
   });
 
