@@ -15,6 +15,7 @@ import {
   createStreamParseState,
   parseUpstreamFrame,
   ResponsesUpstreamEventError,
+  type StreamUsageSummary,
 } from './stream-protocol.js';
 import { buildRoundSystemMessages } from './stream-system-prompts.js';
 import type { resolveModelRoute } from '../model-router.js';
@@ -160,6 +161,8 @@ export async function runModelRound(input: {
   stopReason: StreamStopReason;
   statusCode: number;
   state: StreamAccumulationState;
+  usage?: StreamUsageSummary;
+  usageOccurredAt?: number;
 }> {
   const conversation = buildUpstreamConversation(
     listSessionMessages({
@@ -238,6 +241,8 @@ export async function runModelRound(input: {
         stopReason: 'error',
         statusCode: response.status,
         state,
+        usage: undefined,
+        usageOccurredAt: undefined,
       };
     }
     input.wl.succeed(stepUpstream, undefined, { status: response.status });
@@ -319,6 +324,8 @@ export async function runModelRound(input: {
         stopReason,
         statusCode: 200,
         state,
+        usage: streamState.usage,
+        usageOccurredAt: streamState.usage ? (doneChunk?.occurredAt ?? Date.now()) : undefined,
       };
     };
 
@@ -392,6 +399,8 @@ export async function runModelRound(input: {
           stopReason: 'error',
           statusCode: 502,
           state,
+          usage: undefined,
+          usageOccurredAt: undefined,
         };
       }
 
@@ -436,6 +445,8 @@ export async function runModelRound(input: {
         stopReason: 'error',
         statusCode: 502,
         state,
+        usage: undefined,
+        usageOccurredAt: undefined,
       };
     }
 
@@ -458,6 +469,8 @@ export async function runModelRound(input: {
         stopReason: 'cancelled',
         statusCode: 200,
         state,
+        usage: undefined,
+        usageOccurredAt: undefined,
       };
     }
     const message = err instanceof Error ? err.message : String(err);
@@ -478,6 +491,14 @@ export async function runModelRound(input: {
     });
     input.writeChunk(createStreamErrorChunk('STREAM_ERROR', message, input.runId));
     input.wl.flush(input.ctx, 500);
-    return { shouldContinue: false, shouldStop: true, stopReason: 'error', statusCode: 500, state };
+    return {
+      shouldContinue: false,
+      shouldStop: true,
+      stopReason: 'error',
+      statusCode: 500,
+      state,
+      usage: undefined,
+      usageOccurredAt: undefined,
+    };
   }
 }

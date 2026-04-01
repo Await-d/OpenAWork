@@ -56,8 +56,27 @@ describe('replayPersistedAssistantResponse', () => {
             type: 'tool_result',
             toolCallId: 'call-1',
             toolName: 'codesearch',
+            clientRequestId: 'req-1',
             output: 'snippet',
             isError: false,
+            fileDiffs: [
+              {
+                file: '/repo/example.ts',
+                before: 'const a = 1;',
+                after: 'const a = 2;',
+                additions: 1,
+                deletions: 1,
+                status: 'modified',
+                clientRequestId: 'req-1',
+                toolCallId: 'call-1',
+                toolName: 'codesearch',
+              },
+            ],
+            observability: {
+              presentedToolName: 'CodeSearch',
+              canonicalToolName: 'codesearch',
+              toolSurfaceProfile: 'openawork',
+            },
           },
         ],
       },
@@ -80,8 +99,27 @@ describe('replayPersistedAssistantResponse', () => {
       type: 'tool_result',
       toolCallId: 'call-1',
       toolName: 'codesearch',
+      clientRequestId: 'req-1',
       output: 'snippet',
       isError: false,
+      fileDiffs: [
+        {
+          file: '/repo/example.ts',
+          before: 'const a = 1;',
+          after: 'const a = 2;',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          clientRequestId: 'req-1',
+          toolCallId: 'call-1',
+          toolName: 'codesearch',
+        },
+      ],
+      observability: {
+        presentedToolName: 'CodeSearch',
+        canonicalToolName: 'codesearch',
+        toolSurfaceProfile: 'openawork',
+      },
     });
   });
 });

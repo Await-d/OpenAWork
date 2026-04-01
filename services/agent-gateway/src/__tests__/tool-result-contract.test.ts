@@ -8,8 +8,22 @@ describe('tool-result-contract', () => {
       buildToolResultContent({
         toolCallId: 'call-1',
         toolName: 'write',
+        clientRequestId: 'req-1',
         output: { ok: true },
         isError: false,
+        fileDiffs: [
+          {
+            file: '/repo/a.ts',
+            before: 'a',
+            after: 'b',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            clientRequestId: 'req-1',
+            toolCallId: 'call-1',
+            toolName: 'write',
+          },
+        ],
         observability: {
           presentedToolName: 'Write',
           canonicalToolName: 'write',
@@ -21,8 +35,22 @@ describe('tool-result-contract', () => {
       type: 'tool_result',
       toolCallId: 'call-1',
       toolName: 'write',
+      clientRequestId: 'req-1',
       output: { ok: true },
       isError: false,
+      fileDiffs: [
+        {
+          file: '/repo/a.ts',
+          before: 'a',
+          after: 'b',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          clientRequestId: 'req-1',
+          toolCallId: 'call-1',
+          toolName: 'write',
+        },
+      ],
       observability: {
         presentedToolName: 'Write',
         canonicalToolName: 'write',
@@ -37,8 +65,22 @@ describe('tool-result-contract', () => {
       buildToolResultRunEvent({
         toolCallId: 'call-1',
         toolName: 'Agent',
+        clientRequestId: 'req-1',
         output: 'done',
         isError: false,
+        fileDiffs: [
+          {
+            file: '/repo/task.md',
+            before: '',
+            after: 'done',
+            additions: 1,
+            deletions: 0,
+            status: 'added',
+            clientRequestId: 'req-1',
+            toolCallId: 'call-1',
+            toolName: 'Agent',
+          },
+        ],
         pendingPermissionRequestId: 'perm-1',
         observability: {
           presentedToolName: 'Agent',
@@ -56,8 +98,22 @@ describe('tool-result-contract', () => {
       type: 'tool_result',
       toolCallId: 'call-1',
       toolName: 'Agent',
+      clientRequestId: 'req-1',
       output: 'done',
       isError: false,
+      fileDiffs: [
+        {
+          file: '/repo/task.md',
+          before: '',
+          after: 'done',
+          additions: 1,
+          deletions: 0,
+          status: 'added',
+          clientRequestId: 'req-1',
+          toolCallId: 'call-1',
+          toolName: 'Agent',
+        },
+      ],
       pendingPermissionRequestId: 'perm-1',
       observability: {
         presentedToolName: 'Agent',

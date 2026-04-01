@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type WorkspaceReviewStatus = 'added' | 'modified' | 'deleted' | 'renamed';
@@ -32,6 +32,10 @@ export async function listWorkspaceReviewChanges(
     ]);
   } catch (error) {
     if (isNotGitRepositoryError(error)) {
+      return [];
+    }
+
+    if (await isGitExecutableUnavailableError(error, workspaceRoot)) {
       return [];
     }
 
@@ -113,13 +117,7 @@ function isNotGitRepositoryError(error: unknown): boolean {
     return false;
   }
 
-  let code: string | undefined;
-  if ('code' in error) {
-    const rawCode = error.code;
-    if (typeof rawCode === 'string' || typeof rawCode === 'number') {
-      code = String(rawCode);
-    }
-  }
+  const code = getErrorCode(error);
 
   const parts = [error.message];
   if ('stderr' in error && typeof error.stderr === 'string') {
@@ -131,4 +129,40 @@ function isNotGitRepositoryError(error: unknown): boolean {
     (code === '128' || code === '129') &&
     normalizedParts.some((part) => part.includes('not a git repository'))
   );
+}
+
+async function isGitExecutableUnavailableError(error: unknown, cwd: string): Promise<boolean> {
+  if (!(error instanceof Error) || getErrorCode(error) !== 'ENOENT') {
+    return false;
+  }
+
+  try {
+    const cwdStat = await stat(cwd);
+    if (!cwdStat.isDirectory()) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  const commandPath = 'path' in error && typeof error.path === 'string' ? error.path : undefined;
+  const command = 'cmd' in error && typeof error.cmd === 'string' ? error.cmd : undefined;
+  if (commandPath === 'git' || command?.startsWith('git ')) {
+    return true;
+  }
+
+  return error.message.toLowerCase().includes('spawn git');
+}
+
+function getErrorCode(error: Error): string | undefined {
+  if (!('code' in error)) {
+    return undefined;
+  }
+
+  const rawCode = error.code;
+  if (typeof rawCode === 'string' || typeof rawCode === 'number') {
+    return String(rawCode);
+  }
+
+  return undefined;
 }

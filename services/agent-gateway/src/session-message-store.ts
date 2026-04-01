@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
+  FileBackupRef,
   FileDiffContent,
   Message,
   MessageContent,
@@ -49,6 +50,8 @@ export function hasToolOutputReference(messages: UpstreamChatMessage[]): boolean
 }
 
 export interface StoredToolResult {
+  clientRequestId?: string;
+  fileDiffs?: FileDiffContent[];
   isError: boolean;
   output: unknown;
   pendingPermissionRequestId?: string;
@@ -277,8 +280,10 @@ export function getSessionToolResultByCallId(input: {
       return {
         toolCallId: content.toolCallId,
         toolName: content.toolName,
+        clientRequestId: content.clientRequestId,
         output: content.output,
         isError: content.isError,
+        fileDiffs: content.fileDiffs,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
         observability: content.observability,
       };
@@ -314,8 +319,10 @@ export function getLatestReferencedToolResult(input: {
       return {
         toolCallId: content.toolCallId,
         toolName: content.toolName,
+        clientRequestId: content.clientRequestId,
         output: content.output,
         isError: content.isError,
+        fileDiffs: content.fileDiffs,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
         observability: content.observability,
       };
@@ -654,16 +661,24 @@ function parseMessageContentArray(raw: unknown[]): MessageContent[] {
       typeof record['toolCallId'] === 'string' &&
       typeof record['isError'] === 'boolean'
     ) {
+      const observability = parseToolCallObservability(record['observability']);
+      const fileDiffs = Array.isArray(record['fileDiffs'])
+        ? record['fileDiffs'].flatMap((item) => parseFileDiffContent(item))
+        : [];
       items.push({
         type: 'tool_result',
         toolCallId: record['toolCallId'],
         toolName: typeof record['toolName'] === 'string' ? record['toolName'] : undefined,
+        clientRequestId:
+          typeof record['clientRequestId'] === 'string' ? record['clientRequestId'] : undefined,
         output: record['output'],
         isError: record['isError'],
+        ...(fileDiffs.length > 0 ? { fileDiffs } : {}),
         pendingPermissionRequestId:
           typeof record['pendingPermissionRequestId'] === 'string'
             ? record['pendingPermissionRequestId']
             : undefined,
+        ...(observability ? { observability } : {}),
       });
       return;
     }
@@ -749,14 +764,94 @@ function parseFileDiffContent(value: unknown): FileDiffContent[] {
       after: record['after'],
       additions: record['additions'],
       deletions: record['deletions'],
+      clientRequestId:
+        typeof record['clientRequestId'] === 'string' ? record['clientRequestId'] : undefined,
+      requestId: typeof record['requestId'] === 'string' ? record['requestId'] : undefined,
+      toolName: typeof record['toolName'] === 'string' ? record['toolName'] : undefined,
+      toolCallId: typeof record['toolCallId'] === 'string' ? record['toolCallId'] : undefined,
       status:
         record['status'] === 'added' ||
         record['status'] === 'deleted' ||
         record['status'] === 'modified'
           ? record['status']
           : undefined,
+      sourceKind: isFileChangeSourceKind(record['sourceKind']) ? record['sourceKind'] : undefined,
+      guaranteeLevel: isFileChangeGuaranteeLevel(record['guaranteeLevel'])
+        ? record['guaranteeLevel']
+        : undefined,
+      backupBeforeRef: parseFileBackupRef(record['backupBeforeRef']),
+      backupAfterRef: parseFileBackupRef(record['backupAfterRef']),
+      observability: parseToolCallObservability(record['observability']),
     },
   ];
+}
+
+function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnotation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const parsed: ToolCallObservabilityAnnotation = {};
+
+  if (typeof record['presentedToolName'] === 'string') {
+    parsed.presentedToolName = record['presentedToolName'];
+  }
+  if (typeof record['canonicalToolName'] === 'string') {
+    parsed.canonicalToolName = record['canonicalToolName'];
+  }
+  if (
+    record['toolSurfaceProfile'] === 'openawork' ||
+    record['toolSurfaceProfile'] === 'claude_code_simple' ||
+    record['toolSurfaceProfile'] === 'claude_code_default'
+  ) {
+    parsed.toolSurfaceProfile = record['toolSurfaceProfile'];
+  }
+  if (typeof record['adapterVersion'] === 'string') {
+    parsed.adapterVersion = record['adapterVersion'];
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+function parseFileBackupRef(value: unknown): FileBackupRef | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record['backupId'] !== 'string') {
+    return undefined;
+  }
+  if (
+    record['kind'] !== 'before_write' &&
+    record['kind'] !== 'after_write' &&
+    record['kind'] !== 'snapshot_base'
+  ) {
+    return undefined;
+  }
+
+  return {
+    backupId: record['backupId'],
+    kind: record['kind'],
+    storagePath: typeof record['storagePath'] === 'string' ? record['storagePath'] : undefined,
+    artifactId: typeof record['artifactId'] === 'string' ? record['artifactId'] : undefined,
+    contentHash: typeof record['contentHash'] === 'string' ? record['contentHash'] : undefined,
+  };
+}
+
+function isFileChangeSourceKind(value: unknown): value is FileDiffContent['sourceKind'] {
+  return (
+    value === 'structured_tool_diff' ||
+    value === 'session_snapshot' ||
+    value === 'restore_replay' ||
+    value === 'workspace_reconcile' ||
+    value === 'manual_revert'
+  );
+}
+
+function isFileChangeGuaranteeLevel(value: unknown): value is FileDiffContent['guaranteeLevel'] {
+  return value === 'strong' || value === 'medium' || value === 'weak';
 }
 
 function touchSession(sessionId: string, userId: string): void {

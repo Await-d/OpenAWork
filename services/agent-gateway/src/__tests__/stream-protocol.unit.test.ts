@@ -133,6 +133,44 @@ describe('buildUpstreamRequestBody', () => {
     ]);
   });
 
+  it('enables usage chunks for chat completion streams', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'kimi-k2.5',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      tools: [],
+      messages: [{ role: 'user', content: 'hello chat usage' }],
+    });
+
+    expect(body['stream_options']).toEqual({ include_usage: true });
+  });
+
+  it('preserves include_usage when chat request overrides provide stream_options', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'kimi-k2.5',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {
+        body: {
+          stream_options: {
+            include_obfuscation: true,
+            include_usage: false,
+          },
+        },
+      },
+      tools: [],
+      messages: [{ role: 'user', content: 'hello overridden chat usage' }],
+    });
+
+    expect(body['stream_options']).toEqual({
+      include_obfuscation: true,
+      include_usage: true,
+    });
+  });
+
   it('maps OpenAI thinking settings into Responses reasoning payloads', () => {
     const body = buildUpstreamRequestBody({
       protocol: 'responses',
@@ -460,6 +498,51 @@ describe('parseUpstreamFrame', () => {
     );
 
     expect(chunks[0]).toMatchObject({ type: 'done', stopReason: 'max_tokens' });
+  });
+
+  it('captures Responses usage from response.completed into parse state', () => {
+    const state = createStreamParseState('run-test');
+
+    parseUpstreamFrame(
+      [
+        'event: response.completed',
+        'data: {"response":{"output":[{"type":"message","id":"msg_1"}],"usage":{"input_tokens":12,"output_tokens":34,"total_tokens":46}}}',
+      ].join('\n'),
+      'responses',
+      state,
+    );
+
+    expect(state).toMatchObject({
+      usage: {
+        inputTokens: 12,
+        outputTokens: 34,
+        totalTokens: 46,
+      },
+    });
+  });
+
+  it('captures chat completion usage chunks into parse state when upstream provides them', () => {
+    const state = createStreamParseState('run-test');
+
+    parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [],
+        usage: {
+          prompt_tokens: 21,
+          completion_tokens: 13,
+          total_tokens: 34,
+        },
+      }),
+      state,
+    );
+
+    expect(state).toMatchObject({
+      usage: {
+        inputTokens: 21,
+        outputTokens: 13,
+        totalTokens: 34,
+      },
+    });
   });
 
   it('throws structured errors for response.error frames', () => {

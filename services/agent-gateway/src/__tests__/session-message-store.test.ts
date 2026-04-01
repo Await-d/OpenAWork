@@ -524,6 +524,101 @@ describe('session message store', () => {
     });
   });
 
+  it('round-trips tool_result trace metadata from persisted messages', async () => {
+    const { appendSessionMessage, listSessionMessages } =
+      await import('../session-message-store.js');
+
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'tool',
+      clientRequestId: 'req-tool-trace',
+      content: [
+        {
+          type: 'tool_result',
+          toolCallId: 'call-trace',
+          toolName: 'write',
+          clientRequestId: 'req-tool-trace',
+          output: { ok: true },
+          isError: false,
+          fileDiffs: [
+            {
+              file: '/repo/a.ts',
+              before: 'a',
+              after: 'b',
+              additions: 1,
+              deletions: 1,
+              status: 'modified',
+              clientRequestId: 'req-tool-trace',
+              requestId: 'req-tool-trace:tool:call-trace',
+              toolName: 'write',
+              toolCallId: 'call-trace',
+              sourceKind: 'structured_tool_diff',
+              guaranteeLevel: 'strong',
+              backupBeforeRef: {
+                backupId: 'backup-1',
+                kind: 'before_write',
+                storagePath: '/tmp/backup-1',
+              },
+              observability: {
+                presentedToolName: 'Write',
+                canonicalToolName: 'write',
+                toolSurfaceProfile: 'openawork',
+              },
+            },
+          ],
+          observability: {
+            presentedToolName: 'Write',
+            canonicalToolName: 'write',
+            toolSurfaceProfile: 'openawork',
+          },
+        },
+      ],
+    });
+
+    expect(
+      listSessionMessages({ sessionId: 'session-1', userId: 'user-1' })[0]?.content[0],
+    ).toEqual({
+      type: 'tool_result',
+      toolCallId: 'call-trace',
+      toolName: 'write',
+      clientRequestId: 'req-tool-trace',
+      output: { ok: true },
+      isError: false,
+      fileDiffs: [
+        {
+          file: '/repo/a.ts',
+          before: 'a',
+          after: 'b',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+          clientRequestId: 'req-tool-trace',
+          requestId: 'req-tool-trace:tool:call-trace',
+          toolName: 'write',
+          toolCallId: 'call-trace',
+          sourceKind: 'structured_tool_diff',
+          guaranteeLevel: 'strong',
+          backupBeforeRef: {
+            backupId: 'backup-1',
+            kind: 'before_write',
+            storagePath: '/tmp/backup-1',
+          },
+          observability: {
+            presentedToolName: 'Write',
+            canonicalToolName: 'write',
+            toolSurfaceProfile: 'openawork',
+          },
+        },
+      ],
+      observability: {
+        presentedToolName: 'Write',
+        canonicalToolName: 'write',
+        toolSurfaceProfile: 'openawork',
+      },
+    });
+  });
+
   it('round-trips modified_files_summary content from stored assistant messages', async () => {
     const { listSessionMessages } = await import('../session-message-store.js');
 
@@ -548,6 +643,17 @@ describe('session message store', () => {
                 additions: 2,
                 deletions: 1,
                 status: 'modified',
+                clientRequestId: 'req-summary-1',
+                requestId: 'req-summary-1:tool:call-1',
+                toolName: 'write',
+                toolCallId: 'call-1',
+                sourceKind: 'structured_tool_diff',
+                guaranteeLevel: 'medium',
+                observability: {
+                  presentedToolName: 'Write',
+                  canonicalToolName: 'write',
+                  toolSurfaceProfile: 'openawork',
+                },
               },
               {
                 file: 'src/feature.ts',
@@ -585,6 +691,17 @@ describe('session message store', () => {
                 additions: 2,
                 deletions: 1,
                 status: 'modified',
+                clientRequestId: 'req-summary-1',
+                requestId: 'req-summary-1:tool:call-1',
+                toolName: 'write',
+                toolCallId: 'call-1',
+                sourceKind: 'structured_tool_diff',
+                guaranteeLevel: 'medium',
+                observability: {
+                  presentedToolName: 'Write',
+                  canonicalToolName: 'write',
+                  toolSurfaceProfile: 'openawork',
+                },
               },
               {
                 file: 'src/feature.ts',

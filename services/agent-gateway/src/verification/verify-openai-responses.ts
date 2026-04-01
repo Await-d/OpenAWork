@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
+import { calculateTokenCost } from '@openAwork/agent-core';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
@@ -29,6 +30,14 @@ interface VerificationContext {
   accessToken: string;
   app: FastifyInstance;
   capturedRequests: ScenarioRequestCapture[];
+  userId: string;
+}
+
+interface MonthlyUsageSnapshot {
+  costUsd: number;
+  inputTokens: number;
+  month: string;
+  outputTokens: number;
 }
 
 const RESPONSES_PORT = 3311;
@@ -134,13 +143,23 @@ async function main(): Promise<void> {
         const accessToken = app.jwt.sign({ sub: adminId, email: 'admin@openAwork.local' });
         configureOpenAIProvider(adminId);
 
-        await verifyTextScenario({ accessToken, app, capturedRequests });
-        await verifyToolScenario({ accessToken, app, capturedRequests });
-        await verifyToolEmptyArgsScenario({ accessToken, app, capturedRequests });
-        await verifyResponsesToolEofScenario({ accessToken, app, capturedRequests });
-        await verifyChatCompletionsToolEofScenario({ accessToken, app, capturedRequests });
-        await verifyIncompleteScenario({ accessToken, app, capturedRequests });
-        await verifyErrorScenario({ accessToken, app, capturedRequests });
+        await verifyTextScenario({ accessToken, app, capturedRequests, userId: adminId });
+        await verifyToolScenario({ accessToken, app, capturedRequests, userId: adminId });
+        await verifyToolEmptyArgsScenario({ accessToken, app, capturedRequests, userId: adminId });
+        await verifyResponsesToolEofScenario({
+          accessToken,
+          app,
+          capturedRequests,
+          userId: adminId,
+        });
+        await verifyChatCompletionsToolEofScenario({
+          accessToken,
+          app,
+          capturedRequests,
+          userId: adminId,
+        });
+        await verifyIncompleteScenario({ accessToken, app, capturedRequests, userId: adminId });
+        await verifyErrorScenario({ accessToken, app, capturedRequests, userId: adminId });
       } finally {
         await app.close();
         await new Promise<void>((resolve) => upstream.close(() => resolve()));
@@ -194,6 +213,7 @@ function configureOpenAIProvider(userId: string): void {
 
 async function verifyTextScenario(input: VerificationContext): Promise<void> {
   const sessionId = await createSession(input.app, input.accessToken);
+  const beforeUsage = captureMonthlyUsageSnapshot(input.userId);
   const response = await streamScenario({
     app: input.app,
     accessToken: input.accessToken,
@@ -231,6 +251,14 @@ async function verifyTextScenario(input: VerificationContext): Promise<void> {
 
   const request = lastScenarioRequest(input.capturedRequests, 'text');
   assertResponsesPayloadShape(request.body, 'provider alias responses 文本验证');
+  assertMonthlyUsageDelta({
+    before: beforeUsage,
+    expectedCostUsd: 0,
+    expectedInputTokens: 1,
+    expectedOutputTokens: 1,
+    label: 'text scenario usage persistence',
+    userId: input.userId,
+  });
 }
 
 async function verifyToolScenario(input: VerificationContext): Promise<void> {
@@ -395,6 +423,7 @@ async function verifyResponsesToolEofScenario(input: VerificationContext): Promi
 
 async function verifyChatCompletionsToolEofScenario(input: VerificationContext): Promise<void> {
   const sessionId = await createSession(input.app, input.accessToken);
+  const beforeUsage = captureMonthlyUsageSnapshot(input.userId);
   const response = await streamScenario({
     app: input.app,
     accessToken: input.accessToken,
@@ -439,6 +468,14 @@ async function verifyChatCompletionsToolEofScenario(input: VerificationContext):
   if (!hasChatToolResult(requests[1]!.body)) {
     throw new Error('expected chat eof second request to include tool role output');
   }
+  assertMonthlyUsageDelta({
+    before: beforeUsage,
+    expectedCostUsd: calculateTokenCost(3, 2, 0.6, 3),
+    expectedInputTokens: 3,
+    expectedOutputTokens: 2,
+    label: 'chat eof tool scenario usage persistence',
+    userId: input.userId,
+  });
 }
 
 async function verifyIncompleteScenario(input: VerificationContext): Promise<void> {
@@ -608,6 +645,7 @@ function handleChatToolEofScenario(body: Record<string, unknown>, res: ServerRes
   res.write(
     'data: {"choices":[{"delta":{"content":"最终答复"}}]}\n\n' +
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' +
+      'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n' +
       'data: [DONE]\n\n',
   );
   res.end();
@@ -733,8 +771,70 @@ function assertChatPayloadShape(body: Record<string, unknown>, expectedUserText:
   if (body['max_tokens'] !== 2048) {
     throw new Error('expected max_tokens=2048');
   }
+  const streamOptions = body['stream_options'];
+  const streamOptionsRecord: Record<string, unknown> | null =
+    streamOptions && typeof streamOptions === 'object' && !Array.isArray(streamOptions)
+      ? (streamOptions as Record<string, unknown>)
+      : null;
+  if (streamOptionsRecord?.['include_usage'] !== true) {
+    throw new Error('expected stream_options.include_usage=true');
+  }
   if (!requestContainsText(body, expectedUserText)) {
     throw new Error(`expected request messages to contain user text: ${expectedUserText}`);
+  }
+}
+
+function captureMonthlyUsageSnapshot(userId: string): MonthlyUsageSnapshot {
+  const month = new Date().toISOString().slice(0, 7);
+  const row = sqliteGet<{
+    cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+  }>(
+    `SELECT input_tokens, output_tokens, cost_usd
+     FROM usage_records
+     WHERE user_id = ? AND month = ?
+     LIMIT 1`,
+    [userId, month],
+  );
+
+  return {
+    costUsd: row?.cost_usd ?? 0,
+    inputTokens: row?.input_tokens ?? 0,
+    month,
+    outputTokens: row?.output_tokens ?? 0,
+  };
+}
+
+function assertMonthlyUsageDelta(input: {
+  before: MonthlyUsageSnapshot;
+  expectedCostUsd: number;
+  expectedInputTokens: number;
+  expectedOutputTokens: number;
+  label: string;
+  userId: string;
+}): void {
+  const after = captureMonthlyUsageSnapshot(input.userId);
+  const expectedInputTotal = input.before.inputTokens + input.expectedInputTokens;
+  const expectedOutputTotal = input.before.outputTokens + input.expectedOutputTokens;
+  const expectedCostTotal = Number((input.before.costUsd + input.expectedCostUsd).toFixed(8));
+
+  if (after.inputTokens !== expectedInputTotal) {
+    throw new Error(
+      `${input.label} expected input_tokens=${expectedInputTotal} but received ${after.inputTokens}`,
+    );
+  }
+
+  if (after.outputTokens !== expectedOutputTotal) {
+    throw new Error(
+      `${input.label} expected output_tokens=${expectedOutputTotal} but received ${after.outputTokens}`,
+    );
+  }
+
+  if (Number(after.costUsd.toFixed(8)) !== expectedCostTotal) {
+    throw new Error(
+      `${input.label} expected cost_usd=${expectedCostTotal} but received ${after.costUsd}`,
+    );
   }
 }
 

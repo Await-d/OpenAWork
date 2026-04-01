@@ -58,6 +58,17 @@ describe('workspace review helpers', () => {
     }
   });
 
+  it('returns empty changes when git executable is unavailable', async () => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = '';
+
+    try {
+      await expect(listWorkspaceReviewChanges(workspaceRoot)).resolves.toEqual([]);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it('returns unified diff for a changed file', async () => {
     await writeFile(join(workspaceRoot, 'tracked.txt'), 'hello\nworld\n', 'utf-8');
 

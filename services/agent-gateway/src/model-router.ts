@@ -34,6 +34,8 @@ export interface ModelRouteConfig {
   upstreamProtocol: UpstreamProtocol;
   requestOverrides: RequestOverrides;
   providerType?: AIProvider['type'];
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
   supportsThinking: boolean;
   systemPrompt?: string;
 }
@@ -152,6 +154,8 @@ export function resolveModelRouteFromProvider(
     upstreamProtocol,
     requestOverrides,
     providerType: provider.type,
+    inputPricePerMillion: modelConfig?.inputPricePerMillion,
+    outputPricePerMillion: modelConfig?.outputPricePerMillion,
     supportsThinking: modelConfig?.supportsThinking === true,
     systemPrompt: request.systemPrompt,
   };

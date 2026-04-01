@@ -1,5 +1,8 @@
 import type { StreamChunk, StreamDoneChunk } from '@openAwork/shared';
-import { buildGatewayToolDefinitions as buildToolDefinitions } from '../tool-definitions.js';
+import {
+  buildGatewayToolDefinitions as buildDefaultGatewayToolDefinitions,
+  buildGatewayToolDefinitionsForProfile,
+} from '../tool-definitions.js';
 import type { UpstreamProtocol } from './upstream-protocol.js';
 
 type StopReason = StreamDoneChunk['stopReason'];
@@ -26,6 +29,7 @@ interface UpstreamChoice {
 
 interface UpstreamEvent {
   choices?: UpstreamChoice[];
+  usage?: unknown;
 }
 
 interface ResponsesOutputItem {
@@ -65,10 +69,17 @@ interface ResponsesErrorEvent {
 interface ResponsesCompletedEvent {
   response?: {
     output?: ResponsesOutputItem[];
+    usage?: unknown;
     incomplete_details?: {
       reason?: string;
     };
   };
+}
+
+export interface StreamUsageSummary {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
 }
 
 interface ToolCallState {
@@ -83,6 +94,7 @@ export interface StreamParseState {
   sawFinishReason: boolean;
   stopReason: StopReason;
   toolCalls: Map<number, ToolCallState>;
+  usage?: StreamUsageSummary;
 }
 
 export class ResponsesUpstreamEventError extends Error {
@@ -102,11 +114,16 @@ export function createStreamParseState(runId = 'run-local'): StreamParseState {
     sawFinishReason: false,
     stopReason: 'end_turn',
     toolCalls: new Map(),
+    usage: undefined,
   };
 }
 
-export function buildGatewayToolDefinitions() {
-  return buildToolDefinitions();
+export function buildGatewayToolDefinitions(profile?: string) {
+  if (profile) {
+    return buildGatewayToolDefinitionsForProfile(profile);
+  }
+
+  return buildDefaultGatewayToolDefinitions();
 }
 
 export function parseUpstreamFrame(
@@ -140,6 +157,10 @@ export function parseUpstreamDataLine(data: string, state: StreamParseState): St
   }
 
   const event = JSON.parse(data) as UpstreamEvent;
+  const usage = parseStreamUsage(event.usage);
+  if (usage) {
+    state.usage = usage;
+  }
   const chunks: StreamChunk[] = [];
 
   for (const choice of event.choices ?? []) {
@@ -304,6 +325,10 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
     }
     case 'response.completed': {
       const payload = JSON.parse(data) as ResponsesCompletedEvent;
+      const usage = parseStreamUsage(payload.response?.usage);
+      if (usage) {
+        state.usage = usage;
+      }
       state.sawFinishReason = true;
       if (state.stopReason !== 'tool_use' && responseContainsFunctionCall(payload)) {
         state.stopReason = 'tool_use';
@@ -312,6 +337,10 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
     }
     case 'response.incomplete': {
       const payload = JSON.parse(data) as ResponsesCompletedEvent;
+      const usage = parseStreamUsage(payload.response?.usage);
+      if (usage) {
+        state.usage = usage;
+      }
       state.sawFinishReason = true;
       state.stopReason = mapResponsesStopReason(
         payload.response?.incomplete_details?.reason,
@@ -435,6 +464,41 @@ function parseResponsesFunctionArgumentsDone(data: string, state: StreamParseSta
 
 function responseContainsFunctionCall(payload: ResponsesCompletedEvent): boolean {
   return payload.response?.output?.some((item) => item.type === 'function_call') ?? false;
+}
+
+function parseStreamUsage(value: unknown): StreamUsageSummary | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const inputTokens = readNonNegativeInteger(record['input_tokens'] ?? record['prompt_tokens']);
+  const outputTokens = readNonNegativeInteger(
+    record['output_tokens'] ?? record['completion_tokens'],
+  );
+
+  if (inputTokens === undefined && outputTokens === undefined) {
+    return undefined;
+  }
+
+  const safeInputTokens = inputTokens ?? 0;
+  const safeOutputTokens = outputTokens ?? 0;
+  const totalTokens =
+    readNonNegativeInteger(record['total_tokens']) ?? safeInputTokens + safeOutputTokens;
+
+  return {
+    inputTokens: safeInputTokens,
+    outputTokens: safeOutputTokens,
+    totalTokens,
+  };
+}
+
+function readNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.trunc(value));
 }
 
 function createChunkMeta(state: StreamParseState): {

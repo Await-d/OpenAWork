@@ -30,6 +30,7 @@ import {
   persistSessionRunEventForRequest,
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
+import { deriveRunEventBookend } from '../run-event-envelope.js';
 import { collectFileDiffsFromToolOutput, mergeFileDiffs } from '../modified-files-summary.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
@@ -59,6 +60,7 @@ import {
   touchSessionRuntimeThread,
   upsertSessionRuntimeThread,
 } from '../session-runtime-thread-store.js';
+import { persistMonthlyUsageRecord } from '../usage-records-store.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -279,8 +281,13 @@ function isMissingRequiredToolArguments(
   return Object.keys(rawInput).length === 0;
 }
 
-function hasTerminalRunEvent(events: RunEvent[]): boolean {
-  return events.some((event) => event.type === 'done' || event.type === 'error');
+function hasReplayableLatestBookend(events: RunEvent[]): boolean {
+  const latestEvent = events.at(-1);
+  if (!latestEvent) {
+    return false;
+  }
+
+  return deriveRunEventBookend(latestEvent)?.replayable === true;
 }
 
 export function replayPersistedAssistantResponse(input: {
@@ -294,7 +301,7 @@ export function replayPersistedAssistantResponse(input: {
     sessionId: input.sessionId,
     clientRequestId: input.clientRequestId,
   });
-  if (durableEvents.length > 0 && hasTerminalRunEvent(durableEvents)) {
+  if (durableEvents.length > 0 && hasReplayableLatestBookend(durableEvents)) {
     durableEvents.forEach((event) => {
       input.writeChunk(event);
     });
@@ -338,9 +345,12 @@ export function replayPersistedAssistantResponse(input: {
           buildToolResultRunEvent({
             toolCallId: content.toolCallId,
             toolName: content.toolName ?? toolNames.get(content.toolCallId) ?? 'tool',
+            clientRequestId: content.clientRequestId ?? input.clientRequestId,
             output: content.output,
             isError: content.isError,
+            fileDiffs: content.fileDiffs,
             pendingPermissionRequestId: content.pendingPermissionRequestId,
+            observability: content.observability,
             eventMeta: {
               eventId: `${input.runId}:replay:${sequence++}`,
               runId: input.runId,
@@ -603,6 +613,18 @@ export async function executeToolCalls(input: {
       presentedToolName: toolCall.toolName,
     });
 
+    const tracedFileDiffs = input.turnFileDiffs
+      ? collectFileDiffsFromToolOutput(result.output).map((diff) => ({
+          ...diff,
+          clientRequestId: input.clientRequestId,
+          requestId: createToolResultRequestId(input.clientRequestId, toolCallId),
+          toolName: toolCall.toolName,
+          toolCallId,
+          sourceKind: diff.sourceKind ?? 'structured_tool_diff',
+          observability: diff.observability ?? observability,
+        }))
+      : [];
+
     appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -611,8 +633,10 @@ export async function executeToolCalls(input: {
         buildToolResultContent({
           toolCallId,
           toolName: toolCall.toolName,
+          clientRequestId: input.clientRequestId,
           output: result.output,
           isError: result.isError,
+          fileDiffs: tracedFileDiffs,
           pendingPermissionRequestId: result.pendingPermissionRequestId,
           observability,
         }),
@@ -622,15 +646,17 @@ export async function executeToolCalls(input: {
     });
 
     if (input.turnFileDiffs) {
-      const fileDiffs = collectFileDiffsFromToolOutput(result.output);
-      mergeFileDiffs(input.turnFileDiffs, fileDiffs);
-      if (fileDiffs.length > 0) {
+      mergeFileDiffs(input.turnFileDiffs, tracedFileDiffs);
+      if (tracedFileDiffs.length > 0) {
         persistSessionFileDiffs({
           sessionId: input.sessionId,
           userId: input.userId,
+          clientRequestId: input.clientRequestId,
           requestId: createToolResultRequestId(input.clientRequestId, toolCallId),
           toolName: toolCall.toolName,
-          diffs: fileDiffs,
+          toolCallId,
+          observability,
+          diffs: tracedFileDiffs,
         });
       }
     }
@@ -639,8 +665,10 @@ export async function executeToolCalls(input: {
       buildToolResultRunEvent({
         toolCallId,
         toolName: toolCall.toolName,
+        clientRequestId: input.clientRequestId,
         output: result.output,
         isError: result.isError,
+        fileDiffs: tracedFileDiffs,
         pendingPermissionRequestId: result.pendingPermissionRequestId,
         observability,
         eventMeta: createRunEventMeta(input.runId, input.eventSequence),
@@ -876,6 +904,16 @@ export async function handleStreamRequest(input: {
           requestSystemPrompts,
           writeChunk: emitChunk,
         });
+
+        if (result.usage) {
+          persistMonthlyUsageRecord({
+            occurredAt: result.usageOccurredAt,
+            inputPricePerMillion: route.inputPricePerMillion,
+            outputPricePerMillion: route.outputPricePerMillion,
+            usage: result.usage,
+            userId: input.user.sub,
+          });
+        }
 
         if (result.stopReason === 'error' || result.shouldStop) {
           if (result.stopReason !== 'error') {

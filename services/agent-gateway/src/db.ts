@@ -154,18 +154,32 @@ export async function migrate(): Promise<void> {
     CREATE TABLE IF NOT EXISTS session_file_diffs (
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT,
       request_id TEXT NOT NULL,
       tool_name TEXT NOT NULL,
+      tool_call_id TEXT,
       file_path TEXT NOT NULL,
       before_text TEXT NOT NULL,
       after_text TEXT NOT NULL,
       additions INTEGER NOT NULL DEFAULT 0,
       deletions INTEGER NOT NULL DEFAULT 0,
       status TEXT,
+      source_kind TEXT,
+      guarantee_level TEXT,
+      observability_json TEXT,
+      backup_before_ref_json TEXT,
+      backup_after_ref_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (session_id, request_id, file_path)
     )
   `);
+  ensureColumn('session_file_diffs', 'client_request_id', 'TEXT');
+  ensureColumn('session_file_diffs', 'tool_call_id', 'TEXT');
+  ensureColumn('session_file_diffs', 'source_kind', 'TEXT');
+  ensureColumn('session_file_diffs', 'guarantee_level', 'TEXT');
+  ensureColumn('session_file_diffs', 'observability_json', 'TEXT');
+  ensureColumn('session_file_diffs', 'backup_before_ref_json', 'TEXT');
+  ensureColumn('session_file_diffs', 'backup_after_ref_json', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS permission_decision_logs (

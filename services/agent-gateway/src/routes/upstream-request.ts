@@ -115,6 +115,29 @@ function applyThinkingConfigToBody(
   }
 }
 
+function applyChatStreamUsageOptions(
+  body: UpstreamRequestBody,
+  protocol: UpstreamProtocol,
+): UpstreamRequestBody {
+  if (protocol !== 'chat_completions' || body['stream'] !== true) {
+    return body;
+  }
+
+  const streamOptions = body['stream_options'];
+  const streamOptionsRecord =
+    streamOptions && typeof streamOptions === 'object' && !Array.isArray(streamOptions)
+      ? (streamOptions as Record<string, unknown>)
+      : {};
+
+  return {
+    ...body,
+    stream_options: {
+      ...streamOptionsRecord,
+      include_usage: true,
+    },
+  };
+}
+
 export function buildUpstreamRequestBody(input: {
   protocol: UpstreamProtocol;
   model: string;
@@ -149,6 +172,9 @@ export function buildUpstreamRequestBody(input: {
           max_tokens: input.maxTokens,
           temperature: input.temperature,
           stream: true,
+          stream_options: {
+            include_usage: true,
+          },
           ...(input.tools.length > 0 ? { tools: input.tools, tool_choice: 'auto' as const } : {}),
         };
 
@@ -157,8 +183,9 @@ export function buildUpstreamRequestBody(input: {
     input.requestOverrides,
     input.protocol,
   );
+  const usageAwareBody = applyChatStreamUsageOptions(overriddenBody, input.protocol);
 
-  return applyThinkingConfigToBody(overriddenBody, input.thinking, input.protocol);
+  return applyThinkingConfigToBody(usageAwareBody, input.thinking, input.protocol);
 }
 
 function convertConversationToResponsesInput(

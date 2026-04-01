@@ -7,6 +7,7 @@ import {
   persistSessionRunEventForRequest,
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
+import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import { mergeFileDiffs, collectFileDiffsFromToolOutput } from '../modified-files-summary.js';
 import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tool-sandbox.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
@@ -31,6 +32,7 @@ import {
 } from './stream.js';
 import { runModelRound } from './stream-model-round.js';
 import { getAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
+import { persistMonthlyUsageRecord } from '../usage-records-store.js';
 
 async function continueFromApprovedToolResult(input: {
   initialToolResult: {
@@ -102,6 +104,21 @@ async function continueFromApprovedToolResult(input: {
       throw new Error('Another request is already running for this session.');
     }
 
+    const resumedFileDiffs = collectFileDiffsFromToolOutput(input.initialToolResult.output).map(
+      (diff) => ({
+        ...diff,
+        clientRequestId: input.payload.clientRequestId,
+        requestId: createToolResultRequestId(
+          input.payload.clientRequestId,
+          input.initialToolResult.toolCallId,
+        ),
+        toolName: input.initialToolResult.toolName,
+        toolCallId: input.initialToolResult.toolCallId,
+        sourceKind: diff.sourceKind ?? 'structured_tool_diff',
+        observability: diff.observability ?? input.payload.observability,
+      }),
+    );
+
     const toolResultMessage = appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -110,8 +127,10 @@ async function continueFromApprovedToolResult(input: {
         buildToolResultContent({
           toolCallId: input.initialToolResult.toolCallId,
           toolName: input.initialToolResult.toolName,
+          clientRequestId: input.payload.clientRequestId,
           output: input.initialToolResult.output,
           isError: input.initialToolResult.isError,
+          fileDiffs: resumedFileDiffs,
           observability: input.payload.observability,
         }),
       ],
@@ -135,13 +154,30 @@ async function continueFromApprovedToolResult(input: {
       buildToolResultRunEvent({
         toolCallId: input.initialToolResult.toolCallId,
         toolName: input.initialToolResult.toolName,
+        clientRequestId: input.payload.clientRequestId,
         output: input.initialToolResult.output,
         isError: input.initialToolResult.isError,
+        fileDiffs: resumedFileDiffs,
         observability: input.payload.observability,
         eventMeta: createRunEventMeta(runId, eventSequence),
       }),
     );
-    mergeFileDiffs(turnFileDiffs, collectFileDiffsFromToolOutput(input.initialToolResult.output));
+    mergeFileDiffs(turnFileDiffs, resumedFileDiffs);
+    if (resumedFileDiffs.length > 0) {
+      persistSessionFileDiffs({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        clientRequestId: input.payload.clientRequestId,
+        requestId: createToolResultRequestId(
+          input.payload.clientRequestId,
+          input.initialToolResult.toolCallId,
+        ),
+        toolName: input.initialToolResult.toolName,
+        toolCallId: input.initialToolResult.toolCallId,
+        observability: input.payload.observability,
+        diffs: resumedFileDiffs,
+      });
+    }
 
     const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
       if (event.type === 'question_asked') {
@@ -203,6 +239,16 @@ async function continueFromApprovedToolResult(input: {
           requestSystemPrompts,
           writeChunk,
         });
+
+        if (result.usage) {
+          persistMonthlyUsageRecord({
+            occurredAt: result.usageOccurredAt,
+            inputPricePerMillion: route.inputPricePerMillion,
+            outputPricePerMillion: route.outputPricePerMillion,
+            usage: result.usage,
+            userId: input.userId,
+          });
+        }
 
         if (result.stopReason === 'error' || result.shouldStop) {
           if (result.stopReason !== 'error') {
