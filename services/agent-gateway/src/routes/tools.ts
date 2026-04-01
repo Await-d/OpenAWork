@@ -1,7 +1,20 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireAuth } from '../auth.js';
+import { sqliteGet } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { buildGatewayToolDefinitions } from '../tool-definitions.js';
+import {
+  buildGatewayToolDefinitions,
+  buildGatewayToolDefinitionsForProfile,
+} from '../tool-definitions.js';
+import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+import {
+  extractToolSurfaceProfile,
+  parseSessionMetadataJson,
+} from '../session-workspace-metadata.js';
+
+interface SessionMetadataRow {
+  metadata_json: string;
+}
 
 export async function toolsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -9,7 +22,23 @@ export async function toolsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'tools.definitions.list');
-      const tools = buildGatewayToolDefinitions().map((tool) => ({
+      const user = request.user as { sub: string };
+      const query = (request.query ?? {}) as { sessionId?: string };
+      const sessionMetadataRow = query.sessionId
+        ? sqliteGet<SessionMetadataRow>(
+            'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+            [query.sessionId, user.sub],
+          )
+        : undefined;
+      const visibleTools = sessionMetadataRow?.metadata_json
+        ? filterEnabledGatewayToolsForSession(
+            buildGatewayToolDefinitionsForProfile(
+              extractToolSurfaceProfile(parseSessionMetadataJson(sessionMetadataRow.metadata_json)),
+            ),
+            sessionMetadataRow.metadata_json,
+          )
+        : buildGatewayToolDefinitions();
+      const tools = visibleTools.map((tool) => ({
         name: tool.function.name,
         description: tool.function.description,
       }));

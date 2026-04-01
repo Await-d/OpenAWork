@@ -78,4 +78,32 @@ describe('session permission events', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'permission_asked', requestId: 'perm-2' });
   });
+
+  it('builds a fusion-native permission interaction record', async () => {
+    const { createPermissionInteractionRecord } = await import('../session-permission-events.js');
+
+    expect(
+      createPermissionInteractionRecord({
+        interactionId: 'perm-interaction-1',
+        requestId: 'perm-1',
+        toolName: 'bash',
+        scope: 'workspace',
+        reason: '需要运行命令',
+        riskLevel: 'medium',
+        status: 'pending',
+      }),
+    ).toEqual({
+      interactionId: 'perm-interaction-1',
+      runId: 'permission:perm-1',
+      type: 'permission',
+      channel: 'api',
+      payload: {
+        toolName: 'bash',
+        scope: 'workspace',
+        reason: '需要运行命令',
+        riskLevel: 'medium',
+      },
+      status: 'pending',
+    });
+  });
 });

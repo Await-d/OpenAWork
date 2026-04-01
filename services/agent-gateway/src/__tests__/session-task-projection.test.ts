@@ -7,6 +7,10 @@ function createGraph(): AgentTaskGraph {
     projectRoot: '/tmp/openawork-session-task-projection',
     createdAt: 1,
     updatedAt: 1,
+    runs: {},
+    interactions: {},
+    sessionContexts: {},
+    schemaVersion: 2,
     tasks: {
       root: {
         id: 'root',
@@ -77,6 +81,9 @@ describe('buildSessionTaskProjection', () => {
     expect(projected).toHaveLength(4);
     expect(projected[0]).toMatchObject({
       id: 'root',
+      kind: 'task',
+      subject: '根任务',
+      revision: 0,
       completedSubtaskCount: 1,
       depth: 0,
       readySubtaskCount: 1,
@@ -171,6 +178,8 @@ describe('buildSessionTaskProjection', () => {
     expect(projected).toHaveLength(5);
     expect(delegatedTask).toMatchObject({
       id: 'delegated',
+      kind: 'task',
+      subject: '委派子代理任务',
       sessionId: 'child-session-1',
       assignedAgent: 'librarian',
       result: '文档抓取完成',

@@ -54,11 +54,17 @@ describe('session-runtime-state', () => {
 
     const result = reconcileSessionStateStatus({ sessionId: 'ses-stale', userId: 'user-1' });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       previousStatus: 'running',
+      sessionContext: {
+        sessionId: 'ses-stale',
+        status: 'idle',
+        revision: 0,
+      },
       status: 'idle',
       wasReset: true,
     });
+    expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
     expect(mocked.clearSessionRuntimeThreadMock).toHaveBeenCalledWith({
       sessionId: 'ses-stale',
       userId: 'user-1',
@@ -87,11 +93,17 @@ describe('session-runtime-state', () => {
 
     const result = reconcileSessionStateStatus({ sessionId: 'ses-paused', userId: 'user-1' });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       previousStatus: 'paused',
+      sessionContext: {
+        sessionId: 'ses-paused',
+        status: 'paused',
+        revision: 0,
+      },
       status: 'paused',
       wasReset: false,
     });
+    expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
     expect(mocked.sqliteRunMock).not.toHaveBeenCalled();
   });
 
@@ -113,11 +125,17 @@ describe('session-runtime-state', () => {
 
     const result = reconcileSessionStateStatus({ sessionId: 'ses-question', userId: 'user-1' });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       previousStatus: 'running',
+      sessionContext: {
+        sessionId: 'ses-question',
+        status: 'paused',
+        revision: 0,
+      },
       status: 'paused',
       wasReset: false,
     });
+    expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
     expect(mocked.sqliteRunMock).toHaveBeenCalledWith(
       "UPDATE sessions SET state_status = 'paused', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
       ['ses-question', 'user-1'],
@@ -150,11 +168,17 @@ describe('session-runtime-state', () => {
 
     const result = reconcileSessionStateStatus({ sessionId: 'ses-live', userId: 'user-1' });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       previousStatus: 'running',
+      sessionContext: {
+        sessionId: 'ses-live',
+        status: 'busy',
+        revision: 0,
+      },
       status: 'running',
       wasReset: false,
     });
+    expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
     expect(mocked.sqliteRunMock).not.toHaveBeenCalled();
   });
 });

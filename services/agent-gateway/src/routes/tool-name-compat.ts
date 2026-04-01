@@ -1,3 +1,5 @@
+import { PRESENTED_TO_CANONICAL } from '../claude-code-tool-surface-profiles.js';
+
 const LEGACY_ENABLED_TOOL_NAME_MAP = {
   web_search: 'websearch',
   workspace_tree: 'list',
@@ -11,6 +13,14 @@ const LEGACY_ENABLED_TOOL_NAME_MAP = {
   write_file: 'write',
 } as const;
 
+export function normalizeToolNameForEnablement(toolName: string): string {
+  const canonicalName = PRESENTED_TO_CANONICAL[toolName] ?? toolName;
+  return (
+    LEGACY_ENABLED_TOOL_NAME_MAP[canonicalName as keyof typeof LEGACY_ENABLED_TOOL_NAME_MAP] ??
+    canonicalName
+  );
+}
+
 export function isEnabledToolName(
   toolName: string,
   enabledToolNames: ReadonlySet<string>,
@@ -19,11 +29,16 @@ export function isEnabledToolName(
     return true;
   }
 
-  const mappedToolName =
-    LEGACY_ENABLED_TOOL_NAME_MAP[toolName as keyof typeof LEGACY_ENABLED_TOOL_NAME_MAP];
-  if (!mappedToolName) {
-    return false;
+  const normalizedToolName = normalizeToolNameForEnablement(toolName);
+  if (enabledToolNames.has(normalizedToolName)) {
+    return true;
   }
 
-  return enabledToolNames.has(mappedToolName);
+  for (const enabledToolName of enabledToolNames) {
+    if (normalizeToolNameForEnablement(enabledToolName) === normalizedToolName) {
+      return true;
+    }
+  }
+
+  return false;
 }

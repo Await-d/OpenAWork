@@ -3,6 +3,7 @@ import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import type { AgentTaskGraph } from '@openAwork/agent-core';
 import {
   buildStartWorkTaskTags,
+  buildWorkflowPlanSubtaskIdempotencyKey,
   createTaskUpdateEvent,
   createWorkflowPlanSubtasks,
   findReusableStartWorkTask,
@@ -13,6 +14,10 @@ function createGraph(): AgentTaskGraph {
   return {
     projectRoot: '/tmp/openawork-start-work-subtasks',
     tasks: {},
+    runs: {},
+    interactions: {},
+    sessionContexts: {},
+    schemaVersion: 2,
     createdAt: 1,
     updatedAt: 1,
   };
@@ -53,14 +58,18 @@ describe('start-work-subtasks helpers', () => {
     }
 
     expect(firstSubtask).toMatchObject({
+      kind: 'workflow_step',
       title: '设计任务树模型',
+      subject: '设计任务树模型',
       blockedBy: [],
       parentTaskId: rootTask.id,
       sessionId: 'session-1',
       priority: 'high',
     });
     expect(secondSubtask).toMatchObject({
+      kind: 'workflow_step',
       title: '接通任务面板展示',
+      subject: '接通任务面板展示',
       blockedBy: [firstSubtask.id],
       parentTaskId: rootTask.id,
       sessionId: 'session-1',
@@ -84,6 +93,13 @@ describe('start-work-subtasks helpers', () => {
       parentTaskId: rootTask.id,
       runId: 'command:session-1:slash-start-work',
     });
+    expect(firstSubtask.idempotencyKey).toBe(
+      buildWorkflowPlanSubtaskIdempotencyKey({
+        parentTaskId: rootTask.id,
+        relativePath: '.agentdocs/workflow/plan.md',
+        title: '设计任务树模型',
+      }),
+    );
   });
 
   it('does not create duplicate subtasks for repeated or duplicated checklist items', () => {

@@ -1,3 +1,4 @@
+import type { SessionContextRecord } from '@openAwork/shared';
 import { sqliteGet, sqliteRun } from './db.js';
 import { getAnyInFlightStreamRequestForSession } from './routes/stream-cancellation.js';
 import {
@@ -17,8 +18,45 @@ interface SessionStateRow {
 
 export interface SessionRuntimeReconciliationResult {
   previousStatus: PersistedSessionStateStatus | null;
+  sessionContext: SessionContextRecord | null;
   status: PersistedSessionStateStatus | null;
   wasReset: boolean;
+}
+
+export function toSessionContextStatus(
+  status: PersistedSessionStateStatus | null,
+): SessionContextRecord['status'] {
+  if (status === 'running') {
+    return 'busy';
+  }
+  if (status === 'paused') {
+    return 'paused';
+  }
+  return 'idle';
+}
+
+export function buildSessionContextRecord(input: {
+  clientSurface?: string;
+  currentRunId?: string;
+  parentSessionId?: string;
+  planRef?: string;
+  revision?: number;
+  rootSessionId?: string;
+  sessionId: string;
+  status: PersistedSessionStateStatus | null;
+  updatedAt?: number;
+}): SessionContextRecord {
+  return {
+    sessionId: input.sessionId,
+    ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+    ...(input.rootSessionId ? { rootSessionId: input.rootSessionId } : {}),
+    status: toSessionContextStatus(input.status),
+    ...(input.currentRunId ? { currentRunId: input.currentRunId } : {}),
+    ...(input.planRef ? { planRef: input.planRef } : {}),
+    ...(input.clientSurface ? { clientSurface: input.clientSurface } : {}),
+    revision: input.revision ?? 0,
+    updatedAt: input.updatedAt ?? Date.now(),
+  };
 }
 
 function normalizePersistedSessionStateStatus(value: string): PersistedSessionStateStatus {
@@ -60,6 +98,7 @@ export function reconcileSessionStateStatus(input: {
   if (!row) {
     return {
       previousStatus: null,
+      sessionContext: null,
       status: null,
       wasReset: false,
     };
@@ -70,6 +109,10 @@ export function reconcileSessionStateStatus(input: {
   if (getAnyInFlightStreamRequestForSession({ sessionId: input.sessionId, userId: input.userId })) {
     return {
       previousStatus,
+      sessionContext: buildSessionContextRecord({
+        sessionId: input.sessionId,
+        status: previousStatus,
+      }),
       status: previousStatus,
       wasReset: false,
     };
@@ -84,6 +127,10 @@ export function reconcileSessionStateStatus(input: {
   ) {
     return {
       previousStatus,
+      sessionContext: buildSessionContextRecord({
+        sessionId: input.sessionId,
+        status: previousStatus,
+      }),
       status: previousStatus,
       wasReset: false,
     };
@@ -100,6 +147,7 @@ export function reconcileSessionStateStatus(input: {
 
     return {
       previousStatus,
+      sessionContext: buildSessionContextRecord({ sessionId: input.sessionId, status: 'paused' }),
       status: 'paused',
       wasReset: false,
     };
@@ -109,6 +157,10 @@ export function reconcileSessionStateStatus(input: {
     clearSessionRuntimeThread({ sessionId: input.sessionId, userId: input.userId });
     return {
       previousStatus,
+      sessionContext: buildSessionContextRecord({
+        sessionId: input.sessionId,
+        status: previousStatus,
+      }),
       status: previousStatus,
       wasReset: false,
     };
@@ -121,6 +173,7 @@ export function reconcileSessionStateStatus(input: {
   );
   return {
     previousStatus,
+    sessionContext: buildSessionContextRecord({ sessionId: input.sessionId, status: 'idle' }),
     status: 'idle',
     wasReset: true,
   };

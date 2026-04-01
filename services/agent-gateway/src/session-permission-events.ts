@@ -1,4 +1,4 @@
-import type { RunEvent } from '@openAwork/shared';
+import type { InteractionRecord, RunEvent } from '@openAwork/shared';
 import { sqliteAll } from './db.js';
 
 interface PermissionRequestEventRow {
@@ -50,6 +50,40 @@ export function createPermissionRepliedEvent(input: {
     eventId: `permission:${input.requestId}:replied`,
     runId: `permission:${input.requestId}`,
     occurredAt: input.occurredAt ?? Date.now(),
+  };
+}
+
+export function createPermissionInteractionRecord(input: {
+  channel?: InteractionRecord['channel'];
+  decision?: 'approved' | 'rejected';
+  feedback?: string;
+  interactionId: string;
+  requestId: string;
+  runId?: string;
+  status: InteractionRecord['status'];
+  toolCallRef?: string;
+  toolName: string;
+  reason: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  scope: string;
+  previewAction?: string;
+}): InteractionRecord {
+  return {
+    interactionId: input.interactionId,
+    runId: input.runId ?? `permission:${input.requestId}`,
+    type: 'permission',
+    ...(input.toolCallRef ? { toolCallRef: input.toolCallRef } : {}),
+    channel: input.channel ?? 'api',
+    payload: {
+      toolName: input.toolName,
+      scope: input.scope,
+      reason: input.reason,
+      riskLevel: input.riskLevel,
+      ...(input.previewAction ? { previewAction: input.previewAction } : {}),
+    },
+    ...(input.feedback ? { feedback: input.feedback } : {}),
+    ...(input.decision ? { decision: input.decision } : {}),
+    status: input.status,
   };
 }
 

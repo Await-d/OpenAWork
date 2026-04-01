@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
+import type { InteractionRecord } from '@openAwork/shared';
 import { z } from 'zod';
 
 const questionOptionSchema = z.object({
@@ -51,4 +52,33 @@ export function formatAnsweredQuestionOutput(input: {
       return `${question.question}="${answers.join(', ')}"`;
     })
     .join('\n');
+}
+
+export function createQuestionInteractionRecord(input: {
+  answers?: string[][];
+  answeredAt?: number;
+  channel?: InteractionRecord['channel'];
+  interactionId: string;
+  runId: string;
+  status: InteractionRecord['status'];
+  taskId?: string;
+  toolCallRef?: string;
+  toolName: string;
+  questions: QuestionToolInput['questions'];
+}): InteractionRecord {
+  return {
+    interactionId: input.interactionId,
+    ...(input.taskId ? { taskId: input.taskId } : {}),
+    runId: input.runId,
+    type: 'question',
+    ...(input.toolCallRef ? { toolCallRef: input.toolCallRef } : {}),
+    channel: input.channel ?? 'api',
+    payload: {
+      toolName: input.toolName,
+      questions: input.questions,
+      ...(input.answers ? { answers: input.answers } : {}),
+    },
+    status: input.status,
+    ...(input.answeredAt ? { answeredAt: input.answeredAt } : {}),
+  };
 }

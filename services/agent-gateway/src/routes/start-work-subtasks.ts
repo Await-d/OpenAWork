@@ -23,6 +23,14 @@ export function buildStartWorkTaskTags(workflowPlan: WorkflowPlanIdentity | null
   return ['start-work', 'workflow', 'plan', buildWorkflowPlanTag(workflowPlan)];
 }
 
+export function buildWorkflowPlanSubtaskIdempotencyKey(input: {
+  parentTaskId: string;
+  relativePath: string;
+  title: string;
+}): string {
+  return `start-work:${input.parentTaskId}:${input.relativePath}:${input.title.trim()}`;
+}
+
 export function findReusableStartWorkTask(input: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   sessionId: string;
@@ -119,14 +127,22 @@ export function createWorkflowPlanSubtasks(input: {
     }
 
     const createdTask = input.taskManager.addTask(input.graph, {
+      kind: 'workflow_step',
       title: item,
+      subject: item,
       description: `来自工作计划 ${input.workflowPlan.relativePath}`,
       status: 'pending',
       blockedBy,
+      blocks: [],
       parentTaskId: input.parentTaskId,
       sessionId: input.sessionId,
       priority: previousTaskId ? 'medium' : 'high',
       tags: ['start-work', 'workflow', 'subtask'],
+      idempotencyKey: buildWorkflowPlanSubtaskIdempotencyKey({
+        parentTaskId: input.parentTaskId,
+        relativePath: input.workflowPlan.relativePath,
+        title: item,
+      }),
     });
     subtasks.push(createdTask);
     previousTaskId = createdTask.id;
@@ -153,7 +169,7 @@ export function createTaskUpdateEvent(input: {
   return {
     type: 'task_update',
     taskId: input.task.id,
-    label: input.task.title,
+    label: input.task.subject ?? input.task.title,
     status: input.status,
     assignedAgent: input.task.assignedAgent,
     result: input.task.result,
@@ -172,8 +188,17 @@ export function toTaskUpdateStatus(
   if (status === 'running') {
     return 'in_progress';
   }
+  if (status === 'blocked') {
+    return 'pending';
+  }
   if (status === 'completed') {
     return 'done';
   }
-  return status;
+  if (status === 'failed') {
+    return 'failed';
+  }
+  if (status === 'cancelled') {
+    return 'cancelled';
+  }
+  return 'pending';
 }

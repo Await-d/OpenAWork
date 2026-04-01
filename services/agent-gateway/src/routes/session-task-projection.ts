@@ -8,6 +8,16 @@ export type SessionTaskResponse = AgentTask & {
   unmetDependencyCount: number;
 };
 
+function normalizeProjectedTask(task: AgentTask): AgentTask {
+  return {
+    ...task,
+    kind: task.kind ?? 'task',
+    subject: task.subject ?? task.title,
+    blocks: task.blocks ?? [],
+    revision: task.revision ?? 0,
+  };
+}
+
 export function buildSessionTaskProjection(
   graph: AgentTaskGraph,
   sessionId: string,
@@ -60,7 +70,7 @@ export function buildSessionTaskProjection(
       });
     }).length;
     orderedTasks.push({
-      ...task,
+      ...normalizeProjectedTask(task),
       completedSubtaskCount: childTasks.filter((childTask) => childTask.status === 'completed')
         .length,
       depth,
