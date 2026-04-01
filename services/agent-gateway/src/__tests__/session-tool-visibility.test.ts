@@ -11,6 +11,7 @@ vi.mock('../db.js', () => ({
 import {
   filterEnabledGatewayToolsForSession,
   isGatewayToolEnabledForSessionMetadata,
+  isPlanModeToolEnabledForSessionMetadata,
   isQuestionToolEnabledForSessionMetadata,
   isTaskToolEnabledForSessionMetadata,
   shouldAutoApproveToolForSessionMetadata,
@@ -38,6 +39,8 @@ describe('session tool visibility', () => {
   const tools = [
     createToolDefinition('task'),
     createToolDefinition('question'),
+    createToolDefinition('EnterPlanMode'),
+    createToolDefinition('ExitPlanMode'),
     createToolDefinition('read'),
   ];
 
@@ -50,6 +53,7 @@ describe('session tool visibility', () => {
     ).map((tool) => tool.function.name);
 
     expect(isQuestionToolEnabledForSessionMetadata({ createdByTool: 'task' })).toBe(false);
+    expect(isPlanModeToolEnabledForSessionMetadata({ createdByTool: 'task' })).toBe(false);
     expect(visibleToolNames).toEqual(['read']);
   });
 
@@ -61,7 +65,8 @@ describe('session tool visibility', () => {
     );
 
     expect(isQuestionToolEnabledForSessionMetadata({})).toBe(true);
-    expect(visibleToolNames).toEqual(['task', 'question', 'read']);
+    expect(isPlanModeToolEnabledForSessionMetadata({})).toBe(true);
+    expect(visibleToolNames).toEqual(['task', 'question', 'EnterPlanMode', 'ExitPlanMode', 'read']);
   });
 
   it('allows explicit task tool opt-in override on task-created sessions', () => {
@@ -134,6 +139,7 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
     expect(isTaskToolEnabledForSessionMetadata(metadata)).toBe(true);
     expect(isQuestionToolEnabledForSessionMetadata(metadata)).toBe(false);
+    expect(isPlanModeToolEnabledForSessionMetadata(metadata)).toBe(false);
     expect(visibleToolNames).toEqual([
       'websearch',
       'webfetch',

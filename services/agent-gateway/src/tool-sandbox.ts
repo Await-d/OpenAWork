@@ -121,6 +121,7 @@ import { reconcileSessionStateStatus } from './session-runtime-state.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import {
   isGatewayToolEnabledForSessionMetadata,
+  isPlanModeToolEnabledForSessionMetadata,
   shouldAutoApproveToolForSessionMetadata,
 } from './session-tool-visibility.js';
 import {
@@ -1858,6 +1859,15 @@ async function executeGatewayManagedTool(
       }
 
       const metadata = getSessionMetadata(sessionId);
+      if (!isPlanModeToolEnabledForSessionMetadata(metadata)) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'EnterPlanMode is not available in this session context.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
       if (isPlanModeEnabled(metadata)) {
         return {
           toolCallId: request.toolCallId,
@@ -1904,6 +1914,15 @@ async function executeGatewayManagedTool(
       }
 
       const metadata = getSessionMetadata(sessionId);
+      if (!isPlanModeToolEnabledForSessionMetadata(metadata)) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'ExitPlanMode is not available in this session context.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
       if (!isPlanModeEnabled(metadata)) {
         return {
           toolCallId: request.toolCallId,

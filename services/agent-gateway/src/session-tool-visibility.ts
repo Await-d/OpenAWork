@@ -141,6 +141,16 @@ export function isQuestionToolEnabledForSessionMetadata(
   return metadata['createdByTool'] !== 'task';
 }
 
+export function isPlanModeToolEnabledForSessionMetadata(
+  metadata: Record<string, unknown>,
+): boolean {
+  if (isChannelManagedSession(metadata)) {
+    return false;
+  }
+
+  return metadata['createdByTool'] !== 'task';
+}
+
 export function isTaskToolEnabledForSession(metadataJson: string): boolean {
   return isTaskToolEnabledForSessionMetadata(parseSessionMetadataJson(metadataJson));
 }
@@ -159,6 +169,10 @@ export function isGatewayToolEnabledForSessionMetadata(
 
   if (toolName === 'question' || toolName === 'AskUserQuestion') {
     return isQuestionToolEnabledForSessionMetadata(metadata);
+  }
+
+  if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') {
+    return isPlanModeToolEnabledForSessionMetadata(metadata);
   }
 
   return isChannelPolicyToolEnabled(metadata, toolName);
