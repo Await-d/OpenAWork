@@ -64,3 +64,4 @@
 - 当前已切回主线程直接实施；子代理路线终止，不再继续扩散并行子会话。
 - 当前执行策略：基础工具保持 OpenCode-first，非基础工具按 Claude-first 逐把推进。已完成：`Skill`、`AskUserQuestion`、`Agent`、`EnterPlanMode`、`ExitPlanMode`；`WebFetch`、`WebSearch` 已冻结为保留现有合同。
 - 当前 PlanMode 采用最小可信闭环：`EnterPlanMode` 通过 session metadata 打开 `planMode=true`；`ExitPlanMode` 复用 `question_requests` 进行用户审批，并在批准后关闭 `planMode` 再继续恢复会话。
+- 后端联动验证已补齐到路由层：`questions` 路由现在有显式回归用例，覆盖 `ExitPlanMode` 审批回答后对 `planMode` 的切换，以及 `resumeAnsweredQuestionRequest()` 的恢复调用。

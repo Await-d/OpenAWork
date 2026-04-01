@@ -119,6 +119,7 @@
 - [2026-03-31] 在新边界下，`WebFetch` 与 `WebSearch` 明确保留 OpenCode/现有合同，不再按 Claude Code 迁移；剩余候选中 `Agent` 与 `PlanMode` 属于高风险交互级能力，不适合作为下一批低风险切换目标。
 - [2026-03-31] 进一步实施后，`Agent` 已以“对外 `Agent`、对内复用 `call_omo_agent`”的最小闭环落地；这允许保持基础 `task` 工具不变，同时把非基础代理调用收口为 Claude-first 合同。
 - [2026-03-31] PlanMode 现以最小闭环落地：`EnterPlanMode` 只负责切换会话 `planMode` 状态；`ExitPlanMode` 复用既有 `question_requests` 审批与 resume 链，在用户批准后退出计划模式继续执行，不额外引入新的审批子系统。
+- [2026-03-31] PlanMode 不应只靠 helper 测试自证：至少需要一条 `questions` 路由回归，验证 `ExitPlanMode` 的审批回答会真实更新 session metadata 并触发 resume 调用，否则容易在路由层出现 Promise/mock/时序问题而 helper 测试完全捕捉不到。
 
 - [2026-03-30] `services/agent-gateway/src/routes/stream.ts` 已按职责拆分：核心流执行逻辑保留在 `stream.ts`，恢复/后台运行迁至 `stream-runtime.ts`，路由注册迁至 `stream-routes-plugin.ts`，以满足单文件 ≤1500 行约束并降低后续耦合。
 
