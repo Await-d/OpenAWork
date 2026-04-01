@@ -55,11 +55,6 @@ export const PRELOADABLE_ROUTE_MODULES = {
     '消息频道',
   ),
   chat: createPreloadableRouteModule('chat', () => import('../pages/ChatPage.js'), '会话工作台'),
-  'prompt-optimizer': createPreloadableRouteModule(
-    'prompt-optimizer',
-    () => import('../pages/PromptOptimizerPage.js'),
-    '提示优化',
-  ),
   schedules: createPreloadableRouteModule(
     'schedules',
     () => import('../pages/SchedulesPage.js'),
@@ -76,18 +71,7 @@ export const PRELOADABLE_ROUTE_MODULES = {
     '设置中心',
   ),
   skills: createPreloadableRouteModule('skills', () => import('../pages/SkillsPage.js'), '技能库'),
-  team: createPreloadableRouteModule('team', () => import('../pages/TeamPage.js'), '团队空间'),
-  translation: createPreloadableRouteModule(
-    'translation',
-    () => import('../pages/TranslationPage.js'),
-    '翻译工作台',
-  ),
   usage: createPreloadableRouteModule('usage', () => import('../pages/UsagePage.js'), '用量统计'),
-  workflows: createPreloadableRouteModule(
-    'workflows',
-    () => import('../pages/WorkflowsPage.js'),
-    '工作流',
-  ),
 } as const;
 
 export type PreloadableRouteKey = keyof typeof PRELOADABLE_ROUTE_MODULES;

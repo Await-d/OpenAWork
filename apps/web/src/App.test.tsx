@@ -2,7 +2,7 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Outlet } from 'react-router';
+import { MemoryRouter, Outlet, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from './stores/auth.js';
 
@@ -177,6 +177,35 @@ describe('App routing', () => {
     expect(container?.textContent).toContain('消息频道');
     expect(container?.textContent).toContain('渠道模板库');
   });
+
+  it.each(['/workflows', '/prompt-optimizer', '/translation', '/team'])(
+    'redirects legacy route %s back to /chat',
+    async (initialEntry) => {
+      const { default: App } = await import('./App.js');
+      let pathname = '';
+
+      function LocationProbe() {
+        const location = useLocation();
+
+        pathname = location.pathname;
+        return null;
+      }
+
+      await act(async () => {
+        root?.render(
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <App />
+            <LocationProbe />
+          </MemoryRouter>,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(pathname).toBe('/chat');
+    },
+  );
 
   it('renders the agents page on /agents', async () => {
     const { default: App } = await import('./App.js');

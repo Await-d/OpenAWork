@@ -69,6 +69,15 @@ async function renderNavRail(initialEntry = '/settings') {
 }
 
 describe('NavRail route preloading', () => {
+  it('does not render removed workflow-related rail items', async () => {
+    const rendered = await renderNavRail('/chat');
+
+    expect(rendered.textContent).not.toContain('工作流');
+    expect(rendered.textContent).not.toContain('Prompt 优化');
+    expect(rendered.textContent).not.toContain('翻译工作流');
+    expect(rendered.textContent).not.toContain('团队');
+  });
+
   it('preloads the resolved chat route on pointer intent', async () => {
     const rendered = await renderNavRail();
     const chatLink = Array.from(rendered.querySelectorAll('a')).find(

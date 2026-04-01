@@ -20,15 +20,11 @@ const ROUTE_LABELS: Record<string, string> = {
   artifacts: '产物中心',
   channels: '消息频道',
   chat: '会话工作台',
-  'prompt-optimizer': '提示优化',
   schedules: '计划任务',
   sessions: '会话列表',
   settings: '设置中心',
   skills: '技能库',
-  team: '团队空间',
-  translation: '翻译工作台',
   usage: '用量统计',
-  workflows: '工作流',
 };
 
 interface CachedRouteOutletProps {

@@ -6,10 +6,6 @@ export const railItems = [
   { to: '/skills', label: 'Skills' },
   { to: '/agents', label: 'Agents' },
   { to: '/settings/channels', label: 'Channels' },
-  { to: '/workflows', label: 'Workflows' },
-  { to: '/prompt-optimizer', label: 'PromptOptimizer' },
-  { to: '/translation', label: 'Translation' },
-  { to: '/team', label: 'Team' },
   { to: '/usage', label: 'Usage' },
   { to: '/schedules', label: 'Schedules' },
 ];
@@ -21,12 +17,8 @@ export const railLabelCn: Record<string, string> = {
   Skills: '技能',
   Agents: '智能体',
   Channels: '频道',
-  Workflows: '工作流',
-  Team: '团队',
   Usage: '用量',
   Schedules: '定时',
-  PromptOptimizer: 'Prompt 优化',
-  Translation: '翻译工作流',
 };
 
 const I = ({ d, children }: { d?: string; children?: React.ReactNode }) => (
@@ -68,42 +60,6 @@ export function railIcon(label: string) {
           <line x1="9" y1="10" x2="9" y2="10" />
           <line x1="12" y1="10" x2="12" y2="10" />
           <line x1="15" y1="10" x2="15" y2="10" />
-        </I>
-      );
-    case 'Workflows':
-      return (
-        <I>
-          <line x1="6" y1="3" x2="6" y2="15" />
-          <circle cx="18" cy="6" r="3" />
-          <circle cx="6" cy="18" r="3" />
-          <path d="M18 9a9 9 0 0 1-9 9" />
-        </I>
-      );
-    case 'PromptOptimizer':
-      return (
-        <I>
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-        </I>
-      );
-    case 'Translation':
-      return (
-        <I>
-          <path d="M5 8l6 6" />
-          <path d="M4 14l6-6 2-3" />
-          <path d="M2 5h12" />
-          <path d="M7 2h1" />
-          <path d="M22 22l-5-10-5 10" />
-          <path d="M14 18h6" />
-        </I>
-      );
-    case 'Team':
-      return (
-        <I>
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-          <circle cx="9" cy="7" r="4" />
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </I>
       );
     case 'Usage':
