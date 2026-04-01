@@ -12,11 +12,12 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm run test:unit && pnpm run test:verification",
     "test:unit": "vitest run --passWithNoTests",
-    "test:verification": "pnpm run test:responses && pnpm run test:permissions && pnpm run test:session-tasks && pnpm run test:task-tool",
+    "test:verification": "pnpm run test:responses && pnpm run test:permissions && pnpm run test:session-tasks && pnpm run test:task-tool && pnpm run test:claude-tools",
     "test:responses": "tsx src/verification/verify-openai-responses.ts",
     "test:permissions": "tsx src/verification/verify-permissions-routes.ts",
     "test:session-tasks": "tsx src/verification/verify-session-task-routes.ts && tsx src/verification/verify-session-delete-child-detach.ts",
     "test:task-tool": "tsx src/verification/verify-task-tool-no-permission.ts && tsx src/verification/verify-task-tool-auto-run.ts && tsx src/verification/verify-task-tool-failure-propagation.ts && tsx src/verification/verify-task-tool-pending-interaction-resume.ts && tsx src/verification/verify-task-tool-question-resume.ts",
+    "test:claude-tools": "tsx src/verification/verify-claude-first-tools.ts",
     "lint": "eslint .",
     "clean": "rm -rf dist"
   },

@@ -207,6 +207,8 @@ const TOOL_WHITELIST = new Set<string>([
   astGrepReplaceToolDefinition.name,
   interactiveBashToolDefinition.name,
   callOmoAgentToolDefinition.name,
+  enterPlanModeToolDefinition.name,
+  exitPlanModeToolDefinition.name,
   skillMcpToolDefinition.name,
   lookAtToolDefinition.name,
   'read_tool_output',
@@ -1048,6 +1050,7 @@ async function executeGatewayManagedTool(
   sessionId: string,
   request: ToolCallRequest,
   signal: AbortSignal,
+  observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
 ): Promise<ToolCallResult | null> {
   const rawInput = request.rawInput as Record<string, unknown>;
@@ -1484,6 +1487,7 @@ async function executeGatewayManagedTool(
         sessionId,
         delegatedRequest,
         signal,
+        observability,
         executionContext,
       );
       if (!taskResult) {
@@ -1815,11 +1819,7 @@ async function executeGatewayManagedTool(
               requestData: executionContext.requestData,
               toolCallId: request.toolCallId,
               rawInput,
-              observability: buildToolObservability({
-                canonicalToolName: 'question',
-                metadata: getSessionMetadata(sessionId),
-                presentedToolName: request.toolName,
-              }),
+              ...(observability ? { observability } : {}),
             }
           : undefined;
       const title = buildQuestionRequestTitle(parsed.data);
@@ -1957,11 +1957,7 @@ async function executeGatewayManagedTool(
               requestData: executionContext.requestData,
               toolCallId: request.toolCallId,
               rawInput,
-              observability: buildToolObservability({
-                canonicalToolName: exitPlanModeToolDefinition.name,
-                metadata,
-                presentedToolName: request.toolName,
-              }),
+              ...(observability ? { observability } : {}),
             }
           : undefined;
 
@@ -3333,6 +3329,7 @@ function consumeOncePermission(requestId: string): void {
 function ensurePermissionForTool(
   sessionId: string,
   request: ToolCallRequest,
+  observability: PermissionRequestPayload['observability'] | undefined,
   executionContext?: SandboxExecutionContext,
 ): PermissionState {
   if (!PERMISSION_GATED_TOOLS.has(request.toolName)) {
@@ -3363,11 +3360,7 @@ function ensurePermissionForTool(
           requestData: executionContext.requestData,
           toolCallId: request.toolCallId,
           rawInput: request.rawInput as Record<string, unknown>,
-          observability: buildToolObservability({
-            canonicalToolName: request.toolName,
-            metadata: sessionMetadata,
-            presentedToolName: request.toolName,
-          }),
+          ...(observability ? { observability } : {}),
         }
       : undefined;
 
@@ -3457,6 +3450,11 @@ export class ToolSandbox {
     }
 
     const sessionMetadata = getSessionMetadata(sessionId);
+    const toolObservability = buildToolObservability({
+      canonicalToolName: normalizedRequest.toolName,
+      metadata: sessionMetadata,
+      presentedToolName: request.toolName,
+    });
     if (!isGatewayToolEnabledForSessionMetadata(normalizedRequest.toolName, sessionMetadata)) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
@@ -3490,7 +3488,12 @@ export class ToolSandbox {
       }
     }
 
-    const permissionState = ensurePermissionForTool(sessionId, normalizedRequest, executionContext);
+    const permissionState = ensurePermissionForTool(
+      sessionId,
+      normalizedRequest,
+      toolObservability,
+      executionContext,
+    );
     if (permissionState.kind === 'pending') {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
@@ -3511,6 +3514,7 @@ export class ToolSandbox {
       sessionId,
       normalizedRequest,
       signal,
+      toolObservability,
       executionContext,
     );
     if (gatewayManagedResult) {

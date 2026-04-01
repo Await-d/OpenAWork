@@ -38,8 +38,10 @@ import type { SandboxExecutionContext } from '../tool-sandbox.js';
 import { buildGatewayToolDefinitions } from './stream-protocol.js';
 import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
+import { extractToolSurfaceProfile } from '../session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace-paths.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+import { resolveCanonicalName } from '../claude-code-tool-surface.js';
 import {
   clearInFlightStreamRequest,
   getAnyInFlightStreamRequestForSession,
@@ -148,6 +150,25 @@ export interface ApprovedPermissionResumePayload {
   toolName: string;
   rawInput: Record<string, unknown>;
   observability?: ToolCallObservabilityAnnotation;
+}
+
+function buildStreamToolObservability(input: {
+  metadataJson: string;
+  presentedToolName: string;
+}): ToolCallObservabilityAnnotation {
+  let metadata: Record<string, unknown> = {};
+  try {
+    metadata = JSON.parse(input.metadataJson) as Record<string, unknown>;
+  } catch {
+    metadata = {};
+  }
+
+  return {
+    presentedToolName: input.presentedToolName,
+    canonicalToolName: resolveCanonicalName(input.presentedToolName),
+    toolSurfaceProfile: extractToolSurfaceProfile(metadata),
+    adapterVersion: '1.0.0',
+  };
 }
 
 export interface SessionStreamContext {
@@ -577,6 +598,11 @@ export async function executeToolCalls(input: {
             durationMs: 0,
           };
 
+    const observability = buildStreamToolObservability({
+      metadataJson: input.sessionContext.metadataJson,
+      presentedToolName: toolCall.toolName,
+    });
+
     appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -588,6 +614,7 @@ export async function executeToolCalls(input: {
           output: result.output,
           isError: result.isError,
           pendingPermissionRequestId: result.pendingPermissionRequestId,
+          observability,
         }),
       ],
       legacyMessagesJson: input.sessionContext.legacyMessagesJson,
@@ -615,6 +642,7 @@ export async function executeToolCalls(input: {
         output: result.output,
         isError: result.isError,
         pendingPermissionRequestId: result.pendingPermissionRequestId,
+        observability,
         eventMeta: createRunEventMeta(input.runId, input.eventSequence),
       }),
     );
