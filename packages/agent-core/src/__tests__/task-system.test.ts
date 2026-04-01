@@ -9,6 +9,10 @@ function createGraph(): AgentTaskGraph {
   return {
     projectRoot: '/tmp/openawork-task-system',
     tasks: {},
+    runs: {},
+    interactions: {},
+    sessionContexts: {},
+    schemaVersion: 2,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

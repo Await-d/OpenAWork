@@ -4,6 +4,7 @@ import { AgentTaskSchedulerImpl } from './scheduler.js';
 import { AgentTaskStoreImpl } from './store.js';
 import type {
   AgentTask,
+  AgentTaskDraft,
   AgentTaskGraph,
   AgentTaskManager,
   AgentTaskScheduler,
@@ -16,6 +17,20 @@ function createTaskId(): string {
 
 function touchGraph(graph: AgentTaskGraph): void {
   graph.updatedAt = Date.now();
+}
+
+function bumpTaskRevision(task: AgentTask): void {
+  task.revision = (task.revision ?? 0) + 1;
+}
+
+function normalizeTaskRecord(task: AgentTask): AgentTask {
+  return {
+    ...task,
+    kind: task.kind ?? 'task',
+    subject: task.subject ?? task.title,
+    blocks: task.blocks ?? [],
+    revision: task.revision ?? 0,
+  };
 }
 
 function getTaskOrThrow(graph: AgentTaskGraph, taskId: string): AgentTask {
@@ -136,10 +151,7 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
     return this.store.load(projectRoot, graphId);
   }
 
-  addTask(
-    graph: AgentTaskGraph,
-    task: Omit<AgentTask, 'id' | 'createdAt' | 'updatedAt'>,
-  ): AgentTask {
+  addTask(graph: AgentTaskGraph, task: AgentTaskDraft): AgentTask {
     const now = Date.now();
     const relation = resolveParentTaskLink({
       graph,
@@ -148,15 +160,19 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
     });
     const newTask: AgentTask = {
       ...task,
+      kind: task.kind ?? 'task',
+      subject: task.subject ?? task.title,
       parentTaskId: relation.parentTaskId,
       sessionId: relation.sessionId,
+      blocks: task.blocks ?? [],
+      revision: task.revision ?? 0,
       id: createTaskId(),
       createdAt: now,
       updatedAt: now,
     };
-    graph.tasks[newTask.id] = newTask;
+    graph.tasks[newTask.id] = normalizeTaskRecord(newTask);
     touchGraph(graph);
-    return newTask;
+    return graph.tasks[newTask.id]!;
   }
 
   updateTask(graph: AgentTaskGraph, taskId: string, patch: Partial<AgentTask>): void {
@@ -170,7 +186,13 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
       parentTaskId: hasParentPatch ? restPatch.parentTaskId : task.parentTaskId,
       sessionId: hasSessionPatch ? restPatch.sessionId : task.sessionId,
     });
-    Object.assign(task, restPatch, relation, { updatedAt: Date.now() });
+    Object.assign(task, restPatch, relation, {
+      kind: restPatch.kind ?? task.kind ?? 'task',
+      subject: restPatch.subject ?? restPatch.title ?? task.subject ?? task.title,
+      blocks: restPatch.blocks ?? task.blocks ?? [],
+      updatedAt: Date.now(),
+    });
+    bumpTaskRevision(task);
     touchGraph(graph);
   }
 
@@ -189,6 +211,7 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
       if (nextBlockedBy.length !== task.blockedBy.length) {
         task.blockedBy = nextBlockedBy;
         task.updatedAt = Date.now();
+        bumpTaskRevision(task);
       }
     }
 
@@ -205,6 +228,7 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
     task.status = 'running';
     task.startedAt = now;
     task.updatedAt = now;
+    bumpTaskRevision(task);
     touchGraph(graph);
   }
 
@@ -219,6 +243,7 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
     task.errorMessage = undefined;
     task.completedAt = now;
     task.updatedAt = now;
+    bumpTaskRevision(task);
     touchGraph(graph);
   }
 
@@ -231,6 +256,7 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
     task.status = 'failed';
     task.errorMessage = error;
     task.updatedAt = now;
+    bumpTaskRevision(task);
     touchGraph(graph);
   }
 
@@ -242,6 +268,7 @@ export class AgentTaskManagerImpl implements AgentTaskManager {
     const now = Date.now();
     task.status = 'cancelled';
     task.updatedAt = now;
+    bumpTaskRevision(task);
     touchGraph(graph);
   }
 

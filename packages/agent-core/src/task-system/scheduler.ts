@@ -1,6 +1,11 @@
 import type { AgentTask, AgentTaskGraph, AgentTaskScheduler, AgentTaskStatus } from './types.js';
 
-const BLOCKING_STATUSES: ReadonlySet<AgentTaskStatus> = new Set(['pending', 'running', 'failed']);
+const BLOCKING_STATUSES: ReadonlySet<AgentTaskStatus> = new Set([
+  'pending',
+  'running',
+  'blocked',
+  'failed',
+]);
 
 function sortTasks(tasks: AgentTask[]): AgentTask[] {
   return [...tasks].sort((a, b) => {

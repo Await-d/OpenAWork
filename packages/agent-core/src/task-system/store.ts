@@ -20,6 +20,10 @@ function createEmptyGraph(projectRoot: string): AgentTaskGraph {
   return {
     projectRoot,
     tasks: {},
+    runs: {},
+    interactions: {},
+    sessionContexts: {},
+    schemaVersion: 2,
     createdAt: now,
     updatedAt: now,
   };

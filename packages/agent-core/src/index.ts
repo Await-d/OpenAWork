@@ -11,6 +11,14 @@ export type {
   StreamErrorChunk,
   StreamChunk,
   ApiError,
+  TaskOwnership,
+  TaskEntityRecord,
+  TaskRunRecord,
+  InteractionRecord,
+  PlanTransitionRecord,
+  SessionContextRecord,
+  EventEnvelope,
+  RunEventCursor,
 } from '@openAwork/shared';
 
 export { isRetryableError } from '@openAwork/shared';
