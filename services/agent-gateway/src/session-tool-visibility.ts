@@ -126,6 +126,14 @@ export function isTaskToolEnabledForSessionMetadata(metadata: Record<string, unk
   return metadata['createdByTool'] !== 'task';
 }
 
+export function isAgentToolEnabledForSessionMetadata(metadata: Record<string, unknown>): boolean {
+  if (isChannelManagedSession(metadata)) {
+    return isChannelPolicyToolEnabled(metadata, 'task');
+  }
+
+  return metadata['createdByTool'] !== 'task';
+}
+
 export function isQuestionToolEnabledForSessionMetadata(
   metadata: Record<string, unknown>,
 ): boolean {
@@ -165,6 +173,10 @@ export function isGatewayToolEnabledForSessionMetadata(
 ): boolean {
   if (toolName === 'task') {
     return isTaskToolEnabledForSessionMetadata(metadata);
+  }
+
+  if (toolName === 'call_omo_agent' || toolName === 'Agent') {
+    return isAgentToolEnabledForSessionMetadata(metadata);
   }
 
   if (toolName === 'question' || toolName === 'AskUserQuestion') {

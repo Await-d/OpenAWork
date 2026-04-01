@@ -390,9 +390,16 @@ describe('listCapabilitiesForUser', () => {
     const capabilities = listCapabilitiesForUser('user-1', 'child-session-1');
 
     expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'task')).toBe(false);
+    expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'Agent')).toBe(false);
     expect(
       capabilities.some((item) => item.kind === 'tool' && item.label === 'AskUserQuestion'),
     ).toBe(false);
+    expect(
+      capabilities.some((item) => item.kind === 'tool' && item.label === 'EnterPlanMode'),
+    ).toBe(false);
+    expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'ExitPlanMode')).toBe(
+      false,
+    );
     expect(capabilities.some((item) => item.kind === 'tool' && item.label === 'read')).toBe(true);
   });
 

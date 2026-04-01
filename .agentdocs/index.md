@@ -121,6 +121,7 @@
 - [2026-03-31] PlanMode 现以最小闭环落地：`EnterPlanMode` 只负责切换会话 `planMode` 状态；`ExitPlanMode` 复用既有 `question_requests` 审批与 resume 链，在用户批准后退出计划模式继续执行，不额外引入新的审批子系统。
 - [2026-03-31] PlanMode 不应只靠 helper 测试自证：至少需要一条 `questions` 路由回归，验证 `ExitPlanMode` 的审批回答会真实更新 session metadata 并触发 resume 调用，否则容易在路由层出现 Promise/mock/时序问题而 helper 测试完全捕捉不到。
 - [2026-03-31] PlanMode 还需要双层 gating：不仅 capability/visible-tools 层要在 task-created 与 channel 会话中隐藏 `EnterPlanMode/ExitPlanMode`，sandbox 运行时也要再次拒绝，防止模型绕过工具列表直接调用。
+- [2026-03-31] `Agent` 与 `PlanMode` 这类高阶工具都需要 session-scoped 双层 gating：capability 列表和 sandbox 运行时必须同时限制 task-created 子会话与 channel 会话，否则会出现 UI 层已隐藏但模型仍可硬调的后端一致性漏洞。
 
 - [2026-03-30] `services/agent-gateway/src/routes/stream.ts` 已按职责拆分：核心流执行逻辑保留在 `stream.ts`，恢复/后台运行迁至 `stream-runtime.ts`，路由注册迁至 `stream-routes-plugin.ts`，以满足单文件 ≤1500 行约束并降低后续耦合。
 

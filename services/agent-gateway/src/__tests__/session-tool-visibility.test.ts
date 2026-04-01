@@ -9,6 +9,7 @@ vi.mock('../db.js', () => ({
 }));
 
 import {
+  isAgentToolEnabledForSessionMetadata,
   filterEnabledGatewayToolsForSession,
   isGatewayToolEnabledForSessionMetadata,
   isPlanModeToolEnabledForSessionMetadata,
@@ -38,6 +39,7 @@ function createToolDefinition(name: string): GatewayToolDefinition {
 describe('session tool visibility', () => {
   const tools = [
     createToolDefinition('task'),
+    createToolDefinition('Agent'),
     createToolDefinition('question'),
     createToolDefinition('EnterPlanMode'),
     createToolDefinition('ExitPlanMode'),
@@ -52,6 +54,7 @@ describe('session tool visibility', () => {
       JSON.stringify({ createdByTool: 'task' }),
     ).map((tool) => tool.function.name);
 
+    expect(isAgentToolEnabledForSessionMetadata({ createdByTool: 'task' })).toBe(false);
     expect(isQuestionToolEnabledForSessionMetadata({ createdByTool: 'task' })).toBe(false);
     expect(isPlanModeToolEnabledForSessionMetadata({ createdByTool: 'task' })).toBe(false);
     expect(visibleToolNames).toEqual(['read']);
@@ -66,7 +69,15 @@ describe('session tool visibility', () => {
 
     expect(isQuestionToolEnabledForSessionMetadata({})).toBe(true);
     expect(isPlanModeToolEnabledForSessionMetadata({})).toBe(true);
-    expect(visibleToolNames).toEqual(['task', 'question', 'EnterPlanMode', 'ExitPlanMode', 'read']);
+    expect(isAgentToolEnabledForSessionMetadata({})).toBe(true);
+    expect(visibleToolNames).toEqual([
+      'task',
+      'Agent',
+      'question',
+      'EnterPlanMode',
+      'ExitPlanMode',
+      'read',
+    ]);
   });
 
   it('allows explicit task tool opt-in override on task-created sessions', () => {
@@ -101,6 +112,7 @@ describe('session tool visibility', () => {
       createToolDefinition('webfetch'),
       createToolDefinition('bash'),
       createToolDefinition('task'),
+      createToolDefinition('Agent'),
       createToolDefinition('question'),
       createToolDefinition('read'),
       createToolDefinition('edit'),
@@ -138,12 +150,14 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('edit', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
     expect(isTaskToolEnabledForSessionMetadata(metadata)).toBe(true);
+    expect(isAgentToolEnabledForSessionMetadata(metadata)).toBe(true);
     expect(isQuestionToolEnabledForSessionMetadata(metadata)).toBe(false);
     expect(isPlanModeToolEnabledForSessionMetadata(metadata)).toBe(false);
     expect(visibleToolNames).toEqual([
       'websearch',
       'webfetch',
       'task',
+      'Agent',
       'read',
       'workspace_review_diff',
       'mcp_call',
@@ -166,5 +180,6 @@ describe('session tool visibility', () => {
 
     expect(shouldAutoApproveToolForSessionMetadata('bash', metadata)).toBe(true);
     expect(shouldAutoApproveToolForSessionMetadata('task', metadata)).toBe(false);
+    expect(shouldAutoApproveToolForSessionMetadata('Agent', metadata)).toBe(false);
   });
 });

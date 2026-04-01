@@ -66,3 +66,4 @@
 - 当前 PlanMode 采用最小可信闭环：`EnterPlanMode` 通过 session metadata 打开 `planMode=true`；`ExitPlanMode` 复用 `question_requests` 进行用户审批，并在批准后关闭 `planMode` 再继续恢复会话。
 - 后端联动验证已补齐到路由层：`questions` 路由现在有显式回归用例，覆盖 `ExitPlanMode` 审批回答后对 `planMode` 的切换，以及 `resumeAnsweredQuestionRequest()` 的恢复调用。
 - PlanMode 后端 gating 已补齐：对 `createdByTool='task'` 的子会话以及 channel 会话，`EnterPlanMode/ExitPlanMode` 在 capability 过滤和 sandbox 执行两层都被明确禁用，避免误暴露和绕过调用。
+- Agent 后端 gating 现也补齐到同一层级：`Agent` 在 task-created 子会话与 channel 会话中都会被 capability 过滤和 sandbox 运行时同时限制，防止嵌套子代理链在不受支持的会话上下文里继续扩散。
