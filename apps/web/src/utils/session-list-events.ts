@@ -3,6 +3,8 @@ const CURRENT_SESSION_REFRESH_EVENT = 'openAwork:current-session-refresh';
 const SESSION_PENDING_PERMISSION_EVENT = 'openAwork:session-pending-permission';
 
 let refreshScheduled = false;
+let pendingPermissionDispatchScheduled = false;
+const pendingPermissionStateBySession = new Map<string, SessionPendingPermissionState | null>();
 
 export interface SessionPendingPermissionState {
   requestId: string;
@@ -76,17 +78,31 @@ export function publishSessionPendingPermission(
     return;
   }
 
-  window.dispatchEvent(
-    new CustomEvent<{ permission: SessionPendingPermissionState | null; sessionId: string }>(
-      SESSION_PENDING_PERMISSION_EVENT,
-      {
-        detail: {
-          permission,
-          sessionId,
-        },
-      },
-    ),
-  );
+  pendingPermissionStateBySession.set(sessionId, permission);
+  if (pendingPermissionDispatchScheduled) {
+    return;
+  }
+
+  pendingPermissionDispatchScheduled = true;
+  queueMicrotask(() => {
+    pendingPermissionDispatchScheduled = false;
+    const pendingEntries = Array.from(pendingPermissionStateBySession.entries());
+    pendingPermissionStateBySession.clear();
+
+    for (const [pendingSessionId, pendingPermission] of pendingEntries) {
+      window.dispatchEvent(
+        new CustomEvent<{ permission: SessionPendingPermissionState | null; sessionId: string }>(
+          SESSION_PENDING_PERMISSION_EVENT,
+          {
+            detail: {
+              permission: pendingPermission,
+              sessionId: pendingSessionId,
+            },
+          },
+        ),
+      );
+    }
+  });
 }
 
 export function subscribeSessionPendingPermission(

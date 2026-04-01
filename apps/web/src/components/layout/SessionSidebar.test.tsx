@@ -500,7 +500,9 @@ describe('SessionSidebar file tree actions', () => {
       await Promise.resolve();
     });
 
-    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-1');
+    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-1', {
+      suppressToast: true,
+    });
     expect(removeWorkspaceSpy).toHaveBeenCalledWith('/repo/alpha');
     expect(toastSpy).toHaveBeenCalledWith('已删除工作区「alpha」及 1 个会话', 'success');
   });
@@ -678,8 +680,12 @@ describe('SessionSidebar file tree actions', () => {
       await Promise.resolve();
     });
 
-    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-1');
-    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-2');
+    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-1', {
+      suppressToast: true,
+    });
+    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-2', {
+      suppressToast: true,
+    });
     expect(removeWorkspaceSpy).not.toHaveBeenCalled();
     expect(toastSpy).toHaveBeenCalledWith(
       '工作区「project」删除未完成：已删除 1 个会话，1 个失败，工作区未移除。',
@@ -758,7 +764,9 @@ describe('SessionSidebar file tree actions', () => {
       await Promise.resolve();
     });
 
-    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-unbound-1');
+    expect(useSessionsMockState.quickDeleteSession).toHaveBeenCalledWith('session-unbound-1', {
+      suppressToast: true,
+    });
     expect(removeWorkspaceSpy).not.toHaveBeenCalled();
     expect(toastSpy).toHaveBeenCalledWith('已删除未绑定工作区中的 1 个会话', 'success');
   });

@@ -176,6 +176,43 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   }, [accessToken, currentChatSessionId]);
 
   useEffect(() => {
+    if (!accessToken || !currentChatSessionId) {
+      return;
+    }
+
+    const controller = new AbortController();
+    void createPermissionsClient(gatewayUrl)
+      .listPending(accessToken, currentChatSessionId, { signal: controller.signal })
+      .then((requests) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const pendingRequest = requests.find((request) => request.status === 'pending');
+        setPendingPermission(
+          pendingRequest
+            ? {
+                requestId: pendingRequest.requestId,
+                targetSessionId: pendingRequest.sessionId,
+                toolName: pendingRequest.toolName,
+                scope: pendingRequest.scope,
+                reason: pendingRequest.reason,
+                riskLevel: pendingRequest.riskLevel,
+                previewAction: pendingRequest.previewAction,
+              }
+            : null,
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setPendingPermission(null);
+        }
+      });
+
+    return () => controller.abort();
+  }, [accessToken, currentChatSessionId, gatewayUrl]);
+
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const ctrl = e.metaKey || e.ctrlKey;
       if (ctrl && e.key === 'k') {

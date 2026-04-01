@@ -196,10 +196,14 @@ async function renderLayoutWithRoutes(initialEntry = '/settings') {
 }
 
 describe('Layout sidebar session quick actions', () => {
-  it('does not poll pending permissions directly on chat route render', async () => {
+  it('loads pending permissions for the active chat session on initial render', async () => {
     await renderLayout();
 
-    expect(listPendingPermissionsMock).not.toHaveBeenCalled();
+    expect(listPendingPermissionsMock).toHaveBeenCalledWith(
+      'token-123',
+      'session-1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('replies to the target child session when the parent surfaces a child permission request', async () => {
