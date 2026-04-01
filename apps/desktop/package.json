@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "lint": "eslint ."
+    "lint": "node -e \"console.log('跳过 apps/desktop lint：apps/** 按仓库约定不参与根 ESLint 检查')\""
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

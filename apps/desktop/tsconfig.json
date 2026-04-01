@@ -5,10 +5,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
+    "baseUrl": ".",
     "outDir": "./dist",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "paths": {
       "@openAwork/shared": ["../../packages/shared/src/index.ts"],
+      "@openAwork/shared-ui": ["../../packages/shared-ui/src/index.ts"],
       "@openAwork/web-client": ["../../packages/web-client/src/index.ts"],
       "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"]
     }
