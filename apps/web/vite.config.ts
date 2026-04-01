@@ -8,8 +8,14 @@ import versionPlugin from '../../scripts/vite-plugin-version.mjs';
 export default defineConfig({
   resolve: {
     alias: {
+      '@openAwork/shared': fileURLToPath(
+        new URL('../../packages/shared/src/index.ts', import.meta.url),
+      ),
       '@openAwork/shared-ui': fileURLToPath(
         new URL('../../packages/shared-ui/src/index.ts', import.meta.url),
+      ),
+      '@openAwork/web-client': fileURLToPath(
+        new URL('../../packages/web-client/src/index.ts', import.meta.url),
       ),
     },
   },
