@@ -23,8 +23,19 @@ export default function SessionListPanel() {
     if (!visible || !token) return;
     createSessionsClient(gatewayUrl)
       .list(token ?? '')
-      .then((list) => setSessions(list as any[]))
-      .catch(() => null);
+      .then((list) => {
+        const nextSessions: SessionRow[] = list.map(
+          (session): SessionRow => ({
+            id: session.id,
+            state_status: session.state_status ?? 'idle',
+            updated_at: String(session.updatedAt ?? ''),
+          }),
+        );
+        setSessions(nextSessions);
+      })
+      .catch((error) => {
+        console.warn('Failed to load desktop session list', error);
+      });
   }, [visible, token, gatewayUrl]);
 
   async function createSession() {
