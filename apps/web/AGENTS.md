@@ -54,7 +54,7 @@ src/
 - **主题**：默认深色，浅色模式通过 `document.documentElement.classList.add('light')` 切换，存储于 `localStorage`。
 - **引导**：通过 `localStorage.getItem('onboarded') !== '1'` 控制是否显示。
 - **遥测授权**：通过 `localStorage.getItem('telemetry_consent_shown') !== '1'` 控制。
-- **ESLint**：`apps/` 被根目录 ESLint 排除——此应用**不参与** `pnpm lint` 检查。
+- **ESLint**：`apps/web` 当前按阶段性策略仍被根目录 ESLint 排除；`pnpm --filter @openAwork/web lint` 会显式提示跳过，待后续单独收口历史 lint 债务。
 
 ## 约定
 

@@ -2,8 +2,6 @@
 
 ## 活跃工作流
 
-- [260401-opencode-claude-任务体系完整融合方案](./workflow/260401-opencode-claude-任务体系完整融合方案.md) — 基于 `temp/opencode` 与 `temp/claude-code-sourcemap` 本体源码，对任务体系做完整融合设计：以 Task Entity 为核心、TaskRun/Interaction/PlanTransition 为主干，明确核心层/扩展层/兼容层、保留项/舍弃项与演进顺序
-
 - [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout
 
 - [260331-聊天刷新恢复与运行控制方案](./workflow/260331-聊天刷新恢复与运行控制方案.md) — 为 Chat 对话页冻结“待发队列持久化 + 刷新后运行控制恢复 + stopCapability 三态 + UI 明示可控性”的正式实施方案，优先解决刷新后队列丢失与无法管理 running 会话的问题
@@ -25,7 +23,12 @@
 
 ## 归档工作流（已完成）
 
-- 当前无归档方案。
+- [260401-opencode-claude-任务体系完整融合方案](./workflow/done/260401-opencode-claude-任务体系完整融合方案.md) — 以 fusion-native first 完成 OpenCode 与 Claude Code 任务体系主线实施：D-01～D-11 已落地并通过验证；D-12 importer/translator 因“旧版本不需要兼容”决策而未开启
+- [260401-usage写入闭环实现](./workflow/done/260401-usage写入闭环实现.md) — usage 月度记录闭环收口：为 chat-completions 流式请求显式启用 `stream_options.include_usage`，并以真实 Responses/chat 验收证明 `usage_records` 会按月累计写入
+- [260401-apps-真正纳入lint](./workflow/done/260401-apps-真正纳入lint.md) — 让 `apps/desktop`、`apps/mobile` 真正参与 ESLint 检查、lint-staged 与 CI quality 门禁；`apps/web` 按当前阶段性策略暂缓 lint 收口
+- [260401-mcp-client-源码类型解析修复](./workflow/done/260401-mcp-client-源码类型解析修复.md) — 修复 `@openAwork/mcp-client` 在 lint 阶段对 `@openAwork/skill-types` 的类型解析不稳定问题，并收口 apps lint 脚本与仓库约定的冲突
+- [260401-usage页面实现度分析](./workflow/done/260401-usage页面实现度分析.md) — usage 页面/标签页实现度审计：已确认页面与读取接口存在，但 `usage_records` 缺少写入链路，`/usage/breakdown` 与模型价格编辑存在空壳/半成品实现
+- [260401-usage写入链路追踪](./workflow/done/260401-usage写入链路追踪.md) — 上游 usage/token/cost 链路追踪：已确认 provider usage 在 `stream-protocol.ts` 被丢弃，`stream-model-round.ts` / `stream.ts` 无 usage 聚合与月度 upsert，`TokenUsageManagerImpl` 与 `calculateTokenCost()` 处于未接线状态
 
 ## Architecture Decisions
 
@@ -33,6 +36,11 @@
 - [2026-04-01] 融合后的统一核心只吸收 `Task lifecycle / TaskRun / Interaction / PlanTransition / 最小后台运行控制面`；OpenCode 的 session-level `todowrite`、Claude 的文件型 tasks 与 `diskOutput/polling/eviction` 都保留为扩展层，而不是核心标准。
 - [2026-04-01] 任务体系后续实施采用 **fusion-native first**：旧版本 OpenCode / Claude Code surface 只作为语义来源与迁移输入，不再作为长期兼容目标；先定义新合同，再按需编写 importer / translator。
 - [2026-04-01] 任务体系实施顺序固定为：先 `packages/shared/src/index.ts` 冻结共享合同，再改 `packages/agent-core/src/task-system/*`，然后收口 `services/agent-gateway/src/task-*.ts / background-task-tools.ts / session-run-events.ts`，最后才进入 `routes/stream*.ts` 与对外 surface；禁止从 gateway 热点路由倒着改起。
+- [2026-04-01] D-09 的 durable replay 判断切换为 **latest bookend-driven**：`RunEventEnvelope` 承载 `bookend + cursor + outputOffset`，只有最新 bookend 为终态或 `interaction_wait` 时才允许 durable replay；`tool_handoff` 与 `interaction_resumed` 明确是非 replayable 边界，避免运行中的 request 被误当成可回放完成态。
+- [2026-04-01] D-10 的 tools/capabilities surface 采用 **openawork canonical 默认 + claude_code_* profile 次级呈现**：默认 `openawork` 只暴露 canonical/fusion-native 工具名；只有显式 `toolSurfaceProfile` 选择 `claude_code_*` 时才暴露 `Skill/AskUserQuestion/Agent/...` 等 presented names。
+- [2026-04-01] 只要某个 profile 暴露了 presented tool name，就必须同时保证 `tool-definitions`、`isEnabledToolName/session-tool-visibility`、以及 `dispatchClaudeCodeTool` 三层都能归一到同一个 canonical tool；否则会出现“模型可见且 enabled，但运行期 unsupported”的错配。
+- [2026-04-01] D-11 的验证矩阵优先放在 `src/verification/verify-*.ts` 而不是强行解锁脆弱的 route 集成：当 Node/vitest 环境仍会把 `sqlite` 相关 route suite 整体 skip 时，优先用真实 Fastify + in-memory DB 的 verification 脚本补关键链路（`/tools`、`/capabilities`、stream surface、replay/bookend、session delete abort`）。
+- [2026-04-01] 对 stream/replay/bookend，最关键的 ATDD 不是“事件存在”，而是 **bookend gating 行为**：`interaction_wait` 必须直接 replay 且不触发 upstream；`tool_handoff` 必须继续走 upstream 而不能把旧 `done(tool_use)` 当成可回放完成态。
 
 - [2026-04-01] Buddy / Companion 能力在 OpenAWork 中定位为“体验层 companion layer”，不进入 `agent-core` 状态机与消息真相模型；账号级偏好统一落 gateway `user_settings`，前端只持有瞬时 reaction/UI 状态，Web/Desktop 先行，Mobile 延后降级接入。
 - [2026-04-01] Companion 的模型边界采用 request-scoped system prompt augmentation，而非写入 `session_messages`；注入逻辑必须同时覆盖 `services/agent-gateway/src/routes/stream.ts` 与 `stream-runtime.ts`，避免恢复执行与后台续跑时出现人格漂移。
@@ -118,6 +126,11 @@
 
 ## Known Pitfalls
 
+- [2026-04-01] Chat Completions 的流式 usage 不能只实现解析逻辑：OpenAI 语义要求请求体显式带 `stream_options.include_usage=true`，否则最后的 usage chunk 默认不会返回；如果只在 `stream-protocol.ts` 里写了解析，但没在 `upstream-request.ts` 打开这个选项，`usage_records` 在 chat 路径上仍会长期缺数。
+- [2026-04-01] 即使已经在 chat 请求默认值里加入 `stream_options.include_usage=true`，也不能假设它会一直保留：`applyRequestOverridesToBody()` 若先合并外部 `requestOverrides.body.stream_options`，后续没有再做强制 merge，就可能把 `include_usage` 悄悄覆盖掉，导致 usage 写入回归失效。
+- [2026-04-01] usage 相关能力不能只看页面是否已挂载：当前 `UsagePage` / `Settings usage` 虽已接通读取接口，但 `usage_records` 仍无写入实现，`/usage/breakdown` 固定返回空明细，`ModelPriceConfig` 在 settings 中也是 `onUpdate={() => undefined}` 的假可编辑状态，极易误判为“功能已完整落地”。
+- [2026-04-01] usage 写入链路最容易卡在“上游明明有 usage，但协议层没透传”：`response.completed.response.usage` 若未在 `stream-protocol.ts` 提取并带到 `stream.ts` 的 `runModelRound()` 主循环，后续即使有价格表、`calculateTokenCost()` 和 `usage_records` 月表，也只会长期保持空壳读取态。
+
 - [2026-04-01] 比较 OpenCode 与 Claude Code 任务体系时，最容易犯的错误是按同名工具直接对齐：OpenCode `task` 是委派执行动作，不是 Claude `TaskCreate/Get/List/Update` 那种任务实体管理；若不先拆开“实体 / 运行 / 交互 / 规划边界”四层，后续融合一定出现语义腐蚀。
 - [2026-04-01] 当已明确采用融合优先方案后，最大的坑不是“兼容得不够”，而是继续把旧 tool 名、旧状态词、旧 API 形状带进新核心；这会把系统重新拖回双轨设计。
 
@@ -130,6 +143,9 @@
 - [2026-03-31] 在“基础工具 OpenCode-first、非基础工具 Claude-first”的混合路线下，最容易出问题的是展示层和执行层不同步：任何新切到 Claude-first 的工具，都必须同时更新 `tool-definitions`、`tool-sandbox`、`capabilities` 与对应测试，否则会出现 capability 名称已变、sandbox 仍按旧名执行的断裂。
 
 - [2026-03-30] `apps/web` 若直接消费 `@openAwork/shared-ui` 的包导出，Vitest/Vite 可能继续读取旧的 `dist` 产物，导致跨包 UI 源码改动“看起来没生效”；已通过 `apps/web/vite.config.ts` alias 到 `packages/shared-ui/src/index.ts` 保持开发/测试与源码一致。
+- [2026-04-01] monorepo 中直接消费 workspace 包的 package 若参与 type-aware lint / typecheck，不能只依赖 `package.json` 的 `dist` 导出；至少要在消费方 `tsconfig.json` 补齐源码 `paths + references`，必要时再把该包纳入根 `tsconfig.json` 的 solution references，否则 ESLint 可能把上游类型降级为 error type。
+- [2026-04-01] `apps/web`、`apps/desktop`、`apps/mobile` 当前按仓库约定不参与根 ESLint；若保留 `package.json` 中的 `lint: eslint .`，一旦被 `pnpm --filter ... lint` 直接点名就会因为 `apps/**` 全局忽略而退出失败，脚本必须与该约定保持一致。
+- [2026-04-01] app 层 lint 策略已调整为分层覆盖：`apps/desktop` 与 `apps/mobile` 参与根 ESLint、`lint-staged` 与 CI quality 门禁；`apps/web` 仅暂缓 lint，仍保留 typecheck，且因 desktop 直接复用 web 源码，web 变更仍可能影响 desktop 类型检查。
 
 - [2026-03-30] `release-mobile.yml` 的 preview OTA 不能只在 step 级判断 `inputs.profile == 'preview'`：如果 job 级 `if` 不放开 preview dispatch，prepare-release 触发的 mobile preview 会构建成功但永远不推 OTA。
 

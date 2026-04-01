@@ -109,7 +109,7 @@ OpenAWork/
 
 ### ESLint 范围与规则
 
-- 代码检查仅运行在 `packages/` 和 `services/` 上——`apps/` 被根目录 ESLint 配置排除
+- 代码检查默认覆盖 `packages/`、`services/`、`apps/desktop`、`apps/mobile`；`apps/web` 当前按阶段性策略仍被根目录 ESLint 排除
 - `@typescript-eslint/no-explicit-any`: error — 禁止 `any` 类型
 - `@typescript-eslint/ban-ts-comment`: error — 禁止 `@ts-ignore`/`@ts-expect-error`
 - `@typescript-eslint/consistent-type-imports`: error — 纯类型导入必须用 `import type`
