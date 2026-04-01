@@ -41,6 +41,10 @@ describe('session-delete-recovery', () => {
         String(sql).startsWith('UPDATE request_workflow_logs'),
       ),
     ).toBe(false);
+    expect(mocks.sqliteRunMock).toHaveBeenCalledWith(
+      'DELETE FROM question_requests WHERE session_id = ? AND user_id = ?',
+      ['session-1', 'user-1'],
+    );
   });
 
   it('rolls back when a required table cleanup fails', () => {

@@ -22,7 +22,10 @@ vi.mock('../session-runtime-thread-store.js', () => ({
   hasFreshSessionRuntimeThread: mocked.hasFreshSessionRuntimeThreadMock,
 }));
 
-import { reconcileSessionStateStatus } from '../session-runtime-state.js';
+import {
+  hasPendingSessionInteraction,
+  reconcileSessionStateStatus,
+} from '../session-runtime-state.js';
 
 describe('session-runtime-state', () => {
   beforeEach(() => {
@@ -119,6 +122,20 @@ describe('session-runtime-state', () => {
       "UPDATE sessions SET state_status = 'paused', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
       ['ses-question', 'user-1'],
     );
+  });
+
+  it('treats pending ExitPlanMode approval questions as pending session interaction', () => {
+    mocked.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('FROM permission_requests')) {
+        return { count: 0 };
+      }
+      if (query.includes('FROM question_requests')) {
+        return { count: 1 };
+      }
+      return undefined;
+    });
+
+    expect(hasPendingSessionInteraction('ses-plan-mode')).toBe(true);
   });
 
   it('keeps sessions running when a fresh runtime thread heartbeat exists', () => {

@@ -632,9 +632,19 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
           randomUUID(),
           childSessionId,
           userId,
-          'ask_question',
-          '等待确认',
-          JSON.stringify([{ id: 'q-1', label: '继续吗？', kind: 'text' }]),
+          'ExitPlanMode',
+          'Exit plan mode',
+          JSON.stringify([
+            {
+              question: 'Do you approve this plan and want implementation to start now?',
+              header: 'Plan approval',
+              multiple: false,
+              options: [
+                { label: 'Start implementation', description: 'Approve the plan' },
+                { label: 'Continue planning', description: 'Keep planning' },
+              ],
+            },
+          ]),
         ],
       );
 
