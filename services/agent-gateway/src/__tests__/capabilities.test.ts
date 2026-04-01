@@ -136,6 +136,24 @@ vi.mock('../tool-definitions.js', () => ({
     {
       type: 'function',
       function: {
+        name: 'EnterPlanMode',
+        description: 'enter plan mode tool',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'ExitPlanMode',
+        description: 'exit plan mode tool',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'task',
         description: 'task tool',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
@@ -254,6 +272,12 @@ describe('listCapabilitiesForUser', () => {
     const agentTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'Agent',
     );
+    const enterPlanModeTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'EnterPlanMode',
+    );
+    const exitPlanModeTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'ExitPlanMode',
+    );
     const taskTools = capabilities.filter((item) => item.kind === 'tool' && item.label === 'task');
     const backgroundOutputTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'background_output',
@@ -294,6 +318,10 @@ describe('listCapabilitiesForUser', () => {
     expect(questionTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(agentTools).toHaveLength(1);
     expect(agentTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(enterPlanModeTools).toHaveLength(1);
+    expect(enterPlanModeTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(exitPlanModeTools).toHaveLength(1);
+    expect(exitPlanModeTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(taskTools).toHaveLength(1);
     expect(taskTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(backgroundOutputTools).toHaveLength(1);

@@ -53,6 +53,8 @@ describe('buildGatewayToolDefinitions', () => {
         'bash',
         'apply_patch',
         'AskUserQuestion',
+        'EnterPlanMode',
+        'ExitPlanMode',
         'read_tool_output',
         'task',
         'background_output',
@@ -106,6 +108,8 @@ describe('buildGatewayToolDefinitions', () => {
     expect(byName.get('bash')?.function.parameters.required).toEqual(['command']);
     expect(byName.get('apply_patch')?.function.parameters.required).toEqual(['patchText']);
     expect(byName.get('AskUserQuestion')?.function.parameters.required).toEqual(['questions']);
+    expect(byName.get('EnterPlanMode')?.function.parameters.required).toEqual([]);
+    expect(byName.get('ExitPlanMode')?.function.parameters.required).toEqual([]);
     expect(byName.get('read_tool_output')?.function.parameters.required).toEqual([]);
     expect(byName.get('read_tool_output')?.function.parameters).toMatchObject({
       properties: {
@@ -341,6 +345,8 @@ describe('ClaudeCodeToolSurface profiles', () => {
     expect(PRESENTED_TO_CANONICAL['Skill']).toBe('skill');
     expect(PRESENTED_TO_CANONICAL['AskUserQuestion']).toBe('question');
     expect(PRESENTED_TO_CANONICAL['Agent']).toBe('call_omo_agent');
+    expect(PRESENTED_TO_CANONICAL['EnterPlanMode']).toBe('EnterPlanMode');
+    expect(PRESENTED_TO_CANONICAL['ExitPlanMode']).toBe('ExitPlanMode');
   });
 
   it('CANONICAL_TO_PRESENTED is the inverse of PRESENTED_TO_CANONICAL (first occurrence)', () => {
@@ -372,6 +378,8 @@ describe('ClaudeCodeToolSurface profiles', () => {
     expect(defaults?.has('task_create')).toBe(true);
     expect(defaults?.has('question')).toBe(true);
     expect(defaults?.has('call_omo_agent')).toBe(true);
+    expect(defaults?.has('EnterPlanMode')).toBe(true);
+    expect(defaults?.has('ExitPlanMode')).toBe(true);
   });
 
   it('isValidProfileName returns true for valid profiles', () => {
@@ -472,6 +480,8 @@ describe('claude-code-tool-surface helpers', () => {
         'task_update',
         'Skill',
         'AskUserQuestion',
+        'EnterPlanMode',
+        'ExitPlanMode',
         'task',
         'Agent',
       ]),

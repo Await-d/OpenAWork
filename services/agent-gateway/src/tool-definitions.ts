@@ -32,6 +32,7 @@ import { bashToolDefinition } from './bash-tools.js';
 import { applyPatchToolDefinition } from './apply-patch-tools.js';
 import { questionToolDefinition } from './question-tools.js';
 import { taskToolDefinition } from './task-tools.js';
+import { enterPlanModeToolDefinition, exitPlanModeToolDefinition } from './plan-mode-tools.js';
 import { readToolOutputToolDefinition } from './tool-output-tools.js';
 import {
   backgroundCancelToolDefinition,
@@ -141,6 +142,8 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   bashToolDefinition,
   applyPatchToolDefinition,
   questionToolDefinition,
+  enterPlanModeToolDefinition,
+  exitPlanModeToolDefinition,
   readToolOutputToolDefinition,
   taskToolDefinition,
   backgroundOutputToolDefinition,
@@ -319,6 +322,34 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['questions'],
+        additionalProperties: false,
+      };
+    case 'EnterPlanMode':
+      return {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      };
+    case 'ExitPlanMode':
+      return {
+        type: 'object',
+        properties: {
+          allowedPrompts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                tool: { type: 'string', enum: ['Bash'] },
+                prompt: { type: 'string' },
+              },
+              required: ['tool', 'prompt'],
+              additionalProperties: false,
+            },
+          },
+          plan: { type: 'string' },
+        },
+        required: [],
         additionalProperties: false,
       };
     case 'codesearch':

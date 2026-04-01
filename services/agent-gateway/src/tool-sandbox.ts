@@ -35,6 +35,11 @@ import { applyPatchToolDefinition, buildApplyPatchPermissionScope } from './appl
 import { bashToolDefinition, buildBashPermissionScope, runBashCommand } from './bash-tools.js';
 import { createEditTool } from './edit-tools.js';
 import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
+import {
+  buildExitPlanModeQuestionInput,
+  enterPlanModeToolDefinition,
+  exitPlanModeToolDefinition,
+} from './plan-mode-tools.js';
 import { createSkillTool } from './skill-tools.js';
 import { taskToolDefinition } from './task-tools.js';
 import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
@@ -1829,6 +1834,128 @@ async function executeGatewayManagedTool(
       };
     }
 
+    if (request.toolName === enterPlanModeToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = enterPlanModeToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const metadata = getSessionMetadata(sessionId);
+      if (isPlanModeEnabled(metadata)) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output:
+            'Plan mode is already active. Continue refining the plan until you are ready to request approval.',
+          isError: false,
+          durationMs: 0,
+        };
+      }
+
+      updateSessionMetadata(sessionId, { ...metadata, planMode: true });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output:
+          'Entered plan mode. Stay in read-first planning until the user approves leaving plan mode.',
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === exitPlanModeToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const parsed = exitPlanModeToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const metadata = getSessionMetadata(sessionId);
+      if (!isPlanModeEnabled(metadata)) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'You are not in plan mode. Call EnterPlanMode before requesting plan approval.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const payload =
+        executionContext?.clientRequestId &&
+        executionContext.requestData &&
+        typeof executionContext.nextRound === 'number'
+          ? {
+              clientRequestId: executionContext.clientRequestId,
+              nextRound: executionContext.nextRound,
+              requestData: executionContext.requestData,
+              toolCallId: request.toolCallId,
+              rawInput,
+            }
+          : undefined;
+
+      const questionInput = buildExitPlanModeQuestionInput(parsed.data);
+      const title = 'Exit plan mode';
+      const existingPending = findPendingQuestionRequest(sessionId, title);
+      const requestId = existingPending
+        ? existingPending
+        : createPendingQuestionRequest({
+            sessionId,
+            userId,
+            toolName: exitPlanModeToolDefinition.name,
+            title,
+            questionsJson: JSON.stringify(questionInput.questions),
+            payload,
+          });
+      if (existingPending && payload) {
+        updatePendingQuestionPayload(existingPending, payload);
+      }
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: existingPending
+          ? `Plan approval request ${requestId} is still pending. Ask the user to answer it, then resume the session.`
+          : `Plan approval request ${requestId} has been created. Ask the user to answer it, then resume the session.`,
+        isError: true,
+        durationMs: 0,
+        pendingPermissionRequestId: requestId,
+      };
+    }
+
     if (request.toolName === 'task') {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
@@ -2989,6 +3116,17 @@ function getSessionMetadata(sessionId: string): Record<string, unknown> {
   return parseSessionMetadataJson(row?.metadata_json ?? '{}');
 }
 
+function updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): void {
+  sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
+    JSON.stringify(metadata),
+    sessionId,
+  ]);
+}
+
+function isPlanModeEnabled(metadata: Record<string, unknown>): boolean {
+  return metadata['planMode'] === true;
+}
+
 function findApprovedPermission(
   sessionId: string,
   toolName: string,
@@ -3099,19 +3237,22 @@ function updatePendingQuestionPayload(requestId: string, payload: PermissionRequ
 function createPendingQuestionRequest(input: {
   sessionId: string;
   userId: string;
+  toolName?: string;
   title: string;
   questionsJson: string;
   payload?: PermissionRequestPayload;
 }): string {
   const requestId = randomUUID();
+  const toolName = input.toolName ?? 'question';
   sqliteRun(
     `INSERT INTO question_requests
-     (id, session_id, user_id, tool_name, title, questions_json, request_payload_json, status)
-     VALUES (?, ?, ?, 'question', ?, ?, ?, 'pending')`,
+      (id, session_id, user_id, tool_name, title, questions_json, request_payload_json, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       requestId,
       input.sessionId,
       input.userId,
+      toolName,
       input.title,
       input.questionsJson,
       input.payload ? JSON.stringify(input.payload) : null,
@@ -3122,7 +3263,7 @@ function createPendingQuestionRequest(input: {
     createQuestionAskedEvent({
       requestId,
       title: input.title,
-      toolName: 'question',
+      toolName,
     }),
     input.payload ? { clientRequestId: input.payload.clientRequestId } : undefined,
   );

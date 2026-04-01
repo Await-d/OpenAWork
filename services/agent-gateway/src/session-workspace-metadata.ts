@@ -14,6 +14,7 @@ const sessionMetadataPatchSchema = z
     editSourceMessageId: z.string().min(1).max(200).optional(),
     modelId: z.string().min(1).max(200).optional(),
     parentSessionId: z.string().min(1).max(200).optional(),
+    planMode: z.boolean().optional(),
     providerId: z.string().min(1).max(200).optional(),
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
     thinkingEnabled: z.boolean().optional(),

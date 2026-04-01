@@ -23,6 +23,8 @@ export const PRESENTED_TO_CANONICAL: Readonly<Record<string, string>> = {
   Skill: 'skill',
   AskUserQuestion: 'question',
   Agent: 'call_omo_agent',
+  EnterPlanMode: 'EnterPlanMode',
+  ExitPlanMode: 'ExitPlanMode',
 } as const;
 
 export const CANONICAL_TO_PRESENTED: Readonly<Record<string, string>> = Object.fromEntries(
@@ -55,6 +57,8 @@ const DEFAULT_CANONICAL_TOOLS: ReadonlySet<string> = new Set([
   'question',
   'task',
   'call_omo_agent',
+  'EnterPlanMode',
+  'ExitPlanMode',
 ]);
 
 export const PROFILE_TOOL_SETS: Readonly<Record<ClaudeCodeProfileName, ProfileToolSet>> = {

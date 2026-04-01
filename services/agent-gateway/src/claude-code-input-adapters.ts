@@ -76,15 +76,13 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
   },
   {
     presentedName: 'EnterPlanMode',
-    canonicalName: null,
-    compatLevel: 'low',
-    note: 'There is no direct model-visible EnterPlanMode tool in the gateway yet.',
+    canonicalName: 'EnterPlanMode',
+    compatLevel: 'high',
   },
   {
     presentedName: 'ExitPlanMode',
-    canonicalName: null,
-    compatLevel: 'low',
-    note: 'There is no direct model-visible ExitPlanMode tool in the gateway yet.',
+    canonicalName: 'ExitPlanMode',
+    compatLevel: 'high',
   },
 ] as const;
 

@@ -5,8 +5,10 @@ import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../question-tools.js';
+import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { createQuestionRepliedEvent } from '../session-question-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
+import { shouldExitPlanModeFromAnswers } from '../plan-mode-tools.js';
 import { type ApprovedPermissionResumePayload } from './stream.js';
 import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
 
@@ -132,6 +134,12 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (body.data.status === 'answered') {
+        if (questionRequest.tool_name === 'ExitPlanMode') {
+          updateSessionPlanModeForExitDecision({
+            answers: body.data.answers,
+            sessionId,
+          });
+        }
         const payload = parseQuestionResumePayload(questionRequest.request_payload_json);
         if (payload) {
           const questions = JSON.parse(
@@ -162,6 +170,27 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true });
     },
   );
+}
+
+function updateSessionPlanModeForExitDecision(input: {
+  answers: string[][];
+  sessionId: string;
+}): void {
+  const session = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+    [input.sessionId],
+  );
+  if (!session) {
+    return;
+  }
+
+  const metadata = parseSessionMetadataJson(session.metadata_json);
+  const shouldExit = shouldExitPlanModeFromAnswers(input.answers);
+  const nextMetadata = { ...metadata, planMode: !shouldExit };
+  sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
+    JSON.stringify(nextMetadata),
+    input.sessionId,
+  ]);
 }
 
 function ownsSession(sessionId: string, userId: string): boolean {
