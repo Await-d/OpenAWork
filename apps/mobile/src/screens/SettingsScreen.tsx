@@ -41,7 +41,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
   const { state: otaState, checkAndApply, applyUpdate } = useOtaUpdate();
   const [gatewayInput, setGatewayInput] = useState(gatewayUrl);
   const [selectedProvider, setSelectedProvider] = useState<MobileProviderOption>(
-    PRESET_PROVIDERS[0]!,
+    PRESET_PROVIDERS[0],
   );
   const [apiKey, setApiKey] = useState('');
   const [mcpServers, setMcpServers] = useState<MobileMcpServer[]>([]);
@@ -57,7 +57,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
 
     const loadPersistedSettings = async () => {
       const config = await persistence.loadProviderConfig();
-      const selectedProviderId = config?.active.chat.providerId ?? PRESET_PROVIDERS[0]!.id;
+      const selectedProviderId = config?.active.chat.providerId ?? PRESET_PROVIDERS[0].id;
       const storedApiKey = await persistence.loadApiKey(selectedProviderId);
       const restored = restoreMobileProviderSelection(config, storedApiKey);
       const storedMcpServers = await loadMcpServers();
@@ -66,7 +66,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
 
       setSelectedProvider(
         PRESET_PROVIDERS.find((provider) => provider.id === restored.selectedProviderId) ??
-          PRESET_PROVIDERS[0]!,
+          PRESET_PROVIDERS[0],
       );
       setApiKey(restored.apiKey);
       setMcpServers(storedMcpServers);

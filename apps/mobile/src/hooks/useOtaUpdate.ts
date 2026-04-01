@@ -40,7 +40,7 @@ export function useOtaUpdate() {
   useEffect(() => {
     if (__DEV__) return;
     const timer = setTimeout(() => {
-      checkAndApply().catch(() => {});
+      void checkAndApply();
     }, 5000);
     return () => clearTimeout(timer);
   }, [checkAndApply]);

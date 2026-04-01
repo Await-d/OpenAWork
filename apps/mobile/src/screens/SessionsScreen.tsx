@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { login as apiLogin, createSessionsClient } from '@openAwork/web-client';
+import { createSessionsClient } from '@openAwork/web-client';
 import {
   View,
   Text,
@@ -18,7 +18,10 @@ interface SessionsScreenProps {
   onNewSession: () => void;
 }
 
-export function SessionsScreen({ onSelectSession, onNewSession }: SessionsScreenProps) {
+export function SessionsScreen({
+  onSelectSession,
+  onNewSession: _onNewSession,
+}: SessionsScreenProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
   const [sessions, setSessions] = useState<LocalSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +52,9 @@ export function SessionsScreen({ onSelectSession, onNewSession }: SessionsScreen
         });
       }
       setSessions(await listSessions());
-    } catch {}
+    } catch (error) {
+      console.warn('Failed to sync mobile sessions from gateway', error);
+    }
   }, [accessToken, gatewayUrl]);
 
   useEffect(() => {
@@ -82,7 +87,9 @@ export function SessionsScreen({ onSelectSession, onNewSession }: SessionsScreen
       });
       setSessions(await listSessions());
       onSelectSession(data.sessionId);
-    } catch {}
+    } catch (error) {
+      console.warn('Failed to create mobile session', error);
+    }
   };
 
   if (loading) {

@@ -85,8 +85,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             sizeBytes: artifact.sizeBytes ?? 0,
           })),
       );
-    } catch {
-      void 0;
+    } catch (error) {
+      console.warn('Failed to load mobile artifact history', error);
     }
   }, [accessToken, gatewayUrl, sessionId]);
 
@@ -99,7 +99,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         if (cancelled) return;
         const msgs: Message[] = (session.messages ?? []).map((m) => ({
           id: (m as { id?: string }).id ?? `hist-${Math.random()}`,
-          role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          role: m.role === 'user' ? 'user' : 'assistant',
           content:
             typeof m.content === 'string'
               ? m.content
@@ -108,8 +108,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
                 : '',
         }));
         setMessages(msgs);
-      } catch {
-        void 0;
+      } catch (error) {
+        console.warn('Failed to load mobile chat history', error);
       } finally {
         if (!cancelled) setHistoryLoading(false);
       }
@@ -159,7 +159,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
               ? `- ${data.artifact.name} (artifact:${data.artifact.id})${data.artifact.preview ? `\n内容摘录:\n${data.artifact.preview}` : ''}`
               : `- ${attachment.name} (${attachment.type})`,
           );
-        } catch {
+        } catch (error) {
+          console.warn('Failed to upload mobile attachment', error);
           uploadedAttachmentLines.push(`- ${attachment.name} (${attachment.type}, 上传失败)`);
         }
       }
@@ -304,8 +305,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           sizeBytes: asset.size ?? 0,
         })),
       ]);
-    } catch {
-      void 0;
+    } catch (error) {
+      console.warn('Failed to pick mobile attachment', error);
     }
   }, []);
 
