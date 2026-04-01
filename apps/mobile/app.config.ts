@@ -5,11 +5,13 @@ import rootPackageJson from '../../package.json';
 const config = appJson.expo as unknown as ExpoConfig;
 const version = rootPackageJson.version;
 
-export default {
+const expoConfig: ExpoConfig = {
   ...config,
   version,
   extra: {
     ...(config.extra ?? {}),
     appVersion: version,
   },
-} satisfies ExpoConfig;
+};
+
+export default expoConfig;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../store/auth';
 

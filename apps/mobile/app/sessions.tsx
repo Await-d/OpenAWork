@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { login as apiLogin, createSessionsClient } from '@openAwork/web-client';
+import { createSessionsClient } from '@openAwork/web-client';
 import {
   View,
   Text,

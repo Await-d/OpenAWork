@@ -80,8 +80,8 @@ export function AppNavigator() {
         await setTokens(data.accessToken, data.refreshToken);
         const expiresInMs = data.expiresIn ? parseExpiresIn(data.expiresIn) : 15 * 60 * 1000;
         await SecureStore.setItemAsync(TOKEN_EXPIRES_AT_KEY, String(Date.now() + expiresInMs));
-      } catch {
-        void 0;
+      } catch (error) {
+        console.warn('Failed to refresh mobile auth token', error);
       }
     }
 
@@ -123,7 +123,7 @@ export function AppNavigator() {
   return (
     <SessionsScreen
       onSelectSession={(sessionId) => setScreen({ name: 'chat', sessionId })}
-      onNewSession={() => {}}
+      onNewSession={() => undefined}
     />
   );
 }

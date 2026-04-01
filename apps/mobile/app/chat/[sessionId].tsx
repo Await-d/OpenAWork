@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { login as apiLogin, createSessionsClient } from '@openAwork/web-client';
+import { createSessionsClient } from '@openAwork/web-client';
 import {
   View,
   Text,
@@ -78,7 +78,8 @@ export default function ChatScreen() {
           created_at: local?.created_at ?? Date.now(),
           updated_at: Date.now(),
         });
-      } catch {
+      } catch (error) {
+        console.warn('Failed to load remote session messages', error);
       } finally {
         setLoadingHistory(false);
       }
