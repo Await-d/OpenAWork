@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+export const fileBackupRefSchema = z
+  .object({
+    backupId: z.string(),
+    kind: z.enum(['before_write', 'after_write', 'snapshot_base']),
+    storagePath: z.string().optional(),
+    artifactId: z.string().optional(),
+    contentHash: z.string().optional(),
+  })
+  .strict();
+
 export const fileDiffSchema = z
   .object({
     file: z.string(),
@@ -8,6 +18,8 @@ export const fileDiffSchema = z
     additions: z.number().int().min(0),
     deletions: z.number().int().min(0),
     status: z.enum(['added', 'deleted', 'modified']).optional(),
+    backupBeforeRef: fileBackupRefSchema.optional(),
+    backupAfterRef: fileBackupRefSchema.optional(),
   })
   .strict();
 

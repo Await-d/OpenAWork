@@ -224,6 +224,116 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       ).toBeUndefined();
     });
 
+    it('includes unified file change summary in get and list responses', async () => {
+      const loginRes = await app!.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'admin@openAwork.local', password: 'admin123456' },
+      });
+      const { accessToken } = JSON.parse(loginRes.body) as { accessToken: string };
+
+      const sessionRes = await app!.inject({
+        method: 'POST',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {},
+      });
+      const { sessionId } = JSON.parse(sessionRes.body) as { sessionId: string };
+
+      const { persistSessionFileDiffs } = await import('../session-file-diff-store.js');
+      const { createRequestSnapshotRef, persistSessionSnapshot } =
+        await import('../session-snapshot-store.js');
+      const { sqliteGet } = await import('../db.js');
+      const admin = sqliteGet<{ id: string }>('SELECT id FROM users WHERE email = ? LIMIT 1', [
+        'admin@openAwork.local',
+      ]);
+      const userId = admin?.id;
+      expect(userId).toBeTruthy();
+
+      persistSessionFileDiffs({
+        sessionId,
+        userId: userId!,
+        clientRequestId: 'req-route-1',
+        requestId: 'req-route-1:tool:bash-1',
+        toolName: 'bash',
+        toolCallId: 'bash-1',
+        diffs: [
+          {
+            file: 'copied.txt',
+            before: '',
+            after: 'hello\n',
+            additions: 1,
+            deletions: 0,
+            status: 'added',
+            sourceKind: 'workspace_reconcile',
+            guaranteeLevel: 'weak',
+          },
+        ],
+      });
+      persistSessionSnapshot({
+        sessionId,
+        userId: userId!,
+        snapshotRef: createRequestSnapshotRef('req-route-1'),
+        fileDiffs: [
+          {
+            file: 'copied.txt',
+            before: '',
+            after: 'hello\n',
+            additions: 1,
+            deletions: 0,
+            status: 'added',
+            sourceKind: 'workspace_reconcile',
+            guaranteeLevel: 'weak',
+          },
+        ],
+      });
+
+      const getRes = await app!.inject({
+        method: 'GET',
+        url: `/sessions/${sessionId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      const getPayload = JSON.parse(getRes.body) as {
+        session: {
+          fileChangesSummary: {
+            latestSnapshotRef: string;
+            snapshotCount: number;
+            sourceKinds: string[];
+            totalFileDiffs: number;
+            weakestGuaranteeLevel: string;
+          };
+        };
+      };
+      expect(getPayload.session.fileChangesSummary).toMatchObject({
+        totalFileDiffs: 1,
+        snapshotCount: 1,
+        weakestGuaranteeLevel: 'weak',
+        latestSnapshotRef: 'req:req-route-1',
+        sourceKinds: ['workspace_reconcile'],
+      });
+
+      const listRes = await app!.inject({
+        method: 'GET',
+        url: '/sessions',
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      const listPayload = JSON.parse(listRes.body) as {
+        sessions: Array<{
+          fileChangesSummary?: {
+            totalFileDiffs: number;
+            weakestGuaranteeLevel: string;
+          };
+          id: string;
+        }>;
+      };
+      expect(
+        listPayload.sessions.find((session) => session.id === sessionId)?.fileChangesSummary,
+      ).toMatchObject({
+        totalFileDiffs: 1,
+        weakestGuaranteeLevel: 'weak',
+      });
+    });
+
     it('rejects rebinding a session workspace through the dedicated workspace route', async () => {
       const loginRes = await app!.inject({
         method: 'POST',

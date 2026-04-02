@@ -6,6 +6,7 @@ import { extractMessageText, listSessionMessages } from './session-message-store
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { listSessionTodoLanes } from './todo-tools.js';
 import { listSessionFileDiffs } from './session-file-diff-store.js';
+import { buildSessionFileChangesProjection } from './session-file-changes-projection.js';
 import { listSessionRunEvents } from './session-run-events.js';
 import { listSessionSnapshots } from './session-snapshot-store.js';
 
@@ -297,17 +298,20 @@ export function runSessionReadTool(
 
   const fileDiffs = listSessionFileDiffs({ sessionId: session.id, userId });
   const snapshots = listSessionSnapshots({ sessionId: session.id, userId });
-  if (fileDiffs.length > 0) {
+  const fileChanges = buildSessionFileChangesProjection({ fileDiffs, snapshots });
+  if (fileChanges.summary.totalFileDiffs > 0) {
     lines.push('File Diffs:');
-    fileDiffs.slice(0, 20).forEach((diff) => {
-      lines.push(`- ${diff.file} (+${diff.additions} / -${diff.deletions})`);
+    fileChanges.fileDiffs.slice(0, 20).forEach((diff) => {
+      lines.push(
+        `- ${diff.file} (+${diff.additions} / -${diff.deletions}) · guarantee=${diff.guaranteeLevel ?? 'unknown'} · source=${diff.sourceKind ?? 'unknown'}`,
+      );
     });
   }
-  if (snapshots.length > 0) {
+  if (fileChanges.summary.snapshotCount > 0) {
     lines.push('Snapshots:');
-    snapshots.slice(0, 20).forEach((snapshot) => {
+    fileChanges.snapshots.slice(0, 20).forEach((snapshot) => {
       lines.push(
-        `- ${snapshot.clientRequestId} · files=${snapshot.summary.files} · +${snapshot.summary.additions} / -${snapshot.summary.deletions}`,
+        `- ${snapshot.snapshotRef} · scope=${snapshot.scopeKind} · files=${snapshot.summary.files} · +${snapshot.summary.additions} / -${snapshot.summary.deletions} · weakest=${snapshot.summary.guaranteeLevel ?? 'unknown'}`,
       );
     });
   }
@@ -369,6 +373,7 @@ export async function runSessionInfoTool(
   const metadata = parseSessionMetadataJson(session.metadata_json);
   const fileDiffs = listSessionFileDiffs({ sessionId: session.id, userId });
   const snapshots = listSessionSnapshots({ sessionId: session.id, userId });
+  const fileChanges = buildSessionFileChangesProjection({ fileDiffs, snapshots });
   const firstMessage = messages[0];
   const lastMessage = messages.at(-1);
   const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
@@ -378,8 +383,11 @@ export async function runSessionInfoTool(
     `Date Range: ${formatDate(firstMessage?.createdAt ?? session.created_at)} to ${formatDate(lastMessage?.createdAt ?? session.updated_at)}`,
     `Status: ${runtime.status ?? session.state_status}`,
     `Has Todos: ${lanes.main.length + lanes.temp.length > 0 ? 'Yes' : 'No'} (${lanes.main.length + lanes.temp.length} items)`,
-    `File Diffs: ${fileDiffs.length}`,
-    `Snapshots: ${snapshots.length}`,
+    `File Diffs: ${fileChanges.summary.totalFileDiffs}`,
+    `Snapshots: ${fileChanges.summary.snapshotCount}`,
+    `Weakest Guarantee: ${fileChanges.summary.weakestGuaranteeLevel ?? 'unknown'}`,
+    `Sources: ${fileChanges.summary.sourceKinds.join(', ') || 'none'}`,
+    `Latest Snapshot: ${fileChanges.summary.latestSnapshotRef ?? 'None'}`,
     `Children: ${countChildSessions(userId, session.id)}`,
     `Parent Session: ${typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : 'None'}`,
   ].join('\n');

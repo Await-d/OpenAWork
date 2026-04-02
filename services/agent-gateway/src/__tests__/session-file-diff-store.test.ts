@@ -10,7 +10,11 @@ vi.mock('../db.js', () => ({
   sqliteRun: mocks.sqliteRunMock,
 }));
 
-import { listSessionFileDiffs, persistSessionFileDiffs } from '../session-file-diff-store.js';
+import {
+  listRequestFileDiffs,
+  listSessionFileDiffs,
+  persistSessionFileDiffs,
+} from '../session-file-diff-store.js';
 
 describe('session-file-diff-store', () => {
   beforeEach(() => {
@@ -165,5 +169,55 @@ describe('session-file-diff-store', () => {
         },
       },
     ]);
+  });
+
+  it('lists durable file diffs for a specific client request', () => {
+    mocks.sqliteAllMock.mockReturnValue([
+      {
+        client_request_id: 'client-a',
+        file_path: '/repo/request.ts',
+        before_text: 'a',
+        after_text: 'b',
+        additions: 1,
+        deletions: 1,
+        status: 'modified',
+        source_kind: 'workspace_reconcile',
+        guarantee_level: 'weak',
+        observability_json: null,
+        backup_before_ref_json: null,
+        backup_after_ref_json: null,
+        tool_name: 'bash',
+        tool_call_id: 'tool-2',
+        request_id: 'client-a:tool:tool-2',
+        created_at: '2026-03-30T00:00:01.000Z',
+      },
+    ]);
+
+    expect(
+      listRequestFileDiffs({
+        sessionId: 'session-a',
+        userId: 'user-a',
+        clientRequestId: 'client-a',
+      }),
+    ).toEqual([
+      {
+        file: '/repo/request.ts',
+        before: 'a',
+        after: 'b',
+        additions: 1,
+        deletions: 1,
+        clientRequestId: 'client-a',
+        status: 'modified',
+        sourceKind: 'workspace_reconcile',
+        guaranteeLevel: 'weak',
+        requestId: 'client-a:tool:tool-2',
+        toolName: 'bash',
+        toolCallId: 'tool-2',
+      },
+    ]);
+    expect(mocks.sqliteAllMock).toHaveBeenCalledWith(
+      expect.stringContaining('AND client_request_id = ?'),
+      ['session-a', 'user-a', 'client-a'],
+    );
   });
 });

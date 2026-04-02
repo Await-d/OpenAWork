@@ -8,7 +8,11 @@ import {
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
-import { mergeFileDiffs, collectFileDiffsFromToolOutput } from '../modified-files-summary.js';
+import {
+  collectFileDiffsFromToolOutput,
+  mergeFileDiffs,
+  traceFileDiffs,
+} from '../modified-files-summary.js';
 import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tool-sandbox.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
 import { buildRequestScopedSystemPrompts } from './stream-system-prompts.js';
@@ -17,6 +21,7 @@ import {
   type ApprovedPermissionResumePayload,
   buildWorkspaceContext,
   createRunEventMeta,
+  buildStreamToolObservability,
   createStreamExecutionContext,
   createTaskRuntimeGuardContext,
   createToolResultRequestId,
@@ -104,20 +109,23 @@ async function continueFromApprovedToolResult(input: {
       throw new Error('Another request is already running for this session.');
     }
 
-    const resumedFileDiffs = collectFileDiffsFromToolOutput(input.initialToolResult.output).map(
-      (diff) => ({
-        ...diff,
-        clientRequestId: input.payload.clientRequestId,
-        requestId: createToolResultRequestId(
-          input.payload.clientRequestId,
-          input.initialToolResult.toolCallId,
-        ),
-        toolName: input.initialToolResult.toolName,
-        toolCallId: input.initialToolResult.toolCallId,
-        sourceKind: diff.sourceKind ?? 'structured_tool_diff',
-        observability: diff.observability ?? input.payload.observability,
-      }),
-    );
+    const observability =
+      input.payload.observability ??
+      buildStreamToolObservability({
+        metadataJson: sessionContext.metadataJson,
+        presentedToolName: input.initialToolResult.toolName,
+      });
+    const resumedFileDiffs = traceFileDiffs({
+      clientRequestId: input.payload.clientRequestId,
+      diffs: collectFileDiffsFromToolOutput(input.initialToolResult.output),
+      observability,
+      requestId: createToolResultRequestId(
+        input.payload.clientRequestId,
+        input.initialToolResult.toolCallId,
+      ),
+      toolCallId: input.initialToolResult.toolCallId,
+      toolName: input.initialToolResult.toolName,
+    });
 
     const toolResultMessage = appendSessionMessage({
       sessionId: input.sessionId,
@@ -131,7 +139,7 @@ async function continueFromApprovedToolResult(input: {
           output: input.initialToolResult.output,
           isError: input.initialToolResult.isError,
           fileDiffs: resumedFileDiffs,
-          observability: input.payload.observability,
+          observability,
         }),
       ],
       legacyMessagesJson: sessionContext.legacyMessagesJson,
@@ -158,7 +166,7 @@ async function continueFromApprovedToolResult(input: {
         output: input.initialToolResult.output,
         isError: input.initialToolResult.isError,
         fileDiffs: resumedFileDiffs,
-        observability: input.payload.observability,
+        observability,
         eventMeta: createRunEventMeta(runId, eventSequence),
       }),
     );
@@ -174,7 +182,7 @@ async function continueFromApprovedToolResult(input: {
         ),
         toolName: input.initialToolResult.toolName,
         toolCallId: input.initialToolResult.toolCallId,
-        observability: input.payload.observability,
+        observability,
         diffs: resumedFileDiffs,
       });
     }

@@ -8,6 +8,7 @@ import {
 } from '../session-message-store.js';
 import { buildModifiedFilesSummaryContent } from '../modified-files-summary.js';
 import { persistSessionSnapshot } from '../session-snapshot-store.js';
+import { createRequestSnapshotRef } from '../session-snapshot-store.js';
 import { resolveEofRoundDecision } from './stream-completion.js';
 import { readUpstreamError } from './upstream-error.js';
 import { buildUpstreamRequestBody } from './upstream-request.js';
@@ -286,7 +287,7 @@ export async function runModelRound(input: {
         persistSessionSnapshot({
           sessionId: input.sessionId,
           userId: input.userId,
-          clientRequestId: input.clientRequestId,
+          snapshotRef: createRequestSnapshotRef(input.clientRequestId),
           fileDiffs: Array.from(input.turnFileDiffs.values()),
         });
       }

@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
+import type { FileBackupRef } from '@openAwork/shared';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
+import { buildFileDiff, fileBackupRefSchema, fileDiffSchema } from './file-diff-format.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 
 const applyPatchInputSchema = z.object({
@@ -19,6 +20,7 @@ const applyPatchOutputSchema = z.object({
       action: z.enum(['add', 'update', 'delete', 'move']),
       additions: z.number().int().optional(),
       after: z.string().optional(),
+      backupBeforeRef: fileBackupRefSchema.optional(),
       before: z.string().optional(),
       deletions: z.number().int().optional(),
       path: z.string(),
@@ -215,6 +217,7 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
     action: 'add' | 'update' | 'delete' | 'move';
     additions?: number;
     after?: string;
+    backupBeforeRef?: FileBackupRef;
     before?: string;
     deletions?: number;
     path: string;
@@ -225,6 +228,7 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
     action: 'add' | 'update' | 'delete' | 'move';
     additions?: number;
     after?: string;
+    backupBeforeRef?: FileBackupRef;
     before?: string;
     deletions?: number;
     path: string;
@@ -311,6 +315,41 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
   return outputs;
 }
 
+export async function executeApplyPatch(
+  input: z.infer<typeof applyPatchInputSchema>,
+  options?: {
+    beforeWriteBackup?: (input: {
+      content: string;
+      filePath: string;
+    }) => Promise<FileBackupRef | undefined>;
+  },
+): Promise<z.infer<typeof applyPatchOutputSchema>> {
+  const planned = await planPatchText(input.patchText);
+  const files = await applyPlannedOperations(planned);
+  for (const file of files) {
+    if (
+      !options?.beforeWriteBackup ||
+      typeof file.before !== 'string' ||
+      file.before.length === 0
+    ) {
+      continue;
+    }
+    file.backupBeforeRef = await options.beforeWriteBackup({
+      filePath: file.path,
+      content: file.before,
+    });
+  }
+
+  return {
+    success: true,
+    files,
+    diffs: files.map((file) => ({
+      ...buildFileDiff({ file: file.path, before: file.before ?? '', after: file.after ?? '' }),
+      ...(file.backupBeforeRef ? { backupBeforeRef: file.backupBeforeRef } : {}),
+    })),
+  };
+}
+
 function buildApplyPatchPermissionScope(patchText: string): string {
   const digest = createHash('sha256').update(patchText).digest('hex').slice(0, 12);
   return `apply_patch:${digest}`;
@@ -326,17 +365,7 @@ export const applyPatchToolDefinition: ToolDefinition<
   inputSchema: applyPatchInputSchema,
   outputSchema: applyPatchOutputSchema,
   timeout: 120000,
-  execute: async (input) => {
-    const planned = await planPatchText(input.patchText);
-    const files = await applyPlannedOperations(planned);
-    return {
-      success: true,
-      files,
-      diffs: files.map((file) =>
-        buildFileDiff({ file: file.path, before: file.before ?? '', after: file.after ?? '' }),
-      ),
-    };
-  },
+  execute: async (input) => executeApplyPatch(input),
 };
 
 export { buildApplyPatchPermissionScope };

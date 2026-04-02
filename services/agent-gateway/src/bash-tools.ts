@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
+import type { FileDiffContent } from '@openAwork/shared';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT } from './db.js';
+import {
+  captureWorkspaceReconcileSnapshot,
+  collectWorkspaceReconcileDiffs,
+} from './workspace-reconcile.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 import { z } from 'zod';
 
@@ -26,6 +31,21 @@ const bashOutputSchema = z.object({
   exitCode: z.number().int(),
   stdout: z.string(),
   stderr: z.string(),
+  diffs: z
+    .array(
+      z.object({
+        file: z.string(),
+        before: z.string(),
+        after: z.string(),
+        additions: z.number().int(),
+        deletions: z.number().int(),
+        status: z.enum(['added', 'deleted', 'modified']).optional(),
+        sourceKind: z.literal('workspace_reconcile').optional(),
+        guaranteeLevel: z.literal('weak').optional(),
+      }),
+    )
+    .optional()
+    .default([]),
 });
 
 const DISALLOWED_PATTERNS: Array<{ pattern: RegExp; message: string }> = [
@@ -80,6 +100,7 @@ async function resolveBashWorkdir(workdir: string): Promise<string> {
 export interface BashExecutionResult {
   command: string;
   cwd: string;
+  diffs: FileDiffContent[];
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -90,6 +111,7 @@ export async function runBashCommand(
 ): Promise<BashExecutionResult> {
   const command = assertSafeBashCommand(input.command);
   const cwd = await resolveBashWorkdir(input.workdir);
+  const beforeSnapshot = await captureWorkspaceReconcileSnapshot(cwd);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const execFileAsync = promisify(execFile);
@@ -103,6 +125,11 @@ export async function runBashCommand(
     return {
       command,
       cwd,
+      diffs: await collectWorkspaceReconcileDiffs({
+        workspaceRoot: cwd,
+        before: beforeSnapshot,
+        after: await captureWorkspaceReconcileSnapshot(cwd),
+      }),
       exitCode: 0,
       stdout: result.stdout,
       stderr: result.stderr,
@@ -116,6 +143,11 @@ export async function runBashCommand(
     return {
       command,
       cwd,
+      diffs: await collectWorkspaceReconcileDiffs({
+        workspaceRoot: cwd,
+        before: beforeSnapshot,
+        after: await captureWorkspaceReconcileSnapshot(cwd),
+      }),
       exitCode: typeof execError.code === 'number' ? execError.code : 1,
       stdout: execError.stdout ?? '',
       stderr: execError.stderr ?? (execError.message || String(error)),

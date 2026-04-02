@@ -115,7 +115,11 @@ export interface GatewayToolDefinition {
   };
 }
 
-const editTool = createEditTool('__tool-definitions__');
+const editTool = createEditTool(
+  '__tool-definitions__',
+  '__tool-definitions__',
+  '__tool-definitions__',
+);
 const skillTool = createSkillTool('__tool-definitions__', '__tool-definitions__');
 
 const MODEL_VISIBLE_GATEWAY_TOOLS = [

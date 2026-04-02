@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import { sqliteAll } from './db.js';
 import { lspManager } from './lsp/router.js';
+import { persistSessionFileBackup } from './session-file-backup-store.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 
 const editInputSchema = z.object({
@@ -98,6 +99,9 @@ async function touchEditedFile(filePath: string): Promise<void> {
 
 export function createEditTool(
   sessionId: string,
+  userId: string,
+  requestId: string,
+  toolCallId = 'edit',
 ): ToolDefinition<typeof editInputSchema, typeof editOutputSchema> {
   return {
     name: 'edit',
@@ -125,16 +129,31 @@ export function createEditTool(
       }
 
       if (input.oldString.length === 0) {
+        const backupBeforeRef = exists
+          ? await persistSessionFileBackup({
+              sessionId,
+              userId,
+              requestId,
+              toolCallId,
+              toolName: 'edit',
+              filePath: safePath,
+              content: currentContent,
+              kind: 'before_write',
+            })
+          : undefined;
         await fsp.writeFile(safePath, input.newString, 'utf8');
         await touchEditedFile(safePath);
         return {
           before: currentContent,
           after: input.newString,
-          filediff: buildFileDiff({
-            file: safePath,
-            before: currentContent,
-            after: input.newString,
-          }),
+          filediff: {
+            ...buildFileDiff({
+              file: safePath,
+              before: currentContent,
+              after: input.newString,
+            }),
+            ...(backupBeforeRef ? { backupBeforeRef } : {}),
+          },
           success: true,
           path: safePath,
           replacements: 1,
@@ -164,13 +183,26 @@ export function createEditTool(
         ? currentContent.split(input.oldString).join(input.newString)
         : currentContent.replace(input.oldString, input.newString);
 
+      const backupBeforeRef = await persistSessionFileBackup({
+        sessionId,
+        userId,
+        requestId,
+        toolCallId,
+        toolName: 'edit',
+        filePath: safePath,
+        content: currentContent,
+        kind: 'before_write',
+      });
       await fsp.writeFile(safePath, nextContent, 'utf8');
       await touchEditedFile(safePath);
 
       return {
         before: currentContent,
         after: nextContent,
-        filediff: buildFileDiff({ file: safePath, before: currentContent, after: nextContent }),
+        filediff: {
+          ...buildFileDiff({ file: safePath, before: currentContent, after: nextContent }),
+          backupBeforeRef,
+        },
         success: true,
         path: safePath,
         replacements: input.replaceAll ? occurrences : 1,

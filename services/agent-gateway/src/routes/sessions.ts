@@ -39,7 +39,15 @@ import {
 } from './stream-cancellation.js';
 import { reconcileSessionRuntime } from '../session-runtime-reconciler.js';
 import { deleteSessionWithMalformedRecovery } from '../session-delete-recovery.js';
+import { buildSessionFileChangesProjection } from '../session-file-changes-projection.js';
+import { listRequestFileDiffs, listSessionFileDiffs } from '../session-file-diff-store.js';
 import { isSqliteMalformedError } from '../sqlite-error-utils.js';
+import {
+  compareSessionSnapshots,
+  getSessionSnapshotByRef,
+  listRequestSnapshots,
+  listSessionSnapshots,
+} from '../session-snapshot-store.js';
 import { hasFreshSessionRuntimeThread } from '../session-runtime-thread-store.js';
 import { hasPendingSessionInteraction } from '../session-runtime-state.js';
 
@@ -57,6 +65,87 @@ interface SessionRow {
   title: string | null;
   created_at: string;
   updated_at: string;
+}
+
+const snapshotCompareQuerySchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  includeText: z.coerce.boolean().optional().default(false),
+});
+
+const fileChangesQuerySchema = z.object({
+  includeText: z.coerce.boolean().optional().default(false),
+});
+
+function buildSessionFileChangesSummary(input: { sessionId: string; userId: string }) {
+  return buildSessionFileChangesProjection({
+    fileDiffs: listSessionFileDiffs({ sessionId: input.sessionId, userId: input.userId }),
+    snapshots: listSessionSnapshots({ sessionId: input.sessionId, userId: input.userId }),
+  }).summary;
+}
+
+function toPublicFileDiff(
+  diff: ReturnType<typeof listSessionFileDiffs>[number],
+  includeText: boolean,
+) {
+  return includeText
+    ? diff
+    : {
+        file: diff.file,
+        additions: diff.additions,
+        deletions: diff.deletions,
+        ...(diff.status ? { status: diff.status } : {}),
+        ...(diff.clientRequestId ? { clientRequestId: diff.clientRequestId } : {}),
+        ...(diff.requestId ? { requestId: diff.requestId } : {}),
+        ...(diff.toolName ? { toolName: diff.toolName } : {}),
+        ...(diff.toolCallId ? { toolCallId: diff.toolCallId } : {}),
+        ...(diff.sourceKind ? { sourceKind: diff.sourceKind } : {}),
+        ...(diff.guaranteeLevel ? { guaranteeLevel: diff.guaranteeLevel } : {}),
+      };
+}
+
+function toPublicSnapshot(input: {
+  includeText: boolean;
+  snapshot: {
+    clientRequestId?: string;
+    createdAt: string;
+    files?: ReturnType<typeof listSessionFileDiffs>;
+    scopeKind: 'request' | 'backup' | 'scope' | 'unknown';
+    snapshotRef: string;
+    summary: {
+      additions: number;
+      deletions: number;
+      files: number;
+      guaranteeLevel?: 'strong' | 'medium' | 'weak';
+      sourceKinds?: Array<
+        | 'structured_tool_diff'
+        | 'session_snapshot'
+        | 'restore_replay'
+        | 'workspace_reconcile'
+        | 'manual_revert'
+      >;
+    };
+  };
+}) {
+  return input.includeText
+    ? input.snapshot
+    : {
+        snapshotRef: input.snapshot.snapshotRef,
+        clientRequestId: input.snapshot.clientRequestId,
+        scopeKind: input.snapshot.scopeKind,
+        summary: {
+          files: input.snapshot.summary.files,
+          additions: input.snapshot.summary.additions,
+          deletions: input.snapshot.summary.deletions,
+          ...(input.snapshot.summary.guaranteeLevel
+            ? { guaranteeLevel: input.snapshot.summary.guaranteeLevel }
+            : {}),
+          ...(input.snapshot.summary.sourceKinds
+            ? { sourceKinds: input.snapshot.summary.sourceKinds }
+            : {}),
+        },
+        createdAt: input.snapshot.createdAt,
+      };
 }
 
 function collectDescendantSessionIds(sessions: SessionRow[], rootSessionId: string): Set<string> {
@@ -441,6 +530,14 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
         })),
         user.sub,
+      ).then((rows) =>
+        rows.map((session) => ({
+          ...session,
+          fileChangesSummary: buildSessionFileChangesSummary({
+            sessionId: session.id,
+            userId: user.sub,
+          }),
+        })),
       );
       step.succeed(undefined, { count: sessions.length });
       return reply.send({ sessions });
@@ -479,7 +576,260 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         }),
         todos,
       );
-      return reply.send({ session: response });
+      return reply.send({
+        session: {
+          ...response,
+          fileChangesSummary: buildSessionFileChangesSummary({ sessionId, userId: user.sub }),
+        },
+      });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/file-changes',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const query = fileChangesQuerySchema.safeParse(
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+      const { step } = startRequestWorkflow(request, 'session.file-changes.get', undefined, {
+        sessionId,
+      });
+      if (!query.success) {
+        step.fail('invalid query');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid query params', issues: query.error.issues });
+      }
+
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const fileChanges = buildSessionFileChangesProjection({
+        fileDiffs: listSessionFileDiffs({ sessionId, userId: user.sub }),
+        snapshots: listSessionSnapshots({ sessionId, userId: user.sub }),
+      });
+      step.succeed(undefined, {
+        diffCount: fileChanges.summary.totalFileDiffs,
+        snapshotCount: fileChanges.summary.snapshotCount,
+      });
+      return reply.send({
+        fileChanges: {
+          ...fileChanges,
+          fileDiffs: fileChanges.fileDiffs.map((diff) =>
+            toPublicFileDiff(diff, query.data.includeText),
+          ),
+          snapshots: fileChanges.snapshots.map((snapshot) =>
+            toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+          ),
+        },
+      });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/requests/:clientRequestId/file-changes',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { clientRequestId, sessionId } = request.params as {
+        clientRequestId: string;
+        sessionId: string;
+      };
+      const query = fileChangesQuerySchema.safeParse(
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+      const { step } = startRequestWorkflow(
+        request,
+        'session.request-file-changes.get',
+        undefined,
+        {
+          clientRequestId,
+          sessionId,
+        },
+      );
+      if (!query.success) {
+        step.fail('invalid query');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid query params', issues: query.error.issues });
+      }
+
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const fileChanges = buildSessionFileChangesProjection({
+        fileDiffs: listRequestFileDiffs({ clientRequestId, sessionId, userId: user.sub }),
+        snapshots: listRequestSnapshots({ clientRequestId, sessionId, userId: user.sub }),
+      });
+      step.succeed(undefined, {
+        clientRequestId,
+        diffCount: fileChanges.summary.totalFileDiffs,
+        snapshotCount: fileChanges.summary.snapshotCount,
+      });
+      return reply.send({
+        clientRequestId,
+        fileChanges: {
+          ...fileChanges,
+          fileDiffs: fileChanges.fileDiffs.map((diff) =>
+            toPublicFileDiff(diff, query.data.includeText),
+          ),
+          snapshots: fileChanges.snapshots.map((snapshot) =>
+            toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+          ),
+        },
+      });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/snapshots',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.snapshots.list', undefined, {
+        sessionId,
+      });
+
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const snapshots = listSessionSnapshots({ sessionId, userId: user.sub }).map((snapshot) =>
+        toPublicSnapshot({ includeText: false, snapshot }),
+      );
+      step.succeed(undefined, { count: snapshots.length });
+      return reply.send({ snapshots });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/snapshots/compare',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.snapshots.compare', undefined, {
+        sessionId,
+      });
+      const query = snapshotCompareQuerySchema.safeParse(
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+      if (!query.success) {
+        step.fail('invalid query');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid query params', issues: query.error.issues });
+      }
+
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const fromSnapshot = getSessionSnapshotByRef({
+        sessionId,
+        userId: user.sub,
+        snapshotRef: query.data.from,
+      });
+      const toSnapshot = getSessionSnapshotByRef({
+        sessionId,
+        userId: user.sub,
+        snapshotRef: query.data.to,
+      });
+      if (!fromSnapshot || !toSnapshot) {
+        step.fail('snapshot not found');
+        return reply.status(404).send({ error: 'Snapshot not found' });
+      }
+
+      const comparison = compareSessionSnapshots({ from: fromSnapshot, to: toSnapshot }).map(
+        (item) =>
+          query.data.includeText
+            ? item
+            : {
+                file: item.file,
+                fromExists: item.fromExists,
+                toExists: item.toExists,
+                changed: item.changed,
+                fromStatus: item.fromStatus,
+                toStatus: item.toStatus,
+              },
+      );
+      step.succeed(undefined, { fileCount: comparison.length });
+      return reply.send({
+        comparison,
+        from: toPublicSnapshot({ includeText: query.data.includeText, snapshot: fromSnapshot }),
+        to: toPublicSnapshot({ includeText: query.data.includeText, snapshot: toSnapshot }),
+      });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/snapshots/:snapshotRef',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId, snapshotRef } = request.params as {
+        sessionId: string;
+        snapshotRef: string;
+      };
+      const query = fileChangesQuerySchema.safeParse(
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+      const { step } = startRequestWorkflow(request, 'session.snapshot.get', undefined, {
+        sessionId,
+        snapshotRef,
+      });
+      if (!query.success) {
+        step.fail('invalid query');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid query params', issues: query.error.issues });
+      }
+
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const snapshot = getSessionSnapshotByRef({ sessionId, userId: user.sub, snapshotRef });
+      if (!snapshot) {
+        step.fail('snapshot not found');
+        return reply.status(404).send({ error: 'Snapshot not found' });
+      }
+
+      step.succeed(undefined, { fileCount: snapshot.files.length, snapshotRef });
+      return reply.send({
+        snapshot: toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+      });
     },
   );
 

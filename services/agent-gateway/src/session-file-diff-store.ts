@@ -72,41 +72,66 @@ export function listSessionFileDiffs(input: {
   sessionId: string;
   userId: string;
 }): FileDiffContent[] {
+  return listSessionFileDiffsWithWhere({
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+}
+
+export function listRequestFileDiffs(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): FileDiffContent[] {
+  return listSessionFileDiffsWithWhere({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    whereClause: 'AND client_request_id = ?',
+    whereParams: [input.clientRequestId],
+  });
+}
+
+function listSessionFileDiffsWithWhere(input: {
+  sessionId: string;
+  userId: string;
+  whereClause?: string;
+  whereParams?: string[];
+}): FileDiffContent[] {
   return sqliteAll<SessionFileDiffRow>(
     `SELECT client_request_id, file_path, before_text, after_text, additions, deletions, status, source_kind, guarantee_level, observability_json, backup_before_ref_json, backup_after_ref_json, tool_name, tool_call_id, request_id, created_at
      FROM session_file_diffs
-     WHERE session_id = ? AND user_id = ?
+     WHERE session_id = ? AND user_id = ? ${input.whereClause ?? ''}
      ORDER BY created_at DESC, file_path ASC`,
-    [input.sessionId, input.userId],
-  ).map((row) => {
-    const observability = parseNullableJson<ToolCallObservabilityAnnotation>(
-      row.observability_json,
-    );
-    const backupBeforeRef = parseNullableJson<FileBackupRef>(row.backup_before_ref_json);
-    const backupAfterRef = parseNullableJson<FileBackupRef>(row.backup_after_ref_json);
+    [input.sessionId, input.userId, ...(input.whereParams ?? [])],
+  ).map(mapSessionFileDiffRow);
+}
 
-    return {
-      file: row.file_path,
-      before: row.before_text,
-      after: row.after_text,
-      additions: row.additions,
-      deletions: row.deletions,
-      clientRequestId: row.client_request_id ?? undefined,
-      requestId: row.request_id,
-      toolName: row.tool_name,
-      toolCallId: row.tool_call_id ?? undefined,
-      ...(row.status === 'added' || row.status === 'deleted' || row.status === 'modified'
-        ? { status: row.status }
-        : {}),
-      ...(isFileChangeSourceKind(row.source_kind) ? { sourceKind: row.source_kind } : {}),
-      ...(isFileChangeGuaranteeLevel(row.guarantee_level)
-        ? { guaranteeLevel: row.guarantee_level }
-        : {}),
-      ...(observability ? { observability } : {}),
-      ...(backupBeforeRef ? { backupBeforeRef } : {}),
-      ...(backupAfterRef ? { backupAfterRef } : {}),
-    } satisfies FileDiffContent;
-  });
+function mapSessionFileDiffRow(row: SessionFileDiffRow): FileDiffContent {
+  const observability = parseNullableJson<ToolCallObservabilityAnnotation>(row.observability_json);
+  const backupBeforeRef = parseNullableJson<FileBackupRef>(row.backup_before_ref_json);
+  const backupAfterRef = parseNullableJson<FileBackupRef>(row.backup_after_ref_json);
+
+  return {
+    file: row.file_path,
+    before: row.before_text,
+    after: row.after_text,
+    additions: row.additions,
+    deletions: row.deletions,
+    clientRequestId: row.client_request_id ?? undefined,
+    requestId: row.request_id,
+    toolName: row.tool_name,
+    toolCallId: row.tool_call_id ?? undefined,
+    ...(row.status === 'added' || row.status === 'deleted' || row.status === 'modified'
+      ? { status: row.status }
+      : {}),
+    ...(isFileChangeSourceKind(row.source_kind) ? { sourceKind: row.source_kind } : {}),
+    ...(isFileChangeGuaranteeLevel(row.guarantee_level)
+      ? { guaranteeLevel: row.guarantee_level }
+      : {}),
+    ...(observability ? { observability } : {}),
+    ...(backupBeforeRef ? { backupBeforeRef } : {}),
+    ...(backupAfterRef ? { backupAfterRef } : {}),
+  } satisfies FileDiffContent;
 }
 
 function parseNullableJson<T>(value: string | null): T | undefined {

@@ -13,6 +13,8 @@ import { webSearchTool, lspDiagnosticsTool, lspTouchTool } from '@openAwork/agen
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import { lspManager } from './lsp/router.js';
 import {
+  executeWorkspaceWriteFile,
+  executeWriteTool,
   WORKSPACE_TOOL_NAMES,
   globTool,
   grepTool,
@@ -34,6 +36,7 @@ import { BATCH_TOOL_DISALLOWED, BATCH_TOOL_MAX_CALLS } from './batch-tools.js';
 import { applyPatchToolDefinition, buildApplyPatchPermissionScope } from './apply-patch-tools.js';
 import { bashToolDefinition, buildBashPermissionScope, runBashCommand } from './bash-tools.js';
 import { createEditTool } from './edit-tools.js';
+import { persistSessionFileBackup } from './session-file-backup-store.js';
 import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
 import {
   buildExitPlanModeQuestionInput,
@@ -778,6 +781,10 @@ export function syncParentTaskToolResult(input: {
     status: input.status,
     taskId: input.taskId,
   });
+  const parentToolResultClientRequestId = createTaskToolResultClientRequestId(
+    input.parentToolReference.clientRequestId,
+    input.parentToolReference.toolCallId,
+  );
   appendSessionMessage({
     sessionId: input.parentSessionId,
     userId: input.userId,
@@ -786,14 +793,12 @@ export function syncParentTaskToolResult(input: {
       buildToolResultContent({
         toolCallId: input.parentToolReference.toolCallId,
         toolName: 'task',
+        clientRequestId: parentToolResultClientRequestId,
         output,
         isError: input.status === 'failed',
       }),
     ],
-    clientRequestId: createTaskToolResultClientRequestId(
-      input.parentToolReference.clientRequestId,
-      input.parentToolReference.toolCallId,
-    ),
+    clientRequestId: parentToolResultClientRequestId,
     replaceExisting: true,
   });
 
@@ -802,6 +807,7 @@ export function syncParentTaskToolResult(input: {
     buildToolResultRunEvent({
       toolCallId: input.parentToolReference.toolCallId,
       toolName: 'task',
+      clientRequestId: parentToolResultClientRequestId,
       output,
       isError: input.status === 'failed',
       eventMeta: {
@@ -810,6 +816,7 @@ export function syncParentTaskToolResult(input: {
         occurredAt: Date.now(),
       },
     }),
+    { clientRequestId: parentToolResultClientRequestId },
   );
 }
 
@@ -1642,7 +1649,22 @@ async function executeGatewayManagedTool(
     }
 
     if (request.toolName === 'edit') {
-      const editTool = createEditTool(sessionId);
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const editTool = createEditTool(
+        sessionId,
+        userId,
+        executionContext?.clientRequestId ?? request.toolCallId,
+        request.toolCallId,
+      );
       const parsed = editTool.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
         return {
@@ -1655,6 +1677,69 @@ async function executeGatewayManagedTool(
       }
 
       const output = await editTool.execute(parsed.data, signal);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === workspaceWriteFileTool.name || request.toolName === writeTool.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const toolDefinition =
+        request.toolName === workspaceWriteFileTool.name ? workspaceWriteFileTool : writeTool;
+      const parsed = toolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output =
+        request.toolName === workspaceWriteFileTool.name
+          ? await executeWorkspaceWriteFile(parsed.data, {
+              beforeWriteBackup: async ({ content, filePath }) =>
+                persistSessionFileBackup({
+                  sessionId,
+                  userId,
+                  requestId: executionContext?.clientRequestId,
+                  toolCallId: request.toolCallId,
+                  toolName: request.toolName,
+                  filePath,
+                  content,
+                  kind: 'before_write',
+                }),
+            })
+          : await executeWriteTool(parsed.data, signal, {
+              beforeWriteBackup: async ({ content, filePath }) =>
+                persistSessionFileBackup({
+                  sessionId,
+                  userId,
+                  requestId: executionContext?.clientRequestId,
+                  toolCallId: request.toolCallId,
+                  toolName: request.toolName,
+                  filePath,
+                  content,
+                  kind: 'before_write',
+                }),
+            });
+
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2071,7 +2156,10 @@ async function executeGatewayManagedTool(
             }
           : undefined;
       const autoResumeRequestData = executionContext?.requestData;
-      const canAutoResumeParentSession = false;
+      const canAutoResumeParentSession =
+        shouldRunInBackground &&
+        parentToolReference !== undefined &&
+        autoResumeRequestData !== undefined;
       const childSessionMetadata: Record<string, unknown> = {
         parentSessionId: sessionId,
         subagentType: resolvedAgent.agentId,
@@ -3606,7 +3694,7 @@ export class ToolSandbox {
 }
 
 export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
-  const editTool = createEditTool('__sandbox__');
+  const editTool = createEditTool('__sandbox__', '__sandbox__', '__sandbox__');
   const sandbox = new ToolSandbox({
     allowedTools: [...allowedTools, ...TOOL_WHITELIST],
     defaultTimeoutMs: DEFAULT_TOOL_TIMEOUT_MS,

@@ -1,4 +1,33 @@
-import type { FileDiffContent, ModifiedFilesSummaryContent } from '@openAwork/shared';
+import type {
+  FileBackupRef,
+  FileChangeGuaranteeLevel,
+  FileChangeSourceKind,
+  FileDiffContent,
+  ModifiedFilesSummaryContent,
+  ToolCallObservabilityAnnotation,
+} from '@openAwork/shared';
+
+export function traceFileDiffs(input: {
+  clientRequestId: string;
+  diffs: FileDiffContent[];
+  guaranteeLevel?: FileChangeGuaranteeLevel;
+  observability?: ToolCallObservabilityAnnotation;
+  requestId: string;
+  sourceKind?: FileChangeSourceKind;
+  toolCallId: string;
+  toolName: string;
+}): FileDiffContent[] {
+  return input.diffs.map((diff) => ({
+    ...diff,
+    clientRequestId: diff.clientRequestId ?? input.clientRequestId,
+    requestId: diff.requestId ?? input.requestId,
+    toolName: diff.toolName ?? input.toolName,
+    toolCallId: diff.toolCallId ?? input.toolCallId,
+    sourceKind: diff.sourceKind ?? input.sourceKind ?? 'structured_tool_diff',
+    guaranteeLevel: diff.guaranteeLevel ?? input.guaranteeLevel ?? 'medium',
+    observability: diff.observability ?? input.observability,
+  }));
+}
 
 export function collectFileDiffsFromToolOutput(output: unknown): FileDiffContent[] {
   if (!output || typeof output !== 'object') {
@@ -90,8 +119,86 @@ function toFileDiff(value: unknown): FileDiffContent[] {
       additions,
       deletions,
       status,
+      clientRequestId: readString(record['clientRequestId']),
+      requestId: readString(record['requestId']),
+      toolName: readString(record['toolName']),
+      toolCallId: readString(record['toolCallId']),
+      sourceKind: isFileChangeSourceKind(record['sourceKind']) ? record['sourceKind'] : undefined,
+      guaranteeLevel: isFileChangeGuaranteeLevel(record['guaranteeLevel'])
+        ? record['guaranteeLevel']
+        : undefined,
+      backupBeforeRef: parseFileBackupRef(record['backupBeforeRef']),
+      backupAfterRef: parseFileBackupRef(record['backupAfterRef']),
+      observability: parseToolCallObservability(record['observability']),
     },
   ];
+}
+
+function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnotation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const parsed: ToolCallObservabilityAnnotation = {};
+  if (typeof record['presentedToolName'] === 'string') {
+    parsed.presentedToolName = record['presentedToolName'];
+  }
+  if (typeof record['canonicalToolName'] === 'string') {
+    parsed.canonicalToolName = record['canonicalToolName'];
+  }
+  if (
+    record['toolSurfaceProfile'] === 'openawork' ||
+    record['toolSurfaceProfile'] === 'claude_code_simple' ||
+    record['toolSurfaceProfile'] === 'claude_code_default'
+  ) {
+    parsed.toolSurfaceProfile = record['toolSurfaceProfile'];
+  }
+  if (typeof record['adapterVersion'] === 'string') {
+    parsed.adapterVersion = record['adapterVersion'];
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+function parseFileBackupRef(value: unknown): FileBackupRef | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record['backupId'] !== 'string') {
+    return undefined;
+  }
+  if (
+    record['kind'] !== 'before_write' &&
+    record['kind'] !== 'after_write' &&
+    record['kind'] !== 'snapshot_base'
+  ) {
+    return undefined;
+  }
+
+  return {
+    backupId: record['backupId'],
+    kind: record['kind'],
+    storagePath: readString(record['storagePath']),
+    artifactId: readString(record['artifactId']),
+    contentHash: readString(record['contentHash']),
+  };
+}
+
+function isFileChangeSourceKind(value: unknown): value is FileChangeSourceKind {
+  return (
+    value === 'structured_tool_diff' ||
+    value === 'session_snapshot' ||
+    value === 'restore_replay' ||
+    value === 'workspace_reconcile' ||
+    value === 'manual_revert'
+  );
+}
+
+function isFileChangeGuaranteeLevel(value: unknown): value is FileChangeGuaranteeLevel {
+  return value === 'strong' || value === 'medium' || value === 'weak';
 }
 
 function readString(value: unknown): string | undefined {

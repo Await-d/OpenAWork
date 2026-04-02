@@ -66,6 +66,9 @@ async function main(): Promise<void> {
             );
             const sandbox = createDefaultSandbox();
             const events: Array<{
+              clientRequestId?: string;
+              toolCallId?: string;
+              toolName?: string;
               type: string;
               status?: string;
               sessionId?: string;
@@ -119,6 +122,7 @@ async function main(): Promise<void> {
               );
 
               const output = result.output;
+              const parentTaskResultClientRequestId = 'parent-req-1:tool:task-call-1';
               const taskManager = new AgentTaskManagerImpl();
               const permissionRequestCount =
                 sqliteGet<{ count: number }>(
@@ -250,6 +254,12 @@ async function main(): Promise<void> {
                   parentTaskResultPart['type'] === 'tool_result',
                 'parent session should store a task tool_result entry',
               );
+              assert(
+                parentTaskResultPart &&
+                  typeof parentTaskResultPart === 'object' &&
+                  parentTaskResultPart['clientRequestId'] === parentTaskResultClientRequestId,
+                'parent session tool_result should preserve the derived task tool clientRequestId',
+              );
               const parentTaskOutput =
                 parentTaskResultPart &&
                 typeof parentTaskResultPart === 'object' &&
@@ -294,6 +304,29 @@ async function main(): Promise<void> {
                 parentReminderPayload.payload?.message?.includes(`会话：${output.sessionId}`) ===
                   true,
                 'parent completion reminder should point back to the child session id',
+              );
+              assert(
+                events.some(
+                  (event) =>
+                    event.type === 'tool_result' &&
+                    event.toolCallId === 'task-call-1' &&
+                    event.toolName === 'task' &&
+                    event.clientRequestId === parentTaskResultClientRequestId,
+                ),
+                'parent session should publish a task tool_result run event with the same trace key',
+              );
+              const persistedToolResultRequestId =
+                sqliteGet<{ client_request_id: string | null }>(
+                  `SELECT client_request_id
+                   FROM session_run_events
+                   WHERE session_id = ? AND event_type = 'tool_result' AND client_request_id = ?
+                   ORDER BY id DESC
+                   LIMIT 1`,
+                  [parentSessionId, parentTaskResultClientRequestId],
+                )?.client_request_id ?? null;
+              assert(
+                persistedToolResultRequestId === parentTaskResultClientRequestId,
+                'parent task tool_result should persist the same request-scoped key into session_run_events',
               );
 
               const resumedResult = await sandbox.execute(

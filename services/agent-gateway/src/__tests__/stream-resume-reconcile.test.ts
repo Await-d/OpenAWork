@@ -52,6 +52,12 @@ vi.mock('../routes/stream-system-prompts.js', () => ({
 
 vi.mock('../routes/stream.js', () => ({
   buildWorkspaceContext: vi.fn(async () => null),
+  buildStreamToolObservability: vi.fn((input: { presentedToolName: string }) => ({
+    presentedToolName: input.presentedToolName,
+    canonicalToolName: input.presentedToolName === 'Agent' ? 'call_omo_agent' : 'bash',
+    toolSurfaceProfile: 'openawork',
+    adapterVersion: '1.0.0',
+  })),
   createRunEventMeta: vi.fn(() => ({ eventId: 'evt-1', runId: 'run-1', occurredAt: 1 })),
   createStreamExecutionContext: vi.fn((clientRequestId, nextRound, requestData) => ({
     clientRequestId,
@@ -180,6 +186,92 @@ describe('resume reconcile fallback', () => {
         },
       }),
       { clientRequestId: 'resume-client-2' },
+    );
+  });
+
+  it('backfills observability and durable diff defaults when payload metadata is missing', async () => {
+    executeMock.mockResolvedValue({
+      toolCallId: 'tool-call-2',
+      toolName: 'Agent',
+      output: {
+        filediff: {
+          file: '/repo/example.ts',
+          before: 'const before = true;',
+          after: 'const after = true;',
+        },
+      },
+      isError: false,
+      durationMs: 1,
+    });
+    reconcileMock.mockResolvedValue(undefined);
+
+    const { resumeApprovedPermissionRequest } = await import('../routes/stream-runtime.js');
+
+    await resumeApprovedPermissionRequest({
+      payload: {
+        clientRequestId: 'resume-client-3',
+        nextRound: 2,
+        rawInput: { description: 'delegate' },
+        requestData: { clientRequestId: 'resume-client-3', message: 'resume child task' },
+        toolCallId: 'tool-call-2',
+        toolName: 'Agent',
+      },
+      sessionId: 'child-session-3',
+      userId: 'user-1',
+    });
+
+    expect(appendSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({
+            type: 'tool_result',
+            toolName: 'Agent',
+            observability: {
+              presentedToolName: 'Agent',
+              canonicalToolName: 'call_omo_agent',
+              toolSurfaceProfile: 'openawork',
+              adapterVersion: '1.0.0',
+            },
+            fileDiffs: [
+              expect.objectContaining({
+                file: '/repo/example.ts',
+                clientRequestId: 'resume-client-3',
+                requestId: 'tool-result-request-1',
+                toolCallId: 'tool-call-2',
+                toolName: 'Agent',
+                sourceKind: 'structured_tool_diff',
+                guaranteeLevel: 'medium',
+                observability: {
+                  presentedToolName: 'Agent',
+                  canonicalToolName: 'call_omo_agent',
+                  toolSurfaceProfile: 'openawork',
+                  adapterVersion: '1.0.0',
+                },
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(persistRunEventMock).toHaveBeenCalledWith(
+      'child-session-3',
+      expect.objectContaining({
+        type: 'tool_result',
+        toolName: 'Agent',
+        observability: {
+          presentedToolName: 'Agent',
+          canonicalToolName: 'call_omo_agent',
+          toolSurfaceProfile: 'openawork',
+          adapterVersion: '1.0.0',
+        },
+        fileDiffs: [
+          expect.objectContaining({
+            sourceKind: 'structured_tool_diff',
+            guaranteeLevel: 'medium',
+          }),
+        ],
+      }),
+      { clientRequestId: 'resume-client-3' },
     );
   });
 });

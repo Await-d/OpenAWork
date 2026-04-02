@@ -31,7 +31,11 @@ import {
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
 import { deriveRunEventBookend } from '../run-event-envelope.js';
-import { collectFileDiffsFromToolOutput, mergeFileDiffs } from '../modified-files-summary.js';
+import {
+  collectFileDiffsFromToolOutput,
+  mergeFileDiffs,
+  traceFileDiffs,
+} from '../modified-files-summary.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
@@ -154,7 +158,7 @@ export interface ApprovedPermissionResumePayload {
   observability?: ToolCallObservabilityAnnotation;
 }
 
-function buildStreamToolObservability(input: {
+export function buildStreamToolObservability(input: {
   metadataJson: string;
   presentedToolName: string;
 }): ToolCallObservabilityAnnotation {
@@ -614,15 +618,14 @@ export async function executeToolCalls(input: {
     });
 
     const tracedFileDiffs = input.turnFileDiffs
-      ? collectFileDiffsFromToolOutput(result.output).map((diff) => ({
-          ...diff,
+      ? traceFileDiffs({
           clientRequestId: input.clientRequestId,
+          diffs: collectFileDiffsFromToolOutput(result.output),
+          observability,
           requestId: createToolResultRequestId(input.clientRequestId, toolCallId),
-          toolName: toolCall.toolName,
           toolCallId,
-          sourceKind: diff.sourceKind ?? 'structured_tool_diff',
-          observability: diff.observability ?? observability,
-        }))
+          toolName: toolCall.toolName,
+        })
       : [];
 
     appendSessionMessage({

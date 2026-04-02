@@ -2,6 +2,7 @@ import { promises as fsp, type Dirent, type Stats } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
+import type { FileBackupRef } from '@openAwork/shared';
 import { z } from 'zod';
 import { WORKSPACE_ROOT } from './db.js';
 import { ensureIgnoreRulesLoadedForPath } from './workspace-safety.js';
@@ -804,23 +805,42 @@ export const workspaceWriteFileTool: ToolDefinition<
   inputSchema: workspaceWriteFileInputSchema,
   outputSchema: workspaceWriteFileOutputSchema,
   timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    await assertFile(safePath);
-    const previousContent = await fsp.readFile(safePath, 'utf8');
-    await fsp.writeFile(safePath, input.content, 'utf8');
-    return {
-      before: previousContent,
-      after: input.content,
-      created: false,
-      filediff: buildFileDiff({ file: safePath, before: previousContent, after: input.content }),
-      success: true,
-      path: safePath,
-      bytes: input.content.length,
-    };
-  },
+  execute: async (input) => executeWorkspaceWriteFile(input),
 };
+
+export async function executeWorkspaceWriteFile(
+  input: z.infer<typeof workspaceWriteFileInputSchema>,
+  options?: {
+    beforeWriteBackup?: (input: {
+      content: string;
+      filePath: string;
+    }) => Promise<FileBackupRef | undefined>;
+  },
+): Promise<z.infer<typeof workspaceWriteFileOutputSchema>> {
+  const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  await assertFile(safePath);
+  const previousContent = await fsp.readFile(safePath, 'utf8');
+  const backupBeforeRef = options?.beforeWriteBackup
+    ? await options.beforeWriteBackup({
+        filePath: safePath,
+        content: previousContent,
+      })
+    : undefined;
+  await fsp.writeFile(safePath, input.content, 'utf8');
+  return {
+    before: previousContent,
+    after: input.content,
+    created: false,
+    filediff: {
+      ...buildFileDiff({ file: safePath, before: previousContent, after: input.content }),
+      ...(backupBeforeRef ? { backupBeforeRef } : {}),
+    },
+    success: true,
+    path: safePath,
+    bytes: input.content.length,
+  };
+}
 
 export const writeTool: ToolDefinition<typeof writeInputSchema, typeof writeOutputSchema> = {
   name: 'write',
@@ -830,27 +850,40 @@ export const writeTool: ToolDefinition<typeof writeInputSchema, typeof writeOutp
   outputSchema: writeOutputSchema,
   timeout: workspaceWriteFileTool.timeout,
   execute: async (input, signal) => {
-    const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    const stat = await fsp.stat(safePath).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
-      }
-
-      throw error;
-    });
-
-    if (stat) {
-      if (!stat.isFile()) {
-        throw new Error(`Path is not a file: ${safePath}`);
-      }
-
-      return workspaceWriteFileTool.execute({ path: safePath, content: input.content }, signal);
-    }
-
-    return workspaceCreateFileTool.execute({ path: safePath, content: input.content }, signal);
+    return executeWriteTool(input, signal);
   },
 };
+
+export async function executeWriteTool(
+  input: z.infer<typeof writeInputSchema>,
+  _signal: AbortSignal | undefined,
+  options?: {
+    beforeWriteBackup?: (input: {
+      content: string;
+      filePath: string;
+    }) => Promise<FileBackupRef | undefined>;
+  },
+): Promise<z.infer<typeof writeOutputSchema>> {
+  const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  const stat = await fsp.stat(safePath).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (stat) {
+    if (!stat.isFile()) {
+      throw new Error(`Path is not a file: ${safePath}`);
+    }
+
+    return executeWorkspaceWriteFile({ path: safePath, content: input.content }, options);
+  }
+
+  return executeWorkspaceCreateFile({ path: safePath, content: input.content });
+}
 
 export const workspaceCreateFileTool: ToolDefinition<
   typeof workspaceCreateFileInputSchema,
@@ -861,33 +894,37 @@ export const workspaceCreateFileTool: ToolDefinition<
   inputSchema: workspaceCreateFileInputSchema,
   outputSchema: workspaceCreateFileOutputSchema,
   timeout: 10000,
-  execute: async (input) => {
-    const safePath = assertWritableWorkspacePath(input.path, 'file');
-    await ensureIgnoreRulesLoadedForPath(safePath);
-    const parentPath = resolve(join(safePath, '..'));
-    const parentStat = await fsp.stat(parentPath);
-    if (!parentStat.isDirectory()) {
-      throw new Error(`Parent directory is invalid: ${parentPath}`);
-    }
-
-    const handle = await fsp.open(safePath, 'wx');
-    try {
-      await handle.writeFile(input.content, 'utf8');
-    } finally {
-      await handle.close();
-    }
-
-    return {
-      before: '',
-      after: input.content,
-      created: true,
-      filediff: buildFileDiff({ file: safePath, before: '', after: input.content }),
-      success: true,
-      path: safePath,
-      bytes: input.content.length,
-    };
-  },
+  execute: async (input) => executeWorkspaceCreateFile(input),
 };
+
+export async function executeWorkspaceCreateFile(
+  input: z.infer<typeof workspaceCreateFileInputSchema>,
+): Promise<z.infer<typeof workspaceCreateFileOutputSchema>> {
+  const safePath = assertWritableWorkspacePath(input.path, 'file');
+  await ensureIgnoreRulesLoadedForPath(safePath);
+  const parentPath = resolve(join(safePath, '..'));
+  const parentStat = await fsp.stat(parentPath);
+  if (!parentStat.isDirectory()) {
+    throw new Error(`Parent directory is invalid: ${parentPath}`);
+  }
+
+  const handle = await fsp.open(safePath, 'wx');
+  try {
+    await handle.writeFile(input.content, 'utf8');
+  } finally {
+    await handle.close();
+  }
+
+  return {
+    before: '',
+    after: input.content,
+    created: true,
+    filediff: buildFileDiff({ file: safePath, before: '', after: input.content }),
+    success: true,
+    path: safePath,
+    bytes: input.content.length,
+  };
+}
 
 export const workspaceCreateDirectoryTool: ToolDefinition<
   typeof workspaceCreateDirectoryInputSchema,

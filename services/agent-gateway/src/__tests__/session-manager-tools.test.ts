@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
+  buildSessionFileChangesProjectionMock: vi.fn(),
   sqliteAllMock: vi.fn(),
   sqliteGetMock: vi.fn(),
   listSessionMessagesMock: vi.fn(),
@@ -32,6 +33,10 @@ vi.mock('../session-runtime-reconciler.js', () => ({
   reconcileSessionRuntime: mocked.reconcileSessionStateStatusMock,
 }));
 
+vi.mock('../session-file-changes-projection.js', () => ({
+  buildSessionFileChangesProjection: mocked.buildSessionFileChangesProjectionMock,
+}));
+
 import {
   runSessionInfoTool,
   runSessionListTool,
@@ -41,6 +46,22 @@ import {
 
 describe('session-manager-tools', () => {
   beforeEach(() => {
+    mocked.buildSessionFileChangesProjectionMock.mockReset();
+    mocked.buildSessionFileChangesProjectionMock.mockReturnValue({
+      fileDiffs: [],
+      snapshots: [],
+      summary: {
+        totalFileDiffs: 0,
+        snapshotCount: 0,
+        totalAdditions: 0,
+        totalDeletions: 0,
+        sourceKinds: [],
+        weakestGuaranteeLevel: undefined,
+        latestSnapshotRef: undefined,
+        latestSnapshotScopeKind: undefined,
+        latestSnapshotAt: undefined,
+      },
+    });
     mocked.reconcileSessionStateStatusMock.mockReset();
     mocked.reconcileSessionStateStatusMock.mockImplementation(() => ({
       previousStatus: null,
@@ -132,6 +153,64 @@ describe('session-manager-tools', () => {
     expect(output).toContain('Todos:');
   });
 
+  it('renders unified file-change projection in read output', () => {
+    mocked.sqliteGetMock.mockReturnValue({
+      id: 'ses_projection',
+      metadata_json: '{}',
+      state_status: 'idle',
+      title: 'Projection',
+      created_at: '2026-03-29T10:00:00.000Z',
+      updated_at: '2026-03-29T11:00:00.000Z',
+    });
+    mocked.listSessionMessagesMock.mockReturnValue([]);
+    mocked.buildSessionFileChangesProjectionMock.mockReturnValue({
+      fileDiffs: [
+        {
+          file: '/repo/script.sh',
+          additions: 2,
+          deletions: 1,
+          guaranteeLevel: 'weak',
+          sourceKind: 'workspace_reconcile',
+        },
+      ],
+      snapshots: [
+        {
+          snapshotRef: 'req:req-1',
+          scopeKind: 'request',
+          summary: {
+            files: 1,
+            additions: 2,
+            deletions: 1,
+            guaranteeLevel: 'weak',
+          },
+        },
+      ],
+      summary: {
+        totalFileDiffs: 1,
+        snapshotCount: 1,
+        totalAdditions: 2,
+        totalDeletions: 1,
+        sourceKinds: ['workspace_reconcile'],
+        weakestGuaranteeLevel: 'weak',
+        latestSnapshotRef: 'req:req-1',
+        latestSnapshotScopeKind: 'request',
+        latestSnapshotAt: '2026-03-29T11:00:00.000Z',
+      },
+    });
+
+    const output = runSessionReadTool('user-1', {
+      session_id: 'ses_projection',
+      include_todos: false,
+      include_transcript: false,
+    });
+
+    expect(output).toContain('File Diffs:');
+    expect(output).toContain('guarantee=weak');
+    expect(output).toContain('source=workspace_reconcile');
+    expect(output).toContain('Snapshots:');
+    expect(output).toContain('req:req-1 · scope=request');
+  });
+
   it('includes transcript rows when requested', () => {
     mocked.sqliteGetMock.mockReturnValue({
       id: 'ses_1',
@@ -203,10 +282,28 @@ describe('session-manager-tools', () => {
     ]);
     mocked.listSessionTodoLanesMock.mockReturnValue({ main: [], temp: [] });
     mocked.parseSessionMetadataJsonMock.mockImplementation((value: string) => JSON.parse(value));
+    mocked.buildSessionFileChangesProjectionMock.mockReturnValue({
+      fileDiffs: [],
+      snapshots: [],
+      summary: {
+        totalFileDiffs: 3,
+        snapshotCount: 2,
+        totalAdditions: 7,
+        totalDeletions: 1,
+        sourceKinds: ['structured_tool_diff', 'workspace_reconcile'],
+        weakestGuaranteeLevel: 'weak',
+        latestSnapshotRef: 'backup:backup-1',
+        latestSnapshotScopeKind: 'backup',
+        latestSnapshotAt: '2026-03-29T11:00:00.000Z',
+      },
+    });
 
     const output = await runSessionInfoTool('user-1', { session_id: 'ses_1' });
     expect(output).toContain('Session ID: ses_1');
     expect(output).toContain('Children: 1');
     expect(output).toContain('Parent Session: root-1');
+    expect(output).toContain('Weakest Guarantee: weak');
+    expect(output).toContain('Sources: structured_tool_diff, workspace_reconcile');
+    expect(output).toContain('Latest Snapshot: backup:backup-1');
   });
 });

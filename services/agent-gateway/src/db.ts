@@ -253,6 +253,30 @@ export async function migrate(): Promise<void> {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS session_file_backups (
+      backup_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      source_tool TEXT,
+      source_request_id TEXT,
+      tool_call_id TEXT,
+      storage_path TEXT,
+      artifact_id TEXT,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_file_backups_session ON session_file_backups(session_id)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_file_backups_hash ON session_file_backups(content_hash)',
+  );
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS permission_requests (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
