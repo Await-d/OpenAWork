@@ -2,7 +2,12 @@ export { GatewayWebSocketClient } from './gateway-ws.js';
 export { GatewaySSEClient } from './gateway-sse.js';
 export { login, refreshAccessToken, logout } from './auth.js';
 export type { TokenPair } from './auth.js';
-export type { StreamChunkHandler, SendMessageOptions } from './gateway-ws.js';
+export type {
+  GatewayStreamEvent,
+  StreamChunkHandler,
+  StreamEventHandler,
+  SendMessageOptions,
+} from './gateway-ws.js';
 export { createCommandsClient } from './commands.js';
 export type { CommandsClient } from './commands.js';
 export { createCapabilitiesClient } from './capabilities.js';

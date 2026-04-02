@@ -1,6 +1,10 @@
-import type { StreamChunk } from '@openAwork/shared';
+import type { RunEvent } from '@openAwork/shared';
 
-export type StreamChunkHandler = (chunk: StreamChunk) => void;
+export type GatewayStreamEvent = RunEvent;
+
+export type StreamEventHandler = (event: GatewayStreamEvent) => void;
+
+export type StreamChunkHandler = StreamEventHandler;
 
 export interface SendMessageOptions {
   clientRequestId?: string;
@@ -10,7 +14,7 @@ export interface SendMessageOptions {
 
 export class GatewayWebSocketClient {
   private ws: WebSocket | null = null;
-  private handlers: Set<StreamChunkHandler> = new Set();
+  private handlers: Set<StreamEventHandler> = new Set();
   private pendingPayload: string | null = null;
   private gatewayUrl: string;
   private token: string;
@@ -34,12 +38,16 @@ export class GatewayWebSocketClient {
     };
 
     this.ws.onmessage = (ev) => {
-      const chunk = JSON.parse(ev.data as string) as StreamChunk;
+      const chunk = JSON.parse(ev.data as string) as GatewayStreamEvent;
       for (const h of this.handlers) h(chunk);
     };
 
     this.ws.onerror = () => {
-      const errChunk: StreamChunk = { type: 'error', code: 'WS_ERROR', message: 'WebSocket error' };
+      const errChunk: GatewayStreamEvent = {
+        type: 'error',
+        code: 'WS_ERROR',
+        message: 'WebSocket error',
+      };
       for (const h of this.handlers) h(errChunk);
     };
   }
@@ -61,7 +69,7 @@ export class GatewayWebSocketClient {
     this.pendingPayload = payload;
   }
 
-  onChunk(handler: StreamChunkHandler): () => void {
+  onChunk(handler: StreamEventHandler): () => void {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);
   }

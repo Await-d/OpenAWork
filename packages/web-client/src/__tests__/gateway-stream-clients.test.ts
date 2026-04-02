@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StreamChunk } from '@openAwork/shared';
+import type { RunEvent } from '@openAwork/shared';
 import { GatewayWebSocketClient } from '../gateway-ws.js';
 import { GatewaySSEClient } from '../gateway-sse.js';
 
@@ -27,7 +27,7 @@ class MockWebSocket {
     this.onopen?.();
   }
 
-  emitChunk(chunk: StreamChunk): void {
+  emitChunk(chunk: RunEvent): void {
     this.onmessage?.({ data: JSON.stringify(chunk) });
   }
 
@@ -49,7 +49,7 @@ class MockEventSource {
     MockEventSource.instances.push(this);
   }
 
-  emitChunk(chunk: StreamChunk): void {
+  emitChunk(chunk: RunEvent): void {
     this.onmessage?.({ data: JSON.stringify(chunk) });
   }
 
@@ -94,7 +94,7 @@ describe('GatewayWebSocketClient', () => {
 
   it('dispatches parsed stream chunks to subscribers', () => {
     const client = new GatewayWebSocketClient('http://localhost:3000', 'token-123');
-    const received: StreamChunk[] = [];
+    const received: RunEvent[] = [];
     client.onChunk((chunk) => received.push(chunk));
 
     client.connect('session-1');
@@ -111,6 +111,35 @@ describe('GatewayWebSocketClient', () => {
         toolCallId: 'call_1',
         toolName: 'web_search',
         inputDelta: '{"query":"上海天气"}',
+      },
+    ]);
+  });
+
+  it('passes through run events beyond the StreamChunk subset', () => {
+    const client = new GatewayWebSocketClient('http://localhost:3000', 'token-123');
+    const received: RunEvent[] = [];
+    client.onChunk((chunk) => received.push(chunk));
+
+    client.connect('session-1');
+    MockWebSocket.instances[0]!.emitChunk({
+      type: 'task_update',
+      taskId: 'task-1',
+      label: '让子代理继续分析',
+      status: 'in_progress',
+      assignedAgent: 'explore',
+      sessionId: 'child-session-1',
+      parentSessionId: 'session-1',
+    });
+
+    expect(received).toEqual([
+      {
+        type: 'task_update',
+        taskId: 'task-1',
+        label: '让子代理继续分析',
+        status: 'in_progress',
+        assignedAgent: 'explore',
+        sessionId: 'child-session-1',
+        parentSessionId: 'session-1',
       },
     ]);
   });
@@ -131,7 +160,7 @@ describe('GatewaySSEClient', () => {
 
   it('dispatches stream chunks and closes on done', () => {
     const client = new GatewaySSEClient('http://localhost:3000', 'token-123');
-    const received: StreamChunk[] = [];
+    const received: RunEvent[] = [];
     client.onChunk((chunk) => received.push(chunk));
     client.connectAndStream('session-1', 'hello');
 
@@ -140,5 +169,38 @@ describe('GatewaySSEClient', () => {
 
     expect(received).toEqual([{ type: 'done', stopReason: 'end_turn' }]);
     expect(es.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispatches task updates without eagerly closing the stream', () => {
+    const client = new GatewaySSEClient('http://localhost:3000', 'token-123');
+    const received: RunEvent[] = [];
+    client.onChunk((chunk) => received.push(chunk));
+    client.connectAndStream('session-1', 'hello');
+
+    const es = MockEventSource.instances[0]!;
+    es.emitChunk({
+      type: 'task_update',
+      taskId: 'task-2',
+      label: '后台子任务运行中',
+      status: 'done',
+      result: '子代理已经完成。',
+      assignedAgent: 'explore',
+      sessionId: 'child-session-2',
+      parentSessionId: 'session-1',
+    });
+
+    expect(received).toEqual([
+      {
+        type: 'task_update',
+        taskId: 'task-2',
+        label: '后台子任务运行中',
+        status: 'done',
+        result: '子代理已经完成。',
+        assignedAgent: 'explore',
+        sessionId: 'child-session-2',
+        parentSessionId: 'session-1',
+      },
+    ]);
+    expect(es.close).not.toHaveBeenCalled();
   });
 });
