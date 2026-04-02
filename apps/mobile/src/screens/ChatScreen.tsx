@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ import {
 } from '../components/DialogueModeSelector';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { reconcileTaskActivities, upsertTaskActivity } from './chat-task-activities.js';
 
 interface Message {
   id: string;
@@ -50,6 +51,7 @@ interface ArtifactRecord {
 export function ChatScreen({ sessionId }: ChatScreenProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
   const { stream, disconnect } = useGatewayClient(gatewayUrl, accessToken);
+  const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [input, setInput] = useState('');
@@ -60,6 +62,51 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const [artifactHistory, setArtifactHistory] = useState<MobileAttachmentItem[]>([]);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
   const listRef = useRef<FlatList>(null);
+  const hasRunningSubagents = activities.some(
+    (activity) => activity.kind === 'subagent' && activity.status === 'running',
+  );
+  const taskSyncIntervalMs = sending || hasRunningSubagents ? 1800 : 10000;
+
+  const syncTaskActivities = useCallback(async (): Promise<void> => {
+    if (!accessToken) {
+      return;
+    }
+
+    try {
+      const tasks = await sessionsClient.getTasks(accessToken, sessionId);
+      setActivities((prev) => reconcileTaskActivities(prev, tasks));
+    } catch (error) {
+      console.warn('Failed to sync mobile task activities', error);
+    }
+  }, [accessToken, sessionId, sessionsClient]);
+
+  useEffect(() => {
+    void syncTaskActivities();
+  }, [syncTaskActivities]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    let cancelled = false;
+    const sync = async (): Promise<void> => {
+      if (cancelled) {
+        return;
+      }
+      await syncTaskActivities();
+    };
+
+    void sync();
+    const timer = setInterval(() => {
+      void sync();
+    }, taskSyncIntervalMs);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [accessToken, syncTaskActivities, taskSyncIntervalMs]);
 
   const loadArtifactHistory = useCallback(async () => {
     if (!accessToken) return;
@@ -187,6 +234,9 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       await loadArtifactHistory();
 
       stream(sessionId, finalText, {
+        onConnected: () => {
+          void syncTaskActivities();
+        },
         onDelta: (delta) => {
           const safeDelta = extractRuntimeTextDelta(delta);
           setMessages((prev) =>
@@ -194,9 +244,12 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           );
         },
         onDone: () => {
+          void syncTaskActivities();
           setActivities((prev) =>
             prev.map((activity) =>
-              activity.status === 'running' ? { ...activity, status: 'done' } : activity,
+              activity.kind !== 'subagent' && activity.status === 'running'
+                ? { ...activity, status: 'done' }
+                : activity,
             ),
           );
           setMessages((prev) =>
@@ -206,9 +259,12 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
         },
         onError: (_code, message) => {
+          void syncTaskActivities();
           setActivities((prev) =>
             prev.map((activity) =>
-              activity.status === 'running' ? { ...activity, status: 'error' } : activity,
+              activity.kind !== 'subagent' && activity.status === 'running'
+                ? { ...activity, status: 'error' }
+                : activity,
             ),
           );
           setMessages((prev) =>
@@ -239,6 +295,17 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
               ];
             }
 
+            if (event.kind === 'task_update') {
+              return upsertTaskActivity(prev, {
+                id: event.id,
+                name: event.name,
+                status: event.status,
+                output: event.output,
+                assignedAgent: event.assignedAgent,
+                sessionId: event.sessionId,
+              });
+            }
+
             return prev.map((activity) =>
               activity.id === event.id
                 ? {
@@ -261,11 +328,13 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     loadArtifactHistory,
     sending,
     sessionId,
+    syncTaskActivities,
     stream,
   ]);
 
   const handleStop = useCallback(() => {
     disconnect();
+    void syncTaskActivities();
     setSending(false);
     setMessages((prev) =>
       prev.map((message) =>
@@ -276,12 +345,12 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     );
     setActivities((prev) =>
       prev.map((activity) =>
-        activity.status === 'running'
+        activity.kind !== 'subagent' && activity.status === 'running'
           ? { ...activity, status: 'error', output: '用户已停止' }
           : activity,
       ),
     );
-  }, [disconnect]);
+  }, [disconnect, syncTaskActivities]);
 
   const handleAddAttachment = useCallback(async () => {
     try {

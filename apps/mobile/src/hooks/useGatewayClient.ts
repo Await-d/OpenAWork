@@ -4,17 +4,28 @@ import { extractRuntimeTextDelta } from '../chat-message-content.js';
 
 export type ActivityEvent =
   | { kind: 'tool_start'; id: string; name: string }
-  | { kind: 'tool_result'; id: string; name: string; isError: boolean };
+  | { kind: 'tool_result'; id: string; name: string; isError: boolean }
+  | {
+      kind: 'task_update';
+      id: string;
+      name: string;
+      status: 'running' | 'done' | 'error';
+      assignedAgent?: string;
+      sessionId?: string;
+      output?: string;
+    };
 
 export type StreamHandlers = {
   onDelta: (delta: string) => void;
   onDone: (stopReason: string) => void;
   onError: (code: string, message: string) => void;
+  onConnected?: () => void;
   onActivity?: (event: ActivityEvent) => void;
 };
 
 export class MobileGatewayClient {
   private ws: WebSocket | null = null;
+  private pendingPayload: string | null = null;
   private gatewayUrl: string;
   private token: string;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,10 +48,16 @@ export class MobileGatewayClient {
   private openConnection(sessionId: string): void {
     const protocol = this.gatewayUrl.startsWith('https') ? 'wss' : 'ws';
     const base = this.gatewayUrl.replace(/^https?/, protocol);
-    this.ws = new WebSocket(`${base}/sessions/${sessionId}/stream`);
+    const params = new URLSearchParams({ token: this.token });
+    this.ws = new WebSocket(`${base}/sessions/${sessionId}/stream?${params.toString()}`);
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
+      if (this.pendingPayload) {
+        this.ws?.send(this.pendingPayload);
+        this.pendingPayload = null;
+      }
+      this.handlers?.onConnected?.();
     };
 
     this.ws.onmessage = (ev) => {
@@ -65,6 +82,24 @@ export class MobileGatewayClient {
           name: chunk.toolName,
           isError: chunk.isError,
         });
+      } else if (chunk.type === 'task_update') {
+        this.handlers.onActivity?.({
+          kind: 'task_update',
+          id: chunk.taskId,
+          name: chunk.assignedAgent ? `@${chunk.assignedAgent} · ${chunk.label}` : chunk.label,
+          status:
+            chunk.status === 'done'
+              ? 'done'
+              : chunk.status === 'failed' || chunk.status === 'cancelled'
+                ? 'error'
+                : 'running',
+          assignedAgent: chunk.assignedAgent,
+          sessionId: chunk.sessionId,
+          output:
+            chunk.errorMessage ??
+            chunk.result ??
+            (chunk.status === 'cancelled' ? '子任务已取消。' : undefined),
+        });
       }
     };
 
@@ -84,13 +119,22 @@ export class MobileGatewayClient {
   }
 
   send(message: string): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(
-      JSON.stringify({
-        message,
-        authorization: `Bearer ${this.token}`,
-      }),
-    );
+    const payload = JSON.stringify({
+      clientRequestId: crypto.randomUUID(),
+      message,
+    });
+
+    if (!this.ws) {
+      this.pendingPayload = payload;
+      return;
+    }
+
+    if (this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(payload);
+      return;
+    }
+
+    this.pendingPayload = payload;
   }
 
   disconnect(): void {
@@ -122,8 +166,7 @@ export function useGatewayClient(gatewayUrl: string, token: string | null) {
     const client = clientRef.current;
     if (!client) return;
     client.connect(sessionId, handlers);
-    const WS_HANDSHAKE_DELAY_MS = 100;
-    setTimeout(() => client.send(message), WS_HANDSHAKE_DELAY_MS);
+    client.send(message);
   }, []);
 
   const disconnect = useCallback(() => {
