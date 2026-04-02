@@ -25,6 +25,7 @@
 
 ## 归档工作流（已完成）
 
+- [260402-任务使用链与完成回调收口](./workflow/done/260402-任务使用链与完成回调收口.md) — 继续按当前 fusion-native/reference way 收口 task 使用链、任务完成回调与多端消费差异：`packages/web-client` 已统一消费 `RunEvent`，mobile 已接通 task 快照恢复与 `task_update` 可见性，gateway 的 task parent auto-resume 也已按参考语义启用并通过专项验收
 - [260402-usage持久化回归修复](./workflow/done/260402-usage持久化回归修复.md) — 按既有 usage 方案设计修复 `verify-openai-responses.ts` 的 usage persistence 回归：`runModelRound` 现向上返回 round usage，`stream.ts`/`stream-runtime.ts` 已恢复 `usage_records` 月度写入，`agent-gateway` 全量测试重新通过
 - [260402-opencode-claude-任务体系修复收口](./workflow/done/260402-opencode-claude-任务体系修复收口.md) — 修复 OpenCode/Claude 任务体系主线的 shared/gateway 合同断裂、replay/bookend durable replay 判定与 session runtime state 测试漂移；相关类型检查、构建与定点验证已恢复为绿，完整 gateway 套件仍受 usage 链路的现有失败阻塞
 - [260402-opencode-claude-任务体系完成度核查](./workflow/done/260402-opencode-claude-任务体系完成度核查.md) — 对 `260401-opencode-claude-任务体系完整融合方案` 做仓库级完成度审计后确认：当前工作树并非“全部完成”，主要反证为 shared/gateway 合同断裂、stream replay 验证失败、以及 agent-gateway 的 typecheck/build/test 未全绿
@@ -46,6 +47,9 @@
 - [2026-04-01] 任务体系后续实施采用 **fusion-native first**：旧版本 OpenCode / Claude Code surface 只作为语义来源与迁移输入，不再作为长期兼容目标；先定义新合同，再按需编写 importer / translator。
 - [2026-04-01] 任务体系实施顺序固定为：先 `packages/shared/src/index.ts` 冻结共享合同，再改 `packages/agent-core/src/task-system/*`，然后收口 `services/agent-gateway/src/task-*.ts / background-task-tools.ts / session-run-events.ts`，最后才进入 `routes/stream*.ts` 与对外 surface；禁止从 gateway 热点路由倒着改起。
 - [2026-04-01] D-09 的 durable replay 判断切换为 **latest bookend-driven**：`RunEventEnvelope` 承载 `bookend + cursor + outputOffset`，只有最新 bookend 为终态或 `interaction_wait` 时才允许 durable replay；`tool_handoff` 与 `interaction_resumed` 明确是非 replayable 边界，避免运行中的 request 被误当成可回放完成态。
+- [2026-04-02] task 完成回调的参考语义不是“只写完成提醒”，而是 **子任务终态 → 父会话 `tool_result` 收敛 + `task_update` 广播 + 在 `run_in_background + request context` 条件下自动回流续跑父会话**；`task-parent-auto-resume` 只能在具备父请求上下文时启用，不能无条件对任何子任务补发续跑。
+- [2026-04-02] `packages/web-client` 作为通用流式客户端必须消费 **完整 `RunEvent`**，不能继续把网关输出收窄为 `StreamChunk`；否则 `task_update`、`tool_result`、`permission_*`、`question_*` 等任务/交互事件会在宿主端静默丢失。
+- [2026-04-02] mobile 侧子任务活动恢复必须镜像 gateway `/sessions/:id/tasks` 的投影语义：**只把 `tags.includes('task-tool') && sessionId` 的 delegated task 视为 subagent activity，并采用 `task_update` 增量 + `/tasks` 快照（发送/运行时快轮询、空闲时慢轮询、重连即补 sync）双轨恢复**；不能再只按 `sessionId` 过滤或只依赖流事件。
 - [2026-04-01] D-10 的 tools/capabilities surface 采用 **openawork canonical 默认 + claude_code_* profile 次级呈现**：默认 `openawork` 只暴露 canonical/fusion-native 工具名；只有显式 `toolSurfaceProfile` 选择 `claude_code_*` 时才暴露 `Skill/AskUserQuestion/Agent/...` 等 presented names。
 - [2026-04-01] 只要某个 profile 暴露了 presented tool name，就必须同时保证 `tool-definitions`、`isEnabledToolName/session-tool-visibility`、以及 `dispatchClaudeCodeTool` 三层都能归一到同一个 canonical tool；否则会出现“模型可见且 enabled，但运行期 unsupported”的错配。
 - [2026-04-01] D-11 的验证矩阵优先放在 `src/verification/verify-*.ts` 而不是强行解锁脆弱的 route 集成：当 Node/vitest 环境仍会把 `sqlite` 相关 route suite 整体 skip 时，优先用真实 Fastify + in-memory DB 的 verification 脚本补关键链路（`/tools`、`/capabilities`、stream surface、replay/bookend、session delete abort`）。
@@ -140,6 +144,15 @@
 - [2026-04-02] `.agentdocs/workflow/done/260401-usage写入闭环实现.md` 这类归档文档即使写着“主链已接通”，也不能替代对当前代码的复验；本次实际代码已经回退到“`stream-model-round` 不再返回 usage、`stream.ts/stream-runtime.ts` 不再写 `usage_records`”，直到重新验证 `verify-openai-responses.ts + pnpm run test` 才确认真正恢复。
 - [2026-04-02] 当 `packages/shared` 的导出合同变更后，若 `services/agent-gateway` 仍只跑裸 `tsc`，TypeScript 很容易继续吃旧声明；gateway 已切到 `tsc -b`，后续独立构建应保持 build mode，避免把“过期声明”误判成代码未修复。
 - [2026-04-02] 如果 `tool_result` 只保存 `output` 而不把 `clientRequestId/fileDiffs/observability` 一起持久化，`stream replay` 与会话消息重载时会天然丢掉 request → tool → file 的 trace 语义；`tool_result` 必须被视为 durable trace 载体，而不只是展示结果。
+- [2026-04-02] `session_snapshots.client_request_id` 现在承担通用 `snapshotRef` 语义；request 级快照统一写成 `req:<clientRequestId>`，为后续 `backup:` / `scope:` ref 预留稳定格式，避免把 snapshot 永远绑定死在 requestId 上。
+- [2026-04-02] 进入 `tool_result / session_file_diffs / session_snapshots` 之前，文件 diff 必须先经过统一 trace 规范化（至少补齐 `clientRequestId/requestId/toolCallId/sourceKind/guaranteeLevel/observability`）；否则同一轮 diff 会在不同 durable 链里出现不同默认值，后续恢复和审计会漂移。
+- [2026-04-02] `bash` 这类外部进程写路径默认不应伪装成结构化高保障 diff；当前统一通过 `workspace-reconcile.ts` 在命令前后做工作区快照对比，并强制落为 `sourceKind=workspace_reconcile`、`guaranteeLevel=weak`。
+- [2026-04-02] session 读侧不要各自拼接 file diff / snapshot 语义；`session-manager-tools.ts` 与 `routes/sessions.ts` 统一复用 `session-file-changes-projection.ts` 输出 `fileChangesSummary`，避免读模型再次漂移。
+- [2026-04-02] 请求级/会话级 file-changes 与 snapshot 读接口默认必须走轻量响应：`includeText=false` 时只返回 diff meta 与 snapshot 白名单 summary，不默认暴露 `before/after`、`files`、`backup refs` 等重/敏字段。
+- [2026-04-02] `session_file_diffs` 与 `session_snapshots` 的读 API 不要靠全量内存过滤凑出来；已新增按 `clientRequestId` 过滤的 diff 查询、按 `snapshotRef` 取 detail，以及 snapshot compare helper，后续扩展 API 应复用这些 store 能力。
+- [2026-04-02] 写前备份层当前先走专用目录 `data/file-backups/<sessionId>/<backupId>.txt` + `session_file_backups` 元数据表，不把原文大文本直接塞进 `session_file_diffs/session_snapshots`；后续更多写路径应复用同一 backup store，而不是各自写临时文件。
+- [2026-04-02] `edit` 已成为第一条接入写前备份的写路径：`createEditTool()` 现在必须接收 `sessionId/userId/requestId/toolCallId`，这样 `backupBeforeRef` 才能带着会话级关联键回流进 durable diff/snapshot 主链。
+- [2026-04-02] `workspace_write_file` / `write` 这类通用写工具不能在“写完之后”再补备份；当前统一通过 `workspace-tools.ts` 的 beforeWrite hook 在真正写入前生成 `backupBeforeRef`，再由 `tool-sandbox.ts` 的 gateway-managed 分支传入会话上下文。
 - [2026-04-02] `.agentdocs/workflow/done` 与 `index.md` 中的“已完成”只能证明文档流程已归档，不能证明当前工作树真实完成；审计时必须同时检查 `git status`、`typecheck/build/test` 与关键 verification 脚本，尤其是 shared 合同导出与 stream replay/bookend 链路。
 - [2026-04-01] Chat Completions 的流式 usage 不能只实现解析逻辑：OpenAI 语义要求请求体显式带 `stream_options.include_usage=true`，否则最后的 usage chunk 默认不会返回；如果只在 `stream-protocol.ts` 里写了解析，但没在 `upstream-request.ts` 打开这个选项，`usage_records` 在 chat 路径上仍会长期缺数。
 - [2026-04-01] 即使已经在 chat 请求默认值里加入 `stream_options.include_usage=true`，也不能假设它会一直保留：`applyRequestOverridesToBody()` 若先合并外部 `requestOverrides.body.stream_options`，后续没有再做强制 merge，就可能把 `include_usage` 悄悄覆盖掉，导致 usage 写入回归失效。
@@ -161,6 +174,7 @@
 - [2026-04-01] monorepo 中直接消费 workspace 包的 package 若参与 type-aware lint / typecheck，不能只依赖 `package.json` 的 `dist` 导出；至少要在消费方 `tsconfig.json` 补齐源码 `paths + references`，必要时再把该包纳入根 `tsconfig.json` 的 solution references，否则 ESLint 可能把上游类型降级为 error type。
 - [2026-04-01] `apps/web`、`apps/desktop`、`apps/mobile` 当前按仓库约定不参与根 ESLint；若保留 `package.json` 中的 `lint: eslint .`，一旦被 `pnpm --filter ... lint` 直接点名就会因为 `apps/**` 全局忽略而退出失败，脚本必须与该约定保持一致。
 - [2026-04-01] app 层 lint 策略已调整为分层覆盖：`apps/desktop` 与 `apps/mobile` 参与根 ESLint、`lint-staged` 与 CI quality 门禁；`apps/web` 仅暂缓 lint，仍保留 typecheck，且因 desktop 直接复用 web 源码，web 变更仍可能影响 desktop 类型检查。
+- [2026-04-02] mobile 侧若只依赖流式 `task_update` 增量事件、或把 `/sessions/:id/tasks` 里的“有 `sessionId` 的任务”一概当成子代理任务，页面重进、漏事件、重连后都会出现状态消失或普通任务误入活动面板；移动端任务可见性必须采用“`task-tool` 过滤 + 事件增量 + tasks 快照恢复”三者同时成立的模型。
 
 - [2026-03-30] `release-mobile.yml` 的 preview OTA 不能只在 step 级判断 `inputs.profile == 'preview'`：如果 job 级 `if` 不放开 preview dispatch，prepare-release 触发的 mobile preview 会构建成功但永远不推 OTA。
 
