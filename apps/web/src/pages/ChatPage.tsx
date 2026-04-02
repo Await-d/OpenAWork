@@ -123,6 +123,7 @@ import {
   persistQueuedComposerFiles,
   restoreQueuedComposerFiles,
 } from './chat-page/queued-composer-file-store.js';
+import { appendAttachmentSummary, uploadChatAttachments } from './chat-page/attachment-upload.js';
 import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
@@ -155,6 +156,140 @@ const CHAT_LATEST_FOCUS_THRESHOLD_PX = 32;
 const CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX = 40;
 const CHAT_LATEST_REGION_FALLBACK_PX = 420;
 const CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS = 420;
+
+const RIGHT_PANEL_TABS = [
+  { id: 'overview', label: '概览' },
+  { id: 'plan', label: '计划' },
+  { id: 'tools', label: '工具' },
+  { id: 'history', label: '历史' },
+  { id: 'viz', label: '可视化' },
+  { id: 'mcp', label: 'MCP' },
+  { id: 'agent', label: '代理' },
+] as const;
+
+type RightPanelTabId = (typeof RIGHT_PANEL_TABS)[number]['id'];
+
+const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string; title: string }> = {
+  overview: {
+    title: '会话概览',
+    description: '查看当前会话、上下文注入与运行摘要。',
+  },
+  plan: {
+    title: '计划面板',
+    description: '聚焦当前任务拆解、优先级与执行进度。',
+  },
+  tools: {
+    title: '工具记录',
+    description: '浏览工具调用、筛选分类，并快速定位输出。',
+  },
+  history: {
+    title: '会话历史',
+    description: '查看子会话、审批、计划记录与历史待办。',
+  },
+  viz: {
+    title: '执行可视化',
+    description: '从图谱与事件时间线理解当前执行路径。',
+  },
+  mcp: {
+    title: 'MCP 状态',
+    description: '检查 MCP 服务连接状态与可用能力。',
+  },
+  agent: {
+    title: '代理详情',
+    description: '查看子代理会话、日志与运行细节。',
+  },
+};
+
+function renderRightPanelTabIcon(tabId: RightPanelTabId): React.ReactNode {
+  const iconProps = {
+    fill: 'none',
+    height: 16,
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    strokeWidth: 1.8,
+    viewBox: '0 0 24 24',
+    width: 16,
+  };
+
+  if (tabId === 'overview') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <rect x="4" y="4" width="6" height="6" rx="1.5" />
+        <rect x="14" y="4" width="6" height="6" rx="1.5" />
+        <rect x="4" y="14" width="6" height="6" rx="1.5" />
+        <rect x="14" y="14" width="6" height="6" rx="1.5" />
+      </svg>
+    );
+  }
+
+  if (tabId === 'plan') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <path d="M9 6h9" />
+        <path d="M9 12h9" />
+        <path d="M9 18h9" />
+        <path d="M5 6.5l1.2 1.2L8.5 5.5" />
+        <path d="M5 12.5l1.2 1.2 2.3-2.2" />
+        <path d="M5 18.5l1.2 1.2 2.3-2.2" />
+      </svg>
+    );
+  }
+
+  if (tabId === 'tools') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <path d="M14.5 6.5a4 4 0 0 0 4.9 4.9l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l8.2-8.2a4 4 0 0 0-2.4-6.8" />
+      </svg>
+    );
+  }
+
+  if (tabId === 'history') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v4h4" />
+        <path d="M12 7.5v5l3 2" />
+      </svg>
+    );
+  }
+
+  if (tabId === 'viz') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <circle cx="6" cy="18" r="2.5" />
+        <circle cx="12" cy="6" r="2.5" />
+        <circle cx="18" cy="14" r="2.5" />
+        <path d="M8 16.7l2.5-7" />
+        <path d="M13.8 7.5l2.4 4.8" />
+      </svg>
+    );
+  }
+
+  if (tabId === 'mcp') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <rect x="5" y="5" width="5" height="5" rx="1.2" />
+        <rect x="14" y="5" width="5" height="5" rx="1.2" />
+        <rect x="9.5" y="14" width="5" height="5" rx="1.2" />
+        <path d="M10 7.5h4" />
+        <path d="M12 10v4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+      <rect x="6" y="7" width="12" height="9" rx="2.5" />
+      <circle cx="10" cy="11.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="11.5" r="1" fill="currentColor" stroke="none" />
+      <path d="M9 17v2" />
+      <path d="M15 17v2" />
+      <path d="M9 5.5l-1-1.5" />
+      <path d="M15 5.5l1-1.5" />
+    </svg>
+  );
+}
 
 function normalizeModelLookupKey(value: string | undefined): string {
   return (value ?? '').trim().toLowerCase();
@@ -1841,15 +1976,6 @@ export default function ChatPage() {
     return session.id;
   }
 
-  const readFileAsText = useCallback((file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error('文件读取失败'));
-      reader.readAsText(file);
-    });
-  }, []);
-
   const appendFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
     setAttachedFiles((prev) => [...prev, ...files]);
@@ -2026,19 +2152,30 @@ export default function ChatPage() {
       clearComposerDraft();
     }
 
-    if (effectiveFiles.length > 0) {
-      const parts: string[] = [];
-      for (const file of effectiveFiles) {
-        try {
-          const content = await readFileAsText(file);
-          parts.push(`<file name="${file.name}">
-${content}
-</file>`);
-        } catch {
-          parts.push(`<file name="${file.name}">[二进制文件 — 无法显示]</file>`);
-        }
+    let sid: string;
+    try {
+      sid = options?.forcedSessionId ?? (await ensureSession());
+    } catch (err) {
+      logger.error('session create failed', err);
+      if (activeSessionRef.current === requestOriginSessionId) {
+        resetStreamState();
+        setStreamError(err instanceof Error ? err.message : '会话创建失败');
       }
-      text = parts.join('\n') + (text ? '\n\n' + text : '');
+      return false;
+    }
+
+    if (activeSessionRef.current !== sid) {
+      return false;
+    }
+
+    if (effectiveFiles.length > 0) {
+      const uploadedAttachmentLines = await uploadChatAttachments({
+        files: effectiveFiles,
+        gatewayUrl,
+        sessionId: sid,
+        token,
+      });
+      text = appendAttachmentSummary(text, uploadedAttachmentLines);
       if (options?.queuedFiles === undefined) {
         setAttachedFiles([]);
         setAttachmentItems([]);
@@ -2113,22 +2250,6 @@ ${content}
       status: 'completed',
     };
     setMessages((prev) => [...prev, userMsg]);
-
-    let sid: string;
-    try {
-      sid = options?.forcedSessionId ?? (await ensureSession());
-    } catch (err) {
-      logger.error('session create failed', err);
-      if (activeSessionRef.current === requestOriginSessionId) {
-        resetStreamState();
-        setStreamError(err instanceof Error ? err.message : '会话创建失败');
-      }
-      return false;
-    }
-
-    if (activeSessionRef.current !== sid) {
-      return false;
-    }
 
     if (options?.queuedMessageId && queuedComposerScope) {
       void deleteQueuedComposerFiles({
@@ -2890,8 +3011,10 @@ ${content}
 
     const pastedText = e.clipboardData.getData('text/plain');
 
-    if (imageFiles.length > 0 && !pastedText) {
-      e.preventDefault();
+    if (imageFiles.length > 0) {
+      if (!pastedText) {
+        e.preventDefault();
+      }
       appendFiles(imageFiles);
     }
   }
@@ -3257,6 +3380,7 @@ ${content}
       : 'clamp(320px, 32vw, 400px)'
     : 0;
   const rightPanelMaxWidth = rightOpen ? 'calc(100vw - 88px)' : 0;
+  const activeRightTabMeta = RIGHT_PANEL_TAB_META[(rightTab as RightPanelTabId) ?? 'overview'];
 
   return (
     <div className="page-root page-root-row">
@@ -3774,10 +3898,10 @@ ${content}
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'stretch',
-                gap: 6,
-                width: 76,
-                minWidth: 76,
-                padding: '8px 5px',
+                gap: 4,
+                width: 52,
+                minWidth: 52,
+                padding: '8px 4px',
                 borderRight: '1px solid var(--border)',
                 flexShrink: 0,
                 background:
@@ -3785,34 +3909,12 @@ ${content}
               }}
             >
               <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-3)',
-                  padding: '0 5px',
-                }}
-              >
-                面板
-              </div>
-              <div
                 role="tablist"
                 aria-label="右侧面板切换"
                 aria-orientation="vertical"
-                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
               >
-                {(
-                  [
-                    { id: 'overview', label: '概览' },
-                    { id: 'plan', label: '计划' },
-                    { id: 'tools', label: '工具' },
-                    { id: 'history', label: '历史' },
-                    { id: 'viz', label: '可视化' },
-                    { id: 'mcp', label: 'MCP' },
-                    { id: 'agent', label: '代理' },
-                  ] as const
-                ).map((tab) => {
+                {RIGHT_PANEL_TABS.map((tab) => {
                   const isActive = rightTab === tab.id;
 
                   return (
@@ -3820,19 +3922,21 @@ ${content}
                       key={tab.id}
                       type="button"
                       role="tab"
+                      aria-label={tab.label}
                       aria-selected={isActive}
                       aria-controls={`chat-right-panel-${tab.id}`}
                       id={`chat-right-tab-${tab.id}`}
                       tabIndex={isActive ? 0 : -1}
+                      title={tab.label}
                       onClick={() => setRightTab(tab.id)}
                       className={`toolbar-btn${isActive ? ' active' : ''}`}
                       style={{
                         width: '100%',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'flex-start',
-                        minHeight: 30,
-                        padding: '6px 7px',
+                        justifyContent: 'center',
+                        minHeight: 34,
+                        padding: '6px 0',
                         borderRadius: 8,
                         border: isActive
                           ? '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))'
@@ -3844,14 +3948,10 @@ ${content}
                         boxShadow: isActive
                           ? 'inset 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent)'
                           : 'none',
-                        fontSize: 11,
-                        fontWeight: isActive ? 600 : 500,
-                        whiteSpace: 'nowrap',
-                        textAlign: 'left',
-                        lineHeight: 1.15,
+                        fontSize: 0,
                       }}
                     >
-                      {tab.label}
+                      {renderRightPanelTabIcon(tab.id)}
                     </button>
                   );
                 })}
@@ -3865,176 +3965,24 @@ ${content}
                 flex: 1,
                 minHeight: 0,
                 minWidth: 0,
-                overflow: rightTab === 'agent' ? 'hidden' : 'auto',
-                padding: rightTab === 'agent' ? 0 : 12,
+                overflow: 'hidden',
+                padding: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 background: 'color-mix(in oklch, var(--surface) 98%, var(--bg) 2%)',
               }}
             >
-              {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
-              {rightTab === 'tools' &&
-                (() => {
-                  const lspPrefixes = ['lsp_', 'ast_grep'];
-                  const filePrefixes = [
-                    'read',
-                    'write',
-                    'edit',
-                    'glob',
-                    'multi_edit',
-                    'workspace_',
-                  ];
-                  const networkPrefixes = [
-                    'webfetch',
-                    'websearch',
-                    'google_search',
-                    'playwright',
-                    'mcp_',
-                  ];
-                  const filtered = toolCallCards.filter((tc) => {
-                    if (toolFilter === 'all') return true;
-                    const n = tc.toolName.toLowerCase();
-                    if (toolFilter === 'lsp') return lspPrefixes.some((p) => n.startsWith(p));
-                    if (toolFilter === 'file') return filePrefixes.some((p) => n.startsWith(p));
-                    if (toolFilter === 'network')
-                      return networkPrefixes.some((p) => n.startsWith(p));
-                    return (
-                      !lspPrefixes.some((p) => n.startsWith(p)) &&
-                      !filePrefixes.some((p) => n.startsWith(p)) &&
-                      !networkPrefixes.some((p) => n.startsWith(p))
-                    );
-                  });
-                  return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
-                          <button
-                            key={f}
-                            type="button"
-                            onClick={() => setToolFilter(f)}
-                            style={{
-                              height: 22,
-                              padding: '0 7px',
-                              borderRadius: 5,
-                              border: 'none',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              background: toolFilter === f ? 'var(--accent-muted)' : 'transparent',
-                              color: toolFilter === f ? 'var(--accent)' : 'var(--text-3)',
-                            }}
-                          >
-                            {f === 'all'
-                              ? '全部'
-                              : f === 'lsp'
-                                ? 'LSP'
-                                : f === 'file'
-                                  ? '文件'
-                                  : f === 'network'
-                                    ? '网络'
-                                    : '其他'}
-                          </button>
-                        ))}
-                      </div>
-                      {filtered.length > 0 ? (
-                        filtered.map((toolCall, index) =>
-                          toolCall.toolName.trim().toLowerCase() === 'task' ? (
-                            <TaskToolInline
-                              key={`${toolCall.toolName}-${index}`}
-                              toolCallId={toolCall.toolCallId}
-                              toolName={toolCall.toolName}
-                              input={toolCall.input}
-                              output={toolCall.output}
-                              isError={toolCall.isError}
-                              status={toolCall.status}
-                              onOpenChildSession={openChildSessionInspector}
-                              runtimeSnapshot={resolveTaskToolRuntimeSnapshot(
-                                toolCall.input,
-                                toolCall.output,
-                                taskToolRuntimeLookup,
-                              )}
-                              selectedChildSessionId={selectedChildSessionId}
-                            />
-                          ) : (
-                            <ToolCallCard
-                              key={`${toolCall.toolName}-${index}`}
-                              toolCallId={toolCall.toolCallId}
-                              toolName={toolCall.toolName}
-                              input={toolCall.input}
-                              output={toolCall.output}
-                              isError={toolCall.isError}
-                              status={toolCall.status}
-                            />
-                          ),
-                        )
-                      ) : (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: 'var(--text-3)',
-                            padding: '4px 0',
-                          }}
-                        >
-                          暂无工具调用记录
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              {rightTab === 'viz' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={sharedUiThemeVars}>
-                    <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
-                  </div>
-                  <div style={sharedUiThemeVars}>
-                    <AgentVizPanel events={agentEvents} />
-                  </div>
-                </div>
-              )}
-              {rightTab === 'history' && (
-                <ChatHistoryTabContent
-                  childSessions={childSessions}
-                  compactions={compactions}
-                  pendingPermissions={pendingPermissions}
-                  planHistory={planHistory}
-                  sessionTodos={sessionTodos}
-                  sessionTasks={sessionTasks}
-                  onOpenSession={(nextSessionId) => {
-                    void navigate(`/chat/${nextSessionId}`);
-                  }}
-                  sharedUiThemeVars={sharedUiThemeVars}
-                />
-              )}
-              {rightTab === 'overview' && (
-                <ChatOverviewTabContent
-                  attachmentItems={attachmentItems}
-                  childSessions={childSessions}
-                  compactions={compactions}
-                  currentSessionId={currentSessionId}
-                  dialogueMode={dialogueMode}
-                  effectiveWorkingDirectory={effectiveWorkingDirectory}
-                  messages={messages}
-                  pendingPermissions={pendingPermissions}
-                  sessionTodos={sessionTodos}
-                  sessionTasks={sessionTasks}
-                  workspaceFileItems={workspaceFileItems}
-                  yoloMode={yoloMode}
-                />
-              )}
-              {rightTab === 'mcp' && (
-                <div style={sharedUiThemeVars}>
-                  <MCPServerList servers={mcpServers} />
-                </div>
-              )}
               {rightTab === 'agent' && (
                 <div
                   style={{
                     flex: 1,
                     minHeight: 0,
+                    minWidth: 0,
                     display: 'flex',
                     flexDirection: 'column',
                     overflow: 'hidden',
-                    padding: 8,
+                    padding: '10px 10px 12px',
+                    boxSizing: 'border-box',
                   }}
                 >
                   <SubSessionDetailPanel
@@ -4048,6 +3996,247 @@ ${content}
                     token={token}
                   />
                 </div>
+              )}
+              {rightTab !== 'agent' && (
+                <>
+                  <div
+                    data-testid={`chat-right-panel-header-${rightTab}`}
+                    style={{
+                      padding: '12px 12px 10px',
+                      borderBottom: '1px solid color-mix(in oklch, var(--border) 86%, transparent)',
+                      background:
+                        'linear-gradient(180deg, color-mix(in oklch, var(--surface) 96%, var(--bg) 4%), color-mix(in oklch, var(--surface) 98%, var(--bg) 2%))',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: 'var(--text-3)',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        marginBottom: 4,
+                      }}
+                    >
+                      侧栏内容
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: 'var(--text)',
+                        lineHeight: 1.2,
+                        marginBottom: 3,
+                      }}
+                    >
+                      {activeRightTabMeta.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--text-3)',
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {activeRightTabMeta.description}
+                    </div>
+                  </div>
+                  <div
+                    data-testid={`chat-right-panel-body-${rightTab}`}
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      overflowY: 'auto',
+                      overflowX: 'hidden',
+                      padding: '10px 10px 12px',
+                      scrollbarGutter: 'stable',
+                    }}
+                  >
+                    <div
+                      style={{
+                        minHeight: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 12,
+                        padding: 12,
+                        borderRadius: 12,
+                        border: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
+                        background: 'color-mix(in oklch, var(--surface) 92%, var(--bg) 8%)',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
+                      {rightTab === 'tools' &&
+                        (() => {
+                          const lspPrefixes = ['lsp_', 'ast_grep'];
+                          const filePrefixes = [
+                            'read',
+                            'write',
+                            'edit',
+                            'glob',
+                            'multi_edit',
+                            'workspace_',
+                          ];
+                          const networkPrefixes = [
+                            'webfetch',
+                            'websearch',
+                            'google_search',
+                            'playwright',
+                            'mcp_',
+                          ];
+                          const filtered = toolCallCards.filter((tc) => {
+                            if (toolFilter === 'all') return true;
+                            const n = tc.toolName.toLowerCase();
+                            if (toolFilter === 'lsp')
+                              return lspPrefixes.some((p) => n.startsWith(p));
+                            if (toolFilter === 'file')
+                              return filePrefixes.some((p) => n.startsWith(p));
+                            if (toolFilter === 'network')
+                              return networkPrefixes.some((p) => n.startsWith(p));
+                            return (
+                              !lspPrefixes.some((p) => n.startsWith(p)) &&
+                              !filePrefixes.some((p) => n.startsWith(p)) &&
+                              !networkPrefixes.some((p) => n.startsWith(p))
+                            );
+                          });
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  gap: 5,
+                                  flexWrap: 'wrap',
+                                  paddingBottom: 2,
+                                }}
+                              >
+                                {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
+                                  <button
+                                    key={f}
+                                    type="button"
+                                    onClick={() => setToolFilter(f)}
+                                    style={{
+                                      minHeight: 24,
+                                      padding: '0 8px',
+                                      borderRadius: 999,
+                                      border:
+                                        toolFilter === f
+                                          ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border))'
+                                          : '1px solid var(--border-subtle)',
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      background:
+                                        toolFilter === f
+                                          ? 'color-mix(in oklch, var(--accent) 14%, var(--surface))'
+                                          : 'color-mix(in oklch, var(--surface) 86%, transparent)',
+                                      color: toolFilter === f ? 'var(--accent)' : 'var(--text-3)',
+                                    }}
+                                  >
+                                    {f === 'all'
+                                      ? '全部'
+                                      : f === 'lsp'
+                                        ? 'LSP'
+                                        : f === 'file'
+                                          ? '文件'
+                                          : f === 'network'
+                                            ? '网络'
+                                            : '其他'}
+                                  </button>
+                                ))}
+                              </div>
+                              {filtered.length > 0 ? (
+                                filtered.map((toolCall, index) =>
+                                  toolCall.toolName.trim().toLowerCase() === 'task' ? (
+                                    <TaskToolInline
+                                      key={`${toolCall.toolName}-${index}`}
+                                      toolCallId={toolCall.toolCallId}
+                                      toolName={toolCall.toolName}
+                                      input={toolCall.input}
+                                      output={toolCall.output}
+                                      isError={toolCall.isError}
+                                      status={toolCall.status}
+                                      onOpenChildSession={openChildSessionInspector}
+                                      runtimeSnapshot={resolveTaskToolRuntimeSnapshot(
+                                        toolCall.input,
+                                        toolCall.output,
+                                        taskToolRuntimeLookup,
+                                      )}
+                                      selectedChildSessionId={selectedChildSessionId}
+                                    />
+                                  ) : (
+                                    <ToolCallCard
+                                      key={`${toolCall.toolName}-${index}`}
+                                      toolCallId={toolCall.toolCallId}
+                                      toolName={toolCall.toolName}
+                                      input={toolCall.input}
+                                      output={toolCall.output}
+                                      isError={toolCall.isError}
+                                      status={toolCall.status}
+                                    />
+                                  ),
+                                )
+                              ) : (
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: 'var(--text-3)',
+                                    padding: '6px 2px',
+                                  }}
+                                >
+                                  暂无工具调用记录
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      {rightTab === 'viz' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div style={sharedUiThemeVars}>
+                            <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
+                          </div>
+                          <div style={sharedUiThemeVars}>
+                            <AgentVizPanel events={agentEvents} />
+                          </div>
+                        </div>
+                      )}
+                      {rightTab === 'history' && (
+                        <ChatHistoryTabContent
+                          childSessions={childSessions}
+                          compactions={compactions}
+                          pendingPermissions={pendingPermissions}
+                          planHistory={planHistory}
+                          sessionTodos={sessionTodos}
+                          sessionTasks={sessionTasks}
+                          onOpenSession={(nextSessionId) => {
+                            void navigate(`/chat/${nextSessionId}`);
+                          }}
+                          sharedUiThemeVars={sharedUiThemeVars}
+                        />
+                      )}
+                      {rightTab === 'overview' && (
+                        <ChatOverviewTabContent
+                          attachmentItems={attachmentItems}
+                          childSessions={childSessions}
+                          compactions={compactions}
+                          currentSessionId={currentSessionId}
+                          dialogueMode={dialogueMode}
+                          effectiveWorkingDirectory={effectiveWorkingDirectory}
+                          messages={messages}
+                          pendingPermissions={pendingPermissions}
+                          sessionTodos={sessionTodos}
+                          sessionTasks={sessionTasks}
+                          workspaceFileItems={workspaceFileItems}
+                          yoloMode={yoloMode}
+                        />
+                      )}
+                      {rightTab === 'mcp' && (
+                        <div style={sharedUiThemeVars}>
+                          <MCPServerList servers={mcpServers} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>

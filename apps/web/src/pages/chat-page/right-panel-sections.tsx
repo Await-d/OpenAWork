@@ -19,6 +19,30 @@ interface SessionTodoItem {
   priority: 'high' | 'medium' | 'low';
 }
 
+const PANEL_SECTION_STYLE: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: '10px 11px',
+  borderRadius: 12,
+  border: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
+  background: 'color-mix(in oklch, var(--surface) 80%, transparent)',
+};
+
+const PANEL_SECTION_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--text-2)',
+  lineHeight: 1.25,
+};
+
+const PANEL_SECTION_EYEBROW_STYLE: React.CSSProperties = {
+  fontSize: 10,
+  color: 'var(--text-3)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+};
+
 function splitSessionTodosByLane(sessionTodos: SessionTodoItem[]): {
   mainTodos: SessionTodoItem[];
   tempTodos: SessionTodoItem[];
@@ -123,31 +147,21 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
   const activeCount = props.sessionTodos.filter((todo) => todo.status !== 'completed').length;
 
   return (
-    <div>
+    <div style={PANEL_SECTION_STYLE}>
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 7,
-          marginBottom: 2,
+          gap: 8,
         }}
       >
-        <div
-          style={{
-            fontSize: 10,
-            color: 'var(--text-3)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-          }}
-        >
-          {props.title}
-        </div>
+        <div style={PANEL_SECTION_EYEBROW_STYLE}>{props.title}</div>
         <div
           style={{
             fontSize: 10,
             lineHeight: 1,
-            padding: '1px 4px',
+            padding: '2px 6px',
             borderRadius: 999,
             border: '1px solid var(--border)',
             color: 'var(--text-3)',
@@ -157,15 +171,22 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
           {activeCount}/{props.sessionTodos.length}
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {props.sessionTodos.map((todo, index) => {
           const tone = getSessionTodoBadgeTone(todo);
           return (
             <div
               key={`${todo.content}-${index}`}
-              style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '1px 0' }}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+                padding: '6px 8px',
+                borderRadius: 9,
+                background: 'color-mix(in oklch, var(--surface) 68%, transparent)',
+              }}
             >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                 <span style={{ color: todo.status === 'completed' ? '#34d399' : '#fbbf24' }}>
                   {todo.status === 'completed' ? '●' : todo.status === 'in_progress' ? '◐' : '○'}
                 </span>
@@ -175,6 +196,7 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
                       fontSize: 11,
                       color: 'var(--text)',
                       fontWeight: 600,
+                      lineHeight: 1.45,
                       textDecoration:
                         todo.status === 'completed' || todo.status === 'cancelled'
                           ? 'line-through'
@@ -185,12 +207,12 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
                   </div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', paddingLeft: 18 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 20 }}>
                 <span
                   style={{
                     fontSize: 10,
-                    lineHeight: 1,
-                    padding: '1px 4px',
+                    lineHeight: 1.2,
+                    padding: '2px 6px',
                     borderRadius: 999,
                     ...tone,
                   }}
@@ -200,8 +222,8 @@ function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: strin
                 <span
                   style={{
                     fontSize: 10,
-                    lineHeight: 1,
-                    padding: '1px 4px',
+                    lineHeight: 1.2,
+                    padding: '2px 6px',
                     borderRadius: 999,
                     border: '1px solid var(--border)',
                     color: 'var(--text-3)',
@@ -242,53 +264,25 @@ export function ChatHistoryTabContent(props: {
   const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
 
   return (
-    <div style={{ ...sharedUiThemeVars, display: 'flex', flexDirection: 'column', gap: 7 }}>
+    <div style={{ ...sharedUiThemeVars, display: 'flex', flexDirection: 'column', gap: 10 }}>
       {compactions.length > 0 && (
-        <div
-          style={{
-            borderBottom: '1px solid var(--border-subtle)',
-            paddingBottom: 6,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--text-3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: 3,
-            }}
-          >
-            会话压缩
-          </div>
+        <div style={PANEL_SECTION_STYLE}>
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>会话压缩</div>
           {compactions.map((item) => (
-            <div key={item.id} style={{ fontSize: 12, color: 'var(--text)', marginBottom: 5 }}>
-              <div style={{ fontWeight: 600, marginBottom: 2 }}>
+            <div key={item.id} style={{ fontSize: 12, color: 'var(--text)' }}>
+              <div style={{ ...PANEL_SECTION_LABEL_STYLE, marginBottom: 4, color: 'var(--text)' }}>
                 {item.trigger === 'manual' ? '手动压缩' : '自动压缩'}
               </div>
-              <div style={{ color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>{item.summary}</div>
+              <div style={{ color: 'var(--text-2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                {item.summary}
+              </div>
             </div>
           ))}
         </div>
       )}
       {childSessions.length > 0 && (
-        <div
-          style={{
-            borderTop: '1px solid var(--border-subtle)',
-            paddingTop: 6,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--text-3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: 2,
-            }}
-          >
-            子会话
-          </div>
+        <div style={PANEL_SECTION_STYLE}>
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>子会话</div>
           {childSessions.map((session) => (
             <button
               key={session.id}
@@ -298,18 +292,22 @@ export function ChatHistoryTabContent(props: {
                 width: '100%',
                 textAlign: 'left',
                 border: 'none',
-                background: 'transparent',
+                borderRadius: 8,
+                background: 'color-mix(in oklch, var(--surface) 70%, transparent)',
                 color: 'var(--text)',
-                padding: '2px 0',
+                padding: '7px 9px',
                 cursor: 'pointer',
                 fontSize: 12,
                 textDecoration: 'none',
+                lineHeight: 1.45,
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline';
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  'color-mix(in oklch, var(--surface) 88%, var(--bg) 12%)';
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none';
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  'color-mix(in oklch, var(--surface) 70%, transparent)';
               }}
             >
               {session.title ?? '未命名'} · {session.id.slice(0, 8)}…
@@ -318,23 +316,8 @@ export function ChatHistoryTabContent(props: {
         </div>
       )}
       {sessionTasks.length > 0 && (
-        <div
-          style={{
-            borderTop: '1px solid var(--border-subtle)',
-            paddingTop: 6,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--text-3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: 2,
-            }}
-          >
-            任务状态
-          </div>
+        <div style={PANEL_SECTION_STYLE}>
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>任务状态</div>
           {sessionTasks.map((task) => (
             <div
               key={task.id}
@@ -439,39 +422,24 @@ export function ChatHistoryTabContent(props: {
       {mainTodos.length > 0 && <SessionTodoPanel sessionTodos={mainTodos} title="主待办" />}
       {tempTodos.length > 0 && <SessionTodoPanel sessionTodos={tempTodos} title="临时待办" />}
       {pendingPermissions.length > 0 && (
-        <div
-          style={{
-            borderTop: '1px solid var(--border-subtle)',
-            paddingTop: 6,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--text-3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: 2,
-            }}
-          >
-            待处理审批
-          </div>
+        <div style={PANEL_SECTION_STYLE}>
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>待处理审批</div>
           {pendingPermissions.map((permission, idx) => (
             <div
               key={permission.requestId}
               style={{
-                paddingTop: idx > 0 ? 5 : 0,
-                marginTop: idx > 0 ? 5 : 0,
+                paddingTop: idx > 0 ? 7 : 0,
+                marginTop: idx > 0 ? 7 : 0,
                 borderTop: idx > 0 ? '1px solid var(--border-subtle)' : 'none',
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
                 {permission.toolName}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, lineHeight: 1.45 }}>
                 {permission.reason}
               </div>
-              <div style={{ color: 'var(--text-3)', fontSize: 10, marginTop: 1 }}>
+              <div style={{ color: 'var(--text-3)', fontSize: 10, marginTop: 2 }}>
                 {permission.scope} · {permission.riskLevel}
                 {permission.previewAction ? ` · ${permission.previewAction}` : ''}
               </div>
@@ -538,11 +506,15 @@ export function ChatOverviewTabContent(props: {
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div
         style={{
+          ...PANEL_SECTION_STYLE,
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          gridTemplateColumns: 'minmax(74px, 96px) 1fr',
+          gap: 1,
+          padding: 1,
+          overflow: 'hidden',
         }}
       >
         {overviewRows.map(({ label, value }, idx) => (
@@ -556,11 +528,12 @@ export function ChatOverviewTabContent(props: {
               style={{
                 fontSize: 11,
                 color: 'var(--text-3)',
-                padding: '2px 5px',
+                padding: '8px 9px',
+                lineHeight: 1.35,
                 background:
                   idx % 2 === 0
-                    ? 'color-mix(in oklch, var(--surface) 60%, transparent)'
-                    : 'transparent',
+                    ? 'color-mix(in oklch, var(--surface) 68%, transparent)'
+                    : 'color-mix(in oklch, var(--surface) 54%, transparent)',
               }}
             >
               {label}
@@ -569,44 +542,36 @@ export function ChatOverviewTabContent(props: {
               style={{
                 fontSize: 11,
                 color: 'var(--text)',
-                padding: '2px 5px',
-                wordBreak: 'break-all',
+                padding: '8px 9px',
+                overflowWrap: 'anywhere',
                 textAlign: 'right',
+                lineHeight: 1.4,
                 background:
                   idx % 2 === 0
-                    ? 'color-mix(in oklch, var(--surface) 60%, transparent)'
-                    : 'transparent',
+                    ? 'color-mix(in oklch, var(--surface) 68%, transparent)'
+                    : 'color-mix(in oklch, var(--surface) 54%, transparent)',
               }}
+              title={value}
             >
               {value}
             </div>
           </div>
         ))}
       </div>
-      <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 6 }}>
-        <div
-          style={{
-            fontSize: 10,
-            color: 'var(--text-3)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            marginBottom: 2,
-          }}
-        >
-          上下文注入
-        </div>
+      <div style={PANEL_SECTION_STYLE}>
+        <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文注入</div>
         {yoloMode && (
-          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 2 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
             ⚡ YOLO 模式已开启
           </div>
         )}
         {attachmentItems.length > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 2 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
             📎 引用文件 {attachmentItems.length} 个
           </div>
         )}
         {workspaceFileItems.length > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
             📂 已索引 {workspaceFileItems.length} 个工作区文件
           </div>
         )}

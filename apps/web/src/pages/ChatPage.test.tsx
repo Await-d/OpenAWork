@@ -19,6 +19,20 @@ const jsonResponse = (body: unknown) =>
 
 const providerFetchUrls: string[] = [];
 const writeClipboardMock = vi.fn(async () => undefined);
+let artifactUploadCounter = 0;
+const uploadArtifactMock = vi.fn(
+  async (payload: {
+    name: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    contentBase64: string;
+  }) => ({
+    artifact: {
+      id: `artifact-${++artifactUploadCounter}`,
+      name: payload.name,
+    },
+  }),
+);
 
 const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
   const rawUrl =
@@ -94,6 +108,22 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
       { inclusive: requestBody.inclusive === true },
     );
     return jsonResponse({ messages });
+  }
+
+  if (url.pathname.endsWith('/artifacts') && init?.method === 'POST') {
+    const requestBody = init?.body
+      ? (JSON.parse(String(init.body)) as {
+          name: string;
+          mimeType?: string;
+          sizeBytes?: number;
+          contentBase64: string;
+        })
+      : { name: '', contentBase64: '' };
+    return jsonResponse(await uploadArtifactMock(requestBody));
+  }
+
+  if (url.pathname.endsWith('/artifacts')) {
+    return jsonResponse({ artifacts: [] });
   }
 
   throw new Error(`Unhandled fetch path: ${url.pathname}${url.search}`);
@@ -702,6 +732,21 @@ beforeEach(() => {
     value: { writeText: writeClipboardMock },
   });
   writeClipboardMock.mockClear();
+  artifactUploadCounter = 0;
+  uploadArtifactMock.mockReset();
+  uploadArtifactMock.mockImplementation(
+    async (payload: {
+      name: string;
+      mimeType?: string;
+      sizeBytes?: number;
+      contentBase64: string;
+    }) => ({
+      artifact: {
+        id: `artifact-${++artifactUploadCounter}`,
+        name: payload.name,
+      },
+    }),
+  );
   window.sessionStorage.clear();
   useChatQueueStore.setState({ queuesByScope: {} });
   useUIStateStore.setState({
@@ -953,9 +998,9 @@ describe('ChatPage', () => {
 
     await flushEffects();
 
-    const historyButton = Array.from(rendered.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '历史',
-    );
+    const historyButton = rendered.querySelector(
+      '#chat-right-tab-history',
+    ) as HTMLButtonElement | null;
     act(() => {
       historyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1029,22 +1074,29 @@ describe('ChatPage', () => {
     const overviewPanel = rendered.querySelector(
       '#chat-right-panel-overview',
     ) as HTMLDivElement | null;
+    const overviewHeader = rendered.querySelector(
+      '[data-testid="chat-right-panel-header-overview"]',
+    ) as HTMLDivElement | null;
+    const overviewBody = rendered.querySelector(
+      '[data-testid="chat-right-panel-body-overview"]',
+    ) as HTMLDivElement | null;
     const panelShell = navRail?.parentElement as HTMLDivElement | null;
 
     expect(tabList).not.toBeNull();
     expect(navRail).not.toBeNull();
     expect(tabList?.getAttribute('aria-orientation')).toBe('vertical');
     expect(panelShell?.style.flexDirection).toBe('row');
-    expect(navRail?.style.width).toBe('76px');
-    expect(navRail?.textContent).toContain('面板');
+    expect(navRail?.style.width).toBe('52px');
     expect(tabList?.style.flexDirection).toBe('column');
     expect(overviewTab?.getAttribute('role')).toBe('tab');
+    expect(overviewTab?.getAttribute('aria-label')).toBe('概览');
     expect(overviewTab?.getAttribute('aria-selected')).toBe('true');
+    expect(overviewTab?.getAttribute('title')).toBe('概览');
     expect(overviewTab?.style.width).toBe('100%');
-    expect(overviewTab?.style.justifyContent).toBe('flex-start');
-    expect(overviewTab?.style.textAlign).toBe('left');
+    expect(overviewTab?.style.justifyContent).toBe('center');
     expect(overviewPanel?.getAttribute('role')).toBe('tabpanel');
-    expect(overviewPanel?.style.padding).toBe('12px');
+    expect(overviewHeader?.textContent).toContain('会话概览');
+    expect(overviewBody?.style.padding).toBe('10px 10px 12px');
   });
 
   it('syncs the sidebar file tree root with the current session workspace', async () => {
@@ -3405,9 +3457,17 @@ describe('ChatPage', () => {
       await flushEffects();
       await flushEffects();
 
+      const childDetailPanel = rendered.querySelector(
+        '[data-testid="sub-session-detail-panel"]',
+      ) as HTMLDivElement | null;
       const childTextarea = rendered.querySelector(
         'textarea[placeholder="向这个子代理追加一条消息…"]',
       ) as HTMLTextAreaElement | null;
+      expect(childDetailPanel).not.toBeNull();
+      expect(childDetailPanel?.textContent).toContain('代理摘要');
+      expect(childDetailPanel?.textContent).toContain('子代理对话');
+      expect(childTextarea?.getAttribute('aria-label')).toBe('向子代理追加消息');
+
       const childSendButton = Array.from(rendered.querySelectorAll('button')).find(
         (button) => button.textContent?.trim() === '发送干预',
       ) as HTMLButtonElement | undefined;
@@ -4509,9 +4569,9 @@ describe('ChatPage', () => {
     });
     await flushEffects();
 
-    const historyButton = Array.from(rendered.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '历史',
-    );
+    const historyButton = rendered.querySelector(
+      '#chat-right-tab-history',
+    ) as HTMLButtonElement | null;
 
     act(() => {
       historyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -4646,9 +4706,7 @@ describe('ChatPage', () => {
     });
     await flushEffects();
 
-    const mcpButton = Array.from(rendered.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'MCP',
-    );
+    const mcpButton = rendered.querySelector('#chat-right-tab-mcp') as HTMLButtonElement | null;
     act(() => {
       mcpButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -5114,9 +5172,7 @@ describe('ChatPage', () => {
     });
 
     expect(rendered.querySelector('button[title="收起面板"]')).not.toBeNull();
-    const toolsTab = Array.from(rendered.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '工具',
-    );
+    const toolsTab = rendered.querySelector('#chat-right-tab-tools') as HTMLButtonElement | null;
     expect(toolsTab?.getAttribute('aria-selected')).toBe('true');
     expect(getMessageRows()).toHaveLength(2);
     const toolRow = getMessageRows().find((row) => row.textContent?.includes('web_search'));
@@ -5206,9 +5262,7 @@ describe('ChatPage', () => {
       await Promise.resolve();
     });
 
-    const toolsTab = Array.from(rendered.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '工具',
-    );
+    const toolsTab = rendered.querySelector('#chat-right-tab-tools') as HTMLButtonElement | null;
     expect(toolsTab?.getAttribute('aria-selected')).toBe('true');
     expect(rendered.textContent).toContain('子代理已经执行完成。');
   });
@@ -5395,5 +5449,65 @@ describe('ChatPage', () => {
 
     expect(rendered.textContent).toContain('pasted-image.png');
     expect(rendered.querySelector('[data-testid="image-preview"]')).not.toBeNull();
+  });
+
+  it('uploads pasted screenshots as artifacts before sending the chat request', async () => {
+    streamMock.mockImplementationOnce(() => undefined);
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const pastedFile = new File(['png-binary'], 'pasted-image.png', { type: 'image/png' });
+
+    act(() => {
+      const event = new Event('paste', { bubbles: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: vi.fn(() => ''),
+          items: [
+            {
+              type: 'image/png',
+              getAsFile: () => pastedFile,
+            },
+          ],
+        },
+      });
+      textarea!.dispatchEvent(event);
+    });
+
+    await flushEffects();
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '请分析这张截图');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | undefined;
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    await flushEffects();
+
+    expect(uploadArtifactMock).toHaveBeenCalledTimes(1);
+    expect(uploadArtifactMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'pasted-image.png',
+        mimeType: 'image/png',
+        sizeBytes: pastedFile.size,
+        contentBase64: expect.any(String),
+      }),
+    );
+    expect(String(streamMock.mock.calls[0]?.[1] ?? '')).toContain('请分析这张截图');
+    expect(String(streamMock.mock.calls[0]?.[1] ?? '')).toContain(
+      '[附件]\n- pasted-image.png (artifact:artifact-1)',
+    );
   });
 });

@@ -110,6 +110,37 @@ const SUB_SESSION_LATEST_EDGE_VISIBILITY_THRESHOLD_PX = 40;
 const SUB_SESSION_LATEST_REGION_FALLBACK_PX = 320;
 const SUB_SESSION_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS = 420;
 
+const SUB_SESSION_CARD_STYLE: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: '10px 11px',
+  borderRadius: 12,
+  border: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
+  background: 'color-mix(in oklch, var(--surface) 86%, transparent)',
+};
+
+const SUB_SESSION_SECTION_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--text-3)',
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+};
+
+const SUB_SESSION_META_PILL_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  minHeight: 22,
+  padding: '0 8px',
+  borderRadius: 999,
+  border: '1px solid var(--border-subtle)',
+  background: 'color-mix(in oklch, var(--surface) 78%, transparent)',
+  color: 'var(--text-2)',
+  fontSize: 10,
+  fontWeight: 600,
+};
+
 function buildGroupedMessages(
   messages: ChatMessage[],
   taskRuntimeLookup?: TaskToolRuntimeLookup,
@@ -568,32 +599,44 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     return (
       <div
         style={{
+          flex: 1,
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 6,
-          padding: '32px 16px',
-          minHeight: 120,
+          gap: 10,
+          padding: '36px 18px',
+          borderRadius: 14,
+          border: '1px dashed color-mix(in oklch, var(--border) 80%, transparent)',
+          background: 'color-mix(in oklch, var(--surface) 82%, transparent)',
         }}
       >
         <span
           aria-hidden="true"
           style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: 'var(--accent)',
-            opacity: 0.5,
+            width: 32,
+            height: 32,
+            borderRadius: 12,
+            background: 'color-mix(in oklch, var(--accent) 14%, var(--surface))',
+            border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-subtle))',
+            color: 'var(--accent)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 14,
+            fontWeight: 700,
           }}
-        />
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>等待查看子代理</div>
+        >
+          ◈
+        </span>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>等待查看子代理</div>
         <div
           style={{
-            fontSize: 10,
+            fontSize: 11,
             color: 'var(--text-3)',
             textAlign: 'center',
-            lineHeight: 1.6,
+            lineHeight: 1.65,
             maxWidth: 220,
           }}
         >
@@ -604,90 +647,118 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, height: '100%', minHeight: 0 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          flexWrap: 'wrap',
-          padding: '1px 0',
-        }}
-      >
+    <div
+      data-testid="sub-session-detail-panel"
+      style={{
+        display: 'flex',
+        flex: 1,
+        flexDirection: 'column',
+        gap: 10,
+        minHeight: 0,
+        minWidth: 0,
+      }}
+    >
+      <div style={SUB_SESSION_CARD_STYLE}>
+        <div style={SUB_SESSION_SECTION_LABEL_STYLE}>代理摘要</div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <div
+            aria-hidden="true"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 10,
+              background: 'color-mix(in oklch, var(--accent) 14%, var(--surface))',
+              border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-subtle))',
+              color: 'var(--accent)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 13,
+              fontWeight: 800,
+              flexShrink: 0,
+            }}
+          >
+            ◈
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                color: 'var(--text)',
+                lineHeight: 1.3,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={session?.title?.trim() || childSessionId}
+            >
+              {session?.title?.trim() || `子代理 ${childSessionId.slice(0, 8)}`}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.45 }}>
+              追踪子会话对话、任务状态与实时干预。
+            </div>
+          </div>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '2px 7px',
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 700,
+              flexShrink: 0,
+              ...getTaskStatusStyle(headlineStatus),
+            }}
+          >
+            {formatTaskStatus(headlineStatus)}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span style={SUB_SESSION_META_PILL_STYLE} title={childSessionId}>
+            {compactSessionId(childSessionId)}
+          </span>
+          {[
+            { label: '消息', value: String(messages.length) },
+            { label: '任务', value: String(tasks.length) },
+            { label: '运行中', value: String(runningTaskCount) },
+            { label: '已完成', value: String(completedTaskCount) },
+          ].map((item) => (
+            <span key={item.label} style={SUB_SESSION_META_PILL_STYLE}>
+              <span style={{ color: 'var(--text-3)' }}>{item.label}</span>
+              <span style={{ margin: '0 4px', opacity: 0.35 }}>·</span>
+              <span style={{ color: 'var(--text)' }}>{item.value}</span>
+            </span>
+          ))}
+        </div>
         <div
-          style={{
-            fontSize: 12,
-            fontWeight: 800,
-            color: 'var(--text)',
-            minWidth: 0,
-            flex: 1,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
         >
-          {session?.title?.trim() || `子代理 ${childSessionId.slice(0, 8)}`}
+          <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.45 }}>
+            {failedTaskCount > 0
+              ? `当前有 ${failedTaskCount} 个失败任务需要关注。`
+              : '保持子代理上下文一致，必要时直接补充指令。'}
+          </div>
+          <button
+            type="button"
+            onClick={() => onOpenFullSession(childSessionId)}
+            style={{
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 8,
+              background: 'color-mix(in oklch, var(--surface) 74%, transparent)',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '6px 9px',
+              flexShrink: 0,
+            }}
+          >
+            打开完整会话
+          </button>
         </div>
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '2px 6px',
-            borderRadius: 999,
-            fontSize: 10,
-            fontWeight: 700,
-            flexShrink: 0,
-            ...getTaskStatusStyle(headlineStatus),
-          }}
-        >
-          {formatTaskStatus(headlineStatus)}
-        </span>
-        <div style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }} title={childSessionId}>
-          {compactSessionId(childSessionId)}
-        </div>
-        <button
-          type="button"
-          onClick={() => onOpenFullSession(childSessionId)}
-          style={{
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 6,
-            background: 'transparent',
-            color: 'var(--text-3)',
-            cursor: 'pointer',
-            fontSize: 10,
-            fontWeight: 600,
-            padding: '3px 7px',
-            flexShrink: 0,
-          }}
-        >
-          打开完整会话
-        </button>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          height: 20,
-          fontSize: 10,
-          color: 'var(--text-3)',
-          flexWrap: 'nowrap',
-          overflow: 'hidden',
-        }}
-      >
-        {[
-          { label: '消息', value: String(messages.length) },
-          { label: '任务', value: String(tasks.length) },
-          { label: '运行中', value: String(runningTaskCount) },
-          { label: '已完成', value: String(completedTaskCount) },
-        ].map((item, i) => (
-          <React.Fragment key={item.label}>
-            {i > 0 && <span style={{ margin: '0 3px', opacity: 0.35 }}>·</span>}
-            <span style={{ fontWeight: 600, color: 'var(--text-2)' }}>{item.label}</span>
-            <span style={{ margin: '0 2px', opacity: 0.35 }}>·</span>
-            <span>{item.value}</span>
-          </React.Fragment>
-        ))}
-      </div>
+
       {pendingPermissions.some((permission) => permission.status === 'pending') && (
         <div
           role="alert"
@@ -695,9 +766,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           style={{
             display: 'flex',
             alignItems: 'flex-start',
-            gap: 7,
-            padding: '5px 8px',
-            borderRadius: 10,
+            gap: 8,
+            padding: '8px 10px',
+            borderRadius: 12,
             border: '1px solid color-mix(in srgb, #f59e0b 40%, var(--border-subtle))',
             background: 'color-mix(in srgb, #f59e0b 8%, var(--surface))',
           }}
@@ -710,10 +781,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               borderRadius: '50%',
               background: '#f59e0b',
               flexShrink: 0,
-              marginTop: 3,
+              marginTop: 4,
             }}
           />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: '#fcd34d' }}>等待权限审批</div>
             {pendingPermissions
               .filter((permission) => permission.status === 'pending')
@@ -740,92 +811,90 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           </div>
         </div>
       )}
+
       {tasks.length > 0 && (
-        <div
-          style={{
-            borderLeft: '2px solid var(--border-subtle)',
-            paddingLeft: 8,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-          }}
-        >
+        <div style={SUB_SESSION_CARD_STYLE}>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 7,
-              marginBottom: 3,
             }}
           >
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)' }}>任务轨迹</div>
+            <div style={SUB_SESSION_SECTION_LABEL_STYLE}>任务轨迹</div>
             {failedTaskCount > 0 && (
               <div style={{ fontSize: 10, color: '#fca5a5', fontWeight: 700 }}>
                 {failedTaskCount} 个失败
               </div>
             )}
           </div>
-          {tasks.slice(0, VISIBLE_TASK_COUNT).map((task, index) => (
-            <div
-              key={task.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 1,
-                padding: '2px 0',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 999,
-                    background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                    color: 'var(--accent)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 9,
-                    fontWeight: 800,
-                    flexShrink: 0,
-                  }}
-                >
-                  {index + 1}
-                </span>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--text)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    minWidth: 0,
-                  }}
-                  title={task.title}
-                >
-                  {task.title}
-                </div>
-              </div>
-              <span
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {tasks.slice(0, VISIBLE_TASK_COUNT).map((task, index) => (
+              <div
+                key={task.id}
                 style={{
-                  flexShrink: 0,
-                  display: 'inline-flex',
+                  display: 'flex',
                   alignItems: 'center',
-                  padding: '2px 6px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  ...getTaskStatusStyle(task.status),
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  padding: '7px 8px',
+                  borderRadius: 10,
+                  background: 'color-mix(in oklch, var(--surface) 72%, transparent)',
                 }}
               >
-                {formatTaskStatus(task.status)}
-              </span>
-            </div>
-          ))}
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 999,
+                      background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                      color: 'var(--accent)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 9,
+                      fontWeight: 800,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--text)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      minWidth: 0,
+                    }}
+                    title={task.title}
+                  >
+                    {task.title}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '2px 6px',
+                    borderRadius: 999,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    ...getTaskStatusStyle(task.status),
+                  }}
+                >
+                  {formatTaskStatus(task.status)}
+                </span>
+              </div>
+            ))}
+          </div>
           {tasks.length > VISIBLE_TASK_COUNT && (
             <div style={{ fontSize: 10, color: 'var(--text-3)', paddingTop: 2 }}>
               还有 {tasks.length - VISIBLE_TASK_COUNT} 条，打开完整会话查看。
@@ -842,6 +911,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           flexDirection: 'column',
           overflow: 'hidden',
           position: 'relative',
+          borderRadius: 14,
+          border: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
+          background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
         }}
       >
         <div
@@ -849,13 +921,15 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 7,
-            padding: '3px 0',
-            borderBottom: '1px solid var(--border-subtle)',
+            gap: 8,
+            padding: '10px 12px 9px',
+            borderBottom: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
+            background:
+              'linear-gradient(180deg, color-mix(in oklch, var(--surface) 94%, var(--bg) 6%), color-mix(in oklch, var(--surface) 90%, transparent))',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>子代理对话</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>子代理对话</div>
             <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
               {streaming ? '正在接收…' : `${renderedMessages.length} 组`}
             </div>
@@ -865,13 +939,13 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             onClick={() => void refresh()}
             style={{
               border: '1px solid var(--border-subtle)',
-              borderRadius: 6,
-              background: 'transparent',
-              color: 'var(--text-3)',
+              borderRadius: 8,
+              background: 'color-mix(in oklch, var(--surface) 74%, transparent)',
+              color: 'var(--text-2)',
               cursor: 'pointer',
               fontSize: 10,
-              fontWeight: 600,
-              padding: '3px 7px',
+              fontWeight: 700,
+              padding: '6px 9px',
               flexShrink: 0,
             }}
           >
@@ -886,8 +960,11 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             flex: 1,
             minHeight: 0,
             overflowY: 'auto',
-            padding: '6px 8px 10px',
+            overflowX: 'hidden',
+            overscrollBehavior: 'contain',
+            padding: '10px 12px 12px',
             scrollPaddingBottom: SUB_SESSION_SCROLL_BOTTOM_SPACER_HEIGHT,
+            scrollbarGutter: 'stable',
           }}
         >
           {loading && renderedMessages.length === 0 ? (
@@ -1012,19 +1089,18 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
 
       <div
         style={{
-          borderTop: '1px solid var(--border-subtle)',
-          paddingTop: 6,
+          ...SUB_SESSION_CARD_STYLE,
           display: 'flex',
           flexDirection: 'column',
-          gap: 4,
+          gap: 6,
           flexShrink: 0,
         }}
       >
         <div
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7 }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>干预子代理</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>干预子代理</div>
             <div style={{ fontSize: 10, color: 'var(--text-3)' }}>直接补充指令或纠偏</div>
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>
@@ -1037,9 +1113,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: 7,
-              padding: '5px 8px',
-              borderRadius: 8,
+              gap: 8,
+              padding: '8px 10px',
+              borderRadius: 10,
               border: '1px solid color-mix(in srgb, #ef4444 28%, var(--border-subtle))',
               background: 'color-mix(in srgb, #ef4444 6%, var(--surface))',
             }}
@@ -1066,13 +1142,13 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               disabled={cancellingTask}
               style={{
                 border: '1px solid color-mix(in srgb, #ef4444 30%, var(--border-subtle))',
-                borderRadius: 6,
+                borderRadius: 8,
                 background: 'transparent',
                 color: '#fca5a5',
                 cursor: cancellingTask ? 'not-allowed' : 'pointer',
                 fontSize: 10,
                 fontWeight: 700,
-                padding: '4px 8px',
+                padding: '5px 9px',
                 opacity: cancellingTask ? 0.55 : 1,
                 flexShrink: 0,
               }}
@@ -1082,6 +1158,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           </div>
         )}
         <textarea
+          aria-label="向子代理追加消息"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
@@ -1107,7 +1184,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           }}
         />
         <div
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7 }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
         >
           <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
             {cancellingTask
