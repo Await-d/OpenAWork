@@ -160,6 +160,25 @@ export class LSPManager {
     return client?.rename(input) ?? null;
   }
 
+  async prepareCallHierarchy(input: {
+    file: string;
+    line: number;
+    character: number;
+  }): Promise<unknown[]> {
+    const client = await this.clientForFile(input.file);
+    return client?.prepareCallHierarchy(input) ?? [];
+  }
+
+  async incomingCalls(input: { file: string; item: unknown }): Promise<unknown[]> {
+    const client = await this.clientForFile(input.file);
+    return client?.incomingCalls({ item: input.item }) ?? [];
+  }
+
+  async outgoingCalls(input: { file: string; item: unknown }): Promise<unknown[]> {
+    const client = await this.clientForFile(input.file);
+    return client?.outgoingCalls({ item: input.item }) ?? [];
+  }
+
   async status(): Promise<LSPServerStatus[]> {
     return this.clients.map((c) => ({
       id: c.serverID,
@@ -199,6 +218,13 @@ export {
   TypescriptServer,
   GoplsServer,
   PyrightServer,
+  JsonServer,
+  HtmlServer,
+  CssServer,
+  YamlServer,
+  DockerfileServer,
+  ShellscriptServer,
+  RustAnalyzerServer,
   NearestRoot,
 } from './server.js';
 export { createLSPClient } from './client.js';

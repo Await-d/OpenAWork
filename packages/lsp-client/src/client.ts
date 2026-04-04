@@ -54,6 +54,7 @@ function buildInitializeParams(root: string, initialization?: Record<string, unk
           symbolKind: { valueSet: SYMBOL_KIND_VALUE_SET },
         },
         rename: { prepareSupport: true, prepareSupportDefaultBehavior: 1 },
+        callHierarchy: { dynamicRegistration: false },
       },
     },
     initializationOptions: initialization ?? {},
@@ -245,6 +246,30 @@ export async function createLSPClient(input: {
           newName,
         })
         .catch(() => null);
+    },
+
+    async prepareCallHierarchy({ file, line, character }) {
+      const result = await connection
+        .sendRequest('textDocument/prepareCallHierarchy', {
+          textDocument: { uri: pathToFileURL(file).href },
+          position: { line, character },
+        })
+        .catch(() => []);
+      return Array.isArray(result) ? result : result ? [result] : [];
+    },
+
+    async incomingCalls({ item }) {
+      const result = await connection
+        .sendRequest('callHierarchy/incomingCalls', { item })
+        .catch(() => []);
+      return Array.isArray(result) ? result : [];
+    },
+
+    async outgoingCalls({ item }) {
+      const result = await connection
+        .sendRequest('callHierarchy/outgoingCalls', { item })
+        .catch(() => []);
+      return Array.isArray(result) ? result : [];
     },
 
     async shutdown() {

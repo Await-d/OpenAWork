@@ -115,6 +115,13 @@ export const hoverInputSchema = z.object({
   character: z.number().int().min(0),
 });
 
+export const callHierarchyInputSchema = z.object({
+  filePath: z.string().min(1),
+  line: z.number().int().min(1),
+  character: z.number().int().min(0),
+  direction: z.enum(['incoming', 'outgoing', 'both']).optional().default('both'),
+});
+
 export interface LspToolMetadata {
   readonly name: string;
   readonly description: string;
@@ -167,7 +174,14 @@ export const lspHoverMeta: LspToolMetadata = {
   inputSchema: hoverInputSchema,
 };
 
-/** All 7 richer LSP tool metadata (execution provided by gateway). */
+export const lspCallHierarchyMeta: LspToolMetadata = {
+  name: 'lsp_call_hierarchy',
+  description:
+    'Get call hierarchy for a symbol: who calls it (incoming) and what it calls (outgoing). Single-hop only.',
+  inputSchema: callHierarchyInputSchema,
+};
+
+/** All 8 richer LSP tool metadata (execution provided by gateway). */
 export const LSP_RICHER_TOOL_METADATA: readonly LspToolMetadata[] = [
   lspGotoDefinitionMeta,
   lspGotoImplementationMeta,
@@ -176,9 +190,10 @@ export const LSP_RICHER_TOOL_METADATA: readonly LspToolMetadata[] = [
   lspPrepareRenameMeta,
   lspRenameMeta,
   lspHoverMeta,
+  lspCallHierarchyMeta,
 ] as const;
 
-/** Canonical list of all 9 LSP tool names (2 core + 7 richer). */
+/** Canonical list of all 10 LSP tool names (2 core + 8 richer). */
 export const ALL_LSP_TOOL_NAMES = [
   'lsp_diagnostics',
   'lsp_touch',
@@ -189,4 +204,5 @@ export const ALL_LSP_TOOL_NAMES = [
   'lsp_prepare_rename',
   'lsp_rename',
   'lsp_hover',
+  'lsp_call_hierarchy',
 ] as const;

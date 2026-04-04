@@ -1,6 +1,6 @@
 import { spawn, execSync } from 'child_process';
 import { promises as fs } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { createRequire } from 'module';
 import type { LSPServerHandle, LSPServerInfo, RootFunction } from './types.js';
 
@@ -58,6 +58,54 @@ function resolveModule(modulePath: string, root: string): string | undefined {
   }
 }
 
+const WEB_ROOT_MARKERS = [
+  'package.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'bun.lockb',
+  'bun.lock',
+  '.git',
+];
+
+const YAML_ROOT_MARKERS = [
+  'package.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'bun.lockb',
+  'bun.lock',
+  '.git',
+  '.yamllint',
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'compose.yaml',
+  'Chart.yaml',
+];
+
+const DOCKER_ROOT_MARKERS = [
+  'Dockerfile',
+  '.dockerignore',
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'compose.yml',
+  'compose.yaml',
+  '.git',
+];
+
+const SHELL_ROOT_MARKERS = [
+  'package.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'bun.lockb',
+  'bun.lock',
+  '.git',
+  '.editorconfig',
+  '.shellcheckrc',
+  '.shellcheck.json',
+];
+
 export const TypescriptServer: LSPServerInfo = {
   id: 'typescript',
   extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'],
@@ -98,9 +146,104 @@ export const PyrightServer: LSPServerInfo = {
   },
 };
 
-export const ALL_SERVERS: LSPServerInfo[] = [TypescriptServer, GoplsServer, PyrightServer];
+export const JsonServer: LSPServerInfo = {
+  id: 'json',
+  extensions: ['.json', '.jsonc', '.json5'],
+  root: NearestRoot(WEB_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('vscode-json-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['--stdio'], { cwd: root }) };
+  },
+};
+
+export const HtmlServer: LSPServerInfo = {
+  id: 'html',
+  extensions: ['.html', '.htm'],
+  root: NearestRoot(WEB_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('vscode-html-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['--stdio'], { cwd: root }) };
+  },
+};
+
+export const CssServer: LSPServerInfo = {
+  id: 'css',
+  extensions: ['.css', '.scss', '.sass', '.less'],
+  root: NearestRoot(WEB_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('vscode-css-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['--stdio'], { cwd: root }) };
+  },
+};
+
+export const YamlServer: LSPServerInfo = {
+  id: 'yaml',
+  extensions: ['.yaml', '.yml'],
+  root: NearestRoot(YAML_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('yaml-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['--stdio'], { cwd: root }) };
+  },
+};
+
+export const DockerfileServer: LSPServerInfo = {
+  id: 'dockerfile',
+  extensions: ['dockerfile'],
+  root: NearestRoot(DOCKER_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('docker-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['start', '--stdio'], { cwd: root }) };
+  },
+};
+
+export const ShellscriptServer: LSPServerInfo = {
+  id: 'shellscript',
+  extensions: ['.sh', '.bash', '.zsh'],
+  root: NearestRoot(SHELL_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('bash-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['start'], { cwd: root }) };
+  },
+};
+
+export const RustAnalyzerServer: LSPServerInfo = {
+  id: 'rust-analyzer',
+  extensions: ['.rs'],
+  root: NearestRoot(['Cargo.toml', 'Cargo.lock']),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('rust-analyzer');
+    if (!bin) return undefined;
+    return { process: spawn(bin, { cwd: root }) };
+  },
+};
+
+export const ALL_SERVERS: LSPServerInfo[] = [
+  TypescriptServer,
+  GoplsServer,
+  PyrightServer,
+  JsonServer,
+  HtmlServer,
+  CssServer,
+  YamlServer,
+  DockerfileServer,
+  ShellscriptServer,
+  RustAnalyzerServer,
+];
 
 export function findServerForFile(filePath: string): LSPServerInfo | undefined {
-  const ext = filePath.slice(filePath.lastIndexOf('.'));
-  return ALL_SERVERS.find((s) => s.extensions.includes(ext));
+  const idx = filePath.lastIndexOf('.');
+  const ext = idx >= 0 ? filePath.slice(idx).toLowerCase() : '';
+  const name = basename(filePath).toLowerCase();
+  return ALL_SERVERS.find((s) =>
+    s.extensions.some((value) => {
+      const key = value.toLowerCase();
+      return key === ext || key === name;
+    }),
+  );
 }

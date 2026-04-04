@@ -44,6 +44,13 @@ export interface LSPClientInfo {
     character: number;
     newName: string;
   }): Promise<unknown>;
+  prepareCallHierarchy(input: {
+    file: string;
+    line: number;
+    character: number;
+  }): Promise<unknown[]>;
+  incomingCalls(input: { item: unknown }): Promise<unknown[]>;
+  outgoingCalls(input: { item: unknown }): Promise<unknown[]>;
   shutdown(): Promise<void>;
 }
 

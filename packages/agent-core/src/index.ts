@@ -88,6 +88,7 @@ export {
   prepareRenameInputSchema,
   renameInputSchema,
   hoverInputSchema,
+  callHierarchyInputSchema,
   lspGotoDefinitionMeta,
   lspGotoImplementationMeta,
   lspFindReferencesMeta,
@@ -95,6 +96,7 @@ export {
   lspPrepareRenameMeta,
   lspRenameMeta,
   lspHoverMeta,
+  lspCallHierarchyMeta,
   LSP_RICHER_TOOL_METADATA,
   ALL_LSP_TOOL_NAMES,
 } from './tools/lsp.js';
