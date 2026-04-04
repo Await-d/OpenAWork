@@ -91,6 +91,17 @@ export function listRequestFileDiffs(input: {
   });
 }
 
+export function deleteRequestFileDiffs(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): void {
+  sqliteRun(
+    'DELETE FROM session_file_diffs WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
+    [input.sessionId, input.userId, input.clientRequestId],
+  );
+}
+
 function listSessionFileDiffsWithWhere(input: {
   sessionId: string;
   userId: string;

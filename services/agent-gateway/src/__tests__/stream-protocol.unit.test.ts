@@ -335,6 +335,133 @@ describe('parseUpstreamDataLine', () => {
     const doneChunks = parseUpstreamDataLine('[DONE]', state);
     expect(doneChunks[0]).toMatchObject({ type: 'done', stopReason: 'tool_use' });
   });
+
+  it('parses DeepSeek reasoning_content into thinking_delta chunks', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [{ delta: { reasoning_content: '先分析需求边界。' } }],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({
+      type: 'thinking_delta',
+      delta: '先分析需求边界。',
+      runId: 'run-test',
+    });
+  });
+
+  it('emits both text_delta and thinking_delta when reasoning_content and content coexist', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [{ delta: { content: '结论是', reasoning_content: '因为A大于B' } }],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({ type: 'text_delta', delta: '结论是' });
+    expect(chunks[1]).toMatchObject({ type: 'thinking_delta', delta: '因为A大于B' });
+  });
+
+  it('separates Anthropic thinking content blocks from text content blocks', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              content: [
+                { type: 'thinking', thinking: '让我想想这个问题。' },
+                { type: 'text', text: '答案如下：' },
+              ],
+            },
+          },
+        ],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({ type: 'text_delta', delta: '答案如下：' });
+    expect(chunks[1]).toMatchObject({ type: 'thinking_delta', delta: '让我想想这个问题。' });
+  });
+
+  it('handles standalone Anthropic thinking block without text blocks', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              content: [{ type: 'thinking', thinking: '分析约束条件。' }],
+            },
+          },
+        ],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ type: 'thinking_delta', delta: '分析约束条件。' });
+  });
+
+  it('handles reasoning-typed content block with text field as thinking', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              content: [{ type: 'reasoning', text: '逐步推导。' }],
+            },
+          },
+        ],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ type: 'thinking_delta', delta: '逐步推导。' });
+  });
+
+  it('treats Gemini thought-flagged text blocks as thinking deltas', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              content: [{ type: 'text', text: '先检验边界条件。', thought: true }],
+            },
+          },
+        ],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({
+      type: 'thinking_delta',
+      delta: '先检验边界条件。',
+    });
+  });
+
+  it('ignores empty reasoning_content', () => {
+    const state = createStreamParseState('run-test');
+    const chunks = parseUpstreamDataLine(
+      JSON.stringify({
+        choices: [{ delta: { content: '你好', reasoning_content: '' } }],
+      }),
+      state,
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ type: 'text_delta', delta: '你好' });
+  });
 });
 
 describe('parseUpstreamFrame', () => {

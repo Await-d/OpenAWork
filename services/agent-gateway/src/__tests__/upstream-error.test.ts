@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readUpstreamError, readUpstreamErrorDetail } from '../routes/upstream-error.js';
+import {
+  isUpstreamContextOverflowError,
+  readUpstreamError,
+  readUpstreamErrorDetail,
+} from '../routes/upstream-error.js';
 
 describe('readUpstreamErrorDetail', () => {
   it('extracts OpenAI-style nested error messages', async () => {
@@ -72,5 +76,29 @@ describe('readUpstreamErrorDetail', () => {
       technicalDetail:
         'Upstream request failed (429): You exceeded your current quota, please check your plan and billing details.',
     });
+  });
+
+  it('detects context overflow errors from provider messages', () => {
+    expect(
+      isUpstreamContextOverflowError({
+        response: { status: 400 },
+        error: {
+          code: 'MODEL_ERROR',
+          message: 'maximum context length exceeded',
+          technicalDetail: 'Upstream request failed (400): maximum context length exceeded',
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      isUpstreamContextOverflowError({
+        response: { status: 400 },
+        error: {
+          code: 'MODEL_ERROR',
+          message: 'invalid api key',
+          technicalDetail: 'Upstream request failed (400): invalid api key',
+        },
+      }),
+    ).toBe(false);
   });
 });

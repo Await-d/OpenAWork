@@ -45,6 +45,7 @@ describe('buildGatewayToolDefinitions', () => {
         'lsp_prepare_rename',
         'lsp_rename',
         'lsp_hover',
+        'lsp_call_hierarchy',
         'list',
         'read',
         'glob',
@@ -183,6 +184,16 @@ describe('buildGatewayToolDefinitions', () => {
       'line',
       'character',
     ]);
+    expect(byName.get('lsp_call_hierarchy')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
+    ]);
+    expect(byName.get('lsp_call_hierarchy')?.function.parameters).toMatchObject({
+      properties: {
+        direction: { type: 'string', enum: ['incoming', 'outgoing', 'both'] },
+      },
+    });
     expect(byName.get('session_list')?.function.parameters.required).toEqual([]);
     expect(byName.get('session_read')?.function.parameters.required).toEqual(['session_id']);
     expect(byName.get('session_search')?.function.parameters.required).toEqual(['query']);

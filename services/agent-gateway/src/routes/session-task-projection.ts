@@ -3,8 +3,10 @@ import type { AgentTask, AgentTaskGraph } from '@openAwork/agent-core';
 export type SessionTaskResponse = AgentTask & {
   completedSubtaskCount: number;
   depth: number;
+  effectiveDeadline?: number;
   readySubtaskCount: number;
   subtaskCount: number;
+  terminalReason?: string;
   unmetDependencyCount: number;
 };
 

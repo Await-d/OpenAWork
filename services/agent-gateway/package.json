@@ -20,7 +20,7 @@
     "test:file-changes": "tsx src/verification/verify-session-file-summary-routes.ts",
     "test:restore": "tsx src/verification/verify-session-file-summary-routes.ts",
     "test:delete-cleanup": "tsx src/verification/verify-session-delete-cleanup-matrix.ts",
-    "test:durable": "tsx src/verification/verify-write-tools-durable-closure.ts && tsx src/verification/verify-stream-runtime-durable-continuity.ts",
+    "test:durable": "tsx src/verification/verify-write-tools-durable-closure.ts && tsx src/verification/verify-stream-runtime-durable-continuity.ts && tsx src/verification/verify-stream-attach-recovery.ts",
     "test:claude-tools": "tsx src/verification/verify-claude-first-tools.ts",
     "lint": "eslint .",
     "clean": "rm -rf dist"

@@ -3,7 +3,10 @@ import {
   reconcileSessionStateStatus,
   type SessionRuntimeReconciliationResult,
 } from './session-runtime-state.js';
-import { reconcileResumedTaskChildSession } from './tool-sandbox.js';
+import {
+  reconcileResumedTaskChildSession,
+  reconcileTimedOutTaskChildSessionIfExpired,
+} from './tool-sandbox.js';
 
 interface SessionRuntimeCandidateRow {
   id: string;
@@ -18,17 +21,25 @@ export interface SessionRuntimeBatchReconciliationResult {
 }
 
 export async function reconcileSessionRuntime(input: {
+  nowMs?: number;
   sessionId: string;
   userId: string;
 }): Promise<SessionRuntimeReconciliationResult> {
   const reconciliation = reconcileSessionStateStatus(input);
   if (reconciliation.wasReset) {
-    await reconcileResumedTaskChildSession({
+    const reconciledAsTimeout = await reconcileTimedOutTaskChildSessionIfExpired({
       childSessionId: input.sessionId,
-      pendingInteraction: false,
-      statusCode: 500,
+      nowMs: input.nowMs,
       userId: input.userId,
     });
+    if (!reconciledAsTimeout) {
+      await reconcileResumedTaskChildSession({
+        childSessionId: input.sessionId,
+        pendingInteraction: false,
+        statusCode: 500,
+        userId: input.userId,
+      });
+    }
   }
 
   return reconciliation;

@@ -6,14 +6,6 @@ import type { PersistedCompactionMemory } from '../compaction-metadata.js';
 import type { UpstreamChatMessage } from '../session-message-store.js';
 
 interface PreparedConversationMockResult {
-  compaction?: {
-    eventSummary: string;
-    omittedMessages: number;
-    persistedMemory: PersistedCompactionMemory;
-    recentMessagesKept: number;
-    signature: string;
-    structuredSummary: string;
-  };
   messages: UpstreamChatMessage[];
 }
 
@@ -25,11 +17,9 @@ const mocks = vi.hoisted(() => ({
       options?:
         | number
         | {
-            autoCompactTargetRatio?: number;
-            autoCompactThresholdRatio?: number;
             contextWindow?: number;
+            llmCompactionSummary?: string;
             maxMessages?: number;
-            maxOutputTokens?: number;
             persistedMemory?: unknown;
           },
     ) => PreparedConversationMockResult
@@ -53,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   })),
   fetchUpstreamStreamWithRetryMock: vi.fn(),
   hasToolOutputReferenceMock: vi.fn(() => false),
+  isUpstreamContextOverflowErrorMock: vi.fn(() => false),
   listSessionMessagesMock: vi.fn<() => Message[]>(() => []),
   updateSessionMessagesStatusByRequestScopeMock: vi.fn(),
   parseUpstreamFrameMock: vi.fn<(frame: string) => StreamChunk[]>(() => [
@@ -60,6 +51,9 @@ const mocks = vi.hoisted(() => ({
   ]),
   upsertArtifactsFromAssistantMessageMock: vi.fn(),
   persistSessionSnapshotMock: vi.fn(),
+  readLastCompactionLlmSummaryMock: vi.fn<(metadataJson: string) => string | undefined>(
+    () => undefined,
+  ),
   readPersistedCompactionMemoryMock: vi.fn<
     (metadataJson: string) => PersistedCompactionMemory | null
   >(() => null),
@@ -74,11 +68,10 @@ vi.mock('../session-message-store.js', () => ({
     options?:
       | number
       | {
-          autoCompactTargetRatio?: number;
-          autoCompactThresholdRatio?: number;
           contextWindow?: number;
+          llmCompactionSummary?: string;
           maxMessages?: number;
-          maxOutputTokens?: number;
+          persistedMemory?: unknown;
         },
   ) =>
     mocks.buildPreparedUpstreamConversationMock(
@@ -92,6 +85,7 @@ vi.mock('../session-message-store.js', () => ({
 }));
 
 vi.mock('../compaction-metadata.js', () => ({
+  readLastCompactionLlmSummary: mocks.readLastCompactionLlmSummaryMock,
   readPersistedCompactionMemory: mocks.readPersistedCompactionMemoryMock,
 }));
 
@@ -113,6 +107,7 @@ vi.mock('../routes/stream-completion.js', () => ({
 }));
 
 vi.mock('../routes/upstream-error.js', () => ({
+  isUpstreamContextOverflowError: mocks.isUpstreamContextOverflowErrorMock,
   readUpstreamError: mocks.readUpstreamErrorMock,
 }));
 
@@ -377,27 +372,6 @@ describe('runModelRound', () => {
     });
     mocks.buildPreparedUpstreamConversationMock.mockReturnValue({
       messages: [{ role: 'system', content: 'durable summary' }],
-      compaction: {
-        eventSummary: '已自动压缩新增的 2 条较早消息',
-        omittedMessages: 6,
-        persistedMemory: {
-          schemaVersion: 1,
-          coveredUntilMessageId: 'assistant-3',
-          updatedAt: 2,
-          compactionCount: 3,
-          summarizedMessages: 8,
-          lastTrigger: 'automatic',
-          userGoals: ['已有目标', '新增目标'],
-          assistantProgress: ['已有进展', '新增进展'],
-          toolActivity: [],
-          filesReferenced: [],
-          latestUserRequest: '新增请求',
-          lastCompactionSignature: 'new-sig',
-        },
-        recentMessagesKept: 4,
-        signature: 'new-sig',
-        structuredSummary: 'Durable session compaction memory (automatic compaction).',
-      },
     });
     mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
       ok: false,
@@ -467,5 +441,141 @@ describe('runModelRound', () => {
       }),
     );
     expect(result.stopReason).toBe('error');
+  });
+
+  it('returns overflow recovery signal when upstream rejects oversized context', async () => {
+    mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      body: null,
+    });
+    mocks.readUpstreamErrorMock.mockResolvedValue({
+      code: 'MODEL_ERROR',
+      message: 'maximum context length exceeded',
+    });
+    mocks.isUpstreamContextOverflowErrorMock.mockReturnValue(true);
+
+    const { runModelRound } = await import('../routes/stream-model-round.js');
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext('TEST', '/stream', {}, 'local');
+    const writeChunk = vi.fn();
+
+    const result = await runModelRound({
+      clientRequestId: 'req-overflow',
+      enabledTools: [],
+      eventSequence: { value: 1 },
+      requestData: {
+        clientRequestId: 'req-overflow',
+        maxTokens: 1024,
+        message: '继续执行',
+        temperature: 0,
+      },
+      round: 1,
+      route: {
+        apiKey: '',
+        apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
+        maxTokens: 1024,
+        model: 'test-model',
+        requestOverrides: {},
+        supportsThinking: false,
+        temperature: 0,
+        upstreamProtocol: 'responses',
+        variant: undefined,
+      },
+      runId: 'run-overflow',
+      signal: new AbortController().signal,
+      sessionContext: { legacyMessagesJson: '[]', metadataJson: '{}' },
+      sessionId: 'session-1',
+      transport: 'SSE',
+      turnFileDiffs: undefined,
+      userId: 'user-1',
+      wl,
+      ctx,
+      workspaceCtx: null,
+      requestSystemPrompts: [],
+      writeChunk,
+    });
+
+    expect(result.overflow).toBe(true);
+    expect(result.shouldStop).toBe(false);
+    expect(result.stopReason).toBe('error');
+    expect(mocks.appendSessionMessageMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'error' }),
+    );
+    expect(writeChunk).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+  });
+
+  it('appends a synthetic continuation user prompt when requested', async () => {
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount += 1;
+            if (readCount === 1) {
+              return { done: false, value: encoder.encode('data: first\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+        }),
+      },
+    });
+    mocks.parseUpstreamFrameMock.mockImplementation((frame: string) =>
+      frame.includes('data:') ? [{ type: 'done', stopReason: 'end_turn' }] : [],
+    );
+
+    const { runModelRound } = await import('../routes/stream-model-round.js');
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext('TEST', '/stream', {}, 'local');
+
+    await runModelRound({
+      clientRequestId: 'req-synthetic',
+      enabledTools: [],
+      eventSequence: { value: 1 },
+      requestData: {
+        clientRequestId: 'req-synthetic',
+        maxTokens: 1024,
+        message: '继续执行',
+        temperature: 0,
+      },
+      round: 0,
+      route: {
+        apiKey: '',
+        apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
+        maxTokens: 1024,
+        model: 'test-model',
+        requestOverrides: {},
+        supportsThinking: false,
+        temperature: 0,
+        upstreamProtocol: 'responses',
+        variant: undefined,
+      },
+      runId: 'run-synthetic',
+      signal: new AbortController().signal,
+      sessionContext: { legacyMessagesJson: '[]', metadataJson: '{}' },
+      sessionId: 'session-1',
+      syntheticContinuationPrompt: 'Continue after compaction.',
+      transport: 'SSE',
+      turnFileDiffs: undefined,
+      userId: 'user-1',
+      wl,
+      ctx,
+      workspaceCtx: null,
+      requestSystemPrompts: [],
+      writeChunk: vi.fn(),
+    });
+
+    expect(mocks.buildUpstreamRequestBodyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({ role: 'user', content: 'Continue after compaction.' }),
+        ]),
+      }),
+    );
   });
 });

@@ -11,7 +11,15 @@ import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { listSessionMessages, truncateSessionMessagesAfter } from '../session-message-store.js';
+import {
+  filterVisibleSessionMessages,
+  listSessionMessages,
+  truncateSessionMessagesAfter,
+} from '../session-message-store.js';
+import {
+  hydrateLegacySessionMessagesForSearch,
+  searchSessionMessages,
+} from '../session-search-store.js';
 import {
   collectSessionBackupStoragePaths,
   captureBeforeWriteBackup,
@@ -114,6 +122,18 @@ const fileChangesQuerySchema = z.object({
       return value;
     }, z.boolean().optional())
     .default(false),
+});
+
+const searchSessionsQuerySchema = z.object({
+  limit: z
+    .preprocess((value) => {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return Number(value);
+      }
+      return value;
+    }, z.number().int().min(1).max(20).optional())
+    .default(8),
+  q: z.string().trim().min(1),
 });
 
 const restorePreviewSchema = z
@@ -782,7 +802,29 @@ async function buildMergedSessionTaskProjection(input: {
       graphs.map(({ graph }) =>
         buildSessionTaskProjection(graph, input.sessionId, visibleSessionIds),
       ),
-    ),
+    ).map((task) => {
+      if (!task.sessionId) {
+        return task;
+      }
+
+      const taskSession = sessionsById.get(task.sessionId);
+      if (!taskSession) {
+        return task;
+      }
+
+      const taskSessionMetadata = parseSessionMetadataJson(taskSession.metadata_json);
+      const terminalReason = taskSessionMetadata['terminalReason'];
+      const effectiveDeadline = taskSessionMetadata['deadlineMs'];
+      return {
+        ...task,
+        ...(typeof terminalReason === 'string' && terminalReason.length > 0
+          ? { terminalReason }
+          : {}),
+        ...(typeof effectiveDeadline === 'number' && Number.isFinite(effectiveDeadline)
+          ? { effectiveDeadline }
+          : {}),
+      };
+    }),
     updatedAt: graphs.reduce(
       (latestUpdatedAt, { graph }) => Math.max(latestUpdatedAt, graph.updatedAt),
       0,
@@ -956,6 +998,34 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get(
+    '/sessions/search',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const query = searchSessionsQuerySchema.safeParse(
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+      const { step } = startRequestWorkflow(request, 'session.search');
+      if (!query.success) {
+        step.fail('invalid query params');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid query params', issues: query.error.issues });
+      }
+
+      hydrateLegacySessionMessagesForSearch(user.sub);
+
+      const results = searchSessionMessages({
+        limit: query.data.limit,
+        query: query.data.q,
+        userId: user.sub,
+      });
+      step.succeed(undefined, { count: results.length });
+      return reply.send({ results });
+    },
+  );
+
+  app.get(
     '/sessions/:sessionId',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -980,11 +1050,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           ...reconciledSession,
           metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
         },
-        listSessionMessages({
-          sessionId,
-          userId: user.sub,
-          legacyMessagesJson: session.messages_json,
-        }),
+        filterVisibleSessionMessages(
+          listSessionMessages({
+            sessionId,
+            userId: user.sub,
+            legacyMessagesJson: session.messages_json,
+          }),
+        ),
         todos,
         listSessionRunEvents(sessionId),
       );
@@ -1905,11 +1977,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
             ...session,
             metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
           },
-          listSessionMessages({
-            sessionId: session.id,
-            userId: user.sub,
-            legacyMessagesJson: session.messages_json,
-          }),
+          filterVisibleSessionMessages(
+            listSessionMessages({
+              sessionId: session.id,
+              userId: user.sub,
+              legacyMessagesJson: session.messages_json,
+            }),
+          ),
         ),
       );
 

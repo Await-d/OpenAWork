@@ -5,6 +5,11 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import {
+  COMPACTION_SETTINGS_KEY,
+  compactionSettingsSchema,
+  readCompactionSettings,
+} from '../compaction-policy.js';
+import {
   filterEnabledProviderConfig,
   materializeProviderConfig,
   parseStoredDefaultThinking,
@@ -707,6 +712,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({
         chat: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
         fast: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
+        compaction: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
       });
       const parsed = schema.safeParse(request.body);
       if (!parsed.success) {
@@ -765,6 +771,60 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, UPSTREAM_RETRY_SETTINGS_KEY, JSON.stringify(parsed.data)],
       );
       saveStep.succeed(undefined, { maxRetries: parsed.data.maxRetries });
+      step.succeed(undefined, { saved: true });
+
+      return reply.send(parsed.data);
+    },
+  );
+
+  app.get(
+    '/settings/compaction',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.compaction.get');
+      const user = request.user as JwtPayload;
+
+      const loadStep = child('load');
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+        [user.sub, COMPACTION_SETTINGS_KEY],
+      );
+      loadStep.succeed(undefined, { found: row !== undefined });
+
+      const settings = readCompactionSettings(parseStoredJson(row?.value));
+      step.succeed(undefined, {
+        auto: settings.auto,
+        prune: settings.prune,
+        ...(typeof settings.reserved === 'number' ? { reserved: settings.reserved } : {}),
+      });
+      return reply.send(settings);
+    },
+  );
+
+  app.put(
+    '/settings/compaction',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.compaction.put');
+      const user = request.user as JwtPayload;
+
+      const parsed = compactionSettingsSchema.safeParse(request.body);
+      if (!parsed.success) {
+        step.fail('invalid body');
+        return reply.status(400).send({ error: 'Invalid compaction settings' });
+      }
+
+      const saveStep = child('save');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, COMPACTION_SETTINGS_KEY, JSON.stringify(parsed.data)],
+      );
+      saveStep.succeed(undefined, {
+        auto: parsed.data.auto,
+        prune: parsed.data.prune,
+        ...(typeof parsed.data.reserved === 'number' ? { reserved: parsed.data.reserved } : {}),
+      });
       step.succeed(undefined, { saved: true });
 
       return reply.send(parsed.data);

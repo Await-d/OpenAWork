@@ -14,18 +14,12 @@ import {
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import { mergeCompactionMetadata, readPersistedCompactionMemory } from '../compaction-metadata.js';
+import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction-policy.js';
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
 import { resolveCompactionRoute, type ModelRouteConfig } from '../model-router.js';
 import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
-import { callCompactionLlm } from '../compaction-llm.js';
-import {
-  appendSessionMessage,
-  buildDurableCompactionSummary,
-  buildPreparedUpstreamConversation,
-  buildStructuredCompactionSummary,
-  listSessionMessages,
-} from '../session-message-store.js';
+import { appendSessionMessage, listSessionMessages } from '../session-message-store.js';
+import { executeSessionCompaction } from '../session-compaction.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
@@ -260,57 +254,27 @@ async function executeCompactCommand(params: {
     tags: ['command', 'compaction'],
   });
   taskManager.startTask(params.graph, task.id);
-  const durableSummary = buildDurableCompactionSummary({
-    existingMemory: readPersistedCompactionMemory(params.metadataJson),
-    messages: params.messages,
-    recentMessagesKept: 0,
-    trigger: 'manual',
-  });
-  const templateSummary =
-    durableSummary?.structuredSummary ??
-    buildStructuredCompactionSummary({
-      messages: params.messages,
-      recentMessagesKept: 0,
-      trigger: 'manual',
-    });
-
-  let summary = templateSummary;
-  let llmSummary: string | undefined;
   const compactionRoute = await resolveCompactCommandRoute(params.userId);
-  if (compactionRoute) {
-    try {
-      const conversationMessages = buildPreparedUpstreamConversation(params.messages, {
-        contextWindow: 1,
-      }).messages;
-      const result = await callCompactionLlm({
-        conversationMessages,
-        route: compactionRoute,
-      });
-      llmSummary = result.summary;
-      summary = llmSummary;
-    } catch (error: unknown) {
-      console.warn('manual llm compaction failed, fallback to template summary', error);
-    }
-  }
-
-  const mergedMetadata = mergeCompactionMetadata(params.metadataJson, {
-    persistedMemory: durableSummary?.persistedMemory,
-    summary,
+  const compactionSettingsRow = sqliteGet<{ value: string }>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+    [params.userId, COMPACTION_SETTINGS_KEY],
+  );
+  const compactionSettings = readCompactionSettings(parseStoredJson(compactionSettingsRow?.value));
+  const startedAt = Date.now();
+  const compaction = await executeSessionCompaction({
+    metadataJson: params.metadataJson,
+    messages: params.messages,
+    prune: compactionSettings.prune,
+    route: compactionRoute,
+    sessionId: params.sessionId,
     trigger: 'manual',
-    omittedMessages: durableSummary?.totalRepresentedMessages ?? params.messages.length,
-    recentMessagesKept: 0,
-    signature: durableSummary?.signature,
+    userId: params.userId,
   });
-  const metadata = llmSummary
-    ? {
-        ...mergedMetadata,
-        lastCompactionLlmSummary: llmSummary,
-      }
-    : mergedMetadata;
+  const completedAt = Date.now();
   const card = {
     type: 'compaction' as const,
     title: '会话已压缩',
-    summary,
+    summary: compaction.summary,
     trigger: 'manual' as const,
   };
   const storedMessages = appendCommandCardArtifacts({
@@ -321,10 +285,10 @@ async function executeCompactCommand(params: {
   });
 
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET messages_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(storedMessages), params.sessionId, params.userId],
   );
-  taskManager.completeTask(params.graph, task.id, summary);
+  taskManager.completeTask(params.graph, task.id, compaction.summary);
   await taskManager.save(params.graph);
 
   return {
@@ -343,11 +307,44 @@ async function executeCompactCommand(params: {
       },
       {
         type: 'compaction',
-        summary,
+        summary: '正在压缩会话上下文。',
         trigger: 'manual',
+        phase: 'started',
+        cause: 'manual',
+        strategy: 'summary_only',
         runId: `command:${params.sessionId}:${params.commandId}`,
-        eventId: `${params.sessionId}:${params.commandId}:compaction`,
-        occurredAt: Date.now(),
+        eventId: `${params.sessionId}:${params.commandId}:compaction:started`,
+        occurredAt: startedAt,
+      },
+      ...(compaction.llmErrorMessage
+        ? [
+            {
+              type: 'compaction' as const,
+              summary: `压缩 LLM 失败，已回退到结构化摘要：${compaction.llmErrorMessage}`,
+              trigger: 'manual' as const,
+              phase: 'failed' as const,
+              cause: 'manual' as const,
+              strategy: 'summary_only' as const,
+              runId: `command:${params.sessionId}:${params.commandId}`,
+              eventId: `${params.sessionId}:${params.commandId}:compaction:failed`,
+              occurredAt: completedAt,
+            },
+          ]
+        : []),
+      {
+        type: 'compaction',
+        summary: compaction.summary,
+        trigger: 'manual',
+        phase: 'completed',
+        cause: 'manual',
+        strategy: 'summary_only',
+        compactedMessages:
+          compaction.durableSummary?.newlySummarizedMessages ?? params.messages.length,
+        representedMessages:
+          compaction.durableSummary?.totalRepresentedMessages ?? params.messages.length,
+        runId: `command:${params.sessionId}:${params.commandId}`,
+        eventId: `${params.sessionId}:${params.commandId}:compaction:completed`,
+        occurredAt: completedAt,
       },
     ],
     card,

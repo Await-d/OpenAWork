@@ -46,6 +46,61 @@ let dbClosed = false;
 
 export let db = createDatabase(currentDbPath);
 
+function buildSearchableMessageTextForMigration(contentJson: string): string {
+  try {
+    const parsed = JSON.parse(contentJson) as unknown;
+    if (!Array.isArray(parsed)) {
+      return '';
+    }
+
+    return parsed
+      .flatMap((item) => {
+        if (!item || typeof item !== 'object') {
+          return [];
+        }
+        const record = item as Record<string, unknown>;
+        if (record['type'] === 'text' && typeof record['text'] === 'string') {
+          return [record['text']];
+        }
+        if (record['type'] === 'modified_files_summary') {
+          const title = typeof record['title'] === 'string' ? record['title'] : '';
+          const summary = typeof record['summary'] === 'string' ? record['summary'] : '';
+          return [[title, summary].filter((value) => value.length > 0).join('：')];
+        }
+        return [];
+      })
+      .join('\n')
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+function rebuildSessionMessageSearchIndex(): void {
+  db.exec('DELETE FROM session_messages_fts');
+  const rows = db
+    .prepare('SELECT id, session_id, user_id, role, content_json FROM session_messages')
+    .all() as Array<{
+    content_json: string;
+    id: string;
+    role: string;
+    session_id: string;
+    user_id: string;
+  }>;
+  const insert = db.prepare(
+    'INSERT INTO session_messages_fts (message_id, session_id, user_id, role, content) VALUES (?, ?, ?, ?, ?)',
+  );
+
+  rows.forEach((row) => {
+    const content = buildSearchableMessageTextForMigration(row.content_json);
+    if (content.length === 0) {
+      return;
+    }
+
+    insert.run(row.id, row.session_id, row.user_id, row.role, content);
+  });
+}
+
 const sessionStore = new Map<string, boolean>();
 
 export const redis = {
@@ -134,6 +189,10 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_session_messages_created ON session_messages(session_id, created_at_ms)',
   );
+  db.exec(
+    "CREATE VIRTUAL TABLE IF NOT EXISTS session_messages_fts USING fts5(message_id UNINDEXED, session_id UNINDEXED, user_id UNINDEXED, role UNINDEXED, content, tokenize='unicode61')",
+  );
+  rebuildSessionMessageSearchIndex();
 
   migrateSessionTodosTable();
 

@@ -51,6 +51,7 @@ import { skillMcpToolDefinition } from './skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
 import { desktopAutomationToolDefinition } from './desktop-automation.js';
 import {
+  lspCallHierarchyToolDefinition,
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
   lspGotoImplementationToolDefinition,
@@ -137,6 +138,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   lspPrepareRenameToolDefinition,
   lspRenameToolDefinition,
   lspHoverToolDefinition,
+  lspCallHierarchyToolDefinition,
   taskCreateToolDefinition,
   taskGetToolDefinition,
   taskListToolDefinition,
@@ -475,6 +477,18 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           filePath: { type: 'string' },
           line: { type: 'integer', minimum: 1 },
           character: { type: 'integer', minimum: 0 },
+        },
+        required: ['filePath', 'line', 'character'],
+        additionalProperties: false,
+      };
+    case 'lsp_call_hierarchy':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+          direction: { type: 'string', enum: ['incoming', 'outgoing', 'both'] },
         },
         required: ['filePath', 'line', 'character'],
         additionalProperties: false,

@@ -116,6 +116,12 @@ async function main(): Promise<void> {
         });
         await taskManager.save(childGraph);
 
+        dbModule.sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
+          JSON.stringify({ parentSessionId: sessionId, terminalReason: 'timeout' }),
+          childSessionId,
+          userId,
+        ]);
+
         const grandchildGraph = await taskManager.loadOrCreate(
           dbModule.WORKSPACE_ROOT,
           grandchildSessionId,
@@ -204,6 +210,11 @@ async function main(): Promise<void> {
         assert(
           delegatedProjectedTask?.title === delegatedTask.title,
           'delegated child-session task should preserve its title',
+        );
+        assert(
+          (delegatedProjectedTask as { terminalReason?: string } | undefined)?.terminalReason ===
+            'timeout',
+          'delegated child-session task should expose terminalReason from child session metadata',
         );
         assert(
           grandchildProjectedTask?.sessionId === grandchildSessionId,

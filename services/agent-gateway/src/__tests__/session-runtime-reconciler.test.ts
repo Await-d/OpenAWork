@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocked = vi.hoisted(() => ({
   sqliteAllMock: vi.fn(),
   reconcileResumedTaskChildSessionMock: vi.fn(),
+  reconcileTimedOutTaskChildSessionIfExpiredMock: vi.fn(),
   reconcileSessionStateStatusMock: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock('../db.js', () => ({
 
 vi.mock('../tool-sandbox.js', () => ({
   reconcileResumedTaskChildSession: mocked.reconcileResumedTaskChildSessionMock,
+  reconcileTimedOutTaskChildSessionIfExpired: mocked.reconcileTimedOutTaskChildSessionIfExpiredMock,
 }));
 
 vi.mock('../session-runtime-state.js', () => ({
@@ -30,7 +32,9 @@ describe('session-runtime-reconciler', () => {
   beforeEach(() => {
     mocked.sqliteAllMock.mockReset();
     mocked.reconcileResumedTaskChildSessionMock.mockReset();
+    mocked.reconcileTimedOutTaskChildSessionIfExpiredMock.mockReset();
     mocked.reconcileSessionStateStatusMock.mockReset();
+    mocked.reconcileTimedOutTaskChildSessionIfExpiredMock.mockResolvedValue(false);
   });
 
   it('reconciles parent task graph when a stale child session is reset', async () => {
@@ -64,6 +68,33 @@ describe('session-runtime-reconciler', () => {
 
     await reconcileSessionRuntime({ sessionId: 'child-1', userId: 'user-1' });
 
+    expect(mocked.reconcileResumedTaskChildSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('prefers timeout reconciliation when a stale child deadline is already expired', async () => {
+    mocked.reconcileSessionStateStatusMock.mockReturnValue({
+      previousStatus: 'running',
+      status: 'idle',
+      wasReset: true,
+    });
+    mocked.reconcileTimedOutTaskChildSessionIfExpiredMock.mockResolvedValue(true);
+
+    const result = await reconcileSessionRuntime({
+      nowMs: 123,
+      sessionId: 'child-timeout-1',
+      userId: 'user-1',
+    });
+
+    expect(result).toEqual({
+      previousStatus: 'running',
+      status: 'idle',
+      wasReset: true,
+    });
+    expect(mocked.reconcileTimedOutTaskChildSessionIfExpiredMock).toHaveBeenCalledWith({
+      childSessionId: 'child-timeout-1',
+      nowMs: 123,
+      userId: 'user-1',
+    });
     expect(mocked.reconcileResumedTaskChildSessionMock).not.toHaveBeenCalled();
   });
 

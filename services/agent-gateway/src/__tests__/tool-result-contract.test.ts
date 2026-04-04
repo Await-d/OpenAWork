@@ -126,4 +126,41 @@ describe('tool-result-contract', () => {
       occurredAt: 1,
     });
   });
+
+  it('preserves reason on tool_result content and run events', () => {
+    expect(
+      buildToolResultContent({
+        toolCallId: 'call-timeout-1',
+        toolName: 'task',
+        clientRequestId: 'req-timeout-1',
+        output: { status: 'failed' },
+        isError: true,
+        reason: 'timeout',
+      }),
+    ).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-timeout-1',
+      reason: 'timeout',
+    });
+
+    expect(
+      buildToolResultRunEvent({
+        toolCallId: 'call-timeout-1',
+        toolName: 'task',
+        clientRequestId: 'req-timeout-1',
+        output: { status: 'failed' },
+        isError: true,
+        reason: 'timeout',
+        eventMeta: {
+          eventId: 'evt-timeout-1',
+          runId: 'run-timeout-1',
+          occurredAt: 1,
+        },
+      }),
+    ).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-timeout-1',
+      reason: 'timeout',
+    });
+  });
 });

@@ -15,6 +15,17 @@ const QUOTA_EXCEEDED_PATTERNS = [
 ];
 
 const RATE_LIMIT_PATTERNS = [/rate limit/i, /too many requests/i, /request limit/i];
+const CONTEXT_OVERFLOW_PATTERNS = [
+  /context length/i,
+  /context window/i,
+  /maximum context length/i,
+  /maximum.*tokens/i,
+  /too many input tokens/i,
+  /input.*too long/i,
+  /prompt.*too long/i,
+  /context exceeds/i,
+  /requested.*tokens/i,
+];
 
 export async function readUpstreamError(response: Response): Promise<UpstreamErrorDescriptor> {
   const technicalDetail = await readUpstreamErrorDetail(response);
@@ -48,6 +59,18 @@ export async function readUpstreamError(response: Response): Promise<UpstreamErr
     message: technicalDetail,
     technicalDetail,
   };
+}
+
+export function isUpstreamContextOverflowError(input: {
+  response: Pick<Response, 'status'>;
+  error: UpstreamErrorDescriptor;
+}): boolean {
+  if (input.response.status !== 400 && input.response.status !== 413) {
+    return false;
+  }
+
+  const detail = `${input.error.code} ${input.error.message} ${input.error.technicalDetail}`;
+  return matchesAnyPattern(detail, CONTEXT_OVERFLOW_PATTERNS);
 }
 
 export async function readUpstreamErrorDetail(response: Response): Promise<string> {

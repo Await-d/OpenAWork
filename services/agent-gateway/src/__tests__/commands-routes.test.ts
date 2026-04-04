@@ -176,6 +176,16 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
         type: 'text',
         text: expect.stringContaining('"type":"compaction"'),
       });
+      expect(
+        session.session.messages.some((message) =>
+          message.content.some(
+            (content) =>
+              content.type === 'text' &&
+              typeof content.text === 'string' &&
+              content.text.includes('compaction_marker'),
+          ),
+        ),
+      ).toBe(false);
 
       const tasksRes = await app!.inject({
         method: 'GET',

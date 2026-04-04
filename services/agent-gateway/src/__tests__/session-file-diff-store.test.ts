@@ -11,6 +11,7 @@ vi.mock('../db.js', () => ({
 }));
 
 import {
+  deleteRequestFileDiffs,
   listRequestFileDiffs,
   listSessionFileDiffs,
   persistSessionFileDiffs,
@@ -169,6 +170,19 @@ describe('session-file-diff-store', () => {
         },
       },
     ]);
+  });
+
+  it('deletes file diffs by request scope', () => {
+    deleteRequestFileDiffs({
+      clientRequestId: 'client-a',
+      sessionId: 'session-a',
+      userId: 'user-a',
+    });
+
+    expect(mocks.sqliteRunMock).toHaveBeenCalledWith(
+      'DELETE FROM session_file_diffs WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
+      ['session-a', 'user-a', 'client-a'],
+    );
   });
 
   it('lists durable file diffs for a specific client request', () => {

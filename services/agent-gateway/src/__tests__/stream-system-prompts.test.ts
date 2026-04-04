@@ -40,12 +40,12 @@ describe('stream system prompt integration', () => {
 
     expect(guidance).toBeDefined();
     expect(guidance).toContain(
-      '如果 LSP 工具返回"No definition found"/"No implementation found"/"No references found"/"No symbols found"/"No hover information available"，回退到 grep + read 组合',
+      '如果 LSP 工具返回"No definition found"/"No implementation found"/"No references found"/"No symbols found"/"No hover information available"/"No call hierarchy found"/"No incoming calls found"/"No outgoing calls found"，回退到 grep + read 组合',
     );
     expect(guidance).toContain('不是所有文件类型都支持');
     expect(guidance).toContain('绝不自动执行 rename，必须是用户明确要求');
     expect(guidance).toContain(
-      '不要每轮自动调用 lsp_goto_definition/lsp_find_references/lsp_symbols',
+      '不要每轮自动调用 lsp_goto_definition/lsp_find_references/lsp_symbols/lsp_call_hierarchy',
     );
   });
 
@@ -67,6 +67,15 @@ describe('stream system prompt integration', () => {
     expect(guidance).toContain(
       '查找接口/抽象方法的具体实现 → lsp_goto_implementation（而非 lsp_goto_definition）',
     );
+  });
+
+  it('includes lsp_call_hierarchy in the semantic query guidance', () => {
+    const result = buildRequestScopedSystemPrompts('查看调用关系', '## 系统 Agents\n- oracle');
+    const guidance = result.find((prompt) => prompt.startsWith('LSP 工具使用策略'));
+
+    expect(guidance).toBeDefined();
+    expect(guidance).toContain('lsp_call_hierarchy');
+    expect(guidance).toContain('查看函数的调用关系（谁调用了它/它调用了谁） → lsp_call_hierarchy');
   });
 
   it('builds upstream system messages in stable order', () => {

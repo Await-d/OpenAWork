@@ -1,6 +1,9 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import { readPersistedCompactionMemory } from '../compaction-metadata.js';
+import {
+  readLastCompactionLlmSummary,
+  readPersistedCompactionMemory,
+} from '../compaction-metadata.js';
 import {
   appendSessionMessage,
   buildPreparedUpstreamConversation,
@@ -14,7 +17,7 @@ import { persistSessionSnapshot } from '../session-snapshot-store.js';
 import { createRequestSnapshotRef } from '../session-snapshot-store.js';
 import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
 import { resolveEofRoundDecision } from './stream-completion.js';
-import { readUpstreamError } from './upstream-error.js';
+import { isUpstreamContextOverflowError, readUpstreamError } from './upstream-error.js';
 import { buildUpstreamRequestBody } from './upstream-request.js';
 import {
   createStreamParseState,
@@ -143,16 +146,6 @@ function createIntermediateAssistantRequestId(clientRequestId: string, round: nu
   return `${clientRequestId}:assistant:${round}`;
 }
 
-function readLastCompactionLlmSummary(metadataJson: string): string | undefined {
-  try {
-    const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
-    const summary = parsed['lastCompactionLlmSummary'];
-    return typeof summary === 'string' && summary.trim().length > 0 ? summary : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function runModelRound(input: {
   clientRequestId: string;
   enabledTools: ReturnType<typeof getEnabledTools>;
@@ -169,8 +162,11 @@ export async function runModelRound(input: {
   userId: string;
   wl: WorkflowLogger;
   ctx: ReturnType<typeof createRequestContext>;
+  compactionAutoEnabled?: boolean;
+  compactionReservedTokens?: number;
   workspaceCtx: string | null;
   requestSystemPrompts: string[];
+  syntheticContinuationPrompt?: string;
   memoryBlock?: string | null;
   writeChunk: (chunk: RunEvent) => void;
 }): Promise<{
@@ -183,6 +179,7 @@ export async function runModelRound(input: {
   usage?: StreamUsageSummary;
   usageOccurredAt?: number;
 }> {
+  const compactionAutoEnabled = input.compactionAutoEnabled ?? true;
   const preparedConversation = buildPreparedUpstreamConversation(
     listSessionMessages({
       sessionId: input.sessionId,
@@ -207,6 +204,9 @@ export async function runModelRound(input: {
       memoryBlock: input.memoryBlock,
     }),
     ...conversation,
+    ...(input.syntheticContinuationPrompt
+      ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt }]
+      : []),
   ];
   const upstreamPath =
     input.route.upstreamProtocol === 'responses' ? '/responses' : '/chat/completions';
@@ -305,8 +305,11 @@ export async function runModelRound(input: {
 
     if (!response.ok || !response.body) {
       const upstreamError = await readUpstreamError(response);
-      markFailedRequestScopeMessages();
       input.wl.fail(stepUpstream, undefined, { status: response.status });
+      const contextOverflow = isUpstreamContextOverflowError({
+        response,
+        error: upstreamError,
+      });
       writeAuditLog({
         sessionId: input.sessionId,
         category: 'llm',
@@ -323,6 +326,19 @@ export async function runModelRound(input: {
           code: upstreamError.code,
         },
       });
+      if (contextOverflow && compactionAutoEnabled) {
+        return {
+          overflow: true,
+          shouldContinue: false,
+          shouldStop: false,
+          stopReason: 'error',
+          statusCode: response.status,
+          state,
+          usage: undefined,
+          usageOccurredAt: undefined,
+        };
+      }
+      markFailedRequestScopeMessages();
       appendSessionMessage({
         sessionId: input.sessionId,
         userId: input.userId,
@@ -392,7 +408,7 @@ export async function runModelRound(input: {
       const overflow =
         !!usage &&
         typeof input.route.contextWindow === 'number' &&
-        isContextOverflow(usage, input.route.contextWindow);
+        isContextOverflow(usage, input.route.contextWindow, input.compactionReservedTokens);
       return {
         overflow,
         shouldContinue,

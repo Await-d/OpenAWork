@@ -355,12 +355,12 @@ async function verifyAgent(input: {
     'sync Agent output should include the delegated child content',
   );
   assert(
-    String(syncResult.output).includes('<task_metadata>'),
-    'sync Agent output should append task metadata',
+    String(syncResult.output).includes('<task_result>'),
+    'sync Agent output should append opencode task_result metadata',
   );
   assert(
-    String(syncResult.output).includes('session_id:'),
-    'sync Agent output should include the delegated session id metadata',
+    String(syncResult.output).includes('task_id:'),
+    'sync Agent output should include the delegated session id task_id hint',
   );
 }
 

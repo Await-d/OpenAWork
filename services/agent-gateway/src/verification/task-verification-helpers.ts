@@ -84,6 +84,79 @@ export function createChatCompletionsStream(text: string): Response {
   );
 }
 
+export function createHangingChatCompletionsStream(signal?: AbortSignal): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        const onAbort = () => {
+          controller.error(new DOMException('Aborted', 'AbortError'));
+        };
+
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+
+        signal?.addEventListener('abort', onAbort, { once: true });
+      },
+      cancel() {
+        return;
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+}
+
+export function createDelayedChatCompletionsStream(input: {
+  delayMs: number;
+  ignoreAbort?: boolean;
+  signal?: AbortSignal;
+  text: string;
+}): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        const timer = setTimeout(() => {
+          controller.enqueue(
+            encoder.encode(
+              [
+                `data: ${JSON.stringify({ choices: [{ delta: { content: input.text } }] })}`,
+                '',
+                `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}`,
+                '',
+                'data: [DONE]',
+                '',
+              ].join('\n'),
+            ),
+          );
+          controller.close();
+        }, input.delayMs);
+
+        if (input.ignoreAbort) {
+          return;
+        }
+
+        const onAbort = () => {
+          clearTimeout(timer);
+          controller.error(new DOMException('Aborted', 'AbortError'));
+        };
+
+        if (input.signal?.aborted) {
+          onAbort();
+          return;
+        }
+
+        input.signal?.addEventListener('abort', onAbort, { once: true });
+      },
+      cancel() {
+        return;
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+}
+
 export function readLastUserMessage(body: string): string {
   try {
     const parsed = JSON.parse(body) as {

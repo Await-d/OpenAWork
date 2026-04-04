@@ -28,11 +28,32 @@ export function buildAssistantEventMessageContent(event: RunEvent): MessageConte
 
 function createAssistantEventText(event: RunEvent): string | null {
   if (event.type === 'compaction') {
+    const title =
+      event.phase === 'started'
+        ? '正在压缩会话'
+        : event.phase === 'failed'
+          ? '会话压缩失败'
+          : event.phase === 'completed' || !event.phase
+            ? '会话已压缩'
+            : '会话压缩';
+    const detailParts = [event.summary];
+    if (typeof event.compactedMessages === 'number') {
+      detailParts.push(`新增压缩：${event.compactedMessages} 条`);
+    }
+    if (typeof event.representedMessages === 'number') {
+      detailParts.push(`累计覆盖：${event.representedMessages} 条`);
+    }
+    if (event.strategy === 'replay') {
+      detailParts.push('恢复策略：保留当前用户请求重放');
+    } else if (event.strategy === 'synthetic_continue') {
+      detailParts.push('恢复策略：注入继续执行提示');
+    }
     return createAssistantEventCardContent({
       kind: 'compaction',
-      title: '会话已压缩',
-      message: event.summary,
-      status: 'success',
+      title,
+      message: detailParts.filter((item) => item.trim().length > 0).join('\n'),
+      status:
+        event.phase === 'started' ? 'running' : event.phase === 'failed' ? 'error' : 'success',
     });
   }
 

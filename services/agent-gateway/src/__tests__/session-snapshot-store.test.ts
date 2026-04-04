@@ -13,6 +13,7 @@ vi.mock('../db.js', () => ({
 import {
   compareSessionSnapshots,
   createRequestSnapshotRef,
+  deleteRequestSnapshots,
   getSessionSnapshotByRef,
   listRequestSnapshots,
   listSessionSnapshots,
@@ -217,6 +218,19 @@ describe('session-snapshot-store', () => {
         createdAt: '2026-03-30T00:00:02.000Z',
       },
     ]);
+  });
+
+  it('deletes request snapshots by client request id', () => {
+    deleteRequestSnapshots({
+      clientRequestId: 'req-a',
+      sessionId: 'session-a',
+      userId: 'user-a',
+    });
+
+    expect(mocks.sqliteRunMock).toHaveBeenCalledWith(
+      'DELETE FROM session_snapshots WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
+      ['session-a', 'user-a', 'req:req-a'],
+    );
   });
 
   it('finds a snapshot by ref and filters request snapshots', () => {

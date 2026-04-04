@@ -244,4 +244,34 @@ describe('session run events', () => {
       }),
     );
   });
+
+  it('mirrors compaction lifecycle phases into assistant event cards', () => {
+    mocks.sqliteGetMock.mockReturnValue({ user_id: 'user-a' });
+
+    publishSessionRunEvent(
+      'session-5',
+      {
+        type: 'compaction',
+        summary: '正在压缩会话上下文。',
+        trigger: 'automatic',
+        phase: 'started',
+        cause: 'provider_overflow',
+        strategy: 'synthetic_continue',
+        compactedMessages: 4,
+        representedMessages: 12,
+        eventId: 'evt-compact-start',
+        occurredAt: 789,
+      },
+      { clientRequestId: 'req-compact' },
+    );
+
+    const mirroredText = mocks.appendSessionMessageMock.mock.calls.at(-1)?.[0]?.content?.[0]?.text;
+    expect(JSON.parse(String(mirroredText))).toMatchObject({
+      type: 'assistant_event',
+      payload: {
+        title: '正在压缩会话',
+        status: 'running',
+      },
+    });
+  });
 });

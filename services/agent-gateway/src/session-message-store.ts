@@ -9,11 +9,16 @@ import type {
 } from '@openAwork/shared';
 import {
   mergePersistedCompactionMemory,
+  parsePersistedCompactionMemory,
   renderPersistedCompactionMemory,
   type CompactionSummaryFields,
   type CompactionTrigger,
   type PersistedCompactionMemory,
 } from './compaction-metadata.js';
+import {
+  deleteSessionMessageSearchDocument,
+  upsertSessionMessageSearchDocument,
+} from './session-search-store.js';
 import { buildReadToolOutputHint } from './tool-output-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 
@@ -34,6 +39,7 @@ interface SessionMessageRow {
 const MAX_INLINE_TOOL_OUTPUT_BYTES = 8 * 1024;
 const INTERNAL_ASSISTANT_EVENT_SOURCE = 'openawork_internal';
 const INTERNAL_CLIENT_REQUEST_ID_KEY = '__openAworkClientRequestId';
+const COMPACTION_MARKER_TYPE = 'compaction_marker';
 
 export interface UpstreamChatMessage {
   role: 'assistant' | 'system' | 'tool' | 'user';
@@ -66,6 +72,14 @@ export interface DurableCompactionSummary {
   signature: string;
   structuredSummary: string;
   totalRepresentedMessages: number;
+}
+
+export interface CompactionMarkerRecord {
+  omittedMessages?: number;
+  persistedMemory: PersistedCompactionMemory | null;
+  signature?: string;
+  summary: string;
+  trigger: CompactionTrigger;
 }
 
 export function hasToolOutputReference(messages: UpstreamChatMessage[]): boolean {
@@ -144,6 +158,79 @@ function isAssistantUiEventTextForMessage(value: string, message: Message): bool
   }
 }
 
+function parseCompactionMarkerText(value: string): CompactionMarkerRecord | null {
+  const normalized = value.trim();
+  if (!normalized.startsWith('{') || !normalized.endsWith('}')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as {
+      payload?: Record<string, unknown>;
+      source?: unknown;
+      type?: unknown;
+    };
+    if (
+      parsed.source !== INTERNAL_ASSISTANT_EVENT_SOURCE ||
+      parsed.type !== COMPACTION_MARKER_TYPE ||
+      !parsed.payload ||
+      typeof parsed.payload !== 'object'
+    ) {
+      return null;
+    }
+
+    const summary = parsed.payload['summary'];
+    if (typeof summary !== 'string' || summary.trim().length === 0) {
+      return null;
+    }
+
+    return {
+      summary,
+      trigger: parsed.payload['trigger'] === 'manual' ? 'manual' : 'automatic',
+      persistedMemory: parsePersistedCompactionMemory(parsed.payload['persistedMemory']),
+      signature:
+        typeof parsed.payload['signature'] === 'string' ? parsed.payload['signature'] : undefined,
+      omittedMessages:
+        typeof parsed.payload['omittedMessages'] === 'number'
+          ? parsed.payload['omittedMessages']
+          : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isCompactionMarkerMessage(message: Message): boolean {
+  return (
+    message.role === 'assistant' &&
+    message.content.length > 0 &&
+    message.content.every(
+      (content) => content.type === 'text' && parseCompactionMarkerText(content.text) !== null,
+    )
+  );
+}
+
+function readLatestCompactionMarker(messages: Message[]): CompactionMarkerRecord | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || !isCompactionMarkerMessage(message)) {
+      continue;
+    }
+
+    for (const content of message.content) {
+      if (content.type !== 'text') {
+        continue;
+      }
+      const marker = parseCompactionMarkerText(content.text);
+      if (marker) {
+        return marker;
+      }
+    }
+  }
+
+  return null;
+}
+
 function isCommandCardPayload(value: string): boolean {
   const normalized = value.trim();
   if (!normalized.startsWith('{') || !normalized.endsWith('}')) {
@@ -180,7 +267,15 @@ function isCommandCardMessage(message: Message): boolean {
 }
 
 function isContextArtifactMessage(message: Message): boolean {
-  return isAssistantUiEventMessage(message) || isCommandCardMessage(message);
+  return (
+    isAssistantUiEventMessage(message) ||
+    isCommandCardMessage(message) ||
+    isCompactionMarkerMessage(message)
+  );
+}
+
+export function filterVisibleSessionMessages(messages: Message[]): Message[] {
+  return messages.filter((message) => !isCompactionMarkerMessage(message));
 }
 
 export function listSessionMessages(input: {
@@ -219,10 +314,18 @@ export function appendSessionMessage(input: {
         input.replaceExisting === true ||
         (existing.status === 'error' && nextStatus === 'final')
       ) {
+        const nextContentJson = JSON.stringify(input.content);
         sqliteRun(
           "UPDATE session_messages SET content_json = ?, status = 'final', updated_at = datetime('now') WHERE id = ?",
-          [JSON.stringify(input.content), existing.id],
+          [nextContentJson, existing.id],
         );
+        upsertSessionMessageSearchDocument({
+          contentJson: nextContentJson,
+          id: existing.id,
+          role: existing.role,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        });
         touchSession(input.sessionId, input.userId);
         return {
           id: existing.id,
@@ -242,6 +345,7 @@ export function appendSessionMessage(input: {
     )?.next_seq ?? 1;
   const createdAt = input.createdAt ?? Date.now();
   const messageId = input.messageId ?? randomUUID();
+  const contentJson = JSON.stringify(input.content);
 
   sqliteRun(
     "INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
@@ -251,12 +355,20 @@ export function appendSessionMessage(input: {
       input.userId,
       nextSeq,
       input.role,
-      JSON.stringify(input.content),
+      contentJson,
       input.status ?? 'final',
       input.clientRequestId ?? null,
       createdAt,
     ],
   );
+
+  upsertSessionMessageSearchDocument({
+    contentJson,
+    id: messageId,
+    role: input.role,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
 
   touchSession(input.sessionId, input.userId);
 
@@ -266,6 +378,42 @@ export function appendSessionMessage(input: {
     createdAt,
     content: input.content,
   };
+}
+
+export function appendCompactionMarkerMessage(input: {
+  legacyMessagesJson?: string;
+  omittedMessages?: number;
+  persistedMemory?: PersistedCompactionMemory | null;
+  sessionId: string;
+  signature?: string;
+  summary: string;
+  trigger: CompactionTrigger;
+  userId: string;
+}): Message {
+  const payload = {
+    source: INTERNAL_ASSISTANT_EVENT_SOURCE,
+    type: COMPACTION_MARKER_TYPE,
+    payload: {
+      summary: input.summary,
+      trigger: input.trigger,
+      ...(input.persistedMemory ? { persistedMemory: input.persistedMemory } : {}),
+      ...(typeof input.signature === 'string' && input.signature.length > 0
+        ? { signature: input.signature }
+        : {}),
+      ...(typeof input.omittedMessages === 'number'
+        ? { omittedMessages: input.omittedMessages }
+        : {}),
+    },
+  };
+
+  return appendSessionMessage({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    role: 'assistant',
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    legacyMessagesJson: input.legacyMessagesJson,
+    clientRequestId: `compaction-marker:${input.signature ?? randomUUID()}`,
+  });
 }
 
 export function buildUpstreamConversation(
@@ -288,11 +436,14 @@ export function buildPreparedUpstreamConversation(
   const llmCompactionSummary =
     typeof options === 'number' ? undefined : options.llmCompactionSummary;
   const persistedMemory = typeof options === 'number' ? null : (options.persistedMemory ?? null);
+  const marker = readLatestCompactionMarker(messages);
+  const effectiveSummary = marker?.summary ?? llmCompactionSummary;
+  const effectivePersistedMemory = marker?.persistedMemory ?? persistedMemory;
   const normalizedMessages = messages.filter((message) => !isContextArtifactMessage(message));
   const historySinceBoundary = selectMessagesSinceCompactionBoundary(
     normalizedMessages,
-    persistedMemory,
-    llmCompactionSummary,
+    effectivePersistedMemory,
+    effectiveSummary,
   );
   const history =
     contextWindow && contextWindow > 0
@@ -300,7 +451,7 @@ export function buildPreparedUpstreamConversation(
       : selectSafeConversationWindow(historySinceBoundary, maxMessages);
   const upstreamMessages = buildUpstreamConversationFromHistory(history);
 
-  if (!llmCompactionSummary || llmCompactionSummary.trim().length === 0) {
+  if (!effectiveSummary || effectiveSummary.trim().length === 0) {
     return { messages: upstreamMessages };
   }
 
@@ -312,7 +463,7 @@ export function buildPreparedUpstreamConversation(
           '[COMPACT BOUNDARY]',
           'Earlier conversation history has been compacted by an LLM summary.',
           'Use this summary as the authoritative context before the remaining verbatim messages.',
-          llmCompactionSummary,
+          effectiveSummary,
         ].join('\n\n'),
       },
       ...upstreamMessages,
@@ -915,11 +1066,15 @@ export function truncateSessionMessagesAfter(input: {
   const keepRows = rows.slice(0, input.inclusive === false ? targetIndex + 1 : targetIndex);
   const deleteFromSeq = rows[targetIndex]?.seq ?? Number.MAX_SAFE_INTEGER;
   const cutoffSeq = input.inclusive === false ? deleteFromSeq + 1 : deleteFromSeq;
+  const deletedRows = rows.filter((row) => row.seq >= cutoffSeq);
   sqliteRun('DELETE FROM session_messages WHERE session_id = ? AND user_id = ? AND seq >= ?', [
     input.sessionId,
     input.userId,
     cutoffSeq,
   ]);
+  deletedRows.forEach((row) => {
+    deleteSessionMessageSearchDocument(row.id);
+  });
   sqliteRun(
     "UPDATE sessions SET messages_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [JSON.stringify(keepRows.map((row) => rowToMessage(row))), input.sessionId, input.userId],
@@ -958,6 +1113,38 @@ export function updateSessionMessagesStatusByRequestScope(input: {
     `UPDATE session_messages SET status = ?, updated_at = datetime('now') WHERE id IN (${placeholders})`,
     [input.status, ...targetIds],
   );
+  touchSession(input.sessionId, input.userId);
+}
+
+export function deleteSessionMessagesByRequestScope(input: {
+  clientRequestId: string;
+  roles?: MessageRole[];
+  sessionId: string;
+  userId: string;
+}): void {
+  const rows = sqliteAll<SessionMessageRow>(
+    'SELECT id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms FROM session_messages WHERE session_id = ? AND user_id = ? ORDER BY seq ASC',
+    [input.sessionId, input.userId],
+  );
+  const roleFilter = input.roles ? new Set(input.roles) : null;
+  const targetIds = rows
+    .filter(
+      (row) =>
+        (row.client_request_id === input.clientRequestId ||
+          row.client_request_id?.startsWith(`${input.clientRequestId}:`) === true) &&
+        (roleFilter ? roleFilter.has(row.role) : true),
+    )
+    .map((row) => row.id);
+
+  if (targetIds.length === 0) {
+    return;
+  }
+
+  const placeholders = targetIds.map(() => '?').join(', ');
+  sqliteRun(`DELETE FROM session_messages WHERE id IN (${placeholders})`, targetIds);
+  targetIds.forEach((messageId) => {
+    deleteSessionMessageSearchDocument(messageId);
+  });
   touchSession(input.sessionId, input.userId);
 }
 
@@ -1080,18 +1267,27 @@ function hydrateLegacyMessages(
       'SELECT id FROM session_messages WHERE id = ? LIMIT 1',
       [message.id],
     );
+    const nextMessageId = existing ? randomUUID() : message.id;
+    const contentJson = JSON.stringify(message.content);
     sqliteRun(
       "INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'final', NULL, ?, datetime('now'))",
       [
-        existing ? randomUUID() : message.id,
+        nextMessageId,
         sessionId,
         userId,
         index + 1,
         message.role,
-        JSON.stringify(message.content),
+        contentJson,
         normalizeCreatedAt(message.createdAt),
       ],
     );
+    upsertSessionMessageSearchDocument({
+      contentJson,
+      id: nextMessageId,
+      role: message.role,
+      sessionId,
+      userId,
+    });
   });
 }
 
@@ -1181,6 +1377,7 @@ function parseMessageContentArray(raw: unknown[]): MessageContent[] {
           typeof record['clientRequestId'] === 'string' ? record['clientRequestId'] : undefined,
         output: record['output'],
         isError: record['isError'],
+        reason: typeof record['reason'] === 'string' ? record['reason'] : undefined,
         ...(fileDiffs.length > 0 ? { fileDiffs } : {}),
         pendingPermissionRequestId:
           typeof record['pendingPermissionRequestId'] === 'string'

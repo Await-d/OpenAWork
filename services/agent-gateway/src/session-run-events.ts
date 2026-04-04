@@ -3,7 +3,7 @@ import { buildAssistantEventMessageContent } from './assistant-event-message.js'
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import { appendSessionMessage } from './session-message-store.js';
 
-type RunEventHandler = (event: RunEvent) => void;
+type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
 const sessionHandlers = new Map<string, Set<RunEventHandler>>();
 
@@ -12,6 +12,7 @@ interface SessionOwnerRow {
 }
 
 interface SessionRunEventRow {
+  seq?: number | null;
   payload_json: string;
 }
 
@@ -161,7 +162,7 @@ export function publishSessionRunEvent(
   const handlers = sessionHandlers.get(sessionId);
   if (!handlers) return;
   handlers.forEach((handler) => {
-    handler(event);
+    handler(event, meta);
   });
 }
 
@@ -203,6 +204,48 @@ export function listSessionRunEventsByRequest(input: {
       return [];
     }
   });
+}
+
+export interface PersistedSessionRunEvent {
+  event: RunEvent;
+  seq: number;
+}
+
+export function listSessionRunEventsByRequestAfterSeq(input: {
+  sessionId: string;
+  clientRequestId: string;
+  afterSeq: number;
+}): PersistedSessionRunEvent[] {
+  return sqliteAll<SessionRunEventRow>(
+    `SELECT payload_json, seq
+     FROM session_run_events
+     WHERE session_id = ? AND client_request_id = ? AND COALESCE(seq, 0) > ?
+     ORDER BY COALESCE(seq, 2147483647) ASC, occurred_at_ms ASC, id ASC`,
+    [input.sessionId, input.clientRequestId, input.afterSeq],
+  ).flatMap((row) => {
+    if (typeof row.seq !== 'number') {
+      return [];
+    }
+
+    try {
+      return [{ event: JSON.parse(row.payload_json) as RunEvent, seq: row.seq }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export function getLatestSessionRunEventSeqByRequest(input: {
+  sessionId: string;
+  clientRequestId: string;
+}): number {
+  const row = sqliteGet<SessionRunEventSeqRow>(
+    `SELECT MAX(seq) AS max_seq
+     FROM session_run_events
+     WHERE session_id = ? AND client_request_id = ?`,
+    [input.sessionId, input.clientRequestId],
+  );
+  return row?.max_seq ?? 0;
 }
 
 export function deleteSessionRunEventsByRequest(input: {

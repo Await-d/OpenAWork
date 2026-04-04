@@ -286,6 +286,15 @@ vi.mock('../tool-definitions.js', () => ({
         strict: false,
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_call_hierarchy',
+        description: 'lsp call hierarchy',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
   ],
 }));
 
@@ -391,6 +400,9 @@ describe('listCapabilitiesForUser', () => {
     const lspHoverTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'lsp_hover',
     );
+    const lspCallHierarchyTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_call_hierarchy',
+    );
 
     expect(listTools).toHaveLength(1);
     expect(listTools[0]).toMatchObject({ source: 'runtime', callable: true });
@@ -448,6 +460,8 @@ describe('listCapabilitiesForUser', () => {
     expect(lspRenameTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(lspHoverTools).toHaveLength(1);
     expect(lspHoverTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspCallHierarchyTools).toHaveLength(1);
+    expect(lspCallHierarchyTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(
       capabilities.filter((item) => item.kind === 'tool' && item.label === 'apply_patch'),
     ).toHaveLength(1);

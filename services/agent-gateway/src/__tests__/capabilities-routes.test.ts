@@ -225,6 +225,11 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       ).toBe(true);
       expect(
         body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'lsp_call_hierarchy',
+        ),
+      ).toBe(true);
+      expect(
+        body.capabilities.some(
           (item) =>
             item.kind === 'mcp' &&
             item.label === 'context7' &&

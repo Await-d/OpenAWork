@@ -176,6 +176,7 @@ describe('session tool visibility', () => {
       'lsp_symbols',
       'lsp_prepare_rename',
       'lsp_hover',
+      'lsp_call_hierarchy',
     ] as const;
 
     const editLspTools = ['lsp_rename'] as const;

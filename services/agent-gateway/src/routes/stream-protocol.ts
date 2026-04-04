@@ -22,6 +22,7 @@ interface UpstreamChoice {
   delta?: {
     content?: unknown;
     function_call?: UpstreamToolFunctionDelta;
+    reasoning_content?: unknown;
     tool_calls?: UpstreamToolCallDelta[];
   };
   finish_reason?: string | null;
@@ -172,9 +173,22 @@ export function parseUpstreamDataLine(data: string, state: StreamParseState): St
     const delta = choice.delta;
     if (!delta) continue;
 
-    const textDelta = extractUpstreamTextDelta(delta.content);
+    const { text: textDelta, thinking: contentThinkingDelta } =
+      extractUpstreamTextAndThinkingDeltas(delta.content);
     if (textDelta.length > 0) {
       chunks.push({ type: 'text_delta', delta: textDelta, ...createChunkMeta(state) });
+    }
+    if (contentThinkingDelta.length > 0) {
+      chunks.push({
+        type: 'thinking_delta',
+        delta: contentThinkingDelta,
+        ...createChunkMeta(state),
+      });
+    }
+
+    const reasoningDelta = extractUpstreamReasoningContentDelta(delta.reasoning_content);
+    if (reasoningDelta.length > 0) {
+      chunks.push({ type: 'thinking_delta', delta: reasoningDelta, ...createChunkMeta(state) });
     }
 
     if (delta.function_call) {
@@ -247,6 +261,90 @@ function extractUpstreamTextDelta(value: unknown): string {
   const record = value as Record<string, unknown>;
   const candidates = [record['text'], record['content'], record['markdown'], record['value']];
   return candidates.map((item) => extractUpstreamTextDelta(item)).join('');
+}
+
+function isThinkingContentBlock(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    record['type'] === 'thinking' ||
+    record['type'] === 'reasoning' ||
+    record['type'] === 'thought' ||
+    record['type'] === 'thoughts' ||
+    record['thought'] === true
+  );
+}
+
+function extractThinkingTextFromBlock(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record['thought'] === 'string') {
+    return record['thought'];
+  }
+
+  if (typeof record['thinking'] === 'string') {
+    return record['thinking'];
+  }
+
+  if (typeof record['reasoning'] === 'string') {
+    return record['reasoning'];
+  }
+
+  if (typeof record['text'] === 'string') {
+    return record['text'];
+  }
+
+  return '';
+}
+
+function extractUpstreamTextAndThinkingDeltas(content: unknown): {
+  text: string;
+  thinking: string;
+} {
+  if (typeof content === 'string') {
+    return { text: content, thinking: '' };
+  }
+
+  if (!Array.isArray(content)) {
+    if (!content || typeof content !== 'object') {
+      return { text: '', thinking: '' };
+    }
+
+    if (isThinkingContentBlock(content)) {
+      return { text: '', thinking: extractThinkingTextFromBlock(content) };
+    }
+
+    return { text: extractUpstreamTextDelta(content), thinking: '' };
+  }
+
+  let text = '';
+  let thinking = '';
+  for (const item of content) {
+    if (isThinkingContentBlock(item)) {
+      thinking += extractThinkingTextFromBlock(item);
+    } else {
+      text += extractUpstreamTextDelta(item);
+    }
+  }
+  return { text, thinking };
+}
+
+function extractUpstreamReasoningContentDelta(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === 'string' ? item : '')).join('');
+  }
+
+  return '';
 }
 
 function parseResponsesFrame(frame: string, state: StreamParseState): StreamChunk[] {

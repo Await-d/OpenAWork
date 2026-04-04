@@ -70,6 +70,12 @@ export function readPersistedCompactionMemory(
   return parsePersistedCompactionMemory(metadata['compactionMemory']);
 }
 
+export function readLastCompactionLlmSummary(metadataJson: string): string | undefined {
+  const metadata = parseMetadata(metadataJson);
+  const summary = metadata['lastCompactionLlmSummary'];
+  return typeof summary === 'string' && summary.trim().length > 0 ? summary : undefined;
+}
+
 export function mergePersistedCompactionMemory(
   existing: PersistedCompactionMemory | null,
   input: PersistedCompactionMemoryMergeInput,
@@ -145,7 +151,7 @@ function parseMetadata(metadataJson: string): Record<string, unknown> {
   return {};
 }
 
-function parsePersistedCompactionMemory(value: unknown): PersistedCompactionMemory | null {
+export function parsePersistedCompactionMemory(value: unknown): PersistedCompactionMemory | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }

@@ -11,6 +11,7 @@ export interface ToolResultPayloadInput {
   clientRequestId?: string;
   output: unknown;
   isError: boolean;
+  reason?: string;
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   observability?: ToolCallObservabilityAnnotation;
@@ -24,6 +25,7 @@ export function buildToolResultContent(input: ToolResultPayloadInput): ToolResul
     ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
     output: input.output,
     isError: input.isError,
+    ...(input.reason ? { reason: input.reason } : {}),
     ...(input.fileDiffs && input.fileDiffs.length > 0 ? { fileDiffs: input.fileDiffs } : {}),
     ...(input.observability ? { observability: input.observability } : {}),
     ...(input.pendingPermissionRequestId
@@ -44,6 +46,7 @@ export function buildToolResultRunEvent(
     ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
     output: input.output,
     isError: input.isError,
+    ...(input.reason ? { reason: input.reason } : {}),
     ...(input.fileDiffs && input.fileDiffs.length > 0 ? { fileDiffs: input.fileDiffs } : {}),
     ...(input.observability ? { observability: input.observability } : {}),
     ...(input.pendingPermissionRequestId

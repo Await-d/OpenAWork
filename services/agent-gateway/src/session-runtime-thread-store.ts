@@ -11,6 +11,14 @@ interface SessionRuntimeThreadRow {
   user_id: string;
 }
 
+export interface FreshSessionRuntimeThreadInfo {
+  clientRequestId: string;
+  heartbeatAtMs: number;
+  sessionId: string;
+  startedAtMs: number;
+  userId: string;
+}
+
 export function upsertSessionRuntimeThread(input: {
   clientRequestId: string;
   heartbeatAtMs?: number;
@@ -82,17 +90,36 @@ function getSessionRuntimeThread(input: {
   );
 }
 
+export function getFreshSessionRuntimeThread(input: {
+  nowMs?: number;
+  sessionId: string;
+  userId: string;
+}): FreshSessionRuntimeThreadInfo | null {
+  const thread = getSessionRuntimeThread({ sessionId: input.sessionId, userId: input.userId });
+  if (!thread) {
+    return null;
+  }
+
+  if (
+    thread.heartbeat_at_ms <
+    (input.nowMs ?? Date.now()) - SESSION_RUNTIME_THREAD_STALE_AFTER_MS
+  ) {
+    return null;
+  }
+
+  return {
+    clientRequestId: thread.client_request_id,
+    heartbeatAtMs: thread.heartbeat_at_ms,
+    sessionId: thread.session_id,
+    startedAtMs: thread.started_at_ms,
+    userId: thread.user_id,
+  };
+}
+
 export function hasFreshSessionRuntimeThread(input: {
   nowMs?: number;
   sessionId: string;
   userId: string;
 }): boolean {
-  const thread = getSessionRuntimeThread({ sessionId: input.sessionId, userId: input.userId });
-  if (!thread) {
-    return false;
-  }
-
-  return (
-    thread.heartbeat_at_ms >= (input.nowMs ?? Date.now()) - SESSION_RUNTIME_THREAD_STALE_AFTER_MS
-  );
+  return getFreshSessionRuntimeThread(input) !== null;
 }

@@ -125,6 +125,17 @@ export function listRequestSnapshots(input: {
   );
 }
 
+export function deleteRequestSnapshots(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): void {
+  sqliteRun(
+    'DELETE FROM session_snapshots WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
+    [input.sessionId, input.userId, createRequestSnapshotRef(input.clientRequestId)],
+  );
+}
+
 export function getSessionSnapshotByRef(input: {
   sessionId: string;
   snapshotRef: string;
