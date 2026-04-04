@@ -166,4 +166,27 @@ describe('chat-screen-stream-handlers', () => {
     expect(harness.sendingCalls).toEqual([false]);
     expect(harness.scheduleScrollCount).toBe(0);
   });
+
+  it('keeps tool_result output when the mobile stream event includes a timeout reason', () => {
+    const harness = createHarness({ canApplyMutation: true });
+
+    harness.handlers.onActivity?.({
+      id: 'tool-1',
+      kind: 'tool_result',
+      name: 'task',
+      isError: true,
+      reason: 'timeout',
+      output: '原因：超时 · 子代理首条响应在 30 秒内未返回。',
+    });
+
+    expect(harness.activities).toEqual([
+      {
+        id: 'tool-1',
+        kind: 'tool',
+        name: 'task',
+        status: 'error',
+        output: '原因：超时 · 子代理首条响应在 30 秒内未返回。',
+      },
+    ]);
+  });
 });

@@ -4,13 +4,21 @@ import { extractRuntimeTextDelta, extractRuntimeThinkingDelta } from '../chat-me
 
 export type ActivityEvent =
   | { kind: 'tool_start'; id: string; name: string }
-  | { kind: 'tool_result'; id: string; name: string; isError: boolean }
+  | {
+      kind: 'tool_result';
+      id: string;
+      name: string;
+      isError: boolean;
+      output?: string;
+      reason?: string;
+    }
   | {
       kind: 'task_update';
       id: string;
       name: string;
       status: 'running' | 'done' | 'error';
       assignedAgent?: string;
+      reason?: string;
       sessionId?: string;
       output?: string;
     };
@@ -90,6 +98,15 @@ export class MobileGatewayClient {
           id: chunk.toolCallId,
           name: chunk.toolName,
           isError: chunk.isError,
+          reason: chunk.reason,
+          output:
+            typeof chunk.output === 'string'
+              ? chunk.reason === 'timeout'
+                ? `原因：超时 · ${chunk.output}`
+                : chunk.output
+              : chunk.reason === 'timeout'
+                ? '原因：超时'
+                : undefined,
         });
       } else if (chunk.type === 'task_update') {
         this.handlers.onActivity?.({
@@ -103,10 +120,12 @@ export class MobileGatewayClient {
                 ? 'error'
                 : 'running',
           assignedAgent: chunk.assignedAgent,
+          reason: chunk.reason,
           sessionId: chunk.sessionId,
           output:
             chunk.errorMessage ??
             chunk.result ??
+            (chunk.reason === 'timeout' ? '子任务执行超时。' : undefined) ??
             (chunk.status === 'cancelled' ? '子任务已取消。' : undefined),
         });
       }

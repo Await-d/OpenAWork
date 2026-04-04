@@ -7,6 +7,7 @@ export interface TaskActivityUpdate {
   id: string;
   name: string;
   output?: string;
+  reason?: string;
   sessionId?: string;
   status: 'running' | 'done' | 'error';
 }
@@ -92,12 +93,14 @@ export function buildTaskActivityUpdateFromSessionTask(task: SessionTask): TaskA
   const output =
     task.errorMessage ??
     task.result ??
+    (task.terminalReason === 'timeout' ? '子任务执行超时。' : undefined) ??
     (task.status === 'cancelled' ? '子任务已取消。' : undefined);
 
   return {
     id: task.id,
     name: formatTaskActivityName({ assignedAgent: task.assignedAgent, label: task.title }),
     assignedAgent: task.assignedAgent,
+    reason: task.terminalReason,
     sessionId: task.sessionId,
     status,
     output,

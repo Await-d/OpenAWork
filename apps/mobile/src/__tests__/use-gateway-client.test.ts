@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunEvent } from '@openAwork/shared';
+
+vi.mock('react', () => ({
+  useRef: <T>(value: T) => ({ current: value }),
+  useEffect: () => undefined,
+  useCallback: <T extends (...args: never[]) => unknown>(callback: T) => callback,
+}));
+
 import { MobileGatewayClient } from '../hooks/useGatewayClient.js';
 
 class MockWebSocket {
@@ -134,6 +141,79 @@ describe('MobileGatewayClient', () => {
         assignedAgent: 'explore',
         sessionId: 'child-1',
         output: '目录结构已分析完成。',
+      },
+    ]);
+  });
+
+  it('maps timeout reason into mobile task activity output', () => {
+    const activities: Array<Record<string, unknown>> = [];
+    const client = new MobileGatewayClient('http://localhost:3000', 'token-123');
+    client.connect('session-1', {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onActivity: (event) => activities.push(event as unknown as Record<string, unknown>),
+    });
+    const ws = MockWebSocket.instances[0]!;
+
+    ws.emitMessage({
+      type: 'task_update',
+      taskId: 'task-timeout-1',
+      label: '等待子代理首响应',
+      status: 'failed',
+      assignedAgent: 'explore',
+      sessionId: 'child-timeout-1',
+      reason: 'timeout',
+      eventId: 'evt-task-timeout-1',
+      runId: 'run-task-timeout-1',
+      occurredAt: 123,
+    });
+
+    expect(activities).toEqual([
+      {
+        kind: 'task_update',
+        id: 'task-timeout-1',
+        name: '@explore · 等待子代理首响应',
+        status: 'error',
+        assignedAgent: 'explore',
+        reason: 'timeout',
+        sessionId: 'child-timeout-1',
+        output: '子任务执行超时。',
+      },
+    ]);
+  });
+
+  it('maps tool_result timeout reason into mobile activity output', () => {
+    const activities: Array<Record<string, unknown>> = [];
+    const client = new MobileGatewayClient('http://localhost:3000', 'token-123');
+    client.connect('session-1', {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onActivity: (event) => activities.push(event as unknown as Record<string, unknown>),
+    });
+    const ws = MockWebSocket.instances[0]!;
+
+    ws.emitMessage({
+      type: 'tool_result',
+      toolCallId: 'tool-timeout-1',
+      toolName: 'task',
+      output: '子代理首条响应在 30 秒内未返回。',
+      isError: true,
+      reason: 'timeout',
+      eventId: 'evt-tool-timeout-1',
+      runId: 'run-tool-timeout-1',
+      occurredAt: 456,
+    });
+
+    expect(activities).toEqual([
+      {
+        kind: 'tool_result',
+        id: 'tool-timeout-1',
+        name: 'task',
+        isError: true,
+        reason: 'timeout',
+        output: '原因：超时 · 子代理首条响应在 30 秒内未返回。',
       },
     ]);
   });

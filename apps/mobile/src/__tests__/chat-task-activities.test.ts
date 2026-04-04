@@ -37,6 +37,37 @@ describe('chat-task-activities', () => {
     ]);
   });
 
+  it('falls back to terminalReason when a failed task has no explicit error or result', () => {
+    const taskUpdate = buildTaskActivityUpdateFromSessionTask({
+      id: 'task-timeout-1',
+      title: '等待子代理首响应',
+      status: 'failed',
+      blockedBy: [],
+      completedSubtaskCount: 0,
+      readySubtaskCount: 0,
+      priority: 'high',
+      tags: ['task-tool'],
+      createdAt: 1,
+      updatedAt: 2,
+      depth: 0,
+      subtaskCount: 0,
+      unmetDependencyCount: 0,
+      assignedAgent: 'explore',
+      sessionId: 'child-timeout-1',
+      terminalReason: 'timeout',
+    });
+
+    expect(taskUpdate).toEqual({
+      id: 'task-timeout-1',
+      name: '@explore · 等待子代理首响应',
+      assignedAgent: 'explore',
+      reason: 'timeout',
+      sessionId: 'child-timeout-1',
+      status: 'error',
+      output: '子任务执行超时。',
+    });
+  });
+
   it('reconciles running subagent activities with polled task snapshots', () => {
     const activities: AgentActivity[] = [
       {

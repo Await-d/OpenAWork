@@ -68,6 +68,7 @@ function applyActivityEvent(activities: AgentActivity[], event: ActivityEvent): 
           ...activity,
           name: event.name,
           status: event.isError ? 'error' : 'done',
+          output: event.output ?? activity.output,
         }
       : activity,
   );
