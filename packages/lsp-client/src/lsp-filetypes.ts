@@ -4,6 +4,15 @@ export interface LanguageFiletypeEntry {
   rootMarkers: string[];
 }
 
+function extOf(filePath: string): string {
+  const idx = filePath.lastIndexOf('.');
+  return idx >= 0 ? filePath.slice(idx).toLowerCase() : '';
+}
+
+function baseOf(filePath: string): string {
+  return filePath.split('/').pop()?.toLowerCase() ?? '';
+}
+
 export const LSP_FILETYPES: readonly LanguageFiletypeEntry[] = [
   {
     languageId: 'typescript',
@@ -116,6 +125,35 @@ export const LSP_FILETYPES: readonly LanguageFiletypeEntry[] = [
       'compose.yaml',
       '.git',
     ],
+  },
+  {
+    languageId: 'dockercompose',
+    extensions: [
+      'compose.yaml',
+      'compose.yml',
+      'compose.override.yaml',
+      'compose.override.yml',
+      'docker-compose.yaml',
+      'docker-compose.yml',
+      'docker-compose.override.yaml',
+      'docker-compose.override.yml',
+    ],
+    rootMarkers: [
+      'compose.yaml',
+      'compose.yml',
+      'compose.override.yaml',
+      'compose.override.yml',
+      'docker-compose.yaml',
+      'docker-compose.yml',
+      'docker-compose.override.yaml',
+      'docker-compose.override.yml',
+      '.git',
+    ],
+  },
+  {
+    languageId: 'dockerbake',
+    extensions: ['docker-bake.hcl', 'docker-bake.override.hcl'],
+    rootMarkers: ['docker-bake.hcl', 'docker-bake.override.hcl', '.git'],
   },
   {
     languageId: 'shellscript',
@@ -235,16 +273,28 @@ export const LSP_FILETYPES: readonly LanguageFiletypeEntry[] = [
 
 const _extToLanguageId = new Map<string, string>();
 const _languageIdToEntry = new Map<string, LanguageFiletypeEntry>();
+const _nameToLanguageId = new Map<string, string>();
 
 for (const entry of LSP_FILETYPES) {
   _languageIdToEntry.set(entry.languageId, entry);
   for (const ext of entry.extensions) {
-    _extToLanguageId.set(ext, entry.languageId);
+    if (ext.startsWith('.')) {
+      _extToLanguageId.set(ext.toLowerCase(), entry.languageId);
+      continue;
+    }
+    _nameToLanguageId.set(ext.toLowerCase(), entry.languageId);
   }
 }
 
 export function getLanguageIdByExtension(ext: string): string | undefined {
-  return _extToLanguageId.get(ext);
+  return _extToLanguageId.get(ext.toLowerCase());
+}
+
+export function getLanguageIdForFilePath(filePath: string): string | undefined {
+  const name = baseOf(filePath);
+  const byName = _nameToLanguageId.get(name);
+  if (byName) return byName;
+  return _extToLanguageId.get(extOf(filePath));
 }
 
 export function getRootMarkersForLanguage(languageId: string): string[] {
@@ -252,7 +302,13 @@ export function getRootMarkersForLanguage(languageId: string): string[] {
 }
 
 export function getRootMarkersForExtension(ext: string): string[] {
-  const langId = _extToLanguageId.get(ext);
+  const langId = _extToLanguageId.get(ext.toLowerCase());
+  if (langId === undefined) return [];
+  return _languageIdToEntry.get(langId)?.rootMarkers ?? [];
+}
+
+export function getRootMarkersForFilePath(filePath: string): string[] {
+  const langId = getLanguageIdForFilePath(filePath);
   if (langId === undefined) return [];
   return _languageIdToEntry.get(langId)?.rootMarkers ?? [];
 }

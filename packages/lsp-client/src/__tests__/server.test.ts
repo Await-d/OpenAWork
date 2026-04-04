@@ -10,10 +10,13 @@ import {
   CssServer,
   YamlServer,
   DockerfileServer,
+  DockerComposeServer,
+  DockerBakeServer,
   ShellscriptServer,
   RustAnalyzerServer,
   ALL_SERVERS,
 } from '../server.js';
+import { getLanguageIdForFilePath, getRootMarkersForFilePath } from '../lsp-filetypes.js';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { promises as fs } from 'fs';
@@ -97,6 +100,21 @@ describe('findServerForFile', () => {
     expect(server?.id).toBe('dockerfile');
   });
 
+  it('returns DockerComposeServer for compose.yaml by filename', () => {
+    const server = findServerForFile('/workspace/compose.yaml');
+    expect(server?.id).toBe('dockercompose');
+  });
+
+  it('returns DockerComposeServer for docker-compose.yml by filename', () => {
+    const server = findServerForFile('/workspace/docker-compose.yml');
+    expect(server?.id).toBe('dockercompose');
+  });
+
+  it('returns DockerBakeServer for docker-bake.hcl by filename', () => {
+    const server = findServerForFile('/workspace/docker-bake.hcl');
+    expect(server?.id).toBe('dockerbake');
+  });
+
   it('returns ShellscriptServer for .sh files', () => {
     const server = findServerForFile('/scripts/run.sh');
     expect(server?.id).toBe('shellscript');
@@ -122,7 +140,7 @@ describe('findServerForFile', () => {
     expect(server).toBeUndefined();
   });
 
-  it('ALL_SERVERS contains typescript, gopls, pyright, json, html, css, yaml, dockerfile, shellscript, rust-analyzer', () => {
+  it('ALL_SERVERS contains typescript, gopls, pyright, json, html, css, yaml, dockerfile, dockercompose, dockerbake, shellscript, rust-analyzer', () => {
     const ids = ALL_SERVERS.map((s) => s.id);
     expect(ids).toContain('typescript');
     expect(ids).toContain('gopls');
@@ -132,6 +150,8 @@ describe('findServerForFile', () => {
     expect(ids).toContain('css');
     expect(ids).toContain('yaml');
     expect(ids).toContain('dockerfile');
+    expect(ids).toContain('dockercompose');
+    expect(ids).toContain('dockerbake');
     expect(ids).toContain('shellscript');
     expect(ids).toContain('rust-analyzer');
   });
@@ -173,6 +193,16 @@ describe('findServerForFile', () => {
     expect(DockerfileServer.extensions).toContain('dockerfile');
   });
 
+  it('DockerComposeServer extensions include canonical compose filenames', () => {
+    expect(DockerComposeServer.extensions).toContain('compose.yaml');
+    expect(DockerComposeServer.extensions).toContain('docker-compose.yml');
+  });
+
+  it('DockerBakeServer extensions include canonical bake filenames', () => {
+    expect(DockerBakeServer.extensions).toContain('docker-bake.hcl');
+    expect(DockerBakeServer.extensions).toContain('docker-bake.override.hcl');
+  });
+
   it('ShellscriptServer extensions include .sh, .bash, and .zsh', () => {
     expect(ShellscriptServer.extensions).toContain('.sh');
     expect(ShellscriptServer.extensions).toContain('.bash');
@@ -181,5 +211,15 @@ describe('findServerForFile', () => {
 
   it('RustAnalyzerServer extensions include .rs', () => {
     expect(RustAnalyzerServer.extensions).toContain('.rs');
+  });
+
+  it('getLanguageIdForFilePath resolves compose and bake basename tokens', () => {
+    expect(getLanguageIdForFilePath('/workspace/compose.yaml')).toBe('dockercompose');
+    expect(getLanguageIdForFilePath('/workspace/docker-bake.hcl')).toBe('dockerbake');
+  });
+
+  it('getRootMarkersForFilePath resolves compose and bake root markers', () => {
+    expect(getRootMarkersForFilePath('/workspace/compose.yaml')).toContain('compose.yaml');
+    expect(getRootMarkersForFilePath('/workspace/docker-bake.hcl')).toContain('docker-bake.hcl');
   });
 });

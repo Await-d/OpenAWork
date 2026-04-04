@@ -94,6 +94,16 @@ function getLanguageByFilename(filePath: string): string | undefined {
   const base = filePath.split('/').pop()?.toLowerCase() ?? '';
   const exact: Record<string, string> = {
     dockerfile: 'dockerfile',
+    'compose.yaml': 'dockercompose',
+    'compose.yml': 'dockercompose',
+    'compose.override.yaml': 'dockercompose',
+    'compose.override.yml': 'dockercompose',
+    'docker-compose.yaml': 'dockercompose',
+    'docker-compose.yml': 'dockercompose',
+    'docker-compose.override.yaml': 'dockercompose',
+    'docker-compose.override.yml': 'dockercompose',
+    'docker-bake.hcl': 'dockerbake',
+    'docker-bake.override.hcl': 'dockerbake',
     makefile: 'makefile',
     gemfile: 'ruby',
     rakefile: 'ruby',

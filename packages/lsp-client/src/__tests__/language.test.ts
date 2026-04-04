@@ -55,6 +55,17 @@ describe('getLanguageId', () => {
     expect(getLanguageId('/Dockerfile')).toBe('dockerfile');
   });
 
+  it('recognizes Compose files by filename', () => {
+    expect(getLanguageId('/compose.yaml')).toBe('dockercompose');
+    expect(getLanguageId('/docker-compose.yml')).toBe('dockercompose');
+    expect(getLanguageId('/compose.override.yaml')).toBe('dockercompose');
+  });
+
+  it('recognizes Bake files by filename', () => {
+    expect(getLanguageId('/docker-bake.hcl')).toBe('dockerbake');
+    expect(getLanguageId('/docker-bake.override.hcl')).toBe('dockerbake');
+  });
+
   it('recognizes Makefile by filename', () => {
     expect(getLanguageId('/Makefile')).toBe('makefile');
   });

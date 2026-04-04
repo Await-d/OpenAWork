@@ -223,6 +223,8 @@ export {
   CssServer,
   YamlServer,
   DockerfileServer,
+  DockerComposeServer,
+  DockerBakeServer,
   ShellscriptServer,
   RustAnalyzerServer,
   NearestRoot,
@@ -247,8 +249,10 @@ export type { TauriSpawner, TauriExtraServerId } from './tauri.js';
 export {
   LSP_FILETYPES,
   getLanguageIdByExtension,
+  getLanguageIdForFilePath,
   getRootMarkersForLanguage,
   getRootMarkersForExtension,
+  getRootMarkersForFilePath,
   getAllRootMarkers,
 } from './lsp-filetypes.js';
 export type { LanguageFiletypeEntry } from './lsp-filetypes.js';

@@ -93,6 +93,22 @@ const DOCKER_ROOT_MARKERS = [
   '.git',
 ];
 
+const DOCKER_COMPOSE_FILES = [
+  'compose.yaml',
+  'compose.yml',
+  'compose.override.yaml',
+  'compose.override.yml',
+  'docker-compose.yaml',
+  'docker-compose.yml',
+  'docker-compose.override.yaml',
+  'docker-compose.override.yml',
+];
+
+const DOCKER_BAKE_FILES = ['docker-bake.hcl', 'docker-bake.override.hcl'];
+
+const DOCKER_COMPOSE_ROOT_MARKERS = [...DOCKER_COMPOSE_FILES, '.git'];
+const DOCKER_BAKE_ROOT_MARKERS = [...DOCKER_BAKE_FILES, '.git'];
+
 const SHELL_ROOT_MARKERS = [
   'package.json',
   'pnpm-lock.yaml',
@@ -201,6 +217,28 @@ export const DockerfileServer: LSPServerInfo = {
   },
 };
 
+export const DockerComposeServer: LSPServerInfo = {
+  id: 'dockercompose',
+  extensions: DOCKER_COMPOSE_FILES,
+  root: NearestRoot(DOCKER_COMPOSE_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('docker-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['start', '--stdio'], { cwd: root }) };
+  },
+};
+
+export const DockerBakeServer: LSPServerInfo = {
+  id: 'dockerbake',
+  extensions: DOCKER_BAKE_FILES,
+  root: NearestRoot(DOCKER_BAKE_ROOT_MARKERS),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('docker-language-server');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['start', '--stdio'], { cwd: root }) };
+  },
+};
+
 export const ShellscriptServer: LSPServerInfo = {
   id: 'shellscript',
   extensions: ['.sh', '.bash', '.zsh'],
@@ -232,6 +270,8 @@ export const ALL_SERVERS: LSPServerInfo[] = [
   CssServer,
   YamlServer,
   DockerfileServer,
+  DockerComposeServer,
+  DockerBakeServer,
   ShellscriptServer,
   RustAnalyzerServer,
 ];
@@ -240,10 +280,8 @@ export function findServerForFile(filePath: string): LSPServerInfo | undefined {
   const idx = filePath.lastIndexOf('.');
   const ext = idx >= 0 ? filePath.slice(idx).toLowerCase() : '';
   const name = basename(filePath).toLowerCase();
-  return ALL_SERVERS.find((s) =>
-    s.extensions.some((value) => {
-      const key = value.toLowerCase();
-      return key === ext || key === name;
-    }),
+  return (
+    ALL_SERVERS.find((s) => s.extensions.some((value) => value.toLowerCase() === name)) ??
+    ALL_SERVERS.find((s) => s.extensions.some((value) => value.toLowerCase() === ext))
   );
 }
