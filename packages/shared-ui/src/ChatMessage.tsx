@@ -5,6 +5,9 @@ function renderContent(content: MessageContent): string {
   if (content.type === 'text') return content.text;
   if (content.type === 'tool_call') return `[工具: ${content.toolName}]`;
   if (content.type === 'tool_result') return `[结果: ${content.isError ? '错误' : '正常'}]`;
+  if (content.type === 'modified_files_summary') {
+    return `[变更: ${content.files.length} 个文件 · ${content.summary}]`;
+  }
   return '';
 }
 
