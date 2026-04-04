@@ -14,6 +14,25 @@ export { createCapabilitiesClient } from './capabilities.js';
 export type { CapabilitiesClient } from './capabilities.js';
 export { createAgentsClient } from './agents.js';
 export type { AgentsClient } from './agents.js';
+export { createTeamClient } from './team.js';
+export type {
+  CreateTeamMemberInput,
+  CreateTeamMessageInput,
+  CreateTeamTaskInput,
+  TeamClient,
+  TeamMemberRecord,
+  TeamMessageRecord,
+  TeamTaskRecord,
+  UpdateTeamTaskInput,
+} from './team.js';
+export { createWorkflowsClient } from './workflows.js';
+export type {
+  CreateWorkflowTemplateInput,
+  WorkflowEdgeRecord,
+  WorkflowNodeRecord,
+  WorkflowTemplateRecord,
+  WorkflowsClient,
+} from './workflows.js';
 export { createPermissionsClient } from './permissions.js';
 export type {
   PendingPermissionRequest,
@@ -26,6 +45,7 @@ export type {
   DeleteSessionErrorData,
   DeleteSessionResult,
   Session,
+  SessionActiveStream,
   SessionBackupRestorePreviewResult,
   SessionFileBackupTarget,
   SessionFileChangesProjection,
@@ -34,6 +54,7 @@ export type {
   SessionFileDiffEntry,
   SessionRestoreApplyInput,
   SessionRestoreApplyResult,
+  SessionSearchResult,
   SessionRestoreHashValidation,
   SessionRestorePreviewInput,
   SessionRestorePreviewResult,

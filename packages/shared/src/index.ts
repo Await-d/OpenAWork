@@ -601,6 +601,11 @@ export interface StreamCompactionChunk {
   type: 'compaction';
   summary: string;
   trigger: 'manual' | 'automatic';
+  phase?: 'started' | 'completed' | 'failed';
+  cause?: 'manual' | 'usage_overflow' | 'provider_overflow';
+  strategy?: 'summary_only' | 'replay' | 'synthetic_continue';
+  compactedMessages?: number;
+  representedMessages?: number;
   eventId?: string;
   runId?: string;
   occurredAt?: number;

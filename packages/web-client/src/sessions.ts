@@ -262,6 +262,24 @@ export interface Session {
   fileChangesSummary?: SessionFileChangesSummary;
 }
 
+export interface SessionSearchResult {
+  createdAtMs: number;
+  messageId: string;
+  role: string;
+  sessionId: string;
+  snippet: string;
+  title: string | null;
+  updatedAt: string;
+}
+
+export interface SessionActiveStream {
+  clientRequestId: string;
+  heartbeatAtMs: number;
+  lastSeq: number;
+  sessionId: string;
+  startedAtMs: number;
+}
+
 export interface SessionTask {
   id: string;
   title: string;
@@ -282,6 +300,7 @@ export interface SessionTask {
   depth: number;
   subtaskCount: number;
   unmetDependencyCount: number;
+  effectiveDeadline?: number;
   result?: string;
   errorMessage?: string;
   terminalReason?: string;
@@ -307,6 +326,7 @@ export interface SessionsClient {
     opts?: { title?: string; metadata?: Record<string, unknown> },
   ): Promise<Session>;
   get(token: string, sessionId: string): Promise<Session>;
+  getActiveStream(token: string, sessionId: string): Promise<SessionActiveStream | null>;
   getFileChangesReadModel(
     token: string,
     sessionId: string,
@@ -354,6 +374,11 @@ export interface SessionsClient {
     sessionId: string,
     options?: { signal?: AbortSignal },
   ): Promise<Session[]>;
+  search(
+    token: string,
+    query: string,
+    options?: { limit?: number; signal?: AbortSignal },
+  ): Promise<SessionSearchResult[]>;
   getTasks(
     token: string,
     sessionId: string,
@@ -452,6 +477,37 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       if (!res.ok) throw new HttpError(`Failed to get session: ${res.status}`, res.status);
       const data = (await res.json()) as { session: Session };
       return data.session;
+    },
+
+    async search(token, query, options) {
+      const params = new URLSearchParams({ q: query });
+      if (typeof options?.limit === 'number') {
+        params.set('limit', String(options.limit));
+      }
+      const res = await fetch(`${gatewayUrl}/sessions/search?${params.toString()}`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to search sessions: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      const data = (await res.json()) as { results?: SessionSearchResult[] };
+      return data.results ?? [];
+    },
+
+    async getActiveStream(token, sessionId) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/stream/active`, {
+        headers: authHeader(token),
+      });
+      if (!res.ok) {
+        throw new HttpError(`Failed to get active stream: ${res.status}`, res.status);
+      }
+      const data = (await res.json()) as { active?: SessionActiveStream | null };
+      return data.active ?? null;
     },
 
     async getFileChangesReadModel(token, sessionId, options) {
