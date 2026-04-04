@@ -13,17 +13,17 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useAuthStore } from '../../src/store/auth';
-import { useGatewayClient } from '../../src/hooks/useGatewayClient';
+import { ChatMessageBubble } from '../../src/components/chat-message-bubble.js';
+import type { MobileChatMessage } from '../../src/chat-message-content.js';
+import { normalizeMobileChatMessages } from '../../src/chat-message-content.js';
 import {
-  normalizeMobileChatMessages,
-  type MobileChatMessage,
-} from '../../src/chat-message-content.js';
-import {
-  getSession,
-  upsertSession,
-  appendMessage as dbAppendMessage,
-  saveDraft,
-} from '../../src/db/session-store';
+  buildChatRouteHistoryLocalHydrationState,
+  buildChatRouteHistoryReadyState,
+  buildChatRouteHistoryResetState,
+} from '../../src/chat-route-history-state.js';
+import { shouldApplyChatSessionMutation } from '../../src/hooks/chat-stream-guard.js';
+import { useChatStreamState } from '../../src/hooks/use-chat-stream-state.js';
+import { getSession, upsertSession, saveDraft } from '../../src/db/session-store';
 
 const DRAFT_SAVE_DEBOUNCE_MS = 500;
 
@@ -32,46 +32,110 @@ export default function ChatScreen() {
   const navigation = useNavigation();
   const { accessToken, gatewayUrl } = useAuthStore();
 
-  const [messages, setMessages] = useState<MobileChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [streamBuffer, setStreamBuffer] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(true);
   const flatListRef = useRef<FlatList>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+  const latestSessionIdRef = useRef(sessionId);
 
-  const { stream } = useGatewayClient(gatewayUrl, accessToken);
+  const { replaceMessages, renderedMessages, sendMessage, streaming } = useChatStreamState({
+    accessToken,
+    gatewayUrl,
+    sessionId,
+  });
+
+  useEffect(() => {
+    latestSessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const canApplySessionMutation = useCallback(
+    (requestSessionId: string | undefined) =>
+      shouldApplyChatSessionMutation({
+        currentSessionId: latestSessionIdRef.current,
+        mounted: isMountedRef.current,
+        requestSessionId,
+      }),
+    [],
+  );
+
+  const applyHistoryState = useCallback(
+    (nextState: { input: string; loadingHistory: boolean; messages: MobileChatMessage[] }) => {
+      setInput(nextState.input);
+      setLoadingHistory(nextState.loadingHistory);
+      replaceMessages(nextState.messages);
+    },
+    [replaceMessages],
+  );
 
   useEffect(() => {
     navigation.setOptions({ title: 'Chat' });
   }, [navigation]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      applyHistoryState(buildChatRouteHistoryResetState({ hasSessionId: false }));
+      return;
+    }
+
+    applyHistoryState(buildChatRouteHistoryResetState({ hasSessionId: true }));
+    const requestSessionId = sessionId;
 
     async function loadMessages() {
-      const local = await getSession(sessionId);
+      const local = await getSession(requestSessionId);
+      if (!canApplySessionMutation(requestSessionId)) {
+        return;
+      }
+
+      let nextInput = '';
+      let nextMessages: MobileChatMessage[] = [];
+
       if (local) {
         const cached = normalizeMobileChatMessages(JSON.parse(local.messages_json) as unknown[]);
-        if (cached.length > 0) {
-          setMessages(cached);
-          setInput(local.draft);
-        }
+        const nextState = buildChatRouteHistoryLocalHydrationState({
+          draft: local.draft,
+          messages: cached,
+        });
+        nextInput = nextState.input;
+        nextMessages = nextState.messages;
+        applyHistoryState(nextState);
       }
 
       if (!accessToken) {
-        setLoadingHistory(false);
+        if (canApplySessionMutation(requestSessionId)) {
+          applyHistoryState(
+            buildChatRouteHistoryReadyState({
+              input: nextInput,
+              messages: nextMessages,
+            }),
+          );
+        }
         return;
       }
       try {
         const session = await createSessionsClient(gatewayUrl).get(
           accessToken ?? '',
-          sessionId ?? '',
+          requestSessionId,
         );
+        if (!canApplySessionMutation(requestSessionId)) {
+          return;
+        }
         const remote = normalizeMobileChatMessages(session.messages ?? []);
-        setMessages(remote);
+        nextMessages = remote;
+        applyHistoryState(
+          buildChatRouteHistoryReadyState({
+            input: nextInput,
+            messages: remote,
+          }),
+        );
         await upsertSession({
-          id: sessionId,
+          id: requestSessionId,
           title: session.title ?? null,
           messages_json: JSON.stringify(remote),
           draft: local?.draft ?? '',
@@ -81,12 +145,19 @@ export default function ChatScreen() {
       } catch (error) {
         console.warn('Failed to load remote session messages', error);
       } finally {
-        setLoadingHistory(false);
+        if (canApplySessionMutation(requestSessionId)) {
+          applyHistoryState(
+            buildChatRouteHistoryReadyState({
+              input: nextInput,
+              messages: nextMessages,
+            }),
+          );
+        }
       }
     }
 
     void loadMessages();
-  }, [sessionId, accessToken, gatewayUrl]);
+  }, [accessToken, applyHistoryState, canApplySessionMutation, gatewayUrl, sessionId]);
 
   const handleInputChange = useCallback(
     (text: string) => {
@@ -106,53 +177,19 @@ export default function ChatScreen() {
     };
   }, []);
 
-  const sendMessage = useCallback(() => {
-    if (!input.trim() || streaming || !sessionId) return;
-    const text = input.trim();
+  const handleSendMessage = useCallback(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    const didSend = sendMessage(input);
+    if (!didSend) {
+      return;
+    }
+
     setInput('');
     void saveDraft(sessionId, '');
-    setStreaming(true);
-    setStreamBuffer('');
-
-    const userMsg: MobileChatMessage = { id: crypto.randomUUID(), role: 'user', content: text };
-    setMessages((prev) => [...prev, userMsg]);
-    void dbAppendMessage(sessionId, { id: userMsg.id, role: 'user', content: text });
-
-    let accumulated = '';
-    stream(sessionId, text, {
-      onDelta: (delta) => {
-        accumulated += delta;
-        setStreamBuffer(accumulated);
-      },
-      onDone: () => {
-        const assistantMsg: MobileChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: accumulated,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        void dbAppendMessage(sessionId, {
-          id: assistantMsg.id,
-          role: 'assistant',
-          content: accumulated,
-        });
-        setStreamBuffer('');
-        setStreaming(false);
-      },
-      onError: (code) => {
-        setMessages((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), role: 'assistant', content: `[Error: ${code}]` },
-        ]);
-        setStreamBuffer('');
-        setStreaming(false);
-      },
-    });
-  }, [input, streaming, sessionId, stream]);
-
-  const allItems: MobileChatMessage[] = streamBuffer
-    ? [...messages, { id: '__streaming__', role: 'assistant', content: streamBuffer }]
-    : messages;
+  }, [input, sendMessage, sessionId]);
 
   if (loadingHistory) {
     return (
@@ -170,7 +207,7 @@ export default function ChatScreen() {
     >
       <FlatList
         ref={flatListRef}
-        data={allItems}
+        data={renderedMessages}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.messageList}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
@@ -181,22 +218,8 @@ export default function ChatScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const isUser = item.role === 'user';
           const isStreaming = item.id === '__streaming__';
-          return (
-            <View
-              style={[
-                styles.bubble,
-                isUser ? styles.userBubble : styles.assistantBubble,
-                isStreaming && styles.streamingBubble,
-              ]}
-            >
-              <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
-                {item.content}
-                {isStreaming && <Text style={styles.cursor}>▋</Text>}
-              </Text>
-            </View>
-          );
+          return <ChatMessageBubble isStreaming={isStreaming} message={item} />;
         }}
       />
 
@@ -210,11 +233,11 @@ export default function ChatScreen() {
           multiline
           editable={!streaming}
           returnKeyType="send"
-          onSubmitEditing={sendMessage}
+          onSubmitEditing={handleSendMessage}
         />
         <TouchableOpacity
           style={[styles.sendButton, (!input.trim() || streaming) && styles.sendButtonDisabled]}
-          onPress={sendMessage}
+          onPress={handleSendMessage}
           disabled={!input.trim() || streaming}
         >
           {streaming ? (
@@ -235,36 +258,6 @@ const styles = StyleSheet.create({
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   emptyIcon: { fontSize: 32, color: '#6366f1', marginBottom: 10 },
   emptyText: { color: '#64748b', fontSize: 15 },
-  bubble: {
-    maxWidth: '80%',
-    borderRadius: 14,
-    padding: 12,
-    paddingHorizontal: 14,
-  },
-  userBubble: {
-    backgroundColor: '#6366f1',
-    alignSelf: 'flex-end',
-  },
-  assistantBubble: {
-    backgroundColor: '#1e293b',
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  streamingBubble: {
-    opacity: 0.85,
-  },
-  bubbleText: {
-    color: '#94a3b8',
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  userBubbleText: {
-    color: '#fff',
-  },
-  cursor: {
-    color: '#6366f1',
-  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',

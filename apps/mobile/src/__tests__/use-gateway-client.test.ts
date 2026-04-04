@@ -79,6 +79,31 @@ describe('MobileGatewayClient', () => {
     expect(payload['authorization']).toBeUndefined();
   });
 
+  it('includes structured mode fields in websocket payload when provided', () => {
+    const client = new MobileGatewayClient('http://localhost:3000', 'token-123');
+    client.connect('session-1', {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+    });
+    const ws = MockWebSocket.instances[0]!;
+
+    client.send('hello mobile', {
+      agentId: 'hephaestus',
+      dialogueMode: 'programmer',
+      yoloMode: true,
+    });
+    ws.emitOpen();
+
+    const payload = JSON.parse(ws.send.mock.calls[0]?.[0] ?? '{}') as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      agentId: 'hephaestus',
+      dialogueMode: 'programmer',
+      message: 'hello mobile',
+      yoloMode: true,
+    });
+  });
+
   it('emits task_update as mobile activity events', () => {
     const activities: Array<Record<string, unknown>> = [];
     const client = new MobileGatewayClient('http://localhost:3000', 'token-123');
@@ -111,6 +136,28 @@ describe('MobileGatewayClient', () => {
         output: '目录结构已分析完成。',
       },
     ]);
+  });
+
+  it('forwards thinking_delta chunks to onThinkingDelta', () => {
+    const thinkingDeltas: string[] = [];
+    const client = new MobileGatewayClient('http://localhost:3000', 'token-123');
+    client.connect('session-1', {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onThinkingDelta: (delta) => thinkingDeltas.push(delta),
+    });
+    const ws = MockWebSocket.instances[0]!;
+
+    ws.emitMessage({
+      type: 'thinking_delta',
+      delta: '先比较方案\n再确认边界',
+      itemId: 'item-1',
+      outputIndex: 0,
+      summaryIndex: 0,
+    });
+
+    expect(thinkingDeltas).toEqual(['先比较方案\n再确认边界']);
   });
 
   it('invokes onConnected when websocket opens', () => {

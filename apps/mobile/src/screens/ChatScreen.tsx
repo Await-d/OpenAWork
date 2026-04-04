@@ -13,20 +13,26 @@ import {
 import { useAuthStore } from '../store/auth';
 import { useGatewayClient } from '../hooks/useGatewayClient';
 import { createSessionsClient } from '@openAwork/web-client';
-import { extractRuntimeTextDelta } from '../chat-message-content.js';
+import {
+  buildChatStreamToken,
+  shouldApplyChatSessionMutation,
+  shouldApplyChatStreamMutation,
+} from '../hooks/chat-stream-guard.js';
 import type { AgentActivity } from '../components/AgentActivityPanel';
 import { AgentActivityPanel } from '../components/AgentActivityPanel';
 import { MobileVoiceRecorder } from '../components/MobileVoiceRecorder';
 import { MobileAttachmentBar } from '../components/MobileAttachmentBar';
 import type { MobileAttachmentItem } from '../components/MobileAttachmentBar';
-import type { DialogueMode } from '../components/DialogueModeSelector';
-import {
-  DialogueModeSelector,
-  applyDialogueModeToMessage,
-} from '../components/DialogueModeSelector';
+import type { DialogueMode } from '@openAwork/shared';
+import { DialogueModeSelector } from '../components/DialogueModeSelector';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { reconcileTaskActivities, upsertTaskActivity } from './chat-task-activities.js';
+import { reconcileTaskActivities } from './chat-task-activities.js';
+import {
+  buildChatScreenSessionResetState,
+  buildChatScreenStaleSendAbortState,
+} from './chat-screen-state.js';
+import { createChatScreenGuardedStreamHandlers } from './chat-screen-stream-handlers.js';
 
 interface Message {
   id: string;
@@ -62,23 +68,83 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const [artifactHistory, setArtifactHistory] = useState<MobileAttachmentItem[]>([]);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
   const listRef = useRef<FlatList>(null);
+  const isMountedRef = useRef(true);
+  const latestSessionIdRef = useRef(sessionId);
+  const streamRequestVersionRef = useRef(0);
+  const activeStreamTokenRef = useRef<string | null>(null);
   const hasRunningSubagents = activities.some(
     (activity) => activity.kind === 'subagent' && activity.status === 'running',
   );
   const taskSyncIntervalMs = sending || hasRunningSubagents ? 1800 : 10000;
+  const streamOptions = useMemo(() => ({ dialogueMode }), [dialogueMode]);
 
-  const syncTaskActivities = useCallback(async (): Promise<void> => {
-    if (!accessToken) {
-      return;
-    }
+  const applySessionResetState = useCallback(() => {
+    const resetState = buildChatScreenSessionResetState<
+      Message,
+      AgentActivity,
+      MobileAttachmentItem
+    >();
+    setHistoryLoading(resetState.historyLoading);
+    setMessages(resetState.messages);
+    setArtifactHistory(resetState.artifactHistory);
+    setActivities(resetState.activities);
+    setSending(resetState.sending);
+  }, []);
 
-    try {
-      const tasks = await sessionsClient.getTasks(accessToken, sessionId);
-      setActivities((prev) => reconcileTaskActivities(prev, tasks));
-    } catch (error) {
-      console.warn('Failed to sync mobile task activities', error);
-    }
-  }, [accessToken, sessionId, sessionsClient]);
+  const clearSendingAfterStaleAbort = useCallback(() => {
+    const nextState = buildChatScreenStaleSendAbortState({
+      activities,
+      artifactHistory,
+      historyLoading,
+      messages,
+      sending,
+    });
+    setSending(nextState.sending);
+  }, [activities, artifactHistory, historyLoading, messages, sending]);
+
+  useEffect(() => {
+    latestSessionIdRef.current = sessionId;
+    streamRequestVersionRef.current += 1;
+    activeStreamTokenRef.current = null;
+    applySessionResetState();
+  }, [applySessionResetState, sessionId]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      streamRequestVersionRef.current += 1;
+      activeStreamTokenRef.current = null;
+    };
+  }, []);
+
+  const canApplySessionMutation = useCallback(
+    (requestSessionId: string | undefined) =>
+      shouldApplyChatSessionMutation({
+        currentSessionId: latestSessionIdRef.current,
+        mounted: isMountedRef.current,
+        requestSessionId,
+      }),
+    [],
+  );
+
+  const syncTaskActivities = useCallback(
+    async (requestSessionId = sessionId): Promise<void> => {
+      if (!accessToken) {
+        return;
+      }
+
+      try {
+        const tasks = await sessionsClient.getTasks(accessToken, requestSessionId);
+        if (!canApplySessionMutation(requestSessionId)) {
+          return;
+        }
+        setActivities((prev) => reconcileTaskActivities(prev, tasks));
+      } catch (error) {
+        console.warn('Failed to sync mobile task activities', error);
+      }
+    },
+    [accessToken, canApplySessionMutation, sessionId, sessionsClient],
+  );
 
   useEffect(() => {
     void syncTaskActivities();
@@ -94,7 +160,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       if (cancelled) {
         return;
       }
-      await syncTaskActivities();
+      await syncTaskActivities(sessionId);
     };
 
     void sync();
@@ -106,44 +172,57 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [accessToken, syncTaskActivities, taskSyncIntervalMs]);
+  }, [accessToken, sessionId, syncTaskActivities, taskSyncIntervalMs]);
 
-  const loadArtifactHistory = useCallback(async () => {
-    if (!accessToken) return;
-    try {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/artifacts`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { artifacts?: ArtifactRecord[] };
-      setArtifactHistory(
-        [...(data.artifacts ?? [])]
-          .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
-          .map((artifact) => ({
-            id: artifact.id,
-            artifactId: artifact.id,
-            name: artifact.name,
-            mimeType: artifact.mimeType,
-            type: artifact.mimeType?.startsWith('image/')
-              ? 'image'
-              : artifact.mimeType?.startsWith('audio/')
-                ? 'audio'
-                : 'file',
-            sizeBytes: artifact.sizeBytes ?? 0,
-          })),
-      );
-    } catch (error) {
-      console.warn('Failed to load mobile artifact history', error);
-    }
-  }, [accessToken, gatewayUrl, sessionId]);
+  const loadArtifactHistory = useCallback(
+    async (requestSessionId = sessionId) => {
+      if (!accessToken) return;
+      try {
+        const res = await fetch(`${gatewayUrl}/sessions/${requestSessionId}/artifacts`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { artifacts?: ArtifactRecord[] };
+        if (!canApplySessionMutation(requestSessionId)) {
+          return;
+        }
+        setArtifactHistory(
+          [...(data.artifacts ?? [])]
+            .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
+            .map((artifact) => ({
+              id: artifact.id,
+              artifactId: artifact.id,
+              name: artifact.name,
+              mimeType: artifact.mimeType,
+              type: artifact.mimeType?.startsWith('image/')
+                ? 'image'
+                : artifact.mimeType?.startsWith('audio/')
+                  ? 'audio'
+                  : 'file',
+              sizeBytes: artifact.sizeBytes ?? 0,
+            })),
+        );
+      } catch (error) {
+        console.warn('Failed to load mobile artifact history', error);
+      }
+    },
+    [accessToken, canApplySessionMutation, gatewayUrl, sessionId],
+  );
 
   useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
+    applySessionResetState();
+    if (!accessToken) {
+      setHistoryLoading(false);
+      return;
+    }
+
+    const requestSessionId = sessionId;
     void (async () => {
       try {
-        const session = await createSessionsClient(gatewayUrl).get(accessToken, sessionId);
-        if (cancelled) return;
+        const session = await createSessionsClient(gatewayUrl).get(accessToken, requestSessionId);
+        if (!canApplySessionMutation(requestSessionId)) {
+          return;
+        }
         const msgs: Message[] = (session.messages ?? []).map((m) => ({
           id: (m as { id?: string }).id ?? `hist-${Math.random()}`,
           role: m.role === 'user' ? 'user' : 'assistant',
@@ -158,19 +237,26 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       } catch (error) {
         console.warn('Failed to load mobile chat history', error);
       } finally {
-        if (!cancelled) setHistoryLoading(false);
+        if (canApplySessionMutation(requestSessionId)) {
+          setHistoryLoading(false);
+        }
       }
     })();
-    void loadArtifactHistory();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, gatewayUrl, loadArtifactHistory, sessionId]);
+    void loadArtifactHistory(requestSessionId);
+  }, [
+    accessToken,
+    applySessionResetState,
+    canApplySessionMutation,
+    gatewayUrl,
+    loadArtifactHistory,
+    sessionId,
+  ]);
 
   const handleSend = useCallback(() => {
     void (async () => {
       const text = input.trim();
       if (!text || sending) return;
+      const requestSessionId = sessionId;
       const uploadedAttachmentLines: string[] = [];
       for (const attachment of attachments) {
         if (!attachment.uri || !accessToken) {
@@ -181,7 +267,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           const contentBase64 = await FileSystem.readAsStringAsync(attachment.uri, {
             encoding: FileSystem.EncodingType.Base64,
           });
-          const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/artifacts`, {
+          const res = await fetch(`${gatewayUrl}/sessions/${requestSessionId}/artifacts`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -211,11 +297,14 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           uploadedAttachmentLines.push(`- ${attachment.name} (${attachment.type}, 上传失败)`);
         }
       }
+      if (!canApplySessionMutation(requestSessionId)) {
+        return;
+      }
       const attachmentSummary =
         uploadedAttachmentLines.length > 0
           ? `\n\n[附件]\n${uploadedAttachmentLines.join('\n')}`
           : '';
-      const finalText = applyDialogueModeToMessage(dialogueMode, `${text}${attachmentSummary}`);
+      const requestMessage = `${text}${attachmentSummary}`;
 
       const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text };
       const assistantId = `a-${Date.now()}`;
@@ -231,108 +320,62 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
       setAttachments([]);
       setInput('');
       setSending(true);
-      await loadArtifactHistory();
+      await loadArtifactHistory(requestSessionId);
+      if (!canApplySessionMutation(requestSessionId)) {
+        clearSendingAfterStaleAbort();
+        return;
+      }
 
-      stream(sessionId, finalText, {
-        onConnected: () => {
-          void syncTaskActivities();
+      const requestVersion = streamRequestVersionRef.current + 1;
+      streamRequestVersionRef.current = requestVersion;
+      const requestToken = buildChatStreamToken(requestSessionId, requestVersion);
+      activeStreamTokenRef.current = requestToken;
+
+      const canApplyMutation = () =>
+        shouldApplyChatStreamMutation({
+          activeToken: activeStreamTokenRef.current,
+          callbackToken: requestToken,
+          currentSessionId: latestSessionIdRef.current,
+          mounted: isMountedRef.current,
+          requestSessionId,
+        });
+
+      const handlers = createChatScreenGuardedStreamHandlers<Message>({
+        assistantId,
+        canApplyMutation,
+        clearActiveStreamToken: () => {
+          activeStreamTokenRef.current = null;
         },
-        onDelta: (delta) => {
-          const safeDelta = extractRuntimeTextDelta(delta);
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + safeDelta } : m)),
-          );
-        },
-        onDone: () => {
-          void syncTaskActivities();
-          setActivities((prev) =>
-            prev.map((activity) =>
-              activity.kind !== 'subagent' && activity.status === 'running'
-                ? { ...activity, status: 'done' }
-                : activity,
-            ),
-          );
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
-          );
-          setSending(false);
+        requestSessionId,
+        scheduleScrollToBottom: () => {
           setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
         },
-        onError: (_code, message) => {
-          void syncTaskActivities();
-          setActivities((prev) =>
-            prev.map((activity) =>
-              activity.kind !== 'subagent' && activity.status === 'running'
-                ? { ...activity, status: 'error' }
-                : activity,
-            ),
-          );
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: `错误：${message}`, streaming: false } : m,
-            ),
-          );
-          setSending(false);
-        },
-        onActivity: (event) => {
-          setActivities((prev) => {
-            if (event.kind === 'tool_start') {
-              if (prev.some((activity) => activity.id === event.id)) {
-                return prev.map((activity) =>
-                  activity.id === event.id
-                    ? { ...activity, name: event.name, status: 'running' }
-                    : activity,
-                );
-              }
-              return [
-                ...prev,
-                {
-                  id: event.id,
-                  kind: 'tool',
-                  name: event.name,
-                  status: 'running',
-                },
-              ];
-            }
-
-            if (event.kind === 'task_update') {
-              return upsertTaskActivity(prev, {
-                id: event.id,
-                name: event.name,
-                status: event.status,
-                output: event.output,
-                assignedAgent: event.assignedAgent,
-                sessionId: event.sessionId,
-              });
-            }
-
-            return prev.map((activity) =>
-              activity.id === event.id
-                ? {
-                    ...activity,
-                    name: event.name,
-                    status: event.isError ? 'error' : 'done',
-                  }
-                : activity,
-            );
-          });
-        },
+        setActivities,
+        setMessages,
+        setSending,
+        syncTaskActivities,
       });
+
+      stream(requestSessionId, requestMessage, handlers, streamOptions);
     })();
   }, [
     accessToken,
     attachments,
-    dialogueMode,
+    canApplySessionMutation,
+    clearSendingAfterStaleAbort,
     gatewayUrl,
     input,
     loadArtifactHistory,
     sending,
     sessionId,
+    streamOptions,
     syncTaskActivities,
     stream,
   ]);
 
   const handleStop = useCallback(() => {
+    activeStreamTokenRef.current = null;
+    streamRequestVersionRef.current += 1;
     disconnect();
     void syncTaskActivities();
     setSending(false);

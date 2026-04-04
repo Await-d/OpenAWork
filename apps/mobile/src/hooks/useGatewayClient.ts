@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
-import type { RunEvent } from '@openAwork/shared';
-import { extractRuntimeTextDelta } from '../chat-message-content.js';
+import type { DialogueMode, RunEvent } from '@openAwork/shared';
+import { extractRuntimeTextDelta, extractRuntimeThinkingDelta } from '../chat-message-content.js';
 
 export type ActivityEvent =
   | { kind: 'tool_start'; id: string; name: string }
@@ -21,6 +21,13 @@ export type StreamHandlers = {
   onError: (code: string, message: string) => void;
   onConnected?: () => void;
   onActivity?: (event: ActivityEvent) => void;
+  onThinkingDelta?: (delta: string) => void;
+};
+
+export type StreamOptions = {
+  agentId?: string;
+  dialogueMode?: DialogueMode;
+  yoloMode?: boolean;
 };
 
 export class MobileGatewayClient {
@@ -65,6 +72,8 @@ export class MobileGatewayClient {
       if (!this.handlers) return;
       if (chunk.type === 'text_delta') {
         this.handlers.onDelta(extractRuntimeTextDelta(chunk.delta));
+      } else if (chunk.type === 'thinking_delta') {
+        this.handlers.onThinkingDelta?.(extractRuntimeThinkingDelta(chunk.delta));
       } else if (chunk.type === 'done') {
         this.handlers.onDone(chunk.stopReason);
       } else if (chunk.type === 'error') {
@@ -118,10 +127,15 @@ export class MobileGatewayClient {
     };
   }
 
-  send(message: string): void {
+  send(message: string, options: StreamOptions = {}): void {
+    const agentId = options.agentId?.trim() || undefined;
+    const dialogueMode = options.dialogueMode;
     const payload = JSON.stringify({
+      ...(agentId ? { agentId } : {}),
       clientRequestId: crypto.randomUUID(),
+      ...(dialogueMode ? { dialogueMode } : {}),
       message,
+      ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode } : {}),
     });
 
     if (!this.ws) {
@@ -162,12 +176,15 @@ export function useGatewayClient(gatewayUrl: string, token: string | null) {
     };
   }, [gatewayUrl, token]);
 
-  const stream = useCallback((sessionId: string, message: string, handlers: StreamHandlers) => {
-    const client = clientRef.current;
-    if (!client) return;
-    client.connect(sessionId, handlers);
-    client.send(message);
-  }, []);
+  const stream = useCallback(
+    (sessionId: string, message: string, handlers: StreamHandlers, options: StreamOptions = {}) => {
+      const client = clientRef.current;
+      if (!client) return;
+      client.connect(sessionId, handlers);
+      client.send(message, options);
+    },
+    [],
+  );
 
   const disconnect = useCallback(() => {
     clientRef.current?.disconnect();

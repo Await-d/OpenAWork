@@ -13,6 +13,7 @@ export interface LocalMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  reasoningBlocks?: string[];
 }
 
 let db: SQLite.SQLiteDatabase | null = null;

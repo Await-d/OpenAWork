@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { DialogueMode } from '@openAwork/shared';
 import {
   Modal,
   View,
@@ -8,37 +9,38 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 
-export type DialogueMode = 'clarify' | 'coding' | 'programmer';
+export type { DialogueMode };
+
+interface DialogueModeDefinition {
+  value: DialogueMode;
+  label: string;
+  icon: string;
+  desc: string;
+}
+
+const DIALOGUE_MODE_DEFINITIONS = [
+  {
+    value: 'clarify',
+    label: '澄清',
+    icon: '◎',
+    desc: '先基于已知事实厘清目标、约束和验收条件',
+  },
+  {
+    value: 'coding',
+    label: '编程',
+    icon: '⟨/⟩',
+    desc: '优先直接产出代码、命令和最小可运行实现',
+  },
+  {
+    value: 'programmer',
+    label: '程序员',
+    icon: '⌨',
+    desc: '以工程协作视角处理实现、修改、调试和验证',
+  },
+] satisfies readonly DialogueModeDefinition[];
 
 export const DIALOGUE_MODES: { value: DialogueMode; label: string; icon: string; desc: string }[] =
-  [
-    { value: 'clarify', label: '澄清', icon: '◎', desc: '先识别目标和约束，优先补充问题与边界' },
-    { value: 'coding', label: '编程', icon: '⟨/⟩', desc: '优先直接给出代码、函数和最小可运行实现' },
-    {
-      value: 'programmer',
-      label: '程序员',
-      icon: '⌨',
-      desc: '以程序员协作模式，优先给实现思路和代码建议',
-    },
-  ];
-
-export function buildDialogueModePrompt(mode: DialogueMode): string {
-  switch (mode) {
-    case 'clarify':
-      return '【对话模式：澄清】\n如果用户目标、约束、环境或验收条件不清晰，请先澄清关键缺口，再给出后续建议。\n优先帮助用户厘清问题，而不是直接跳到实现。';
-    case 'programmer':
-      return '【对话模式：程序员】\n请以程序员协作模式回答，优先给出实现思路、代码修改建议、调试步骤和可执行方案。\n默认面向工程实现，不必先做泛泛解释。';
-    case 'coding':
-      return '【对话模式：编程】\n请优先直接给出代码、函数、命令、脚本或最小可运行实现。\n除非必要，不要先给大段泛化背景。';
-    default:
-      return '';
-  }
-}
-
-export function applyDialogueModeToMessage(mode: DialogueMode, text: string): string {
-  const prompt = buildDialogueModePrompt(mode);
-  return prompt ? `${prompt}\n\n${text}` : text;
-}
+  DIALOGUE_MODE_DEFINITIONS.map(({ value, label, icon, desc }) => ({ value, label, icon, desc }));
 
 interface DialogueModeSelectorProps {
   mode: DialogueMode;
