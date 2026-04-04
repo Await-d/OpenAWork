@@ -771,3 +771,14 @@ export interface ToolCallTraceEntry extends ToolCallTraceKey, ToolCallObservabil
   /** 工具调用发生的毫秒时间戳（来源：session_run_events.occurred_at_ms）*/
   occurredAt?: number;
 }
+
+export {
+  buildReasoningBlockKey,
+  cleanReasoningInlineText,
+  extractReasoningHeading,
+  extractReasoningPreview,
+  getReasoningHint,
+  getReasoningLabel,
+  REASONING_COLOR_TOKENS,
+  REASONING_UI_TOKENS,
+} from './reasoning-ui.js';
