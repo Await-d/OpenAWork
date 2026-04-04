@@ -1,4 +1,4 @@
-import type { RunEvent } from '@openAwork/shared';
+import type { DialogueMode, RunEvent } from '@openAwork/shared';
 
 export type GatewayStreamEvent = RunEvent;
 
@@ -7,9 +7,12 @@ export type StreamEventHandler = (event: GatewayStreamEvent) => void;
 export type StreamChunkHandler = StreamEventHandler;
 
 export interface SendMessageOptions {
+  agentId?: string;
   clientRequestId?: string;
+  dialogueMode?: DialogueMode;
   model?: string;
   temperature?: number;
+  yoloMode?: boolean;
 }
 
 export class GatewayWebSocketClient {
@@ -54,11 +57,15 @@ export class GatewayWebSocketClient {
 
   send(message: string, options: SendMessageOptions = {}): void {
     const clientRequestId = options.clientRequestId ?? crypto.randomUUID();
+    const agentId = options.agentId?.trim() || undefined;
     const payload = JSON.stringify({
+      ...(agentId ? { agentId } : {}),
       clientRequestId,
+      ...(options.dialogueMode ? { dialogueMode: options.dialogueMode } : {}),
       message,
       model: options.model ?? 'default',
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode } : {}),
     });
 
     if (!this.ws) return;

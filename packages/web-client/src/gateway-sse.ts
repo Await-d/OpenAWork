@@ -14,13 +14,17 @@ export class GatewaySSEClient {
   connectAndStream(sessionId: string, message: string, options: SendMessageOptions = {}): void {
     this.es?.close();
     const clientRequestId = options.clientRequestId ?? crypto.randomUUID();
+    const agentId = options.agentId?.trim() || undefined;
 
     const params = new URLSearchParams({
+      ...(agentId ? { agentId } : {}),
       clientRequestId,
+      ...(options.dialogueMode ? { dialogueMode: options.dialogueMode } : {}),
       message,
       model: options.model ?? 'default',
       token: this.token,
       ...(options.temperature !== undefined ? { temperature: String(options.temperature) } : {}),
+      ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode ? '1' : '0' } : {}),
     });
 
     this.es = new EventSource(

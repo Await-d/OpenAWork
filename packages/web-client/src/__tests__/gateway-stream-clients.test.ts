@@ -85,10 +85,23 @@ describe('GatewayWebSocketClient', () => {
     const ws = MockWebSocket.instances[0]!;
 
     ws.emitOpen();
-    client.send('hello', { model: 'gpt-4o', temperature: 0.3 });
+    client.send('hello', {
+      agentId: 'hephaestus',
+      dialogueMode: 'programmer',
+      model: 'gpt-4o',
+      temperature: 0.3,
+      yoloMode: true,
+    });
 
     const payload = JSON.parse(ws.send.mock.calls[0]?.[0] ?? '{}') as Record<string, unknown>;
-    expect(payload).toMatchObject({ message: 'hello', model: 'gpt-4o', temperature: 0.3 });
+    expect(payload).toMatchObject({
+      agentId: 'hephaestus',
+      dialogueMode: 'programmer',
+      message: 'hello',
+      model: 'gpt-4o',
+      temperature: 0.3,
+      yoloMode: true,
+    });
     expect(typeof payload['clientRequestId']).toBe('string');
   });
 
@@ -148,14 +161,22 @@ describe('GatewayWebSocketClient', () => {
 describe('GatewaySSEClient', () => {
   it('connects with token in the sse query string', () => {
     const client = new GatewaySSEClient('http://localhost:3000', 'token-123');
-    client.connectAndStream('session-1', 'hello', { model: 'gpt-4o' });
+    client.connectAndStream('session-1', 'hello', {
+      agentId: 'sisyphus-junior',
+      dialogueMode: 'coding',
+      model: 'gpt-4o',
+      yoloMode: true,
+    });
 
     const url = new URL(MockEventSource.instances[0]?.url ?? 'http://localhost');
     expect(url.pathname).toBe('/sessions/session-1/stream/sse');
+    expect(url.searchParams.get('agentId')).toBe('sisyphus-junior');
+    expect(url.searchParams.get('dialogueMode')).toBe('coding');
     expect(url.searchParams.get('message')).toBe('hello');
     expect(url.searchParams.get('model')).toBe('gpt-4o');
     expect(url.searchParams.get('token')).toBe('token-123');
     expect(url.searchParams.get('clientRequestId')).toBeTruthy();
+    expect(url.searchParams.get('yoloMode')).toBe('1');
   });
 
   it('dispatches stream chunks and closes on done', () => {
