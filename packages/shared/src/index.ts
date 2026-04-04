@@ -579,6 +579,7 @@ export interface StreamTaskUpdateChunk {
   result?: string;
   errorMessage?: string;
   reason?: string;
+  effectiveDeadline?: number;
   sessionId?: string;
   parentTaskId?: string;
   parentSessionId?: string;
