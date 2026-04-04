@@ -53,25 +53,25 @@
 
 ### Phase 1：lsp-client 与 contract 接线
 
-- [ ] T-03：在 `packages/lsp-client` 补齐 call hierarchy 相关 capability、types 与请求方法
-- [ ] T-04：在 `packages/agent-core` 补齐 call hierarchy schema / metadata / exports
+- [x] T-03：在 `packages/lsp-client` 补齐 call hierarchy 相关 capability、types 与请求方法
+- [x] T-04：在 `packages/agent-core` 补齐 call hierarchy schema / metadata / exports
 
 ### Phase 2：gateway tool surface 暴露
 
-- [ ] T-05：在 `services/agent-gateway/src/lsp-tools.ts` 实现 call hierarchy 工具定义与输出格式化
-- [ ] T-06：在 `tool-definitions.ts`、`tool-sandbox.ts`、`session-tool-visibility.ts` 补齐 call hierarchy tool surface
-- [ ] T-07：在 `stream-system-prompts.ts` 增补 call hierarchy guidance
+- [x] T-05：在 `services/agent-gateway/src/lsp-tools.ts` 实现 call hierarchy 工具定义与输出格式化
+- [x] T-06：在 `tool-definitions.ts`、`tool-sandbox.ts`、`session-tool-visibility.ts` 补齐 call hierarchy tool surface
+- [x] T-07：在 `stream-system-prompts.ts` 增补 call hierarchy guidance
 
 ### Phase 3：测试与验证
 
-- [ ] T-08：扩展相关单测（tool-definitions / capabilities / capabilities-routes / session-tool-visibility / stream-system-prompts）
-- [ ] T-09：扩展 `verify-lsp-tools.ts`，覆盖 call hierarchy 正向链与空结果 fallback
-- [ ] T-10：运行 diagnostics、targeted vitest、`verify-lsp-tools.ts`、相关 build
+- [x] T-08：扩展相关单测（tool-definitions / capabilities / capabilities-routes / session-tool-visibility / stream-system-prompts）
+- [x] T-09：扩展 `verify-lsp-tools.ts`，覆盖 call hierarchy 正向链与空结果 fallback
+- [x] T-10：运行 diagnostics、targeted vitest、`verify-lsp-tools.ts`、相关 build
 
 ### Phase 4：文档收口与复核
 
-- [ ] T-11：同步 `.agentdocs/index.md` 与当前 workflow 状态
-- [ ] T-12：Oracle 只读复核并决定是否归档本 workflow
+- [x] T-11：同步 `.agentdocs/index.md` 与当前 workflow 状态
+- [x] T-12：Oracle 只读复核并决定是否归档本 workflow
 
 ## Notes
 
@@ -90,3 +90,11 @@
   - 查询前统一 `touch(true)`
   - `CallHierarchyItem.data` 必须作为 opaque payload 原样透传给 incoming/outgoing，禁止自行重建中间对象
   - v1 只做单跳 call hierarchy，不扩成递归树或 UI drill-down
+- 当前主线程验证已通过：
+  - 相关修改文件 diagnostics 全绿
+  - `stream-system-prompts.test.ts`、`tool-definitions.test.ts`、`capabilities.test.ts`、`capabilities-routes.test.ts`、`session-tool-visibility.test.ts` 通过
+  - `verify-lsp-tools.ts` 已覆盖 `lsp_call_hierarchy` 正向链、prepare 空结果、单方向空结果与 opaque item 透传
+  - `@openAwork/lsp-client`、`@openAwork/agent-core`、`@openAwork/agent-gateway` build 通过
+  - 额外修复了两个阻塞 `agent-gateway build` 的现存类型问题：`stream-attach-route.test.ts` 的 JWT mock 结构与 `stream-routes-plugin.ts` 的 logging payload 标量类型
+- Oracle 复核结论：当前 `lsp_call_hierarchy` 的单工具设计、协议层接线、tool surface、sandbox、visibility、prompt guidance、verification 与文档状态均已闭环，工作流可归档。
+- Memory sync: completed

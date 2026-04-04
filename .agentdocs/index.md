@@ -2,7 +2,7 @@
 
 ## 活跃工作流
 
-- [260404-lsp-call-hierarchy-分阶段实施](./workflow/260404-lsp-call-hierarchy-分阶段实施.md) — richer LSP 在 implementation 归档后继续推进下一条 follow-up：正式接入 call hierarchy，并先冻结 tool 设计与验证边界
+- [260404-lsp-language-server-coverage-docker-生态第二阶段实施](./workflow/260404-lsp-language-server-coverage-docker-生态第二阶段实施.md) — richer LSP 在 Dockerfile coverage 之后，继续推进 Docker 生态第二阶段 coverage：Compose / Bake gateway-side server coverage 与受控文件名匹配
 - [260404-子代理超时调整方案](./workflow/260404-子代理超时调整方案.md) — 子代理 child session timeout / deadline 详细调整方案：聚焦 gateway 最小闭环、统一终结原因、父会话回流、Web/Mobile 可见性与 DAG 后续演进
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
@@ -14,6 +14,19 @@
 
 ## 归档工作流（已完成）
 
+- [260404-chat-真实端到端验收实施](./workflow/done/260404-chat-真实端到端验收实施.md) — 已完成真实 gateway 驱动的 Chat 刷新恢复浏览器 E2E：real web + real gateway + mock upstream，覆盖发送、刷新、attach 恢复与最终消息落定
+- [260404-chat-浏览器续流最终落定实施](./workflow/done/260404-chat-浏览器续流最终落定实施.md) — 已完成刷新恢复最终落定验收分层：浏览器层保留恢复体验，最终消息落定转由 `ChatPage` 回归稳定覆盖
+- [260404-chat-浏览器续流验收实施](./workflow/done/260404-chat-浏览器续流验收实施.md) — 已完成 Chat 刷新恢复的浏览器层验收：新增 Playwright 用例验证恢复中的流内容、运行态提示与停止控制
+- [260404-chat-续流验收强化](./workflow/done/260404-chat-续流验收强化.md) — 已完成 Chat attach 恢复的 gateway 级自动化验收接线：新增 `verify-stream-attach-recovery.ts` 并纳入 `test:durable`
+- [260404-chat-真正续流phase2b实施](./workflow/done/260404-chat-真正续流phase2b实施.md) — 已完成 Chat Phase 2B 竞态收口：attach 路径采用 buffer-live-then-replay，收紧 replay/live 窗口并通过 gateway 回归验证
+- [260404-chat-真正续流phase2a实施](./workflow/done/260404-chat-真正续流phase2a实施.md) — 已完成 Chat Phase 2A 真正续流实施：active-stream handshake、attach-only SSE、Web attach-first 恢复、Oracle 修正与全链路验证
+- [260404-chat-真正续流resume协议设计](./workflow/done/260404-chat-真正续流resume协议设计.md) — 已完成 Chat 从“快照恢复展示”演进到“真正 resume / reattach 协议”的二阶段技术设计，明确 attach-only SSE、`clientRequestId + seq` cursor、前端恢复顺序与验证矩阵
+- [260404-lsp-language-server-coverage-bash-实施](./workflow/done/260404-lsp-language-server-coverage-bash-实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `bash-language-server start`，在不扩散到 fish/powershell/shellcheck/shfmt 的前提下，让既有 LSP 工具对 `.sh/.bash/.zsh` 真正可用
+- [260404-lsp-language-server-coverage-dockerfile-实施](./workflow/done/260404-lsp-language-server-coverage-dockerfile-实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `docker-language-server start --stdio`，并通过 filename-based server matching 让既有 LSP 工具对 Dockerfile 真正可用
+- [260404-lsp-language-server-coverage-yaml-实施](./workflow/done/260404-lsp-language-server-coverage-yaml-实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `yaml-language-server`，在不扩散到 eslint/docker/bash 或 YAML schema-store 深配置的前提下，让既有 LSP 工具对 YAML 真正可用
+- [260404-lsp-language-server-coverage-第二轮实施](./workflow/done/260404-lsp-language-server-coverage-第二轮实施.md) — 已完成 richer LSP 的第二轮 coverage 扩展：gateway-side 现已补齐 `vscode-json-language-server`、`vscode-html-language-server`、`vscode-css-language-server`，在不扩散到 eslint/yaml/docker/bash 的前提下，让既有 LSP 工具对 JSON / HTML / CSS 真正可用
+- [260404-lsp-language-server-coverage-扩展实施](./workflow/done/260404-lsp-language-server-coverage-扩展实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `rust-analyzer`，在不扩散到 eslint/biome 等非目标 server 的前提下，让既有 LSP 工具对 Rust 真正可用
+- [260404-lsp-call-hierarchy-分阶段实施](./workflow/done/260404-lsp-call-hierarchy-分阶段实施.md) — 已完成 richer LSP 的下一条 follow-up：`lsp_call_hierarchy` 作为单工具高层封装已补齐 lsp-client 协议层、agent-core contract、gateway tool surface、sandbox、session visibility、prompt guidance 与 verification
 - [260404-lsp-implementation-最小增量实施](./workflow/done/260404-lsp-implementation-最小增量实施.md) — 已完成 richer LSP 下一条最小增量：`lsp_goto_implementation` 已补齐 lsp-client capability/request、agent-core contract、gateway tool surface、sandbox、session visibility、prompt guidance 与 verification
 - [260404-lsp-后续路线评估](./workflow/done/260404-lsp-后续路线评估.md) — 已完成 implementation / call hierarchy / language server coverage 三条 richer LSP follow-up 路线评估；结论为 implementation 作为下一条最小增量优先推进
 - [260404-lsp-hover-轻量增强实施](./workflow/done/260404-lsp-hover-轻量增强实施.md) — 已完成 richer LSP 的最小 follow-up：`lsp_hover` 已补齐 agent-core/gateway tool surface、sandbox、session visibility、targeted tests 与 `verify-lsp-tools.ts` 验证，范围保持为 hover-only
@@ -43,7 +56,24 @@
 
 ## Architecture Decisions
 
-- [2026-04-04] OpenAWork richer LSP 当前正式支持面已扩展为 **definition / implementation / references / symbols / prepareRename / rename / hover / diagnostics / touch**；其中 call hierarchy、language server coverage 扩展与 status/event/UI diagnostics 继续延后到独立工作流。
+- [2026-04-04] Chat attach 路径在 Phase 2B 收敛为 **buffer-live-then-replay**：先订阅、在 replay 期间缓冲匹配 request 的 live 事件，再按 `seq` 去重并顺序冲刷；不额外引入前端协议变更，优先在 gateway attach route 内部消掉 replay→subscribe 的竞态窗口。
+- [2026-04-04] T-06 的首批搜索收口采用 **SQLite FTS5 + gateway `/sessions/search` + Layout Cmd+K 动态结果注入**：先把会话全文搜索与统一命令面板打通，保留标签系统、suggestions、向量检索到后续迭代，而不是一开始就引入更重的检索栈。
+- [2026-04-04] T-03 的首批产品化收口采用 **复用现有会话文件快照 + 工作区改动审阅链路**：以 `SessionsPage` 详情页中的 `restore/preview`、`restore/apply` 与 `FileChangeReviewPanel` 作为 MVP 主入口，先满足“预览 + 接受/还原/应用”闭环，再决定是否后续扩展到聊天主线程中的 proposal 模型。
+- [2026-04-05] T-04 的首批产品化收口采用 **复用 `session_run_events` + ChatPage 右侧 `viz` tab**：以 `AgentDAGGraph + AgentVizPanel + run-event 投影` 作为 MVP 时间线主入口，先满足“执行路径 + 活动事件 + 子代理/权限状态可视化”，DAG 实时布局、性能图和更细粒度 span 继续后续扩展。
+- [2026-04-04] T-08/T-12 的首批产品化收口采用 **先开放真实 Web 入口，再复用既有 gateway route + shared-ui 组件做 MVP**：`/workflows` 先接模板库 + 画布 + 模板保存/删除，`/team` 先接成员/任务/消息协作工作台；深层执行、审批和共享权限继续在后续迭代扩展，而不是等全量能力齐备才开放入口。
+- [2026-04-04] Chat 真正续流的二阶段演进采用 **attach-only SSE + request-scoped `RunEventCursor(clientRequestId, seq)`**：现有 `/stream` 与 `/stream/sse` 继续只负责“发起新请求”，刷新/重连后的 resume 通过独立 attach 通道完成；一阶段 `session.runEvents` 快照恢复展示保留为降级兜底层，而不是被替换掉。
+- [2026-04-04] OpenAWork 的 call hierarchy 对外 surface 采用 **单个高层读工具 `lsp_call_hierarchy`**，内部再编排 `prepareCallHierarchy / incomingCalls / outgoingCalls` 三步协议；不要把协议镜像步骤直接暴露给模型，以免 `CallHierarchyItem.data` 这类 opaque payload 在多轮中被错误传递。
+- [2026-04-04] OpenAWork richer LSP 当前正式支持面已扩展为 **definition / implementation / references / symbols / prepareRename / rename / hover / call hierarchy / diagnostics / touch**；其中更多 language server coverage 扩展与 status/event/UI diagnostics 继续延后到独立工作流。
+
+- [2026-04-04] gateway-side language server coverage 采用 **incremental parity**：先将 Tauri 侧已验证的 `rust-analyzer` 最小引入 `packages/lsp-client/src/server.ts` / `ALL_SERVERS`，暂不把 `eslint` / `biome` 等更易引入额外诊断噪音的 server 一并带入。
+
+- [2026-04-04] gateway-side language server coverage 第二轮继续采用 **low-noise extracted servers**：优先引入 `vscode-json-language-server`、`vscode-html-language-server`、`vscode-css-language-server` 这类与前端/配置文件高频场景直接相关、且不强绑定额外 lint 诊断语义的 server；`vscode-eslint-language-server` 继续延后。
+
+- [2026-04-04] YAML coverage 继续采用 **standalone server-only** 策略：只接入 `yaml-language-server --stdio` 的 gateway-side parity，不顺带启用 schema-store、CRD store 或额外 telemetry 流转，以避免把单纯 coverage 扩展放大成网络/配置策略工程。
+
+- [2026-04-04] Dockerfile coverage 需要 **filename-based server matching**：仅靠扩展名无法命中 `Dockerfile`，因此 `findServerForFile()` 必须同时支持 basename 命中，才能让 `docker-language-server start --stdio` 真正生效；Compose / Bake 仍保持后续独立工作流。
+
+- [2026-04-04] Bash coverage 继续采用 **shellscript-only** 策略：只接入 `bash-language-server start` 的 gateway-side parity，覆盖 `.sh/.bash/.zsh`，不把 `fish`、`powershell`、shellcheck、shfmt 或更深的 lint/format 配置一并带入。
 
 - [2026-04-04] `textDocument/implementation` 是 hover 之后的最小增量 follow-up：它与现有 `definition` 协议形状同构、接线与验证成本最低且能显著提升接口/抽象类型场景；call hierarchy 与 language server coverage 延后到独立工作流。
 
@@ -167,6 +197,15 @@
 
 ## Known Pitfalls
 
+- [2026-04-05] 做真实 gateway 驱动的流式浏览器 E2E 时，mock upstream 只要 SSE 分隔符少一个空行，就会在 gateway 里表现成 `PARSE_ERROR: Failed to parse upstream stream chunk`；这类问题看起来像前端或 attach 故障，实际是上游流格式不合法。
+- [2026-04-04] 想把 Chat attach 的所有细节一次性塞进 Playwright 浏览器层时，最容易踩到 EventSource 与 reload 的时序不稳定；更可靠的做法是：浏览器层验“恢复体验”，`ChatPage` 回归验“最终消息落定”，gateway verification / hook tests 继续兜底协议细节。
+- [2026-04-04] 浏览器层验证 Chat 续流时，不要把所有 attach 协议细节都压进 Playwright 对 EventSource 的 mock；更稳定的做法是：浏览器层断言用户可见恢复体验，attach wire / cursor / replay 次序交给 gateway verification、hook tests 和 route tests 兜底。
+- [2026-04-04] Chat attach 恢复若只有 route unit test 和前端回归，没有一条真实 Fastify + in-memory DB 的 verification，很容易把“协议层能跑”误判成“gateway 验收已覆盖”；当前已用 `verify-stream-attach-recovery.ts` 把它纳入 `test:durable`。
+- [2026-04-04] attach 路径若采用“先 replay 后 subscribe”，会在两步之间留下真实漏事件窗口；但改成 buffer-live-then-replay 后，又必须确保 `listSessionRunEventsByRequestAfterSeq` 按 `seq` 升序返回，否则去重+冲刷逻辑会把低序号回放误判为已送达。
+- [2026-04-04] 给会话搜索补 FTS 时，不能只索引 `session_messages` 现存行就认为完成：像 `/sessions/import` 这类只写 `sessions.messages_json` 的 legacy/imported 会话，如果搜索前不做惰性水合，就会出现“会话可见但全文搜索命中为空”的假失败。
+- [2026-04-04] 做竞品差异化能力时，最容易出现“后端表 / 路由 / shared-ui 组件都在，于是误判功能已完成”的假闭环；如果 `apps/web/src/App.tsx` 仍把 `/workflows`、`/team` 之类入口直接 `Navigate` 回 `/chat`，用户实际上依然无法使用该能力。
+- [2026-04-04] attach-only SSE 落地时，服务端与浏览器事件模型必须严格对齐：如果服务端显式写 `event: run`，客户端就不能只靠 `EventSource.onmessage`；同时 `afterSeq` 不能盲用服务端 `lastSeq`，应优先使用客户端已见 seq，否则快照→attach 窗口会漏增量。
+- [2026-04-04] 给 Chat 加真正续流时，不能把 attach 逻辑直接塞进现有 `/sessions/:id/stream/sse` 这类“创建请求”路由；该路由天然携带 `message/clientRequestId` 创建语义，重连时会有重复发送风险。正确做法是新增 attach-only 通道，并把 cursor 真相源固定在 `session_run_events(session_id + client_request_id + seq)` 上。
 - [2026-04-04] 给 OpenAWork 增加新 LSP 能力时，不能只在 gateway 暴露新 tool；`packages/lsp-client/src/client.ts` 的 `initialize.capabilities` 也必须同步声明，否则 implementation / call hierarchy 这类能力在部分语言服务器上可能根本不会启用。
 
 - [2026-04-04] richer LSP 新工具即使已经通过 `tool-definitions`、`capabilities`、`verify-lsp-tools.ts` 和 build，也仍可能在真实执行时因为 `services/agent-gateway/src/tool-sandbox.ts` 漏掉 import / allowlist / `sandbox.register(...)` 而断链；新增工具时必须把 sandbox 纳入专项复核清单。
