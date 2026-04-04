@@ -2,53 +2,50 @@
 
 ## 活跃工作流
 
-
-- [260403-lsp-自动使用集成方案](./workflow/260403-lsp-自动使用集成方案.md) — 为 OpenAWork 规划 opencode 风格 LSP 能力集成与自动使用修复方案，聚焦 tool surface、session visibility、prompt guidance、fallback 与验证矩阵
-
-
-
-- [260403-三仓对话模式提示词对比](./workflow/260403-三仓对话模式提示词对比.md) — 对比 `temp/opencode`、`temp/oh-my-opencode`、`temp/OpenCowork` 中模式提示词/agent prompt 配置方式，重点抽取 OpenCowork 的可借鉴机制并回看当前 OpenAWork 三种模式的改造空间
-
-
-- [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout
-
-- [260331-聊天刷新恢复与运行控制方案](./workflow/260331-聊天刷新恢复与运行控制方案.md) — 为 Chat 对话页冻结“待发队列持久化 + 刷新后运行控制恢复 + stopCapability 三态 + UI 明示可控性”的正式实施方案，优先解决刷新后队列丢失与无法管理 running 会话的问题
-
-- [260331-claude-code-工具环境并行实施](./workflow/260331-claude-code-工具环境并行实施.md) — 按五人并行方案正式启动 Claude Code 风格工具环境接入实施，采用子开发流分工、每个小功能完成即复查与 git 提交，并把每对话文件变更记录与日志闭环作为强制交付项
-
-- [260331-claude-code-五人并行开发方案](./workflow/260331-claude-code-五人并行开发方案.md) — 基于已冻结的 Claude Code 风格工具环境接入方案，按 `tool-definitions / stream / tool-sandbox / session metadata / capabilities / tests` 五条主线设计五人可并行推进的详细实施计划、依赖 DAG 与阶段验收策略
-
-- [260331-手机端功能补全方案](./workflow/260331-手机端功能补全方案.md) — 修复 P0 Bug（AppNavigator 登录跳转/token 过期写入/Host 模式 URL/历史消息加载）并接通已有但未挂载的 AgentActivityPanel/MobileVoiceRecorder/MobileAttachmentBar/DialogueModeSelector 组件
-
-- [260330-agent-gateway云端部署方案](./workflow/260330-agent-gateway云端部署方案.md) — 将 agent-gateway 升级为可独立云端部署的生产级服务：新建 Dockerfile、接入真实 Redis、安全加固（JWT/CORS/Admin 默认值）、CloudWorkerConnection stub 收口、Desktop 云端引导对齐，附完整 cloud-deployment.md 文档
-
-
-- [260329-全工具特殊功能子代理模型复审方案](./workflow/260329-全工具特殊功能子代理模型复审方案.md) — 再次对照 `temp/opencode` 与 `temp/oh-my-openagent`，复审当前仓库的全部工具、特殊功能使用方式与子代理模型路由是否一致，并继续收口残余关键偏差
-
-- [260329-子代理工具提示词完全对齐方案](./workflow/260329-子代理工具提示词完全对齐方案.md) — 对照 `temp/opencode` 与 `temp/oh-my-openagent`，继续审查并收敛子代理功能、基础工具定义与提示词/系统提示词，使使用方式、源定义与关键约束尽可能完全一致
-
-- [260329-前两天功能恢复补全](./workflow/260329-前两天功能恢复补全.md) — 恢复 2026-03-27 与 2026-03-28 两天内确认的 1–7 条功能线，覆盖聊天运行态、子代理任务链路、设置能力、会话关系、HTML/TSX/file preview 与页面切换体验
+- [260404-lsp-call-hierarchy-分阶段实施](./workflow/260404-lsp-call-hierarchy-分阶段实施.md) — richer LSP 在 implementation 归档后继续推进下一条 follow-up：正式接入 call hierarchy，并先冻结 tool 设计与验证边界
+- [260404-子代理超时调整方案](./workflow/260404-子代理超时调整方案.md) — 子代理 child session timeout / deadline 详细调整方案：聚焦 gateway 最小闭环、统一终结原因、父会话回流、Web/Mobile 可见性与 DAG 后续演进
+- [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
+- [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
+- [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout（方案已冻结，全部 19 项待实施）
+- [260331-claude-code-工具环境并行实施](./workflow/260331-claude-code-工具环境并行实施.md) — 按五人并行方案正式启动 Claude Code 风格工具环境接入实施（基础工具已完成，profile/surface/sandbox/stream/observability 层待实施）
+- [260331-claude-code-五人并行开发方案](./workflow/260331-claude-code-五人并行开发方案.md) — 五条主线详细实施计划、依赖 DAG 与阶段验收策略（规划完成，Dev-1~Dev-5 共 47 项开发任务待执行）
+- [260330-agent-gateway云端部署方案](./workflow/260330-agent-gateway云端部署方案.md) — 将 agent-gateway 升级为可独立云端部署的生产级服务（Mobile 端已完成，服务端基础设施/安全/Desktop/Web/文档共 14 项待实施）
+- [260404-竞品差异化功能方案](./workflow/260404-竞品差异化功能方案.md) — ✅ 已完成全部 12 个竞品差异化功能详细技术方案（P0×3 + P1×4 + P2×5），含完整数据模型、API 设计、前端组件、实施阶段和验证矩阵
 
 ## 归档工作流（已完成）
 
-- [260403-变更记录功能收口实施](./workflow/done/260403-变更记录功能收口实施.md) — 已完成把 Sessions 页面补齐为会话级 file changes / snapshots / restore 的产品入口，同时把 `SessionsPage.tsx` 拆回文件体积限制内，并通过页面测试、gateway 断言、LSP、typecheck 与 web build 验证
-- [260403-自动压缩二期实施](./workflow/done/260403-自动压缩二期实施.md) — OpenAWork 自动压缩二期已完成：metadata-backed `compactionMemory` 已接入 gateway 主模型输入链与 `/compact`，按 `coveredUntilMessageId` 做增量归并，并在 omitted history 已被覆盖时复用 durable summary 而不重复触发新一轮压缩
-- [260403-操作电脑语音github工作流集成](./workflow/done/260403-操作电脑语音github工作流集成.md) — 已完成把桌面自动化工具面、Web/Desktop 语音输入闭环，以及 GitHub trigger 的 owner 归属与后台执行主链收口为最小可用产品能力
-- [260403-自动压缩一期实施](./workflow/done/260403-自动压缩一期实施.md) — OpenAWork 自动压缩一期已完成：gateway 主模型输入链现会在固定安全窗口裁切前自动注入 compact boundary + 结构化 summary，并把 command-card/assistant_event UI artifact 从模型上下文中隔离
-- [260402-对话模式默认agent方案](./workflow/done/260402-对话模式默认agent方案.md) — 为聊天对话引入“模式派生默认 agent + 用户手动覆盖优先”的正式实施方案已完成落地：Gateway/Web/Mobile Phase 1 协议链与优先级合同已接通，相关测试、类型检查、构建与 Oracle 复核均已通过
-- [260402-对话级文件变更记录保障融合方案](./workflow/done/260402-对话级文件变更记录保障融合方案.md) — 对话级文件变更保障主线已全量完成：从 SQLite 单一真相源、备份层、restore preview/apply、UI 读模型，到 WS-6 的验证矩阵、rollout gate 与 runbook 均已落地并验证
-- [260402-任务使用链与完成回调收口](./workflow/done/260402-任务使用链与完成回调收口.md) — 继续按当前 fusion-native/reference way 收口 task 使用链、任务完成回调与多端消费差异：`packages/web-client` 已统一消费 `RunEvent`，mobile 已接通 task 快照恢复与 `task_update` 可见性，gateway 的 task parent auto-resume 也已按参考语义启用并通过专项验收
-- [260402-usage持久化回归修复](./workflow/done/260402-usage持久化回归修复.md) — 按既有 usage 方案设计修复 `verify-openai-responses.ts` 的 usage persistence 回归：`runModelRound` 现向上返回 round usage，`stream.ts`/`stream-runtime.ts` 已恢复 `usage_records` 月度写入，`agent-gateway` 全量测试重新通过
-- [260402-opencode-claude-任务体系修复收口](./workflow/done/260402-opencode-claude-任务体系修复收口.md) — 修复 OpenCode/Claude 任务体系主线的 shared/gateway 合同断裂、replay/bookend durable replay 判定与 session runtime state 测试漂移；相关类型检查、构建与定点验证已恢复为绿，完整 gateway 套件仍受 usage 链路的现有失败阻塞
-- [260402-opencode-claude-任务体系完成度核查](./workflow/done/260402-opencode-claude-任务体系完成度核查.md) — 对 `260401-opencode-claude-任务体系完整融合方案` 做仓库级完成度审计后确认：当前工作树并非“全部完成”，主要反证为 shared/gateway 合同断裂、stream replay 验证失败、以及 agent-gateway 的 typecheck/build/test 未全绿
-- [260401-opencode-claude-任务体系完整融合方案](./workflow/done/260401-opencode-claude-任务体系完整融合方案.md) — 以 fusion-native first 完成 OpenCode 与 Claude Code 任务体系主线实施：D-01～D-11 已落地并通过验证；D-12 importer/translator 因“旧版本不需要兼容”决策而未开启
-- [260401-usage写入闭环实现](./workflow/done/260401-usage写入闭环实现.md) — usage 月度记录闭环收口：为 chat-completions 流式请求显式启用 `stream_options.include_usage`，并以真实 Responses/chat 验收证明 `usage_records` 会按月累计写入
-- [260401-apps-真正纳入lint](./workflow/done/260401-apps-真正纳入lint.md) — 让 `apps/desktop`、`apps/mobile` 真正参与 ESLint 检查、lint-staged 与 CI quality 门禁；`apps/web` 按当前阶段性策略暂缓 lint 收口
-- [260401-mcp-client-源码类型解析修复](./workflow/done/260401-mcp-client-源码类型解析修复.md) — 修复 `@openAwork/mcp-client` 在 lint 阶段对 `@openAwork/skill-types` 的类型解析不稳定问题，并收口 apps lint 脚本与仓库约定的冲突
-- [260401-usage页面实现度分析](./workflow/done/260401-usage页面实现度分析.md) — usage 页面/标签页实现度审计：已确认页面与读取接口存在，但 `usage_records` 缺少写入链路，`/usage/breakdown` 与模型价格编辑存在空壳/半成品实现
-- [260401-usage写入链路追踪](./workflow/done/260401-usage写入链路追踪.md) — 上游 usage/token/cost 链路追踪：已确认 provider usage 在 `stream-protocol.ts` 被丢弃，`stream-model-round.ts` / `stream.ts` 无 usage 聚合与月度 upsert，`TokenUsageManagerImpl` 与 `calculateTokenCost()` 处于未接线状态
+- [260404-lsp-implementation-最小增量实施](./workflow/done/260404-lsp-implementation-最小增量实施.md) — 已完成 richer LSP 下一条最小增量：`lsp_goto_implementation` 已补齐 lsp-client capability/request、agent-core contract、gateway tool surface、sandbox、session visibility、prompt guidance 与 verification
+- [260404-lsp-后续路线评估](./workflow/done/260404-lsp-后续路线评估.md) — 已完成 implementation / call hierarchy / language server coverage 三条 richer LSP follow-up 路线评估；结论为 implementation 作为下一条最小增量优先推进
+- [260404-lsp-hover-轻量增强实施](./workflow/done/260404-lsp-hover-轻量增强实施.md) — 已完成 richer LSP 的最小 follow-up：`lsp_hover` 已补齐 agent-core/gateway tool surface、sandbox、session visibility、targeted tests 与 `verify-lsp-tools.ts` 验证，范围保持为 hover-only
+- [260403-lsp-自动使用集成方案](./workflow/done/260403-lsp-自动使用集成方案.md) — 已完成 OpenAWork richer LSP Phase 1 收口：system prompt guidance、写后 diagnostics、合约统一、负向回归与 trigger 策略验收均已落地；Phase 5 评估结论为“hover 作为下一条轻量增强，implementation / call hierarchy / status-event-UI diagnostics 暂缓到独立后续工作流”
+- [260403-三仓对话模式提示词对比](./workflow/done/260403-三仓对话模式提示词对比.md) — 已完成三仓模式提示词对比调研并将模式 prompt 收口为 gateway 单点注入 + 前端结构化透传
+- [260403-变更记录功能收口实施](./workflow/done/260403-变更记录功能收口实施.md) — 已完成把 Sessions 页面补齐为会话级 file changes / snapshots / restore 的产品入口
+- [260403-自动压缩二期实施](./workflow/done/260403-自动压缩二期实施.md) — 已完成 metadata-backed compactionMemory 接入 gateway 主模型输入链
+- [260403-操作电脑语音github工作流集成](./workflow/done/260403-操作电脑语音github工作流集成.md) — 已完成桌面自动化工具面、语音输入闭环与 GitHub trigger 最小可用能力
+- [260403-自动压缩一期实施](./workflow/done/260403-自动压缩一期实施.md) — 已完成 gateway 主模型输入链 runtime compaction
+- [260402-对话模式默认agent方案](./workflow/done/260402-对话模式默认agent方案.md) — 已完成模式派生默认 agent + 用户手动覆盖优先的实施
+- [260402-对话级文件变更记录保障融合方案](./workflow/done/260402-对话级文件变更记录保障融合方案.md) — 已完成对话级文件变更保障主线全量落地与验证
+- [260402-任务使用链与完成回调收口](./workflow/done/260402-任务使用链与完成回调收口.md) — 已完成 task 使用链、任务完成回调与多端消费收口
+- [260402-usage持久化回归修复](./workflow/done/260402-usage持久化回归修复.md) — 已修复 usage persistence 回归并恢复月度写入
+- [260402-opencode-claude-任务体系修复收口](./workflow/done/260402-opencode-claude-任务体系修复收口.md) — 已修复任务体系主线合同断裂与 replay/bookend 判定
+- [260402-opencode-claude-任务体系完成度核查](./workflow/done/260402-opencode-claude-任务体系完成度核查.md) — 已完成任务体系融合仓库级完成度审计
+- [260401-opencode-claude-任务体系完整融合方案](./workflow/done/260401-opencode-claude-任务体系完整融合方案.md) — 已完成 fusion-native first 任务体系主线实施 D-01～D-11
+- [260401-usage写入闭环实现](./workflow/done/260401-usage写入闭环实现.md) — 已完成 usage 月度记录闭环收口
+- [260401-apps-真正纳入lint](./workflow/done/260401-apps-真正纳入lint.md) — 已让 desktop/mobile 真正参与 ESLint 门禁
+- [260401-mcp-client-源码类型解析修复](./workflow/done/260401-mcp-client-源码类型解析修复.md) — 已修复 mcp-client 类型解析不稳定问题
+- [260401-usage页面实现度分析](./workflow/done/260401-usage页面实现度分析.md) — 已完成 usage 页面实现度审计
+- [260401-usage写入链路追踪](./workflow/done/260401-usage写入链路追踪.md) — 已完成 usage 上游链路追踪
+- [260331-聊天刷新恢复与运行控制方案](./workflow/done/260331-聊天刷新恢复与运行控制方案.md) — 已完成 Chat 对话页待发队列持久化 + 刷新后运行控制恢复 + stopCapability 三态 + 附件二进制恢复
+- [260331-手机端功能补全方案](./workflow/done/260331-手机端功能补全方案.md) — 已完成 P0 Bug 修复、UI 组件接入、附件上传增强与 STT 语音输入
+- [260329-全工具特殊功能子代理模型复审方案](./workflow/done/260329-全工具特殊功能子代理模型复审方案.md) — 已完成全部工具/特殊功能/子代理模型复审，关键偏差已修复
+- [260329-子代理工具提示词完全对齐方案](./workflow/done/260329-子代理工具提示词完全对齐方案.md) — 已被后续全工具复审方案覆盖
+- [260329-前两天功能恢复补全](./workflow/done/260329-前两天功能恢复补全.md) — 功能线已被 03-29 至今的 81 次提交全面覆盖
 
 ## Architecture Decisions
+
+- [2026-04-04] OpenAWork richer LSP 当前正式支持面已扩展为 **definition / implementation / references / symbols / prepareRename / rename / hover / diagnostics / touch**；其中 call hierarchy、language server coverage 扩展与 status/event/UI diagnostics 继续延后到独立工作流。
+
+- [2026-04-04] `textDocument/implementation` 是 hover 之后的最小增量 follow-up：它与现有 `definition` 协议形状同构、接线与验证成本最低且能显著提升接口/抽象类型场景；call hierarchy 与 language server coverage 延后到独立工作流。
 
 - [2026-04-03] 自动压缩二期先采用 **metadata-backed compactionMemory**：在 `sessions.metadata_json` 中持久化累计摘要、`coveredUntilMessageId` 与统计字段，由 `buildPreparedUpstreamConversation()` 只对未覆盖的 omitted history 做增量归并；若 covered boundary 失效则从当前 omitted history 全量重建，而不是盲目叠加旧 memory。
 - [2026-04-03] 对话模式提示词采用 **gateway request-scoped system prompt injection**：`dialogueMode / yoloMode` 作为结构化字段从 Web/Mobile/web-client 透传，真正的模式正文只保留在 `services/agent-gateway/src/routes/stream-system-prompts.ts`，并同时覆盖 `stream.ts` 与 `stream-runtime.ts`；不要再在前端拼接 `<system-reminder>` 文本。
@@ -169,6 +166,12 @@
 - 规划文档统一放置在 `.agentdocs/workflow/`，使用 `YYMMDD-任务名.md` 命名。
 
 ## Known Pitfalls
+
+- [2026-04-04] 给 OpenAWork 增加新 LSP 能力时，不能只在 gateway 暴露新 tool；`packages/lsp-client/src/client.ts` 的 `initialize.capabilities` 也必须同步声明，否则 implementation / call hierarchy 这类能力在部分语言服务器上可能根本不会启用。
+
+- [2026-04-04] richer LSP 新工具即使已经通过 `tool-definitions`、`capabilities`、`verify-lsp-tools.ts` 和 build，也仍可能在真实执行时因为 `services/agent-gateway/src/tool-sandbox.ts` 漏掉 import / allowlist / `sandbox.register(...)` 而断链；新增工具时必须把 sandbox 纳入专项复核清单。
+
+- [2026-04-04] LSP 自动使用不能只看 capability surface 或 `verify-lsp-tools.ts` 一条脚本就判定完成：`read/write/edit/apply_patch` 的 side effect 必须在各自测试中显式断言 `touch/diagnostics`，同时提示词层也要锁定 fallback 与“禁止自动 rename / 禁止每轮自动 semantic query”，否则很容易出现“实现存在但策略未验收”的假完成。
 
 - [2026-04-03] 参考 Claude Code 风格能力做产品集成时，最容易误判成“设置页/路由已存在就等于已集成完成”；这次实际缺口证明：desktop automation 若没进 tool surface、VoiceRecorder 若没有 transcript、GitHub trigger 若没有 owner + background stream，都会形成可见但不可用的假闭环。
 
