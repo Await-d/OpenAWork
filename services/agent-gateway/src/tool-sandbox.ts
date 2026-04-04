@@ -13,6 +13,7 @@ import { webSearchTool, lspDiagnosticsTool, lspTouchTool } from '@openAwork/agen
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import { lspManager } from './lsp/router.js';
 import {
+  executeWorkspaceCreateFile,
   executeWorkspaceWriteFile,
   executeWriteTool,
   WORKSPACE_TOOL_NAMES,
@@ -33,10 +34,14 @@ import {
   writeTool,
 } from './workspace-tools.js';
 import { BATCH_TOOL_DISALLOWED, BATCH_TOOL_MAX_CALLS } from './batch-tools.js';
-import { applyPatchToolDefinition, buildApplyPatchPermissionScope } from './apply-patch-tools.js';
+import {
+  applyPatchToolDefinition,
+  buildApplyPatchPermissionScope,
+  executeApplyPatch,
+} from './apply-patch-tools.js';
 import { bashToolDefinition, buildBashPermissionScope, runBashCommand } from './bash-tools.js';
 import { createEditTool } from './edit-tools.js';
-import { persistSessionFileBackup } from './session-file-backup-store.js';
+import { captureBeforeWriteBackup } from './session-file-backup-store.js';
 import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
 import {
   buildExitPlanModeQuestionInput,
@@ -76,6 +81,7 @@ import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-
 import { runSkillMcpTool, skillMcpToolDefinition } from './skill-mcp-tools.js';
 import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
+import { desktopAutomationToolDefinition, runDesktopAutomationTool } from './desktop-automation.js';
 import {
   ensureIgnoreRulesLoadedForPath,
   hasWorkspacePermanentPermission,
@@ -125,6 +131,10 @@ import {
   extractToolSurfaceProfile,
   parseSessionMetadataJson,
 } from './session-workspace-metadata.js';
+import {
+  normalizeUpstreamRetryMaxRetries,
+  UPSTREAM_RETRY_MAX_RETRIES_KEY,
+} from './upstream-retry-policy.js';
 import {
   isGatewayToolEnabledForSessionMetadata,
   isPlanModeToolEnabledForSessionMetadata,
@@ -186,6 +196,7 @@ const PERMISSION_GATED_TOOLS = new Set([
   'workspace_create_directory',
   'workspace_review_revert',
   'mcp_call',
+  desktopAutomationToolDefinition.name,
 ]);
 
 const TOOL_WHITELIST = new Set<string>([
@@ -236,6 +247,7 @@ const TOOL_WHITELIST = new Set<string>([
   todoWriteTool.name,
   'mcp_list_tools',
   'mcp_call',
+  desktopAutomationToolDefinition.name,
   ...WORKSPACE_TOOL_NAMES,
 ]);
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
@@ -414,6 +426,7 @@ function buildTaskCompletionAssistantEventText(input: {
     input.errorMessage ?? input.result ?? '子代理执行已结束。',
   );
   const payload = {
+    source: 'openawork_internal',
     type: 'assistant_event',
     payload: {
       kind: 'agent',
@@ -618,6 +631,7 @@ function buildTaskTags(input: {
 }
 
 function buildDelegatedChildRequestData(input: {
+  agentId: string;
   childSessionId: string;
   executionContext?: SandboxExecutionContext;
   modelSelection?: {
@@ -637,6 +651,7 @@ function buildDelegatedChildRequestData(input: {
 
   return {
     ...input.executionContext.requestData,
+    agentId: input.agentId,
     clientRequestId: `task:${input.executionContext.clientRequestId ?? 'child'}:child:${input.childSessionId}`,
     displayMessage: input.prompt,
     message: input.prompt,
@@ -1047,6 +1062,25 @@ function buildPermissionRequestContext(
         previewAction: `列出 MCP 工具：${selectedServers.map((server) => server.id).join(', ')}`,
       };
     }
+    case 'desktop_automation': {
+      const action =
+        typeof rawInput['action'] === 'string' ? rawInput['action'].trim().toLowerCase() : '';
+      if (!action) {
+        return null;
+      }
+      const target =
+        typeof rawInput['url'] === 'string'
+          ? rawInput['url'].trim()
+          : typeof rawInput['selector'] === 'string'
+            ? rawInput['selector'].trim()
+            : '';
+      return {
+        scope: target ? `desktop_automation:${action}:${target}` : `desktop_automation:${action}`,
+        reason: '需要操作桌面 sidecar 的浏览器自动化能力',
+        riskLevel: 'high',
+        previewAction: target ? `桌面自动化 ${action}: ${target}` : `桌面自动化 ${action}`,
+      };
+    }
     default:
       return null;
   }
@@ -1158,6 +1192,27 @@ async function executeGatewayManagedTool(
         toolCallId: request.toolCallId,
         toolName: request.toolName,
         output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === desktopAutomationToolDefinition.name) {
+      const parsed = desktopAutomationToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: await runDesktopAutomationTool(parsed.data),
         isError: false,
         durationMs: 0,
       };
@@ -1686,7 +1741,12 @@ async function executeGatewayManagedTool(
       };
     }
 
-    if (request.toolName === workspaceWriteFileTool.name || request.toolName === writeTool.name) {
+    if (
+      request.toolName === workspaceWriteFileTool.name ||
+      request.toolName === writeTool.name ||
+      request.toolName === fileWriteTool.name ||
+      request.toolName === writeFileTool.name
+    ) {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
         return {
@@ -1699,7 +1759,13 @@ async function executeGatewayManagedTool(
       }
 
       const toolDefinition =
-        request.toolName === workspaceWriteFileTool.name ? workspaceWriteFileTool : writeTool;
+        request.toolName === workspaceWriteFileTool.name
+          ? workspaceWriteFileTool
+          : request.toolName === writeTool.name
+            ? writeTool
+            : request.toolName === fileWriteTool.name
+              ? fileWriteTool
+              : writeFileTool;
       const parsed = toolDefinition.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
         return {
@@ -1715,7 +1781,7 @@ async function executeGatewayManagedTool(
         request.toolName === workspaceWriteFileTool.name
           ? await executeWorkspaceWriteFile(parsed.data, {
               beforeWriteBackup: async ({ content, filePath }) =>
-                persistSessionFileBackup({
+                captureBeforeWriteBackup({
                   sessionId,
                   userId,
                   requestId: executionContext?.clientRequestId,
@@ -1726,20 +1792,92 @@ async function executeGatewayManagedTool(
                   kind: 'before_write',
                 }),
             })
-          : await executeWriteTool(parsed.data, signal, {
-              beforeWriteBackup: async ({ content, filePath }) =>
-                persistSessionFileBackup({
-                  sessionId,
-                  userId,
-                  requestId: executionContext?.clientRequestId,
-                  toolCallId: request.toolCallId,
-                  toolName: request.toolName,
-                  filePath,
-                  content,
-                  kind: 'before_write',
-                }),
-            });
+          : await executeWriteTool(
+              'filePath' in parsed.data
+                ? { path: parsed.data.filePath, content: parsed.data.content }
+                : parsed.data,
+              signal,
+              {
+                beforeWriteBackup: async ({ content, filePath }) =>
+                  captureBeforeWriteBackup({
+                    sessionId,
+                    userId,
+                    requestId: executionContext?.clientRequestId,
+                    toolCallId: request.toolCallId,
+                    toolName: request.toolName,
+                    filePath,
+                    content,
+                    kind: 'before_write',
+                  }),
+              },
+            );
 
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === workspaceCreateFileTool.name) {
+      const parsed = workspaceCreateFileTool.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeWorkspaceCreateFile(parsed.data);
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === applyPatchToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = applyPatchToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: parsed.error.issues.map((issue) => issue.message).join(', '),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      const output = await executeApplyPatch(parsed.data, {
+        beforeWriteBackup: async ({ content, filePath }) =>
+          captureBeforeWriteBackup({
+            sessionId,
+            userId,
+            requestId: executionContext?.clientRequestId,
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            filePath,
+            content,
+            kind: 'before_write',
+          }),
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -2133,6 +2271,7 @@ async function executeGatewayManagedTool(
       const childSessionId = resumableTask?.sessionId ?? requestedSessionId ?? randomUUID();
       const childSessionTitle = `${parsed.data.description} (@${resolvedAgent.agentId})`;
       const childRequestData = buildDelegatedChildRequestData({
+        agentId: resolvedAgent.agentId,
         childSessionId,
         executionContext,
         modelSelection: delegatedModel,
@@ -2188,6 +2327,12 @@ async function executeGatewayManagedTool(
       const inheritedWorkingDirectory = parentSessionMetadata['workingDirectory'];
       if (typeof inheritedWorkingDirectory === 'string') {
         childSessionMetadata['workingDirectory'] = inheritedWorkingDirectory;
+      }
+      const inheritedUpstreamRetryMaxRetries =
+        normalizeUpstreamRetryMaxRetries(childRequestData?.[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
+        normalizeUpstreamRetryMaxRetries(parentSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY]);
+      if (inheritedUpstreamRetryMaxRetries !== undefined) {
+        childSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY] = inheritedUpstreamRetryMaxRetries;
       }
       const existingChildSession = sqliteGet<{ id: string; metadata_json: string }>(
         'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',

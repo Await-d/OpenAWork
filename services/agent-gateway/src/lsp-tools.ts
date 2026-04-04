@@ -75,6 +75,58 @@ function uriToPath(uri: string): string {
   return fileURLToPath(uri);
 }
 
+/**
+ * Pre-touch: sync file with LSP server before semantic queries.
+ * Mirrors opencode's tool/lsp.ts: `await LSP.touchFile(file, true)` before any query.
+ * Failures are silently ignored — LSP is best-effort, not blocking.
+ */
+async function preTouchForQuery(filePath: string): Promise<void> {
+  try {
+    await lspManager.touchFile(filePath, true);
+  } catch {
+    // LSP pre-touch is best-effort; do not block the query
+  }
+}
+
+/**
+ * Post-write touch + diagnostics: sync LSP state after file modifications.
+ * Mirrors opencode's tool/write.ts: `touchFile(true)` + `diagnostics()` after writes.
+ * Failures are silently ignored — do not roll back successful file modifications.
+ */
+async function postWriteTouch(filePaths: string[]): Promise<void> {
+  try {
+    for (const filePath of filePaths) {
+      await lspManager.touchFile(filePath, true);
+    }
+  } catch {
+    // Post-write LSP sync is best-effort; do not fail the rename operation
+  }
+}
+
+function collectWorkspaceEditFiles(edit: WorkspaceEdit | null): string[] {
+  if (!edit) return [];
+  const files: string[] = [];
+  if (edit.changes) {
+    for (const uri of Object.keys(edit.changes)) {
+      files.push(uriToPath(uri));
+    }
+  }
+  if (edit.documentChanges) {
+    for (const change of edit.documentChanges) {
+      if ('kind' in change) {
+        if (change.kind === 'rename') {
+          files.push(uriToPath(change.newUri));
+        } else if (change.kind === 'create') {
+          files.push(uriToPath(change.uri));
+        }
+      } else {
+        files.push(uriToPath(change.textDocument.uri));
+      }
+    }
+  }
+  return files;
+}
+
 function formatLocation(location: Location | LocationLink): string {
   if ('targetUri' in location) {
     const filePath = uriToPath(location.targetUri);
@@ -193,6 +245,7 @@ export const lspGotoDefinitionToolDefinition: ToolDefinition<
   outputSchema: z.string(),
   timeout: 30000,
   execute: async (input) => {
+    await preTouchForQuery(input.filePath);
     const result = await lspManager.definition({
       file: input.filePath,
       line: input.line - 1,
@@ -214,6 +267,7 @@ export const lspFindReferencesToolDefinition: ToolDefinition<
   outputSchema: z.string(),
   timeout: 30000,
   execute: async (input) => {
+    await preTouchForQuery(input.filePath);
     const result = await lspManager.references({
       file: input.filePath,
       line: input.line - 1,
@@ -227,11 +281,13 @@ export const lspFindReferencesToolDefinition: ToolDefinition<
 
 export const lspSymbolsToolDefinition: ToolDefinition<typeof symbolsInputSchema, z.ZodString> = {
   name: 'lsp_symbols',
-  description: 'Get symbols from file (document) or search across workspace.',
+  description:
+    "Get symbols from file (document) or search across workspace. Use scope='document' for file outline, scope='workspace' for project-wide symbol search.",
   inputSchema: symbolsInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
   execute: async (input) => {
+    await preTouchForQuery(input.filePath);
     if (input.scope === 'workspace') {
       if (!input.query) {
         throw new Error("'query' is required for workspace scope");
@@ -266,29 +322,36 @@ export const lspPrepareRenameToolDefinition: ToolDefinition<
   inputSchema: prepareRenameInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
-  execute: async (input) =>
-    formatPrepareRenameResult(
+  execute: async (input) => {
+    await preTouchForQuery(input.filePath);
+    return formatPrepareRenameResult(
       await lspManager.prepareRename({
         file: input.filePath,
         line: input.line - 1,
         character: input.character,
       }),
-    ),
+    );
+  },
 };
 
 export const lspRenameToolDefinition: ToolDefinition<typeof renameInputSchema, z.ZodString> = {
   name: 'lsp_rename',
-  description: 'Rename symbol across entire workspace. APPLIES changes to all files.',
+  description:
+    'Rename symbol across entire workspace. APPLIES changes to all files. Use lsp_prepare_rename first to verify.',
   inputSchema: renameInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
-  execute: async (input) =>
-    applyWorkspaceEdit(
-      (await lspManager.rename({
-        file: input.filePath,
-        line: input.line - 1,
-        character: input.character,
-        newName: input.newName,
-      })) as WorkspaceEdit | null,
-    ),
+  execute: async (input) => {
+    await preTouchForQuery(input.filePath);
+    const workspaceEdit = (await lspManager.rename({
+      file: input.filePath,
+      line: input.line - 1,
+      character: input.character,
+      newName: input.newName,
+    })) as WorkspaceEdit | null;
+    const modifiedFiles = collectWorkspaceEditFiles(workspaceEdit);
+    const result = await applyWorkspaceEdit(workspaceEdit);
+    await postWriteTouch(modifiedFiles);
+    return result;
+  },
 };

@@ -18,6 +18,7 @@ import {
   validateWorkspacePath,
   validateWorkspaceRelativePath,
 } from './workspace-paths.js';
+import { lspManager } from './lsp/router.js';
 
 interface WorkspaceTreeNode {
   path: string;
@@ -692,11 +693,13 @@ export const workspaceReadFileTool: ToolDefinition<
     try {
       const buffer = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
       await fd.read(buffer, 0, buffer.length, 0);
-      return {
+      const result = {
         path: safePath,
         content: buffer.toString('utf8'),
         truncated,
       };
+      lspManager.touchFile(safePath, false).catch((_e: unknown) => undefined);
+      return result;
     } finally {
       await fd.close();
     }
@@ -828,6 +831,7 @@ export async function executeWorkspaceWriteFile(
       })
     : undefined;
   await fsp.writeFile(safePath, input.content, 'utf8');
+  lspManager.touchFile(safePath, true).catch((_e: unknown) => undefined);
   return {
     before: previousContent,
     after: input.content,
@@ -915,6 +919,7 @@ export async function executeWorkspaceCreateFile(
     await handle.close();
   }
 
+  lspManager.touchFile(safePath, true).catch((_e: unknown) => undefined);
   return {
     before: '',
     after: input.content,

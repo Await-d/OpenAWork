@@ -1,16 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import type {
+  DialogueMode,
   FileDiffContent,
+  ManagedAgentRecord,
   MessageContent,
   RunEvent,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
+import { mergeCompactionMetadata } from '../compaction-metadata.js';
 import { sqliteGet, sqliteRun } from '../db.js';
 import {
   modelRequestSchema,
+  type ModelRouteConfig,
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../model-router.js';
@@ -28,6 +32,7 @@ import {
   hasPersistedRunEvent,
   listSessionRunEventsByRequest,
   persistSessionRunEventForRequest,
+  publishSessionRunEvent,
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
 import { deriveRunEventBookend } from '../run-event-envelope.js';
@@ -44,6 +49,7 @@ import { buildGatewayToolDefinitions } from './stream-protocol.js';
 import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
 import { extractToolSurfaceProfile } from '../session-workspace-metadata.js';
+import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace-paths.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
 import { resolveCanonicalName } from '../claude-code-tool-surface.js';
@@ -65,6 +71,15 @@ import {
   upsertSessionRuntimeThread,
 } from '../session-runtime-thread-store.js';
 import { persistMonthlyUsageRecord } from '../usage-records-store.js';
+import { listManagedAgentsForUser } from '../agent-catalog.js';
+import { selectDelegatedModelForUser } from '../task-model-selection.js';
+import {
+  DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
+  readUpstreamRetrySettings,
+  UPSTREAM_RETRY_MAX_RETRIES_KEY,
+  UPSTREAM_RETRY_SETTINGS_KEY,
+  upstreamRetryMaxRetriesSchema,
+} from '../upstream-retry-policy.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -127,12 +142,33 @@ export function isWebSearchEnabled(metadataJson: string): boolean {
   }
 }
 
-export const streamRequestSchema = modelRequestSchema.extend({
+export const streamRequestSchema = modelRequestSchema.omit({ model: true }).extend({
+  agentId: z.string().trim().min(1).max(120).optional(),
   displayMessage: z.string().min(1).max(32768).optional(),
+  dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
   message: z.string().min(1).max(32768),
+  model: z.string().min(1).max(200).optional(),
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
   webSearchEnabled: z
+    .preprocess((value) => {
+      if (typeof value === 'boolean') return value;
+      if (value === '1' || value === 'true') return true;
+      if (value === '0' || value === 'false') return false;
+      return value;
+    }, z.boolean())
+    .optional(),
+  upstreamRetryMaxRetries: z
+    .preprocess((value) => {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : value;
+      }
+
+      return value;
+    }, upstreamRetryMaxRetriesSchema)
+    .optional(),
+  yoloMode: z
     .preprocess((value) => {
       if (typeof value === 'boolean') return value;
       if (value === '1' || value === 'true') return true;
@@ -147,6 +183,37 @@ export const stopStreamSchema = z.object({
 });
 
 export type StreamRequest = z.infer<typeof streamRequestSchema>;
+
+export function resolveStreamRequestUpstreamRetry(input: {
+  metadataJson: string;
+  requestData: StreamRequest;
+  userId: string;
+}): StreamRequest {
+  const requestRetry = input.requestData.upstreamRetryMaxRetries;
+  if (requestRetry !== undefined) {
+    return input.requestData;
+  }
+
+  const metadata = parseSessionMetadataJson(input.metadataJson);
+  const metadataRetry = metadata[UPSTREAM_RETRY_MAX_RETRIES_KEY];
+  if (typeof metadataRetry === 'number') {
+    return {
+      ...input.requestData,
+      upstreamRetryMaxRetries: metadataRetry,
+    };
+  }
+
+  const row = sqliteGet<{ value: string }>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+    [input.userId, UPSTREAM_RETRY_SETTINGS_KEY],
+  );
+  const settings = readUpstreamRetrySettings(parseStoredJson(row?.value));
+
+  return {
+    ...input.requestData,
+    upstreamRetryMaxRetries: settings.maxRetries ?? DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
+  };
+}
 
 export interface ApprovedPermissionResumePayload {
   clientRequestId: string;
@@ -187,11 +254,31 @@ interface SessionUserRow {
 }
 
 interface SessionProviderSelection {
+  delegatedSystemPrompt?: string;
   modelId?: string;
   providerId?: string;
   variant?: string;
   systemPrompt?: string;
 }
+
+interface StreamInteractionModes {
+  dialogueMode?: DialogueMode;
+  yoloMode: boolean;
+}
+
+type StreamAgentDowngradeReason = 'agent_disabled' | 'agent_model_unavailable' | 'agent_not_found';
+
+interface StreamAgentSelection {
+  downgradeReason?: StreamAgentDowngradeReason;
+  effectiveAgentId?: string;
+  modelId?: string;
+  providerId?: string;
+  requestedAgentId?: string;
+  systemPrompt?: string;
+  variant?: string;
+}
+
+type ResolvedStreamModelRoute = ModelRouteConfig & StreamAgentSelection;
 
 interface StreamAccumulationState {
   toolCalls: Map<string, { toolName: string; inputText: string }>;
@@ -257,13 +344,15 @@ export function createRunEventMeta(runId: string, sequence: { value: number }) {
   };
 }
 
-function buildMissingToolArgumentsMessage(toolName: string): string {
+function buildMissingToolArgumentsMessage(toolName: string, workingDirectory?: string): string {
+  const examplePath = workingDirectory ?? '/absolute/workspace/path';
+
   if (toolName === 'list') {
-    return 'Tool "list" was called without arguments. Retry with JSON like {"path":"/absolute/workspace/path","depth":2}.';
+    return `Tool "list" was called without arguments. Retry with JSON like {"path":"${examplePath}","depth":2}.`;
   }
 
   if (toolName === 'bash') {
-    return 'Tool "bash" was called without arguments. Retry with JSON like {"command":"pwd","workdir":"/absolute/workspace/path"}.';
+    return `Tool "bash" was called without arguments. Retry with JSON like {"command":"pwd","workdir":"${examplePath}"}.`;
   }
 
   return `Tool "${toolName}" was called without arguments. Retry with a non-empty JSON object that matches the tool schema.`;
@@ -491,12 +580,11 @@ function parseSessionProviderSelection(metadataJson: string): SessionProviderSel
           : typeof channelRecord?.['variant'] === 'string'
             ? channelRecord['variant']
             : undefined,
-      systemPrompt:
+      delegatedSystemPrompt:
         typeof parsed['delegatedSystemPrompt'] === 'string'
           ? parsed['delegatedSystemPrompt']
-          : typeof parsed['systemPrompt'] === 'string'
-            ? parsed['systemPrompt']
-            : undefined,
+          : undefined,
+      systemPrompt: typeof parsed['systemPrompt'] === 'string' ? parsed['systemPrompt'] : undefined,
     };
   } catch {
     return {};
@@ -512,11 +600,126 @@ function parseStoredJson<T>(value: string | undefined): T | undefined {
   }
 }
 
+function normalizeRequestedAgentId(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeManagedAgentIdentifier(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function findManagedStreamAgent(
+  agents: ManagedAgentRecord[],
+  requestedAgentId: string,
+): ManagedAgentRecord | undefined {
+  const normalizedRequestedAgentId = normalizeManagedAgentIdentifier(requestedAgentId);
+  return agents.find((agent) => {
+    if (normalizeManagedAgentIdentifier(agent.id) === normalizedRequestedAgentId) {
+      return true;
+    }
+
+    if (normalizeManagedAgentIdentifier(agent.label) === normalizedRequestedAgentId) {
+      return true;
+    }
+
+    return agent.aliases.some(
+      (alias) => normalizeManagedAgentIdentifier(alias) === normalizedRequestedAgentId,
+    );
+  });
+}
+
+function normalizeAgentModelCandidate(modelId: string): string {
+  const normalized = modelId.trim();
+  return normalized.includes('/') ? (normalized.split('/').at(-1) ?? normalized) : normalized;
+}
+
+function getManagedAgentModelCandidates(agent: ManagedAgentRecord): string[] {
+  return Array.from(
+    new Set(
+      [agent.model, ...(agent.fallbackModels ?? [])]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => normalizeAgentModelCandidate(value)),
+    ),
+  );
+}
+
+function resolveStreamAgentSelection(input: {
+  requestedAgentId: string | undefined;
+  userId: string;
+}): StreamAgentSelection {
+  const requestedAgentId = normalizeRequestedAgentId(input.requestedAgentId);
+  if (!requestedAgentId) {
+    return {};
+  }
+
+  const agents = listManagedAgentsForUser(input.userId);
+  const matchedAgent = findManagedStreamAgent(agents, requestedAgentId);
+  if (!matchedAgent) {
+    return {
+      downgradeReason: 'agent_not_found',
+      requestedAgentId,
+    };
+  }
+
+  if (!matchedAgent.enabled) {
+    return {
+      downgradeReason: 'agent_disabled',
+      requestedAgentId,
+    };
+  }
+
+  const modelCandidates = getManagedAgentModelCandidates(matchedAgent);
+  const delegatedModel =
+    modelCandidates.length > 0
+      ? selectDelegatedModelForUser(input.userId, modelCandidates)
+      : undefined;
+
+  return {
+    ...(modelCandidates.length > 0 && !delegatedModel?.providerId
+      ? { downgradeReason: 'agent_model_unavailable' as const }
+      : {}),
+    effectiveAgentId: matchedAgent.id,
+    modelId: delegatedModel?.modelId,
+    providerId: delegatedModel?.providerId,
+    requestedAgentId,
+    systemPrompt: matchedAgent.systemPrompt,
+    variant: delegatedModel?.variant ?? matchedAgent.variant,
+  };
+}
+
+function normalizeRequestedModelId(modelId: string | undefined): string | undefined {
+  if (!modelId || modelId === 'default') {
+    return undefined;
+  }
+
+  return modelId;
+}
+
+function isDialogueMode(value: unknown): value is DialogueMode {
+  return value === 'clarify' || value === 'coding' || value === 'programmer';
+}
+
+function resolveStreamInteractionModes(input: {
+  metadataJson: string;
+  requestData: StreamRequest;
+}): StreamInteractionModes {
+  const metadata = parseSessionMetadataJson(input.metadataJson);
+  const metadataDialogueMode = isDialogueMode(metadata['dialogueMode'])
+    ? metadata['dialogueMode']
+    : undefined;
+
+  return {
+    dialogueMode: input.requestData.dialogueMode ?? metadataDialogueMode,
+    yoloMode: input.requestData.yoloMode ?? metadata['yoloMode'] === true,
+  };
+}
+
 export async function resolveStreamModelRoute(input: {
   metadataJson: string;
   requestData: StreamRequest;
   userId: string;
-}) {
+}): Promise<ResolvedStreamModelRoute> {
   const providerRow = sqliteGet<{ value: string }>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
     [input.userId],
@@ -526,29 +729,54 @@ export async function resolveStreamModelRoute(input: {
     [input.userId],
   );
   const sessionSelection = parseSessionProviderSelection(input.metadataJson);
+  const agentSelection = resolveStreamAgentSelection({
+    requestedAgentId: input.requestData.agentId,
+    userId: input.userId,
+  });
+  const requestedModelId = normalizeRequestedModelId(input.requestData.model);
   const resolvedRequestData: StreamRequest = {
     ...input.requestData,
-    variant: input.requestData.variant ?? sessionSelection.variant,
-    systemPrompt: input.requestData.systemPrompt ?? sessionSelection.systemPrompt,
+    model:
+      requestedModelId ??
+      agentSelection.modelId ??
+      sessionSelection.modelId ??
+      input.requestData.model,
+    providerId:
+      input.requestData.providerId ?? agentSelection.providerId ?? sessionSelection.providerId,
+    variant: input.requestData.variant ?? agentSelection.variant ?? sessionSelection.variant,
+    systemPrompt:
+      sessionSelection.delegatedSystemPrompt ??
+      input.requestData.systemPrompt ??
+      agentSelection.systemPrompt ??
+      sessionSelection.systemPrompt,
   };
   const providerConfig = await getProviderConfigForSelection(
     parseStoredJson(providerRow?.value),
     parseStoredJson(selectionRow?.value),
     {
-      providerId: resolvedRequestData.providerId ?? sessionSelection.providerId,
-      modelId: resolvedRequestData.model ?? sessionSelection.modelId,
+      providerId: resolvedRequestData.providerId,
+      modelId: resolvedRequestData.model,
     },
   );
 
   if (providerConfig) {
-    return resolveModelRouteFromProvider(
-      providerConfig.provider,
-      providerConfig.modelId,
-      resolvedRequestData,
-    );
+    return {
+      ...agentSelection,
+      ...resolveModelRouteFromProvider(
+        providerConfig.provider,
+        providerConfig.modelId,
+        resolvedRequestData,
+      ),
+    };
   }
 
-  return resolveModelRoute(resolvedRequestData);
+  return {
+    ...agentSelection,
+    ...resolveModelRoute({
+      ...resolvedRequestData,
+      model: resolvedRequestData.model ?? 'default',
+    }),
+  };
 }
 
 export function createToolResultRequestId(clientRequestId: string, toolCallId: string): string {
@@ -571,6 +799,11 @@ export async function executeToolCalls(input: {
   writeChunk: (chunk: RunEvent) => void;
 }): Promise<void> {
   const sandbox = createDefaultSandbox();
+  const sessionMetadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
+  const workingDirectory =
+    typeof sessionMetadata['workingDirectory'] === 'string'
+      ? sessionMetadata['workingDirectory']
+      : undefined;
 
   for (const [toolCallId, toolCall] of input.state.toolCalls.entries()) {
     if (input.signal.aborted) {
@@ -598,7 +831,7 @@ export async function executeToolCalls(input: {
       ? {
           toolCallId,
           toolName: toolCall.toolName,
-          output: buildMissingToolArgumentsMessage(toolCall.toolName),
+          output: buildMissingToolArgumentsMessage(toolCall.toolName, workingDirectory),
           isError: true,
           durationMs: 0,
         }
@@ -706,21 +939,31 @@ export async function handleStreamRequest(input: {
   user: JwtPayload;
   writeChunk: (chunk: RunEvent) => void;
 }): Promise<{ statusCode: number }> {
+  const requestData = resolveStreamRequestUpstreamRetry({
+    metadataJson: input.sessionContext.metadataJson,
+    requestData: input.requestData,
+    userId: input.user.sub,
+  });
   const runId = randomUUID();
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(input.method, input.path, input.headers, input.ip);
-  if (!isTaskParentAutoResumeClientRequestId(input.requestData.clientRequestId)) {
+  if (!isTaskParentAutoResumeClientRequestId(requestData.clientRequestId)) {
     noteManualSessionInteraction({ sessionId: input.sessionId, userId: input.user.sub });
   }
   const stepRoute = wl.start('stream.model-resolve');
-  let route: ReturnType<typeof resolveModelRoute>;
+  let route: ResolvedStreamModelRoute;
   try {
     route = await resolveStreamModelRoute({
       metadataJson: input.sessionContext.metadataJson,
-      requestData: input.requestData,
+      requestData,
       userId: input.user.sub,
     });
-    wl.succeed(stepRoute, undefined, { model: route.model });
+    wl.succeed(stepRoute, undefined, {
+      downgradeReason: route.downgradeReason ?? 'none',
+      effectiveAgentId: route.effectiveAgentId ?? 'none',
+      model: route.model,
+      requestedAgentId: route.requestedAgentId ?? 'none',
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     wl.fail(stepRoute, message);
@@ -729,16 +972,21 @@ export async function handleStreamRequest(input: {
   }
 
   const workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson);
+  const interactionModes = resolveStreamInteractionModes({
+    metadataJson: input.sessionContext.metadataJson,
+    requestData,
+  });
   const requestSystemPrompts = buildRequestScopedSystemPrompts(
-    input.requestData.message,
+    requestData.message,
     buildCapabilityContext(input.user.sub, input.sessionId),
+    interactionModes,
   );
   const webSearchEnabled =
-    input.requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
+    requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
 
   if (
     replayPersistedAssistantResponse({
-      clientRequestId: input.requestData.clientRequestId,
+      clientRequestId: requestData.clientRequestId,
       runId,
       sessionId: input.sessionId,
       userId: input.user.sub,
@@ -749,12 +997,12 @@ export async function handleStreamRequest(input: {
     return { statusCode: 200 };
   }
 
-  const inFlight = getInFlightStreamRequest(input.sessionId, input.requestData.clientRequestId);
+  const inFlight = getInFlightStreamRequest(input.sessionId, requestData.clientRequestId);
   if (inFlight) {
     await inFlight.execution.catch(() => undefined);
     if (
       replayPersistedAssistantResponse({
-        clientRequestId: input.requestData.clientRequestId,
+        clientRequestId: requestData.clientRequestId,
         runId,
         sessionId: input.sessionId,
         userId: input.user.sub,
@@ -774,7 +1022,7 @@ export async function handleStreamRequest(input: {
 
   if (
     getAnyInFlightStreamRequestForSession({
-      excludeClientRequestId: input.requestData.clientRequestId,
+      excludeClientRequestId: requestData.clientRequestId,
       sessionId: input.sessionId,
       userId: input.user.sub,
     })
@@ -795,7 +1043,7 @@ export async function handleStreamRequest(input: {
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(input.sessionContext.metadataJson);
   const emitChunk = (chunk: RunEvent) => {
     persistSessionRunEventForRequest(input.sessionId, chunk, {
-      clientRequestId: input.requestData.clientRequestId,
+      clientRequestId: requestData.clientRequestId,
     });
     input.writeChunk(chunk);
   };
@@ -808,7 +1056,7 @@ export async function handleStreamRequest(input: {
       userId: input.user.sub,
     });
     upsertSessionRuntimeThread({
-      clientRequestId: input.requestData.clientRequestId,
+      clientRequestId: requestData.clientRequestId,
       heartbeatAtMs: runtimeThreadStartedAt,
       sessionId: input.sessionId,
       startedAtMs: runtimeThreadStartedAt,
@@ -816,7 +1064,7 @@ export async function handleStreamRequest(input: {
     });
     const runtimeThreadHeartbeat = setInterval(() => {
       touchSessionRuntimeThread({
-        clientRequestId: input.requestData.clientRequestId,
+        clientRequestId: requestData.clientRequestId,
         sessionId: input.sessionId,
         userId: input.user.sub,
       });
@@ -871,10 +1119,10 @@ export async function handleStreamRequest(input: {
       }
 
       persistStreamUserMessage({
-        clientRequestId: input.requestData.clientRequestId,
-        displayMessage: input.requestData.displayMessage,
+        clientRequestId: requestData.clientRequestId,
+        displayMessage: requestData.displayMessage,
         legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-        message: input.requestData.message,
+        message: requestData.message,
         sessionId: input.sessionId,
         userId: input.user.sub,
       });
@@ -885,13 +1133,14 @@ export async function handleStreamRequest(input: {
       );
       const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
       const turnFileDiffs = new Map<string, FileDiffContent>();
+      let lastAutoCompactionSignature: string | null = null;
 
       for (let round = 1; ; round += 1) {
         const result = await runModelRound({
-          clientRequestId: input.requestData.clientRequestId,
+          clientRequestId: requestData.clientRequestId,
           enabledTools,
           eventSequence,
-          requestData: input.requestData,
+          requestData,
           round,
           route,
           runId,
@@ -907,6 +1156,36 @@ export async function handleStreamRequest(input: {
           requestSystemPrompts,
           writeChunk: emitChunk,
         });
+
+        if (result.compaction && result.compaction.signature !== lastAutoCompactionSignature) {
+          lastAutoCompactionSignature = result.compaction.signature;
+          const metadata = mergeCompactionMetadata(input.sessionContext.metadataJson, {
+            persistedMemory: result.compaction.persistedMemory,
+            summary: result.compaction.structuredSummary,
+            trigger: 'automatic',
+            omittedMessages: result.compaction.omittedMessages,
+            recentMessagesKept: result.compaction.recentMessagesKept,
+            signature: result.compaction.signature,
+          });
+          const metadataJson = JSON.stringify(metadata);
+          sqliteRun(
+            "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+            [metadataJson, input.sessionId, input.user.sub],
+          );
+          input.sessionContext.metadataJson = metadataJson;
+          publishSessionRunEvent(
+            input.sessionId,
+            {
+              type: 'compaction',
+              summary: result.compaction.eventSummary,
+              trigger: 'automatic',
+              eventId: `${requestData.clientRequestId}:auto-compact:${round}:${result.compaction.signature}`,
+              runId,
+              occurredAt: Date.now(),
+            },
+            { clientRequestId: requestData.clientRequestId },
+          );
+        }
 
         if (result.usage) {
           persistMonthlyUsageRecord({
@@ -933,11 +1212,11 @@ export async function handleStreamRequest(input: {
         }
 
         await executeToolCalls({
-          clientRequestId: input.requestData.clientRequestId,
+          clientRequestId: requestData.clientRequestId,
           executionContext: createStreamExecutionContext(
-            input.requestData.clientRequestId,
+            requestData.clientRequestId,
             round + 1,
-            input.requestData,
+            requestData,
           ),
           enabledToolNames,
           eventSequence,
@@ -955,7 +1234,7 @@ export async function handleStreamRequest(input: {
     } finally {
       clearInterval(runtimeThreadHeartbeat);
       clearSessionRuntimeThread({
-        clientRequestId: input.requestData.clientRequestId,
+        clientRequestId: requestData.clientRequestId,
         sessionId: input.sessionId,
         userId: input.user.sub,
       });
@@ -988,7 +1267,7 @@ export async function handleStreamRequest(input: {
       role: 'assistant',
       content: buildErrorContent('STREAM_ERROR', String(err)),
       legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-      clientRequestId: input.requestData.clientRequestId,
+      clientRequestId: requestData.clientRequestId,
       status: 'error',
     });
     emitChunk(createStreamErrorChunk('STREAM_ERROR', String(err), runId));
@@ -998,7 +1277,7 @@ export async function handleStreamRequest(input: {
 
   registerInFlightStreamRequest({
     abortController,
-    clientRequestId: input.requestData.clientRequestId,
+    clientRequestId: requestData.clientRequestId,
     execution,
     sessionId: input.sessionId,
     userId: input.user.sub,
@@ -1007,7 +1286,7 @@ export async function handleStreamRequest(input: {
     return await execution;
   } finally {
     clearInFlightStreamRequest({
-      clientRequestId: input.requestData.clientRequestId,
+      clientRequestId: requestData.clientRequestId,
       execution,
       sessionId: input.sessionId,
     });

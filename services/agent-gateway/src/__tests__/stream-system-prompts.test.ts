@@ -19,6 +19,28 @@ describe('stream system prompt integration', () => {
     ]);
   });
 
+  it('injects dialogue mode and yolo prompts after capability context', () => {
+    expect(
+      buildRequestScopedSystemPrompts('实现这个接口', '## 系统 Agents\n- hephaestus', {
+        dialogueMode: 'programmer',
+        yoloMode: true,
+      }),
+    ).toEqual([
+      '## 系统 Agents\n- hephaestus',
+      [
+        'OpenAWork 对话模式提醒：programmer（程序员）',
+        '以工程协作模式回答，优先给实现思路、修改点、调试步骤、验证方式和风险提醒。',
+        '优先结合现有代码结构、调用链和影响面给出建议，而不是只讲抽象概念。',
+        '可以简短说明取舍，但结论必须面向落地。',
+        '如果任务有多个步骤，用简明步骤组织输出。',
+      ].join('\n'),
+      [
+        'OpenAWork 执行偏好提醒：yolo',
+        '优先少确认、快执行、直达结果；除非明显缺信息，否则不要反复征询。',
+      ].join('\n'),
+    ]);
+  });
+
   it('builds upstream system messages in stable order', () => {
     expect(
       buildRoundSystemMessages({

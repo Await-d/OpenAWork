@@ -49,6 +49,7 @@ import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from './skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
+import { desktopAutomationToolDefinition } from './desktop-automation.js';
 import {
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
@@ -162,6 +163,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   callOmoAgentToolDefinition,
   skillMcpToolDefinition,
   lookAtToolDefinition,
+  desktopAutomationToolDefinition,
   workspaceReviewStatusTool,
   workspaceReviewDiffTool,
   writeTool,
@@ -495,6 +497,21 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           metadata: { type: 'object' },
         },
         required: ['id'],
+        additionalProperties: false,
+      };
+    case 'desktop_automation':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['status', 'start', 'goto', 'click', 'type', 'screenshot'],
+          },
+          url: { type: 'string' },
+          selector: { type: 'string' },
+          text: { type: 'string' },
+        },
+        required: ['action'],
         additionalProperties: false,
       };
     case 'list':

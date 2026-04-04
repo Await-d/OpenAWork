@@ -1,13 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { appendSessionMessageMock, executeMock, persistRunEventMock, reconcileMock } = vi.hoisted(
-  () => ({
-    appendSessionMessageMock: vi.fn(() => ({ id: 'msg-1' })),
-    executeMock: vi.fn(),
-    persistRunEventMock: vi.fn(),
-    reconcileMock: vi.fn(),
-  }),
-);
+const {
+  appendSessionMessageMock,
+  executeMock,
+  persistFileDiffsMock,
+  persistRunEventMock,
+  reconcileMock,
+  resolveStreamRequestUpstreamRetryMock,
+} = vi.hoisted(() => ({
+  appendSessionMessageMock: vi.fn(() => ({ id: 'msg-1' })),
+  executeMock: vi.fn(),
+  persistFileDiffsMock: vi.fn(),
+  persistRunEventMock: vi.fn(),
+  reconcileMock: vi.fn(),
+  resolveStreamRequestUpstreamRetryMock: vi.fn(
+    (input: { requestData: Record<string, unknown> }) => input.requestData,
+  ),
+}));
 
 vi.mock('../db.js', () => {
   return {
@@ -40,6 +49,10 @@ vi.mock('../session-message-store.js', () => ({
 vi.mock('../session-run-events.js', () => ({
   persistSessionRunEventForRequest: persistRunEventMock,
   subscribeSessionRunEvents: vi.fn(() => () => undefined),
+}));
+
+vi.mock('../session-file-diff-store.js', () => ({
+  persistSessionFileDiffs: persistFileDiffsMock,
 }));
 
 vi.mock('../routes/capabilities.js', () => ({
@@ -76,6 +89,7 @@ vi.mock('../routes/stream.js', () => ({
   isWebSearchEnabled: vi.fn(() => false),
   loadSessionContext: vi.fn(() => ({ legacyMessagesJson: '[]', metadataJson: '{}' })),
   loadSessionUser: vi.fn(() => ({ email: 'user-1@example.com' })),
+  resolveStreamRequestUpstreamRetry: resolveStreamRequestUpstreamRetryMock,
   resolveStreamModelRoute: vi.fn(),
   setPersistedSessionStateStatus: vi.fn(),
   streamRequestSchema: {
@@ -92,8 +106,10 @@ describe('resume reconcile fallback', () => {
     appendSessionMessageMock.mockReset();
     appendSessionMessageMock.mockReturnValue({ id: 'msg-1' });
     executeMock.mockReset();
+    persistFileDiffsMock.mockReset();
     persistRunEventMock.mockReset();
     reconcileMock.mockReset();
+    resolveStreamRequestUpstreamRetryMock.mockClear();
   });
 
   it('reconciles the parent task when approved permission execution throws before resume continuation', async () => {
@@ -143,7 +159,11 @@ describe('resume reconcile fallback', () => {
         clientRequestId: 'resume-client-2',
         nextRound: 2,
         rawInput: { description: 'delegate' },
-        requestData: { clientRequestId: 'resume-client-2', message: 'resume child task' },
+        requestData: {
+          clientRequestId: 'resume-client-2',
+          message: 'resume child task',
+          upstreamRetryMaxRetries: 2,
+        },
         toolCallId: 'tool-call-1',
         toolName: 'Agent',
         observability: {
@@ -187,6 +207,15 @@ describe('resume reconcile fallback', () => {
       }),
       { clientRequestId: 'resume-client-2' },
     );
+    expect(resolveStreamRequestUpstreamRetryMock).toHaveBeenCalledWith({
+      metadataJson: '{}',
+      requestData: {
+        clientRequestId: 'resume-client-2',
+        message: 'resume child task',
+        upstreamRetryMaxRetries: 2,
+      },
+      userId: 'user-1',
+    });
   });
 
   it('backfills observability and durable diff defaults when payload metadata is missing', async () => {
@@ -212,7 +241,11 @@ describe('resume reconcile fallback', () => {
         clientRequestId: 'resume-client-3',
         nextRound: 2,
         rawInput: { description: 'delegate' },
-        requestData: { clientRequestId: 'resume-client-3', message: 'resume child task' },
+        requestData: {
+          clientRequestId: 'resume-client-3',
+          message: 'resume child task',
+          upstreamRetryMaxRetries: 1,
+        },
         toolCallId: 'tool-call-2',
         toolName: 'Agent',
       },
@@ -273,5 +306,32 @@ describe('resume reconcile fallback', () => {
       }),
       { clientRequestId: 'resume-client-3' },
     );
+    expect(persistFileDiffsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'child-session-3',
+        userId: 'user-1',
+        clientRequestId: 'resume-client-3',
+        requestId: 'tool-result-request-1',
+        toolName: 'Agent',
+        toolCallId: 'tool-call-2',
+        diffs: [
+          expect.objectContaining({
+            file: '/repo/example.ts',
+            sourceKind: 'structured_tool_diff',
+            guaranteeLevel: 'medium',
+            requestId: 'tool-result-request-1',
+          }),
+        ],
+      }),
+    );
+    expect(resolveStreamRequestUpstreamRetryMock).toHaveBeenCalledWith({
+      metadataJson: '{}',
+      requestData: {
+        clientRequestId: 'resume-client-3',
+        message: 'resume child task',
+        upstreamRetryMaxRetries: 1,
+      },
+      userId: 'user-1',
+    });
   });
 });

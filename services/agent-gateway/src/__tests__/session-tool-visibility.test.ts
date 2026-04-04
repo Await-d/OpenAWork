@@ -116,6 +116,7 @@ describe('session tool visibility', () => {
       createToolDefinition('question'),
       createToolDefinition('read'),
       createToolDefinition('edit'),
+      createToolDefinition('desktop_automation'),
       createToolDefinition('workspace_review_diff'),
       createToolDefinition('mcp_call'),
     ];
@@ -149,6 +150,7 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('mcp_call', metadata)).toBe(true);
     expect(isGatewayToolEnabledForSessionMetadata('edit', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('desktop_automation', metadata)).toBe(false);
     expect(isTaskToolEnabledForSessionMetadata(metadata)).toBe(true);
     expect(isAgentToolEnabledForSessionMetadata(metadata)).toBe(true);
     expect(isQuestionToolEnabledForSessionMetadata(metadata)).toBe(false);

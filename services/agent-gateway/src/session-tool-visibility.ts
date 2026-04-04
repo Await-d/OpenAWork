@@ -56,6 +56,10 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'grep':
     case 'lsp_diagnostics':
     case 'lsp_touch':
+    case 'lsp_goto_definition':
+    case 'lsp_find_references':
+    case 'lsp_symbols':
+    case 'lsp_prepare_rename':
     case 'read_tool_output':
     case 'workspace_tree':
     case 'workspace_read_file':
@@ -67,6 +71,7 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'file_write':
     case 'write_file':
     case 'apply_patch':
+    case 'lsp_rename':
     case 'workspace_write_file':
     case 'workspace_create_file':
     case 'workspace_create_directory':
@@ -93,6 +98,10 @@ function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
 function isChannelPolicyToolEnabled(metadata: Record<string, unknown>, toolName: string): boolean {
   if (!isChannelManagedSession(metadata)) {
     return true;
+  }
+
+  if (toolName === 'desktop_automation') {
+    return false;
   }
 
   const channelTools = readChannelTools(metadata);

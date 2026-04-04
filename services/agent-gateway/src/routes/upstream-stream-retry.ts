@@ -4,7 +4,7 @@ import type { RetryOptions } from '@openAwork/agent-core';
 const RETRYABLE_UPSTREAM_STATUSES = new Set([500, 502, 503, 504]);
 
 const DEFAULT_UPSTREAM_STREAM_RETRY_OPTIONS: Omit<RetryOptions, 'isRetryable'> = {
-  maxAttempts: 3,
+  maxAttempts: 4,
   initialDelayMs: 250,
   maxDelayMs: 1000,
   backoffMultiplier: 2,
@@ -23,6 +23,16 @@ class RetryableUpstreamStatusError extends Error {
   }
 }
 
+class RetryableUpstreamBodyMissingError extends Error {
+  readonly response: Response;
+
+  constructor(response: Response) {
+    super('Retryable upstream response body missing');
+    this.name = 'RetryableUpstreamBodyMissingError';
+    this.response = response;
+  }
+}
+
 export function isRetryableUpstreamStatus(status: number): boolean {
   return RETRYABLE_UPSTREAM_STATUSES.has(status);
 }
@@ -32,6 +42,7 @@ export async function fetchUpstreamStreamWithRetry(input: {
   init: RequestInit;
   signal: AbortSignal;
   fetchImpl?: typeof fetch;
+  requireResponseBody?: boolean;
   retryOptions?: UpstreamStreamRetryOverrides;
 }): Promise<Response> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -40,6 +51,10 @@ export async function fetchUpstreamStreamWithRetry(input: {
     ...input.retryOptions,
     isRetryable: (error) => {
       if (error instanceof RetryableUpstreamStatusError) {
+        return true;
+      }
+
+      if (error instanceof RetryableUpstreamBodyMissingError) {
         return true;
       }
 
@@ -60,6 +75,14 @@ export async function fetchUpstreamStreamWithRetry(input: {
           throw new RetryableUpstreamStatusError(response);
         }
 
+        if (
+          input.requireResponseBody === true &&
+          !response.body &&
+          attempt < retryOptions.maxAttempts
+        ) {
+          throw new RetryableUpstreamBodyMissingError(response);
+        }
+
         return response;
       },
       retryOptions,
@@ -70,8 +93,16 @@ export async function fetchUpstreamStreamWithRetry(input: {
       return error.response;
     }
 
+    if (error instanceof RetryableUpstreamBodyMissingError) {
+      return error.response;
+    }
+
     if (error instanceof RetryExhaustedError) {
       if (error.lastError instanceof RetryableUpstreamStatusError) {
+        return error.lastError.response;
+      }
+
+      if (error.lastError instanceof RetryableUpstreamBodyMissingError) {
         return error.lastError.response;
       }
 

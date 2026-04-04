@@ -100,4 +100,25 @@ describe('fetchUpstreamStreamWithRetry', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(404);
   });
+
+  it('retries when an upstream response is missing a stream body', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response('stream-ok', { status: 200 }));
+
+    const response = await fetchUpstreamStreamWithRetry({
+      url: 'https://example.com/chat/completions',
+      init: { method: 'POST', body: '{}' },
+      signal: new AbortController().signal,
+      fetchImpl,
+      requireResponseBody: true,
+      retryOptions: { ...FAST_RETRY_OPTIONS, maxAttempts: 2 },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(response.status).toBe(200);
+    expect(response.body).not.toBeNull();
+    await expect(response.text()).resolves.toBe('stream-ok');
+  });
 });

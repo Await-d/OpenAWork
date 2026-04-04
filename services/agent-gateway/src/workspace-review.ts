@@ -11,6 +11,10 @@ export interface WorkspaceReviewChange {
   linesDeleted?: number;
 }
 
+export type WorkspaceReviewAvailability =
+  | { available: true; changes: WorkspaceReviewChange[] }
+  | { available: false; changes: []; reason: 'git_unavailable' | 'not_git_repo' };
+
 type ExecResult = { stdout: string };
 
 async function execGit(args: string[], cwd: string): Promise<ExecResult> {
@@ -23,6 +27,13 @@ async function execGit(args: string[], cwd: string): Promise<ExecResult> {
 export async function listWorkspaceReviewChanges(
   workspaceRoot: string,
 ): Promise<WorkspaceReviewChange[]> {
+  const result = await listWorkspaceReviewChangesWithAvailability(workspaceRoot);
+  return result.changes;
+}
+
+export async function listWorkspaceReviewChangesWithAvailability(
+  workspaceRoot: string,
+): Promise<WorkspaceReviewAvailability> {
   let statusOut: string;
   let numstatOut: string;
   try {
@@ -32,11 +43,11 @@ export async function listWorkspaceReviewChanges(
     ]);
   } catch (error) {
     if (isNotGitRepositoryError(error)) {
-      return [];
+      return { available: false, reason: 'not_git_repo', changes: [] };
     }
 
     if (await isGitExecutableUnavailableError(error, workspaceRoot)) {
-      return [];
+      return { available: false, reason: 'git_unavailable', changes: [] };
     }
 
     throw error;
@@ -73,7 +84,7 @@ export async function listWorkspaceReviewChanges(
     changes.push({ path: rest, status, ...numstat });
   }
 
-  return changes;
+  return { available: true, changes };
 }
 
 export async function getWorkspaceReviewDiff(

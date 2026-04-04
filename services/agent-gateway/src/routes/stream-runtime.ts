@@ -31,6 +31,7 @@ import {
   isWebSearchEnabled,
   loadSessionContext,
   loadSessionUser,
+  resolveStreamRequestUpstreamRetry,
   resolveStreamModelRoute,
   setPersistedSessionStateStatus,
   streamRequestSchema,
@@ -50,11 +51,16 @@ async function continueFromApprovedToolResult(input: {
   sessionId: string;
   userId: string;
 }): Promise<{ pendingInteraction: boolean; statusCode: number }> {
-  const requestData = streamRequestSchema.parse(input.payload.requestData);
   const sessionContext = loadSessionContext(input.sessionId, input.userId);
   if (!sessionContext) {
     throw new Error('Session not found');
   }
+
+  const requestData = resolveStreamRequestUpstreamRetry({
+    metadataJson: sessionContext.metadataJson,
+    requestData: streamRequestSchema.parse(input.payload.requestData),
+    userId: input.userId,
+  });
 
   const runId = randomUUID();
   const eventSequence = { value: 1 };
@@ -72,6 +78,10 @@ async function continueFromApprovedToolResult(input: {
   const requestSystemPrompts = buildRequestScopedSystemPrompts(
     requestData.message,
     buildCapabilityContext(input.userId, input.sessionId),
+    {
+      dialogueMode: requestData.dialogueMode,
+      yoloMode: requestData.yoloMode,
+    },
   );
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);

@@ -224,6 +224,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             });
             if (streamResult.statusCode >= 400) {
               wl.fail(stepRoute, 'stream request completed with error status', {
+                agentId: body.data.agentId ?? 'none',
                 sessionId,
                 clientRequestId: body.data.clientRequestId,
                 statusCode: streamResult.statusCode,
@@ -231,6 +232,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
               wl.flush(ctx, streamResult.statusCode);
             } else {
               wl.succeed(stepRoute, undefined, {
+                agentId: body.data.agentId ?? 'none',
                 sessionId,
                 clientRequestId: body.data.clientRequestId,
               });
@@ -239,6 +241,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             wl.fail(stepRoute, message, {
+              agentId: body.data.agentId ?? 'none',
               sessionId,
               clientRequestId: body.data.clientRequestId,
             });
@@ -318,17 +321,27 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       });
       if (streamResult.statusCode >= 400) {
         wl.fail(routeStep, 'stream request completed with error status', {
+          agentId: query.data.agentId ?? 'none',
+          clientRequestId: query.data.clientRequestId,
           sessionId,
           statusCode: streamResult.statusCode,
         });
         wl.flush(ctx, streamResult.statusCode);
       } else {
-        wl.succeed(routeStep, undefined, { sessionId });
+        wl.succeed(routeStep, undefined, {
+          agentId: query.data.agentId ?? 'none',
+          clientRequestId: query.data.clientRequestId,
+          sessionId,
+        });
         wl.flush(ctx, streamResult.statusCode);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      wl.fail(routeStep, message);
+      wl.fail(routeStep, message, {
+        agentId: query.data.agentId ?? 'none',
+        clientRequestId: query.data.clientRequestId,
+        sessionId,
+      });
       wl.flush(ctx, 500);
       throw error;
     } finally {

@@ -55,6 +55,7 @@ const DEFAULT_CANONICAL_TOOLS: ReadonlySet<string> = new Set([
   'task_update',
   'skill',
   'question',
+  'desktop_automation',
   'task',
   'call_omo_agent',
   'EnterPlanMode',

@@ -4,7 +4,17 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  persistSessionFileBackupMock: vi.fn(async () => ({
+  captureBeforeWriteBackupMock: vi.fn<
+    (...args: unknown[]) => Promise<
+      | {
+          backupId: string;
+          kind: 'before_write';
+          contentHash: string;
+          storagePath: string;
+        }
+      | undefined
+    >
+  >(async () => ({
     backupId: 'backup-1',
     kind: 'before_write' as const,
     contentHash: 'hash-1',
@@ -29,7 +39,7 @@ vi.mock('../workspace-paths.js', () => ({
 }));
 
 vi.mock('../session-file-backup-store.js', () => ({
-  persistSessionFileBackup: mocks.persistSessionFileBackupMock,
+  captureBeforeWriteBackup: mocks.captureBeforeWriteBackupMock,
 }));
 
 import { createEditTool } from '../edit-tools.js';
@@ -69,7 +79,7 @@ describe('edit-tools', () => {
       new AbortController().signal,
     );
 
-    expect(mocks.persistSessionFileBackupMock).toHaveBeenCalledWith({
+    expect(mocks.captureBeforeWriteBackupMock).toHaveBeenCalledWith({
       sessionId: 'session-a',
       userId: 'user-a',
       requestId: 'req-a',
@@ -85,5 +95,23 @@ describe('edit-tools', () => {
       contentHash: 'hash-1',
       storagePath: '/tmp/backup-1.txt',
     });
+  });
+
+  it('degrades gracefully when backup capture returns undefined', async () => {
+    mocks.captureBeforeWriteBackupMock.mockImplementationOnce(async () => undefined);
+
+    const tool = createEditTool('session-a', 'user-a', 'req-a', 'call-1');
+    const result = await tool.execute(
+      {
+        filePath,
+        oldString: '1',
+        newString: '2',
+        replaceAll: false,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.filediff.backupBeforeRef).toBeUndefined();
+    expect(result.after).toBe('const value = 2;\n');
   });
 });

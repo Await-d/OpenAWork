@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import { sqliteAll } from './db.js';
 import { lspManager } from './lsp/router.js';
-import { persistSessionFileBackup } from './session-file-backup-store.js';
+import { captureBeforeWriteBackup } from './session-file-backup-store.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 
 const editInputSchema = z.object({
@@ -91,7 +91,7 @@ function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
 
 async function touchEditedFile(filePath: string): Promise<void> {
   try {
-    await lspManager.touchFile(filePath, false);
+    await lspManager.touchFile(filePath, true);
   } catch {
     return;
   }
@@ -130,7 +130,7 @@ export function createEditTool(
 
       if (input.oldString.length === 0) {
         const backupBeforeRef = exists
-          ? await persistSessionFileBackup({
+          ? await captureBeforeWriteBackup({
               sessionId,
               userId,
               requestId,
@@ -183,7 +183,7 @@ export function createEditTool(
         ? currentContent.split(input.oldString).join(input.newString)
         : currentContent.replace(input.oldString, input.newString);
 
-      const backupBeforeRef = await persistSessionFileBackup({
+      const backupBeforeRef = await captureBeforeWriteBackup({
         sessionId,
         userId,
         requestId,

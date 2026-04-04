@@ -1,8 +1,10 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
+import type { PersistedCompactionMemory } from '../compaction-metadata.js';
+import { readPersistedCompactionMemory } from '../compaction-metadata.js';
 import {
   appendSessionMessage,
-  buildUpstreamConversation,
+  buildPreparedUpstreamConversation,
   hasToolOutputReference,
   listSessionMessages,
 } from '../session-message-store.js';
@@ -23,6 +25,7 @@ import type { resolveModelRoute } from '../model-router.js';
 import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
 import type { getEnabledTools } from './stream.js';
+import { fetchUpstreamStreamWithRetry } from './upstream-stream-retry.js';
 
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
 type StreamStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled';
@@ -157,6 +160,14 @@ export async function runModelRound(input: {
   requestSystemPrompts: string[];
   writeChunk: (chunk: RunEvent) => void;
 }): Promise<{
+  compaction?: {
+    eventSummary: string;
+    omittedMessages: number;
+    persistedMemory: PersistedCompactionMemory;
+    recentMessagesKept: number;
+    signature: string;
+    structuredSummary: string;
+  };
   shouldContinue: boolean;
   shouldStop: boolean;
   stopReason: StreamStopReason;
@@ -165,14 +176,18 @@ export async function runModelRound(input: {
   usage?: StreamUsageSummary;
   usageOccurredAt?: number;
 }> {
-  const conversation = buildUpstreamConversation(
+  const preparedConversation = buildPreparedUpstreamConversation(
     listSessionMessages({
       sessionId: input.sessionId,
       userId: input.userId,
       legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-      statuses: ['final'],
+      statuses: ['final', 'error'],
     }),
+    {
+      persistedMemory: readPersistedCompactionMemory(input.sessionContext.metadataJson),
+    },
   );
+  const conversation = preparedConversation.messages;
   const shouldGuideToolOutputReadback = hasToolOutputReference(conversation);
   const upstreamMessages = [
     ...buildRoundSystemMessages({
@@ -197,6 +212,7 @@ export async function runModelRound(input: {
   });
 
   const stepUpstream = input.wl.start(`upstream.fetch.${input.round}`, undefined, {
+    maxRetries: input.requestData.upstreamRetryMaxRetries ?? 3,
     model: input.route.model,
     upstreamProtocol: input.route.upstreamProtocol,
     round: input.round,
@@ -204,6 +220,38 @@ export async function runModelRound(input: {
   });
   const state = createAccumulationState();
   let stepStream: WorkflowStepHandle | undefined;
+  const finalizeAssistant = (reason: StreamStopReason) => {
+    if (
+      reason === 'cancelled' &&
+      state.assistantThinking.trim().length === 0 &&
+      state.assistantText.trim().length === 0 &&
+      state.toolCalls.size === 0
+    ) {
+      return;
+    }
+    appendSessionMessage({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: 'assistant',
+      content: buildAssistantContent(
+        state,
+        reason === 'tool_use' ? undefined : input.turnFileDiffs,
+      ),
+      legacyMessagesJson: input.sessionContext.legacyMessagesJson,
+      clientRequestId:
+        reason === 'tool_use'
+          ? createIntermediateAssistantRequestId(input.clientRequestId, input.round)
+          : input.clientRequestId,
+    });
+    if (reason !== 'tool_use' && input.turnFileDiffs && input.turnFileDiffs.size > 0) {
+      persistSessionSnapshot({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        snapshotRef: createRequestSnapshotRef(input.clientRequestId),
+        fileDiffs: Array.from(input.turnFileDiffs.values()),
+      });
+    }
+  };
 
   try {
     const headers: Record<string, string> = {
@@ -212,11 +260,18 @@ export async function runModelRound(input: {
       ...(input.route.requestOverrides.headers ?? {}),
     };
 
-    const response = await fetch(`${input.route.apiBaseUrl}${upstreamPath}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(upstreamBody),
+    const response = await fetchUpstreamStreamWithRetry({
+      url: `${input.route.apiBaseUrl}${upstreamPath}`,
+      init: {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(upstreamBody),
+      },
       signal: input.signal,
+      requireResponseBody: true,
+      retryOptions: {
+        maxAttempts: (input.requestData.upstreamRetryMaxRetries ?? 3) + 1,
+      },
     });
 
     if (!response.ok || !response.body) {
@@ -237,6 +292,7 @@ export async function runModelRound(input: {
       } as RunEvent);
       input.wl.flush(input.ctx, response.status);
       return {
+        compaction: preparedConversation.compaction,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'error',
@@ -259,39 +315,6 @@ export async function runModelRound(input: {
     streamState.nextEventSequence = input.eventSequence.value;
     let buffer = '';
     let stopReason: StreamStopReason = 'end_turn';
-
-    const finalizeAssistant = (reason: StreamStopReason) => {
-      if (
-        reason === 'cancelled' &&
-        state.assistantThinking.trim().length === 0 &&
-        state.assistantText.trim().length === 0 &&
-        state.toolCalls.size === 0
-      ) {
-        return;
-      }
-      appendSessionMessage({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: 'assistant',
-        content: buildAssistantContent(
-          state,
-          reason === 'tool_use' ? undefined : input.turnFileDiffs,
-        ),
-        legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-        clientRequestId:
-          reason === 'tool_use'
-            ? createIntermediateAssistantRequestId(input.clientRequestId, input.round)
-            : input.clientRequestId,
-      });
-      if (reason !== 'tool_use' && input.turnFileDiffs && input.turnFileDiffs.size > 0) {
-        persistSessionSnapshot({
-          sessionId: input.sessionId,
-          userId: input.userId,
-          snapshotRef: createRequestSnapshotRef(input.clientRequestId),
-          fileDiffs: Array.from(input.turnFileDiffs.values()),
-        });
-      }
-    };
 
     const completeRound = (
       reason: StreamStopReason,
@@ -320,6 +343,7 @@ export async function runModelRound(input: {
 
       const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
       return {
+        compaction: preparedConversation.compaction,
         shouldContinue,
         shouldStop: !shouldContinue,
         stopReason,
@@ -395,6 +419,7 @@ export async function runModelRound(input: {
         input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
         input.wl.flush(input.ctx, 502);
         return {
+          compaction: preparedConversation.compaction,
           shouldContinue: false,
           shouldStop: true,
           stopReason: 'error',
@@ -441,6 +466,7 @@ export async function runModelRound(input: {
       input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
       input.wl.flush(input.ctx, 502);
       return {
+        compaction: preparedConversation.compaction,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'error',
@@ -459,12 +485,14 @@ export async function runModelRound(input: {
     return completeRound(eofResolution.stopReason);
   } catch (err) {
     if (input.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      finalizeAssistant('cancelled');
       input.writeChunk({
         type: 'done',
         stopReason: 'cancelled',
         ...createRunEventMeta(input.runId, input.eventSequence),
       });
       return {
+        compaction: preparedConversation.compaction,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'cancelled',
@@ -493,6 +521,7 @@ export async function runModelRound(input: {
     input.writeChunk(createStreamErrorChunk('STREAM_ERROR', message, input.runId));
     input.wl.flush(input.ctx, 500);
     return {
+      compaction: preparedConversation.compaction,
       shouldContinue: false,
       shouldStop: true,
       stopReason: 'error',

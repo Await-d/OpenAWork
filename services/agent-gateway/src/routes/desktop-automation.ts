@@ -2,11 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../auth.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { createDesktopAutomationManager } from '../desktop-automation.js';
-
-const desktopAutomation = createDesktopAutomationManager({
-  enabled: process.env['DESKTOP_AUTOMATION'] === '1',
-});
+import { desktopAutomationManager } from '../desktop-automation.js';
 
 export async function desktopAutomationRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -14,7 +10,7 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'desktop-automation.status');
-      const status = await desktopAutomation.status();
+      const status = await desktopAutomationManager.status();
       step.succeed(undefined, {
         enabled: status.enabled,
         started: status.started,
@@ -33,7 +29,7 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
         step.fail('invalid input');
         return reply.status(400).send({ ok: false });
       }
-      await desktopAutomation.start(body.data.url);
+      await desktopAutomationManager.start(body.data.url);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -49,7 +45,7 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
         step.fail('invalid input');
         return reply.status(400).send({ ok: false });
       }
-      await desktopAutomation.goto(body.data.url);
+      await desktopAutomationManager.goto(body.data.url);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -65,7 +61,7 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
         step.fail('invalid input');
         return reply.status(400).send({ ok: false });
       }
-      await desktopAutomation.click(body.data.selector);
+      await desktopAutomationManager.click(body.data.selector);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -83,7 +79,7 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
         step.fail('invalid input');
         return reply.status(400).send({ ok: false });
       }
-      await desktopAutomation.type(body.data.selector, body.data.text);
+      await desktopAutomationManager.type(body.data.selector, body.data.text);
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -94,7 +90,7 @@ export async function desktopAutomationRoutes(app: FastifyInstance): Promise<voi
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'desktop-automation.screenshot');
-      const screenshotBase64 = await desktopAutomation.screenshot();
+      const screenshotBase64 = await desktopAutomationManager.screenshot();
       step.succeed(undefined, { bytes: screenshotBase64.length });
       return reply.send({ screenshotBase64 });
     },

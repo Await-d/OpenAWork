@@ -23,7 +23,11 @@ vi.mock('@openAwork/agent-core', async () => ({
   },
 }));
 
-import { executeWorkspaceWriteFile, executeWriteTool } from '../workspace-tools.js';
+import {
+  executeWorkspaceCreateFile,
+  executeWorkspaceWriteFile,
+  executeWriteTool,
+} from '../workspace-tools.js';
 
 let filePath = '';
 
@@ -83,5 +87,16 @@ describe('workspace-tools backup hook', () => {
       contentHash: 'hash-2',
       storagePath: '/tmp/backup-2.txt',
     });
+  });
+
+  it('creates a new file without synthesizing a backupBeforeRef', async () => {
+    const createdPath = join(filePath, '..', 'created.ts');
+    const output = await executeWorkspaceCreateFile({
+      path: createdPath,
+      content: 'export const created = true;\n',
+    });
+
+    expect(output.created).toBe(true);
+    expect(output.filediff.backupBeforeRef).toBeUndefined();
   });
 });

@@ -69,6 +69,7 @@ describe('buildGatewayToolDefinitions', () => {
         'Agent',
         'skill_mcp',
         'look_at',
+        'desktop_automation',
         'write',
         'workspace_review_status',
         'workspace_review_diff',
@@ -192,6 +193,7 @@ describe('buildGatewayToolDefinitions', () => {
     ]);
     expect(byName.get('skill_mcp')?.function.parameters.required).toEqual(['mcp_name']);
     expect(byName.get('look_at')?.function.parameters.required).toEqual(['goal']);
+    expect(byName.get('desktop_automation')?.function.parameters.required).toEqual(['action']);
     expect(byName.get('workspace_review_status')?.function.parameters.required).toEqual(['path']);
     expect(byName.get('workspace_review_diff')?.function.parameters.required).toEqual([
       'path',
@@ -210,6 +212,16 @@ describe('buildGatewayToolDefinitions', () => {
         filePath: {
           type: 'string',
         },
+      },
+    });
+    expect(byName.get('desktop_automation')?.function.parameters).toMatchObject({
+      properties: {
+        action: {
+          enum: ['status', 'start', 'goto', 'click', 'type', 'screenshot'],
+        },
+        url: { type: 'string' },
+        selector: { type: 'string' },
+        text: { type: 'string' },
       },
     });
     expect(byName.get('grep')?.function.parameters).toMatchObject({
@@ -293,6 +305,7 @@ describe('buildGatewayToolDefinitions', () => {
         'task_get',
         'task_list',
         'task_update',
+        'desktop_automation',
         'Skill',
         'AskUserQuestion',
         'task',
@@ -376,6 +389,7 @@ describe('ClaudeCodeToolSurface profiles', () => {
     expect(defaults?.has('bash')).toBe(true);
     expect(defaults?.has('write')).toBe(true);
     expect(defaults?.has('task_create')).toBe(true);
+    expect(defaults?.has('desktop_automation')).toBe(true);
     expect(defaults?.has('question')).toBe(true);
     expect(defaults?.has('call_omo_agent')).toBe(true);
     expect(defaults?.has('EnterPlanMode')).toBe(true);
@@ -478,6 +492,7 @@ describe('claude-code-tool-surface helpers', () => {
         'task_get',
         'task_list',
         'task_update',
+        'desktop_automation',
         'Skill',
         'AskUserQuestion',
         'EnterPlanMode',

@@ -7,6 +7,7 @@ import { defaultIgnoreManager } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { buildFileDiff, fileBackupRefSchema, fileDiffSchema } from './file-diff-format.js';
 import { validateWorkspacePath } from './workspace-paths.js';
+import { lspManager } from './lsp/router.js';
 
 const applyPatchInputSchema = z.object({
   patchText: z.string().min(1),
@@ -212,7 +213,15 @@ async function planPatchText(patchText: string): Promise<PlannedPatchOperation[]
   return planned;
 }
 
-async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise<
+async function applyPlannedOperations(
+  planned: PlannedPatchOperation[],
+  options?: {
+    beforeWriteBackup?: (input: {
+      content: string;
+      filePath: string;
+    }) => Promise<FileBackupRef | undefined>;
+  },
+): Promise<
   Array<{
     action: 'add' | 'update' | 'delete' | 'move';
     additions?: number;
@@ -258,6 +267,12 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
 
     if (operation.type === 'delete') {
       const previousContent = await fsp.readFile(operation.path, 'utf8');
+      const backupBeforeRef = options?.beforeWriteBackup
+        ? await options.beforeWriteBackup({
+            filePath: operation.path,
+            content: previousContent,
+          })
+        : undefined;
       await fsp.unlink(operation.path);
       const filediff = buildFileDiff({ file: operation.path, before: previousContent, after: '' });
       outputs.push({
@@ -265,6 +280,7 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
         path: operation.path,
         before: previousContent,
         after: '',
+        ...(backupBeforeRef ? { backupBeforeRef } : {}),
         additions: filediff.additions,
         deletions: filediff.deletions,
         status: filediff.status,
@@ -274,6 +290,12 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
 
     if (operation.type === 'move') {
       const previousContent = await fsp.readFile(operation.sourcePath, 'utf8');
+      const backupBeforeRef = options?.beforeWriteBackup
+        ? await options.beforeWriteBackup({
+            filePath: operation.sourcePath,
+            content: previousContent,
+          })
+        : undefined;
       await fsp.mkdir(dirname(operation.targetPath), { recursive: true });
       await fsp.writeFile(operation.targetPath, operation.content, 'utf8');
       await fsp.unlink(operation.sourcePath);
@@ -287,6 +309,7 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
         path: operation.targetPath,
         before: previousContent,
         after: operation.content,
+        ...(backupBeforeRef ? { backupBeforeRef } : {}),
         additions: filediff.additions,
         deletions: filediff.deletions,
         status: filediff.status,
@@ -295,6 +318,12 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
     }
 
     const previousContent = await fsp.readFile(operation.path, 'utf8');
+    const backupBeforeRef = options?.beforeWriteBackup
+      ? await options.beforeWriteBackup({
+          filePath: operation.path,
+          content: previousContent,
+        })
+      : undefined;
     await fsp.writeFile(operation.path, operation.content, 'utf8');
     const filediff = buildFileDiff({
       file: operation.path,
@@ -306,6 +335,7 @@ async function applyPlannedOperations(planned: PlannedPatchOperation[]): Promise
       path: operation.path,
       before: previousContent,
       after: operation.content,
+      ...(backupBeforeRef ? { backupBeforeRef } : {}),
       additions: filediff.additions,
       deletions: filediff.deletions,
       status: filediff.status,
@@ -325,19 +355,11 @@ export async function executeApplyPatch(
   },
 ): Promise<z.infer<typeof applyPatchOutputSchema>> {
   const planned = await planPatchText(input.patchText);
-  const files = await applyPlannedOperations(planned);
-  for (const file of files) {
-    if (
-      !options?.beforeWriteBackup ||
-      typeof file.before !== 'string' ||
-      file.before.length === 0
-    ) {
-      continue;
-    }
-    file.backupBeforeRef = await options.beforeWriteBackup({
-      filePath: file.path,
-      content: file.before,
-    });
+  const files = await applyPlannedOperations(planned, options);
+
+  const modifiedPaths = files.filter((f) => f.status !== 'deleted').map((f) => f.path);
+  for (const filePath of modifiedPaths) {
+    lspManager.touchFile(filePath, true).catch((_e: unknown) => undefined);
   }
 
   return {
