@@ -28,7 +28,13 @@ export interface LSPClientInfo {
   waitForDiagnostics(input: { path: string; timeoutMs?: number }): Promise<Diagnostic[]>;
   hover(input: { file: string; line: number; character: number }): Promise<unknown>;
   definition(input: { file: string; line: number; character: number }): Promise<unknown[]>;
-  references(input: { file: string; line: number; character: number }): Promise<unknown[]>;
+  implementation(input: { file: string; line: number; character: number }): Promise<unknown[]>;
+  references(input: {
+    file: string;
+    line: number;
+    character: number;
+    includeDeclaration?: boolean;
+  }): Promise<unknown[]>;
   documentSymbols(input: { file: string }): Promise<unknown[]>;
   workspaceSymbols(input: { query: string }): Promise<unknown[]>;
   prepareRename(input: { file: string; line: number; character: number }): Promise<unknown>;

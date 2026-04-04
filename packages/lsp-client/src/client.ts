@@ -23,6 +23,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+/** SymbolKind values 1–26 per LSP 3.17 spec. */
+const SYMBOL_KIND_VALUE_SET = Array.from({ length: 26 }, (_, i) => i + 1);
+
 function buildInitializeParams(root: string, initialization?: Record<string, unknown>) {
   return {
     processId: globalThis.process?.pid ?? null,
@@ -34,12 +37,23 @@ function buildInitializeParams(root: string, initialization?: Record<string, unk
         configuration: true,
         workspaceFolders: true,
         didChangeConfiguration: { dynamicRegistration: true },
+        symbol: {
+          dynamicRegistration: false,
+          symbolKind: { valueSet: SYMBOL_KIND_VALUE_SET },
+        },
       },
       textDocument: {
         publishDiagnostics: { relatedInformation: true, tagSupport: { valueSet: [1, 2] } },
         hover: { contentFormat: ['markdown', 'plaintext'] },
         definition: { linkSupport: false },
-        references: {},
+        implementation: { dynamicRegistration: false, linkSupport: false },
+        references: { dynamicRegistration: false },
+        documentSymbol: {
+          dynamicRegistration: false,
+          hierarchicalDocumentSymbolSupport: true,
+          symbolKind: { valueSet: SYMBOL_KIND_VALUE_SET },
+        },
+        rename: { prepareSupport: true, prepareSupportDefaultBehavior: 1 },
       },
     },
     initializationOptions: initialization ?? {},
@@ -175,12 +189,22 @@ export async function createLSPClient(input: {
       return Array.isArray(result) ? result : result ? [result] : [];
     },
 
-    async references({ file, line, character }) {
+    async implementation({ file, line, character }) {
+      const result = await connection
+        .sendRequest('textDocument/implementation', {
+          textDocument: { uri: pathToFileURL(file).href },
+          position: { line, character },
+        })
+        .catch(() => []);
+      return Array.isArray(result) ? result : result ? [result] : [];
+    },
+
+    async references({ file, line, character, includeDeclaration = true }) {
       const result = await connection
         .sendRequest('textDocument/references', {
           textDocument: { uri: pathToFileURL(file).href },
           position: { line, character },
-          context: { includeDeclaration: true },
+          context: { includeDeclaration },
         })
         .catch(() => []);
       return Array.isArray(result) ? result : [];

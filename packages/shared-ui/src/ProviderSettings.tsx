@@ -5,6 +5,7 @@ import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
 } from './model-reasoning-support.js';
+import { ModelManager } from './ModelManager.js';
 import type { SupportedReasoningEffort } from './model-reasoning-support.js';
 import { buildFilteredModelGroups } from './model-picker-search.js';
 
@@ -72,7 +73,12 @@ export interface AIModelConfigRef {
   id: string;
   label: string;
   enabled: boolean;
+  autoCompactTargetRatio?: number;
+  autoCompactThresholdRatio?: number;
   contextWindow?: number;
+  inputPricePerMillion?: number;
+  maxOutputTokens?: number;
+  outputPricePerMillion?: number;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
@@ -129,6 +135,7 @@ export interface ProviderSettingsProps {
   onToggleModel?: (providerId: string, modelId: string) => void;
   onAddModel?: (providerId: string, model: AIModelConfigRef) => void;
   onRemoveModel?: (providerId: string, modelId: string) => void;
+  onUpdateModel?: (providerId: string, modelId: string, updates: Partial<AIModelConfigRef>) => void;
   style?: CSSProperties;
 }
 
@@ -367,6 +374,10 @@ export function ProviderSettings({
   onToggleProvider,
   onEditProvider,
   onAddProvider,
+  onToggleModel,
+  onAddModel,
+  onRemoveModel,
+  onUpdateModel,
   style,
 }: ProviderSettingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1142,6 +1153,19 @@ export function ProviderSettings({
                       }}
                       onCancel={() => setEditingId(null)}
                     />
+                    <div style={{ marginTop: 14 }}>
+                      <ModelManager
+                        provider={{
+                          id: provider.id,
+                          name: provider.name,
+                          defaultModels: provider.defaultModels,
+                        }}
+                        onToggleModel={onToggleModel}
+                        onAddModel={onAddModel}
+                        onRemoveModel={onRemoveModel}
+                        onUpdateModel={onUpdateModel}
+                      />
+                    </div>
                   </div>
                 )}
               </li>

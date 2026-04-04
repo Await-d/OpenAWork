@@ -284,6 +284,7 @@ export interface SessionTask {
   unmetDependencyCount: number;
   result?: string;
   errorMessage?: string;
+  terminalReason?: string;
 }
 
 export interface DeleteSessionResult {

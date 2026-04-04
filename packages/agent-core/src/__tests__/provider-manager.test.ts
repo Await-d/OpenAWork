@@ -100,4 +100,34 @@ describe('ProviderManagerImpl.syncFromModelsDev', () => {
     expect(openAi?.defaultModels.some((model) => model.id === 'gpt-5.1-nano')).toBe(false);
     expect(manager.getConfig().active.chat.modelId).not.toBe('gpt-5.1-nano');
   });
+
+  it('preserves custom auto-compaction ratios in selected model config', () => {
+    const manager = new ProviderManagerImpl({
+      providers: [
+        {
+          ...new ProviderManagerImpl()
+            .listProviders()
+            .find((provider) => provider.id === 'openai')!,
+          defaultModels: [
+            {
+              id: 'gpt-5',
+              label: 'GPT-5',
+              enabled: true,
+              autoCompactThresholdRatio: 0.92,
+              autoCompactTargetRatio: 0.48,
+            },
+          ],
+        },
+      ],
+      active: {
+        chat: { providerId: 'openai', modelId: 'gpt-5' },
+        fast: { providerId: 'openai', modelId: 'gpt-5' },
+      },
+    });
+
+    const { model } = manager.getChatProviderConfig();
+
+    expect(model.autoCompactThresholdRatio).toBe(0.92);
+    expect(model.autoCompactTargetRatio).toBe(0.48);
+  });
 });

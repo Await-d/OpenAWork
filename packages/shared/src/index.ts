@@ -402,6 +402,7 @@ export interface ToolResultContent {
   clientRequestId?: string;
   output: unknown;
   isError: boolean;
+  reason?: string;
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   observability?: ToolCallObservabilityAnnotation;
@@ -517,6 +518,7 @@ export interface StreamToolResultChunk {
   clientRequestId?: string;
   output: unknown;
   isError: boolean;
+  reason?: string;
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
   observability?: ToolCallObservabilityAnnotation;
@@ -576,6 +578,7 @@ export interface StreamTaskUpdateChunk {
   requestedSkills?: string[];
   result?: string;
   errorMessage?: string;
+  reason?: string;
   sessionId?: string;
   parentTaskId?: string;
   parentSessionId?: string;
@@ -598,6 +601,17 @@ export interface StreamCompactionChunk {
   type: 'compaction';
   summary: string;
   trigger: 'manual' | 'automatic';
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamUsageChunk {
+  type: 'usage';
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  round: number;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -629,6 +643,7 @@ export type RunEvent =
   | StreamTaskUpdateChunk
   | StreamSessionChildChunk
   | StreamCompactionChunk
+  | StreamUsageChunk
   | StreamAuditRefChunk;
 
 export interface RunEventCursor {

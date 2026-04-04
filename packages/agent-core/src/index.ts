@@ -79,6 +79,25 @@ export {
 } from './hooks/system-directive.js';
 
 export { lspDiagnosticsTool, lspTouchTool, LSP_TOOLS } from './tools/lsp.js';
+export type { LspToolMetadata } from './tools/lsp.js';
+export {
+  gotoDefinitionInputSchema,
+  gotoImplementationInputSchema,
+  findReferencesInputSchema,
+  symbolsInputSchema,
+  prepareRenameInputSchema,
+  renameInputSchema,
+  hoverInputSchema,
+  lspGotoDefinitionMeta,
+  lspGotoImplementationMeta,
+  lspFindReferencesMeta,
+  lspSymbolsMeta,
+  lspPrepareRenameMeta,
+  lspRenameMeta,
+  lspHoverMeta,
+  LSP_RICHER_TOOL_METADATA,
+  ALL_LSP_TOOL_NAMES,
+} from './tools/lsp.js';
 export { webSearchTool, WEB_SEARCH_TOOLS } from './tools/web-search.js';
 export * from './tools/hash-edit.js';
 
@@ -338,3 +357,36 @@ export {
   SSHSessionBindingRegistry,
   sshSessionBindings,
 } from './ssh/ssh-session-binding.js';
+
+export type {
+  MemoryType,
+  MemorySource,
+  MemoryEntry,
+  CreateMemoryInput,
+  UpdateMemoryInput,
+  MemoryListFilter,
+  MemoryStats,
+  MemoryInjectionConfig,
+  MemorySettings,
+  ExtractedMemoryCandidate,
+  MemoryExtractionLog,
+  DeduplicationResult,
+} from './memory/index.js';
+export {
+  MEMORY_TYPES,
+  MEMORY_SOURCES,
+  memoryTypeSchema,
+  memorySourceSchema,
+  createMemorySchema,
+  updateMemorySchema,
+  memoryListQuerySchema,
+  memorySettingsSchema,
+  DEFAULT_MEMORY_SETTINGS,
+  MEMORY_SETTINGS_KEY,
+  estimateTokenCount,
+  parseMemorySettings,
+  normalizeMemoryKey,
+  deduplicateMemories,
+  buildMemoryInjectionBlock,
+  extractMemoriesFromText,
+} from './memory/index.js';

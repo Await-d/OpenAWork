@@ -1,4 +1,11 @@
 export { ArtifactManagerImpl, FileBrowserAPIImpl } from './manager.js';
+export {
+  ARTIFACT_CONTENT_TYPES,
+  ARTIFACT_TYPE_CONFIG,
+  buildArtifactPreviewSnippet,
+  computeArtifactLineDiff,
+  detectArtifactContentType,
+} from './artifact-content.js';
 export type {
   RunArtifact,
   ArtifactType,
@@ -10,3 +17,14 @@ export type {
   ArtifactManager,
   FileBrowserAPI,
 } from './types.js';
+export type {
+  ArtifactContentType,
+  ArtifactDraftInput,
+  ArtifactLineChange,
+  ArtifactMetadata,
+  ArtifactRecord,
+  ArtifactRenderStrategy,
+  ArtifactTypeConfig,
+  ArtifactVersionActor,
+  ArtifactVersionRecord,
+} from './artifact-content.js';

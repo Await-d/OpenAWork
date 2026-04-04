@@ -49,6 +49,8 @@ export interface AIModelConfig {
   enabled: boolean;
   contextWindow?: number;
   maxOutputTokens?: number;
+  autoCompactThresholdRatio?: number;
+  autoCompactTargetRatio?: number;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
@@ -79,6 +81,10 @@ export interface ActiveSelection {
     modelId: string;
   };
   fast: {
+    providerId: string;
+    modelId: string;
+  };
+  compaction?: {
     providerId: string;
     modelId: string;
   };

@@ -116,7 +116,21 @@ export class LSPManager {
     return client?.definition(input) ?? [];
   }
 
-  async references(input: { file: string; line: number; character: number }): Promise<unknown[]> {
+  async implementation(input: {
+    file: string;
+    line: number;
+    character: number;
+  }): Promise<unknown[]> {
+    const client = await this.clientForFile(input.file);
+    return client?.implementation(input) ?? [];
+  }
+
+  async references(input: {
+    file: string;
+    line: number;
+    character: number;
+    includeDeclaration?: boolean;
+  }): Promise<unknown[]> {
     const client = await this.clientForFile(input.file);
     return client?.references(input) ?? [];
   }
