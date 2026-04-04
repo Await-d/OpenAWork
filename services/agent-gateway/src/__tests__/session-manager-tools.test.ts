@@ -204,10 +204,10 @@ describe('session-manager-tools', () => {
       include_transcript: false,
     });
 
-    expect(output).toContain('File Diffs:');
+    expect(output).toContain('Debug File Diffs:');
     expect(output).toContain('guarantee=weak');
     expect(output).toContain('source=workspace_reconcile');
-    expect(output).toContain('Snapshots:');
+    expect(output).toContain('Debug Snapshots:');
     expect(output).toContain('req:req-1 · scope=request');
   });
 

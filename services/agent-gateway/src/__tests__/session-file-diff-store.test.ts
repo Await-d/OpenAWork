@@ -220,4 +220,44 @@ describe('session-file-diff-store', () => {
       ['session-a', 'user-a', 'client-a'],
     );
   });
+
+  it('round-trips non-default source kinds and guarantee levels', () => {
+    mocks.sqliteAllMock.mockReturnValue([
+      {
+        client_request_id: 'client-b',
+        file_path: '/repo/manual.ts',
+        before_text: 'a',
+        after_text: 'b',
+        additions: 1,
+        deletions: 1,
+        status: 'modified',
+        source_kind: 'manual_revert',
+        guarantee_level: 'strong',
+        observability_json: null,
+        backup_before_ref_json: '{bad-json',
+        backup_after_ref_json: '{also-bad',
+        tool_name: 'restore',
+        tool_call_id: 'tool-3',
+        request_id: 'client-b:tool:tool-3',
+        created_at: '2026-03-30T00:00:02.000Z',
+      },
+    ]);
+
+    expect(listSessionFileDiffs({ sessionId: 'session-a', userId: 'user-a' })).toEqual([
+      {
+        file: '/repo/manual.ts',
+        before: 'a',
+        after: 'b',
+        additions: 1,
+        deletions: 1,
+        clientRequestId: 'client-b',
+        status: 'modified',
+        sourceKind: 'manual_revert',
+        guaranteeLevel: 'strong',
+        requestId: 'client-b:tool:tool-3',
+        toolName: 'restore',
+        toolCallId: 'tool-3',
+      },
+    ]);
+  });
 });

@@ -7,6 +7,13 @@ import type {
   MessageRole,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
+import {
+  mergePersistedCompactionMemory,
+  renderPersistedCompactionMemory,
+  type CompactionSummaryFields,
+  type CompactionTrigger,
+  type PersistedCompactionMemory,
+} from './compaction-metadata.js';
 import { buildReadToolOutputHint } from './tool-output-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 
@@ -25,6 +32,8 @@ interface SessionMessageRow {
 }
 
 const MAX_INLINE_TOOL_OUTPUT_BYTES = 8 * 1024;
+const INTERNAL_ASSISTANT_EVENT_SOURCE = 'openawork_internal';
+const INTERNAL_CLIENT_REQUEST_ID_KEY = '__openAworkClientRequestId';
 
 export interface UpstreamChatMessage {
   role: 'assistant' | 'system' | 'tool' | 'user';
@@ -38,6 +47,31 @@ export interface UpstreamChatMessage {
       arguments: string;
     };
   }>;
+}
+
+export interface PreparedUpstreamConversation {
+  messages: UpstreamChatMessage[];
+  compaction?: {
+    eventSummary: string;
+    omittedMessages: number;
+    persistedMemory: PersistedCompactionMemory;
+    recentMessagesKept: number;
+    signature: string;
+    structuredSummary: string;
+  };
+}
+
+export interface BuildPreparedUpstreamConversationOptions {
+  maxMessages?: number;
+  persistedMemory?: PersistedCompactionMemory | null;
+}
+
+export interface DurableCompactionSummary {
+  newlySummarizedMessages: number;
+  persistedMemory: PersistedCompactionMemory;
+  signature: string;
+  structuredSummary: string;
+  totalRepresentedMessages: number;
 }
 
 export function hasToolOutputReference(messages: UpstreamChatMessage[]): boolean {
@@ -67,8 +101,8 @@ export function isAssistantUiEventText(value: string): boolean {
   }
 
   try {
-    const parsed = JSON.parse(normalized) as { type?: unknown };
-    return parsed.type === 'assistant_event';
+    const parsed = JSON.parse(normalized) as { source?: unknown; type?: unknown };
+    return parsed.type === 'assistant_event' && parsed.source === INTERNAL_ASSISTANT_EVENT_SOURCE;
   } catch {
     return false;
   }
@@ -80,8 +114,79 @@ function isAssistantUiEventMessage(message: Message): boolean {
   }
 
   return message.content.every(
-    (content) => content.type === 'text' && isAssistantUiEventText(content.text),
+    (content) => content.type === 'text' && isAssistantUiEventTextForMessage(content.text, message),
   );
+}
+
+function isAssistantUiEventTextForMessage(value: string, message: Message): boolean {
+  if (isAssistantUiEventText(value)) {
+    return true;
+  }
+
+  const clientRequestId = (message as Message & { [INTERNAL_CLIENT_REQUEST_ID_KEY]?: unknown })[
+    INTERNAL_CLIENT_REQUEST_ID_KEY
+  ];
+  if (typeof clientRequestId !== 'string') {
+    return false;
+  }
+
+  if (
+    !clientRequestId.startsWith('assistant_event:') &&
+    !clientRequestId.startsWith('task-reminder:')
+  ) {
+    return false;
+  }
+
+  const normalized = value.trim();
+  if (!normalized.startsWith('{') || !normalized.endsWith('}')) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as { type?: unknown };
+    return parsed.type === 'assistant_event';
+  } catch {
+    return false;
+  }
+}
+
+function isCommandCardPayload(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized.startsWith('{') || !normalized.endsWith('}')) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as { type?: unknown; payload?: unknown };
+    return (
+      typeof parsed.type === 'string' &&
+      typeof parsed.payload === 'object' &&
+      parsed.payload !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isCommandCardMessage(message: Message): boolean {
+  if (message.role !== 'assistant' || message.content.length === 0) {
+    return false;
+  }
+
+  const clientRequestId = (message as Message & { [INTERNAL_CLIENT_REQUEST_ID_KEY]?: unknown })[
+    INTERNAL_CLIENT_REQUEST_ID_KEY
+  ];
+  if (typeof clientRequestId !== 'string' || !clientRequestId.startsWith('command-card:')) {
+    return false;
+  }
+
+  return message.content.every(
+    (content) => content.type === 'text' && isCommandCardPayload(content.text),
+  );
+}
+
+function isContextArtifactMessage(message: Message): boolean {
+  return isAssistantUiEventMessage(message) || isCommandCardMessage(message);
 }
 
 export function listSessionMessages(input: {
@@ -174,12 +279,78 @@ export function buildUpstreamConversation(
   maxMessages = 12,
 ): UpstreamChatMessage[] {
   const history = selectSafeConversationWindow(
-    messages.filter((message) => !isAssistantUiEventMessage(message)),
+    messages.filter((message) => !isContextArtifactMessage(message)),
     maxMessages,
   );
+  return buildUpstreamConversationFromHistory(history);
+}
+
+export function buildPreparedUpstreamConversation(
+  messages: Message[],
+  options: number | BuildPreparedUpstreamConversationOptions = 12,
+): PreparedUpstreamConversation {
+  const maxMessages = typeof options === 'number' ? options : (options.maxMessages ?? 12);
+  const persistedMemory = typeof options === 'number' ? null : (options.persistedMemory ?? null);
+  const normalizedMessages = messages.filter((message) => !isContextArtifactMessage(message));
+  const history = selectSafeConversationWindow(normalizedMessages, maxMessages);
+  const upstreamMessages = buildUpstreamConversationFromHistory(history);
+  const keptIds = new Set(history.map((message) => message.id));
+  const omittedMessages = normalizedMessages.filter((message) => !keptIds.has(message.id));
+
+  if (omittedMessages.length === 0) {
+    return { messages: upstreamMessages };
+  }
+
+  const durableSummary = buildDurableCompactionSummary({
+    existingMemory: persistedMemory,
+    messages: omittedMessages,
+    recentMessagesKept: history.length,
+    trigger: 'automatic',
+  });
+  const structuredSummary =
+    durableSummary?.structuredSummary ??
+    buildStructuredCompactionSummary({
+      messages: omittedMessages,
+      recentMessagesKept: history.length,
+      trigger: 'automatic',
+    });
+
+  return {
+    messages: [
+      {
+        role: 'system',
+        content: [
+          '[COMPACT BOUNDARY]',
+          'Earlier conversation history has been compacted to fit the active context window.',
+          `Messages summarized: ${omittedMessages.length}. Recent verbatim messages kept: ${history.length}.`,
+          'Use the structured summary below for earlier history, and rely on the later verbatim messages for the latest turn-level details.',
+        ].join('\n'),
+      },
+      {
+        role: 'system',
+        content: structuredSummary,
+      },
+      ...upstreamMessages,
+    ],
+    ...(durableSummary && durableSummary.newlySummarizedMessages > 0
+      ? {
+          compaction: {
+            eventSummary: `已自动压缩新增的 ${durableSummary.newlySummarizedMessages} 条较早消息，累计覆盖 ${durableSummary.totalRepresentedMessages} 条消息，保留最近 ${history.length} 条消息。`,
+            omittedMessages: durableSummary.totalRepresentedMessages,
+            persistedMemory: durableSummary.persistedMemory,
+            recentMessagesKept: history.length,
+            signature: durableSummary.signature,
+            structuredSummary,
+          },
+        }
+      : {}),
+  };
+}
+
+function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChatMessage[] {
   const upstreamMessages: UpstreamChatMessage[] = [];
 
-  history.forEach((message) => {
+  messages.forEach((message) => {
     if (message.role === 'tool') {
       message.content.forEach((content) => {
         if (content.type !== 'tool_result') return;
@@ -200,10 +371,21 @@ export function buildUpstreamConversation(
       .filter(
         (content): content is Extract<MessageContent, { type: 'text' }> =>
           content.type === 'text' &&
-          (message.role !== 'assistant' || !isAssistantUiEventText(content.text)),
+          (message.role !== 'assistant' ||
+            !isAssistantUiEventTextForMessage(content.text, message)),
       )
       .map((content) => content.text)
       .join('\n')
+      .trim();
+
+    const modifiedFilesSummaryText = message.content
+      .flatMap((content) => buildModifiedFilesSummaryContext(content))
+      .join('\n\n')
+      .trim();
+
+    const assistantContextText = [textContent, modifiedFilesSummaryText]
+      .filter((value) => value.length > 0)
+      .join('\n\n')
       .trim();
 
     if (message.role === 'assistant') {
@@ -221,10 +403,10 @@ export function buildUpstreamConversation(
         ];
       });
 
-      if (toolCalls.length === 0 && textContent.length === 0) return;
+      if (toolCalls.length === 0 && assistantContextText.length === 0) return;
       upstreamMessages.push({
         role: 'assistant',
-        content: textContent.length > 0 ? textContent : null,
+        content: assistantContextText.length > 0 ? assistantContextText : null,
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       });
       return;
@@ -235,6 +417,278 @@ export function buildUpstreamConversation(
   });
 
   return upstreamMessages;
+}
+
+export function buildStructuredCompactionSummary(input: {
+  messages: Message[];
+  recentMessagesKept: number;
+  trigger: 'automatic' | 'manual';
+}): string {
+  const fields = buildCompactionSummaryFields(input.messages);
+
+  return [
+    `Structured summary of earlier conversation history (${input.trigger} compaction).`,
+    `- Summarized messages: ${input.messages.length}`,
+    `- Recent verbatim messages kept: ${input.recentMessagesKept}`,
+    '',
+    formatSummarySection('User goals', fields.userGoals),
+    '',
+    formatSummarySection('Assistant progress and decisions', fields.assistantProgress),
+    '',
+    formatSummarySection('Tool activity', fields.toolActivity),
+    '',
+    formatSummarySection('Files referenced', fields.filesReferenced),
+    '',
+    formatSummarySection(
+      'Latest summarized user request',
+      fields.latestUserRequest ? [fields.latestUserRequest] : [],
+    ),
+  ]
+    .join('\n')
+    .trim();
+}
+
+export function buildCompactionSummaryFields(messages: Message[]): CompactionSummaryFields {
+  const normalizedMessages = messages.filter((message) => !isContextArtifactMessage(message));
+  const latestUserRequest = collectCompactSummaryLines(
+    normalizedMessages
+      .filter((message) => message.role === 'user')
+      .slice(-1)
+      .map((message) => summarizeCompactMessage(message)),
+    1,
+  )[0];
+
+  return {
+    userGoals: collectCompactSummaryLines(
+      normalizedMessages
+        .filter((message) => message.role === 'user')
+        .map((message) => summarizeCompactMessage(message)),
+      3,
+    ),
+    assistantProgress: collectCompactSummaryLines(
+      normalizedMessages
+        .filter((message) => message.role === 'assistant')
+        .map((message) => summarizeCompactMessage(message)),
+      4,
+    ),
+    toolActivity: collectToolActivitySummary(normalizedMessages),
+    filesReferenced: collectModifiedFilesForSummary(normalizedMessages),
+    ...(latestUserRequest ? { latestUserRequest } : {}),
+  };
+}
+
+export function buildDurableCompactionSummary(input: {
+  existingMemory?: PersistedCompactionMemory | null;
+  messages: Message[];
+  recentMessagesKept: number;
+  trigger: CompactionTrigger;
+}): DurableCompactionSummary | null {
+  const normalizedMessages = input.messages.filter((message) => !isContextArtifactMessage(message));
+  if (normalizedMessages.length === 0) {
+    return null;
+  }
+
+  const { deltaMessages, effectiveExistingMemory } = resolveCompactionDeltaMessages(
+    normalizedMessages,
+    input.existingMemory ?? null,
+  );
+  const coveredUntilMessageId =
+    deltaMessages.at(-1)?.id ??
+    effectiveExistingMemory?.coveredUntilMessageId ??
+    normalizedMessages.at(-1)?.id;
+
+  if (!coveredUntilMessageId) {
+    return null;
+  }
+
+  const signature = buildCompactionSignature({
+    coveredUntilMessageId,
+    previousCoveredUntilMessageId: effectiveExistingMemory?.coveredUntilMessageId,
+    recentMessagesKept: input.recentMessagesKept,
+    representedMessages: normalizedMessages.length,
+  });
+  const newlySummarizedMessages =
+    deltaMessages.length > 0
+      ? deltaMessages.length
+      : effectiveExistingMemory
+        ? 0
+        : normalizedMessages.length;
+  const persistedMemory =
+    deltaMessages.length > 0 || !effectiveExistingMemory
+      ? mergePersistedCompactionMemory(effectiveExistingMemory, {
+          coveredUntilMessageId,
+          fields: buildCompactionSummaryFields(
+            deltaMessages.length > 0 ? deltaMessages : normalizedMessages,
+          ),
+          newlySummarizedMessages,
+          signature,
+          trigger: input.trigger,
+        })
+      : effectiveExistingMemory;
+
+  return {
+    newlySummarizedMessages,
+    persistedMemory,
+    signature,
+    structuredSummary: renderPersistedCompactionMemory({
+      memory: persistedMemory,
+      omittedMessages: normalizedMessages.length,
+      recentMessagesKept: input.recentMessagesKept,
+      trigger: input.trigger,
+    }),
+    totalRepresentedMessages: normalizedMessages.length,
+  };
+}
+
+function resolveCompactionDeltaMessages(
+  messages: Message[],
+  existingMemory: PersistedCompactionMemory | null,
+): {
+  deltaMessages: Message[];
+  effectiveExistingMemory: PersistedCompactionMemory | null;
+} {
+  if (!existingMemory) {
+    return { deltaMessages: messages, effectiveExistingMemory: null };
+  }
+
+  const coveredIndex = messages.findIndex(
+    (message) => message.id === existingMemory.coveredUntilMessageId,
+  );
+  if (coveredIndex === -1) {
+    return { deltaMessages: messages, effectiveExistingMemory: null };
+  }
+
+  return {
+    deltaMessages: messages.slice(coveredIndex + 1),
+    effectiveExistingMemory: existingMemory,
+  };
+}
+
+function buildCompactionSignature(input: {
+  coveredUntilMessageId: string;
+  previousCoveredUntilMessageId?: string;
+  recentMessagesKept: number;
+  representedMessages: number;
+}): string {
+  return [
+    input.previousCoveredUntilMessageId ?? 'none',
+    input.coveredUntilMessageId,
+    String(input.representedMessages),
+    String(input.recentMessagesKept),
+  ].join(':');
+}
+
+function summarizeCompactMessage(message: Message): string {
+  const textParts = message.content
+    .flatMap((content) => {
+      if (content.type === 'text') return [content.text];
+      if (content.type === 'modified_files_summary') {
+        return [`${content.title}: ${content.summary}`];
+      }
+      return [];
+    })
+    .join('\n')
+    .trim();
+
+  if (textParts.length > 0) {
+    return normalizeCompactText(textParts, 220);
+  }
+
+  if (message.role === 'tool') {
+    const toolSummaries = message.content.flatMap((content) => {
+      if (content.type !== 'tool_result') return [];
+      const toolName = content.toolName ?? content.toolCallId;
+      return [content.isError ? `${toolName} (error)` : `${toolName} (ok)`];
+    });
+    return normalizeCompactText(toolSummaries.join(', '), 220);
+  }
+
+  return normalizeCompactText(extractMessageText(message), 220);
+}
+
+function collectCompactSummaryLines(items: string[], limit: number): string[] {
+  const deduped = new Set<string>();
+  const lines: string[] = [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const value = items[index]?.trim();
+    if (!value || deduped.has(value)) {
+      continue;
+    }
+    deduped.add(value);
+    lines.unshift(value);
+    if (lines.length >= limit) {
+      break;
+    }
+  }
+  return lines;
+}
+
+function collectToolActivitySummary(messages: Message[]): string[] {
+  const aggregated = new Map<string, { errors: number; successes: number }>();
+
+  messages.forEach((message) => {
+    if (message.role !== 'tool') {
+      return;
+    }
+
+    message.content.forEach((content) => {
+      if (content.type !== 'tool_result') {
+        return;
+      }
+
+      const toolName = content.toolName ?? content.toolCallId;
+      const current = aggregated.get(toolName) ?? { errors: 0, successes: 0 };
+      if (content.isError) {
+        current.errors += 1;
+      } else {
+        current.successes += 1;
+      }
+      aggregated.set(toolName, current);
+    });
+  });
+
+  return Array.from(aggregated.entries())
+    .slice(0, 5)
+    .map(([toolName, counts]) => {
+      const parts = [] as string[];
+      if (counts.successes > 0) {
+        parts.push(`ok×${counts.successes}`);
+      }
+      if (counts.errors > 0) {
+        parts.push(`error×${counts.errors}`);
+      }
+      return `${toolName}: ${parts.join(', ')}`;
+    });
+}
+
+function collectModifiedFilesForSummary(messages: Message[]): string[] {
+  const files = new Set<string>();
+  messages.forEach((message) => {
+    message.content.forEach((content) => {
+      if (content.type !== 'modified_files_summary') {
+        return;
+      }
+      content.files.forEach((file) => {
+        files.add(file.file);
+      });
+    });
+  });
+  return Array.from(files).slice(0, 6);
+}
+
+function formatSummarySection(title: string, lines: string[]): string {
+  if (lines.length === 0) {
+    return `${title}:\n- None recorded.`;
+  }
+  return `${title}:\n${lines.map((line) => `- ${line}`).join('\n')}`;
+}
+
+function normalizeCompactText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 export function extractMessageText(message: Message | undefined): string {
@@ -540,6 +994,19 @@ function ensureLatestUserMessage(selected: Message[], allMessages: Message[]): M
   return selected;
 }
 
+function buildModifiedFilesSummaryContext(content: MessageContent): string[] {
+  if (content.type !== 'modified_files_summary') {
+    return [];
+  }
+
+  const fileLines = content.files.map((file) => {
+    const status = file.status ?? 'modified';
+    return `- ${status}: ${file.file}`;
+  });
+
+  return [[`${content.title}: ${content.summary}`, ...fileLines].join('\n')];
+}
+
 function extractToolCallIds(message: Message): string[] {
   return message.content.flatMap((content) =>
     content.type === 'tool_call' ? [content.toolCallId] : [],
@@ -724,12 +1191,22 @@ function readSessionMessageRows(input: {
 }
 
 function rowToMessage(row: SessionMessageRow): Message {
-  return {
+  const message: Message = {
     id: row.id,
     role: row.role,
     createdAt: row.created_at_ms,
     content: parseContentJson(row.content_json),
   };
+
+  if (typeof row.client_request_id === 'string' && row.client_request_id.length > 0) {
+    Object.defineProperty(message, INTERNAL_CLIENT_REQUEST_ID_KEY, {
+      value: row.client_request_id,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+
+  return message;
 }
 
 function parseContentJson(raw: string): MessageContent[] {

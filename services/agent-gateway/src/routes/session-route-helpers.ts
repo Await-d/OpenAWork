@@ -1,4 +1,4 @@
-import type { Message } from '@openAwork/shared';
+import type { Message, RunEvent } from '@openAwork/shared';
 import type { SessionTodo } from '../todo-tools.js';
 
 interface SessionResponseLike {
@@ -12,6 +12,7 @@ interface SessionResponseLike {
 
 export interface PublicSessionResponse extends SessionResponseLike {
   messages: Message[];
+  runEvents: RunEvent[];
   todos: SessionTodo[];
 }
 
@@ -22,6 +23,7 @@ export function toPublicSessionResponse(
   session: SessionResponseLike,
   messages: Message[],
   todos: SessionTodo[] = [],
+  runEvents: RunEvent[] = [],
 ): PublicSessionResponse {
   return {
     id: session.id,
@@ -31,6 +33,7 @@ export function toPublicSessionResponse(
     created_at: session.created_at,
     updated_at: session.updated_at,
     messages,
+    runEvents,
     todos,
   };
 }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { validateWorkspacePath } from './workspace-paths.js';
+import { upstreamRetryMaxRetriesSchema } from './upstream-retry-policy.js';
 
 export const TOOL_SURFACE_PROFILES = [
   'openawork',
@@ -19,6 +20,7 @@ const sessionMetadataPatchSchema = z
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
     thinkingEnabled: z.boolean().optional(),
     toolSurfaceProfile: z.enum(TOOL_SURFACE_PROFILES).optional(),
+    upstreamRetryMaxRetries: upstreamRetryMaxRetriesSchema.optional(),
     webSearchEnabled: z.boolean().optional(),
     workingDirectory: z.string().optional(),
     yoloMode: z.boolean().optional(),

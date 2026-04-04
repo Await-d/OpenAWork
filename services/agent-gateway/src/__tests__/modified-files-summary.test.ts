@@ -77,4 +77,95 @@ describe('modified-files-summary', () => {
       },
     ]);
   });
+
+  it('preserves backupBeforeRef when extracting diffs from tool output', () => {
+    expect(
+      collectFileDiffsFromToolOutput({
+        diffs: [
+          {
+            file: 'patched.txt',
+            before: 'old\n',
+            after: 'new\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            backupBeforeRef: {
+              backupId: 'backup-apply-1',
+              kind: 'before_write',
+              contentHash: 'hash-apply-1',
+              storagePath: '/tmp/backup-apply-1.txt',
+            },
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        file: 'patched.txt',
+        before: 'old\n',
+        after: 'new\n',
+        additions: 1,
+        deletions: 1,
+        status: 'modified',
+        backupBeforeRef: {
+          backupId: 'backup-apply-1',
+          kind: 'before_write',
+          contentHash: 'hash-apply-1',
+          storagePath: '/tmp/backup-apply-1.txt',
+        },
+      },
+    ]);
+  });
+
+  it('keeps explicit sourceKind and guaranteeLevel instead of overwriting with defaults', () => {
+    const traced = traceFileDiffs({
+      clientRequestId: 'req-1',
+      diffs: [
+        {
+          file: '/repo/example.ts',
+          before: 'a',
+          after: 'b',
+          additions: 1,
+          deletions: 1,
+          sourceKind: 'restore_replay',
+          guaranteeLevel: 'strong',
+        },
+      ],
+      requestId: 'req-1:tool:call-1',
+      toolCallId: 'call-1',
+      toolName: 'write',
+    });
+
+    expect(traced[0]).toMatchObject({
+      sourceKind: 'restore_replay',
+      guaranteeLevel: 'strong',
+    });
+  });
+
+  it('drops invalid sourceKind and guaranteeLevel values from tool output', () => {
+    expect(
+      collectFileDiffsFromToolOutput({
+        diffs: [
+          {
+            file: 'bad.txt',
+            before: 'a',
+            after: 'b',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+            sourceKind: 'invalid-source',
+            guaranteeLevel: 'ultra',
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        file: 'bad.txt',
+        before: 'a',
+        after: 'b',
+        additions: 1,
+        deletions: 1,
+        status: 'modified',
+      },
+    ]);
+  });
 });

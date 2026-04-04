@@ -1,5 +1,7 @@
 import type { RunEvent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
+import { buildAssistantEventMessageContent } from './assistant-event-message.js';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
+import { appendSessionMessage } from './session-message-store.js';
 
 type RunEventHandler = (event: RunEvent) => void;
 
@@ -47,6 +49,8 @@ export function hasPersistedRunEvent(event: RunEvent): boolean {
 }
 
 function persistRunEventRow(sessionId: string, event: RunEvent, meta?: PublishRunEventMeta): void {
+  const userId = getSessionOwnerUserId(sessionId);
+  const occurredAt = event.occurredAt ?? Date.now();
   const seq =
     meta?.seq ??
     (typeof meta?.clientRequestId === 'string' && meta.clientRequestId.length > 0
@@ -58,17 +62,72 @@ function persistRunEventRow(sessionId: string, event: RunEvent, meta?: PublishRu
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       sessionId,
-      getSessionOwnerUserId(sessionId),
+      userId,
       meta?.clientRequestId ?? null,
       seq,
       event.type,
       event.eventId ?? null,
       event.runId ?? null,
-      event.occurredAt ?? Date.now(),
+      occurredAt,
       JSON.stringify(event),
     ],
   );
+  mirrorDisplayableRunEventAsMessage({ sessionId, userId, event, meta, occurredAt, seq });
   markPersisted(event);
+}
+
+function mirrorDisplayableRunEventAsMessage(input: {
+  sessionId: string;
+  userId: string | null;
+  event: RunEvent;
+  meta?: PublishRunEventMeta;
+  occurredAt: number;
+  seq: number | null;
+}): void {
+  if (!input.userId) {
+    return;
+  }
+
+  const content = buildAssistantEventMessageContent(input.event);
+  if (!content) {
+    return;
+  }
+
+  appendSessionMessage({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    role: 'assistant',
+    clientRequestId: buildMirroredAssistantEventClientRequestId(input),
+    content,
+    createdAt: input.occurredAt,
+  });
+}
+
+function buildMirroredAssistantEventClientRequestId(input: {
+  event: RunEvent;
+  meta?: PublishRunEventMeta;
+  occurredAt: number;
+  seq: number | null;
+}): string {
+  if (typeof input.event.eventId === 'string' && input.event.eventId.length > 0) {
+    return `assistant_event:${input.event.eventId}`;
+  }
+
+  if (typeof input.meta?.clientRequestId === 'string' && input.meta.clientRequestId.length > 0) {
+    const suffix =
+      typeof input.seq === 'number'
+        ? `seq:${input.seq}`
+        : typeof input.event.runId === 'string' && input.event.runId.length > 0
+          ? `run:${input.event.runId}`
+          : `at:${input.occurredAt}`;
+    return `assistant_event:${input.meta.clientRequestId}:${suffix}:${input.event.type}`;
+  }
+
+  if (typeof input.event.runId === 'string' && input.event.runId.length > 0) {
+    return `assistant_event:${input.event.runId}:${input.event.type}:${input.occurredAt}`;
+  }
+
+  return `assistant_event:${input.event.type}:${input.occurredAt}`;
 }
 
 function getSessionOwnerUserId(sessionId: string): string | null {

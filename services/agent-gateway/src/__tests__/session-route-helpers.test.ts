@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Message } from '@openAwork/shared';
+import type { Message, RunEvent } from '@openAwork/shared';
 import {
   toPublicSessionResponse,
   validateImportedMessagesPayload,
@@ -27,10 +27,30 @@ describe('session route helpers', () => {
       },
       messages,
       [{ content: '补充待办', status: 'pending', priority: 'medium' }],
+      [
+        {
+          type: 'permission_asked',
+          requestId: 'perm-1',
+          toolName: 'bash',
+          scope: 'workspace-write',
+          reason: '需要写入配置文件',
+          riskLevel: 'medium',
+        } satisfies RunEvent,
+      ],
     );
 
     expect(response.id).toBe('session-1');
     expect(response.messages).toEqual(messages);
+    expect(response.runEvents).toEqual([
+      {
+        type: 'permission_asked',
+        requestId: 'perm-1',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        reason: '需要写入配置文件',
+        riskLevel: 'medium',
+      },
+    ]);
     expect(response.todos).toEqual([
       { content: '补充待办', status: 'pending', priority: 'medium' },
     ]);

@@ -45,6 +45,10 @@ describe('session-delete-recovery', () => {
       'DELETE FROM question_requests WHERE session_id = ? AND user_id = ?',
       ['session-1', 'user-1'],
     );
+    expect(mocks.sqliteRunMock).toHaveBeenCalledWith(
+      'DELETE FROM session_file_backups WHERE session_id = ? AND user_id = ?',
+      ['session-1', 'user-1'],
+    );
   });
 
   it('rolls back when a required table cleanup fails', () => {

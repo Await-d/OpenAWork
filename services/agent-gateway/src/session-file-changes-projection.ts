@@ -15,6 +15,7 @@ interface SnapshotSummaryLike {
 }
 
 interface SessionSnapshotLike {
+  clientRequestId?: string;
   createdAt: string;
   files?: FileDiffContent[];
   scopeKind: SnapshotScopeKind;
@@ -38,6 +39,35 @@ export interface SessionFileChangesProjection {
   fileDiffs: FileDiffContent[];
   snapshots: SessionSnapshotLike[];
   summary: SessionFileChangesSummary;
+}
+
+export interface SessionTurnDiffFileSummary {
+  additions: number;
+  deletions: number;
+  file: string;
+  guaranteeLevel?: FileChangeGuaranteeLevel;
+  sourceKind?: FileChangeSourceKind;
+  status?: 'added' | 'deleted' | 'modified';
+}
+
+export interface SessionTurnDiffSummary {
+  clientRequestId: string;
+  createdAt: string;
+  files: SessionTurnDiffFileSummary[];
+  snapshotRef: string;
+  summary: SnapshotSummaryLike & { scopeKind: SnapshotScopeKind };
+}
+
+export interface SessionTurnDiffReadModel {
+  debugSurface: {
+    requestFileChangesRouteTemplate: string;
+    restorePreviewRoute: string;
+    sessionFileChangesRoute: string;
+    snapshotCompareRoute: string;
+    snapshotDetailRouteTemplate: string;
+  };
+  sessionSummary: SessionFileChangesSummary & { turnCount: number };
+  turns: SessionTurnDiffSummary[];
 }
 
 export function buildSessionFileChangesProjection(input: {
@@ -73,6 +103,75 @@ export function buildSessionFileChangesProjection(input: {
       latestSnapshotRef: latestSnapshot?.snapshotRef,
       latestSnapshotScopeKind: latestSnapshot?.scopeKind,
       latestSnapshotAt: latestSnapshot?.createdAt,
+    },
+  };
+}
+
+export function buildSessionTurnDiffReadModel(input: {
+  fileDiffs: FileDiffContent[];
+  sessionId: string;
+  snapshots: SessionSnapshotLike[];
+}): SessionTurnDiffReadModel {
+  const projection = buildSessionFileChangesProjection({
+    fileDiffs: input.fileDiffs,
+    snapshots: input.snapshots,
+  });
+
+  const turns = projection.snapshots
+    .filter(
+      (
+        snapshot,
+      ): snapshot is SessionSnapshotLike & {
+        clientRequestId: string;
+        files: FileDiffContent[];
+      } => {
+        return (
+          snapshot.scopeKind === 'request' &&
+          typeof snapshot.clientRequestId === 'string' &&
+          Array.isArray(snapshot.files)
+        );
+      },
+    )
+    .map((snapshot) => ({
+      clientRequestId: snapshot.clientRequestId,
+      snapshotRef: snapshot.snapshotRef,
+      createdAt: snapshot.createdAt,
+      summary: {
+        ...snapshot.summary,
+        scopeKind: snapshot.scopeKind,
+      },
+      files: snapshot.files.map((file) => ({
+        file: file.file,
+        additions: file.additions,
+        deletions: file.deletions,
+        ...(file.status ? { status: file.status } : {}),
+        ...(file.guaranteeLevel ? { guaranteeLevel: file.guaranteeLevel } : {}),
+        ...(file.sourceKind ? { sourceKind: file.sourceKind } : {}),
+      })),
+    }))
+    .sort((left, right) => {
+      if (left.createdAt !== right.createdAt) {
+        return left.createdAt < right.createdAt ? 1 : -1;
+      }
+      return left.snapshotRef < right.snapshotRef
+        ? 1
+        : left.snapshotRef > right.snapshotRef
+          ? -1
+          : 0;
+    });
+
+  return {
+    sessionSummary: {
+      ...projection.summary,
+      turnCount: turns.length,
+    },
+    turns,
+    debugSurface: {
+      sessionFileChangesRoute: `/sessions/${input.sessionId}/file-changes`,
+      requestFileChangesRouteTemplate: `/sessions/${input.sessionId}/requests/{clientRequestId}/file-changes`,
+      snapshotDetailRouteTemplate: `/sessions/${input.sessionId}/snapshots/{snapshotRef}`,
+      snapshotCompareRoute: `/sessions/${input.sessionId}/snapshots/compare`,
+      restorePreviewRoute: `/sessions/${input.sessionId}/restore/preview`,
     },
   };
 }

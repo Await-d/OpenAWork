@@ -32,6 +32,10 @@ const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<{
     params: ({ sessionId, userId }) => [sessionId, userId],
   },
   {
+    sql: 'DELETE FROM session_file_backups WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
     sql: 'DELETE FROM permission_requests WHERE session_id = ?',
     params: ({ sessionId }) => [sessionId],
   },

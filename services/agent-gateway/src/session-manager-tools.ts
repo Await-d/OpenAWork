@@ -300,7 +300,7 @@ export function runSessionReadTool(
   const snapshots = listSessionSnapshots({ sessionId: session.id, userId });
   const fileChanges = buildSessionFileChangesProjection({ fileDiffs, snapshots });
   if (fileChanges.summary.totalFileDiffs > 0) {
-    lines.push('File Diffs:');
+    lines.push('Debug File Diffs:');
     fileChanges.fileDiffs.slice(0, 20).forEach((diff) => {
       lines.push(
         `- ${diff.file} (+${diff.additions} / -${diff.deletions}) · guarantee=${diff.guaranteeLevel ?? 'unknown'} · source=${diff.sourceKind ?? 'unknown'}`,
@@ -308,7 +308,7 @@ export function runSessionReadTool(
     });
   }
   if (fileChanges.summary.snapshotCount > 0) {
-    lines.push('Snapshots:');
+    lines.push('Debug Snapshots:');
     fileChanges.snapshots.slice(0, 20).forEach((snapshot) => {
       lines.push(
         `- ${snapshot.snapshotRef} · scope=${snapshot.scopeKind} · files=${snapshot.summary.files} · +${snapshot.summary.additions} / -${snapshot.summary.deletions} · weakest=${snapshot.summary.guaranteeLevel ?? 'unknown'}`,

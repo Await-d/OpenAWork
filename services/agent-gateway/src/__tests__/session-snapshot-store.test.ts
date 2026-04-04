@@ -351,4 +351,33 @@ describe('session-snapshot-store', () => {
       },
     ]);
   });
+
+  it('uses the weakest guarantee level across snapshot files', () => {
+    persistSessionSnapshot({
+      sessionId: 'session-a',
+      userId: 'user-a',
+      snapshotRef: createRequestSnapshotRef('req-weak'),
+      fileDiffs: [
+        {
+          file: '/repo/a.ts',
+          before: 'a',
+          after: 'b',
+          additions: 1,
+          deletions: 1,
+          guaranteeLevel: 'strong',
+        },
+        {
+          file: '/repo/b.ts',
+          before: 'x',
+          after: 'y',
+          additions: 1,
+          deletions: 1,
+          guaranteeLevel: 'weak',
+        },
+      ],
+    });
+
+    const params = mocks.sqliteRunMock.mock.calls.at(-1)?.[1] as unknown[];
+    expect(JSON.parse(String(params?.[3]))).toMatchObject({ guaranteeLevel: 'weak' });
+  });
 });

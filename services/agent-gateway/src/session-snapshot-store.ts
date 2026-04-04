@@ -76,7 +76,7 @@ export function listSessionSnapshots(input: {
     `SELECT client_request_id, summary_json, files_json, created_at
      FROM session_snapshots
      WHERE session_id = ? AND user_id = ?
-     ORDER BY created_at DESC`,
+     ORDER BY created_at DESC, client_request_id DESC`,
     [input.sessionId, input.userId],
   ).flatMap((row) => {
     if (

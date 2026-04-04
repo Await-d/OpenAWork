@@ -1,18 +1,33 @@
 import { randomUUID } from 'crypto';
+import { promises as fsp } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { AgentTaskManagerImpl, AgentTaskStoreImpl } from '@openAwork/agent-core';
+import {
+  AgentTaskManagerImpl,
+  AgentTaskStoreImpl,
+  HashAnchoredEditorImpl,
+} from '@openAwork/agent-core';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { listSessionMessages, truncateSessionMessagesAfter } from '../session-message-store.js';
+import {
+  collectSessionBackupStoragePaths,
+  captureBeforeWriteBackup,
+  garbageCollectBackupStoragePaths,
+  getSessionFileBackup,
+  readSessionFileBackupContent,
+} from '../session-file-backup-store.js';
 import { startRequestWorkflow } from '../request-workflow.js';
+import { buildFileDiff } from '../file-diff-format.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import {
   toPublicSessionResponse,
   validateImportedMessagesPayload,
 } from './session-route-helpers.js';
 import { validateWorkspacePath } from '../workspace-paths.js';
+import { listWorkspaceReviewChangesWithAvailability } from '../workspace-review.js';
 import {
   extractSessionWorkingDirectory,
   isSessionWorkspaceRebindingAttempt,
@@ -32,21 +47,30 @@ import {
   clearPendingTaskParentAutoResumesForSession,
   clearTaskParentAutoResumeContext,
 } from '../task-parent-auto-resume.js';
-import { publishSessionRunEvent } from '../session-run-events.js';
+import { listSessionRunEvents, publishSessionRunEvent } from '../session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
   stopAllInFlightStreamRequestsForSession,
 } from './stream-cancellation.js';
 import { reconcileSessionRuntime } from '../session-runtime-reconciler.js';
 import { deleteSessionWithMalformedRecovery } from '../session-delete-recovery.js';
-import { buildSessionFileChangesProjection } from '../session-file-changes-projection.js';
-import { listRequestFileDiffs, listSessionFileDiffs } from '../session-file-diff-store.js';
+import {
+  buildSessionFileChangesProjection,
+  buildSessionTurnDiffReadModel,
+} from '../session-file-changes-projection.js';
+import {
+  listRequestFileDiffs,
+  listSessionFileDiffs,
+  persistSessionFileDiffs,
+} from '../session-file-diff-store.js';
 import { isSqliteMalformedError } from '../sqlite-error-utils.js';
 import {
   compareSessionSnapshots,
+  createRequestSnapshotRef,
   getSessionSnapshotByRef,
   listRequestSnapshots,
   listSessionSnapshots,
+  persistSessionSnapshot,
 } from '../session-snapshot-store.js';
 import { hasFreshSessionRuntimeThread } from '../session-runtime-thread-store.js';
 import { hasPendingSessionInteraction } from '../session-runtime-state.js';
@@ -70,12 +94,89 @@ interface SessionRow {
 const snapshotCompareQuerySchema = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
-  includeText: z.coerce.boolean().optional().default(false),
+  includeText: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === '') return false;
+      }
+      return value;
+    }, z.boolean().optional())
+    .default(false),
 });
 
 const fileChangesQuerySchema = z.object({
-  includeText: z.coerce.boolean().optional().default(false),
+  includeText: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === '') return false;
+      }
+      return value;
+    }, z.boolean().optional())
+    .default(false),
 });
+
+const restorePreviewSchema = z
+  .object({
+    backupId: z.string().min(1).optional(),
+    includeText: z
+      .preprocess((value) => {
+        if (value === undefined) return undefined;
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'string') {
+          const normalized = value.trim().toLowerCase();
+          if (normalized === 'true' || normalized === '1') return true;
+          if (normalized === 'false' || normalized === '0' || normalized === '') return false;
+        }
+        return value;
+      }, z.boolean().optional())
+      .default(false),
+    snapshotRef: z.string().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.backupId ? 1 : 0) + (value.snapshotRef ? 1 : 0) !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one of backupId or snapshotRef',
+        path: ['backupId'],
+      });
+    }
+  });
+
+const restoreApplySchema = z
+  .object({
+    backupId: z.string().min(1).optional(),
+    forceConflicts: z.boolean().optional().default(false),
+    includeText: z
+      .preprocess((value) => {
+        if (value === undefined) return undefined;
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'string') {
+          const normalized = value.trim().toLowerCase();
+          if (normalized === 'true' || normalized === '1') return true;
+          if (normalized === 'false' || normalized === '0' || normalized === '') return false;
+        }
+        return value;
+      }, z.boolean().optional())
+      .default(false),
+    snapshotRef: z.string().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.backupId ? 1 : 0) + (value.snapshotRef ? 1 : 0) !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one of backupId or snapshotRef',
+        path: ['backupId'],
+      });
+    }
+  });
 
 function buildSessionFileChangesSummary(input: { sessionId: string; userId: string }) {
   return buildSessionFileChangesProjection({
@@ -146,6 +247,321 @@ function toPublicSnapshot(input: {
         },
         createdAt: input.snapshot.createdAt,
       };
+}
+
+function toPublicBackup(input: {
+  backup: ReturnType<typeof getSessionFileBackup> extends infer T ? Exclude<T, null> : never;
+}) {
+  return {
+    backupId: input.backup.backupId,
+    kind: input.backup.kind,
+    filePath: input.backup.filePath,
+    contentHash: input.backup.contentHash,
+    contentTier: input.backup.contentTier,
+    ...(input.backup.contentFormat ? { contentFormat: input.backup.contentFormat } : {}),
+    ...(input.backup.sourceTool ? { sourceTool: input.backup.sourceTool } : {}),
+    ...(input.backup.requestId ? { requestId: input.backup.requestId } : {}),
+    ...(input.backup.toolCallId ? { toolCallId: input.backup.toolCallId } : {}),
+    ...(input.backup.createdAt ? { createdAt: input.backup.createdAt } : {}),
+  };
+}
+
+async function buildHashValidationForPreview(input: {
+  currentContent: string;
+  currentExists: boolean;
+  expectedAfter: string;
+  expectedBefore?: string;
+  safePath?: string;
+  validPath: boolean;
+}) {
+  if (!input.validPath || !input.currentExists) {
+    return { available: false };
+  }
+
+  try {
+    if (!input.safePath) {
+      return { available: false };
+    }
+    const hashes = await new HashAnchoredEditorImpl().computeLineHashes(input.safePath);
+    return {
+      available: true,
+      lineCount: hashes.length,
+      matchesExpectedAfter: input.currentContent === input.expectedAfter,
+      ...(input.expectedBefore !== undefined
+        ? { matchesExpectedBefore: input.currentContent === input.expectedBefore }
+        : {}),
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
+function toWorkspaceRelativeCandidate(rootPath: string, filePath: string): string {
+  const resolvedRoot = resolve(rootPath);
+  const resolvedPath = isAbsolute(filePath) ? resolve(filePath) : resolve(join(rootPath, filePath));
+  if (resolvedPath.startsWith(`${resolvedRoot}/`)) {
+    return resolvedPath.slice(resolvedRoot.length + 1);
+  }
+  return filePath.replace(/^\//, '');
+}
+
+async function buildWorkspaceReviewSummary(input: { filePaths: string[]; workspaceRoot: string }) {
+  const review = await listWorkspaceReviewChangesWithAvailability(input.workspaceRoot);
+  if (!review.available) {
+    return {
+      available: false,
+      reason: review.reason,
+      workspaceRoot: input.workspaceRoot,
+      dirtyCount: 0,
+      conflicts: [] as Array<Record<string, unknown>>,
+    };
+  }
+  const changePaths = new Map(
+    review.changes.flatMap((change) => {
+      const entries: Array<[string, typeof change]> = [[change.path, change]];
+      if (change.oldPath) {
+        entries.push([change.oldPath, change]);
+      }
+      return entries;
+    }),
+  );
+  const conflicts = input.filePaths.flatMap((filePath) => {
+    const change = changePaths.get(toWorkspaceRelativeCandidate(input.workspaceRoot, filePath));
+    return change ? [{ filePath, change }] : [];
+  });
+  return {
+    available: true,
+    workspaceRoot: input.workspaceRoot,
+    dirtyCount: review.changes.length,
+    conflicts,
+  };
+}
+
+function resolveRestoreTargetPath(input: {
+  filePath: string;
+  workspaceRoot: string;
+}): string | null {
+  if (isAbsolute(input.filePath)) {
+    return validateWorkspacePath(input.filePath);
+  }
+
+  return validateWorkspacePath(resolve(join(input.workspaceRoot, input.filePath)));
+}
+
+async function readWorkspaceContentForPreview(input: {
+  filePath: string;
+  workspaceRoot: string;
+}): Promise<{
+  content: string;
+  exists: boolean;
+  safePath?: string;
+  validPath: boolean;
+}> {
+  const safePath = resolveRestoreTargetPath(input);
+  if (!safePath) {
+    return { validPath: false, exists: false, content: '' };
+  }
+  try {
+    return {
+      validPath: true,
+      exists: true,
+      content: await fsp.readFile(safePath, 'utf8'),
+      safePath,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { validPath: true, exists: false, content: '', safePath };
+    }
+    throw error;
+  }
+}
+
+type RestorePreviewFile = {
+  changed: boolean;
+  currentExists: boolean;
+  deleteFile: boolean;
+  diff: ReturnType<typeof buildFileDiff>;
+  filePath: string;
+  hashValidation: Awaited<ReturnType<typeof buildHashValidationForPreview>>;
+  targetContent: string;
+  validPath: boolean;
+  safePath?: string;
+};
+
+async function buildBackupRestorePreviewState(input: {
+  backup: Exclude<ReturnType<typeof getSessionFileBackup>, null>;
+  backupContent: string | null;
+  includeText: boolean;
+  workspaceRoot: string;
+}) {
+  const current = await readWorkspaceContentForPreview({
+    filePath: input.backup.filePath,
+    workspaceRoot: input.workspaceRoot,
+  });
+  const diff = buildFileDiff({
+    file: input.backup.filePath,
+    before: current.content,
+    after: input.backupContent ?? '',
+  });
+  const hashValidation = await buildHashValidationForPreview({
+    safePath: current.safePath,
+    validPath: current.validPath,
+    currentExists: current.exists,
+    currentContent: current.content,
+    expectedAfter: input.backupContent ?? '',
+  });
+  const workspaceReview = await buildWorkspaceReviewSummary({
+    workspaceRoot: input.workspaceRoot,
+    filePaths: [input.backup.filePath],
+  });
+
+  return {
+    canRestore: current.validPath && input.backupContent !== null,
+    current,
+    diff,
+    hashValidation,
+    preview: {
+      changed: diff.before !== diff.after,
+      diff: input.includeText ? diff : toPublicFileDiff(diff, false),
+    },
+    workspaceReview,
+  };
+}
+
+async function buildSnapshotRestorePreviewState(input: {
+  includeText: boolean;
+  snapshot: Exclude<ReturnType<typeof getSessionSnapshotByRef>, null>;
+  workspaceRoot: string;
+}) {
+  const previews: RestorePreviewFile[] = await Promise.all(
+    input.snapshot.files.map(async (file) => {
+      const current = await readWorkspaceContentForPreview({
+        filePath: file.file,
+        workspaceRoot: input.workspaceRoot,
+      });
+      const diff = buildFileDiff({
+        file: file.file,
+        before: current.content,
+        after: file.after,
+      });
+      const hashValidation = await buildHashValidationForPreview({
+        safePath: current.safePath,
+        validPath: current.validPath,
+        currentExists: current.exists,
+        currentContent: current.content,
+        expectedAfter: file.after,
+        expectedBefore: file.before,
+      });
+      return {
+        filePath: file.file,
+        targetContent: file.after,
+        validPath: current.validPath,
+        currentExists: current.exists,
+        safePath: current.safePath,
+        deleteFile: file.status === 'deleted',
+        changed: diff.before !== diff.after,
+        diff,
+        hashValidation,
+      };
+    }),
+  );
+
+  const workspaceReview = await buildWorkspaceReviewSummary({
+    workspaceRoot: input.workspaceRoot,
+    filePaths: input.snapshot.files.map((file) => file.file),
+  });
+
+  return {
+    canRestore: previews.every((preview) => preview.validPath),
+    previews,
+    workspaceReview,
+    responsePreview: previews.map((preview) => ({
+      changed: preview.changed,
+      currentExists: preview.currentExists,
+      validPath: preview.validPath,
+      hashValidation: preview.hashValidation,
+      diff: input.includeText ? preview.diff : toPublicFileDiff(preview.diff, false),
+    })),
+  };
+}
+
+async function applyRestoreOperations(input: {
+  clientRequestId: string;
+  operations: Array<{
+    currentContent: string;
+    currentExists: boolean;
+    deleteFile: boolean;
+    filePath: string;
+    safePath?: string;
+    targetContent: string;
+    validPath: boolean;
+  }>;
+  sessionId: string;
+  userId: string;
+}) {
+  const requestId = `restore-apply:${input.clientRequestId}`;
+  const diffs: ReturnType<typeof listSessionFileDiffs> = [];
+
+  for (const operation of input.operations) {
+    if (!operation.validPath || !operation.safePath) {
+      throw new Error(`Invalid restore path: ${operation.filePath}`);
+    }
+
+    const backupBeforeRef = operation.currentExists
+      ? await captureBeforeWriteBackup({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          requestId,
+          toolCallId: 'restore-apply',
+          toolName: 'restore_apply',
+          filePath: operation.filePath,
+          content: operation.currentContent,
+          kind: 'before_write',
+        })
+      : undefined;
+
+    if (operation.deleteFile) {
+      await fsp.rm(operation.safePath, { force: true });
+    } else {
+      await fsp.mkdir(dirname(operation.safePath), { recursive: true });
+      await fsp.writeFile(operation.safePath, operation.targetContent, 'utf8');
+    }
+
+    diffs.push({
+      ...buildFileDiff({
+        file: operation.filePath,
+        before: operation.currentContent,
+        after: operation.targetContent,
+      }),
+      clientRequestId: input.clientRequestId,
+      requestId,
+      toolName: 'restore_apply',
+      toolCallId: 'restore-apply',
+      sourceKind: 'restore_replay',
+      guaranteeLevel: 'strong',
+      ...(backupBeforeRef ? { backupBeforeRef } : {}),
+    });
+  }
+
+  persistSessionFileDiffs({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    clientRequestId: input.clientRequestId,
+    requestId,
+    toolName: 'restore_apply',
+    toolCallId: 'restore-apply',
+    sourceKind: 'restore_replay',
+    guaranteeLevel: 'strong',
+    diffs,
+  });
+  persistSessionSnapshot({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    snapshotRef: createRequestSnapshotRef(input.clientRequestId),
+    fileDiffs: diffs,
+  });
+
+  return { clientRequestId: input.clientRequestId, diffs };
 }
 
 function collectDescendantSessionIds(sessions: SessionRow[], rootSessionId: string): Set<string> {
@@ -277,20 +693,31 @@ async function deleteSessionTree(input: {
   sessionsToDelete: ReadonlyArray<SessionRow>;
   userId: string;
 }): Promise<void> {
-  for (const session of input.sessionsToDelete) {
-    clearPendingTaskParentAutoResumesForSession({ sessionId: session.id, userId: input.userId });
+  const backupStoragePaths: string[] = [];
 
-    try {
-      sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [session.id, input.userId]);
-    } catch (error) {
-      if (!isSqliteMalformedError(error)) {
-        throw error;
+  try {
+    for (const session of input.sessionsToDelete) {
+      const candidatePaths = collectSessionBackupStoragePaths({
+        sessionId: session.id,
+        userId: input.userId,
+      });
+      clearPendingTaskParentAutoResumesForSession({ sessionId: session.id, userId: input.userId });
+
+      try {
+        sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [session.id, input.userId]);
+      } catch (error) {
+        if (!isSqliteMalformedError(error)) {
+          throw error;
+        }
+
+        deleteSessionWithMalformedRecovery({ sessionId: session.id, userId: input.userId });
       }
 
-      deleteSessionWithMalformedRecovery({ sessionId: session.id, userId: input.userId });
+      backupStoragePaths.push(...candidatePaths);
+      await taskStore.deleteGraph(WORKSPACE_ROOT, session.id);
     }
-
-    await taskStore.deleteGraph(WORKSPACE_ROOT, session.id);
+  } finally {
+    await garbageCollectBackupStoragePaths(backupStoragePaths);
   }
 }
 
@@ -575,6 +1002,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           legacyMessagesJson: session.messages_json,
         }),
         todos,
+        listSessionRunEvents(sessionId),
       );
       return reply.send({
         session: {
@@ -582,6 +1010,38 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           fileChangesSummary: buildSessionFileChangesSummary({ sessionId, userId: user.sub }),
         },
       });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/file-changes/read-model',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.file-changes.read-model', undefined, {
+        sessionId,
+      });
+
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const readModel = buildSessionTurnDiffReadModel({
+        sessionId,
+        fileDiffs: listSessionFileDiffs({ sessionId, userId: user.sub }),
+        snapshots: listSessionSnapshots({ sessionId, userId: user.sub }),
+      });
+      step.succeed(undefined, {
+        turnCount: readModel.sessionSummary.turnCount,
+        totalFileDiffs: readModel.sessionSummary.totalFileDiffs,
+      });
+      return reply.send({ readModel });
     },
   );
 
@@ -604,8 +1064,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'Invalid query params', issues: query.error.issues });
       }
 
-      const session = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
@@ -663,8 +1123,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'Invalid query params', issues: query.error.issues });
       }
 
-      const session = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
@@ -706,8 +1166,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
       });
 
-      const session = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
@@ -742,8 +1202,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'Invalid query params', issues: query.error.issues });
       }
 
-      const session = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
@@ -811,8 +1271,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'Invalid query params', issues: query.error.issues });
       }
 
-      const session = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
@@ -829,6 +1289,263 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { fileCount: snapshot.files.length, snapshotRef });
       return reply.send({
         snapshot: toPublicSnapshot({ includeText: query.data.includeText, snapshot }),
+      });
+    },
+  );
+
+  app.post(
+    '/sessions/:sessionId/restore/preview',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const body = restorePreviewSchema.safeParse(request.body);
+      const { step } = startRequestWorkflow(request, 'session.restore.preview', undefined, {
+        sessionId,
+      });
+      if (!body.success) {
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      const workspaceRoot =
+        extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
+        WORKSPACE_ROOT;
+
+      if (body.data.backupId) {
+        const backup = getSessionFileBackup({
+          backupId: body.data.backupId,
+          sessionId,
+          userId: user.sub,
+        });
+        if (!backup) {
+          step.fail('backup not found');
+          return reply.status(404).send({ error: 'Backup not found' });
+        }
+
+        const backupContent = await readSessionFileBackupContent({
+          backupId: body.data.backupId,
+          sessionId,
+          userId: user.sub,
+        });
+        const previewState = await buildBackupRestorePreviewState({
+          backup,
+          backupContent,
+          includeText: body.data.includeText,
+          workspaceRoot,
+        });
+        step.succeed(undefined, {
+          mode: 'backup',
+          canRestore: previewState.canRestore,
+          file: backup.filePath,
+        });
+        return reply.send({
+          validateOnly: true,
+          mode: 'backup',
+          target: toPublicBackup({ backup }),
+          validation: {
+            canRestore: previewState.canRestore,
+            currentExists: previewState.current.exists,
+            validPath: previewState.current.validPath,
+            backupContentAvailable: backupContent !== null,
+          },
+          hashValidation: previewState.hashValidation,
+          workspaceReview: previewState.workspaceReview,
+          preview: previewState.preview,
+        });
+      }
+
+      const snapshot = getSessionSnapshotByRef({
+        sessionId,
+        userId: user.sub,
+        snapshotRef: body.data.snapshotRef!,
+      });
+      if (!snapshot) {
+        step.fail('snapshot not found');
+        return reply.status(404).send({ error: 'Snapshot not found' });
+      }
+
+      const previewState = await buildSnapshotRestorePreviewState({
+        snapshot,
+        includeText: body.data.includeText,
+        workspaceRoot,
+      });
+      step.succeed(undefined, {
+        mode: 'snapshot',
+        canRestore: previewState.canRestore,
+        fileCount: previewState.previews.length,
+      });
+      return reply.send({
+        validateOnly: true,
+        mode: 'snapshot',
+        target: toPublicSnapshot({ includeText: body.data.includeText, snapshot }),
+        validation: {
+          canRestore: previewState.canRestore,
+          fileCount: previewState.previews.length,
+        },
+        workspaceReview: previewState.workspaceReview,
+        preview: previewState.responsePreview,
+      });
+    },
+  );
+
+  app.post(
+    '/sessions/:sessionId/restore/apply',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const body = restoreApplySchema.safeParse(request.body);
+      const { step } = startRequestWorkflow(request, 'session.restore.apply', undefined, {
+        sessionId,
+      });
+      if (!body.success) {
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+
+      const session = sqliteGet<{ id: string; metadata_json: string }>(
+        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      const workspaceRoot =
+        extractSessionWorkingDirectory(parseSessionMetadataJson(session.metadata_json)) ??
+        WORKSPACE_ROOT;
+
+      if (body.data.backupId) {
+        const backup = getSessionFileBackup({
+          backupId: body.data.backupId,
+          sessionId,
+          userId: user.sub,
+        });
+        if (!backup) {
+          step.fail('backup not found');
+          return reply.status(404).send({ error: 'Backup not found' });
+        }
+        const backupContent = await readSessionFileBackupContent({
+          backupId: body.data.backupId,
+          sessionId,
+          userId: user.sub,
+        });
+        const previewState = await buildBackupRestorePreviewState({
+          backup,
+          backupContent,
+          includeText: body.data.includeText,
+          workspaceRoot,
+        });
+        const hasConflicts =
+          previewState.workspaceReview.available &&
+          previewState.workspaceReview.conflicts.length > 0;
+        if (!previewState.canRestore || (hasConflicts && !body.data.forceConflicts)) {
+          step.fail('restore blocked', { mode: 'backup', hasConflicts });
+          return reply.status(409).send({
+            error: 'Restore apply blocked by current workspace state',
+            validateOnly: true,
+            mode: 'backup',
+            target: toPublicBackup({ backup }),
+            validation: {
+              canRestore: previewState.canRestore,
+              currentExists: previewState.current.exists,
+              validPath: previewState.current.validPath,
+              backupContentAvailable: backupContent !== null,
+            },
+            hashValidation: previewState.hashValidation,
+            workspaceReview: previewState.workspaceReview,
+            preview: previewState.preview,
+          });
+        }
+
+        const clientRequestId = `restore-apply-${randomUUID()}`;
+        const applyResult = await applyRestoreOperations({
+          clientRequestId,
+          sessionId,
+          userId: user.sub,
+          operations: [
+            {
+              deleteFile: false,
+              filePath: backup.filePath,
+              safePath: previewState.current.safePath,
+              validPath: previewState.current.validPath,
+              currentExists: previewState.current.exists,
+              currentContent: previewState.current.content,
+              targetContent: backupContent ?? '',
+            },
+          ],
+        });
+        step.succeed(undefined, { mode: 'backup', fileCount: applyResult.diffs.length });
+        return reply.send({
+          applied: true,
+          mode: 'backup',
+          clientRequestId,
+          fileCount: applyResult.diffs.length,
+        });
+      }
+
+      const snapshot = getSessionSnapshotByRef({
+        sessionId,
+        userId: user.sub,
+        snapshotRef: body.data.snapshotRef!,
+      });
+      if (!snapshot) {
+        step.fail('snapshot not found');
+        return reply.status(404).send({ error: 'Snapshot not found' });
+      }
+      const previewState = await buildSnapshotRestorePreviewState({
+        snapshot,
+        includeText: body.data.includeText,
+        workspaceRoot,
+      });
+      const hasConflicts =
+        previewState.workspaceReview.available && previewState.workspaceReview.conflicts.length > 0;
+      if (!previewState.canRestore || (hasConflicts && !body.data.forceConflicts)) {
+        step.fail('restore blocked', { mode: 'snapshot', hasConflicts });
+        return reply.status(409).send({
+          error: 'Restore apply blocked by current workspace state',
+          validateOnly: true,
+          mode: 'snapshot',
+          target: toPublicSnapshot({ includeText: body.data.includeText, snapshot }),
+          validation: {
+            canRestore: previewState.canRestore,
+            fileCount: previewState.previews.length,
+          },
+          workspaceReview: previewState.workspaceReview,
+          preview: previewState.responsePreview,
+        });
+      }
+
+      const clientRequestId = `restore-apply-${randomUUID()}`;
+      const applyResult = await applyRestoreOperations({
+        clientRequestId,
+        sessionId,
+        userId: user.sub,
+        operations: previewState.previews.map((preview) => ({
+          deleteFile: preview.deleteFile,
+          filePath: preview.filePath,
+          safePath: preview.safePath,
+          validPath: preview.validPath,
+          currentExists: preview.currentExists,
+          currentContent: preview.diff.before,
+          targetContent: preview.targetContent,
+        })),
+      });
+      step.succeed(undefined, { mode: 'snapshot', fileCount: applyResult.diffs.length });
+      return reply.send({
+        applied: true,
+        mode: 'snapshot',
+        clientRequestId,
+        fileCount: applyResult.diffs.length,
       });
     },
   );

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  appendSessionMessageMock: vi.fn(),
   sqliteGetMock: vi.fn(),
   sqliteRunMock: vi.fn(),
   sqliteAllMock: vi.fn(),
@@ -12,6 +13,10 @@ vi.mock('../db.js', () => ({
   sqliteAll: mocks.sqliteAllMock,
 }));
 
+vi.mock('../session-message-store.js', () => ({
+  appendSessionMessage: mocks.appendSessionMessageMock,
+}));
+
 import {
   listSessionRunEventsByRequest,
   publishSessionRunEvent,
@@ -20,6 +25,7 @@ import {
 
 describe('session run events', () => {
   beforeEach(() => {
+    mocks.appendSessionMessageMock.mockReset();
     mocks.sqliteGetMock.mockReset();
     mocks.sqliteRunMock.mockReset();
     mocks.sqliteAllMock.mockReset();
@@ -176,5 +182,66 @@ describe('session run events', () => {
         },
       },
     ]);
+  });
+
+  it('mirrors displayable run events into assistant_event session messages', () => {
+    mocks.sqliteGetMock.mockReturnValue({ user_id: 'user-a' });
+
+    publishSessionRunEvent(
+      'session-3',
+      {
+        type: 'permission_asked',
+        requestId: 'perm-1',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        reason: '需要写入工作区文件',
+        riskLevel: 'medium',
+        previewAction: '创建配置文件',
+        occurredAt: 123,
+      },
+      { clientRequestId: 'req-3' },
+    );
+
+    expect(mocks.appendSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-3',
+        userId: 'user-a',
+        role: 'assistant',
+        clientRequestId: 'assistant_event:req-3:seq:1:permission_asked',
+        createdAt: 123,
+        content: [
+          {
+            type: 'text',
+            text: expect.stringContaining('"type":"assistant_event"'),
+          },
+        ],
+      }),
+    );
+    const mirroredText = mocks.appendSessionMessageMock.mock.calls[0]?.[0]?.content?.[0]?.text;
+    expect(JSON.parse(String(mirroredText))).toMatchObject({
+      type: 'assistant_event',
+      payload: {
+        title: '等待权限 · bash',
+        status: 'paused',
+      },
+    });
+  });
+
+  it('uses eventId as the mirrored assistant_event idempotency key when available', () => {
+    mocks.sqliteGetMock.mockReturnValue({ user_id: 'user-a' });
+
+    publishSessionRunEvent('session-4', {
+      type: 'compaction',
+      summary: '保留最近 20 条消息，其余已压缩。',
+      trigger: 'manual',
+      eventId: 'evt-compact-1',
+      occurredAt: 456,
+    });
+
+    expect(mocks.appendSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: 'assistant_event:evt-compact-1',
+      }),
+    );
   });
 });
