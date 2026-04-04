@@ -120,10 +120,10 @@ describe('MarkdownMessageContent', () => {
     ) as HTMLIFrameElement | null;
 
     expect(previewFrame).not.toBeNull();
-    expect(previewFrame?.getAttribute('sandbox')).toBe('');
+    expect(previewFrame?.getAttribute('sandbox')).toBe('allow-scripts');
     expect(previewFrame?.getAttribute('referrerpolicy')).toBe('no-referrer');
     expect(previewFrame?.style.minHeight).toBe('360px');
-    expect(previewFrame?.style.height).toBe('460px');
+    expect(previewFrame?.style.height).toBe('360px');
     expect(previewFrame?.style.maxHeight).toBe('70vh');
     expect(previewFrame?.getAttribute('srcdoc')).toContain(
       '<base href="about:srcdoc" target="_blank">',
@@ -153,7 +153,7 @@ describe('MarkdownMessageContent', () => {
     ) as HTMLIFrameElement | null;
 
     expect(previewFrame).not.toBeNull();
-    expect(previewFrame?.getAttribute('sandbox')).toBe('');
+    expect(previewFrame?.getAttribute('sandbox')).toBe('allow-scripts');
     expect(previewFrame?.getAttribute('srcdoc')).toContain('.demo-card { color: rgb(255, 0, 0); }');
     expect(previewFrame?.getAttribute('srcdoc')).toContain('前端样式效果预览');
     expect(previewFrame?.getAttribute('srcdoc')).toContain('CSS Preview');

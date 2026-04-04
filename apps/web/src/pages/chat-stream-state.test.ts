@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyChatRightPanelEvent,
   applyChatRightPanelChunk,
+  buildChatRightPanelStateFromRunEvents,
   createInitialChatRightPanelState,
   getToolCallCards,
   startChatRightPanelRun,
@@ -418,5 +419,42 @@ describe('chat-stream-state', () => {
         label: '子任务',
       },
     ]);
+  });
+
+  it('rebuilds right-panel state from persisted run events', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '恢复运行时状态',
+      events: [
+        {
+          type: 'task_update',
+          taskId: 'task-1',
+          label: '整理上下文',
+          status: 'in_progress',
+          sessionId: 'child-1',
+        },
+        {
+          type: 'permission_asked',
+          requestId: 'perm-1',
+          toolName: 'bash',
+          scope: 'workspace-write',
+          reason: '需要创建配置文件',
+          riskLevel: 'medium',
+          previewAction: '写入 settings.json',
+        },
+        {
+          type: 'session_child',
+          sessionId: 'child-1',
+          parentSessionId: 'session-1',
+          title: '文档检索',
+        },
+      ],
+    });
+
+    expect(state.currentGoal).toBe('恢复运行时状态');
+    expect(state.planTasks).toContainEqual(
+      expect.objectContaining({ id: 'task-1', label: '整理上下文', status: 'in_progress' }),
+    );
+    expect(state.agentEvents.some((event) => event.label.includes('等待权限'))).toBe(true);
+    expect(state.agentEvents.some((event) => event.label.includes('已创建子会话'))).toBe(true);
   });
 });

@@ -18,8 +18,8 @@ import {
   AssistantErrorContent,
   looksLikeAssistantErrorContent,
 } from './assistant-error-content.js';
-import { type ModelPickerProvider } from './model-picker-search.js';
-import { ModelPicker, ModelSettingsPopover } from './model-picker-panels.js';
+import { AssistantReasoningBlock, buildReasoningBlockKey } from './assistant-reasoning-block.js';
+import { ModifiedFilesSummaryCard } from './modified-files-summary-card.js';
 import StreamingMarkdownContent from './streaming-markdown-content.js';
 import {
   type AssistantTracePayload,
@@ -440,6 +440,18 @@ function AssistantTraceContent({
 }) {
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
+      {(payload.reasoningBlocks ?? []).map((reasoning, index) => (
+        <AssistantReasoningBlock
+          key={buildReasoningBlockKey(reasoning, index)}
+          content={reasoning}
+          index={index}
+          renderBody={(reasoningContent, isStreaming) => (
+            <AssistantRichContentBody content={reasoningContent} streaming={isStreaming} />
+          )}
+          streaming={streaming}
+          total={payload.reasoningBlocks?.length ?? 0}
+        />
+      ))}
       {payload.toolCalls.map((toolCall, index) =>
         renderToolCallContent({
           reactKey: `${toolCall.toolName}-${index}`,
@@ -454,6 +466,9 @@ function AssistantTraceContent({
           status: toolCall.status,
           taskRuntimeLookup,
         }),
+      )}
+      {payload.modifiedFilesSummary && (
+        <ModifiedFilesSummaryCard summary={payload.modifiedFilesSummary} />
       )}
       {payload.text.length > 0 && (
         <AssistantRichContentBody content={payload.text} streaming={streaming} />

@@ -1,10 +1,14 @@
-import React from 'react';
 import DialogueModeToggle from '../../pages/DialogueModeToggle.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
 
 interface ChatTopBarProps {
+  agentOptions: Array<{ id: string; label: string }>;
   dialogueMode: DialogueMode;
+  defaultAgentLabel: string;
+  manualAgentId: string;
   onChangeDialogueMode: (mode: DialogueMode) => void;
+  onChangeManualAgentId: (agentId: string) => void;
+  onClearManualAgentId: () => void;
   yoloMode: boolean;
   onToggleYolo: () => void;
   editorMode: boolean;
@@ -14,8 +18,13 @@ interface ChatTopBarProps {
 }
 
 export function ChatTopBar({
+  agentOptions,
   dialogueMode,
+  defaultAgentLabel,
+  manualAgentId,
   onChangeDialogueMode,
+  onChangeManualAgentId,
+  onClearManualAgentId,
   yoloMode,
   onToggleYolo,
   editorMode,
@@ -54,6 +63,65 @@ export function ChatTopBar({
           onChange={onChangeDialogueMode}
           style={{ flexShrink: 0 }}
         />
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 6px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>代理</span>
+          <select
+            aria-label="聊天代理"
+            value={manualAgentId || '__mode_default__'}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              onChangeManualAgentId(nextValue === '__mode_default__' ? '' : nextValue);
+            }}
+            style={{
+              minWidth: 190,
+              height: 30,
+              borderRadius: 8,
+              border: '1px solid var(--border-subtle)',
+              background: 'var(--surface)',
+              color: 'var(--text-1)',
+              fontSize: 12,
+              padding: '0 8px',
+            }}
+          >
+            <option value="__mode_default__">默认代理：{defaultAgentLabel}</option>
+            {agentOptions.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.label}
+              </option>
+            ))}
+          </select>
+          {manualAgentId ? (
+            <button
+              type="button"
+              onClick={onClearManualAgentId}
+              aria-label="清除代理覆盖"
+              title="清除手动代理覆盖，恢复模式默认代理"
+              style={{
+                height: 28,
+                padding: '0 8px',
+                borderRadius: 7,
+                border: '1px solid var(--border-subtle)',
+                background: 'transparent',
+                color: 'var(--text-2)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              恢复默认
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Right group: YOLO + editor + panel — unified pill container */}

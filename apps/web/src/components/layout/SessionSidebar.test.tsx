@@ -19,6 +19,7 @@ vi.mock('../../routes/preloadable-route-modules.js', () => ({
 const useSessionsMockState = {
   sessions: [] as Array<{
     id: string;
+    state_status?: 'idle' | 'running' | 'paused';
     title: string | null;
     updated_at: string;
     metadata_json?: string;
@@ -28,6 +29,7 @@ const useSessionsMockState = {
     workspaceLabel: string;
     sessions: Array<{
       id: string;
+      state_status?: 'idle' | 'running' | 'paused';
       title: string | null;
       updated_at: string;
       metadata_json?: string;
@@ -955,6 +957,146 @@ describe('SessionSidebar file tree actions', () => {
     });
 
     expect(preloadRouteModuleByPath).toHaveBeenCalledWith('/chat/session-1');
+  });
+
+  it('marks running and paused rows without rendering trailing status text', async () => {
+    useSessionsMockState.sessions = [
+      {
+        id: 'session-running',
+        state_status: 'running',
+        title: '会话 A',
+        updated_at: '2026-03-22T10:00:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+      {
+        id: 'session-paused',
+        state_status: 'paused',
+        title: '会话 B',
+        updated_at: '2026-03-22T09:30:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+    ];
+    useSessionsMockState.groupedSessions = [
+      {
+        workspacePath: '/repo/project',
+        workspaceLabel: 'project',
+        sessions: useSessionsMockState.sessions,
+      },
+    ];
+
+    await act(async () => {
+      root!.render(
+        <MemoryRouter initialEntries={['/chat/session-running']}>
+          <SessionSidebar
+            fetchRootPath={vi.fn(async () => '/repo/project')}
+            fetchTree={vi.fn(async () => [])}
+            onOpenWorkspacePicker={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    await flushEffects();
+
+    const runningCard = container?.querySelector('[data-session-id="session-running"]');
+    const pausedCard = container?.querySelector('[data-session-id="session-paused"]');
+
+    expect(runningCard?.getAttribute('data-session-state')).toBe('running');
+    expect(pausedCard?.getAttribute('data-session-state')).toBe('paused');
+    expect(runningCard?.querySelector('[data-session-state-indicator]')).toBeNull();
+    expect(pausedCard?.querySelector('[data-session-state-indicator]')).toBeNull();
+    expect(runningCard?.textContent).not.toContain('运行中');
+    expect(pausedCard?.textContent).not.toContain('等待处理');
+
+    act(() => {
+      runningCard?.dispatchEvent(
+        new MouseEvent('mouseover', { bubbles: true, clientX: 24, clientY: 30 }),
+      );
+    });
+
+    expect(runningCard?.getAttribute('data-session-state')).toBe('running');
+  });
+
+  it('keeps idle rows free of status text and clears running visual state after rerendering to idle', async () => {
+    useSessionsMockState.sessions = [
+      {
+        id: 'session-1',
+        state_status: 'running',
+        title: '会话状态切换',
+        updated_at: '2026-03-22T10:00:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+    ];
+    useSessionsMockState.groupedSessions = [
+      {
+        workspacePath: '/repo/project',
+        workspaceLabel: 'project',
+        sessions: useSessionsMockState.sessions,
+      },
+    ];
+
+    await act(async () => {
+      root!.render(
+        <MemoryRouter initialEntries={['/chat/session-1']}>
+          <SessionSidebar
+            fetchRootPath={vi.fn(async () => '/repo/project')}
+            fetchTree={vi.fn(async () => [])}
+            onOpenWorkspacePicker={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    await flushEffects();
+
+    const runningCard = container?.querySelector('[data-session-id="session-1"]');
+    expect(runningCard?.getAttribute('data-session-state')).toBe('running');
+
+    useSessionsMockState.sessions = [
+      {
+        id: 'session-1',
+        state_status: 'idle',
+        title: '会话状态切换',
+        updated_at: '2026-03-22T10:02:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+      {
+        id: 'session-2',
+        state_status: 'idle',
+        title: '空闲会话',
+        updated_at: '2026-03-22T09:30:00.000Z',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/project' }),
+      },
+    ];
+    useSessionsMockState.groupedSessions = [
+      {
+        workspacePath: '/repo/project',
+        workspaceLabel: 'project',
+        sessions: useSessionsMockState.sessions,
+      },
+    ];
+
+    await act(async () => {
+      root!.render(
+        <MemoryRouter initialEntries={['/chat/session-1']}>
+          <SessionSidebar
+            fetchRootPath={vi.fn(async () => '/repo/project')}
+            fetchTree={vi.fn(async () => [])}
+            onOpenWorkspacePicker={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    await flushEffects();
+
+    const updatedCard = container?.querySelector('[data-session-id="session-1"]');
+    const idleCard = container?.querySelector('[data-session-id="session-2"]');
+
+    expect(updatedCard?.getAttribute('data-session-state')).toBe('idle');
+    expect(updatedCard?.textContent).not.toContain('运行中');
+    expect(idleCard?.textContent).not.toContain('等待处理');
+    expect(idleCard?.getAttribute('data-session-state')).toBe('idle');
   });
 
   it('recomputes hovered session from pointer after deleting the hovered row', async () => {

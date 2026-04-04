@@ -1,4 +1,5 @@
 export const DEFAULT_FILE_PREVIEW_HEIGHT = 280;
+export const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 
 export type FilePreviewKind = 'html' | 'css' | 'javascript';
 
@@ -36,13 +37,69 @@ export function getFilePreviewKind(path: string): FilePreviewKind | null {
   return null;
 }
 
+const RESIZE_SCRIPT = `<script>
+(function () {
+  function postHeight() {
+    var h = document.documentElement.scrollHeight;
+    if (h > 0) {
+      parent.postMessage({ type: '${PREVIEW_RESIZE_MSG_TYPE}', height: h }, '*');
+    }
+  }
+
+  postHeight();
+
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(postHeight).observe(document.body);
+  }
+
+  window.addEventListener('load', postHeight);
+
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(postHeight).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
+  }
+})();
+<\/script>`;
+
+function isFullHtmlDocument(code: string): boolean {
+  const trimmed = code.trimStart().slice(0, 200).toLowerCase();
+  return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html');
+}
+
+function buildFullPagePreview(code: string): string {
+  const safe = stripScriptTags(code);
+  const baseTag = '<base href="about:srcdoc" target="_blank">';
+
+  if (/<head[\s>]/iu.test(safe)) {
+    const withBase = safe.replace(/(<head[^>]*>)/iu, `$1\n    ${baseTag}`);
+    return withBase.replace(/<\/body\s*>/iu, `${RESIZE_SCRIPT}\n</body>`);
+  }
+
+  if (/<html[\s>]/iu.test(safe)) {
+    const withHead = safe.replace(/(<html[^>]*>)/iu, `$1\n<head>${baseTag}</head>`);
+    return withHead.replace(/<\/body\s*>/iu, `${RESIZE_SCRIPT}\n</body>`);
+  }
+
+  return `<!DOCTYPE html>
+<html><head>${baseTag}</head>
+<body>${safe}${RESIZE_SCRIPT}</body></html>`;
+}
+
 export function buildPreviewDocument(previewKind: FilePreviewKind, code: string): string {
+  if (previewKind === 'html' && isFullHtmlDocument(code)) {
+    return buildFullPagePreview(code);
+  }
+
+  const safeCode = previewKind === 'html' ? stripScriptTags(code) : code;
   const previewBody =
     previewKind === 'css'
       ? buildCssPreviewBody()
       : previewKind === 'javascript'
         ? buildJavascriptPreviewBody()
-        : code;
+        : safeCode;
   const previewHead =
     previewKind === 'css'
       ? `<style>
@@ -109,6 +166,7 @@ ${escapeForInlineScript(code)}
   <body>
 ${previewBody}
     ${previewScript}
+    ${RESIZE_SCRIPT}
   </body>
 </html>`;
 }
@@ -146,11 +204,11 @@ export function getPreviewNote(previewKind: FilePreviewKind): string {
     return '当前脚本仅在隔离 iframe 中运行：允许脚本执行，但不会获得宿主页同源权限。';
   }
 
-  return '当前为安全静态预览：禁用脚本执行，外链将在新窗口打开。';
+  return '安全沙箱预览：用户脚本已移除，外链将在新窗口打开。';
 }
 
-export function getPreviewSandbox(previewKind: FilePreviewKind): string {
-  return previewKind === 'javascript' ? 'allow-scripts' : '';
+export function getPreviewSandbox(_previewKind: FilePreviewKind): string {
+  return 'allow-scripts';
 }
 
 function escapeForStyleTag(code: string): string {
@@ -159,6 +217,12 @@ function escapeForStyleTag(code: string): string {
 
 function escapeForInlineScript(code: string): string {
   return code.replace(/<\/script/giu, '<\\/script');
+}
+
+function stripScriptTags(html: string): string {
+  return html
+    .replace(/<script[\s>][\s\S]*?<\/script\s*>/giu, '')
+    .replace(/<script[^>]*\/\s*>/giu, '');
 }
 
 function buildCssPreviewBody(): string {

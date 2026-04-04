@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/auth.js';
 import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { logger } from '../utils/logger.js';
+import { requestCurrentSessionRefresh } from '../utils/session-list-events.js';
 
 const jsonResponse = (body: unknown) =>
   ({
@@ -240,7 +241,7 @@ const listCommandsMock = vi.fn(async () => [
     action: { kind: 'generate_handoff' },
   },
 ]);
-const listCapabilitiesMock = vi.fn(async () => []);
+const listCapabilitiesMock = vi.fn<() => Promise<Array<Record<string, unknown>>>>(async () => []);
 const listSessionsMock = vi.fn(async () => [
   { id: 'session-a', title: '设计讨论', updated_at: '2026-03-21T10:00:00.000Z' },
   { id: 'session-b', title: 'Bug 修复', updated_at: '2026-03-21T09:00:00.000Z' },
@@ -1958,6 +1959,227 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('最终结论。');
   });
 
+  it('shows streamed thinking content before the assistant finishes', async () => {
+    let pendingCallbacks:
+      | {
+          onDelta: (delta: string) => void;
+          onDone: (stopReason?: string) => void;
+          onThinkingDelta?: (delta: string) => void;
+        }
+      | undefined;
+
+    streamMock.mockImplementationOnce(
+      (
+        _sid: string,
+        _message: string,
+        callbacks: {
+          onDelta: (delta: string) => void;
+          onDone: (stopReason?: string) => void;
+          onThinkingDelta?: (delta: string) => void;
+        },
+      ) => {
+        pendingCallbacks = callbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '继续思考');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    await act(async () => {
+      pendingCallbacks?.onThinkingDelta?.('## 先比较方案\n再给出结论');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const thinkingToggle = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(thinkingToggle).not.toBeNull();
+    expect(rendered.textContent).toContain('思考中');
+    expect(rendered.textContent).toContain('先比较方案');
+  });
+
+  it('ignores late thinking deltas after stopping the stream', async () => {
+    let pendingCallbacks:
+      | {
+          onDone: (stopReason?: string) => void;
+          onThinkingDelta?: (delta: string) => void;
+        }
+      | undefined;
+
+    streamMock.mockImplementationOnce(
+      (
+        _sid: string,
+        _message: string,
+        callbacks: {
+          onDone: (stopReason?: string) => void;
+          onThinkingDelta?: (delta: string) => void;
+        },
+      ) => {
+        pendingCallbacks = callbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '请停止当前生成');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    const stopButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('停止') === true,
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      stopButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(stopStreamMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingCallbacks?.onThinkingDelta?.('停止后不应出现的思考');
+      pendingCallbacks?.onDone('cancelled');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('已停止');
+    expect(rendered.textContent).not.toContain('停止后不应出现的思考');
+  });
+
+  it('keeps an expanded reasoning block open while streaming updates continue', async () => {
+    let pendingCallbacks:
+      | {
+          onThinkingDelta?: (delta: string) => void;
+        }
+      | undefined;
+
+    streamMock.mockImplementationOnce(
+      (
+        _sid: string,
+        _message: string,
+        callbacks: {
+          onThinkingDelta?: (delta: string) => void;
+        },
+      ) => {
+        pendingCallbacks = callbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '持续输出思考');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    await act(async () => {
+      pendingCallbacks?.onThinkingDelta?.('## 第一步\n先比较约束');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const thinkingToggle = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(thinkingToggle).not.toBeNull();
+
+    act(() => {
+      thinkingToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(rendered.textContent).toContain('先比较约束');
+
+    await act(async () => {
+      pendingCallbacks?.onThinkingDelta?.('\n再检查边界条件');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const updatedToggle = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(updatedToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(rendered.textContent).toContain('再检查边界条件');
+  });
+
+  it('renders legacy fenced thinking markdown in historical chat messages', async () => {
+    getSessionMock.mockImplementation(async (_token: string, requestedSessionId: string) => ({
+      messages:
+        requestedSessionId === 'session-legacy'
+          ? [
+              {
+                id: 'assistant-legacy-thinking',
+                role: 'assistant',
+                content: '```thinking\n这里是旧格式思考\n```\n\n这是旧格式正文。',
+                createdAt: 1,
+                status: 'completed',
+              },
+            ]
+          : [],
+    }));
+
+    const rendered = await renderChatPage('/chat/session-legacy');
+    const thinkingToggle = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(thinkingToggle).not.toBeNull();
+    expect(rendered.textContent).toContain('思考内容');
+    expect(rendered.textContent).toContain('这是旧格式正文。');
+  });
+
   it('shows a chat skeleton while the target session is still loading', async () => {
     let resolveSessionB: ((value: MockSessionPayload) => void) | null = null;
 
@@ -2091,7 +2313,127 @@ describe('ChatPage', () => {
     });
 
     expect(streamMock).toHaveBeenCalled();
-    expect(streamMock.mock.calls[0]?.[1]).toContain('程序员');
+    expect(streamMock.mock.calls[0]?.[1]).toBe('帮我修复这个 bug');
+    expect(streamMock.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({ agentId: 'hephaestus', dialogueMode: 'programmer' }),
+    );
+  });
+
+  it('lets manual agent override the mode default and clears back to the mode default', async () => {
+    streamMock.mockImplementation(
+      (_sessionId: string, _message: string, callbacks: Record<string, unknown>) => {
+        (callbacks['onDone'] as ((stopReason?: string) => void) | undefined)?.('end_turn');
+      },
+    );
+    listCapabilitiesMock.mockImplementation(
+      async () =>
+        [
+          {
+            id: 'hephaestus',
+            kind: 'agent',
+            label: 'Hephaestus',
+            description: '程序员执行代理',
+            source: 'builtin',
+            callable: false,
+          },
+          {
+            id: 'sisyphus-junior',
+            kind: 'agent',
+            label: 'Sisyphus Junior',
+            description: '编程执行代理',
+            source: 'builtin',
+            callable: false,
+          },
+        ] as Array<Record<string, unknown>>,
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const programmerMode = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '程序员',
+    );
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = rendered.querySelector('button.btn-accent') as HTMLButtonElement | null;
+    const agentSelect = rendered.querySelector(
+      'select[aria-label="聊天代理"]',
+    ) as HTMLSelectElement | null;
+
+    expect(programmerMode).toBeDefined();
+    expect(textarea).not.toBeNull();
+    expect(agentSelect).not.toBeNull();
+
+    const textareaValueSetter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+
+    act(() => {
+      programmerMode?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    act(() => {
+      textareaValueSetter?.call(textarea, '按模式默认发送');
+      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(streamMock.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({ agentId: 'hephaestus' }),
+    );
+
+    act(() => {
+      agentSelect!.value = 'sisyphus-junior';
+      agentSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    act(() => {
+      textareaValueSetter?.call(textarea, '按手动覆盖发送');
+      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(streamMock.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({ agentId: 'sisyphus-junior' }),
+    );
+
+    const clearButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '恢复默认',
+    );
+    expect(clearButton).toBeDefined();
+
+    act(() => {
+      clearButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    act(() => {
+      textareaValueSetter?.call(textarea, '清除覆盖后发送');
+      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(streamMock.mock.calls[2]?.[2]).toEqual(
+      expect.objectContaining({ agentId: 'hephaestus' }),
+    );
   });
 
   it('restores dialogueMode and yoloMode from session metadata on opened sessions', async () => {
@@ -3914,6 +4256,81 @@ describe('ChatPage', () => {
     }
   });
 
+  it('keeps locally appended messages visible during same-session refresh when the server snapshot is stale', async () => {
+    let pendingCallbacks: Record<string, unknown> | null = null;
+    let sessionReadCount = 0;
+
+    getSessionMock.mockImplementation(async (_token: string, currentSessionId: string) => {
+      if (currentSessionId !== 'session-1') {
+        return { messages: [] };
+      }
+
+      sessionReadCount += 1;
+      return {
+        messages: [
+          {
+            id: 'assistant-seed',
+            role: 'assistant',
+            content: '最初的历史消息',
+            createdAt: 1,
+            status: 'completed',
+          },
+        ],
+        state_status: 'idle',
+      };
+    });
+    streamMock.mockImplementationOnce(
+      (_sessionId: string, _message: string, callbacks: Record<string, unknown>) => {
+        pendingCallbacks = callbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = rendered.querySelector('button.btn-accent') as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '请继续保留这条新问题');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      (pendingCallbacks?.['onDelta'] as ((delta: string) => void) | undefined)?.(
+        '这是本地刚完成的新回答',
+      );
+      (pendingCallbacks?.['onDone'] as ((stopReason?: string) => void) | undefined)?.('end_turn');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('最初的历史消息');
+    expect(rendered.textContent).toContain('请继续保留这条新问题');
+    expect(rendered.textContent).toContain('这是本地刚完成的新回答');
+
+    act(() => {
+      requestCurrentSessionRefresh('session-1');
+    });
+
+    await flushEffects();
+    await flushEffects();
+
+    expect(sessionReadCount).toBeGreaterThanOrEqual(2);
+    expect(rendered.textContent).toContain('最初的历史消息');
+    expect(rendered.textContent).toContain('请继续保留这条新问题');
+    expect(rendered.textContent).toContain('这是本地刚完成的新回答');
+    expect(rendered.querySelector('[data-testid="chat-session-skeleton"]')).toBeNull();
+  });
+
   it('does not append a stream error message after a permission pause', async () => {
     let pendingCallbacks: Record<string, unknown> | null = null;
     streamMock.mockImplementationOnce(
@@ -5267,6 +5684,64 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('子代理已经执行完成。');
   });
 
+  it('rebuilds tools panel state from persisted session run events after reload', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          createdAt: 1,
+          content: [{ type: 'text', text: '帮我检查工作区状态' }],
+        },
+      ],
+      runEvents: [
+        {
+          type: 'tool_call_delta',
+          toolCallId: 'call_1',
+          toolName: 'web_search',
+          inputDelta: '{"query":"工作区状态"}',
+        },
+        {
+          type: 'tool_result',
+          toolCallId: 'call_1',
+          toolName: 'web_search',
+          output: { summary: '工作区状态已读取' },
+          isError: false,
+        },
+      ],
+      state_status: 'idle',
+    }));
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const openPanelButton = rendered.querySelector('button[title="展开面板"]');
+
+    act(() => {
+      openPanelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const toolsTab = rendered.querySelector('#chat-right-tab-tools') as HTMLButtonElement | null;
+    act(() => {
+      toolsTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const restoredToolCard = rendered.querySelector(
+      '[data-tool-card-root="true"]',
+    ) as HTMLDivElement | null;
+    expect(restoredToolCard).not.toBeNull();
+    expect(rendered.textContent).toContain('帮我检查工作区状态');
+    expect(restoredToolCard?.textContent).toContain('web_search');
+
+    act(() => {
+      restoredToolCard
+        ?.querySelector('[data-tool-card-toggle="true"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(restoredToolCard?.textContent).toContain('工作区状态已读取');
+  });
+
   it('keeps one assistant bubble after tool calls finish streaming', async () => {
     let pendingCallbacks: Record<string, unknown> | null = null;
     streamMock.mockImplementationOnce(
@@ -5353,6 +5828,51 @@ describe('ChatPage', () => {
       'session-1',
       expect.objectContaining({ dialogueMode: 'coding', yoloMode: true }),
     );
+  });
+
+  it('does not send agentId after switching back to clarify mode', async () => {
+    streamMock.mockImplementationOnce(() => undefined);
+
+    const rendered = await renderChatPage('/chat');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = rendered.querySelector('button.btn-accent') as HTMLButtonElement | null;
+    const codingButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '编程',
+    );
+    const clarifyButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '澄清',
+    );
+
+    act(() => {
+      codingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      clarifyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '先帮我厘清需求');
+      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(streamMock).toHaveBeenCalled();
+    expect(streamMock.mock.calls[0]?.[2]?.agentId).toBeUndefined();
   });
 
   it('shows slash command suggestions when input starts with slash', async () => {

@@ -100,6 +100,20 @@ export function startChatRightPanelRun(
   };
 }
 
+export function buildChatRightPanelStateFromRunEvents(input: {
+  events: RunEvent[];
+  goal: string;
+}): ChatRightPanelState {
+  if (input.events.length === 0) {
+    return createInitialChatRightPanelState();
+  }
+
+  return input.events.reduce<ChatRightPanelState>(
+    (state, event) => applyChatRightPanelEvent(state, event as ChatRunEvent),
+    startChatRightPanelRun(createInitialChatRightPanelState(), input.goal),
+  );
+}
+
 export function getToolCallCards(state: ChatRightPanelState): ToolCallCardModel[] {
   return state.toolCalls.map((toolCall) => ({
     toolCallId: toolCall.toolCallId,

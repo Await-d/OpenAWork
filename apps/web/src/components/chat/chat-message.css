@@ -996,7 +996,7 @@
 .chat-markdown-thinking-block {
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border) 78%);
-  border-radius: 14px;
+  border-radius: var(--reasoning-block-radius, 14px);
   background: linear-gradient(
     180deg,
     color-mix(in oklch, var(--surface) 80%, var(--bg-2) 20%),
@@ -1008,9 +1008,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--reasoning-summary-gap, 10px);
   width: 100%;
-  padding: 7px 10px;
+  padding: var(--reasoning-summary-padding-y, 7px) var(--reasoning-summary-padding-x, 10px);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1028,22 +1028,72 @@
 }
 
 .chat-markdown-thinking-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--reasoning-label-badge-height, 20px);
+  padding: 0 var(--reasoning-label-badge-padding-x, 8px);
+  border-radius: var(--reasoning-label-badge-radius, 999px);
+  background: color-mix(in oklch, var(--accent) 14%, var(--bg-3) 86%);
   color: color-mix(in oklch, var(--accent) 82%, white 18%);
-  font-size: 10px;
+  font-size: var(--reasoning-label-font-size, 10px);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--reasoning-label-letter-spacing, 0.08em);
   text-transform: uppercase;
 }
 
 .chat-markdown-thinking-hint {
   color: var(--text-3);
-  font-size: 10px;
-  line-height: 1.4;
+  font-size: var(--reasoning-hint-font-size, 10px);
+  line-height: var(--reasoning-hint-line-height, 1.4);
 }
 
 .chat-markdown-thinking-body {
   border-top: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border-subtle) 90%);
-  padding: 8px 10px 10px;
+  padding: 8px var(--reasoning-body-padding-x, 10px) var(--reasoning-body-padding-bottom, 10px);
+}
+
+.assistant-reasoning-block {
+  margin-bottom: var(--reasoning-block-margin-bottom, 2px);
+}
+
+.assistant-reasoning-block[data-streaming='true'] {
+  border-color: color-mix(in oklch, var(--accent) 30%, var(--border) 70%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface) 76%, var(--accent) 24%),
+    color-mix(in oklch, var(--surface) 92%, transparent)
+  );
+}
+
+.assistant-reasoning-summary {
+  align-items: flex-start;
+}
+
+.assistant-reasoning-summary-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--reasoning-summary-main-gap, 3px);
+}
+
+.assistant-reasoning-heading {
+  color: color-mix(in oklch, var(--text-2) 86%, var(--accent) 14%);
+  font-size: var(--reasoning-heading-font-size, 12px);
+  line-height: var(--reasoning-heading-line-height, 1.55);
+  word-break: break-word;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.assistant-reasoning-body .assistant-rich-content-body {
+  gap: 0;
+}
+
+.assistant-reasoning-body .chat-markdown-streaming {
+  color: color-mix(in oklch, var(--text-2) 80%, var(--accent) 20%);
 }
 
 .chat-markdown-thinking-pre {

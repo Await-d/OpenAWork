@@ -2,6 +2,7 @@ import { useRef, useCallback } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import type {
+  DialogueMode,
   RunEvent,
   StreamChunk,
   StreamDoneChunk,
@@ -9,6 +10,8 @@ import type {
 } from '@openAwork/shared';
 
 interface StreamCallbacks {
+  agentId?: string;
+  dialogueMode?: DialogueMode;
   displayMessage?: string;
   providerId?: string;
   onEvent?: (event: RunEvent | StreamChunk) => void;
@@ -21,6 +24,7 @@ interface StreamCallbacks {
   thinkingEnabled?: boolean;
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   webSearchEnabled?: boolean;
+  yoloMode?: boolean;
 }
 
 interface GatewayClient {
@@ -104,6 +108,10 @@ function readPersistedActiveStreamSnapshot(): ActiveStreamSnapshot | null {
   }
 }
 
+export function readPersistedActiveStreamSessionId(): string | null {
+  return readPersistedActiveStreamSnapshot()?.sessionId ?? null;
+}
+
 function persistActiveStreamSnapshot(snapshot: ActiveStreamSnapshot | null): void {
   if (typeof window === 'undefined') {
     return;
@@ -171,11 +179,14 @@ export function useGatewayClient(token: string | null): GatewayClient {
       persistActiveStreamSnapshot(activeRequestRef.current);
       stopRequestedRef.current = false;
       const model = callbacks.model ?? 'default';
+      const agentId = callbacks.agentId?.trim() || undefined;
       const providerId = callbacks.providerId;
       const displayMessage = callbacks.displayMessage;
+      const dialogueMode = callbacks.dialogueMode;
       const thinkingEnabled = callbacks.thinkingEnabled;
       const reasoningEffort = callbacks.reasoningEffort;
       const webSearchEnabled = callbacks.webSearchEnabled === true;
+      const yoloMode = callbacks.yoloMode === true;
       const wsBase = gatewayUrl.replace(/^https/, 'wss').replace(/^http/, 'ws');
       const wsUrl = `${wsBase}/sessions/${sessionId}/stream?token=${encodeURIComponent(token ?? '')}`;
 
@@ -233,6 +244,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
         if (fallbackStarted || settled) return;
         fallbackStarted = true;
         const params = new URLSearchParams({
+          ...(agentId ? { agentId } : {}),
+          ...(dialogueMode ? { dialogueMode } : {}),
           ...(displayMessage ? { displayMessage } : {}),
           message,
           model,
@@ -240,6 +253,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           clientRequestId,
           token: token ?? '',
           webSearchEnabled: webSearchEnabled ? '1' : '0',
+          yoloMode: yoloMode ? '1' : '0',
           ...(thinkingEnabled !== undefined
             ? { thinkingEnabled: thinkingEnabled ? '1' : '0' }
             : {}),
@@ -274,6 +288,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
         ws.onopen = () => {
           ws.send(
             JSON.stringify({
+              ...(agentId ? { agentId } : {}),
+              ...(dialogueMode ? { dialogueMode } : {}),
               ...(displayMessage ? { displayMessage } : {}),
               message,
               model,
@@ -282,6 +298,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
               ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
               ...(reasoningEffort ? { reasoningEffort } : {}),
               webSearchEnabled,
+              yoloMode,
             }),
           );
         };

@@ -231,6 +231,53 @@ describe('chat task tool rendering', () => {
     expect(html).toContain('pnpm test');
   });
 
+  it('renders modified file summaries embedded in assistant_trace payloads', () => {
+    const html = renderToStaticMarkup(
+      <>
+        {renderStreamingChatMessageContent(
+          createAssistantTraceContent({
+            text: '已经完成本轮修改。',
+            modifiedFilesSummary: {
+              type: 'modified_files_summary',
+              title: '本轮共更新 2 个文件',
+              summary: '新增客户端接口，并把聊天里的文件摘要真正展示出来。',
+              files: [
+                {
+                  file: 'packages/web-client/src/sessions.ts',
+                  before: 'old',
+                  after: 'new',
+                  additions: 12,
+                  deletions: 2,
+                  status: 'modified',
+                  sourceKind: 'structured_tool_diff',
+                  guaranteeLevel: 'strong',
+                },
+                {
+                  file: 'apps/web/src/components/chat/ChatPageSections.tsx',
+                  before: 'old',
+                  after: 'new',
+                  additions: 4,
+                  deletions: 0,
+                  status: 'modified',
+                  sourceKind: 'workspace_reconcile',
+                  guaranteeLevel: 'weak',
+                },
+              ],
+            },
+            toolCalls: [],
+          }),
+        )}
+      </>,
+    );
+
+    expect(html).toContain('data-chat-modified-summary="true"');
+    expect(html).toContain('本轮共更新 2 个文件');
+    expect(html).toContain('packages/web-client/src/sessions.ts');
+    expect(html).toContain('新增客户端接口，并把聊天里的文件摘要真正展示出来。');
+    expect(html).toContain('+16');
+    expect(html).toContain('-2');
+  });
+
   it('overlays runtime task state and summary onto task tool rows', () => {
     const message: ChatMessage = {
       id: 'msg-task-runtime',

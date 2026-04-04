@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { useNavigate, useParams } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
+import { readPersistedActiveStreamSessionId } from './useGatewayClient.js';
 import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
 import type { TokenStore } from '@openAwork/web-client';
 import { toast } from '../components/ToastNotification.js';
@@ -10,7 +11,11 @@ import {
   buildWorkspaceSessionCollections,
   filterSessionTreeGroupsByQuery,
 } from '../utils/session-grouping.js';
-import { subscribeSessionListRefresh } from '../utils/session-list-events.js';
+import {
+  subscribeSessionListRefresh,
+  subscribeSessionRunState,
+  type SessionRunState,
+} from '../utils/session-list-events.js';
 import {
   getSessionDeleteErrorMessage,
   isSessionAlreadyDeletedError,
@@ -24,6 +29,7 @@ import { logger } from '../utils/logger.js';
 
 export interface Session {
   id: string;
+  state_status?: 'idle' | 'running' | 'paused';
   title: string | null;
   updated_at: string;
   metadata_json?: string;
@@ -74,6 +80,7 @@ export function useSessions() {
   const parentSessionCacheRef = useRef<Map<string, Session>>(new Map());
   const parentSessionInFlightRef = useRef<Map<string, Promise<Session | null>>>(new Map());
   const missingParentSessionExpiryRef = useRef<Map<string, number>>(new Map());
+  const runStateOverridesRef = useRef<Map<string, SessionRunState>>(new Map());
   const parentSessionCacheScopeRef = useRef('');
 
   const parentSessionCacheScope = `${accessToken ?? ''}:${gatewayUrl}`;
@@ -81,6 +88,7 @@ export function useSessions() {
     parentSessionCacheRef.current.clear();
     parentSessionInFlightRef.current.clear();
     missingParentSessionExpiryRef.current.clear();
+    runStateOverridesRef.current.clear();
     parentSessionCacheScopeRef.current = parentSessionCacheScope;
   }
 
@@ -90,10 +98,11 @@ export function useSessions() {
     fetchRequestIdRef.current = requestId;
     try {
       const data = await withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
+        const activeStreamSessionId = readPersistedActiveStreamSessionId();
         const listedSessions = (await createSessionsClient(gatewayUrl).list(
           token,
         )) as unknown as Session[];
-        return hydrateMissingParentSessions(
+        const hydratedSessions = await hydrateMissingParentSessions(
           listedSessions,
           gatewayUrl,
           tokenStore,
@@ -101,6 +110,28 @@ export function useSessions() {
           parentSessionInFlightRef.current,
           missingParentSessionExpiryRef.current,
         );
+
+        for (const session of hydratedSessions) {
+          const overrideState = runStateOverridesRef.current.get(session.id);
+          if (!overrideState) {
+            continue;
+          }
+
+          if (session.state_status === overrideState) {
+            runStateOverridesRef.current.delete(session.id);
+            continue;
+          }
+
+          if (
+            session.state_status === 'idle' &&
+            overrideState !== 'idle' &&
+            session.id !== activeStreamSessionId
+          ) {
+            runStateOverridesRef.current.delete(session.id);
+          }
+        }
+
+        return applySessionRunStateOverrides(hydratedSessions, runStateOverridesRef.current);
       });
       if (fetchRequestIdRef.current !== requestId) {
         return;
@@ -336,6 +367,24 @@ export function useSessions() {
     });
   }, [fetchSessions]);
 
+  useEffect(() => {
+    return subscribeSessionRunState((sessionId, state) => {
+      runStateOverridesRef.current.set(sessionId, state);
+
+      const cachedParentSession = parentSessionCacheRef.current.get(sessionId);
+      if (cachedParentSession) {
+        parentSessionCacheRef.current.set(sessionId, {
+          ...cachedParentSession,
+          state_status: state,
+        });
+      }
+
+      setSessions((previous) =>
+        applySessionRunStateOverrides(previous, runStateOverridesRef.current),
+      );
+    });
+  }, []);
+
   const deferredSessionSearch = useDeferredValue(sessionSearch);
   const normalizedSessionSearch = deferredSessionSearch.trim().toLowerCase();
   const workspaceCollections = useMemo(
@@ -496,8 +545,30 @@ function normalizeSessionSummary(
 
   return {
     id: session.id || fallbackId,
+    state_status: session.state_status,
     title: session.title ?? null,
     metadata_json: session.metadata_json,
     updated_at: updatedAt,
   };
+}
+
+function applySessionRunStateOverrides(
+  sessions: Session[],
+  runStateOverrides: Map<string, SessionRunState>,
+): Session[] {
+  let hasChanges = false;
+  const nextSessions = sessions.map((session) => {
+    const overrideState = runStateOverrides.get(session.id);
+    if (!overrideState || session.state_status === overrideState) {
+      return session;
+    }
+
+    hasChanges = true;
+    return {
+      ...session,
+      state_status: overrideState,
+    };
+  });
+
+  return hasChanges ? nextSessions : sessions;
 }

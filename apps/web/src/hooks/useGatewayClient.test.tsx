@@ -144,6 +144,8 @@ describe('useGatewayClient', () => {
 
     act(() => {
       client!.stream('session-1', 'hello', {
+        agentId: 'hephaestus',
+        dialogueMode: 'programmer',
         providerId: 'openai',
         model: 'gpt-4o',
         onEvent: (event) => eventTypes.push(event.type),
@@ -152,6 +154,7 @@ describe('useGatewayClient', () => {
         onError: () => {
           throw new Error('should not error');
         },
+        yoloMode: true,
       });
     });
 
@@ -168,10 +171,13 @@ describe('useGatewayClient', () => {
 
     const payload = JSON.parse(ws.send.mock.calls[0]?.[0] ?? '{}') as Record<string, unknown>;
     expect(payload).toMatchObject({
+      agentId: 'hephaestus',
+      dialogueMode: 'programmer',
       message: 'hello',
       model: 'gpt-4o',
       providerId: 'openai',
       webSearchEnabled: false,
+      yoloMode: true,
     });
     expect(typeof payload['clientRequestId']).toBe('string');
 
@@ -201,6 +207,8 @@ describe('useGatewayClient', () => {
 
     act(() => {
       client!.stream('session-1', 'hello', {
+        agentId: 'sisyphus-junior',
+        dialogueMode: 'coding',
         model: 'gpt-4o',
         onDelta: () => undefined,
         onEvent: (event) => {
@@ -213,6 +221,7 @@ describe('useGatewayClient', () => {
         onError: () => {
           throw new Error('should not error');
         },
+        yoloMode: true,
       });
     });
 
@@ -222,6 +231,9 @@ describe('useGatewayClient', () => {
 
     const es = MockEventSource.instances[0]!;
     expect(es.url).toContain('token=token-123');
+    expect(es.url).toContain('agentId=sisyphus-junior');
+    expect(es.url).toContain('dialogueMode=coding');
+    expect(es.url).toContain('yoloMode=1');
 
     act(() => {
       es.emitChunk({

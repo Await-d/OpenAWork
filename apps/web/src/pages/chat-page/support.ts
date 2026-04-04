@@ -1,5 +1,6 @@
 import type { DialogueMode } from '../dialogue-mode.js';
 import type {
+  FileBackupRef,
   CapabilitySource,
   CanonicalRoleDescriptor,
   CommandDescriptor,
@@ -8,12 +9,21 @@ import type {
   Message,
   ModifiedFilesSummaryContent,
   RunEvent,
+  ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
+import {
+  buildReadableAssistantText,
+  collectTextCandidateFields,
+  extractReasoningBlocks,
+  isReasoningRecord,
+  normalizeReasoningText,
+} from './reasoning-content.js';
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  rawContent?: Message['content'];
   model?: string;
   providerId?: string;
   createdAt?: number | string;
@@ -31,7 +41,10 @@ export interface AssistantTraceToolCall {
   toolCallId?: string;
   toolName: string;
   input: Record<string, unknown>;
+  clientRequestId?: string;
+  fileDiffs?: FileDiffContent[];
   isError?: boolean;
+  observability?: ToolCallObservabilityAnnotation;
   output?: unknown;
   pendingPermissionRequestId?: string;
   status?: 'running' | 'paused' | 'completed' | 'failed';
@@ -39,6 +52,7 @@ export interface AssistantTraceToolCall {
 
 export interface AssistantTracePayload {
   modifiedFilesSummary?: ModifiedFilesSummaryContent;
+  reasoningBlocks?: string[];
   text: string;
   toolCalls: AssistantTraceToolCall[];
 }
@@ -86,6 +100,8 @@ export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 type StatusTone = 'info' | 'success' | 'warning' | 'error';
 
+const SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS = 15_000;
+
 export function estimateTokenCount(text: string): number {
   const normalized = text.trim();
   if (!normalized) return 0;
@@ -93,10 +109,15 @@ export function estimateTokenCount(text: string): number {
 }
 
 export function createAssistantTraceContent(payload: AssistantTracePayload): string {
+  const reasoningBlocks = (payload.reasoningBlocks ?? [])
+    .map((item) => normalizeReasoningText(item))
+    .filter((item) => item.length > 0);
+
   return JSON.stringify({
     type: 'assistant_trace',
     payload: {
       modifiedFilesSummary: payload.modifiedFilesSummary,
+      ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
       text: payload.text,
       toolCalls: payload.toolCalls,
     },
@@ -105,6 +126,7 @@ export function createAssistantTraceContent(payload: AssistantTracePayload): str
 
 export function createAssistantEventCardContent(payload: AssistantEventPayload): string {
   return JSON.stringify({
+    source: 'openawork_internal',
     type: 'assistant_event',
     payload,
   });
@@ -366,7 +388,12 @@ function formatPermissionDecision(
 export function parseAssistantTraceContent(content: string): AssistantTracePayload | null {
   try {
     const parsed = JSON.parse(content) as {
-      payload?: { modifiedFilesSummary?: unknown; text?: unknown; toolCalls?: unknown };
+      payload?: {
+        modifiedFilesSummary?: unknown;
+        reasoningBlocks?: unknown;
+        text?: unknown;
+        toolCalls?: unknown;
+      };
       type?: unknown;
     };
 
@@ -375,6 +402,12 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
     }
 
     const text = typeof parsed.payload?.text === 'string' ? parsed.payload.text : '';
+    const reasoningBlocks = Array.isArray(parsed.payload?.reasoningBlocks)
+      ? parsed.payload.reasoningBlocks
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => normalizeReasoningText(item))
+          .filter((item) => item.length > 0)
+      : [];
     const toolCalls = Array.isArray(parsed.payload?.toolCalls)
       ? parsed.payload.toolCalls.flatMap((item) => {
           if (!item || typeof item !== 'object') {
@@ -402,12 +435,20 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
                 record['kind'] === 'tool'
                   ? record['kind']
                   : undefined,
+              clientRequestId:
+                typeof record['clientRequestId'] === 'string'
+                  ? record['clientRequestId']
+                  : undefined,
+              fileDiffs: Array.isArray(record['fileDiffs'])
+                ? record['fileDiffs'].flatMap((item) => parseFileDiffContent(item))
+                : undefined,
               toolCallId:
                 typeof record['toolCallId'] === 'string' ? record['toolCallId'] : undefined,
               toolName: record['toolName'],
               input,
               output: record['output'],
               isError: record['isError'] === true,
+              observability: parseToolCallObservability(record['observability']),
               pendingPermissionRequestId:
                 typeof record['pendingPermissionRequestId'] === 'string'
                   ? record['pendingPermissionRequestId']
@@ -428,7 +469,12 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
       parsed.payload?.modifiedFilesSummary,
     );
 
-    return { text, toolCalls, modifiedFilesSummary: modifiedFilesSummary ?? undefined };
+    return {
+      text,
+      toolCalls,
+      modifiedFilesSummary: modifiedFilesSummary ?? undefined,
+      reasoningBlocks,
+    };
   } catch {
     return null;
   }
@@ -669,6 +715,12 @@ function appendToolCallToAssistantMessage(
     return {
       ...message,
       content: createAssistantTraceContent({
+        ...(assistantTrace.modifiedFilesSummary
+          ? { modifiedFilesSummary: assistantTrace.modifiedFilesSummary }
+          : {}),
+        ...(assistantTrace.reasoningBlocks && assistantTrace.reasoningBlocks.length > 0
+          ? { reasoningBlocks: assistantTrace.reasoningBlocks }
+          : {}),
         text: assistantTrace.text,
         toolCalls: [...assistantTrace.toolCalls, toolCall],
       }),
@@ -933,11 +985,55 @@ export function toSharedMessageSnapshot(messages: ChatMessage[]): Message[] {
         type: 'text',
         text:
           message.role === 'assistant'
-            ? (parseAssistantTraceContent(message.content)?.text ?? message.content)
+            ? (() => {
+                const assistantTrace = parseAssistantTraceContent(message.content);
+                return assistantTrace
+                  ? buildReadableAssistantText(assistantTrace.text, assistantTrace.reasoningBlocks)
+                  : message.content;
+              })()
             : message.content,
       },
     ],
   }));
+}
+
+export function reconcileSnapshotChatMessages(
+  previousMessages: ChatMessage[],
+  snapshotMessages: ChatMessage[],
+): ChatMessage[] {
+  if (previousMessages.length === 0 || snapshotMessages.length === 0) {
+    return snapshotMessages.length === 0 ? previousMessages : snapshotMessages;
+  }
+
+  const sharedLength = Math.min(previousMessages.length, snapshotMessages.length);
+  let prefixLength = 0;
+
+  while (prefixLength < sharedLength) {
+    const previousMessage = previousMessages[prefixLength];
+    const snapshotMessage = snapshotMessages[prefixLength];
+    if (previousMessage === undefined || snapshotMessage === undefined) {
+      break;
+    }
+
+    if (!areSnapshotMessagesEquivalent(previousMessage, snapshotMessage)) {
+      break;
+    }
+
+    prefixLength += 1;
+  }
+
+  if (prefixLength === 0) {
+    return snapshotMessages;
+  }
+
+  if (
+    prefixLength === snapshotMessages.length &&
+    snapshotMessages.length < previousMessages.length
+  ) {
+    return previousMessages;
+  }
+
+  return snapshotMessages;
 }
 
 export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
@@ -1035,6 +1131,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           id,
           role: 'user',
           content: text,
+          rawContent: content as Message['content'],
           createdAt: createdAtValue,
           model,
           providerId,
@@ -1050,6 +1147,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
 
     if (role === 'assistant') {
       const text = extractDisplayText(content);
+      const reasoningBlocks = extractReasoningBlocks(content, extractTextFragments);
       const toolCalls = extractToolCalls(content);
       const modifiedFilesSummary = extractModifiedFilesSummary(content);
       toolCalls.forEach((toolCall) => {
@@ -1066,26 +1164,29 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
         status: 'running' as const,
       }));
 
-      if (text.length > 0 || assistantToolCalls.length > 0) {
+      if (text.length > 0 || assistantToolCalls.length > 0 || reasoningBlocks.length > 0) {
         const messageIndex = normalizedMessages.length;
         normalizedMessages.push({
           id,
           role: 'assistant',
           content:
-            assistantToolCalls.length > 0
+            assistantToolCalls.length > 0 || reasoningBlocks.length > 0
               ? createAssistantTraceContent({
                   text,
                   toolCalls: assistantToolCalls,
+                  ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
                   ...(modifiedFilesSummary ? { modifiedFilesSummary } : {}),
                 })
               : text,
+          rawContent: content as Message['content'],
           createdAt: createdAtValue,
           model,
           providerId,
           durationMs,
           firstTokenLatencyMs,
           stopReason,
-          tokenEstimate: tokenEstimate ?? (text.length > 0 ? estimateTokenCount(text) : 0),
+          tokenEstimate:
+            tokenEstimate ?? estimateTokenCount(buildReadableAssistantText(text, reasoningBlocks)),
           toolCallCount: assistantToolCalls.length > 0 ? assistantToolCalls.length : undefined,
           modifiedFilesSummary: modifiedFilesSummary ?? undefined,
           status: 'completed',
@@ -1112,6 +1213,12 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
 
         if (targetMessage && parsedTrace) {
           targetMessage.content = createAssistantTraceContent({
+            ...(parsedTrace.modifiedFilesSummary
+              ? { modifiedFilesSummary: parsedTrace.modifiedFilesSummary }
+              : {}),
+            ...(parsedTrace.reasoningBlocks && parsedTrace.reasoningBlocks.length > 0
+              ? { reasoningBlocks: parsedTrace.reasoningBlocks }
+              : {}),
             text: parsedTrace.text,
             toolCalls: parsedTrace.toolCalls.map((item) =>
               item.toolName === (toolCall?.toolName ?? item.toolName) &&
@@ -1120,8 +1227,11 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
                 : JSON.stringify(item.input) === JSON.stringify(toolCall?.input ?? item.input))
                 ? {
                     ...item,
+                    clientRequestId: toolResult.clientRequestId,
+                    fileDiffs: toolResult.fileDiffs,
                     output: toolResult.output,
                     isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
+                    observability: toolResult.observability,
                     pendingPermissionRequestId: toolResult.pendingPermissionRequestId,
                     status: toolResult.pendingPermissionRequestId
                       ? 'paused'
@@ -1143,11 +1253,14 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           text: '',
           toolCalls: [
             {
+              clientRequestId: toolResult.clientRequestId,
+              fileDiffs: toolResult.fileDiffs,
               toolCallId: toolResult.toolCallId,
               toolName: toolResult.toolName ?? toolCall?.toolName ?? 'tool',
               input: toolCall?.input ?? {},
               output: toolResult.output,
               isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
+              observability: toolResult.observability,
               pendingPermissionRequestId: toolResult.pendingPermissionRequestId,
               status: toolResult.pendingPermissionRequestId
                 ? 'paused'
@@ -1157,6 +1270,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
             },
           ],
         }),
+        rawContent: content as Message['content'],
         createdAt: createdAtValue,
         model,
         providerId,
@@ -1213,6 +1327,35 @@ function normalizeCreatedAt(value: number | string | undefined): number {
   return Date.now();
 }
 
+function getComparableCreatedAt(value: number | string | undefined): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.role !== right.role || left.content !== right.content) {
+    return false;
+  }
+
+  const leftCreatedAt = getComparableCreatedAt(left.createdAt);
+  const rightCreatedAt = getComparableCreatedAt(right.createdAt);
+  if (leftCreatedAt === null || rightCreatedAt === null) {
+    return true;
+  }
+
+  return Math.abs(leftCreatedAt - rightCreatedAt) <= SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS;
+}
+
 function extractDisplayText(rawContent: unknown[]): string {
   return extractTextFragments(rawContent).join('\n').trim();
 }
@@ -1237,6 +1380,10 @@ function extractTextFragments(value: unknown): string[] {
     return [];
   }
 
+  if (isReasoningRecord(content)) {
+    return [];
+  }
+
   if (
     (type === 'text' || type === 'input_text' || type === 'output_text') &&
     typeof content['text'] === 'string'
@@ -1244,17 +1391,7 @@ function extractTextFragments(value: unknown): string[] {
     return content['text'].trim().length > 0 ? [content['text']] : [];
   }
 
-  const candidateFields = [
-    content['text'],
-    content['content'],
-    content['markdown'],
-    content['title'],
-    content['path'],
-    content['command'],
-    content['value'],
-  ];
-
-  return candidateFields.flatMap((item) => extractTextFragments(item));
+  return collectTextCandidateFields(content).flatMap((item) => extractTextFragments(item));
 }
 
 function extractToolCalls(
@@ -1284,10 +1421,13 @@ function extractToolCalls(
 }
 
 function extractToolResults(rawContent: unknown[]): Array<{
+  clientRequestId?: string;
+  fileDiffs?: FileDiffContent[];
   toolCallId: string;
   toolName?: string;
   output: unknown;
   isError: boolean;
+  observability?: ToolCallObservabilityAnnotation;
   pendingPermissionRequestId?: string;
 }> {
   return rawContent.flatMap((item) => {
@@ -1296,10 +1436,16 @@ function extractToolResults(rawContent: unknown[]): Array<{
     if (content['type'] === 'tool_result' && typeof content['toolCallId'] === 'string') {
       return [
         {
+          clientRequestId:
+            typeof content['clientRequestId'] === 'string' ? content['clientRequestId'] : undefined,
+          fileDiffs: Array.isArray(content['fileDiffs'])
+            ? content['fileDiffs'].flatMap((item) => parseFileDiffContent(item))
+            : undefined,
           toolCallId: content['toolCallId'],
           toolName: typeof content['toolName'] === 'string' ? content['toolName'] : undefined,
           output: content['output'],
           isError: content['isError'] === true,
+          observability: parseToolCallObservability(content['observability']),
           pendingPermissionRequestId:
             typeof content['pendingPermissionRequestId'] === 'string'
               ? content['pendingPermissionRequestId']
@@ -1349,6 +1495,50 @@ function parseModifiedFilesSummaryContent(value: unknown): ModifiedFilesSummaryC
   };
 }
 
+function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnotation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const presentedToolName = normalizeOptionalString(record['presentedToolName']);
+  const canonicalToolName = normalizeOptionalString(record['canonicalToolName']);
+  const toolSurfaceProfile = normalizeOptionalString(record['toolSurfaceProfile']);
+  const adapterVersion = normalizeOptionalString(record['adapterVersion']);
+
+  if (!presentedToolName && !canonicalToolName && !toolSurfaceProfile && !adapterVersion) {
+    return undefined;
+  }
+
+  return {
+    presentedToolName,
+    canonicalToolName,
+    toolSurfaceProfile: toolSurfaceProfile as ToolCallObservabilityAnnotation['toolSurfaceProfile'],
+    adapterVersion,
+  };
+}
+
+function parseFileBackupRef(value: unknown): FileBackupRef | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const backupId = normalizeOptionalString(record['backupId']);
+  const kind = normalizeOptionalString(record['kind']);
+  if (!backupId || !kind) {
+    return undefined;
+  }
+
+  return {
+    backupId,
+    kind,
+    storagePath: normalizeOptionalString(record['storagePath']),
+    artifactId: normalizeOptionalString(record['artifactId']),
+    contentHash: normalizeOptionalString(record['contentHash']),
+  } as FileBackupRef;
+}
+
 function parseFileDiffContent(value: unknown): FileDiffContent[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return [];
@@ -1372,6 +1562,17 @@ function parseFileDiffContent(value: unknown): FileDiffContent[] {
       after: record['after'],
       additions: record['additions'],
       deletions: record['deletions'],
+      clientRequestId: normalizeOptionalString(record['clientRequestId']),
+      requestId: normalizeOptionalString(record['requestId']),
+      toolName: normalizeOptionalString(record['toolName']),
+      toolCallId: normalizeOptionalString(record['toolCallId']),
+      sourceKind: normalizeOptionalString(record['sourceKind']) as FileDiffContent['sourceKind'],
+      guaranteeLevel: normalizeOptionalString(
+        record['guaranteeLevel'],
+      ) as FileDiffContent['guaranteeLevel'],
+      backupBeforeRef: parseFileBackupRef(record['backupBeforeRef']),
+      backupAfterRef: parseFileBackupRef(record['backupAfterRef']),
+      observability: parseToolCallObservability(record['observability']),
       status:
         record['status'] === 'added' ||
         record['status'] === 'deleted' ||

@@ -314,15 +314,112 @@ textarea {
 .session-item {
   cursor: pointer;
   transition: background 150ms ease;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
 }
 .session-item:hover {
   background: var(--surface-hover) !important;
 }
+.session-item:focus-within {
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, white 8%);
+  outline-offset: 1px;
+}
 .session-item.active:hover {
+  background: var(--accent-muted) !important;
+}
+.session-item.active:focus-within {
   background: var(--accent-muted) !important;
 }
 .session-item:hover .session-actions {
   opacity: 1 !important;
+}
+.session-item button:focus-visible,
+.session-item input:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, white 8%);
+  outline-offset: 1px;
+}
+
+.session-item::before,
+.session-item::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.session-item::before {
+  inset: -1px;
+}
+
+.session-item::after {
+  padding: 1px;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+.session-item[data-session-state='paused']::before {
+  opacity: 1;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--warning) 50%, transparent);
+}
+
+.session-item[data-session-state='paused']::after {
+  opacity: 1;
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--warning) 60%, transparent),
+    color-mix(in oklch, var(--warning) 20%, transparent) 45%,
+    color-mix(in oklch, var(--warning) 55%, transparent)
+  );
+}
+
+@keyframes omo-session-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.session-item[data-session-state='running']::before {
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent),
+    0 0 14px color-mix(in oklch, var(--success) 18%, transparent);
+}
+
+.session-item[data-session-state='running']::after {
+  opacity: 1;
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklch, var(--accent) 14%, transparent) 0%,
+    color-mix(in oklch, var(--success) 78%, transparent) 18%,
+    color-mix(in oklch, var(--accent) 22%, transparent) 36%,
+    color-mix(in oklch, var(--success) 86%, transparent) 54%,
+    color-mix(in oklch, var(--accent) 24%, transparent) 72%,
+    color-mix(in oklch, var(--success) 72%, transparent) 86%,
+    color-mix(in oklch, var(--accent) 14%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: omo-session-border-flow 2.1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-item[data-session-state='running']::after {
+    animation: none;
+    background-position: 50% 50%;
+  }
 }
 
 .icon-btn {

@@ -1,10 +1,15 @@
 const SESSION_LIST_REFRESH_EVENT = 'openAwork:sessions-refresh';
 const CURRENT_SESSION_REFRESH_EVENT = 'openAwork:current-session-refresh';
 const SESSION_PENDING_PERMISSION_EVENT = 'openAwork:session-pending-permission';
+const SESSION_RUN_STATE_EVENT = 'openAwork:session-run-state';
 
 let refreshScheduled = false;
 let pendingPermissionDispatchScheduled = false;
+let runStateDispatchScheduled = false;
 const pendingPermissionStateBySession = new Map<string, SessionPendingPermissionState | null>();
+const runStateBySession = new Map<string, SessionRunState>();
+
+export type SessionRunState = 'idle' | 'running' | 'paused';
 
 export interface SessionPendingPermissionState {
   requestId: string;
@@ -129,4 +134,58 @@ export function subscribeSessionPendingPermission(
 
   window.addEventListener(SESSION_PENDING_PERMISSION_EVENT, handleChange);
   return () => window.removeEventListener(SESSION_PENDING_PERMISSION_EVENT, handleChange);
+}
+
+export function publishSessionRunState(sessionId: string, state: SessionRunState): void {
+  if (typeof window === 'undefined' || sessionId.trim().length === 0) {
+    return;
+  }
+
+  runStateBySession.set(sessionId, state);
+  if (runStateDispatchScheduled) {
+    return;
+  }
+
+  runStateDispatchScheduled = true;
+  queueMicrotask(() => {
+    runStateDispatchScheduled = false;
+    const runStateEntries = Array.from(runStateBySession.entries());
+    runStateBySession.clear();
+
+    for (const [pendingSessionId, pendingState] of runStateEntries) {
+      window.dispatchEvent(
+        new CustomEvent<{ sessionId: string; state: SessionRunState }>(SESSION_RUN_STATE_EVENT, {
+          detail: {
+            sessionId: pendingSessionId,
+            state: pendingState,
+          },
+        }),
+      );
+    }
+  });
+}
+
+export function subscribeSessionRunState(
+  onChange: (sessionId: string, state: SessionRunState) => void,
+): () => void {
+  if (typeof window === 'undefined') {
+    return () => undefined;
+  }
+
+  const handleChange = (event: Event) => {
+    const detail = (event as CustomEvent<{ sessionId?: string; state?: SessionRunState }>).detail;
+    const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId : '';
+    const state = detail?.state;
+    if (
+      sessionId.trim().length === 0 ||
+      (state !== 'idle' && state !== 'running' && state !== 'paused')
+    ) {
+      return;
+    }
+
+    onChange(sessionId, state);
+  };
+
+  window.addEventListener(SESSION_RUN_STATE_EVENT, handleChange);
+  return () => window.removeEventListener(SESSION_RUN_STATE_EVENT, handleChange);
 }

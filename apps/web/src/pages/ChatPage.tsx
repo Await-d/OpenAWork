@@ -52,7 +52,7 @@ import type { AttachmentItem } from '@openAwork/shared-ui';
 import WorkspacePickerModal from '../components/WorkspacePickerModal.js';
 import HistoryEditDialog from './chat-page/history-edit-dialog.js';
 import RetryModeDialog from './chat-page/retry-mode-dialog.js';
-import { applyChatModesToMessage, type DialogueMode } from './dialogue-mode.js';
+import { getDefaultAgentForDialogueMode, type DialogueMode } from './dialogue-mode.js';
 import {
   type AssistantEventKind,
   createAssistantEventContent,
@@ -68,6 +68,7 @@ import {
   parseAssistantTraceContent,
   parseToolCallInputText,
   parseSessionModeMetadata,
+  reconcileSnapshotChatMessages,
   type ReasoningEffort,
   type ChatMessage,
   type ComposerMenuState,
@@ -79,6 +80,7 @@ import { buildComposerSlashItems } from './chat-page/composer-slash-items.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './chat-page/right-panel-sections.js';
 import { executeServerCommand } from './chat-page/server-command-item.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
+import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
 import {
   SessionRunStateBar,
   SessionRunStatePlaceholder,
@@ -104,6 +106,7 @@ import {
 import {
   applyChatRightPanelEvent,
   applyChatRightPanelChunk,
+  buildChatRightPanelStateFromRunEvents,
   createInitialChatRightPanelState,
   getToolCallCards,
   startChatRightPanelRun,
@@ -136,6 +139,24 @@ interface ModelPriceEntry {
   inputPer1m: number;
   outputPer1m: number;
   cachedPer1m?: number;
+}
+
+function deriveLatestUserGoal(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'user' && message.content.trim().length > 0) {
+      return message.content;
+    }
+  }
+
+  return '';
+}
+
+function buildRightPanelStateFromSessionSnapshot(session: Session, messages: ChatMessage[]) {
+  return buildChatRightPanelStateFromRunEvents({
+    events: Array.isArray(session.runEvents) ? session.runEvents : [],
+    goal: deriveLatestUserGoal(messages),
+  });
 }
 
 interface LiveToolCallState {
@@ -304,21 +325,6 @@ type SessionsClientWithActiveStop = ReturnType<typeof createSessionsClient> & {
   stopActiveStream: (token: string, sessionId: string) => Promise<boolean>;
 };
 
-function buildAssistantTextWithThinking(text: string, thinking: string): string {
-  const normalizedThinking = thinking.trim();
-  const normalizedText = text.trim();
-
-  if (normalizedThinking.length === 0) {
-    return text;
-  }
-
-  const fenceMatches = normalizedThinking.match(/`{3,}/g);
-  const longestFence = fenceMatches?.reduce((max, value) => Math.max(max, value.length), 2) ?? 2;
-  const fence = '`'.repeat(longestFence + 1);
-  const thinkingBlock = `${fence}thinking\n${normalizedThinking}\n${fence}`;
-  return normalizedText.length > 0 ? `${thinkingBlock}\n\n${text}` : thinkingBlock;
-}
-
 function createSessionMetadataSnapshot(metadata: {
   dialogueMode?: DialogueMode;
   modelId?: string;
@@ -463,6 +469,7 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [stoppingStream, setStoppingStream] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
+  const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
   const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
@@ -478,6 +485,7 @@ export default function ChatPage() {
   const activeSessionRef = useRef<string | null>(sessionId ?? null);
   const lastParentTaskSyncMarkerRef = useRef<string | null>(null);
   const pendingBootstrapSessionRef = useRef<string | null>(null);
+  const previousRouteSessionIdRef = useRef<string | null>(sessionId ?? null);
   const savedChatDefaultsRef = useRef<{
     modelId: string;
     providerId: string;
@@ -492,6 +500,7 @@ export default function ChatPage() {
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
   const [rightOpen, setRightOpen] = useState(false);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('clarify');
+  const [manualAgentId, setManualAgentId] = useState('');
   const [yoloMode, setYoloMode] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -513,6 +522,7 @@ export default function ChatPage() {
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
+  const sessionMetadataDirtyRef = useRef(false);
   const [historyEditPrompt, setHistoryEditPrompt] = useState<{
     hasCodeMarkers: boolean;
     messageId: string;
@@ -576,6 +586,31 @@ export default function ChatPage() {
     ? workspace.workingDirectory
     : selectedWorkspacePath;
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog(Boolean(token));
+  const agentOptions = useMemo(
+    () =>
+      composerWorkspaceCatalog.agents.map((agent) => ({
+        id: agent.id,
+        label: agent.label,
+      })),
+    [composerWorkspaceCatalog.agents],
+  );
+  const modeDefaultAgentId = useMemo(
+    () => getDefaultAgentForDialogueMode(dialogueMode),
+    [dialogueMode],
+  );
+  const effectiveAgentId = useMemo(
+    () => manualAgentId.trim() || modeDefaultAgentId,
+    [manualAgentId, modeDefaultAgentId],
+  );
+  const defaultAgentLabel = useMemo(() => {
+    if (!modeDefaultAgentId) {
+      return dialogueMode === 'clarify' ? '不指定（澄清模式）' : '不指定';
+    }
+
+    return (
+      agentOptions.find((agent) => agent.id === modeDefaultAgentId)?.label ?? modeDefaultAgentId
+    );
+  }, [agentOptions, dialogueMode, modeDefaultAgentId]);
   const queuedComposerScope = useMemo(() => {
     if (!currentSessionId) {
       return null;
@@ -632,6 +667,7 @@ export default function ChatPage() {
     streamRevealVisibleCodePointCountRef.current = 0;
     streamRevealNextAllowedAtRef.current = 0;
     setStreamBuffer('');
+    setStreamThinkingBuffer('');
     setStreaming(false);
     setStoppingStream(false);
     setActiveStreamStartedAt(null);
@@ -708,7 +744,13 @@ export default function ChatPage() {
   }, []);
 
   const markSessionMetadataDirty = useCallback(() => {
+    sessionMetadataDirtyRef.current = true;
     setSessionMetadataDirty(true);
+  }, []);
+
+  const clearSessionMetadataDirty = useCallback(() => {
+    sessionMetadataDirtyRef.current = false;
+    setSessionMetadataDirty(false);
   }, []);
 
   const handleDialogueModeChange = useCallback(
@@ -744,6 +786,33 @@ export default function ChatPage() {
     },
     [markSessionMetadataDirty],
   );
+
+  const handleManualAgentChange = useCallback((agentId: string) => {
+    setManualAgentId(agentId.trim());
+  }, []);
+
+  const handleClearManualAgentId = useCallback(() => {
+    setManualAgentId('');
+  }, []);
+
+  useEffect(() => {
+    if (
+      manualAgentId &&
+      agentOptions.length > 0 &&
+      !agentOptions.some((agent) => agent.id === manualAgentId)
+    ) {
+      setManualAgentId('');
+    }
+  }, [agentOptions, manualAgentId]);
+
+  useEffect(() => {
+    const previousSessionId = previousRouteSessionIdRef.current;
+    const nextSessionId = sessionId ?? null;
+    if (previousSessionId && previousSessionId !== nextSessionId) {
+      setManualAgentId('');
+    }
+    previousRouteSessionIdRef.current = nextSessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     activeSessionRef.current = sessionId ?? currentSessionId ?? null;
@@ -1041,7 +1110,9 @@ export default function ChatPage() {
       }
 
       const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-      setMessages(normalizeChatMessages(session.messages));
+      const normalizedMessages = normalizeChatMessages(session.messages);
+      setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
+      setRightPanelState(buildRightPanelStateFromSessionSnapshot(session, normalizedMessages));
       setSessionTodos(Array.isArray(session.todos) ? session.todos : []);
       setSessionStateStatus(sessionWithRuntime.state_status ?? null);
       setIsSessionSnapshotReady(true);
@@ -1156,7 +1227,8 @@ export default function ChatPage() {
 
         lastParentTaskSyncMarkerRef.current = nextMarker;
         const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-        setMessages(normalizeChatMessages(session.messages));
+        const normalizedMessages = normalizeChatMessages(session.messages);
+        setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
         setSessionStateStatus(sessionWithRuntime.state_status ?? null);
       })
       .catch(() => undefined);
@@ -1176,6 +1248,13 @@ export default function ChatPage() {
       toSessionPendingPermissionState(pendingPermissions),
     );
   }, [currentSessionId, pendingPermissions]);
+
+  useSessionSidebarRunState({
+    activeStreamSessionId: activeGatewayStreamSessionId,
+    currentSessionId,
+    sessionStateStatus,
+    streaming,
+  });
 
   useEffect(() => {
     if (!token) {
@@ -1239,6 +1318,10 @@ export default function ChatPage() {
   useEffect(() => {
     const requestedSessionId = sessionId ?? null;
     const shouldPreserveBootstrapState = pendingBootstrapSessionRef.current === requestedSessionId;
+    const shouldSoftReloadCurrentSession =
+      sessionReloadNonce > 0 &&
+      requestedSessionId !== null &&
+      requestedSessionId === activeSessionRef.current;
     void sessionReloadNonce;
 
     if (!requestedSessionId || !token) {
@@ -1247,6 +1330,7 @@ export default function ChatPage() {
       setSelectedChildSessionId(null);
       setIsSessionLoading(false);
       setMessages([]);
+      setRightPanelState(createInitialChatRightPanelState());
       setSessionTodos([]);
       setChildSessions([]);
       setSessionTasks([]);
@@ -1254,7 +1338,7 @@ export default function ChatPage() {
       setSessionStateStatus(null);
       setIsSessionSnapshotReady(true);
       setSessionModesHydrated(false);
-      setSessionMetadataDirty(false);
+      clearSessionMetadataDirty();
       lastPersistedSessionMetadataSnapshotRef.current = null;
       resetStreamState();
       setStreamError(null);
@@ -1266,21 +1350,55 @@ export default function ChatPage() {
 
     navigateToSession();
     setCurrentSessionId(requestedSessionId);
-    setSelectedChildSessionId(null);
 
     if (shouldPreserveBootstrapState) {
+      setSelectedChildSessionId(null);
       pendingBootstrapSessionRef.current = null;
       setIsSessionLoading(false);
       setIsSessionSnapshotReady(true);
-      setSessionMetadataDirty(false);
+      clearSessionMetadataDirty();
       setSessionModesHydrated(true);
       return () => {
         cancelled = true;
       };
     }
 
+    if (shouldSoftReloadCurrentSession) {
+      createSessionsClient(gatewayUrl)
+        .get(token, requestedSessionId)
+        .then((s) => {
+          const sessionWithRuntime = s as Session & { state_status?: SessionStateStatus };
+          if (cancelled || activeSessionRef.current !== requestedSessionId) {
+            return;
+          }
+
+          const normalizedMessages = normalizeChatMessages(s.messages);
+          startSessionSwitchTransition(() => {
+            setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
+            setRightPanelState(buildRightPanelStateFromSessionSnapshot(s, normalizedMessages));
+            setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
+            setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+            setIsSessionSnapshotReady(true);
+          });
+
+          void loadSessionRuntimeSnapshot(requestedSessionId, runtimeSnapshotController.signal);
+        })
+        .catch(() => undefined);
+
+      return () => {
+        cancelled = true;
+        runtimeSnapshotController.abort();
+        if (pendingSessionNormalizeTimeoutRef.current !== null) {
+          window.clearTimeout(pendingSessionNormalizeTimeoutRef.current);
+          pendingSessionNormalizeTimeoutRef.current = null;
+        }
+      };
+    }
+
+    setSelectedChildSessionId(null);
     setIsSessionLoading(true);
     setMessages([]);
+    setRightPanelState(createInitialChatRightPanelState());
     setChildSessions([]);
     setSessionTasks([]);
     setPendingPermissions([]);
@@ -1316,16 +1434,19 @@ export default function ChatPage() {
 
           startSessionSwitchTransition(() => {
             setMessages(normalizedMessages);
+            setRightPanelState(buildRightPanelStateFromSessionSnapshot(s, normalizedMessages));
             setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
             setSessionStateStatus(sessionWithRuntime.state_status ?? null);
             setIsSessionSnapshotReady(true);
-            setDialogueMode(metadata.dialogueMode);
-            setYoloMode(metadata.yoloMode);
-            setWebSearchEnabled(metadata.webSearchEnabled);
-            setThinkingEnabled(metadata.thinkingEnabled);
-            setReasoningEffort(metadata.reasoningEffort);
-            setActiveProviderId(metadata.providerId ?? '');
-            setActiveModelId(metadata.modelId ?? '');
+            if (!sessionMetadataDirtyRef.current) {
+              setDialogueMode(metadata.dialogueMode);
+              setYoloMode(metadata.yoloMode);
+              setWebSearchEnabled(metadata.webSearchEnabled);
+              setThinkingEnabled(metadata.thinkingEnabled);
+              setReasoningEffort(metadata.reasoningEffort);
+              setActiveProviderId(metadata.providerId ?? '');
+              setActiveModelId(metadata.modelId ?? '');
+            }
             lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
               dialogueMode: metadata.dialogueMode,
               yoloMode: metadata.yoloMode,
@@ -1336,7 +1457,9 @@ export default function ChatPage() {
               modelId: metadata.modelId,
               workingDirectory: extractWorkingDirectory(s.metadata_json),
             });
-            setSessionMetadataDirty(false);
+            if (!sessionMetadataDirtyRef.current) {
+              clearSessionMetadataDirty();
+            }
             setSessionModesHydrated(true);
             setIsSessionLoading(false);
           });
@@ -1367,9 +1490,10 @@ export default function ChatPage() {
           return null;
         }
         setSessionTodos([]);
+        setRightPanelState(createInitialChatRightPanelState());
         setSessionStateStatus(null);
         setIsSessionSnapshotReady(false);
-        setSessionMetadataDirty(false);
+        clearSessionMetadataDirty();
         setSessionModesHydrated(true);
         setIsSessionLoading(false);
         return null;
@@ -1384,6 +1508,7 @@ export default function ChatPage() {
       }
     };
   }, [
+    clearSessionMetadataDirty,
     gatewayUrl,
     navigateToHome,
     navigateToSession,
@@ -1526,7 +1651,7 @@ export default function ChatPage() {
     const targetSessionId = currentSessionId;
 
     if (lastPersistedSessionMetadataSnapshotRef.current === nextSnapshot) {
-      setSessionMetadataDirty(false);
+      clearSessionMetadataDirty();
       return;
     }
 
@@ -1537,12 +1662,13 @@ export default function ChatPage() {
           return;
         }
         lastPersistedSessionMetadataSnapshotRef.current = nextSnapshot;
-        setSessionMetadataDirty(false);
+        clearSessionMetadataDirty();
         requestSessionListRefresh();
       })
       .catch(() => undefined);
   }, [
     buildSessionMetadata,
+    clearSessionMetadataDirty,
     currentSessionId,
     gatewayUrl,
     sessionMetadataDirty,
@@ -1699,7 +1825,10 @@ export default function ChatPage() {
     }
     const assistantTrace = parseAssistantTraceContent(message.content);
     if (assistantTrace) {
-      const lines = [assistantTrace.text];
+      const lines = [
+        ...(assistantTrace.reasoningBlocks ?? []).map((item) => `_Thinking:_\n\n${item}`),
+        assistantTrace.text,
+      ];
       for (const toolCall of assistantTrace.toolCalls) {
         lines.push(`工具：${toolCall.toolName}`);
         lines.push(`输入：${JSON.stringify(toolCall.input, null, 2)}`);
@@ -1812,7 +1941,7 @@ export default function ChatPage() {
       pendingBootstrapSessionRef.current = imported.sessionId;
       setCurrentSessionId(imported.sessionId);
       setMessages(normalizeChatMessages(truncatedMessages));
-      setSessionMetadataDirty(false);
+      clearSessionMetadataDirty();
       setSessionModesHydrated(true);
       resetStreamState();
       setStreamError(null);
@@ -1823,6 +1952,7 @@ export default function ChatPage() {
     },
     [
       buildSessionMetadata,
+      clearSessionMetadataDirty,
       currentSessionId,
       focusComposerWithText,
       gatewayUrl,
@@ -1969,7 +2099,7 @@ export default function ChatPage() {
     activeSessionRef.current = session.id;
     pendingBootstrapSessionRef.current = session.id;
     setCurrentSessionId(session.id);
-    setSessionMetadataDirty(false);
+    clearSessionMetadataDirty();
     setSessionModesHydrated(true);
     requestSessionListRefresh();
     void navigate(`/chat/${session.id}`, { replace: true });
@@ -2192,6 +2322,7 @@ export default function ChatPage() {
     streamRevealVisibleCodePointCountRef.current = 0;
     streamRevealNextAllowedAtRef.current = 0;
     setStreamBuffer('');
+    setStreamThinkingBuffer('');
     isNearBottomRef.current = true;
     setHasPendingFollowContent(false);
     setShowScrollToBottom(false);
@@ -2208,36 +2339,45 @@ export default function ChatPage() {
       textContent: string,
       finalStatus?: 'completed' | 'error' | 'cancelled',
     ): string => {
-      return createAssistantTraceContent({
-        text: buildAssistantTextWithThinking(textContent, accumulatedThinking),
-        toolCalls: Array.from(liveToolCalls.values()).map((toolCallState) => {
-          const nextToolState =
-            finalStatus === 'error' && toolCallState.status === 'streaming'
-              ? { ...toolCallState, isError: true, status: 'error' as const }
-              : finalStatus === 'completed' && toolCallState.status === 'streaming'
-                ? { ...toolCallState, status: 'completed' as const }
-                : finalStatus === 'cancelled' && toolCallState.status === 'streaming'
-                  ? { ...toolCallState, status: 'paused' as const }
-                  : toolCallState;
+      const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
+        const nextToolState =
+          finalStatus === 'error' && toolCallState.status === 'streaming'
+            ? { ...toolCallState, isError: true, status: 'error' as const }
+            : finalStatus === 'completed' && toolCallState.status === 'streaming'
+              ? { ...toolCallState, status: 'completed' as const }
+              : finalStatus === 'cancelled' && toolCallState.status === 'streaming'
+                ? { ...toolCallState, status: 'paused' as const }
+                : toolCallState;
+        const status: 'running' | 'paused' | 'completed' | 'failed' =
+          nextToolState.status === 'error'
+            ? 'failed'
+            : nextToolState.status === 'paused'
+              ? 'paused'
+              : nextToolState.status === 'completed'
+                ? 'completed'
+                : 'running';
 
-          return {
-            kind: resolveAssistantCapabilityKind(nextToolState.toolName),
-            toolCallId: nextToolState.toolCallId,
-            toolName: nextToolState.toolName,
-            input: parseToolCallInputText(nextToolState.inputText),
-            output: nextToolState.output,
-            isError: nextToolState.isError,
-            pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
-            status:
-              nextToolState.status === 'error'
-                ? 'failed'
-                : nextToolState.status === 'paused'
-                  ? 'paused'
-                  : nextToolState.status === 'completed'
-                    ? 'completed'
-                    : 'running',
-          };
-        }),
+        return {
+          kind: resolveAssistantCapabilityKind(nextToolState.toolName),
+          toolCallId: nextToolState.toolCallId,
+          toolName: nextToolState.toolName,
+          input: parseToolCallInputText(nextToolState.inputText),
+          output: nextToolState.output,
+          isError: nextToolState.isError,
+          pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
+          status,
+        };
+      });
+
+      const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
+      if (reasoningBlocks.length === 0 && toolCalls.length === 0) {
+        return textContent;
+      }
+
+      return createAssistantTraceContent({
+        ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
+        text: textContent,
+        toolCalls,
       });
     };
 
@@ -2258,7 +2398,7 @@ export default function ChatPage() {
       });
     }
 
-    const requestText = applyChatModesToMessage(dialogueMode, yoloMode, text);
+    const requestText = text;
     let accumulated = '';
     let accumulatedThinking = '';
     let firstTokenObservedAt: number | null = null;
@@ -2268,6 +2408,8 @@ export default function ChatPage() {
     setRightPanelState((prev) => startChatRightPanelRun(prev, text));
 
     client.stream(sid, requestText, {
+      agentId: effectiveAgentId,
+      dialogueMode,
       displayMessage: text,
       onEvent: (event) => {
         if (activeSessionRef.current !== sid) {
@@ -2448,11 +2590,12 @@ export default function ChatPage() {
         }
       },
       onThinkingDelta: (delta: string) => {
-        if (activeSessionRef.current !== sid) {
+        if (activeSessionRef.current !== sid || stoppingStreamRef.current) {
           return;
         }
 
         accumulatedThinking += delta;
+        setStreamThinkingBuffer(accumulatedThinking);
       },
       onToolCall: (chunk) => {
         if (activeSessionRef.current !== sid) {
@@ -2482,21 +2625,25 @@ export default function ChatPage() {
             ? 'error'
             : 'completed';
         const hasRenderableAssistantReply =
-          finalAccumulatedText.trim().length > 0 || toolCallIds.size > 0;
+          finalAccumulatedText.trim().length > 0 ||
+          accumulatedThinking.trim().length > 0 ||
+          toolCallIds.size > 0;
         if (hasRenderableAssistantReply || !wasCancelled) {
+          const content = buildAssistantTraceMessageContent(finalAccumulatedText, traceFinalStatus);
           setMessages((prev) => [
             ...prev,
             {
               id: crypto.randomUUID(),
               role: 'assistant',
-              content:
-                toolCallIds.size > 0
-                  ? buildAssistantTraceMessageContent(finalAccumulatedText, traceFinalStatus)
-                  : buildAssistantTextWithThinking(finalAccumulatedText, accumulatedThinking),
+              content,
               createdAt: finishedAt,
               durationMs: finishedAt - requestStartedAt,
               stopReason: resolvedStopReason,
-              tokenEstimate: estimateTokenCount(finalAccumulatedText),
+              tokenEstimate: estimateTokenCount(
+                [accumulatedThinking, finalAccumulatedText]
+                  .filter((item) => item.trim().length > 0)
+                  .join('\n\n'),
+              ),
               toolCallCount: toolCallIds.size,
               providerId: requestProviderId,
               model: requestModelLabel,
@@ -2506,16 +2653,21 @@ export default function ChatPage() {
             },
           ]);
         } else if (wasCancelled) {
+          const content = buildAssistantTraceMessageContent('已停止', traceFinalStatus);
           setMessages((prev) => [
             ...prev,
             {
               id: crypto.randomUUID(),
               role: 'assistant',
-              content: buildAssistantTextWithThinking('已停止', accumulatedThinking),
+              content,
               createdAt: finishedAt,
               durationMs: finishedAt - requestStartedAt,
               stopReason: resolvedStopReason,
-              tokenEstimate: estimateTokenCount('已停止'),
+              tokenEstimate: estimateTokenCount(
+                [accumulatedThinking, '已停止']
+                  .filter((item) => item.trim().length > 0)
+                  .join('\n\n'),
+              ),
               toolCallCount: toolCallIds.size,
               providerId: requestProviderId,
               model: requestModelLabel,
@@ -2541,19 +2693,21 @@ export default function ChatPage() {
         const finishedAt = Date.now();
         const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
         logger.error('stream error', message ? `${code}: ${message}` : code);
+        const content = buildAssistantTraceMessageContent(errorContent, 'error');
         setMessages((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
             role: 'assistant',
-            content:
-              toolCallIds.size > 0
-                ? buildAssistantTraceMessageContent(errorContent, 'error')
-                : buildAssistantTextWithThinking(errorContent, accumulatedThinking),
+            content,
             createdAt: finishedAt,
             durationMs: finishedAt - requestStartedAt,
             stopReason: 'error',
-            tokenEstimate: estimateTokenCount(errorContent),
+            tokenEstimate: estimateTokenCount(
+              [accumulatedThinking, errorContent]
+                .filter((item) => item.trim().length > 0)
+                .join('\n\n'),
+            ),
             toolCallCount: toolCallIds.size,
             providerId: requestProviderId,
             model: requestModelLabel,
@@ -2572,6 +2726,7 @@ export default function ChatPage() {
       thinkingEnabled: requestModelSupportsThinking ? thinkingEnabled : false,
       reasoningEffort: requestModelSupportsThinking ? reasoningEffort : undefined,
       webSearchEnabled,
+      yoloMode,
     });
     return true;
   }
@@ -3261,8 +3416,11 @@ export default function ChatPage() {
         id: '__streaming__',
         role: 'assistant',
         content:
-          toolCallCards.length > 0
+          toolCallCards.length > 0 || streamThinkingBuffer.trim().length > 0
             ? createAssistantTraceContent({
+                ...(streamThinkingBuffer.trim().length > 0
+                  ? { reasoningBlocks: [streamThinkingBuffer] }
+                  : {}),
                 text: streamBuffer,
                 toolCalls: toolCallCards.map((toolCall) => ({
                   kind: resolveAssistantCapabilityKind(toolCall.toolName),
@@ -3278,7 +3436,11 @@ export default function ChatPage() {
         model: (activeModelOption?.label ?? activeModelId) || undefined,
         providerId: activeProviderId || undefined,
         createdAt: activeStreamStartedAt ?? Date.now(),
-        tokenEstimate: streamingOutputTokens,
+        tokenEstimate: estimateTokenCount(
+          [streamThinkingBuffer, streamBuffer]
+            .filter((item) => item.trim().length > 0)
+            .join('\n\n'),
+        ),
         toolCallCount: toolCallCards.length > 0 ? toolCallCards.length : undefined,
         status: 'streaming',
       },
@@ -3299,8 +3461,8 @@ export default function ChatPage() {
     resolveAssistantCapabilityKind,
     selectedChildSessionId,
     streamBuffer,
+    streamThinkingBuffer,
     streaming,
-    streamingOutputTokens,
     streamingUsageDetails,
     taskToolRuntimeLookup,
     toolCallCards,
@@ -3407,8 +3569,13 @@ export default function ChatPage() {
           }}
         >
           <ChatTopBar
+            agentOptions={agentOptions}
+            defaultAgentLabel={defaultAgentLabel}
             dialogueMode={dialogueMode}
             onChangeDialogueMode={handleDialogueModeChange}
+            manualAgentId={manualAgentId}
+            onChangeManualAgentId={handleManualAgentChange}
+            onClearManualAgentId={handleClearManualAgentId}
             yoloMode={yoloMode}
             onToggleYolo={handleToggleYolo}
             editorMode={editorMode}
@@ -3442,7 +3609,7 @@ export default function ChatPage() {
                   }
                   lastPersistedSessionMetadataSnapshotRef.current =
                     createSessionMetadataSnapshot(selectedMetadata);
-                  setSessionMetadataDirty(false);
+                  clearSessionMetadataDirty();
                   requestSessionListRefresh();
                 }
               }}

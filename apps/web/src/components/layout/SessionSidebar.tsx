@@ -1,20 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useUIStateStore } from '../../stores/uiState.js';
 import { useAuthStore } from '../../stores/auth.js';
 import { useSessions } from '../../hooks/useSessions.js';
 import SessionContextMenu from './SessionContextMenu.js';
 import FileTreeContextMenu from './FileTreeContextMenu.js';
+import { SessionSidebarSessionRow } from './SessionSidebarSessionRow.js';
 import WorkspaceGroupMenu from './WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from './WorkspaceDeleteConfirmDialog.js';
 import { WorkspaceGitBadge, FileTreeView, type FileTreeContextTarget } from './SidebarHelpers.js';
 import type { FileTreeNode } from '../WorkspacePickerModal.js';
-import { SessionModeBadges } from '../SessionModeBadges.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { toast } from '../ToastNotification.js';
-import { hasParentSession } from '../../utils/session-metadata.js';
 import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../utils/session-grouping.js';
-import type { WorkspaceSessionTreeNode } from '../../utils/session-grouping.js';
 
 const sessionIconBtnStyle: React.CSSProperties = {
   display: 'flex',
@@ -39,10 +37,6 @@ const HIDDEN_FILE_TREE_ENTRY_NAMES = new Set([
   '__pycache__',
   '.DS_Store',
 ]);
-
-function isNestedInteractiveTarget(target: EventTarget | null): target is Element {
-  return target instanceof Element && target.closest('button, input, textarea, select, a') !== null;
-}
 
 type FileTreeContextMenuState = FileTreeContextTarget & {
   targetType: 'root' | FileTreeContextTarget['type'];
@@ -489,406 +483,6 @@ export function SessionSidebar({
     },
     [quickDeleteSession, removeSavedWorkspacePath],
   );
-
-  const renderSessionNode = (
-    node: WorkspaceSessionTreeNode<(typeof sessions)[number]>,
-    depth = 0,
-  ): React.ReactElement => {
-    const s = node.session;
-    const showChildBadge = depth > 0 || hasParentSession(s.metadata_json);
-    const deleting = isDeletingSession(s.id);
-
-    return (
-      <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <li
-          data-session-id={s.id}
-          className={`session-item${s.id === sessionId ? ' active' : ''}`}
-          onClick={(event) => {
-            if (isNestedInteractiveTarget(event.target)) {
-              return;
-            }
-
-            openChatSession(s.id);
-          }}
-          onKeyDown={(event) => {
-            if (isNestedInteractiveTarget(event.target)) {
-              return;
-            }
-
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              openChatSession(s.id);
-            }
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setContextMenu({ sessionId: s.id, x: e.clientX, y: e.clientY });
-          }}
-          onMouseEnter={(event) => {
-            preloadChatRoute(s.id);
-            lastPointerPositionRef.current = {
-              x: event.clientX,
-              y: event.clientY,
-            };
-            setHoveredSessionId(s.id);
-          }}
-          onMouseMove={(event) => {
-            lastPointerPositionRef.current = {
-              x: event.clientX,
-              y: event.clientY,
-            };
-          }}
-          onMouseLeave={() => {
-            lastPointerPositionRef.current = null;
-            setHoveredSessionId(null);
-          }}
-          onFocusCapture={() => {
-            preloadChatRoute(s.id);
-            setHoveredSessionId(s.id);
-          }}
-          onBlurCapture={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-              setHoveredSessionId(null);
-            }
-          }}
-          style={{
-            listStyle: 'none',
-            display: 'flex',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 2,
-            width: '100%',
-            borderRadius: 6,
-            padding: '4px 6px',
-            paddingLeft: `${6 + depth * 12}px`,
-            background: s.id === sessionId ? 'var(--accent-muted)' : 'transparent',
-          }}
-        >
-          {depth > 0 && (
-            <span
-              aria-hidden="true"
-              style={{
-                width: 12,
-                flexShrink: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--text-3)',
-                fontSize: 10,
-                fontWeight: 700,
-              }}
-            >
-              ↳
-            </span>
-          )}
-          <span
-            style={{
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 14,
-              height: 14,
-              color:
-                s.id === sessionId
-                  ? 'var(--accent)'
-                  : isPinned(s.id)
-                    ? 'var(--accent)'
-                    : 'var(--text-3)',
-            }}
-          >
-            {isPinned(s.id) ? (
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <line x1="12" y1="17" x2="12" y2="22" />
-                <path d="M5 17H19V15L17 9V4H18V2H6V4H7V9L5 15V17Z" />
-              </svg>
-            ) : (
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            )}
-          </span>
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            {renamingSessionId === s.id ? (
-              <input
-                ref={(el) => el?.focus()}
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === 'Enter') void commitRename(s.id);
-                  if (event.key === 'Escape') void commitRename(s.id);
-                }}
-                onBlur={() => void commitRename(s.id)}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  background: 'var(--bg-2)',
-                  border: '1px solid var(--accent)',
-                  borderRadius: 6,
-                  padding: '3px 6px',
-                  color: 'var(--text)',
-                  fontSize: 12,
-                  outline: 'none',
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                onPointerEnter={() => preloadChatRoute(s.id)}
-                onFocus={() => preloadChatRoute(s.id)}
-                onClick={() => openChatSession(s.id)}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  textAlign: 'left',
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  padding: '4px 0',
-                }}
-              >
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12,
-                    fontWeight: s.id === sessionId ? 600 : 400,
-                    color: s.id === sessionId ? 'var(--text)' : 'var(--text-2)',
-                    lineHeight: '1.4',
-                  }}
-                >
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      width: '100%',
-                      minWidth: 0,
-                    }}
-                  >
-                    <span
-                      title={s.title ?? '未命名'}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {s.title ?? '未命名'}
-                    </span>
-                    {showChildBadge && (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          height: 16,
-                          padding: '0 5px',
-                          borderRadius: 999,
-                          background: 'var(--accent-muted)',
-                          color: 'var(--accent)',
-                          fontSize: 9,
-                          fontWeight: 700,
-                          flexShrink: 0,
-                        }}
-                      >
-                        子会话
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </button>
-            )}
-            <div
-              style={{
-                position: 'relative',
-                width: 170,
-                height: 24,
-                flexShrink: 0,
-                marginLeft: 'auto',
-              }}
-            >
-              <span
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'flex-end',
-                  gap: 6,
-                  opacity: renamingSessionId !== s.id && hoveredSessionId !== s.id ? 1 : 0,
-                  transition: 'opacity 120ms ease-out',
-                  pointerEvents: 'none',
-                  willChange: 'opacity',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--text-3)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {new Date(s.updated_at).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    minWidth: 0,
-                    maxWidth: 100,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <SessionModeBadges compact metadataJson={s.metadata_json} />
-                </span>
-              </span>
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                  gap: 4,
-                  alignItems: 'center',
-                  opacity: hoveredSessionId === s.id && renamingSessionId !== s.id ? 1 : 0,
-                  transition: 'opacity 120ms ease-out',
-                  pointerEvents:
-                    hoveredSessionId === s.id && renamingSessionId !== s.id ? 'auto' : 'none',
-                  willChange: 'opacity',
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => startRename(s)}
-                  tabIndex={hoveredSessionId === s.id && renamingSessionId !== s.id ? 0 : -1}
-                  title="重命名"
-                  style={sessionIconBtnStyle}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void quickExportSession(s.id)}
-                  tabIndex={hoveredSessionId === s.id && renamingSessionId !== s.id ? 0 : -1}
-                  title="导出"
-                  style={sessionIconBtnStyle}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void quickDeleteSession(s.id)}
-                  disabled={deleting}
-                  tabIndex={hoveredSessionId === s.id && renamingSessionId !== s.id ? 0 : -1}
-                  title={deleting ? '删除中…' : '删除'}
-                  style={{
-                    ...sessionIconBtnStyle,
-                    color: 'var(--danger)',
-                    opacity: deleting ? 0.45 : sessionIconBtnStyle.opacity,
-                    cursor: deleting ? 'wait' : sessionIconBtnStyle.cursor,
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    <path d="M10 11v6" />
-                    <path d="M14 11v6" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        </li>
-        {node.children.length > 0 && (
-          <div
-            style={{
-              marginLeft: `${18 + depth * 12}px`,
-              paddingLeft: 8,
-              borderLeft: '1px solid var(--border-subtle)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 1,
-            }}
-          >
-            {node.children.map((childNode) => renderSessionNode(childNode, depth + 1))}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   const refreshDirectory = useCallback(
     async (directoryPath: string): Promise<boolean> => {
@@ -1729,7 +1323,32 @@ export function SessionSidebar({
                       gap: 1,
                     }}
                   >
-                    {group.roots.map((node) => renderSessionNode(node))}
+                    {group.roots.map((node) => (
+                      <SessionSidebarSessionRow
+                        key={node.session.id}
+                        activeSessionId={sessionId}
+                        commitRename={commitRename}
+                        hoveredSessionId={hoveredSessionId}
+                        isDeletingSession={isDeletingSession}
+                        isPinned={isPinned}
+                        node={node}
+                        onHoveredSessionChange={setHoveredSessionId}
+                        onOpenContextMenu={(sessionIdToOpen, x, y) => {
+                          setContextMenu({ sessionId: sessionIdToOpen, x, y });
+                        }}
+                        onPointerPositionChange={(position) => {
+                          lastPointerPositionRef.current = position;
+                        }}
+                        openChatSession={openChatSession}
+                        preloadChatRoute={preloadChatRoute}
+                        quickDeleteSession={quickDeleteSession}
+                        quickExportSession={quickExportSession}
+                        renameValue={renameValue}
+                        renamingSessionId={renamingSessionId}
+                        setRenameValue={setRenameValue}
+                        startRename={startRename}
+                      />
+                    ))}
                     {group.sessions.length === 0 && (
                       <div
                         style={{

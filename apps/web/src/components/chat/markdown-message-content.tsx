@@ -1,12 +1,12 @@
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
-const CHAT_PREVIEW_MIN_HEIGHT = '360px';
-const CHAT_PREVIEW_HEIGHT = '460px';
-const CHAT_PREVIEW_MAX_HEIGHT = '70vh';
+const CHAT_PREVIEW_MIN_HEIGHT = 360;
+const CHAT_PREVIEW_MAX_HEIGHT_VH = 70;
+const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript';
 
@@ -173,13 +173,69 @@ function getStaticPreviewKind(language: string | undefined): StaticPreviewKind |
   return null;
 }
 
+const RESIZE_SCRIPT = `<script>
+(function () {
+  function postHeight() {
+    var h = document.documentElement.scrollHeight;
+    if (h > 0) {
+      parent.postMessage({ type: '${PREVIEW_RESIZE_MSG_TYPE}', height: h }, '*');
+    }
+  }
+
+  postHeight();
+
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(postHeight).observe(document.body);
+  }
+
+  window.addEventListener('load', postHeight);
+
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(postHeight).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
+  }
+})();
+<\/script>`;
+
+function isFullHtmlDocument(code: string): boolean {
+  const trimmed = code.trimStart().slice(0, 200).toLowerCase();
+  return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html');
+}
+
+function buildFullPagePreview(code: string): string {
+  const safe = stripScriptTags(code);
+  const baseTag = '<base href="about:srcdoc" target="_blank">';
+
+  if (/<head[\s>]/iu.test(safe)) {
+    const withBase = safe.replace(/(<head[^>]*>)/iu, `$1\n    ${baseTag}`);
+    return withBase.replace(/<\/body\s*>/iu, `${RESIZE_SCRIPT}\n</body>`);
+  }
+
+  if (/<html[\s>]/iu.test(safe)) {
+    const withHead = safe.replace(/(<html[^>]*>)/iu, `$1\n<head>${baseTag}</head>`);
+    return withHead.replace(/<\/body\s*>/iu, `${RESIZE_SCRIPT}\n</body>`);
+  }
+
+  return `<!DOCTYPE html>
+<html><head>${baseTag}</head>
+<body>${safe}${RESIZE_SCRIPT}</body></html>`;
+}
+
 function buildPreviewDocument(previewKind: StaticPreviewKind, code: string): string {
+  if (previewKind === 'html' && isFullHtmlDocument(code)) {
+    return buildFullPagePreview(code);
+  }
+
+  const safeCode = previewKind === 'html' ? stripScriptTags(code) : code;
   const previewBody =
     previewKind === 'css'
       ? buildCssPreviewBody()
       : previewKind === 'javascript'
         ? buildJavascriptPreviewBody()
-        : code;
+        : safeCode;
   const previewHead =
     previewKind === 'css'
       ? `<style>
@@ -246,6 +302,7 @@ ${escapeForInlineScript(code)}
   <body>
 ${previewBody}
     ${previewScript}
+    ${RESIZE_SCRIPT}
   </body>
 </html>`;
 }
@@ -256,6 +313,12 @@ function escapeForStyleTag(code: string): string {
 
 function escapeForInlineScript(code: string): string {
   return code.replace(/<\/script/giu, '<\\/script');
+}
+
+function stripScriptTags(html: string): string {
+  return html
+    .replace(/<script[\s>][\s\S]*?<\/script\s*>/giu, '')
+    .replace(/<script[^>]*\/\s*>/giu, '');
 }
 
 function buildCssPreviewBody(): string {
@@ -338,11 +401,11 @@ function getPreviewNote(previewKind: StaticPreviewKind): string {
     return '当前脚本仅在隔离 iframe 中运行：允许脚本执行，但不会获得宿主页同源权限。';
   }
 
-  return '当前为安全静态预览：禁用脚本执行，外链将在新窗口打开。';
+  return '安全沙箱预览：用户脚本已移除，外链将在新窗口打开。';
 }
 
-function getPreviewSandbox(previewKind: StaticPreviewKind): string {
-  return previewKind === 'javascript' ? 'allow-scripts' : '';
+function getPreviewSandbox(_previewKind: StaticPreviewKind): string {
+  return 'allow-scripts';
 }
 
 function StaticPreviewCodeBlock({
@@ -360,6 +423,42 @@ function StaticPreviewCodeBlock({
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [frameHeight, setFrameHeight] = useState(CHAT_PREVIEW_MIN_HEIGHT);
+
+  const handleMessage = useCallback((event: MessageEvent) => {
+    if (
+      typeof event.data !== 'object' ||
+      event.data === null ||
+      event.data.type !== PREVIEW_RESIZE_MSG_TYPE
+    ) {
+      return;
+    }
+
+    const height = Number(event.data.height);
+    if (!Number.isFinite(height) || height <= 0) {
+      return;
+    }
+
+    const maxPx = (window.innerHeight * CHAT_PREVIEW_MAX_HEIGHT_VH) / 100;
+    const clamped = Math.max(CHAT_PREVIEW_MIN_HEIGHT, Math.min(height, maxPx));
+    setFrameHeight(clamped);
+  }, []);
+
+  useEffect(() => {
+    if (!previewOpen) {
+      return;
+    }
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [previewOpen, handleMessage]);
+
+  useEffect(() => {
+    if (!previewOpen) {
+      setFrameHeight(CHAT_PREVIEW_MIN_HEIGHT);
+    }
+  }, [previewOpen]);
 
   return (
     <div className="chat-markdown-code-block">
@@ -395,6 +494,7 @@ function StaticPreviewCodeBlock({
         <div className="chat-markdown-preview-panel">
           <div className="chat-markdown-preview-note">{getPreviewNote(previewKind)}</div>
           <iframe
+            ref={iframeRef}
             data-testid="chat-markdown-html-preview"
             className="chat-markdown-preview-frame"
             title={getPreviewTitle(previewKind)}
@@ -404,8 +504,8 @@ function StaticPreviewCodeBlock({
             srcDoc={buildPreviewDocument(previewKind, copyableCode)}
             style={{
               minHeight: CHAT_PREVIEW_MIN_HEIGHT,
-              height: CHAT_PREVIEW_HEIGHT,
-              maxHeight: CHAT_PREVIEW_MAX_HEIGHT,
+              height: frameHeight,
+              maxHeight: `${CHAT_PREVIEW_MAX_HEIGHT_VH}vh`,
             }}
           />
         </div>

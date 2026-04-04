@@ -4,6 +4,7 @@ import {
   normalizeChatMessages,
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
+  reconcileSnapshotChatMessages,
 } from './support.js';
 
 describe('normalizeChatMessages', () => {
@@ -268,6 +269,25 @@ describe('normalizeChatMessages', () => {
     });
   });
 
+  it('keeps reasoning parts separate from assistant final text during normalization', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-reasoning',
+        role: 'assistant',
+        createdAt: 1,
+        content: [
+          { type: 'reasoning', text: '## 先比较约束\n- 需要兼容流式' },
+          { type: 'text', text: '这是最终答复。' },
+        ],
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.reasoningBlocks).toEqual(['## 先比较约束\n- 需要兼容流式']);
+    expect(assistantTrace?.text).toBe('这是最终答复。');
+  });
+
   it('recovers copied tool card text into a structured tool call', () => {
     const copiedText = `工具：todowrite
 类型：TOOL
@@ -383,6 +403,98 @@ describe('normalizeChatMessages', () => {
         ],
       },
     });
+  });
+
+  it('keeps the local tail when a same-session snapshot is only a prefix of current messages', () => {
+    const previousMessages = [
+      {
+        id: 'assistant-seed',
+        role: 'assistant' as const,
+        content: '历史消息',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'local-user',
+        role: 'user' as const,
+        content: '继续分析',
+        createdAt: 2_000,
+        status: 'completed' as const,
+      },
+      {
+        id: 'local-assistant',
+        role: 'assistant' as const,
+        content: '这是本地刚补上的结论',
+        createdAt: 3_000,
+        status: 'completed' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'assistant-seed',
+        role: 'assistant' as const,
+        content: '历史消息',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'server-user',
+        role: 'user' as const,
+        content: '继续分析',
+        createdAt: 2_005,
+        status: 'completed' as const,
+      },
+    ];
+
+    expect(reconcileSnapshotChatMessages(previousMessages, snapshotMessages)).toEqual(
+      previousMessages,
+    );
+  });
+
+  it('falls back to the server snapshot when the same-session history diverges midstream', () => {
+    const previousMessages = [
+      {
+        id: 'assistant-seed',
+        role: 'assistant' as const,
+        content: '历史消息',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'local-user',
+        role: 'user' as const,
+        content: '继续分析',
+        createdAt: 2_000,
+        status: 'completed' as const,
+      },
+      {
+        id: 'local-assistant',
+        role: 'assistant' as const,
+        content: '本地临时尾部',
+        createdAt: 3_000,
+        status: 'completed' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'assistant-seed',
+        role: 'assistant' as const,
+        content: '历史消息',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'server-user',
+        role: 'user' as const,
+        content: '服务端已经截断后的新问题',
+        createdAt: 2_000,
+        status: 'completed' as const,
+      },
+    ];
+
+    expect(reconcileSnapshotChatMessages(previousMessages, snapshotMessages)).toEqual(
+      snapshotMessages,
+    );
   });
 });
 
