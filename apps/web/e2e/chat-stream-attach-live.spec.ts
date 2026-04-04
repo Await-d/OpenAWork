@@ -165,7 +165,15 @@ test.describe.serial('Chat attach live recovery', () => {
     await expect(page.getByText('实时续流第一段')).toBeVisible();
     await expect(page.getByText('当前运行流仍受此页控制')).toBeVisible();
 
+    const stopResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes('/stream/stop') || response.url().includes('/stream/stop-active'),
+    );
     await page.getByRole('button', { name: '停止' }).click();
+    const stopResponse = await stopResponsePromise;
+    expect(stopResponse.ok()).toBeTruthy();
+    const stopPayload = (await stopResponse.json()) as { stopped?: boolean };
+    expect(stopPayload.stopped).toBe(true);
 
     await expect(page.getByRole('button', { name: '停止' })).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByText('当前运行流仍受此页控制')).toHaveCount(0);
