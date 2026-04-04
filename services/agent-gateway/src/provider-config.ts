@@ -63,12 +63,14 @@ const oauthConfigSchema = z.object({
   usePkce: z.boolean().optional(),
 });
 
+const nonNegativeIntegerMetadataSchema = z.number().int().nonnegative().optional();
+
 export const aiModelConfigSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   enabled: z.boolean(),
-  contextWindow: z.number().int().positive().optional(),
-  maxOutputTokens: z.number().int().positive().optional(),
+  contextWindow: nonNegativeIntegerMetadataSchema,
+  maxOutputTokens: nonNegativeIntegerMetadataSchema,
   supportsTools: z.boolean().optional(),
   supportsVision: z.boolean().optional(),
   supportsThinking: z.boolean().optional(),

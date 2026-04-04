@@ -241,6 +241,30 @@ describe('providerSettingsBodySchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts zero token metadata for image-style models', () => {
+    const provider = getBuiltinProviderPreset('openai');
+    const result = providerSettingsBodySchema.safeParse({
+      providers: [
+        {
+          ...provider,
+          defaultModels: provider.defaultModels.map((model, index) =>
+            index === 0
+              ? {
+                  ...model,
+                  contextWindow: 0,
+                  maxOutputTokens: 0,
+                }
+              : model,
+          ),
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.providers[0]?.defaultModels[0]?.contextWindow).toBe(0);
+    expect(result.data?.providers[0]?.defaultModels[0]?.maxOutputTokens).toBe(0);
+  });
+
   it('rejects invalid provider types', () => {
     const provider = getBuiltinProviderPreset('openai');
     const result = providerSettingsBodySchema.safeParse({
@@ -346,6 +370,31 @@ describe('materializeProviderConfig', () => {
     );
 
     expect(result.providers.some((provider) => provider.id === 'openai')).toBe(true);
+  });
+
+  it('preserves zero token metadata for image-style models during materialization', async () => {
+    const provider = getBuiltinProviderPreset('openai');
+    const result = await materializeProviderConfig(
+      [
+        {
+          ...provider,
+          defaultModels: provider.defaultModels.map((model, index) =>
+            index === 0
+              ? {
+                  ...model,
+                  contextWindow: 0,
+                  maxOutputTokens: 0,
+                }
+              : model,
+          ),
+        },
+      ],
+      null,
+    );
+
+    const openAiProvider = result.providers.find((item) => item.id === provider.id);
+    expect(openAiProvider?.defaultModels[0]?.contextWindow).toBe(0);
+    expect(openAiProvider?.defaultModels[0]?.maxOutputTokens).toBe(0);
   });
 });
 

@@ -19,6 +19,7 @@ describe('task result extraction', () => {
           {
             type: 'text',
             text: JSON.stringify({
+              source: 'openawork_internal',
               type: 'assistant_event',
               payload: {
                 kind: 'agent',
@@ -44,6 +45,7 @@ describe('task result extraction', () => {
           {
             type: 'text',
             text: JSON.stringify({
+              source: 'openawork_internal',
               type: 'assistant_event',
               payload: {
                 kind: 'agent',
@@ -95,6 +97,7 @@ describe('task result extraction', () => {
           {
             type: 'text',
             text: JSON.stringify({
+              source: 'openawork_internal',
               type: 'assistant_event',
               payload: {
                 kind: 'agent',
@@ -193,6 +196,7 @@ describe('task result extraction', () => {
           {
             type: 'text',
             text: JSON.stringify({
+              source: 'openawork_internal',
               type: 'assistant_event',
               payload: {
                 kind: 'agent',

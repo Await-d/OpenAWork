@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ArtifactManagerImpl } from '@openAwork/artifacts';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
+import { resolveGatewayArtifactsDir, resolveGatewayArtifactsIndexPath } from '../storage-paths.js';
 
-const ARTIFACTS_DIR = resolve(process.cwd(), 'data', 'artifacts');
-const ARTIFACTS_INDEX = resolve(process.cwd(), 'data', 'artifacts-index.json');
+const ARTIFACTS_DIR = resolveGatewayArtifactsDir();
+const ARTIFACTS_INDEX = resolveGatewayArtifactsIndexPath();
 
 const artifactManager = new ArtifactManagerImpl({ indexFilePath: ARTIFACTS_INDEX });
 

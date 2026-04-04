@@ -51,7 +51,7 @@ src/
 
 - **Fastify 5**：插件注册为顺序执行（`await app.register(...)`）。
 - **认证**：JWT via `@fastify/jwt`。默认管理员从 `ADMIN_EMAIL`/`ADMIN_PASSWORD` 环境变量初始化（开发默认 `admin@openAwork.local` / `admin123456`）。
-- **数据库**：SQLite（`better-sqlite3`，同步 API）。`db.ts` 全为同步调用，无 async DB 操作。Postgres URL 在环境变量中，但当前存储为 SQLite。
+- **数据库**：SQLite（`better-sqlite3`，同步 API）。`db.ts` 全为同步调用，无 async DB 操作。默认落到平台数据目录（Linux: `~/.local/share/OpenAWork/agent-gateway/openAwork.db`），也可通过 `OPENAWORK_DATA_DIR` / `OPENAWORK_DATABASE_PATH` 覆盖。
 - **流式输出**：`/stream` 路由提供 SSE；`@fastify/websocket` 提供实时 WS。
 - **桌面 Sidecar**：通过 `bun build --compile` 编译为二进制，嵌入 Tauri。构建 Tauri 用版本请执行 `pnpm build:binary`，而非 `pnpm build`。
 - **消息渠道**：所有渠道实现 `MessagingChannelService`（start/stop/sendMessage/replyMessage），通过 `manager.ts` 注册管理。
@@ -65,7 +65,9 @@ GATEWAY_HOST=0.0.0.0
 JWT_SECRET=                # 最少 32 字符，生成：openssl rand -base64 32
 JWT_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=7d
-DATABASE_URL=              # Postgres（未来迁移用；当前为 SQLite）
+OPENAWORK_DATA_DIR=        # 可选，Gateway durable 数据根目录
+OPENAWORK_DATABASE_PATH=   # 可选，显式 SQLite 文件路径
+DATABASE_URL=              # 兼容保留的 SQLite 路径覆盖项（不要填 Postgres URL）
 REDIS_URL=
 AI_API_KEY=
 AI_API_BASE_URL=

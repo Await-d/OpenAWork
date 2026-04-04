@@ -7,9 +7,10 @@ import {
   parseConfiguredWorkspaceRoots,
   parseWorkspaceAccessMode,
 } from './workspace-config.js';
+import { resolveGatewayDatabasePath } from './storage-paths.js';
 
 function resolveDbPath(): string {
-  return globalThis.process?.env['DATABASE_URL'] ?? resolve(process.cwd(), 'data', 'openAwork.db');
+  return resolveGatewayDatabasePath();
 }
 
 const configuredWorkspaceRoots = parseConfiguredWorkspaceRoots(process.env['WORKSPACE_ROOTS']);
@@ -274,6 +275,15 @@ export async function migrate(): Promise<void> {
   );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_session_file_backups_hash ON session_file_backups(content_hash)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_file_backups_storage_path ON session_file_backups(storage_path)',
+  );
+  ensureColumn('session_file_backups', 'content_tier', "TEXT NOT NULL DEFAULT 'text'");
+  ensureColumn('session_file_backups', 'content_format', 'TEXT');
+  ensureColumn('session_file_backups', 'hash_scope', "TEXT NOT NULL DEFAULT 'raw'");
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_file_backups_kind_hash_tier ON session_file_backups(kind, content_hash, content_tier, hash_scope)',
   );
 
   db.exec(`

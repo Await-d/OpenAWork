@@ -4,24 +4,18 @@ import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { modelRequestSchema } from '../model-router.js';
 import {
   createPermissionAskedEvent,
   createPermissionRepliedEvent,
 } from '../session-permission-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { type ApprovedPermissionResumePayload } from './stream.js';
+import {
+  type ApprovedPermissionResumePayload,
+  streamRequestSchema as permissionResumeRequestSchema,
+} from './stream.js';
 import { resumeApprovedPermissionRequest } from './stream-runtime.js';
 import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
-
-const permissionResumeRequestSchema = modelRequestSchema.extend({
-  displayMessage: z.string().min(1).max(32768).optional(),
-  message: z.string().min(1).max(32768),
-  providerId: z.string().min(1).max(200).optional(),
-  clientRequestId: z.string().min(1).max(128),
-  webSearchEnabled: z.boolean().optional(),
-});
 
 const createPermissionRequestSchema = z.object({
   toolName: z.string().min(1),

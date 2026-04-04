@@ -104,6 +104,7 @@ async function main(): Promise<void> {
                     model: 'gpt-4o',
                     maxTokens: 512,
                     temperature: 1,
+                    upstreamRetryMaxRetries: 1,
                     webSearchEnabled: false,
                   },
                 },
@@ -171,6 +172,17 @@ async function main(): Promise<void> {
                 JSON.stringify(childMessages[1]?.content) ===
                   JSON.stringify([{ type: 'text', text: '子代理已经执行完成。' }]),
                 'child session should persist delegated assistant output',
+              );
+              const initialChildMetadata = sqliteGet<{ metadata_json: string }>(
+                'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+                [output.sessionId, userId],
+              );
+              const parsedInitialChildMetadata = initialChildMetadata
+                ? (JSON.parse(initialChildMetadata.metadata_json) as Record<string, unknown>)
+                : null;
+              assert(
+                parsedInitialChildMetadata?.['upstreamRetryMaxRetries'] === 1,
+                'child session should inherit the parent upstream retry snapshot',
               );
 
               const backgroundOutputResult = await sandbox.execute(
@@ -353,6 +365,7 @@ async function main(): Promise<void> {
                     model: 'gpt-4o',
                     maxTokens: 512,
                     temperature: 1,
+                    upstreamRetryMaxRetries: 2,
                     webSearchEnabled: false,
                   },
                 },
@@ -400,6 +413,17 @@ async function main(): Promise<void> {
                 JSON.stringify(resumedChildMessages[3]?.content) ===
                   JSON.stringify([{ type: 'text', text: '子代理已经执行完成。' }]),
                 'task resume should persist the follow-up assistant output into the same child session',
+              );
+              const resumedChildMetadata = sqliteGet<{ metadata_json: string }>(
+                'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+                [output.sessionId, userId],
+              );
+              const parsedResumedChildMetadata = resumedChildMetadata
+                ? (JSON.parse(resumedChildMetadata.metadata_json) as Record<string, unknown>)
+                : null;
+              assert(
+                parsedResumedChildMetadata?.['upstreamRetryMaxRetries'] === 2,
+                'resumed child session should refresh to the latest parent retry snapshot',
               );
               assert(
                 fetchCalls.length === 2,

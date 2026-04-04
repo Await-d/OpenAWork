@@ -1,5 +1,7 @@
 import type { Message } from '@openAwork/shared';
 
+const INTERNAL_CLIENT_REQUEST_ID_KEY = '__openAworkClientRequestId';
+
 function isAssistantUiEventText(value: string): boolean {
   const normalized = value.trim();
   if (!normalized.startsWith('{') || !normalized.endsWith('}')) {
@@ -7,8 +9,8 @@ function isAssistantUiEventText(value: string): boolean {
   }
 
   try {
-    const parsed = JSON.parse(normalized) as { type?: unknown };
-    return parsed.type === 'assistant_event';
+    const parsed = JSON.parse(normalized) as { source?: unknown; type?: unknown };
+    return parsed.type === 'assistant_event' && parsed.source === 'openawork_internal';
   } catch {
     return false;
   }
@@ -36,8 +38,40 @@ function isIgnorableAssistantUiEventMessage(message: Message): boolean {
     }
 
     const text = content.text.trim();
-    return text.length === 0 || isAssistantUiEventText(text);
+    return text.length === 0 || isAssistantUiEventTextForMessage(text, message);
   });
+}
+
+function isAssistantUiEventTextForMessage(value: string, message: Message): boolean {
+  if (isAssistantUiEventText(value)) {
+    return true;
+  }
+
+  const clientRequestId = (message as Message & { [INTERNAL_CLIENT_REQUEST_ID_KEY]?: unknown })[
+    INTERNAL_CLIENT_REQUEST_ID_KEY
+  ];
+  if (typeof clientRequestId !== 'string') {
+    return false;
+  }
+
+  if (
+    !clientRequestId.startsWith('assistant_event:') &&
+    !clientRequestId.startsWith('task-reminder:')
+  ) {
+    return false;
+  }
+
+  const normalized = value.trim();
+  if (!normalized.startsWith('{') || !normalized.endsWith('}')) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as { type?: unknown };
+    return parsed.type === 'assistant_event';
+  } catch {
+    return false;
+  }
 }
 
 function normalizeExtractedChildSummary(value: string): string {

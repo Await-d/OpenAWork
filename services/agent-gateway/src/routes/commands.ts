@@ -9,14 +9,19 @@ import {
   RalphLoopImpl,
   SlashCommandRouterImpl,
   buildHandoffDocument,
-  createContextCompactor,
   formatHandoffMarkdown,
 } from '@openAwork/agent-core';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
+import { mergeCompactionMetadata, readPersistedCompactionMemory } from '../compaction-metadata.js';
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
-import { appendSessionMessage, listSessionMessages } from '../session-message-store.js';
+import {
+  appendSessionMessage,
+  buildDurableCompactionSummary,
+  buildStructuredCompactionSummary,
+  listSessionMessages,
+} from '../session-message-store.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
@@ -214,12 +219,27 @@ async function executeCompactCommand(params: {
     tags: ['command', 'compaction'],
   });
   taskManager.startTask(params.graph, task.id);
-  const compactor = createContextCompactor({
-    summarize: async (items) => summarizeMessages(items),
+  const durableSummary = buildDurableCompactionSummary({
+    existingMemory: readPersistedCompactionMemory(params.metadataJson),
+    messages: params.messages,
+    recentMessagesKept: 0,
+    trigger: 'manual',
   });
-  const compacted = await compactor.compact(params.messages, 'summarize');
-  const summary = extractMessageText(compacted[0]) || '当前会话已压缩。';
-  const metadata = mergeCompactionMetadata(params.metadataJson, summary);
+  const summary =
+    durableSummary?.structuredSummary ??
+    buildStructuredCompactionSummary({
+      messages: params.messages,
+      recentMessagesKept: 0,
+      trigger: 'manual',
+    });
+  const metadata = mergeCompactionMetadata(params.metadataJson, {
+    persistedMemory: durableSummary?.persistedMemory,
+    summary,
+    trigger: 'manual',
+    omittedMessages: durableSummary?.totalRepresentedMessages ?? params.messages.length,
+    recentMessagesKept: 0,
+    signature: durableSummary?.signature,
+  });
   const card = {
     type: 'compaction' as const,
     title: '会话已压缩',
@@ -1405,37 +1425,13 @@ function extractMessageText(message: Message | undefined): string {
 
 function summarizeMessages(messages: Message[]): string {
   const content = messages
-    .slice(-8)
-    .map((message) => {
-      const prefix =
-        message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '系统';
-      const text = extractMessageText(message);
-      return text ? `${prefix}：${text}` : null;
-    })
-    .filter((line): line is string => line !== null)
-    .join('\n');
-
-  if (!content) {
+    .map((message) => extractMessageText(message))
+    .filter((text) => text.length > 0);
+  if (content.length === 0) {
     return '当前会话没有足够的上下文可压缩。';
   }
-
-  return content.length <= 240 ? content : `${content.slice(0, 239)}…`;
-}
-
-function mergeCompactionMetadata(metadataJson: string, summary: string): Record<string, unknown> {
-  try {
-    const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
-    return {
-      ...metadata,
-      lastCompactionAt: Date.now(),
-      lastCompactionSummary: summary,
-    };
-  } catch {
-    return {
-      lastCompactionAt: Date.now(),
-      lastCompactionSummary: summary,
-    };
-  }
+  const joined = content.slice(-8).join('\n');
+  return joined.length <= 240 ? joined : `${joined.slice(0, 239)}…`;
 }
 
 function mergeHandoffMetadata(metadataJson: string, markdown: string): Record<string, unknown> {

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   sqliteAllMock: vi.fn(),
   sqliteRunMock: vi.fn(),
   publishSessionRunEventMock: vi.fn(),
+  resumeApprovedPermissionRequestMock: vi.fn(),
 }));
 
 vi.mock('../auth.js', () => ({
@@ -25,6 +26,10 @@ vi.mock('../session-run-events.js', () => ({
   publishSessionRunEvent: mocks.publishSessionRunEventMock,
 }));
 
+vi.mock('../routes/stream-runtime.js', () => ({
+  resumeApprovedPermissionRequest: mocks.resumeApprovedPermissionRequestMock,
+}));
+
 describe('permissions request binding', () => {
   let app: Awaited<ReturnType<typeof Fastify>>;
 
@@ -33,6 +38,8 @@ describe('permissions request binding', () => {
     mocks.sqliteAllMock.mockReset();
     mocks.sqliteRunMock.mockReset();
     mocks.publishSessionRunEventMock.mockReset();
+    mocks.resumeApprovedPermissionRequestMock.mockReset();
+    mocks.resumeApprovedPermissionRequestMock.mockResolvedValue(undefined);
     mocks.sqliteGetMock.mockReturnValue({ id: 'session-a', user_id: 'user-a' });
 
     const { permissionsRoutes } = await import('../routes/permissions.js');
@@ -71,5 +78,58 @@ describe('permissions request binding', () => {
       expect.objectContaining({ type: 'permission_asked' }),
       { clientRequestId: 'req-1' },
     );
+  });
+
+  it('preserves agentId when resuming an approved permission request', async () => {
+    mocks.sqliteGetMock
+      .mockReturnValueOnce({ id: 'session-a', user_id: 'user-a' })
+      .mockReturnValueOnce({
+        id: 'permission-1',
+        session_id: 'session-a',
+        tool_name: 'bash',
+        scope: '/repo',
+        reason: 'need shell',
+        risk_level: 'high',
+        preview_action: null,
+        status: 'pending',
+        decision: null,
+        request_payload_json: JSON.stringify({
+          clientRequestId: 'req-2',
+          nextRound: 2,
+          rawInput: { command: 'pwd' },
+          requestData: {
+            agentId: 'hephaestus',
+            clientRequestId: 'req-2',
+            message: '请继续实现',
+          },
+          toolCallId: 'tool-1',
+        }),
+        created_at: '2026-04-02T00:00:00.000Z',
+      });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-a/permissions/reply',
+      payload: {
+        requestId: 'permission-1',
+        decision: 'once',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mocks.resumeApprovedPermissionRequestMock).toHaveBeenCalledWith({
+      payload: expect.objectContaining({
+        clientRequestId: 'req-2',
+        requestData: expect.objectContaining({
+          agentId: 'hephaestus',
+          clientRequestId: 'req-2',
+          message: '请继续实现',
+        }),
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+      }),
+      sessionId: 'session-a',
+      userId: 'user-a',
+    });
   });
 });

@@ -8,6 +8,7 @@ export type GitHubEventType =
   | 'workflow_run.completed';
 
 export interface GitHubTriggerConfig {
+  ownerUserId: string;
   appId: string;
   privateKeyPem: string;
   webhookSecretForHmacVerification: string;
@@ -25,6 +26,7 @@ export interface GitHubWebhookRequest {
 }
 
 export interface AgentRoutingContext {
+  ownerUserId: string;
   eventType: GitHubEventType;
   repoFullName: string;
   payload: GitHubEventPayload;
@@ -73,8 +75,9 @@ export type AgentRouteHandler = (ctx: AgentRoutingContext) => Promise<GitHubRout
 
 export interface GitHubTrigger {
   register(appConfig: GitHubTriggerConfig): void;
+  unregister(repoFullName: string): boolean;
   handleWebhook(req: GitHubWebhookRequest): Promise<GitHubWebhookResult>;
-  listTriggers(): Array<{ repo: string; events: string[] }>;
+  listTriggers(ownerUserId?: string): Array<{ repo: string; events: string[] }>;
 }
 
 function extractHeaderString(
@@ -144,11 +147,25 @@ export class GitHubTriggerImpl implements GitHubTrigger {
     this.configs.set(appConfig.repoFullNameOwnerSlashRepo, appConfig);
   }
 
-  listTriggers(): Array<{ repo: string; events: string[] }> {
-    return Array.from(this.configs.values()).map((config) => ({
-      repo: config.repoFullNameOwnerSlashRepo,
-      events: config.events,
-    }));
+  unregister(repoFullName: string): boolean {
+    return this.configs.delete(repoFullName);
+  }
+
+  getConfig(repoFullName: string): GitHubTriggerConfig | undefined {
+    return this.configs.get(repoFullName);
+  }
+
+  listAllConfigs(ownerUserId: string): GitHubTriggerConfig[] {
+    return Array.from(this.configs.values()).filter((config) => config.ownerUserId === ownerUserId);
+  }
+
+  listTriggers(ownerUserId?: string): Array<{ repo: string; events: string[] }> {
+    return Array.from(this.configs.values())
+      .filter((config) => ownerUserId === undefined || config.ownerUserId === ownerUserId)
+      .map((config) => ({
+        repo: config.repoFullNameOwnerSlashRepo,
+        events: config.events,
+      }));
   }
 
   async handleWebhook(req: GitHubWebhookRequest): Promise<GitHubWebhookResult> {
@@ -181,6 +198,7 @@ export class GitHubTriggerImpl implements GitHubTrigger {
     }
 
     const ctx: AgentRoutingContext = {
+      ownerUserId: config.ownerUserId,
       eventType,
       repoFullName,
       payload,

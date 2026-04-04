@@ -164,6 +164,14 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       };
       const metadata = JSON.parse(session.session.metadata_json) as Record<string, unknown>;
       expect(typeof metadata['lastCompactionSummary']).toBe('string');
+      expect(metadata['lastCompactionTrigger']).toBe('manual');
+      expect(String(metadata['lastCompactionSummary'])).toContain(
+        'Durable session compaction memory',
+      );
+      expect(metadata['compactionMemory']).toMatchObject({
+        coveredUntilMessageId: 'm2',
+        schemaVersion: 1,
+      });
       expect(session.session.messages.at(-1)?.content[0]).toMatchObject({
         type: 'text',
         text: expect.stringContaining('"type":"compaction"'),

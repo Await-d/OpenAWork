@@ -13,6 +13,11 @@ import {
 } from '../provider-config.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
+import {
+  readUpstreamRetrySettings,
+  UPSTREAM_RETRY_SETTINGS_KEY,
+  upstreamRetrySettingsSchema,
+} from '../upstream-retry-policy.js';
 import { z } from 'zod';
 
 interface RootPackageJson {
@@ -717,6 +722,52 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       saveStep.succeed();
       step.succeed();
       return reply.send({ ok: true });
+    },
+  );
+
+  app.get(
+    '/settings/upstream-retry',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.upstream-retry.get');
+      const user = request.user as JwtPayload;
+
+      const loadStep = child('load');
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+        [user.sub, UPSTREAM_RETRY_SETTINGS_KEY],
+      );
+      loadStep.succeed(undefined, { found: row !== undefined });
+
+      const settings = readUpstreamRetrySettings(parseStoredJson(row?.value));
+      step.succeed(undefined, { maxRetries: settings.maxRetries });
+      return reply.send(settings);
+    },
+  );
+
+  app.put(
+    '/settings/upstream-retry',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.upstream-retry.put');
+      const user = request.user as JwtPayload;
+
+      const parsed = upstreamRetrySettingsSchema.safeParse(request.body);
+      if (!parsed.success) {
+        step.fail('invalid body');
+        return reply.status(400).send({ error: 'Invalid upstream retry settings' });
+      }
+
+      const saveStep = child('save');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, UPSTREAM_RETRY_SETTINGS_KEY, JSON.stringify(parsed.data)],
+      );
+      saveStep.succeed(undefined, { maxRetries: parsed.data.maxRetries });
+      step.succeed(undefined, { saved: true });
+
+      return reply.send(parsed.data);
     },
   );
 

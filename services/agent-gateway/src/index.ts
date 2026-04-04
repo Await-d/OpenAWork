@@ -40,7 +40,7 @@ import webStaticPlugin from './web-static.js';
 import { lspRoutes } from './lsp/router.js';
 import { autoStartConfiguredChannels, channelRoutes } from './channels/router.js';
 import { cronRoutes } from './cron/router.js';
-import { githubRoutes } from './github/router.js';
+import { githubRoutes, restoreGitHubTriggers } from './github/router.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { desktopAutomationRoutes } from './routes/desktop-automation.js';
 import { sshRoutes } from './routes/ssh.js';
@@ -147,6 +147,10 @@ try {
       'failed to auto-start configured channel',
     );
   });
+  bootLogger.succeed(step);
+
+  step = bootLogger.start('gateway.restore-github-triggers');
+  restoreGitHubTriggers();
   bootLogger.succeed(step);
 
   step = bootLogger.start('gateway.models-dev-sync');

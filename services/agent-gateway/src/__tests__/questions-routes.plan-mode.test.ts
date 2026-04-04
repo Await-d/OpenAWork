@@ -189,4 +189,76 @@ describe('questions routes plan mode integration', () => {
       [JSON.stringify({ planMode: true }), 'session-a'],
     );
   });
+
+  it('preserves agentId when resuming an answered question request', async () => {
+    mocks.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('SELECT id, user_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1')) {
+        return { id: 'session-a', user_id: 'user-a' };
+      }
+      if (query.includes('FROM question_requests')) {
+        return {
+          id: 'req-agent',
+          session_id: 'session-a',
+          user_id: 'user-a',
+          tool_name: 'question',
+          title: 'Need input',
+          questions_json: JSON.stringify([
+            {
+              question: '请选择目录',
+              header: '目录',
+              multiple: false,
+              options: [{ label: 'workspace', description: '查看工作目录' }],
+            },
+          ]),
+          answer_json: null,
+          request_payload_json: JSON.stringify({
+            clientRequestId: 'client-agent',
+            nextRound: 2,
+            toolCallId: 'tool-agent',
+            rawInput: { questions: 1 },
+            requestData: {
+              agentId: 'sisyphus-junior',
+              clientRequestId: 'client-agent',
+              message: '请先问我一个问题再继续',
+            },
+          }),
+          status: 'pending',
+          created_at: '2026-04-02T00:00:00.000Z',
+        };
+      }
+
+      return undefined;
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-a/questions/reply',
+      payload: {
+        requestId: 'req-agent',
+        status: 'answered',
+        answers: [['workspace']],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    await vi.waitFor(() => {
+      expect(mocks.resumeAnsweredQuestionRequestMock).toHaveBeenCalledWith({
+        payload: {
+          clientRequestId: 'client-agent',
+          nextRound: 2,
+          toolCallId: 'tool-agent',
+          rawInput: { questions: 1 },
+          requestData: {
+            agentId: 'sisyphus-junior',
+            clientRequestId: 'client-agent',
+            message: '请先问我一个问题再继续',
+          },
+          toolName: 'question',
+        },
+        answerOutput: '请选择目录="workspace"',
+        sessionId: 'session-a',
+        userId: 'user-a',
+      });
+    });
+  });
 });

@@ -8,6 +8,7 @@
       "@openAwork/shared": ["../../packages/shared/src/index.ts"],
       "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"],
       "@openAwork/mcp-client": ["../../packages/mcp-client/src/index.ts"],
+      "@openAwork/platform-adapter": ["../../packages/platform-adapter/src/index.ts"],
       "@openAwork/skill-types": ["../../packages/skill-types/src/index.ts"]
     }
   },
@@ -15,7 +16,8 @@
     { "path": "../../packages/shared" },
     { "path": "../../packages/agent-core" },
     { "path": "../../packages/skill-types" },
-    { "path": "../../packages/mcp-client" }
+    { "path": "../../packages/mcp-client" },
+    { "path": "../../packages/platform-adapter" }
   ],
   "include": ["src"]
 }
