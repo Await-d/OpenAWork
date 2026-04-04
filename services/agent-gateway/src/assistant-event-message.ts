@@ -84,6 +84,9 @@ function createAssistantEventText(event: RunEvent): string | null {
     } else if (event.result) {
       messageParts.push(`结果：${event.result}`);
     }
+    if (event.reason) {
+      messageParts.push(`原因：${formatTaskTerminalReason(event.reason)}`);
+    }
     if ('parentTaskId' in event && typeof event.parentTaskId === 'string') {
       messageParts.push(`父任务：${event.parentTaskId}`);
     }
@@ -98,7 +101,7 @@ function createAssistantEventText(event: RunEvent): string | null {
       kind: classifyAssistantEventKind(
         event.assignedAgent ? `${event.label} ${event.assignedAgent}` : event.label,
       ),
-      title: `任务${formatTaskStatusLabel(event.status)} · ${event.label}`,
+      title: `任务${formatTaskStatusLabel(event.status)}${event.reason === 'timeout' ? '（超时）' : ''} · ${event.label}`,
       message: messageParts.join('\n'),
       status:
         event.status === 'failed'
@@ -189,4 +192,10 @@ function formatPermissionDecision(
   if (decision === 'session') return '本会话允许';
   if (decision === 'permanent') return '永久允许';
   return '已拒绝';
+}
+
+function formatTaskTerminalReason(reason: string): string {
+  if (reason === 'timeout') return '执行超时';
+  if (reason === 'cancelled') return '用户取消';
+  return reason;
 }

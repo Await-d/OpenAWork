@@ -214,6 +214,78 @@ vi.mock('../tool-definitions.js', () => ({
         strict: false,
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_touch',
+        description: 'lsp touch',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_goto_definition',
+        description: 'lsp goto definition',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_goto_implementation',
+        description: 'lsp goto implementation',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_find_references',
+        description: 'lsp find references',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_symbols',
+        description: 'lsp symbols',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_prepare_rename',
+        description: 'lsp prepare rename',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_rename',
+        description: 'lsp rename',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'lsp_hover',
+        description: 'lsp hover',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: false,
+      },
+    },
   ],
 }));
 
@@ -295,6 +367,30 @@ describe('listCapabilitiesForUser', () => {
     const lspDiagnosticsTools = capabilities.filter(
       (item) => item.kind === 'tool' && item.label === 'lsp_diagnostics',
     );
+    const lspTouchTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_touch',
+    );
+    const lspGotoDefinitionTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_goto_definition',
+    );
+    const lspGotoImplementationTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_goto_implementation',
+    );
+    const lspFindReferencesTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_find_references',
+    );
+    const lspSymbolsTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_symbols',
+    );
+    const lspPrepareRenameTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_prepare_rename',
+    );
+    const lspRenameTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_rename',
+    );
+    const lspHoverTools = capabilities.filter(
+      (item) => item.kind === 'tool' && item.label === 'lsp_hover',
+    );
 
     expect(listTools).toHaveLength(1);
     expect(listTools[0]).toMatchObject({ source: 'runtime', callable: true });
@@ -336,6 +432,22 @@ describe('listCapabilitiesForUser', () => {
     expect(websearchTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(lspDiagnosticsTools).toHaveLength(1);
     expect(lspDiagnosticsTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspTouchTools).toHaveLength(1);
+    expect(lspTouchTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspGotoDefinitionTools).toHaveLength(1);
+    expect(lspGotoDefinitionTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspGotoImplementationTools).toHaveLength(1);
+    expect(lspGotoImplementationTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspFindReferencesTools).toHaveLength(1);
+    expect(lspFindReferencesTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspSymbolsTools).toHaveLength(1);
+    expect(lspSymbolsTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspPrepareRenameTools).toHaveLength(1);
+    expect(lspPrepareRenameTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspRenameTools).toHaveLength(1);
+    expect(lspRenameTools[0]).toMatchObject({ source: 'runtime', callable: true });
+    expect(lspHoverTools).toHaveLength(1);
+    expect(lspHoverTools[0]).toMatchObject({ source: 'runtime', callable: true });
     expect(
       capabilities.filter((item) => item.kind === 'tool' && item.label === 'apply_patch'),
     ).toHaveLength(1);

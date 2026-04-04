@@ -25,6 +25,7 @@ vi.mock('../session-runtime-thread-store.js', () => ({
 import {
   hasPendingSessionInteraction,
   reconcileSessionStateStatus,
+  resolveSessionInteractionStateUpdate,
 } from '../session-runtime-state.js';
 
 describe('session-runtime-state', () => {
@@ -107,6 +108,45 @@ describe('session-runtime-state', () => {
     expect(mocked.sqliteRunMock).not.toHaveBeenCalled();
   });
 
+  it('resets paused sessions without pending interactions back to idle', () => {
+    mocked.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('FROM sessions')) {
+        return { state_status: 'paused' };
+      }
+      if (query.includes('FROM permission_requests')) {
+        return { count: 0 };
+      }
+      if (query.includes('FROM question_requests')) {
+        return { count: 0 };
+      }
+      return undefined;
+    });
+    mocked.getAnyInFlightStreamRequestForSessionMock.mockReturnValue(undefined);
+    mocked.hasFreshSessionRuntimeThreadMock.mockReturnValue(false);
+
+    const result = reconcileSessionStateStatus({ sessionId: 'ses-paused-stale', userId: 'user-1' });
+
+    expect(result).toMatchObject({
+      previousStatus: 'paused',
+      sessionContext: {
+        sessionId: 'ses-paused-stale',
+        status: 'idle',
+        revision: 0,
+      },
+      status: 'idle',
+      wasReset: true,
+    });
+    expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
+    expect(mocked.clearSessionRuntimeThreadMock).toHaveBeenCalledWith({
+      sessionId: 'ses-paused-stale',
+      userId: 'user-1',
+    });
+    expect(mocked.sqliteRunMock).toHaveBeenCalledWith(
+      "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+      ['ses-paused-stale', 'user-1'],
+    );
+  });
+
   it('promotes running sessions with pending questions to paused', () => {
     mocked.sqliteGetMock.mockImplementation((query: string) => {
       if (query.includes('FROM sessions')) {
@@ -139,6 +179,41 @@ describe('session-runtime-state', () => {
     expect(mocked.sqliteRunMock).toHaveBeenCalledWith(
       "UPDATE sessions SET state_status = 'paused', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
       ['ses-question', 'user-1'],
+    );
+  });
+
+  it('promotes running sessions with pending permissions to paused', () => {
+    mocked.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('FROM sessions')) {
+        return { state_status: 'running' };
+      }
+      if (query.includes('FROM permission_requests')) {
+        return { count: 1 };
+      }
+      if (query.includes('FROM question_requests')) {
+        return { count: 0 };
+      }
+      return undefined;
+    });
+    mocked.getAnyInFlightStreamRequestForSessionMock.mockReturnValue(undefined);
+    mocked.hasFreshSessionRuntimeThreadMock.mockReturnValue(false);
+
+    const result = reconcileSessionStateStatus({ sessionId: 'ses-permission', userId: 'user-1' });
+
+    expect(result).toMatchObject({
+      previousStatus: 'running',
+      sessionContext: {
+        sessionId: 'ses-permission',
+        status: 'paused',
+        revision: 0,
+      },
+      status: 'paused',
+      wasReset: false,
+    });
+    expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
+    expect(mocked.sqliteRunMock).toHaveBeenCalledWith(
+      "UPDATE sessions SET state_status = 'paused', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+      ['ses-permission', 'user-1'],
     );
   });
 
@@ -180,5 +255,37 @@ describe('session-runtime-state', () => {
     });
     expect(result.sessionContext?.updatedAt).toEqual(expect.any(Number));
     expect(mocked.sqliteRunMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves rejected permission replies back to idle instead of staying paused', () => {
+    expect(
+      resolveSessionInteractionStateUpdate({
+        type: 'permission_replied',
+        requestId: 'perm-1',
+        decision: 'reject',
+        eventId: 'evt-1',
+        runId: 'run-1',
+        occurredAt: 1,
+      }),
+    ).toEqual({
+      shouldKeepPausedState: false,
+      status: 'idle',
+    });
+  });
+
+  it('resolves dismissed question replies back to idle instead of staying paused', () => {
+    expect(
+      resolveSessionInteractionStateUpdate({
+        type: 'question_replied',
+        requestId: 'question-1',
+        status: 'dismissed',
+        eventId: 'evt-2',
+        runId: 'run-2',
+        occurredAt: 2,
+      }),
+    ).toEqual({
+      shouldKeepPausedState: false,
+      status: 'idle',
+    });
   });
 });

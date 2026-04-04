@@ -1,21 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type MockRunModelRoundResult = {
+  shouldStop: boolean;
+  statusCode: number;
+  stopReason: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+  usageOccurredAt?: number;
+};
+
 const {
   appendSessionMessageMock,
+  clearInFlightStreamRequestMock,
+  clearSessionRuntimeThreadMock,
   executeMock,
+  getAnyInFlightStreamRequestForSessionMock,
   persistFileDiffsMock,
+  persistMonthlyUsageRecordMock,
   persistRunEventMock,
+  registerInFlightStreamRequestMock,
   reconcileMock,
+  resolveStreamModelRouteMock,
   resolveStreamRequestUpstreamRetryMock,
+  runModelRoundMock,
+  upsertSessionRuntimeThreadMock,
 } = vi.hoisted(() => ({
   appendSessionMessageMock: vi.fn(() => ({ id: 'msg-1' })),
+  clearInFlightStreamRequestMock: vi.fn(),
+  clearSessionRuntimeThreadMock: vi.fn(),
   executeMock: vi.fn(),
+  getAnyInFlightStreamRequestForSessionMock: vi.fn(() => undefined),
   persistFileDiffsMock: vi.fn(),
+  persistMonthlyUsageRecordMock: vi.fn(),
   persistRunEventMock: vi.fn(),
+  registerInFlightStreamRequestMock: vi.fn(),
   reconcileMock: vi.fn(),
+  resolveStreamModelRouteMock: vi.fn(),
   resolveStreamRequestUpstreamRetryMock: vi.fn(
     (input: { requestData: Record<string, unknown> }) => input.requestData,
   ),
+  runModelRoundMock: vi.fn<() => Promise<MockRunModelRoundResult>>(async () => ({
+    shouldStop: true,
+    stopReason: 'end_turn',
+    statusCode: 200,
+  })),
+  upsertSessionRuntimeThreadMock: vi.fn(),
 }));
 
 vi.mock('../db.js', () => {
@@ -43,6 +75,7 @@ vi.mock('../tool-sandbox.js', () => ({
 
 vi.mock('../session-message-store.js', () => ({
   appendSessionMessage: appendSessionMessageMock,
+  listSessionMessagesByRequestScope: vi.fn(() => []),
   truncateSessionMessagesAfter: vi.fn(),
 }));
 
@@ -53,6 +86,23 @@ vi.mock('../session-run-events.js', () => ({
 
 vi.mock('../session-file-diff-store.js', () => ({
   persistSessionFileDiffs: persistFileDiffsMock,
+}));
+
+vi.mock('../usage-records-store.js', () => ({
+  persistMonthlyUsageRecord: persistMonthlyUsageRecordMock,
+}));
+
+vi.mock('../routes/stream-cancellation.js', () => ({
+  clearInFlightStreamRequest: clearInFlightStreamRequestMock,
+  getAnyInFlightStreamRequestForSession: getAnyInFlightStreamRequestForSessionMock,
+  registerInFlightStreamRequest: registerInFlightStreamRequestMock,
+}));
+
+vi.mock('../session-runtime-thread-store.js', () => ({
+  clearSessionRuntimeThread: clearSessionRuntimeThreadMock,
+  SESSION_RUNTIME_THREAD_HEARTBEAT_MS: 5_000,
+  touchSessionRuntimeThread: vi.fn(),
+  upsertSessionRuntimeThread: upsertSessionRuntimeThreadMock,
 }));
 
 vi.mock('../routes/capabilities.js', () => ({
@@ -90,7 +140,7 @@ vi.mock('../routes/stream.js', () => ({
   loadSessionContext: vi.fn(() => ({ legacyMessagesJson: '[]', metadataJson: '{}' })),
   loadSessionUser: vi.fn(() => ({ email: 'user-1@example.com' })),
   resolveStreamRequestUpstreamRetry: resolveStreamRequestUpstreamRetryMock,
-  resolveStreamModelRoute: vi.fn(),
+  resolveStreamModelRoute: resolveStreamModelRouteMock,
   setPersistedSessionStateStatus: vi.fn(),
   streamRequestSchema: {
     parse: (value: unknown) => value,
@@ -98,18 +148,36 @@ vi.mock('../routes/stream.js', () => ({
 }));
 
 vi.mock('../routes/stream-model-round.js', () => ({
-  runModelRound: vi.fn(async () => ({ shouldStop: true, stopReason: 'end_turn', statusCode: 200 })),
+  runModelRound: runModelRoundMock,
 }));
 
 describe('resume reconcile fallback', () => {
   beforeEach(() => {
     appendSessionMessageMock.mockReset();
     appendSessionMessageMock.mockReturnValue({ id: 'msg-1' });
+    clearInFlightStreamRequestMock.mockReset();
+    clearSessionRuntimeThreadMock.mockReset();
     executeMock.mockReset();
+    getAnyInFlightStreamRequestForSessionMock.mockReset();
+    getAnyInFlightStreamRequestForSessionMock.mockReturnValue(undefined);
     persistFileDiffsMock.mockReset();
+    persistMonthlyUsageRecordMock.mockReset();
     persistRunEventMock.mockReset();
+    registerInFlightStreamRequestMock.mockReset();
     reconcileMock.mockReset();
+    resolveStreamModelRouteMock.mockReset();
+    resolveStreamModelRouteMock.mockResolvedValue({
+      inputPricePerMillion: 0.25,
+      outputPricePerMillion: 1,
+    });
     resolveStreamRequestUpstreamRetryMock.mockClear();
+    runModelRoundMock.mockReset();
+    runModelRoundMock.mockResolvedValue({
+      shouldStop: true,
+      stopReason: 'end_turn',
+      statusCode: 200,
+    });
+    upsertSessionRuntimeThreadMock.mockReset();
   });
 
   it('reconciles the parent task when approved permission execution throws before resume continuation', async () => {
@@ -216,6 +284,65 @@ describe('resume reconcile fallback', () => {
       },
       userId: 'user-1',
     });
+  });
+
+  it('persists a usage run event when resume rounds report exact token usage', async () => {
+    executeMock.mockResolvedValue({
+      toolCallId: 'tool-call-usage',
+      toolName: 'bash',
+      output: { ok: true },
+      isError: false,
+      durationMs: 1,
+    });
+    runModelRoundMock.mockResolvedValue({
+      shouldStop: true,
+      stopReason: 'end_turn',
+      statusCode: 200,
+      usage: {
+        inputTokens: 60_000,
+        outputTokens: 3_000,
+        totalTokens: 63_000,
+      },
+      usageOccurredAt: 123,
+    });
+
+    const { resumeApprovedPermissionRequest } = await import('../routes/stream-runtime.js');
+
+    await resumeApprovedPermissionRequest({
+      payload: {
+        clientRequestId: 'resume-client-usage',
+        nextRound: 2,
+        rawInput: { command: 'pwd' },
+        requestData: { clientRequestId: 'resume-client-usage', message: 'resume usage task' },
+        toolCallId: 'tool-call-usage',
+        toolName: 'bash',
+      },
+      sessionId: 'child-session-usage',
+      userId: 'user-1',
+    });
+
+    expect(persistRunEventMock).toHaveBeenCalledWith(
+      'child-session-usage',
+      expect.objectContaining({
+        type: 'usage',
+        inputTokens: 60_000,
+        outputTokens: 3_000,
+        totalTokens: 63_000,
+        round: 2,
+      }),
+      { clientRequestId: 'resume-client-usage' },
+    );
+    expect(persistMonthlyUsageRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: 123,
+        usage: {
+          inputTokens: 60_000,
+          outputTokens: 3_000,
+          totalTokens: 63_000,
+        },
+        userId: 'user-1',
+      }),
+    );
   });
 
   it('backfills observability and durable diff defaults when payload metadata is missing', async () => {
@@ -333,5 +460,64 @@ describe('resume reconcile fallback', () => {
       },
       userId: 'user-1',
     });
+  });
+
+  it('registers resume execution as active and clears runtime markers after completion', async () => {
+    executeMock.mockResolvedValue({
+      toolCallId: 'tool-call-4',
+      toolName: 'bash',
+      output: { ok: true },
+      isError: false,
+      durationMs: 1,
+    });
+    reconcileMock.mockResolvedValue(undefined);
+
+    const { resumeApprovedPermissionRequest } = await import('../routes/stream-runtime.js');
+
+    await resumeApprovedPermissionRequest({
+      payload: {
+        clientRequestId: 'resume-client-4',
+        nextRound: 2,
+        rawInput: { command: 'pwd' },
+        requestData: {
+          clientRequestId: 'resume-client-4',
+          message: 'resume child task',
+          upstreamRetryMaxRetries: 1,
+        },
+        toolCallId: 'tool-call-4',
+        toolName: 'bash',
+      },
+      sessionId: 'child-session-4',
+      userId: 'user-1',
+    });
+
+    expect(registerInFlightStreamRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: 'resume-client-4',
+        sessionId: 'child-session-4',
+        userId: 'user-1',
+        abortController: expect.any(AbortController),
+        execution: expect.any(Promise),
+      }),
+    );
+    expect(upsertSessionRuntimeThreadMock).toHaveBeenCalledWith({
+      clientRequestId: 'resume-client-4',
+      heartbeatAtMs: expect.any(Number),
+      sessionId: 'child-session-4',
+      startedAtMs: expect.any(Number),
+      userId: 'user-1',
+    });
+    expect(clearSessionRuntimeThreadMock).toHaveBeenCalledWith({
+      clientRequestId: 'resume-client-4',
+      sessionId: 'child-session-4',
+      userId: 'user-1',
+    });
+    expect(clearInFlightStreamRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: 'resume-client-4',
+        sessionId: 'child-session-4',
+        execution: expect.any(Promise),
+      }),
+    );
   });
 });

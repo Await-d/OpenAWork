@@ -6,6 +6,7 @@ import { closeDb, connectDb, migrate, sqliteRun } from '../db.js';
 import requestWorkflowPlugin from '../request-workflow.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
+import { appendSessionMessage } from '../session-message-store.js';
 import { persistSessionRunEventForRequest } from '../session-run-events.js';
 import { assert, withMockFetch, withTempEnv } from './task-verification-helpers.js';
 
@@ -128,6 +129,95 @@ async function main(): Promise<void> {
             assert(
               Number(upstreamCallCount) === 1,
               'tool_handoff should require a fresh upstream call because its bookend is not replayable',
+            );
+
+            appendSessionMessage({
+              sessionId,
+              userId,
+              role: 'assistant',
+              content: [{ type: 'text', text: '[错误: MODEL_ERROR] 历史失败' }],
+              clientRequestId: 'req-retry-after-error',
+              status: 'error',
+            });
+            persistSessionRunEventForRequest(
+              sessionId,
+              {
+                type: 'error',
+                code: 'MODEL_ERROR',
+                message: '历史失败',
+                eventId: 'evt-retry-after-error',
+                runId: 'run-retry-after-error',
+                occurredAt: Date.now(),
+              },
+              { clientRequestId: 'req-retry-after-error' },
+            );
+
+            const callsBeforeRetry = upstreamCallCount;
+            const retryResponse = await streamScenario({
+              accessToken,
+              app,
+              clientRequestId: 'req-retry-after-error',
+              message: '同请求ID失败后应重新请求上游',
+              sessionId,
+            });
+            assert(retryResponse.statusCode === 200, 'same request id retry should succeed');
+            const retryEvents = parseSseChunks(retryResponse.body);
+            assert(
+              retryEvents.some(
+                (event) =>
+                  event['type'] === 'text_delta' &&
+                  event['delta'] === 'bookend fallback reached upstream',
+              ),
+              'same request id retry should emit fresh upstream text',
+            );
+            assert(
+              retryEvents.some(
+                (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+              ),
+              'same request id retry should finish with end_turn',
+            );
+            assert(
+              !retryEvents.some((event) => event['type'] === 'error'),
+              'same request id retry should not replay stale error event',
+            );
+            assert(
+              upstreamCallCount === callsBeforeRetry + 1,
+              'same request id retry should trigger a fresh upstream call after a failure',
+            );
+
+            const replayAfterSuccessResponse = await streamScenario({
+              accessToken,
+              app,
+              clientRequestId: 'req-retry-after-error',
+              message: '同请求ID失败后应重新请求上游',
+              sessionId,
+            });
+            assert(
+              replayAfterSuccessResponse.statusCode === 200,
+              'same request id replay after success should succeed',
+            );
+            const replayAfterSuccessEvents = parseSseChunks(replayAfterSuccessResponse.body);
+            assert(
+              replayAfterSuccessEvents.some(
+                (event) =>
+                  event['type'] === 'text_delta' &&
+                  event['delta'] === 'bookend fallback reached upstream',
+              ),
+              'same request id replay after success should emit the successful result',
+            );
+            assert(
+              replayAfterSuccessEvents.some(
+                (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+              ),
+              'same request id replay after success should end_turn',
+            );
+            assert(
+              !replayAfterSuccessEvents.some((event) => event['type'] === 'error'),
+              'same request id replay after success should not include the stale error event',
+            );
+            assert(
+              upstreamCallCount === callsBeforeRetry + 1,
+              'same request id replay after success should not issue another upstream call',
             );
 
             console.log('verify-stream-replay-bookend: ok');

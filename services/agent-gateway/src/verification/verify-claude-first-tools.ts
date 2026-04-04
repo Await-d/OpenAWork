@@ -295,8 +295,20 @@ async function verifyAgent(input: {
   assert(result.isError === false, 'Agent tool should succeed');
   assert(typeof result.output === 'string', 'Agent tool should return a background summary string');
   assert(
-    String(result.output).includes('Background task started for explore.'),
+    String(result.output).includes('Background agent task launched successfully.'),
     'Agent tool should report that a background delegated run started',
+  );
+  assert(
+    String(result.output).includes('Description: 让子代理给出结论'),
+    'Agent output should include the delegated description',
+  );
+  assert(
+    String(result.output).includes('Agent: explore (subagent)'),
+    'Agent output should include the delegated agent label',
+  );
+  assert(
+    String(result.output).includes('Status: running'),
+    'Agent output should include the delegated task status',
   );
 
   const taskIdMatch = String(result.output).match(/Task ID: ([^\n]+)/u);
@@ -308,6 +320,48 @@ async function verifyAgent(input: {
     const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, input.sessionId);
     return graph.tasks[taskId]?.status === 'completed';
   }, 'Agent delegated task should complete automatically');
+
+  const syncResult = await input.sandbox.execute(
+    {
+      toolCallId: 'agent-call-2',
+      toolName: 'Agent',
+      rawInput: {
+        description: '让子代理同步返回结论',
+        prompt: '请给出最终结论',
+        subagent_type: 'explore',
+        run_in_background: false,
+      },
+    },
+    new AbortController().signal,
+    input.sessionId,
+    {
+      clientRequestId: 'claude-agent-req-sync',
+      nextRound: 2,
+      requestData: {
+        clientRequestId: 'claude-agent-req-sync',
+        message: '请同步委派一个 Agent',
+        model: 'gpt-4o',
+        maxTokens: 512,
+        temperature: 1,
+        webSearchEnabled: false,
+      },
+    },
+  );
+
+  assert(syncResult.isError === false, 'sync Agent tool should succeed');
+  assert(typeof syncResult.output === 'string', 'sync Agent tool should return a string');
+  assert(
+    String(syncResult.output).includes('Claude-first Agent 子代理已完成。'),
+    'sync Agent output should include the delegated child content',
+  );
+  assert(
+    String(syncResult.output).includes('<task_metadata>'),
+    'sync Agent output should append task metadata',
+  );
+  assert(
+    String(syncResult.output).includes('session_id:'),
+    'sync Agent output should include the delegated session id metadata',
+  );
 }
 
 void main().catch((error) => {

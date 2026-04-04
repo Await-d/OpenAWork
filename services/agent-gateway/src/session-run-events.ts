@@ -204,3 +204,13 @@ export function listSessionRunEventsByRequest(input: {
     }
   });
 }
+
+export function deleteSessionRunEventsByRequest(input: {
+  sessionId: string;
+  clientRequestId: string;
+}): void {
+  sqliteRun('DELETE FROM session_run_events WHERE session_id = ? AND client_request_id = ?', [
+    input.sessionId,
+    input.clientRequestId,
+  ]);
+}

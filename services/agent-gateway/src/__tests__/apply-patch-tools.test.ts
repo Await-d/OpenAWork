@@ -2,6 +2,21 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+
+type PostWriteDiagnostic = {
+  file: string;
+  severity: string;
+  line: number;
+  message: string;
+};
+
+const lspMocks = vi.hoisted(() => ({
+  touchFileMock: vi.fn(async () => undefined),
+  getPostWriteDiagnosticsMock: vi.fn(
+    async (_filePaths: string[]): Promise<PostWriteDiagnostic[]> => [],
+  ),
+}));
 
 vi.mock('../workspace-paths.js', () => ({
   validateWorkspacePath: (value: string) => value,
@@ -11,6 +26,22 @@ vi.mock('@openAwork/agent-core', async () => ({
   defaultIgnoreManager: {
     shouldIgnore: () => false,
   },
+}));
+
+vi.mock('../lsp/router.js', () => ({
+  lspManager: {
+    touchFile: lspMocks.touchFileMock,
+  },
+}));
+
+vi.mock('../lsp-tools.js', () => ({
+  getPostWriteDiagnostics: lspMocks.getPostWriteDiagnosticsMock,
+  postWriteDiagnosticSchema: z.object({
+    file: z.string(),
+    severity: z.string(),
+    line: z.number(),
+    message: z.string(),
+  }),
 }));
 
 import { executeApplyPatch } from '../apply-patch-tools.js';
@@ -31,6 +62,7 @@ describe('apply-patch-tools backup hook', () => {
       dirPath = '';
       filePath = '';
     }
+    vi.clearAllMocks();
   });
 
   it('attaches backupBeforeRef for update operations', async () => {
@@ -42,6 +74,17 @@ describe('apply-patch-tools backup hook', () => {
       '+const value = 2;',
       '*** End Patch',
     ].join('\n');
+    const diagnostics = [
+      {
+        file: filePath,
+        severity: 'warning',
+        line: 1,
+        message: 'patch diagnostic',
+      },
+    ];
+    lspMocks.getPostWriteDiagnosticsMock.mockImplementationOnce(
+      async (): Promise<PostWriteDiagnostic[]> => diagnostics,
+    );
 
     const result = await executeApplyPatch(
       { patchText },
@@ -66,6 +109,9 @@ describe('apply-patch-tools backup hook', () => {
       contentHash: 'hash-apply-1',
       storagePath: '/tmp/backup-apply-1.txt',
     });
+    expect(lspMocks.touchFileMock).toHaveBeenCalledWith(filePath, true);
+    expect(lspMocks.getPostWriteDiagnosticsMock).toHaveBeenCalledWith([filePath]);
+    expect(result.diagnostics).toEqual(diagnostics);
     await expect(readFile(filePath, 'utf8')).resolves.toBe('const value = 2;\n');
   });
 });

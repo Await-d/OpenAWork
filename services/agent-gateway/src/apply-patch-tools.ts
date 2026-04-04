@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { buildFileDiff, fileBackupRefSchema, fileDiffSchema } from './file-diff-format.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 import { lspManager } from './lsp/router.js';
+import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 
 const applyPatchInputSchema = z.object({
   patchText: z.string().min(1),
@@ -28,6 +29,7 @@ const applyPatchOutputSchema = z.object({
       status: z.enum(['added', 'deleted', 'modified']).optional(),
     }),
   ),
+  diagnostics: z.array(postWriteDiagnosticSchema).optional(),
 });
 
 type PatchAction =
@@ -361,6 +363,7 @@ export async function executeApplyPatch(
   for (const filePath of modifiedPaths) {
     lspManager.touchFile(filePath, true).catch((_e: unknown) => undefined);
   }
+  const diagnostics = await getPostWriteDiagnostics(modifiedPaths);
 
   return {
     success: true,
@@ -369,6 +372,7 @@ export async function executeApplyPatch(
       ...buildFileDiff({ file: file.path, before: file.before ?? '', after: file.after ?? '' }),
       ...(file.backupBeforeRef ? { backupBeforeRef: file.backupBeforeRef } : {}),
     })),
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
   };
 }
 

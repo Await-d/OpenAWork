@@ -22,7 +22,16 @@ const mocks = vi.hoisted(() => ({
   buildPreparedUpstreamConversationMock: vi.fn<
     (
       messages: Message[],
-      options?: number | { maxMessages?: number; persistedMemory?: unknown },
+      options?:
+        | number
+        | {
+            autoCompactTargetRatio?: number;
+            autoCompactThresholdRatio?: number;
+            contextWindow?: number;
+            maxMessages?: number;
+            maxOutputTokens?: number;
+            persistedMemory?: unknown;
+          },
     ) => PreparedConversationMockResult
   >(() => ({ messages: [] as UpstreamChatMessage[] })),
   buildRoundSystemMessagesMock: vi.fn(() => []),
@@ -45,9 +54,11 @@ const mocks = vi.hoisted(() => ({
   fetchUpstreamStreamWithRetryMock: vi.fn(),
   hasToolOutputReferenceMock: vi.fn(() => false),
   listSessionMessagesMock: vi.fn<() => Message[]>(() => []),
+  updateSessionMessagesStatusByRequestScopeMock: vi.fn(),
   parseUpstreamFrameMock: vi.fn<(frame: string) => StreamChunk[]>(() => [
     { type: 'text_delta', delta: '部分回答' },
   ]),
+  upsertArtifactsFromAssistantMessageMock: vi.fn(),
   persistSessionSnapshotMock: vi.fn(),
   readPersistedCompactionMemoryMock: vi.fn<
     (metadataJson: string) => PersistedCompactionMemory | null
@@ -60,7 +71,15 @@ vi.mock('../session-message-store.js', () => ({
   appendSessionMessage: mocks.appendSessionMessageMock,
   buildPreparedUpstreamConversation: (
     messages: Message[],
-    options?: number | { maxMessages?: number },
+    options?:
+      | number
+      | {
+          autoCompactTargetRatio?: number;
+          autoCompactThresholdRatio?: number;
+          contextWindow?: number;
+          maxMessages?: number;
+          maxOutputTokens?: number;
+        },
   ) =>
     mocks.buildPreparedUpstreamConversationMock(
       messages,
@@ -69,6 +88,7 @@ vi.mock('../session-message-store.js', () => ({
   buildUpstreamConversation: mocks.buildUpstreamConversationMock,
   hasToolOutputReference: mocks.hasToolOutputReferenceMock,
   listSessionMessages: mocks.listSessionMessagesMock,
+  updateSessionMessagesStatusByRequestScope: mocks.updateSessionMessagesStatusByRequestScopeMock,
 }));
 
 vi.mock('../compaction-metadata.js', () => ({
@@ -77,6 +97,10 @@ vi.mock('../compaction-metadata.js', () => ({
 
 vi.mock('../modified-files-summary.js', () => ({
   buildModifiedFilesSummaryContent: vi.fn(() => null),
+}));
+
+vi.mock('../assistant-content-artifacts.js', () => ({
+  upsertArtifactsFromAssistantMessage: mocks.upsertArtifactsFromAssistantMessageMock,
 }));
 
 vi.mock('../session-snapshot-store.js', () => ({
@@ -117,6 +141,10 @@ vi.mock('../routes/upstream-stream-retry.js', () => ({
   fetchUpstreamStreamWithRetry: mocks.fetchUpstreamStreamWithRetryMock,
 }));
 
+vi.mock('../audit-log.js', () => ({
+  writeAuditLog: vi.fn(),
+}));
+
 describe('runModelRound', () => {
   beforeEach(() => {
     mocks.appendSessionMessageMock.mockReset();
@@ -130,11 +158,13 @@ describe('runModelRound', () => {
     mocks.fetchUpstreamStreamWithRetryMock.mockReset();
     mocks.hasToolOutputReferenceMock.mockClear();
     mocks.listSessionMessagesMock.mockReset();
+    mocks.updateSessionMessagesStatusByRequestScopeMock.mockReset();
     mocks.buildPreparedUpstreamConversationMock.mockReset();
     mocks.buildPreparedUpstreamConversationMock.mockImplementation((messages: Message[]) => ({
       messages: mocks.buildUpstreamConversationMock(messages),
     }));
     mocks.parseUpstreamFrameMock.mockReset();
+    mocks.upsertArtifactsFromAssistantMessageMock.mockReset();
     mocks.persistSessionSnapshotMock.mockClear();
     mocks.readPersistedCompactionMemoryMock.mockReset();
     mocks.readPersistedCompactionMemoryMock.mockReturnValue(null);
@@ -142,20 +172,21 @@ describe('runModelRound', () => {
     mocks.resolveEofRoundDecisionMock.mockClear();
   });
 
-  it('includes error messages in upstream history and persists partial assistant output on cancellation', async () => {
+  it('excludes error messages from upstream history and persists partial assistant output on cancellation', async () => {
     const encoder = new TextEncoder();
     const abortError = new Error('aborted');
     abortError.name = 'AbortError';
     let readCount = 0;
+    const previousErrorMessage: Message = {
+      id: 'assistant-error-1',
+      role: 'assistant',
+      createdAt: 1,
+      content: [{ type: 'text', text: '[错误: MODEL_ERROR] 先前失败' }],
+    };
 
-    mocks.listSessionMessagesMock.mockReturnValue([
-      {
-        id: 'assistant-error-1',
-        role: 'assistant',
-        createdAt: 1,
-        content: [{ type: 'text', text: '[错误: MODEL_ERROR] 先前失败' }],
-      },
-    ]);
+    mocks.listSessionMessagesMock.mockImplementation((input?: { statuses?: string[] }) =>
+      input?.statuses?.includes('final') ? [] : [previousErrorMessage],
+    );
     mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -194,6 +225,7 @@ describe('runModelRound', () => {
       route: {
         apiKey: '',
         apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
         maxTokens: 1024,
         model: 'test-model',
         requestOverrides: {},
@@ -217,7 +249,15 @@ describe('runModelRound', () => {
     });
 
     expect(mocks.listSessionMessagesMock).toHaveBeenCalledWith(
-      expect.objectContaining({ statuses: ['final', 'error'] }),
+      expect.objectContaining({ statuses: ['final'] }),
+    );
+    expect(mocks.buildPreparedUpstreamConversationMock).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({
+        contextWindow: 128_000,
+        llmCompactionSummary: undefined,
+        persistedMemory: null,
+      }),
     );
     expect(mocks.fetchUpstreamStreamWithRetryMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -233,10 +273,86 @@ describe('runModelRound', () => {
         content: [{ type: 'text', text: '部分回答' }],
       }),
     );
+    expect(mocks.upsertArtifactsFromAssistantMessageMock).not.toHaveBeenCalled();
     expect(result.stopReason).toBe('cancelled');
   });
 
-  it('reads persisted compaction memory and returns prepared compaction payload', async () => {
+  it('upserts assistant artifacts only after a completed end_turn response', async () => {
+    const encoder = new TextEncoder();
+    let readCount = 0;
+
+    mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount += 1;
+            if (readCount === 1) {
+              return { done: false, value: encoder.encode('data: first\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+        }),
+      },
+    });
+    mocks.parseUpstreamFrameMock.mockImplementation((frame: string) =>
+      frame.includes('data:')
+        ? [{ type: 'text_delta', delta: '```html\n<div>Hello artifact</div>\n```' }]
+        : [],
+    );
+
+    const { runModelRound } = await import('../routes/stream-model-round.js');
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext('TEST', '/stream', {}, 'local');
+
+    const result = await runModelRound({
+      clientRequestId: 'req-end-turn',
+      enabledTools: [],
+      eventSequence: { value: 1 },
+      requestData: {
+        clientRequestId: 'req-end-turn',
+        maxTokens: 1024,
+        message: '继续执行',
+        temperature: 0,
+      },
+      round: 0,
+      route: {
+        apiKey: '',
+        apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
+        maxTokens: 1024,
+        model: 'test-model',
+        requestOverrides: {},
+        supportsThinking: false,
+        temperature: 0,
+        upstreamProtocol: 'responses',
+        variant: undefined,
+      },
+      runId: 'run-end-turn',
+      signal: new AbortController().signal,
+      sessionContext: { legacyMessagesJson: '[]', metadataJson: '{}' },
+      sessionId: 'session-1',
+      transport: 'SSE',
+      turnFileDiffs: undefined,
+      userId: 'user-1',
+      wl,
+      ctx,
+      workspaceCtx: null,
+      requestSystemPrompts: [],
+      writeChunk: vi.fn(),
+    });
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(mocks.upsertArtifactsFromAssistantMessageMock).toHaveBeenCalledWith({
+      clientRequestId: 'req-end-turn',
+      content: [{ type: 'text', text: '```html\n<div>Hello artifact</div>\n```' }],
+      sessionId: 'session-1',
+      userId: 'user-1',
+    });
+  });
+
+  it('reads persisted compaction memory while preparing upstream conversation', async () => {
     mocks.listSessionMessagesMock.mockReturnValue([
       {
         id: 'user-1',
@@ -311,6 +427,7 @@ describe('runModelRound', () => {
       route: {
         apiKey: '',
         apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
         maxTokens: 1024,
         model: 'test-model',
         requestOverrides: {},
@@ -342,15 +459,13 @@ describe('runModelRound', () => {
     expect(mocks.buildPreparedUpstreamConversationMock).toHaveBeenCalledWith(
       expect.any(Array),
       expect.objectContaining({
+        contextWindow: 128_000,
+        llmCompactionSummary: undefined,
         persistedMemory: expect.objectContaining({
           coveredUntilMessageId: 'assistant-2',
         }),
       }),
     );
-    expect(result.compaction).toMatchObject({
-      omittedMessages: 6,
-      recentMessagesKept: 4,
-      signature: 'new-sig',
-    });
+    expect(result.stopReason).toBe('error');
   });
 });

@@ -57,9 +57,11 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'lsp_diagnostics':
     case 'lsp_touch':
     case 'lsp_goto_definition':
+    case 'lsp_goto_implementation':
     case 'lsp_find_references':
     case 'lsp_symbols':
     case 'lsp_prepare_rename':
+    case 'lsp_hover':
     case 'read_tool_output':
     case 'workspace_tree':
     case 'workspace_read_file':

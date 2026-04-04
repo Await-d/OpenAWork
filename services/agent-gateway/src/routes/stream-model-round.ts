@@ -1,16 +1,18 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import type { PersistedCompactionMemory } from '../compaction-metadata.js';
 import { readPersistedCompactionMemory } from '../compaction-metadata.js';
 import {
   appendSessionMessage,
   buildPreparedUpstreamConversation,
   hasToolOutputReference,
+  isContextOverflow,
   listSessionMessages,
+  updateSessionMessagesStatusByRequestScope,
 } from '../session-message-store.js';
 import { buildModifiedFilesSummaryContent } from '../modified-files-summary.js';
 import { persistSessionSnapshot } from '../session-snapshot-store.js';
 import { createRequestSnapshotRef } from '../session-snapshot-store.js';
+import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
 import { resolveEofRoundDecision } from './stream-completion.js';
 import { readUpstreamError } from './upstream-error.js';
 import { buildUpstreamRequestBody } from './upstream-request.js';
@@ -26,6 +28,7 @@ import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
 import type { getEnabledTools } from './stream.js';
 import { fetchUpstreamStreamWithRetry } from './upstream-stream-retry.js';
+import { writeAuditLog } from '../audit-log.js';
 
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
 type StreamStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled';
@@ -140,6 +143,16 @@ function createIntermediateAssistantRequestId(clientRequestId: string, round: nu
   return `${clientRequestId}:assistant:${round}`;
 }
 
+function readLastCompactionLlmSummary(metadataJson: string): string | undefined {
+  try {
+    const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
+    const summary = parsed['lastCompactionLlmSummary'];
+    return typeof summary === 'string' && summary.trim().length > 0 ? summary : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function runModelRound(input: {
   clientRequestId: string;
   enabledTools: ReturnType<typeof getEnabledTools>;
@@ -158,16 +171,10 @@ export async function runModelRound(input: {
   ctx: ReturnType<typeof createRequestContext>;
   workspaceCtx: string | null;
   requestSystemPrompts: string[];
+  memoryBlock?: string | null;
   writeChunk: (chunk: RunEvent) => void;
 }): Promise<{
-  compaction?: {
-    eventSummary: string;
-    omittedMessages: number;
-    persistedMemory: PersistedCompactionMemory;
-    recentMessagesKept: number;
-    signature: string;
-    structuredSummary: string;
-  };
+  overflow: boolean;
   shouldContinue: boolean;
   shouldStop: boolean;
   stopReason: StreamStopReason;
@@ -181,9 +188,11 @@ export async function runModelRound(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-      statuses: ['final', 'error'],
+      statuses: ['final'],
     }),
     {
+      contextWindow: input.route.contextWindow,
+      llmCompactionSummary: readLastCompactionLlmSummary(input.sessionContext.metadataJson),
       persistedMemory: readPersistedCompactionMemory(input.sessionContext.metadataJson),
     },
   );
@@ -195,6 +204,7 @@ export async function runModelRound(input: {
       routeSystemPrompt: input.route.systemPrompt,
       requestSystemPrompts: input.requestSystemPrompts,
       shouldGuideToolOutputReadback,
+      memoryBlock: input.memoryBlock,
     }),
     ...conversation,
   ];
@@ -229,20 +239,30 @@ export async function runModelRound(input: {
     ) {
       return;
     }
+    const assistantContent = buildAssistantContent(
+      state,
+      reason === 'tool_use' ? undefined : input.turnFileDiffs,
+    );
+
     appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',
-      content: buildAssistantContent(
-        state,
-        reason === 'tool_use' ? undefined : input.turnFileDiffs,
-      ),
+      content: assistantContent,
       legacyMessagesJson: input.sessionContext.legacyMessagesJson,
       clientRequestId:
         reason === 'tool_use'
           ? createIntermediateAssistantRequestId(input.clientRequestId, input.round)
           : input.clientRequestId,
     });
+    if (reason === 'end_turn') {
+      upsertArtifactsFromAssistantMessage({
+        clientRequestId: input.clientRequestId,
+        content: assistantContent,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      });
+    }
     if (reason !== 'tool_use' && input.turnFileDiffs && input.turnFileDiffs.size > 0) {
       persistSessionSnapshot({
         sessionId: input.sessionId,
@@ -251,6 +271,15 @@ export async function runModelRound(input: {
         fileDiffs: Array.from(input.turnFileDiffs.values()),
       });
     }
+  };
+  const markFailedRequestScopeMessages = () => {
+    updateSessionMessagesStatusByRequestScope({
+      clientRequestId: input.clientRequestId,
+      roles: ['assistant', 'tool'],
+      sessionId: input.sessionId,
+      status: 'error',
+      userId: input.userId,
+    });
   };
 
   try {
@@ -276,7 +305,24 @@ export async function runModelRound(input: {
 
     if (!response.ok || !response.body) {
       const upstreamError = await readUpstreamError(response);
+      markFailedRequestScopeMessages();
       input.wl.fail(stepUpstream, undefined, { status: response.status });
+      writeAuditLog({
+        sessionId: input.sessionId,
+        category: 'llm',
+        sourceName: upstreamError.code,
+        requestId: input.clientRequestId,
+        input: {
+          model: input.route.model,
+          provider: input.route.apiBaseUrl,
+          round: input.round,
+        },
+        output: {
+          message: upstreamError.message,
+          status: response.status,
+          code: upstreamError.code,
+        },
+      });
       appendSessionMessage({
         sessionId: input.sessionId,
         userId: input.userId,
@@ -292,7 +338,7 @@ export async function runModelRound(input: {
       } as RunEvent);
       input.wl.flush(input.ctx, response.status);
       return {
-        compaction: preparedConversation.compaction,
+        overflow: false,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'error',
@@ -342,15 +388,20 @@ export async function runModelRound(input: {
       }
 
       const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
+      const usage = streamState.usage;
+      const overflow =
+        !!usage &&
+        typeof input.route.contextWindow === 'number' &&
+        isContextOverflow(usage, input.route.contextWindow);
       return {
-        compaction: preparedConversation.compaction,
+        overflow,
         shouldContinue,
         shouldStop: !shouldContinue,
         stopReason,
         statusCode: 200,
         state,
-        usage: streamState.usage,
-        usageOccurredAt: streamState.usage ? (doneChunk?.occurredAt ?? Date.now()) : undefined,
+        usage,
+        usageOccurredAt: usage ? (doneChunk?.occurredAt ?? Date.now()) : undefined,
       };
     };
 
@@ -407,6 +458,15 @@ export async function runModelRound(input: {
             round: input.round,
           });
         }
+        writeAuditLog({
+          sessionId: input.sessionId,
+          category: 'stream',
+          sourceName: errorCode,
+          requestId: input.clientRequestId,
+          input: { model: input.route.model, round: input.round, phase: 'mid-stream' },
+          output: { message: errorMessage, code: errorCode },
+        });
+        markFailedRequestScopeMessages();
         appendSessionMessage({
           sessionId: input.sessionId,
           userId: input.userId,
@@ -419,7 +479,7 @@ export async function runModelRound(input: {
         input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
         input.wl.flush(input.ctx, 502);
         return {
-          compaction: preparedConversation.compaction,
+          overflow: false,
           shouldContinue: false,
           shouldStop: true,
           stopReason: 'error',
@@ -454,6 +514,15 @@ export async function runModelRound(input: {
           round: input.round,
         });
       }
+      writeAuditLog({
+        sessionId: input.sessionId,
+        category: 'stream',
+        sourceName: errorCode,
+        requestId: input.clientRequestId,
+        input: { model: input.route.model, round: input.round, phase: 'trailing-frame' },
+        output: { message: errorMessage, code: errorCode },
+      });
+      markFailedRequestScopeMessages();
       appendSessionMessage({
         sessionId: input.sessionId,
         userId: input.userId,
@@ -466,7 +535,7 @@ export async function runModelRound(input: {
       input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
       input.wl.flush(input.ctx, 502);
       return {
-        compaction: preparedConversation.compaction,
+        overflow: false,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'error',
@@ -492,7 +561,7 @@ export async function runModelRound(input: {
         ...createRunEventMeta(input.runId, input.eventSequence),
       });
       return {
-        compaction: preparedConversation.compaction,
+        overflow: false,
         shouldContinue: false,
         shouldStop: true,
         stopReason: 'cancelled',
@@ -509,6 +578,15 @@ export async function runModelRound(input: {
     if (stepUpstream.status === 'pending') {
       input.wl.fail(stepUpstream, message);
     }
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'stream',
+      sourceName: 'STREAM_ERROR',
+      requestId: input.clientRequestId,
+      input: { model: input.route.model, round: input.round },
+      output: { message, code: 'STREAM_ERROR' },
+    });
+    markFailedRequestScopeMessages();
     appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -521,7 +599,7 @@ export async function runModelRound(input: {
     input.writeChunk(createStreamErrorChunk('STREAM_ERROR', message, input.runId));
     input.wl.flush(input.ctx, 500);
     return {
-      compaction: preparedConversation.compaction,
+      overflow: false,
       shouldContinue: false,
       shouldStop: true,
       stopReason: 'error',

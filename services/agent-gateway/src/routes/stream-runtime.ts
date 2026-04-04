@@ -36,9 +36,22 @@ import {
   setPersistedSessionStateStatus,
   streamRequestSchema,
 } from './stream.js';
+import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { runModelRound } from './stream-model-round.js';
-import { getAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
+import {
+  clearInFlightStreamRequest,
+  getAnyInFlightStreamRequestForSession,
+  registerInFlightStreamRequest,
+} from './stream-cancellation.js';
 import { persistMonthlyUsageRecord } from '../usage-records-store.js';
+import { resolveSessionInteractionStateUpdate } from '../session-runtime-state.js';
+import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
+import {
+  clearSessionRuntimeThread,
+  SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
+  touchSessionRuntimeThread,
+  upsertSessionRuntimeThread,
+} from '../session-runtime-thread-store.js';
 
 async function continueFromApprovedToolResult(input: {
   initialToolResult: {
@@ -93,6 +106,7 @@ async function continueFromApprovedToolResult(input: {
   const turnFileDiffs = new Map<string, FileDiffContent>();
   const abortController = new AbortController();
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(sessionContext.metadataJson);
+  const memoryBlock = buildMemoryBlockForSession(input.userId, sessionContext.metadataJson);
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(
     'INTERNAL',
@@ -103,11 +117,26 @@ async function continueFromApprovedToolResult(input: {
 
   const execution = (async (): Promise<{ pendingInteraction: boolean; statusCode: number }> => {
     let shouldKeepPausedState = false;
+    const runtimeThreadStartedAt = Date.now();
     setPersistedSessionStateStatus({
       sessionId: input.sessionId,
       status: 'running',
       userId: input.userId,
     });
+    upsertSessionRuntimeThread({
+      clientRequestId: input.payload.clientRequestId,
+      heartbeatAtMs: runtimeThreadStartedAt,
+      sessionId: input.sessionId,
+      startedAtMs: runtimeThreadStartedAt,
+      userId: input.userId,
+    });
+    const runtimeThreadHeartbeat = setInterval(() => {
+      touchSessionRuntimeThread({
+        clientRequestId: input.payload.clientRequestId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      });
+    }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
 
     if (
       getAnyInFlightStreamRequestForSession({
@@ -198,38 +227,17 @@ async function continueFromApprovedToolResult(input: {
     }
 
     const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
-      if (event.type === 'question_asked') {
-        shouldKeepPausedState = true;
+      if (
+        event.type === 'question_asked' ||
+        event.type === 'permission_asked' ||
+        event.type === 'permission_replied' ||
+        event.type === 'question_replied'
+      ) {
+        const stateUpdate = resolveSessionInteractionStateUpdate(event);
+        shouldKeepPausedState = stateUpdate.shouldKeepPausedState;
         setPersistedSessionStateStatus({
           sessionId: input.sessionId,
-          status: 'paused',
-          userId: input.userId,
-        });
-      }
-
-      if (event.type === 'permission_asked') {
-        shouldKeepPausedState = true;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'paused',
-          userId: input.userId,
-        });
-      }
-
-      if (event.type === 'permission_replied' && event.decision !== 'reject') {
-        shouldKeepPausedState = false;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'running',
-          userId: input.userId,
-        });
-      }
-
-      if (event.type === 'question_replied' && event.status === 'answered') {
-        shouldKeepPausedState = false;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'running',
+          status: stateUpdate.status,
           userId: input.userId,
         });
       }
@@ -255,10 +263,19 @@ async function continueFromApprovedToolResult(input: {
           ctx,
           workspaceCtx,
           requestSystemPrompts,
+          memoryBlock,
           writeChunk,
         });
 
         if (result.usage) {
+          writeChunk(
+            buildStreamUsageChunk({
+              eventSequence,
+              round,
+              runId,
+              usage: result.usage,
+            }),
+          );
           persistMonthlyUsageRecord({
             occurredAt: result.usageOccurredAt,
             inputPricePerMillion: route.inputPricePerMillion,
@@ -278,6 +295,15 @@ async function continueFromApprovedToolResult(input: {
               status: 'idle',
               userId: input.userId,
             });
+          }
+          try {
+            autoExtractMemoriesForRequest({
+              userId: input.userId,
+              sessionId: input.sessionId,
+              clientRequestId: input.payload.clientRequestId,
+            });
+          } catch (error: unknown) {
+            console.warn('memory auto extraction failed after resume completion', error);
           }
           return { pendingInteraction: shouldKeepPausedState, statusCode: result.statusCode };
         }
@@ -303,6 +329,12 @@ async function continueFromApprovedToolResult(input: {
         });
       }
     } finally {
+      clearInterval(runtimeThreadHeartbeat);
+      clearSessionRuntimeThread({
+        clientRequestId: input.payload.clientRequestId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      });
       unsubscribeSessionEvents();
     }
   })().catch((err) => {
@@ -329,7 +361,23 @@ async function continueFromApprovedToolResult(input: {
     throw err;
   });
 
-  return execution;
+  registerInFlightStreamRequest({
+    abortController,
+    clientRequestId: input.payload.clientRequestId,
+    execution,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+
+  try {
+    return await execution;
+  } finally {
+    clearInFlightStreamRequest({
+      clientRequestId: input.payload.clientRequestId,
+      execution,
+      sessionId: input.sessionId,
+    });
+  }
 }
 
 export async function resumeApprovedPermissionRequest(input: {

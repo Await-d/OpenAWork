@@ -33,6 +33,38 @@ const YOLO_MODE_SYSTEM_PROMPT = [
   '优先少确认、快执行、直达结果；除非明显缺信息，否则不要反复征询。',
 ].join('\n');
 
+const LSP_TOOL_GUIDANCE_SYSTEM_PROMPT = [
+  'LSP 工具使用策略：',
+  '',
+  '【语义查询优先 LSP】',
+  '- 查找符号定义 → lsp_goto_definition（而非 grep）',
+  '- 查找接口/抽象方法的具体实现 → lsp_goto_implementation（而非 lsp_goto_definition）',
+  '- 查找所有引用/使用 → lsp_find_references（而非 grep）',
+  '- 获取文件/工作区符号列表 → lsp_symbols（而非正则匹配）',
+  '- 查看符号类型签名/文档 → lsp_hover（快速了解类型信息，无需跳转到定义）',
+  '- 上述工具返回的是精确语义结果，优先于文本搜索',
+  '',
+  '【全文文本搜索用 grep】',
+  '- 搜索字符串字面量、注释内容、配置文本 → grep',
+  '- 搜索文件名模式 → glob',
+  '- grep 适合非符号级的文本检索场景',
+  '',
+  '【重命名必须按序执行】',
+  '- 第一步：lsp_prepare_rename — 验证该位置是否可重命名',
+  '- 第二步：lsp_rename — 仅在 prepare 通过后执行',
+  '- 绝不跳过 prepare 直接 rename',
+  '- 绝不自动执行 rename，必须是用户明确要求',
+  '',
+  '【LSP 不可用时降级】',
+  '- 如果 LSP 工具返回"No definition found"/"No implementation found"/"No references found"/"No symbols found"/"No hover information available"，回退到 grep + read 组合',
+  '- LSP 能力依赖语言服务器是否运行，不是所有文件类型都支持',
+  '',
+  '【禁止事项】',
+  '- 不要每轮自动调用 lsp_goto_definition/lsp_find_references/lsp_symbols',
+  '- 不要自动执行 lsp_rename（除非用户明确请求重命名）',
+  '- lsp_diagnostics 用于查看当前诊断状态，不要作为常规轮次动作',
+].join('\n');
+
 interface RequestScopedPromptOptions {
   dialogueMode?: DialogueMode;
   yoloMode?: boolean;
@@ -49,9 +81,13 @@ export function buildRequestScopedSystemPrompts(
     options.dialogueMode !== undefined ? DIALOGUE_MODE_SYSTEM_PROMPTS[options.dialogueMode] : null;
   const yoloModePrompt = options.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
 
-  return [detection.injectedPrompt, capabilityContext, dialogueModePrompt, yoloModePrompt].filter(
-    (value): value is string => typeof value === 'string' && value.trim().length > 0,
-  );
+  return [
+    detection.injectedPrompt,
+    capabilityContext,
+    LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
+    dialogueModePrompt,
+    yoloModePrompt,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 }
 
 export function buildRoundSystemMessages(input: {
@@ -59,6 +95,7 @@ export function buildRoundSystemMessages(input: {
   routeSystemPrompt?: string;
   requestSystemPrompts: string[];
   shouldGuideToolOutputReadback: boolean;
+  memoryBlock?: string | null;
 }) {
   return [
     ...(input.workspaceCtx ? [{ role: 'system' as const, content: input.workspaceCtx }] : []),
@@ -66,6 +103,7 @@ export function buildRoundSystemMessages(input: {
       ? [{ role: 'system' as const, content: input.routeSystemPrompt }]
       : []),
     ...input.requestSystemPrompts.map((content) => ({ role: 'system' as const, content })),
+    ...(input.memoryBlock ? [{ role: 'system' as const, content: input.memoryBlock }] : []),
     ...(input.shouldGuideToolOutputReadback
       ? [{ role: 'system' as const, content: TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT }]
       : []),

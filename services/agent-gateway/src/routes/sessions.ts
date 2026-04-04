@@ -38,16 +38,9 @@ import {
   validateSessionMetadataPatch,
 } from '../session-workspace-metadata.js';
 import { listSessionTodoLanes, listSessionTodos } from '../todo-tools.js';
-import {
-  buildTaskUpdateEvent,
-  readTaskParentToolReference,
-  syncParentTaskToolResult,
-} from '../tool-sandbox.js';
-import {
-  clearPendingTaskParentAutoResumesForSession,
-  clearTaskParentAutoResumeContext,
-} from '../task-parent-auto-resume.js';
-import { listSessionRunEvents, publishSessionRunEvent } from '../session-run-events.js';
+import { terminateChildSession } from '../tool-sandbox.js';
+import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
+import { listSessionRunEvents } from '../session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
   stopAllInFlightStreamRequestsForSession,
@@ -829,15 +822,6 @@ async function findVisibleTaskEntry(input: {
   }
 
   return null;
-}
-
-function parseRequestedSkillsFromMetadata(metadata: Record<string, unknown>): string[] {
-  const requestedSkills = metadata['requestedSkills'];
-  return Array.isArray(requestedSkills)
-    ? requestedSkills.filter(
-        (skill): skill is string => typeof skill === 'string' && skill.length > 0,
-      )
-    : [];
 }
 
 const childSessionQuerySchema = z.object({
@@ -2021,75 +2005,24 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(409).send({ error: 'Task is not cancellable' });
       }
 
-      taskManager.cancelTask(taskEntry.graph, taskId);
-      await taskManager.save(taskEntry.graph);
-
       const childSessionId = taskEntry.task.sessionId;
       if (childSessionId) {
-        clearTaskParentAutoResumeContext({ childSessionId, userId: user.sub });
-        sqliteRun(
-          "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-          [childSessionId, user.sub],
-        );
-      }
-
-      const stopped = childSessionId
-        ? (await stopAllInFlightStreamRequestsForSession({
-            sessionId: childSessionId,
-            userId: user.sub,
-          })) > 0
-        : false;
-
-      if (!stopped && childSessionId) {
-        const childSession = sqliteGet<{ metadata_json: string }>(
-          'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-          [childSessionId, user.sub],
-        );
-        const childMetadata = childSession
-          ? parseSessionMetadataJson(childSession.metadata_json)
-          : {};
-        syncParentTaskToolResult({
-          assignedAgent:
-            taskEntry.task.assignedAgent ??
-            (typeof childMetadata['subagentType'] === 'string'
-              ? childMetadata['subagentType']
-              : 'task'),
-          category:
-            typeof childMetadata['taskCategory'] === 'string'
-              ? childMetadata['taskCategory']
-              : undefined,
-          parentSessionId: taskEntry.graphSessionId,
-          parentToolReference: readTaskParentToolReference(childMetadata),
-          requestedSkills: parseRequestedSkillsFromMetadata(childMetadata),
-          sessionId: childSessionId,
-          status: 'cancelled',
+        const result = await terminateChildSession({
+          childSessionId,
+          graphSessionId: taskEntry.graphSessionId,
+          reason: 'cancelled',
           taskId,
           userId: user.sub,
         });
-        publishSessionRunEvent(
-          taskEntry.graphSessionId,
-          buildTaskUpdateEvent({
-            assignedAgent:
-              taskEntry.task.assignedAgent ??
-              (typeof childMetadata['subagentType'] === 'string'
-                ? childMetadata['subagentType']
-                : 'task'),
-            category:
-              typeof childMetadata['taskCategory'] === 'string'
-                ? childMetadata['taskCategory']
-                : undefined,
-            childSessionId,
-            parentSessionId: taskEntry.graphSessionId,
-            requestedSkills: parseRequestedSkillsFromMetadata(childMetadata),
-            status: 'cancelled',
-            taskId,
-            taskTitle: taskEntry.task.title,
-          }),
-        );
+        step.succeed(undefined, { cancelled: result.terminated, stopped: result.stopped });
+        return reply.send({ cancelled: result.terminated, stopped: result.stopped });
       }
 
-      step.succeed(undefined, { cancelled: true, stopped });
-      return reply.send({ cancelled: true, stopped });
+      taskManager.cancelTask(taskEntry.graph, taskId);
+      await taskManager.save(taskEntry.graph);
+
+      step.succeed(undefined, { cancelled: true, stopped: false });
+      return reply.send({ cancelled: true, stopped: false });
     },
   );
 

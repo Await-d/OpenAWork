@@ -49,6 +49,7 @@ import { artifactsRoutes } from './routes/artifacts.js';
 import { reconcileAllSessionRuntimes } from './session-runtime-reconciler.js';
 import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
+import { memoriesRoutes } from './routes/memories.js';
 
 const app = Fastify({ logger: true, disableRequestLogging: true });
 
@@ -83,6 +84,7 @@ await app.register(localSkillsRoutes);
 await app.register(skillsRoutes);
 await app.register(capabilitiesRoutes);
 await app.register(pairingRoutes);
+await app.register(memoriesRoutes);
 
 app.get('/health', (request, reply) => {
   const { step } = startRequestWorkflow(request, 'gateway.health');

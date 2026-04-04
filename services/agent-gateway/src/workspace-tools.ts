@@ -19,6 +19,7 @@ import {
   validateWorkspaceRelativePath,
 } from './workspace-paths.js';
 import { lspManager } from './lsp/router.js';
+import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 
 interface WorkspaceTreeNode {
   path: string;
@@ -172,6 +173,7 @@ const workspaceWriteFileOutputSchema = z.object({
   success: z.literal(true),
   path: z.string(),
   bytes: z.number().int(),
+  diagnostics: z.array(postWriteDiagnosticSchema).optional(),
 });
 
 const writeInputSchema = workspaceWriteFileInputSchema;
@@ -190,6 +192,7 @@ const workspaceCreateFileOutputSchema = z.object({
   success: z.literal(true),
   path: z.string(),
   bytes: z.number().int(),
+  diagnostics: z.array(postWriteDiagnosticSchema).optional(),
 });
 
 const workspaceCreateDirectoryInputSchema = z.object({
@@ -832,6 +835,7 @@ export async function executeWorkspaceWriteFile(
     : undefined;
   await fsp.writeFile(safePath, input.content, 'utf8');
   lspManager.touchFile(safePath, true).catch((_e: unknown) => undefined);
+  const diagnostics = await getPostWriteDiagnostics([safePath]);
   return {
     before: previousContent,
     after: input.content,
@@ -843,6 +847,7 @@ export async function executeWorkspaceWriteFile(
     success: true,
     path: safePath,
     bytes: input.content.length,
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
   };
 }
 
@@ -920,6 +925,7 @@ export async function executeWorkspaceCreateFile(
   }
 
   lspManager.touchFile(safePath, true).catch((_e: unknown) => undefined);
+  const diagnostics = await getPostWriteDiagnostics([safePath]);
   return {
     before: '',
     after: input.content,
@@ -928,6 +934,7 @@ export async function executeWorkspaceCreateFile(
     success: true,
     path: safePath,
     bytes: input.content.length,
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
   };
 }
 

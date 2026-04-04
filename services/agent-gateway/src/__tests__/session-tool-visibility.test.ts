@@ -166,6 +166,165 @@ describe('session tool visibility', () => {
     ]);
   });
 
+  describe('LSP tool channel classification', () => {
+    const readLspTools = [
+      'lsp_diagnostics',
+      'lsp_touch',
+      'lsp_goto_definition',
+      'lsp_goto_implementation',
+      'lsp_find_references',
+      'lsp_symbols',
+      'lsp_prepare_rename',
+      'lsp_hover',
+    ] as const;
+
+    const editLspTools = ['lsp_rename'] as const;
+
+    it('classifies read-only LSP tools under the "read" channel key', () => {
+      const metadata = {
+        source: 'channel',
+        channel: {
+          tools: {
+            read: true,
+            edit: false,
+          },
+          permissions: {},
+        },
+      };
+
+      for (const toolName of readLspTools) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be enabled when read=true`,
+        ).toBe(true);
+      }
+
+      for (const toolName of editLspTools) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be disabled when edit=false`,
+        ).toBe(false);
+      }
+    });
+
+    it('classifies lsp_rename under the "edit" channel key', () => {
+      const metadata = {
+        source: 'channel',
+        channel: {
+          tools: {
+            read: false,
+            edit: true,
+          },
+          permissions: {},
+        },
+      };
+
+      expect(isGatewayToolEnabledForSessionMetadata('lsp_rename', metadata)).toBe(true);
+
+      for (const toolName of readLspTools) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be disabled when read=false`,
+        ).toBe(false);
+      }
+    });
+
+    it('enables all LSP tools in non-channel sessions', () => {
+      const metadata = {};
+
+      for (const toolName of [...readLspTools, ...editLspTools]) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be enabled in regular sessions`,
+        ).toBe(true);
+      }
+    });
+
+    it('disables all LSP tools when both read and edit are disabled in channel', () => {
+      const metadata = {
+        source: 'channel',
+        channel: {
+          tools: {
+            read: false,
+            edit: false,
+          },
+          permissions: {},
+        },
+      };
+
+      for (const toolName of [...readLspTools, ...editLspTools]) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be disabled when both read and edit are false`,
+        ).toBe(false);
+      }
+    });
+
+    it('auto-approves lsp_rename in channel sessions only when edit is enabled', () => {
+      const editEnabled = {
+        source: 'channel',
+        channel: {
+          tools: {
+            read: true,
+            edit: true,
+          },
+          permissions: {},
+        },
+      };
+
+      const editDisabled = {
+        source: 'channel',
+        channel: {
+          tools: {
+            read: true,
+            edit: false,
+          },
+          permissions: {},
+        },
+      };
+
+      expect(shouldAutoApproveToolForSessionMetadata('lsp_rename', editEnabled)).toBe(true);
+
+      expect(shouldAutoApproveToolForSessionMetadata('lsp_rename', editDisabled)).toBe(false);
+    });
+
+    it('does not auto-approve any LSP tools in non-channel sessions', () => {
+      const metadata = {};
+
+      for (const toolName of [...readLspTools, ...editLspTools]) {
+        expect(
+          shouldAutoApproveToolForSessionMetadata(toolName, metadata),
+          `${toolName} should not be auto-approved in regular sessions`,
+        ).toBe(false);
+      }
+    });
+
+    it('filters LSP tools correctly via filterEnabledGatewayToolsForSession', () => {
+      const lspTools = [
+        ...readLspTools.map(createToolDefinition),
+        ...editLspTools.map(createToolDefinition),
+      ];
+      const metadata = {
+        source: 'channel',
+        channel: {
+          tools: {
+            read: true,
+            edit: false,
+          },
+          permissions: {},
+        },
+      };
+
+      const visibleToolNames = filterEnabledGatewayToolsForSession(
+        lspTools,
+        JSON.stringify(metadata),
+      ).map((tool) => tool.function.name);
+
+      expect(visibleToolNames).toEqual([...readLspTools]);
+      expect(visibleToolNames).not.toContain('lsp_rename');
+    });
+  });
+
   it('marks enabled channel tools as auto-approved runtime actions', () => {
     const metadata = {
       source: 'channel',

@@ -1,4 +1,4 @@
-import type { SessionContextRecord } from '@openAwork/shared';
+import type { RunEvent, SessionContextRecord } from '@openAwork/shared';
 import { sqliteGet, sqliteRun } from './db.js';
 import { getAnyInFlightStreamRequestForSession } from './routes/stream-cancellation.js';
 import {
@@ -21,6 +21,40 @@ export interface SessionRuntimeReconciliationResult {
   sessionContext: SessionContextRecord | null;
   status: PersistedSessionStateStatus | null;
   wasReset: boolean;
+}
+
+export type SessionInteractionRunEvent = Extract<
+  RunEvent,
+  {
+    type: 'permission_asked' | 'permission_replied' | 'question_asked' | 'question_replied';
+  }
+>;
+
+export function resolveSessionInteractionStateUpdate(event: SessionInteractionRunEvent): {
+  shouldKeepPausedState: boolean;
+  status: PersistedSessionStateStatus;
+} {
+  switch (event.type) {
+    case 'permission_asked':
+    case 'question_asked': {
+      return {
+        shouldKeepPausedState: true,
+        status: 'paused',
+      };
+    }
+    case 'permission_replied': {
+      return {
+        shouldKeepPausedState: false,
+        status: event.decision === 'reject' ? 'idle' : 'running',
+      };
+    }
+    case 'question_replied': {
+      return {
+        shouldKeepPausedState: false,
+        status: event.status === 'dismissed' ? 'idle' : 'running',
+      };
+    }
+  }
 }
 
 export function toSessionContextStatus(

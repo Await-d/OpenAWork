@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import { sqliteAll } from './db.js';
 import { lspManager } from './lsp/router.js';
+import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { captureBeforeWriteBackup } from './session-file-backup-store.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 
@@ -23,6 +24,7 @@ const editOutputSchema = z.object({
   path: z.string(),
   replacements: z.number().int().min(1),
   created: z.boolean(),
+  diagnostics: z.array(postWriteDiagnosticSchema).optional(),
 });
 
 interface AuditLogRow {
@@ -143,6 +145,7 @@ export function createEditTool(
           : undefined;
         await fsp.writeFile(safePath, input.newString, 'utf8');
         await touchEditedFile(safePath);
+        const diagnostics = await getPostWriteDiagnostics([safePath]);
         return {
           before: currentContent,
           after: input.newString,
@@ -158,6 +161,7 @@ export function createEditTool(
           path: safePath,
           replacements: 1,
           created: !exists,
+          diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
         };
       }
 
@@ -195,6 +199,7 @@ export function createEditTool(
       });
       await fsp.writeFile(safePath, nextContent, 'utf8');
       await touchEditedFile(safePath);
+      const diagnostics = await getPostWriteDiagnostics([safePath]);
 
       return {
         before: currentContent,
@@ -207,6 +212,7 @@ export function createEditTool(
         path: safePath,
         replacements: input.replaceAll ? occurrences : 1,
         created: false,
+        diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
       };
     },
   };

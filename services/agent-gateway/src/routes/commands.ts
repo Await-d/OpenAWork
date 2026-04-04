@@ -16,9 +16,13 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { mergeCompactionMetadata, readPersistedCompactionMemory } from '../compaction-metadata.js';
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
+import { resolveCompactionRoute, type ModelRouteConfig } from '../model-router.js';
+import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
+import { callCompactionLlm } from '../compaction-llm.js';
 import {
   appendSessionMessage,
   buildDurableCompactionSummary,
+  buildPreparedUpstreamConversation,
   buildStructuredCompactionSummary,
   listSessionMessages,
 } from '../session-message-store.js';
@@ -87,6 +91,43 @@ interface SessionRow {
 }
 
 const taskManager = new AgentTaskManagerImpl();
+
+function parseStoredJson<T>(value: string | undefined): T | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveCompactCommandRoute(userId: string): Promise<ModelRouteConfig | null> {
+  const providerRow = sqliteGet<{ value: string }>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+    [userId],
+  );
+  const selectionRow = sqliteGet<{ value: string }>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+    [userId],
+  );
+
+  const providers = parseStoredJson(providerRow?.value);
+  const activeSelection = parseStoredJson(selectionRow?.value);
+  const compactionConfig = await getCompactionProviderConfig(providers, activeSelection);
+  if (compactionConfig) {
+    return resolveCompactionRoute(compactionConfig.provider, compactionConfig.modelId);
+  }
+
+  const chatConfig = await getProviderConfigForSelection(providers, activeSelection);
+  if (!chatConfig) {
+    return null;
+  }
+
+  return resolveCompactionRoute(chatConfig.provider, chatConfig.modelId);
+}
 
 export async function commandsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -225,14 +266,34 @@ async function executeCompactCommand(params: {
     recentMessagesKept: 0,
     trigger: 'manual',
   });
-  const summary =
+  const templateSummary =
     durableSummary?.structuredSummary ??
     buildStructuredCompactionSummary({
       messages: params.messages,
       recentMessagesKept: 0,
       trigger: 'manual',
     });
-  const metadata = mergeCompactionMetadata(params.metadataJson, {
+
+  let summary = templateSummary;
+  let llmSummary: string | undefined;
+  const compactionRoute = await resolveCompactCommandRoute(params.userId);
+  if (compactionRoute) {
+    try {
+      const conversationMessages = buildPreparedUpstreamConversation(params.messages, {
+        contextWindow: 1,
+      }).messages;
+      const result = await callCompactionLlm({
+        conversationMessages,
+        route: compactionRoute,
+      });
+      llmSummary = result.summary;
+      summary = llmSummary;
+    } catch (error: unknown) {
+      console.warn('manual llm compaction failed, fallback to template summary', error);
+    }
+  }
+
+  const mergedMetadata = mergeCompactionMetadata(params.metadataJson, {
     persistedMemory: durableSummary?.persistedMemory,
     summary,
     trigger: 'manual',
@@ -240,6 +301,12 @@ async function executeCompactCommand(params: {
     recentMessagesKept: 0,
     signature: durableSummary?.signature,
   });
+  const metadata = llmSummary
+    ? {
+        ...mergedMetadata,
+        lastCompactionLlmSummary: llmSummary,
+      }
+    : mergedMetadata;
   const card = {
     type: 'compaction' as const,
     title: '会话已压缩',

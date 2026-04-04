@@ -5,6 +5,7 @@ import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
+import { writeAuditLog } from '../audit-log.js';
 import {
   handleStreamRequest,
   loadSessionContext,
@@ -245,6 +246,13 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
               sessionId,
               clientRequestId: body.data.clientRequestId,
             });
+            writeAuditLog({
+              sessionId,
+              category: 'route',
+              sourceName: 'WS_STREAM_ERROR',
+              requestId: body.data.clientRequestId,
+              output: { message, code: 'WS_STREAM_ERROR' },
+            });
             wl.flush(ctx, 500);
           }
         })();
@@ -341,6 +349,13 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         agentId: query.data.agentId ?? 'none',
         clientRequestId: query.data.clientRequestId,
         sessionId,
+      });
+      writeAuditLog({
+        sessionId,
+        category: 'route',
+        sourceName: 'SSE_STREAM_ERROR',
+        requestId: query.data.clientRequestId,
+        output: { message, code: 'SSE_STREAM_ERROR' },
       });
       wl.flush(ctx, 500);
       throw error;

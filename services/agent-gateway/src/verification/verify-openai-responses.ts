@@ -14,6 +14,8 @@ import { withTempEnv } from './task-verification-helpers.js';
 type ScenarioName =
   | 'text'
   | 'tool'
+  | 'tool_error'
+  | 'tool_error_recovery'
   | 'tool_empty_args'
   | 'tool_eof'
   | 'chat_tool_eof'
@@ -73,6 +75,16 @@ async function main(): Promise<void> {
           if (scenario === 'error') {
             res.writeHead(502, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: { message: 'simulated upstream failure' } }));
+            return;
+          }
+
+          if (scenario === 'tool_error') {
+            handleToolErrorScenario(body, res);
+            return;
+          }
+
+          if (scenario === 'tool_error_recovery') {
+            handleToolErrorRecoveryScenario(body, res);
             return;
           }
 
@@ -160,6 +172,18 @@ async function main(): Promise<void> {
         });
         await verifyIncompleteScenario({ accessToken, app, capturedRequests, userId: adminId });
         await verifyErrorScenario({ accessToken, app, capturedRequests, userId: adminId });
+        await verifyRecoveryAfterErrorScenario({
+          accessToken,
+          app,
+          capturedRequests,
+          userId: adminId,
+        });
+        await verifyRecoveryAfterToolErrorScenario({
+          accessToken,
+          app,
+          capturedRequests,
+          userId: adminId,
+        });
       } finally {
         await app.close();
         await new Promise<void>((resolve) => upstream.close(() => resolve()));
@@ -539,6 +563,132 @@ async function verifyErrorScenario(input: VerificationContext): Promise<void> {
   assertNoEvent(events, (event) => event['type'] === 'done', 'error scenario should not emit done');
 }
 
+async function verifyRecoveryAfterErrorScenario(input: VerificationContext): Promise<void> {
+  const sessionId = await createSession(input.app, input.accessToken);
+  const errorResponse = await streamScenario({
+    app: input.app,
+    accessToken: input.accessToken,
+    sessionId,
+    message: 'provider alias responses 错误验证',
+    clientRequestId: 'req-responses-error-then-recover',
+  });
+
+  assertStatus(errorResponse.statusCode, 200, 'error then recover first transport status');
+  const errorEvents = parseSseChunks(errorResponse.body);
+  assertEvent(
+    errorEvents,
+    (event) =>
+      event['type'] === 'error' &&
+      event['code'] === 'MODEL_ERROR' &&
+      event['message'] === 'Upstream request failed (502): simulated upstream failure',
+    'error then recover first request emits MODEL_ERROR',
+  );
+  assertSessionStateStatus(sessionId, 'idle', 'error then recover state after failure');
+
+  const recoveryResponse = await streamScenario({
+    app: input.app,
+    accessToken: input.accessToken,
+    sessionId,
+    message: 'provider alias responses 错误后恢复成功',
+    clientRequestId: 'req-responses-recovery',
+  });
+
+  assertStatus(recoveryResponse.statusCode, 200, 'error then recover second transport status');
+  const recoveryEvents = parseSseChunks(recoveryResponse.body);
+  assertOrderedEvents(
+    recoveryEvents,
+    [
+      (event) => event['type'] === 'text_delta' && event['delta'] === '验证成功',
+      (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+    ],
+    'error then recover second request event order',
+  );
+  assertNoEvent(
+    recoveryEvents,
+    (event) => event['type'] === 'error',
+    'error then recover second request should not emit error',
+  );
+  assertSessionStateStatus(sessionId, 'idle', 'error then recover state after second request');
+
+  const recoveryRequest = lastScenarioRequest(input.capturedRequests, 'text');
+  assertResponsesPayloadShape(recoveryRequest.body, 'provider alias responses 错误后恢复成功');
+  if (requestContainsText(recoveryRequest.body, '[错误:')) {
+    throw new Error('recovery request should not include persisted assistant error text');
+  }
+  if (requestContainsText(recoveryRequest.body, 'simulated upstream failure')) {
+    throw new Error('recovery request should not include previous upstream failure message');
+  }
+}
+
+async function verifyRecoveryAfterToolErrorScenario(input: VerificationContext): Promise<void> {
+  const sessionId = await createSession(input.app, input.accessToken);
+  const errorResponse = await streamScenario({
+    app: input.app,
+    accessToken: input.accessToken,
+    sessionId,
+    message: 'provider alias responses 工具错误验证',
+    clientRequestId: 'req-responses-tool-error',
+  });
+
+  assertStatus(errorResponse.statusCode, 200, 'tool error then recover first transport status');
+  const errorEvents = parseSseChunks(errorResponse.body);
+  assertEvent(
+    errorEvents,
+    (event) => event['type'] === 'tool_result' && event['toolName'] === DISABLED_TOOL_NAME,
+    'tool error then recover first request emits tool_result',
+  );
+  assertEvent(
+    errorEvents,
+    (event) =>
+      event['type'] === 'error' &&
+      event['code'] === 'MODEL_ERROR' &&
+      event['message'] === 'Upstream request failed (502): simulated tool recovery failure',
+    'tool error then recover first request emits MODEL_ERROR',
+  );
+  assertNoEvent(
+    errorEvents,
+    (event) => event['type'] === 'done',
+    'tool error then recover first request should not emit done',
+  );
+  assertSessionStateStatus(sessionId, 'idle', 'tool error then recover state after failure');
+
+  const recoveryResponse = await streamScenario({
+    app: input.app,
+    accessToken: input.accessToken,
+    sessionId,
+    message: 'provider alias responses 工具错误后恢复成功',
+    clientRequestId: 'req-responses-tool-error-recovery',
+  });
+
+  assertStatus(recoveryResponse.statusCode, 200, 'tool error then recover second transport status');
+  const recoveryEvents = parseSseChunks(recoveryResponse.body);
+  assertOrderedEvents(
+    recoveryEvents,
+    [
+      (event) => event['type'] === 'text_delta' && event['delta'] === '工具错误恢复成功',
+      (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+    ],
+    'tool error then recover second request event order',
+  );
+  assertNoEvent(
+    recoveryEvents,
+    (event) => event['type'] === 'error',
+    'tool error then recover second request should not emit error',
+  );
+  assertSessionStateStatus(sessionId, 'idle', 'tool error then recover state after second request');
+
+  const recoveryRequest = lastScenarioRequest(input.capturedRequests, 'tool_error_recovery');
+  assertResponsesPayloadShape(recoveryRequest.body, 'provider alias responses 工具错误后恢复成功');
+  if (hasFunctionCall(recoveryRequest.body)) {
+    throw new Error('tool error recovery request should not include stale function_call items');
+  }
+  if (hasFunctionCallOutput(recoveryRequest.body)) {
+    throw new Error(
+      'tool error recovery request should not include stale function_call_output items',
+    );
+  }
+}
+
 function handleToolScenario(body: Record<string, unknown>, res: ServerResponse): void {
   if (!hasFunctionCallOutput(body)) {
     writeResponseEvent(res, 'response.output_item.added', {
@@ -584,6 +734,70 @@ function handleToolScenario(body: Record<string, unknown>, res: ServerResponse):
   }
 
   writeTextCompletion(res, '工具链路完成');
+}
+
+function handleToolErrorScenario(body: Record<string, unknown>, res: ServerResponse): void {
+  if (!hasFunctionCallOutput(body)) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    writeResponseEvent(res, 'response.output_item.added', {
+      output_index: 0,
+      item: {
+        id: 'fc_error_tool',
+        type: 'function_call',
+        call_id: 'call_error_tool',
+        name: DISABLED_TOOL_NAME,
+        arguments: '',
+      },
+    });
+    writeResponseEvent(res, 'response.function_call_arguments.delta', {
+      output_index: 0,
+      item_id: 'fc_error_tool',
+      delta: JSON.stringify({ query: '上海天气' }),
+    });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 0,
+      item: {
+        id: 'fc_error_tool',
+        type: 'function_call',
+        call_id: 'call_error_tool',
+        name: DISABLED_TOOL_NAME,
+        arguments: JSON.stringify({ query: '上海天气' }),
+      },
+    });
+    writeResponseEvent(res, 'response.completed', {
+      response: {
+        output: [
+          {
+            id: 'fc_error_tool',
+            type: 'function_call',
+            call_id: 'call_error_tool',
+            name: DISABLED_TOOL_NAME,
+            arguments: JSON.stringify({ query: '上海天气' }),
+          },
+        ],
+      },
+    });
+    res.end();
+    return;
+  }
+
+  res.writeHead(502, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: { message: 'simulated tool recovery failure' } }));
+}
+
+function handleToolErrorRecoveryScenario(body: Record<string, unknown>, res: ServerResponse): void {
+  if (hasFunctionCall(body) || hasFunctionCallOutput(body)) {
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        error: { message: 'stale failed tool history leaked into recovery request' },
+      }),
+    );
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+  writeTextCompletion(res, '工具错误恢复成功');
 }
 
 function handleToolEmptyArgsScenario(body: Record<string, unknown>, res: ServerResponse): void {
@@ -677,13 +891,68 @@ function writeResponseEvent(
 }
 
 function resolveScenario(body: Record<string, unknown>): ScenarioName {
-  if (requestContainsText(body, '错误验证')) return 'error';
-  if (requestContainsText(body, '截断验证')) return 'incomplete';
-  if (requestContainsText(body, 'provider alias chat EOF工具验证')) return 'chat_tool_eof';
-  if (requestContainsText(body, 'provider alias responses EOF工具验证')) return 'tool_eof';
-  if (requestContainsText(body, '空参数工具验证')) return 'tool_empty_args';
-  if (requestContainsText(body, '工具验证')) return 'tool';
+  const latestUserText = extractLatestUserRequestText(body);
+  const matches = (needle: string) => latestUserText.includes(needle);
+
+  if (matches('工具错误后恢复成功')) return 'tool_error_recovery';
+  if (matches('工具错误验证')) return 'tool_error';
+  if (matches('provider alias chat EOF工具验证')) return 'chat_tool_eof';
+  if (matches('provider alias responses EOF工具验证')) return 'tool_eof';
+  if (matches('空参数工具验证')) return 'tool_empty_args';
+  if (matches('工具验证')) return 'tool';
+  if (matches('错误验证')) return 'error';
+  if (matches('截断验证')) return 'incomplete';
   return 'text';
+}
+
+function extractLatestUserRequestText(body: Record<string, unknown>): string {
+  const input = body['input'];
+  if (Array.isArray(input)) {
+    for (let index = input.length - 1; index >= 0; index -= 1) {
+      const item = input[index];
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+
+      if (item['role'] !== 'user') {
+        continue;
+      }
+
+      const content = item['content'];
+      if (typeof content === 'string') {
+        return content;
+      }
+      if (!Array.isArray(content)) {
+        continue;
+      }
+
+      const parts = content.flatMap((part) => {
+        if (!part || typeof part !== 'object' || Array.isArray(part)) {
+          return [];
+        }
+        return typeof part['text'] === 'string' ? [part['text']] : [];
+      });
+      if (parts.length > 0) {
+        return parts.join('\n');
+      }
+    }
+  }
+
+  const messages = body['messages'];
+  if (Array.isArray(messages)) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const item = messages[index];
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+      if (item['role'] !== 'user' || typeof item['content'] !== 'string') {
+        continue;
+      }
+      return item['content'];
+    }
+  }
+
+  return '';
 }
 
 async function createSession(app: FastifyInstance, accessToken: string): Promise<string> {
@@ -806,6 +1075,21 @@ function captureMonthlyUsageSnapshot(userId: string): MonthlyUsageSnapshot {
   };
 }
 
+function captureSessionStateStatus(sessionId: string): string | null {
+  return (
+    sqliteGet<{ state_status: string }>('SELECT state_status FROM sessions WHERE id = ? LIMIT 1', [
+      sessionId,
+    ])?.state_status ?? null
+  );
+}
+
+function assertSessionStateStatus(sessionId: string, expected: string, label: string): void {
+  const actual = captureSessionStateStatus(sessionId);
+  if (actual !== expected) {
+    throw new Error(`${label} expected ${expected} but received ${actual ?? 'null'}`);
+  }
+}
+
 function assertMonthlyUsageDelta(input: {
   before: MonthlyUsageSnapshot;
   expectedCostUsd: number;
@@ -851,6 +1135,19 @@ function hasFunctionCallOutput(body: Record<string, unknown>): boolean {
           typeof item === 'object' &&
           !Array.isArray(item) &&
           item['type'] === 'function_call_output',
+      )
+    : false;
+}
+
+function hasFunctionCall(body: Record<string, unknown>): boolean {
+  const input = body['input'];
+  return Array.isArray(input)
+    ? input.some(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          !Array.isArray(item) &&
+          item['type'] === 'function_call',
       )
     : false;
 }

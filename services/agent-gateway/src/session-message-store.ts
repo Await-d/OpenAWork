@@ -51,17 +51,11 @@ export interface UpstreamChatMessage {
 
 export interface PreparedUpstreamConversation {
   messages: UpstreamChatMessage[];
-  compaction?: {
-    eventSummary: string;
-    omittedMessages: number;
-    persistedMemory: PersistedCompactionMemory;
-    recentMessagesKept: number;
-    signature: string;
-    structuredSummary: string;
-  };
 }
 
 export interface BuildPreparedUpstreamConversationOptions {
+  contextWindow?: number;
+  llmCompactionSummary?: string;
   maxMessages?: number;
   persistedMemory?: PersistedCompactionMemory | null;
 }
@@ -290,30 +284,25 @@ export function buildPreparedUpstreamConversation(
   options: number | BuildPreparedUpstreamConversationOptions = 12,
 ): PreparedUpstreamConversation {
   const maxMessages = typeof options === 'number' ? options : (options.maxMessages ?? 12);
+  const contextWindow = typeof options === 'number' ? undefined : options.contextWindow;
+  const llmCompactionSummary =
+    typeof options === 'number' ? undefined : options.llmCompactionSummary;
   const persistedMemory = typeof options === 'number' ? null : (options.persistedMemory ?? null);
   const normalizedMessages = messages.filter((message) => !isContextArtifactMessage(message));
-  const history = selectSafeConversationWindow(normalizedMessages, maxMessages);
+  const historySinceBoundary = selectMessagesSinceCompactionBoundary(
+    normalizedMessages,
+    persistedMemory,
+    llmCompactionSummary,
+  );
+  const history =
+    contextWindow && contextWindow > 0
+      ? historySinceBoundary
+      : selectSafeConversationWindow(historySinceBoundary, maxMessages);
   const upstreamMessages = buildUpstreamConversationFromHistory(history);
-  const keptIds = new Set(history.map((message) => message.id));
-  const omittedMessages = normalizedMessages.filter((message) => !keptIds.has(message.id));
 
-  if (omittedMessages.length === 0) {
+  if (!llmCompactionSummary || llmCompactionSummary.trim().length === 0) {
     return { messages: upstreamMessages };
   }
-
-  const durableSummary = buildDurableCompactionSummary({
-    existingMemory: persistedMemory,
-    messages: omittedMessages,
-    recentMessagesKept: history.length,
-    trigger: 'automatic',
-  });
-  const structuredSummary =
-    durableSummary?.structuredSummary ??
-    buildStructuredCompactionSummary({
-      messages: omittedMessages,
-      recentMessagesKept: history.length,
-      trigger: 'automatic',
-    });
 
   return {
     messages: [
@@ -321,30 +310,27 @@ export function buildPreparedUpstreamConversation(
         role: 'system',
         content: [
           '[COMPACT BOUNDARY]',
-          'Earlier conversation history has been compacted to fit the active context window.',
-          `Messages summarized: ${omittedMessages.length}. Recent verbatim messages kept: ${history.length}.`,
-          'Use the structured summary below for earlier history, and rely on the later verbatim messages for the latest turn-level details.',
-        ].join('\n'),
-      },
-      {
-        role: 'system',
-        content: structuredSummary,
+          'Earlier conversation history has been compacted by an LLM summary.',
+          'Use this summary as the authoritative context before the remaining verbatim messages.',
+          llmCompactionSummary,
+        ].join('\n\n'),
       },
       ...upstreamMessages,
     ],
-    ...(durableSummary && durableSummary.newlySummarizedMessages > 0
-      ? {
-          compaction: {
-            eventSummary: `已自动压缩新增的 ${durableSummary.newlySummarizedMessages} 条较早消息，累计覆盖 ${durableSummary.totalRepresentedMessages} 条消息，保留最近 ${history.length} 条消息。`,
-            omittedMessages: durableSummary.totalRepresentedMessages,
-            persistedMemory: durableSummary.persistedMemory,
-            recentMessagesKept: history.length,
-            signature: durableSummary.signature,
-            structuredSummary,
-          },
-        }
-      : {}),
   };
+}
+
+export function isContextOverflow(
+  usage: { inputTokens: number },
+  contextWindow: number,
+  reserved?: number,
+): boolean {
+  if (contextWindow <= 0) {
+    return false;
+  }
+
+  const buffer = reserved ?? Math.min(20_000, Math.floor(contextWindow * 0.15));
+  return usage.inputTokens >= contextWindow - buffer;
 }
 
 function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChatMessage[] {
@@ -942,6 +928,39 @@ export function truncateSessionMessagesAfter(input: {
   return keepRows.map((row) => rowToMessage(row));
 }
 
+export function updateSessionMessagesStatusByRequestScope(input: {
+  clientRequestId: string;
+  roles?: MessageRole[];
+  sessionId: string;
+  status: SessionMessageStatus;
+  userId: string;
+}): void {
+  const rows = sqliteAll<SessionMessageRow>(
+    'SELECT id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms FROM session_messages WHERE session_id = ? AND user_id = ? ORDER BY seq ASC',
+    [input.sessionId, input.userId],
+  );
+  const roleFilter = input.roles ? new Set(input.roles) : null;
+  const targetIds = rows
+    .filter(
+      (row) =>
+        (row.client_request_id === input.clientRequestId ||
+          row.client_request_id?.startsWith(`${input.clientRequestId}:`) === true) &&
+        (roleFilter ? roleFilter.has(row.role) : true),
+    )
+    .map((row) => row.id);
+
+  if (targetIds.length === 0) {
+    return;
+  }
+
+  const placeholders = targetIds.map(() => '?').join(', ');
+  sqliteRun(
+    `UPDATE session_messages SET status = ?, updated_at = datetime('now') WHERE id IN (${placeholders})`,
+    [input.status, ...targetIds],
+  );
+  touchSession(input.sessionId, input.userId);
+}
+
 function selectSafeConversationWindow(messages: Message[], maxMessages: number): Message[] {
   if (messages.length <= maxMessages) return messages;
 
@@ -975,6 +994,28 @@ function selectSafeConversationWindow(messages: Message[], maxMessages: number):
   }
 
   return ensureLatestUserMessage(selected.reverse(), messages);
+}
+
+function selectMessagesSinceCompactionBoundary(
+  messages: Message[],
+  persistedMemory: PersistedCompactionMemory | null,
+  llmCompactionSummary: string | undefined,
+): Message[] {
+  if (messages.length === 0 || !llmCompactionSummary || llmCompactionSummary.trim().length === 0) {
+    return messages;
+  }
+
+  const coveredUntilMessageId = persistedMemory?.coveredUntilMessageId;
+  if (!coveredUntilMessageId) {
+    return messages;
+  }
+
+  const coveredIndex = messages.findIndex((message) => message.id === coveredUntilMessageId);
+  if (coveredIndex < 0) {
+    return messages;
+  }
+
+  return messages.slice(coveredIndex + 1);
 }
 
 function ensureLatestUserMessage(selected: Message[], allMessages: Message[]): Message[] {

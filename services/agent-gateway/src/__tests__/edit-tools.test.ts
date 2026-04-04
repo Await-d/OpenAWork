@@ -2,6 +2,14 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+
+type PostWriteDiagnostic = {
+  file: string;
+  severity: string;
+  line: number;
+  message: string;
+};
 
 const mocks = vi.hoisted(() => ({
   captureBeforeWriteBackupMock: vi.fn<
@@ -22,6 +30,9 @@ const mocks = vi.hoisted(() => ({
   })),
   sqliteAllMock: vi.fn(),
   touchFileMock: vi.fn(async () => undefined),
+  getPostWriteDiagnosticsMock: vi.fn(
+    async (_filePaths: string[]): Promise<PostWriteDiagnostic[]> => [],
+  ),
 }));
 
 vi.mock('../db.js', () => ({
@@ -32,6 +43,16 @@ vi.mock('../lsp/router.js', () => ({
   lspManager: {
     touchFile: mocks.touchFileMock,
   },
+}));
+
+vi.mock('../lsp-tools.js', () => ({
+  getPostWriteDiagnostics: mocks.getPostWriteDiagnosticsMock,
+  postWriteDiagnosticSchema: z.object({
+    file: z.string(),
+    severity: z.string(),
+    line: z.number(),
+    message: z.string(),
+  }),
 }));
 
 vi.mock('../workspace-paths.js', () => ({
@@ -68,6 +89,18 @@ describe('edit-tools', () => {
   });
 
   it('captures backupBeforeRef before editing an existing file', async () => {
+    const diagnostics = [
+      {
+        file: filePath,
+        severity: 'warning',
+        line: 1,
+        message: 'edit diagnostic',
+      },
+    ];
+    mocks.getPostWriteDiagnosticsMock.mockImplementationOnce(
+      async (): Promise<PostWriteDiagnostic[]> => diagnostics,
+    );
+
     const tool = createEditTool('session-a', 'user-a', 'req-a', 'call-1');
     const result = await tool.execute(
       {
@@ -95,6 +128,9 @@ describe('edit-tools', () => {
       contentHash: 'hash-1',
       storagePath: '/tmp/backup-1.txt',
     });
+    expect(mocks.touchFileMock).toHaveBeenCalledWith(filePath, true);
+    expect(mocks.getPostWriteDiagnosticsMock).toHaveBeenCalledWith([filePath]);
+    expect(result.diagnostics).toEqual(diagnostics);
   });
 
   it('degrades gracefully when backup capture returns undefined', async () => {

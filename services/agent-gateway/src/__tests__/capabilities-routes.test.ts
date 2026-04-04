@@ -196,6 +196,35 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       ).toBe(1);
       expect(
         body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'lsp_goto_definition',
+        ),
+      ).toBe(true);
+      expect(
+        body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'lsp_goto_implementation',
+        ),
+      ).toBe(true);
+      expect(
+        body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'lsp_find_references',
+        ),
+      ).toBe(true);
+      expect(
+        body.capabilities.some((item) => item.kind === 'tool' && item.label === 'lsp_symbols'),
+      ).toBe(true);
+      expect(
+        body.capabilities.some(
+          (item) => item.kind === 'tool' && item.label === 'lsp_prepare_rename',
+        ),
+      ).toBe(true);
+      expect(
+        body.capabilities.some((item) => item.kind === 'tool' && item.label === 'lsp_rename'),
+      ).toBe(true);
+      expect(
+        body.capabilities.some((item) => item.kind === 'tool' && item.label === 'lsp_hover'),
+      ).toBe(true);
+      expect(
+        body.capabilities.some(
           (item) =>
             item.kind === 'mcp' &&
             item.label === 'context7' &&

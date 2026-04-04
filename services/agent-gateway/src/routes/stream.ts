@@ -10,25 +10,32 @@ import type {
 } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
-import { mergeCompactionMetadata } from '../compaction-metadata.js';
+import { mergeCompactionMetadata, readPersistedCompactionMemory } from '../compaction-metadata.js';
 import { sqliteGet, sqliteRun } from '../db.js';
+import { writeAuditLog } from '../audit-log.js';
 import {
   modelRequestSchema,
   type ModelRouteConfig,
+  resolveCompactionRoute,
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../model-router.js';
-import { getProviderConfigForSelection } from '../provider-config.js';
+import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import {
   appendSessionMessage,
+  buildDurableCompactionSummary,
+  buildPreparedUpstreamConversation,
   getSessionMessageByRequestId,
+  isContextOverflow,
+  listSessionMessages,
   listSessionMessagesByRequestScope,
 } from '../session-message-store.js';
 import { persistStreamUserMessage } from '../stream-session-title.js';
 import { buildCapabilityContext } from './capabilities.js';
 import { buildRequestScopedSystemPrompts } from './stream-system-prompts.js';
 import {
+  deleteSessionRunEventsByRequest,
   hasPersistedRunEvent,
   listSessionRunEventsByRequest,
   persistSessionRunEventForRequest,
@@ -46,6 +53,7 @@ import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tool-sandbox.js';
 import { buildGatewayToolDefinitions } from './stream-protocol.js';
+import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
 import { extractToolSurfaceProfile } from '../session-workspace-metadata.js';
@@ -70,6 +78,7 @@ import {
   touchSessionRuntimeThread,
   upsertSessionRuntimeThread,
 } from '../session-runtime-thread-store.js';
+import { resolveSessionInteractionStateUpdate } from '../session-runtime-state.js';
 import { persistMonthlyUsageRecord } from '../usage-records-store.js';
 import { listManagedAgentsForUser } from '../agent-catalog.js';
 import { selectDelegatedModelForUser } from '../task-model-selection.js';
@@ -80,6 +89,8 @@ import {
   UPSTREAM_RETRY_SETTINGS_KEY,
   upstreamRetryMaxRetriesSchema,
 } from '../upstream-retry-policy.js';
+import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
+import { callCompactionLlm } from '../compaction-llm.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -480,15 +491,7 @@ export function replayPersistedAssistantResponse(input: {
   });
 
   if (stored.status === 'error') {
-    const fallbackMessage = stored.message.content[0];
-    input.writeChunk(
-      createStreamErrorChunk(
-        'REQUEST_FAILED',
-        fallbackMessage?.type === 'text' ? fallbackMessage.text : 'Request failed',
-        input.runId,
-      ),
-    );
-    return true;
+    return false;
   }
 
   input.writeChunk({
@@ -499,6 +502,38 @@ export function replayPersistedAssistantResponse(input: {
     occurredAt: Date.now(),
   });
   return true;
+}
+
+function clearRetryableFailedRequestArtifacts(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): void {
+  const durableEvents = listSessionRunEventsByRequest({
+    sessionId: input.sessionId,
+    clientRequestId: input.clientRequestId,
+  });
+  const latestEvent = durableEvents.at(-1);
+  const latestBookend = latestEvent ? deriveRunEventBookend(latestEvent) : undefined;
+  const stored = getSessionMessageByRequestId({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    clientRequestId: input.clientRequestId,
+    role: 'assistant',
+  });
+
+  const shouldClearRunEvents = latestBookend?.kind === 'run_failed';
+  const shouldAllowRetry = shouldClearRunEvents || stored?.status === 'error';
+  if (!shouldAllowRetry) {
+    return;
+  }
+
+  if (shouldClearRunEvents) {
+    deleteSessionRunEventsByRequest({
+      sessionId: input.sessionId,
+      clientRequestId: input.clientRequestId,
+    });
+  }
 }
 
 function parseToolInput(raw: string): Record<string, unknown> {
@@ -967,6 +1002,14 @@ export async function handleStreamRequest(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     wl.fail(stepRoute, message);
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'route',
+      sourceName: 'MODEL_RESOLVE',
+      requestId: requestData.clientRequestId,
+      input: { agentId: requestData.agentId },
+      output: { message, code: 'MODEL_RESOLVE' },
+    });
     wl.flush(ctx, 500);
     throw error;
   }
@@ -983,6 +1026,12 @@ export async function handleStreamRequest(input: {
   );
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
+
+  clearRetryableFailedRequestArtifacts({
+    clientRequestId: requestData.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.user.sub,
+  });
 
   if (
     replayPersistedAssistantResponse({
@@ -1014,6 +1063,13 @@ export async function handleStreamRequest(input: {
     }
 
     wl.flush(ctx, 409);
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'route',
+      sourceName: 'REPLAY_FAILED',
+      requestId: requestData.clientRequestId,
+      output: { message: 'Request replay failed', code: 'REQUEST_REPLAY_FAILED' },
+    });
     input.writeChunk(
       createStreamErrorChunk('REQUEST_REPLAY_FAILED', 'Request replay failed', runId),
     );
@@ -1028,6 +1084,16 @@ export async function handleStreamRequest(input: {
     })
   ) {
     wl.flush(ctx, 409);
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'route',
+      sourceName: 'SESSION_CONFLICT',
+      requestId: requestData.clientRequestId,
+      output: {
+        message: 'Another request is already running for this session.',
+        code: 'SESSION_ALREADY_RUNNING',
+      },
+    });
     input.writeChunk(
       createStreamErrorChunk(
         'SESSION_ALREADY_RUNNING',
@@ -1070,38 +1136,17 @@ export async function handleStreamRequest(input: {
       });
     }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
     const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
-      if (event.type === 'question_asked') {
-        shouldKeepPausedState = true;
+      if (
+        event.type === 'question_asked' ||
+        event.type === 'permission_asked' ||
+        event.type === 'permission_replied' ||
+        event.type === 'question_replied'
+      ) {
+        const stateUpdate = resolveSessionInteractionStateUpdate(event);
+        shouldKeepPausedState = stateUpdate.shouldKeepPausedState;
         setPersistedSessionStateStatus({
           sessionId: input.sessionId,
-          status: 'paused',
-          userId: input.user.sub,
-        });
-      }
-
-      if (event.type === 'permission_asked') {
-        shouldKeepPausedState = true;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'paused',
-          userId: input.user.sub,
-        });
-      }
-
-      if (event.type === 'permission_replied' && event.decision !== 'reject') {
-        shouldKeepPausedState = false;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'running',
-          userId: input.user.sub,
-        });
-      }
-
-      if (event.type === 'question_replied' && event.status === 'answered') {
-        shouldKeepPausedState = false;
-        setPersistedSessionStateStatus({
-          sessionId: input.sessionId,
-          status: 'running',
+          status: stateUpdate.status,
           userId: input.user.sub,
         });
       }
@@ -1133,7 +1178,10 @@ export async function handleStreamRequest(input: {
       );
       const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
       const turnFileDiffs = new Map<string, FileDiffContent>();
-      let lastAutoCompactionSignature: string | null = null;
+      const memoryBlock = buildMemoryBlockForSession(
+        input.user.sub,
+        input.sessionContext.metadataJson,
+      );
 
       for (let round = 1; ; round += 1) {
         const result = await runModelRound({
@@ -1154,40 +1202,19 @@ export async function handleStreamRequest(input: {
           ctx,
           workspaceCtx,
           requestSystemPrompts,
+          memoryBlock,
           writeChunk: emitChunk,
         });
 
-        if (result.compaction && result.compaction.signature !== lastAutoCompactionSignature) {
-          lastAutoCompactionSignature = result.compaction.signature;
-          const metadata = mergeCompactionMetadata(input.sessionContext.metadataJson, {
-            persistedMemory: result.compaction.persistedMemory,
-            summary: result.compaction.structuredSummary,
-            trigger: 'automatic',
-            omittedMessages: result.compaction.omittedMessages,
-            recentMessagesKept: result.compaction.recentMessagesKept,
-            signature: result.compaction.signature,
-          });
-          const metadataJson = JSON.stringify(metadata);
-          sqliteRun(
-            "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-            [metadataJson, input.sessionId, input.user.sub],
-          );
-          input.sessionContext.metadataJson = metadataJson;
-          publishSessionRunEvent(
-            input.sessionId,
-            {
-              type: 'compaction',
-              summary: result.compaction.eventSummary,
-              trigger: 'automatic',
-              eventId: `${requestData.clientRequestId}:auto-compact:${round}:${result.compaction.signature}`,
-              runId,
-              occurredAt: Date.now(),
-            },
-            { clientRequestId: requestData.clientRequestId },
-          );
-        }
-
         if (result.usage) {
+          emitChunk(
+            buildStreamUsageChunk({
+              eventSequence,
+              round,
+              runId,
+              usage: result.usage,
+            }),
+          );
           persistMonthlyUsageRecord({
             occurredAt: result.usageOccurredAt,
             inputPricePerMillion: route.inputPricePerMillion,
@@ -1195,6 +1222,92 @@ export async function handleStreamRequest(input: {
             usage: result.usage,
             userId: input.user.sub,
           });
+        }
+
+        if (
+          result.usage &&
+          result.overflow === true &&
+          typeof route.contextWindow === 'number' &&
+          isContextOverflow(result.usage, route.contextWindow)
+        ) {
+          try {
+            const providerRow = sqliteGet<{ value: string }>(
+              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+              [input.user.sub],
+            );
+            const selectionRow = sqliteGet<{ value: string }>(
+              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+              [input.user.sub],
+            );
+            const compactionProviderConfig = await getCompactionProviderConfig(
+              parseStoredJson(providerRow?.value),
+              parseStoredJson(selectionRow?.value),
+            );
+            const compactionRoute = compactionProviderConfig
+              ? resolveCompactionRoute(
+                  compactionProviderConfig.provider,
+                  compactionProviderConfig.modelId,
+                )
+              : route;
+
+            const allMessages = listSessionMessages({
+              sessionId: input.sessionId,
+              userId: input.user.sub,
+              legacyMessagesJson: input.sessionContext.legacyMessagesJson,
+              statuses: ['final'],
+            });
+            const conversationMessages = buildPreparedUpstreamConversation(allMessages, {
+              contextWindow: 1,
+            }).messages;
+            const compactionResult = await callCompactionLlm({
+              conversationMessages,
+              route: compactionRoute,
+              signal: abortController.signal,
+            });
+
+            const durableSummary = buildDurableCompactionSummary({
+              existingMemory: readPersistedCompactionMemory(input.sessionContext.metadataJson),
+              messages: allMessages,
+              recentMessagesKept: 0,
+              trigger: 'automatic',
+            });
+            const mergedMetadata = mergeCompactionMetadata(input.sessionContext.metadataJson, {
+              persistedMemory: durableSummary?.persistedMemory,
+              summary: compactionResult.summary,
+              trigger: 'automatic',
+              omittedMessages: durableSummary?.totalRepresentedMessages ?? allMessages.length,
+              recentMessagesKept: 0,
+              signature: durableSummary?.signature,
+            });
+            const metadata = {
+              ...mergedMetadata,
+              lastCompactionLlmSummary: compactionResult.summary,
+            };
+            const metadataJson = JSON.stringify(metadata);
+            sqliteRun(
+              "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+              [metadataJson, input.sessionId, input.user.sub],
+            );
+            input.sessionContext.metadataJson = metadataJson;
+
+            const signature = durableSummary?.signature ?? String(Date.now());
+            const compactedCount = durableSummary?.newlySummarizedMessages ?? allMessages.length;
+            const representedCount = durableSummary?.totalRepresentedMessages ?? allMessages.length;
+            publishSessionRunEvent(
+              input.sessionId,
+              {
+                type: 'compaction',
+                summary: `已自动压缩新增的 ${compactedCount} 条较早消息，累计覆盖 ${representedCount} 条消息。`,
+                trigger: 'automatic',
+                eventId: `${requestData.clientRequestId}:auto-compact:${round}:${signature}`,
+                runId,
+                occurredAt: Date.now(),
+              },
+              { clientRequestId: requestData.clientRequestId },
+            );
+          } catch (error: unknown) {
+            console.warn('automatic llm compaction failed', error);
+          }
         }
 
         if (result.stopReason === 'error' || result.shouldStop) {
@@ -1207,6 +1320,15 @@ export async function handleStreamRequest(input: {
               status: 'idle',
               userId: input.user.sub,
             });
+          }
+          try {
+            autoExtractMemoriesForRequest({
+              userId: input.user.sub,
+              sessionId: input.sessionId,
+              clientRequestId: requestData.clientRequestId,
+            });
+          } catch (error: unknown) {
+            console.warn('memory auto extraction failed after stream completion', error);
           }
           return { statusCode: result.statusCode };
         }
@@ -1260,6 +1382,13 @@ export async function handleStreamRequest(input: {
       sessionId: input.sessionId,
       status: 'idle',
       userId: input.user.sub,
+    });
+    writeAuditLog({
+      sessionId: input.sessionId,
+      category: 'stream',
+      sourceName: 'STREAM_ERROR',
+      requestId: requestData.clientRequestId,
+      output: { message: String(err), code: 'STREAM_ERROR' },
     });
     appendSessionMessage({
       sessionId: input.sessionId,

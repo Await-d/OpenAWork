@@ -53,6 +53,8 @@ import { desktopAutomationToolDefinition } from './desktop-automation.js';
 import {
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
+  lspGotoImplementationToolDefinition,
+  lspHoverToolDefinition,
   lspPrepareRenameToolDefinition,
   lspRenameToolDefinition,
   lspSymbolsToolDefinition,
@@ -129,10 +131,12 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   webfetchTool,
   ...LSP_TOOLS,
   lspGotoDefinitionToolDefinition,
+  lspGotoImplementationToolDefinition,
   lspFindReferencesToolDefinition,
   lspSymbolsToolDefinition,
   lspPrepareRenameToolDefinition,
   lspRenameToolDefinition,
+  lspHoverToolDefinition,
   taskCreateToolDefinition,
   taskGetToolDefinition,
   taskListToolDefinition,
@@ -406,6 +410,17 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         required: ['filePath', 'line', 'character'],
         additionalProperties: false,
       };
+    case 'lsp_goto_implementation':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+        },
+        required: ['filePath', 'line', 'character'],
+        additionalProperties: false,
+      };
     case 'lsp_find_references':
       return {
         type: 'object',
@@ -451,6 +466,17 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           newName: { type: 'string' },
         },
         required: ['filePath', 'line', 'character', 'newName'],
+        additionalProperties: false,
+      };
+    case 'lsp_hover':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string' },
+          line: { type: 'integer', minimum: 1 },
+          character: { type: 'integer', minimum: 0 },
+        },
+        required: ['filePath', 'line', 'character'],
         additionalProperties: false,
       };
     case 'task_create':

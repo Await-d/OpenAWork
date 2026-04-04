@@ -29,6 +29,7 @@ export interface ModelRouteConfig {
   variant?: string;
   apiBaseUrl: string;
   apiKey: string;
+  contextWindow?: number;
   maxTokens: number;
   temperature: number;
   upstreamProtocol: UpstreamProtocol;
@@ -120,6 +121,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     temperature: requestOverrides.temperature ?? request.temperature,
     upstreamProtocol,
     requestOverrides,
+    contextWindow: undefined,
     supportsThinking: false,
     systemPrompt: request.systemPrompt,
   };
@@ -153,11 +155,44 @@ export function resolveModelRouteFromProvider(
     temperature: requestOverrides.temperature ?? request.temperature,
     upstreamProtocol,
     requestOverrides,
+    contextWindow: modelConfig?.contextWindow,
     providerType: provider.type,
     inputPricePerMillion: modelConfig?.inputPricePerMillion,
     outputPricePerMillion: modelConfig?.outputPricePerMillion,
     supportsThinking: modelConfig?.supportsThinking === true,
     systemPrompt: request.systemPrompt,
+  };
+}
+
+export function resolveCompactionRoute(
+  provider: AIProvider,
+  modelIdOrModel: string | AIModelConfig,
+): ModelRouteConfig {
+  const modelId = typeof modelIdOrModel === 'string' ? modelIdOrModel : modelIdOrModel.id;
+  const modelConfig =
+    typeof modelIdOrModel === 'string'
+      ? provider.defaultModels.find((model) => model.id === modelIdOrModel)
+      : modelIdOrModel;
+  const requestOverrides = buildRequestOverrides(
+    provider.requestOverrides,
+    modelConfig?.requestOverrides,
+    modelId,
+  );
+  const upstreamProtocol = resolveUpstreamProtocol({ model: modelId, providerType: provider.type });
+
+  return {
+    model: modelId,
+    apiBaseUrl:
+      normalizeBaseUrl(provider.baseUrl) ||
+      normalizeBaseUrl(PROVIDER_DEFAULT_BASE_URL[provider.type]),
+    apiKey: resolveProviderApiKey(provider),
+    maxTokens: requestOverrides.maxTokens ?? 4096,
+    temperature: 0,
+    upstreamProtocol,
+    requestOverrides,
+    contextWindow: modelConfig?.contextWindow,
+    providerType: provider.type,
+    supportsThinking: false,
   };
 }
 

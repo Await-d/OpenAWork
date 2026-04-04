@@ -39,10 +39,12 @@ describe('buildGatewayToolDefinitions', () => {
         'codesearch',
         'webfetch',
         'lsp_goto_definition',
+        'lsp_goto_implementation',
         'lsp_find_references',
         'lsp_symbols',
         'lsp_prepare_rename',
         'lsp_rename',
+        'lsp_hover',
         'list',
         'read',
         'glob',
@@ -154,6 +156,11 @@ describe('buildGatewayToolDefinitions', () => {
       'line',
       'character',
     ]);
+    expect(byName.get('lsp_goto_implementation')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
+    ]);
     expect(byName.get('lsp_find_references')?.function.parameters.required).toEqual([
       'filePath',
       'line',
@@ -170,6 +177,11 @@ describe('buildGatewayToolDefinitions', () => {
       'line',
       'character',
       'newName',
+    ]);
+    expect(byName.get('lsp_hover')?.function.parameters.required).toEqual([
+      'filePath',
+      'line',
+      'character',
     ]);
     expect(byName.get('session_list')?.function.parameters.required).toEqual([]);
     expect(byName.get('session_read')?.function.parameters.required).toEqual(['session_id']);

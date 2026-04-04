@@ -105,9 +105,15 @@ export const aiProviderSchema = z
     }
   });
 
+const providerModelSelectionSchema = z.object({
+  providerId: z.string(),
+  modelId: z.string(),
+});
+
 export const activeSelectionSchema = z.object({
-  chat: z.object({ providerId: z.string(), modelId: z.string() }),
-  fast: z.object({ providerId: z.string(), modelId: z.string() }),
+  chat: providerModelSelectionSchema,
+  fast: providerModelSelectionSchema,
+  compaction: providerModelSelectionSchema.optional(),
 });
 
 export const providerSettingsBodySchema = z.object({
@@ -282,6 +288,32 @@ export const getProviderConfigForSelection = (
       if (!provider || !model) {
         const fallback = manager.getChatProviderConfig();
         return { provider: fallback.provider, modelId: fallback.model.id };
+      }
+
+      return { provider, modelId: model.id };
+    })
+    .catch(() => null);
+
+export const getCompactionProviderConfig = (
+  rawProviders: unknown,
+  rawActiveSelection: unknown,
+): Promise<{ provider: AIProvider; modelId: string } | null> =>
+  createProviderManager(rawProviders, rawActiveSelection)
+    .then((manager) => {
+      const config = manager.getConfig();
+      const selection = config.active.compaction;
+      if (!selection) {
+        return null;
+      }
+
+      const provider = config.providers.find(
+        (item) => item.id === selection.providerId && item.enabled,
+      );
+      const model = provider?.defaultModels.find(
+        (item) => item.id === selection.modelId && item.enabled,
+      );
+      if (!provider || !model) {
+        return null;
       }
 
       return { provider, modelId: model.id };

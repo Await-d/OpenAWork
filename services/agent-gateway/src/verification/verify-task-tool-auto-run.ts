@@ -14,6 +14,7 @@ import {
 
 function isTaskToolOutput(value: unknown): value is {
   assignedAgent: string;
+  message?: string;
   sessionId: string;
   status: 'pending' | 'running';
   taskId: string;
@@ -121,6 +122,11 @@ async function main(): Promise<void> {
                 result.output.assignedAgent === 'explore',
                 'task tool output should expose the delegated agent id',
               );
+              assert(
+                typeof result.output.message === 'string' &&
+                  result.output.message.includes('Background task launched.'),
+                'task tool output should expose a human-friendly launch message',
+              );
 
               const output = result.output;
               const parentTaskResultClientRequestId = 'parent-req-1:tool:task-call-1';
@@ -195,17 +201,43 @@ async function main(): Promise<void> {
                 parentSessionId,
               );
               assert(backgroundOutputResult.isError === false, 'background_output should succeed');
-              const backgroundTaskOutput =
-                backgroundOutputResult.output && typeof backgroundOutputResult.output === 'object'
-                  ? (backgroundOutputResult.output as Record<string, unknown>)
-                  : null;
               assert(
-                backgroundTaskOutput?.['status'] === 'done',
-                'background_output should report done',
+                typeof backgroundOutputResult.output === 'string' &&
+                  backgroundOutputResult.output.includes('Task Result') &&
+                  backgroundOutputResult.output.includes('子代理已经执行完成。'),
+                'background_output should return a human-friendly result string by default',
               );
+
+              const backgroundOutputFullSessionResult = await sandbox.execute(
+                {
+                  toolCallId: 'background-output-2',
+                  toolName: 'background_output',
+                  rawInput: { task_id: output.taskId, full_session: true },
+                },
+                new AbortController().signal,
+                parentSessionId,
+              );
+              assert(
+                backgroundOutputFullSessionResult.isError === false,
+                'background_output with full_session should succeed',
+              );
+              const backgroundTaskOutput =
+                backgroundOutputFullSessionResult.output &&
+                typeof backgroundOutputFullSessionResult.output === 'object'
+                  ? (backgroundOutputFullSessionResult.output as Record<string, unknown>)
+                  : null;
               assert(
                 backgroundTaskOutput?.['result'] === '子代理已经执行完成。',
                 'background_output should expose delegated child summary',
+              );
+              assert(
+                typeof backgroundTaskOutput?.['message'] === 'string' &&
+                  String(backgroundTaskOutput['message']).includes('Task Result'),
+                'background_output full_session should preserve the formatted message',
+              );
+              assert(
+                backgroundTaskOutput?.['status'] === 'done',
+                'background_output full_session should report done',
               );
               const upstreamBody = JSON.parse(fetchCalls[0] ?? '{}') as {
                 tools?: Array<{ function?: { name?: string } }>;
@@ -286,6 +318,12 @@ async function main(): Promise<void> {
               assert(
                 parentTaskOutput?.['result'] === '子代理已经执行完成。',
                 'parent session tool_result should expose the delegated child summary',
+              );
+              assert(
+                typeof parentTaskOutput?.['message'] === 'string' &&
+                  String(parentTaskOutput['message']).includes('<task_result>') &&
+                  String(parentTaskOutput['message']).includes(`task_id: ${output.sessionId}`),
+                'parent session tool_result should expose opencode-style task_result semantics',
               );
               const parentReminderText =
                 parentCompletionReminder?.content[0]?.type === 'text'

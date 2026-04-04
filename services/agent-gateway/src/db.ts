@@ -287,6 +287,45 @@ export async function migrate(): Promise<void> {
   );
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      parent_version_id TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_artifacts_user_session ON artifacts(user_id, session_id)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_artifacts_session_updated ON artifacts(session_id, updated_at)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS artifact_versions (
+      id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+      version_number INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      diff_json TEXT NOT NULL DEFAULT '[]',
+      created_by TEXT NOT NULL,
+      created_by_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(artifact_id, version_number)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_created ON artifact_versions(artifact_id, created_at)',
+  );
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS permission_requests (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -460,6 +499,43 @@ export async function migrate(): Promise<void> {
   );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_registry_source_skill_cache_user_category ON registry_source_skill_cache(user_id, category)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      priority INTEGER NOT NULL DEFAULT 50,
+      workspace_root TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memories_user_enabled ON memories(user_id, enabled)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, type)');
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_type_key ON memories(user_id, type, key) WHERE enabled = 1',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_extraction_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      client_request_id TEXT NOT NULL,
+      extracted_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, session_id, client_request_id)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_extraction_logs_user ON memory_extraction_logs(user_id)',
   );
 }
 
