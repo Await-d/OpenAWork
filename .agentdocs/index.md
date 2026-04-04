@@ -2,7 +2,13 @@
 
 ## 活跃工作流
 
-- [260402-对话级文件变更记录保障融合方案](./workflow/260402-对话级文件变更记录保障融合方案.md) — 为 OpenAWork 冻结“SQLite 主真相源 + 写前原文备份兜底 + 统一读模型/恢复链”的对话级文件变更详细记录与保障实施方案
+
+- [260403-lsp-自动使用集成方案](./workflow/260403-lsp-自动使用集成方案.md) — 为 OpenAWork 规划 opencode 风格 LSP 能力集成与自动使用修复方案，聚焦 tool surface、session visibility、prompt guidance、fallback 与验证矩阵
+
+
+
+- [260403-三仓对话模式提示词对比](./workflow/260403-三仓对话模式提示词对比.md) — 对比 `temp/opencode`、`temp/oh-my-opencode`、`temp/OpenCowork` 中模式提示词/agent prompt 配置方式，重点抽取 OpenCowork 的可借鉴机制并回看当前 OpenAWork 三种模式的改造空间
+
 
 - [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout
 
@@ -25,6 +31,12 @@
 
 ## 归档工作流（已完成）
 
+- [260403-变更记录功能收口实施](./workflow/done/260403-变更记录功能收口实施.md) — 已完成把 Sessions 页面补齐为会话级 file changes / snapshots / restore 的产品入口，同时把 `SessionsPage.tsx` 拆回文件体积限制内，并通过页面测试、gateway 断言、LSP、typecheck 与 web build 验证
+- [260403-自动压缩二期实施](./workflow/done/260403-自动压缩二期实施.md) — OpenAWork 自动压缩二期已完成：metadata-backed `compactionMemory` 已接入 gateway 主模型输入链与 `/compact`，按 `coveredUntilMessageId` 做增量归并，并在 omitted history 已被覆盖时复用 durable summary 而不重复触发新一轮压缩
+- [260403-操作电脑语音github工作流集成](./workflow/done/260403-操作电脑语音github工作流集成.md) — 已完成把桌面自动化工具面、Web/Desktop 语音输入闭环，以及 GitHub trigger 的 owner 归属与后台执行主链收口为最小可用产品能力
+- [260403-自动压缩一期实施](./workflow/done/260403-自动压缩一期实施.md) — OpenAWork 自动压缩一期已完成：gateway 主模型输入链现会在固定安全窗口裁切前自动注入 compact boundary + 结构化 summary，并把 command-card/assistant_event UI artifact 从模型上下文中隔离
+- [260402-对话模式默认agent方案](./workflow/done/260402-对话模式默认agent方案.md) — 为聊天对话引入“模式派生默认 agent + 用户手动覆盖优先”的正式实施方案已完成落地：Gateway/Web/Mobile Phase 1 协议链与优先级合同已接通，相关测试、类型检查、构建与 Oracle 复核均已通过
+- [260402-对话级文件变更记录保障融合方案](./workflow/done/260402-对话级文件变更记录保障融合方案.md) — 对话级文件变更保障主线已全量完成：从 SQLite 单一真相源、备份层、restore preview/apply、UI 读模型，到 WS-6 的验证矩阵、rollout gate 与 runbook 均已落地并验证
 - [260402-任务使用链与完成回调收口](./workflow/done/260402-任务使用链与完成回调收口.md) — 继续按当前 fusion-native/reference way 收口 task 使用链、任务完成回调与多端消费差异：`packages/web-client` 已统一消费 `RunEvent`，mobile 已接通 task 快照恢复与 `task_update` 可见性，gateway 的 task parent auto-resume 也已按参考语义启用并通过专项验收
 - [260402-usage持久化回归修复](./workflow/done/260402-usage持久化回归修复.md) — 按既有 usage 方案设计修复 `verify-openai-responses.ts` 的 usage persistence 回归：`runModelRound` 现向上返回 round usage，`stream.ts`/`stream-runtime.ts` 已恢复 `usage_records` 月度写入，`agent-gateway` 全量测试重新通过
 - [260402-opencode-claude-任务体系修复收口](./workflow/done/260402-opencode-claude-任务体系修复收口.md) — 修复 OpenCode/Claude 任务体系主线的 shared/gateway 合同断裂、replay/bookend durable replay 判定与 session runtime state 测试漂移；相关类型检查、构建与定点验证已恢复为绿，完整 gateway 套件仍受 usage 链路的现有失败阻塞
@@ -37,6 +49,25 @@
 - [260401-usage写入链路追踪](./workflow/done/260401-usage写入链路追踪.md) — 上游 usage/token/cost 链路追踪：已确认 provider usage 在 `stream-protocol.ts` 被丢弃，`stream-model-round.ts` / `stream.ts` 无 usage 聚合与月度 upsert，`TokenUsageManagerImpl` 与 `calculateTokenCost()` 处于未接线状态
 
 ## Architecture Decisions
+
+- [2026-04-03] 自动压缩二期先采用 **metadata-backed compactionMemory**：在 `sessions.metadata_json` 中持久化累计摘要、`coveredUntilMessageId` 与统计字段，由 `buildPreparedUpstreamConversation()` 只对未覆盖的 omitted history 做增量归并；若 covered boundary 失效则从当前 omitted history 全量重建，而不是盲目叠加旧 memory。
+- [2026-04-03] 对话模式提示词采用 **gateway request-scoped system prompt injection**：`dialogueMode / yoloMode` 作为结构化字段从 Web/Mobile/web-client 透传，真正的模式正文只保留在 `services/agent-gateway/src/routes/stream-system-prompts.ts`，并同时覆盖 `stream.ts` 与 `stream-runtime.ts`；不要再在前端拼接 `<system-reminder>` 文本。
+
+- [2026-04-03] “操作电脑”首期在 OpenAWork 中采用 **desktop browser automation as a gateway-managed tool**：复用既有 `desktopAutomationManager` 与 sidecar Playwright 驱动，对外统一暴露单个 `desktop_automation` action-based 工具；不要把调试路由或独立 UI 面板继续发展成并行执行子系统。
+
+- [2026-04-03] Web/Desktop 语音模式首期采用 **shared `VoiceRecorder` + browser SpeechRecognition**：共享组件负责 transcript 聚合、错误反馈与确认回填，Mobile 保持 `expo-speech-recognition` 独立实现；不要把 STT 输入与 companion TTS 输出混成同一需求。
+
+- [2026-04-03] GitHub trigger 若要进入真实工作流，必须显式保存 **registering `ownerUserId`**：webhook 可继续匿名接收，但命中后创建的 session 必须带 `user_id`，并以该 owner 身份调用 `runSessionInBackground()`；否则只会退化成不可执行的 idle 壳会话。
+
+- [2026-04-03] 自动压缩一期采用 **gateway 主模型输入链 runtime compaction**：`buildPreparedUpstreamConversation()` 在固定安全窗口即将丢弃历史时注入 compact boundary + structured summary；`command-card:*` 与 `assistant_event:*` 只作为 UI artifact，必须从模型上下文中过滤，避免 JSON 卡片反向污染后续模型轮次。
+
+- [2026-04-03] Gateway 的 request-scoped agent 解析不能在 `streamRequestSchema` 层给 `model` 提前落默认值；必须先组合 `request/agent/session` 候选，再进入 provider/model resolve，否则隐式 `gpt-4o` 会吞掉 agent 派生模型。
+
+- [2026-04-03] `ResolvedStreamModelRoute` 的最终 `systemPrompt/variant` 必须保留已经按优先级合成好的 `resolvedRequestData` 结果；不要让原始 `agentSelection` 在返回对象 merge 阶段反向覆盖 delegated/request-derived prompt。
+
+- [2026-04-02] 对话模式默认 agent 采用 **request-scoped `agentId` + 明确优先级 `manual override > mode default > existing default`**；其中“现有默认”固定指当前 `provider/model/variant/systemPrompt` 解析链，不要继续依赖纯文本 prompt 暗示作为主选择机制。
+
+- [2026-04-02] mode-derived `agentId` 在 Phase 1 只作为**结构化路由候选**：普通聊天中不得压过 delegated child-session 的 `delegatedSystemPrompt`；Web 先实现完整行为，Mobile 仅保证活跃路由协议兼容，legacy ChatScreen 不再作为 Phase 1 对齐目标。
 
 - [2026-04-02] 对话级文件变更保障方案采用 **`session_run_events + session_file_diffs + session_snapshots` 作为唯一真相源，写前原文备份仅作为恢复兜底层**；不要把独立 snapshot repo、transcript JSONL 或 `structuredPatch` 展示语义升级成并列主事实源。
 
@@ -139,6 +170,8 @@
 
 ## Known Pitfalls
 
+- [2026-04-03] 参考 Claude Code 风格能力做产品集成时，最容易误判成“设置页/路由已存在就等于已集成完成”；这次实际缺口证明：desktop automation 若没进 tool surface、VoiceRecorder 若没有 transcript、GitHub trigger 若没有 owner + background stream，都会形成可见但不可用的假闭环。
+
 - [2026-04-02] 做对话级文件变更记录时，最容易犯的错误不是“记得不够多”，而是**让展示层反客为主**：`structuredPatch`、tool result 摘要、甚至 transcript/JSONL 都适合展示和诊断，但不能替代 SQLite durable 主链；否则恢复、审计和 request-scoped replay 会很快漂移。
 
 - [2026-04-02] `.agentdocs/workflow/done/260401-usage写入闭环实现.md` 这类归档文档即使写着“主链已接通”，也不能替代对当前代码的复验；本次实际代码已经回退到“`stream-model-round` 不再返回 usage、`stream.ts/stream-runtime.ts` 不再写 `usage_records`”，直到重新验证 `verify-openai-responses.ts + pnpm run test` 才确认真正恢复。
@@ -153,6 +186,23 @@
 - [2026-04-02] 写前备份层当前先走专用目录 `data/file-backups/<sessionId>/<backupId>.txt` + `session_file_backups` 元数据表，不把原文大文本直接塞进 `session_file_diffs/session_snapshots`；后续更多写路径应复用同一 backup store，而不是各自写临时文件。
 - [2026-04-02] `edit` 已成为第一条接入写前备份的写路径：`createEditTool()` 现在必须接收 `sessionId/userId/requestId/toolCallId`，这样 `backupBeforeRef` 才能带着会话级关联键回流进 durable diff/snapshot 主链。
 - [2026-04-02] `workspace_write_file` / `write` 这类通用写工具不能在“写完之后”再补备份；当前统一通过 `workspace-tools.ts` 的 beforeWrite hook 在真正写入前生成 `backupBeforeRef`，再由 `tool-sandbox.ts` 的 gateway-managed 分支传入会话上下文。
+- [2026-04-02] `apply_patch` 也必须走与 `edit/write` 相同的会话级写前备份路径：当前通过 `executeApplyPatch()` 暴露 beforeWrite hook，再由 `tool-sandbox.ts` 注入 `persistSessionFileBackup()`；不要把 session/user 感知直接硬编码进 patch 工具定义本身。
+- [2026-04-02] `workspace_create_file` 按设计不会生成空的 `backupBeforeRef`：新文件没有写前原文，因此该路径应只产出普通 diff，而不是为 `before=''` 额外制造无意义备份记录。
+- [2026-04-02] `apply_patch` 的备份时序必须是“先备份、后写入”，不能先改文件再补 `backupBeforeRef`；否则备份失败时会留下“文件已改但不可回滚”的窗口。
+- [2026-04-02] `file_write/write_file` 这类 legacy alias 不能绕过备份层；`tool-sandbox.ts` 必须把它们并到与 `write` 相同的 gateway-managed 分支，并由专项测试验证。 
+- [2026-04-02] `session_file_backups` 现在采用 content-addressed 存储：路径按 `data/file-backups/<tier>/<contentHash>.<format>` 组织，同一 `kind + content_hash + content_tier + hash_scope` 可跨 session/path 复用同一份落盘内容，但仍保留各自的 backup metadata 行。
+- [2026-04-02] 备份 tier 策略已冻结：普通文本走 `text/raw`，`.ipynb` 虽单独归类为 `notebook` 但备份层仍坚持 raw-byte hash 以保证可还原原文，binary 内容会被显式识别并通过 `OPENAWORK_FILE_BACKUP_FAILURE_POLICY` 决定 block 或 degrade；所有写路径统一通过 `captureBeforeWriteBackup()` 执行该策略。
+- [2026-04-02] session 删除对 backup 文件的清理顺序必须是：先收集 `storage_path` 候选、再删除 session/backup 行、最后按引用计数 GC 孤儿文件；不能在 session 删除前先删文件，否则会留下“删除失败但 backup 已丢失”的时序漏洞。
+- [2026-04-02] `POST /sessions/:sessionId/restore/preview` 是当前最小恢复消费面：支持 `backupId` 或 `snapshotRef`，始终 validate-only；默认只返回轻量 diff meta，`includeText=true` 才返回全文内容。
+- [2026-04-02] restore preview 的 `hashValidation` 不能再用原始相对路径直接喂给 `HashAnchoredEditorImpl`；必须先按 session workspace root 解析到 safe path，再计算行哈希，否则 snapshot 相对路径会全部退化成 `available=false`。
+- [2026-04-02] `workspaceReview` 的 fallback 需要区分“工作区真的干净”与“git 不可用/非仓库”；当前 restore preview 已通过 `available + reason + conflicts` 结构化返回该状态，避免把不可检测误判成无风险。
+- [2026-04-02] UI 读模型与排障明细必须分 surface：`/sessions/:sessionId/file-changes/read-model` 只返回 turn 级白名单字段（无 `before/after/requestId/toolCallId/backup refs`），而既有 `/file-changes`、`/snapshots*`、`/restore/preview` 保持 debug/detail surface。
+- [2026-04-02] turn 读模型的稳定性不能依赖 SQLite 秒级时间戳的隐式顺序；`session_snapshots` 读取与 `buildSessionTurnDiffReadModel()` 都需要确定性次排序，否则 `latestSnapshotRef` 和 turns 列表会在同秒多快照时漂移。
+- [2026-04-03] WS-6 验证层已拆成三类护栏：单测矩阵（guarantee/source/default/snapshot summary）、写工具 durable 闭环验收（`test:durable` / `verify-write-tools-durable-closure.ts`）、以及 resume/background 不断链验收（`stream-resume-reconcile.test.ts` + `verify-stream-runtime-durable-continuity.ts`）。新增写/恢复链路时，必须至少挂到其中一类，不允许只靠功能代码通过 build。
+- [2026-04-03] restore 已不再只有 preview：`POST /sessions/:sessionId/restore/apply` 现支持 `backupId` / `snapshotRef` 二选一；默认若 workspaceReview 命中冲突则返回 409，成功 apply 会把 `restore_replay/strong` diff 与 request snapshot 回写 durable 主链。
+- [2026-04-03] `restore/apply` 的 git 冲突门控也已形成固定契约：默认命中 `workspaceReview.conflicts` 时返回 409，仅在显式 `forceConflicts=true` 时继续 apply；相关分支已被 `test:restore` 实测覆盖。
+- [2026-04-03] delete cleanup 的专项矩阵现在必须验证四件事：删除 blocker（至少 pendingInteraction）、父子会话级联删除、`audit_logs.session_id` 置空而非误删、以及 shared `storage_path` 仅在最后一个引用消失后才真正 GC。
+- [2026-04-03] rollout gate 已升级为可执行清单：gateway rollout 前必须显式跑 `test:restore`、`test:delete-cleanup`、`test:durable`，并用 `docs/rollout-file-change-durable.md` + `docs/runbook.md` 作为上线/回滚/监控的统一依据。
 - [2026-04-02] `.agentdocs/workflow/done` 与 `index.md` 中的“已完成”只能证明文档流程已归档，不能证明当前工作树真实完成；审计时必须同时检查 `git status`、`typecheck/build/test` 与关键 verification 脚本，尤其是 shared 合同导出与 stream replay/bookend 链路。
 - [2026-04-01] Chat Completions 的流式 usage 不能只实现解析逻辑：OpenAI 语义要求请求体显式带 `stream_options.include_usage=true`，否则最后的 usage chunk 默认不会返回；如果只在 `stream-protocol.ts` 里写了解析，但没在 `upstream-request.ts` 打开这个选项，`usage_records` 在 chat 路径上仍会长期缺数。
 - [2026-04-01] 即使已经在 chat 请求默认值里加入 `stream_options.include_usage=true`，也不能假设它会一直保留：`applyRequestOverridesToBody()` 若先合并外部 `requestOverrides.body.stream_options`，后续没有再做强制 merge，就可能把 `include_usage` 悄悄覆盖掉，导致 usage 写入回归失效。
