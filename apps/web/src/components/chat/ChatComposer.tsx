@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { AttachmentBar, ImagePreview, VoiceRecorder } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type {
@@ -185,6 +185,8 @@ export function ChatComposer({
   onToggleWebSearch,
 }: ChatComposerProps) {
   const isHomeVariant = variant === 'home';
+  const composerListRef = useRef<HTMLDivElement | null>(null);
+  const composerItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const imagePreviews = useMemo(() => {
     return attachmentItems
       .map((item, index) => ({ item, file: attachedFiles[index] ?? null }))
@@ -208,6 +210,28 @@ export function ChatComposer({
   }, [imagePreviews]);
 
   const currentItems = composerMenu?.type === 'slash' ? slashCommandItems : mentionItems;
+
+  useEffect(() => {
+    composerItemRefs.current.length = currentItems.length;
+  }, [currentItems.length]);
+
+  useEffect(() => {
+    if (!composerMenu || currentItems.length === 0) {
+      return;
+    }
+
+    const selectedItem = composerItemRefs.current[composerMenu.selectedIndex];
+    if (
+      !selectedItem ||
+      !composerListRef.current ||
+      typeof selectedItem.scrollIntoView !== 'function'
+    ) {
+      return;
+    }
+
+    selectedItem.scrollIntoView({ block: 'nearest' });
+  }, [composerMenu, currentItems.length]);
+
   const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
   const canSubmit = input.trim().length > 0 || attachedFiles.length > 0;
   const effectiveStopCapability =
@@ -329,6 +353,7 @@ export function ChatComposer({
                 />
               </div>
               <div
+                ref={composerListRef}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -344,6 +369,9 @@ export function ChatComposer({
                     composerMenu.type === 'slash' && item.kind === 'slash' ? item : null;
                   return (
                     <button
+                      ref={(node) => {
+                        composerItemRefs.current[index] = node;
+                      }}
                       key={item.id}
                       type="button"
                       onMouseEnter={() => {

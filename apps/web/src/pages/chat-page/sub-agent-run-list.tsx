@@ -13,6 +13,7 @@ export interface SubAgentRunItem {
   assignedAgent?: string;
   result?: string;
   errorMessage?: string;
+  terminalReason?: string;
 }
 
 function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
@@ -146,6 +147,7 @@ export function buildSubAgentRunItems(
       assignedAgent: task.assignedAgent,
       result: task.result,
       errorMessage: task.errorMessage,
+      terminalReason: task.terminalReason,
     });
   }
 
@@ -162,6 +164,7 @@ export function buildSubAgentRunItems(
       assignedAgent: existing?.assignedAgent,
       result: existing?.result,
       errorMessage: existing?.errorMessage,
+      terminalReason: existing?.terminalReason,
     });
   }
 
@@ -442,13 +445,14 @@ export function SubAgentRunList({
                     会话 · {item.shortSessionId}
                     {showTaskLabel ? ` · ${item.taskLabel}` : ''}
                   </span>
-                  {(item.errorMessage ?? item.result) && (
+                  {(item.errorMessage ?? item.result ?? item.terminalReason) && (
                     <span
                       style={{
                         fontSize: 7.5,
-                        color: item.errorMessage
-                          ? '#fca5a5'
-                          : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
+                        color:
+                          item.errorMessage || item.terminalReason
+                            ? '#fca5a5'
+                            : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -456,9 +460,22 @@ export function SubAgentRunList({
                         flex: 1,
                         textAlign: 'right',
                       }}
-                      title={item.errorMessage ?? item.result}
+                      title={
+                        item.errorMessage ??
+                        item.result ??
+                        (item.terminalReason === 'timeout'
+                          ? '子代理执行超时。'
+                          : item.terminalReason)
+                      }
                     >
-                      {truncateSummary(item.errorMessage ?? item.result ?? '', 32)}
+                      {truncateSummary(
+                        item.errorMessage ??
+                          item.result ??
+                          (item.terminalReason === 'timeout'
+                            ? '子代理执行超时。'
+                            : (item.terminalReason ?? '')),
+                        32,
+                      )}
                     </span>
                   )}
                   {selected && (

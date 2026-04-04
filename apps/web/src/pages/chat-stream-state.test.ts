@@ -157,6 +157,50 @@ describe('chat-stream-state', () => {
     expect(state.agentEvents.some((event) => event.type === 'tool_done')).toBe(true);
   });
 
+  it('preserves timeout reason on task_update and tool_result events', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '检查超时原因');
+    const withTaskUpdate = applyChatRightPanelEvent(started, {
+      type: 'task_update',
+      taskId: 'task-timeout-1',
+      label: '等待子代理首响应',
+      status: 'failed',
+      assignedAgent: 'explore',
+      reason: 'timeout',
+      errorMessage: '子代理首条响应在 30 秒内未返回。',
+      sessionId: 'child-timeout-1',
+      parentSessionId: 'session-1',
+      eventId: 'evt-task-timeout-1',
+      runId: 'run-task-timeout-1',
+      occurredAt: 100,
+    });
+
+    expect(withTaskUpdate.planTasks[0]).toMatchObject({
+      id: 'task-timeout-1',
+      status: 'failed',
+      terminalReason: 'timeout',
+    });
+    expect(withTaskUpdate.agentEvents.at(-1)?.label).toContain('原因：超时');
+
+    const withToolResult = applyChatRightPanelEvent(withTaskUpdate, {
+      type: 'tool_result',
+      toolCallId: 'call-timeout-1',
+      toolName: 'task',
+      output: { status: 'failed', reason: 'timeout' },
+      isError: true,
+      reason: 'timeout',
+      eventId: 'evt-tool-timeout-1',
+      runId: 'run-tool-timeout-1',
+      occurredAt: 101,
+    });
+
+    expect(withToolResult.planTasks.find((task) => task.id === 'call-timeout-1')).toMatchObject({
+      terminalReason: 'timeout',
+      status: 'failed',
+    });
+    expect(withToolResult.agentEvents.at(-1)?.label).toContain('工具超时：task');
+    expect(withToolResult.agentEvents.at(-1)?.error).toContain('原因：超时');
+  });
+
   it('treats pending-permission tool results as paused instead of failed', () => {
     const started = startChatRightPanelRun(createInitialChatRightPanelState(), '调用 task 工具');
     const running = applyChatRightPanelChunk(started, {

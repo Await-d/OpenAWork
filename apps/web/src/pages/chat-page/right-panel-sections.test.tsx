@@ -112,4 +112,41 @@ describe('right panel todo sections', () => {
     const workspaceLink = container?.querySelector('a');
     expect(workspaceLink?.getAttribute('href')).toBe('/artifacts?sessionId=session-1');
   });
+
+  it('renders timeout terminal reasons in the session task section', async () => {
+    await act(async () => {
+      root!.render(
+        <ChatHistoryTabContent
+          childSessions={[]}
+          compactions={[]}
+          pendingPermissions={[]}
+          planHistory={[]}
+          sessionTodos={[]}
+          sessionTasks={[
+            {
+              id: 'task-timeout-1',
+              title: '等待子代理首响应',
+              status: 'failed',
+              blockedBy: [],
+              completedSubtaskCount: 0,
+              readySubtaskCount: 0,
+              priority: 'high',
+              tags: ['task-tool'],
+              createdAt: 1,
+              updatedAt: 2,
+              depth: 0,
+              subtaskCount: 0,
+              unmetDependencyCount: 0,
+              terminalReason: 'timeout',
+            },
+          ]}
+          onOpenSession={() => undefined}
+          sharedUiThemeVars={{}}
+        />,
+      );
+    });
+
+    expect(container?.textContent).toContain('执行超时');
+    expect(container?.textContent).toContain('子任务执行超时');
+  });
 });

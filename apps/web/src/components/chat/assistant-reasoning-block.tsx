@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   buildLocalReasoningBlockKey,
+  extractLocalReasoningExcerpt,
   extractLocalReasoningHeading,
   extractLocalReasoningPreview,
   getLocalReasoningHint,
@@ -48,30 +49,61 @@ const REASONING_CSS_VARIABLES: ReasoningCssVariables = {
   '--reasoning-body-padding-bottom': `${LOCAL_REASONING_UI_TOKENS.bodyPaddingBottomPx}px`,
 };
 
+const reasoningOpenStateCache = new Map<string, boolean>();
+
 export const buildReasoningBlockKey = buildLocalReasoningBlockKey;
 
 export function AssistantReasoningBlock({
   content,
   index,
   renderBody,
+  stateKey,
   streaming = false,
   total,
 }: {
   content: string;
   index: number;
   renderBody: (content: string, streaming: boolean) => React.ReactNode;
+  stateKey?: string;
   streaming?: boolean;
   total: number;
 }) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(() => {
+    if (!stateKey) {
+      return true;
+    }
+
+    return reasoningOpenStateCache.get(stateKey) ?? true;
+  });
   const heading = React.useMemo(() => extractLocalReasoningHeading(content), [content]);
   const preview = React.useMemo(
     () => heading ?? extractLocalReasoningPreview(content),
     [content, heading],
   );
+  const excerpt = React.useMemo(() => extractLocalReasoningExcerpt(content), [content]);
   const charCount = React.useMemo(() => Array.from(content).length, [content]);
   const label = getLocalReasoningLabel({ index, streaming, total });
   const hint = getLocalReasoningHint({ charCount, open, streaming });
+  const statusText = streaming ? '持续生成中' : open ? '正文已展开' : '摘要视图';
+  const visibleHeading = open ? heading : preview;
+
+  React.useEffect(() => {
+    if (!stateKey) {
+      return;
+    }
+
+    setOpen(reasoningOpenStateCache.get(stateKey) ?? true);
+  }, [stateKey]);
+
+  const handleToggle = React.useCallback(() => {
+    setOpen((previous) => {
+      const next = !previous;
+      if (stateKey) {
+        reasoningOpenStateCache.set(stateKey, next);
+      }
+      return next;
+    });
+  }, [stateKey]);
 
   return (
     <section
@@ -85,13 +117,29 @@ export function AssistantReasoningBlock({
         className="chat-markdown-thinking-summary assistant-reasoning-summary"
         data-testid="chat-markdown-thinking-summary"
         aria-expanded={open}
-        onClick={() => setOpen((previous) => !previous)}
+        onClick={handleToggle}
       >
-        <span className="assistant-reasoning-summary-main">
-          <span className="chat-markdown-thinking-label">{label}</span>
-          {preview && <span className="assistant-reasoning-heading">{preview}</span>}
+        <span
+          className="assistant-reasoning-summary-main"
+          aria-live={streaming ? 'polite' : undefined}
+        >
+          <span className="assistant-reasoning-summary-row">
+            <span className="assistant-reasoning-summary-head">
+              <span className="assistant-reasoning-status-cluster">
+                <span className="assistant-reasoning-status-dot" aria-hidden="true" />
+                <span className="chat-markdown-thinking-label">{label}</span>
+              </span>
+              <span className="assistant-reasoning-status-text">{statusText}</span>
+            </span>
+            <span className="assistant-reasoning-summary-meta">
+              <span className="chat-markdown-thinking-hint">{hint}</span>
+            </span>
+          </span>
+          {visibleHeading && <span className="assistant-reasoning-heading">{visibleHeading}</span>}
+          {!open && excerpt && excerpt !== preview && (
+            <span className="assistant-reasoning-preview">{excerpt}</span>
+          )}
         </span>
-        <span className="chat-markdown-thinking-hint">{hint}</span>
       </button>
       {open && (
         <div className="chat-markdown-thinking-body assistant-reasoning-body">

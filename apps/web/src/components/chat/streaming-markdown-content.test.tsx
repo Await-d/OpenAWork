@@ -64,4 +64,15 @@ describe('StreamingMarkdownContent', () => {
     expect(container?.querySelector('.chat-markdown-streaming')?.textContent).toBe(longParagraph);
     expect(markdownRenderSpy).not.toHaveBeenCalled();
   });
+
+  it('routes completed thinking fences through markdown rendering during streaming', async () => {
+    const content = '```thinking\n先比较约束\n再检查边界\n```';
+
+    await act(async () => {
+      root!.render(<StreamingMarkdownContent content={content} />);
+    });
+
+    expect(markdownRenderSpy).toHaveBeenCalledWith(content);
+    expect(container?.querySelector('.chat-markdown-streaming')).toBeNull();
+  });
 });

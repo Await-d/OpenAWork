@@ -3,6 +3,11 @@ import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import {
+  extractLocalReasoningExcerpt,
+  extractLocalReasoningHeading,
+  extractLocalReasoningPreview,
+} from './assistant-reasoning-block.helpers.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -69,7 +74,7 @@ const markdownComponents: Components = {
     const language = rawLanguage?.toUpperCase();
 
     if (isThinkingLanguage(rawLanguage)) {
-      return <ThinkingCodeBlock codeContent={codeContent} codeProps={props} />;
+      return <ThinkingCodeBlock codeContent={codeContent} />;
     }
 
     const previewKind = getStaticPreviewKind(rawLanguage);
@@ -518,36 +523,57 @@ function StaticPreviewCodeBlock({
   );
 }
 
-function ThinkingCodeBlock({
-  codeContent,
-  codeProps,
-}: {
-  codeContent: ReactNode;
-  codeProps: Record<string, unknown>;
-}) {
-  const [open, setOpen] = useState(false);
+function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const previewSource = getCopyableCodeText(codeContent).replace(/\n$/, '');
+  const heading = extractLocalReasoningHeading(previewSource);
+  const preview = extractLocalReasoningPreview(previewSource);
+  const excerpt = extractLocalReasoningExcerpt(previewSource);
+  const charCount = Array.from(previewSource).length;
+  const statusText = open ? '历史推理正文' : '摘要视图';
+  const visibleHeading = open ? heading : preview;
 
   return (
     <div className="chat-markdown-thinking-block" data-open={open ? 'true' : 'false'}>
       <button
         type="button"
         data-testid="chat-markdown-thinking-summary"
-        className="chat-markdown-thinking-summary"
+        className="chat-markdown-thinking-summary assistant-reasoning-summary"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="chat-markdown-thinking-label">思考内容</span>
-        <span className="chat-markdown-thinking-hint">
-          {open ? '点击收起思考内容' : '默认收起，点击展开查看'}
+        <span className="assistant-reasoning-summary-main">
+          <span className="assistant-reasoning-summary-row">
+            <span className="assistant-reasoning-summary-head">
+              <span className="assistant-reasoning-status-cluster">
+                <span className="assistant-reasoning-status-dot" aria-hidden="true" />
+                <span className="chat-markdown-thinking-label">思考内容</span>
+              </span>
+              <span className="assistant-reasoning-status-text">{statusText}</span>
+            </span>
+            <span className="assistant-reasoning-summary-meta">
+              <span className="chat-markdown-thinking-hint">
+                {open ? `收起 · ${charCount} 字` : `已显示摘要 · ${charCount} 字`}
+              </span>
+            </span>
+          </span>
+          {visibleHeading && <span className="assistant-reasoning-heading">{visibleHeading}</span>}
+          {!open && excerpt && excerpt !== preview && (
+            <span className="assistant-reasoning-preview">{excerpt}</span>
+          )}
         </span>
       </button>
       {open && (
-        <div className="chat-markdown-thinking-body">
-          <pre className="chat-markdown-thinking-pre">
-            <code className="chat-markdown-thinking-code" {...codeProps}>
-              {codeContent}
-            </code>
-          </pre>
+        <div className="chat-markdown-thinking-body assistant-reasoning-body">
+          <div className="assistant-rich-content-body">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
+            >
+              {previewSource}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
     </div>

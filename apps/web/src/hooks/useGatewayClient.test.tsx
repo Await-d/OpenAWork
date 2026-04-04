@@ -53,6 +53,7 @@ class MockEventSource {
   static instances: MockEventSource[] = [];
 
   readonly url: string;
+  onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   readonly close = vi.fn<() => void>();
@@ -60,6 +61,10 @@ class MockEventSource {
   constructor(url: string) {
     this.url = url;
     MockEventSource.instances.push(this);
+  }
+
+  emitOpen(): void {
+    this.onopen?.();
   }
 
   emitChunk(chunk: StreamChunk | RunEvent): void {
@@ -262,6 +267,122 @@ describe('useGatewayClient', () => {
     expect(toolNames).toEqual(['web_search']);
     expect(toolResults).toEqual([{ city: '上海' }]);
     expect(done).toEqual(['end_turn']);
+  });
+
+  it('attaches to the active stream and unwraps run event envelopes', async () => {
+    let client: ReturnType<typeof useGatewayClient> | null = null;
+    window.sessionStorage.setItem(
+      'openAwork-active-stream:anonymous',
+      JSON.stringify({
+        clientRequestId: 'req-attach-1',
+        lastSeq: 2,
+        sessionId: 'session-attach',
+        startedAt: 90,
+        transport: 'attach-sse',
+      }),
+    );
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        active: {
+          clientRequestId: 'req-attach-1',
+          heartbeatAtMs: 120,
+          lastSeq: 4,
+          sessionId: 'session-attach',
+          startedAtMs: 100,
+        },
+      }),
+    } satisfies Partial<Response>);
+
+    await act(async () => {
+      root!.render(
+        <HookHarness
+          token="token-123"
+          onReady={(value) => {
+            client = value;
+          }}
+        />,
+      );
+    });
+
+    const deltas: string[] = [];
+    const done: string[] = [];
+    const attachPromise = client!.attachToActiveStream('session-attach', {
+      onDelta: (delta) => deltas.push(delta),
+      onDone: (stopReason) => done.push(stopReason ?? 'none'),
+      onError: () => {
+        throw new Error('should not error');
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const es = MockEventSource.instances[0]!;
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/sessions/session-attach/stream/active',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-123' }),
+      }),
+    );
+    expect(es.url).toContain('/sessions/session-attach/stream/attach?');
+    expect(es.url).toContain('clientRequestId=req-attach-1');
+    expect(es.url).toContain('afterSeq=2');
+
+    act(() => {
+      es.emitOpen();
+    });
+
+    await expect(attachPromise).resolves.toBe(true);
+    expect(client!.getActiveStreamSessionId()).toBe('session-attach');
+
+    act(() => {
+      es.emitChunk({
+        aggregateType: 'run',
+        aggregateId: 'run-1',
+        eventId: 'req-attach-1:5',
+        payload: {
+          clientRequestId: 'req-attach-1',
+          cursor: { clientRequestId: 'req-attach-1', seq: 5 },
+          deliveryState: 'delivered',
+          event: {
+            type: 'text_delta',
+            delta: '继续输出',
+            eventId: 'run-1:evt:5',
+            runId: 'run-1',
+            occurredAt: 101,
+          },
+          outputOffset: 5,
+        },
+        seq: 5,
+        timestamp: 101,
+        version: 1,
+      } as never);
+      es.emitChunk({
+        aggregateType: 'run',
+        aggregateId: 'run-1',
+        eventId: 'req-attach-1:6',
+        payload: {
+          clientRequestId: 'req-attach-1',
+          cursor: { clientRequestId: 'req-attach-1', seq: 6 },
+          deliveryState: 'delivered',
+          event: {
+            type: 'done',
+            stopReason: 'end_turn',
+            eventId: 'run-1:evt:6',
+            runId: 'run-1',
+            occurredAt: 102,
+          },
+          outputOffset: 6,
+        },
+        seq: 6,
+        timestamp: 102,
+        version: 1,
+      } as never);
+    });
+
+    expect(deltas).toEqual(['继续输出']);
+    expect(done).toEqual(['end_turn']);
+    expect(client!.getActiveStreamSessionId()).toBeNull();
   });
 
   it('delivers thinking deltas from websocket streams', async () => {

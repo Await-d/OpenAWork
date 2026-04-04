@@ -151,7 +151,7 @@ function formatSessionTaskStatus(task: HierarchicalSessionTask): string {
     return '已完成';
   }
   if (task.status === 'failed') {
-    return '执行失败';
+    return task.terminalReason === 'timeout' ? '执行超时' : '执行失败';
   }
   if (task.status === 'cancelled') {
     return '已取消';
@@ -420,22 +420,33 @@ export function ChatHistoryTabContent(props: {
               >
                 {formatSessionTaskStatus(task)}
               </div>
-              {(task.errorMessage ?? task.result) && (
+              {(task.errorMessage ?? task.result ?? task.terminalReason) && (
                 <div
                   style={{
                     marginTop: 2,
                     marginLeft: task.depth && task.depth > 0 ? 16 : 0,
                     fontSize: 10,
-                    color: task.errorMessage
-                      ? '#fca5a5'
-                      : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
+                    color:
+                      task.errorMessage || task.terminalReason
+                        ? '#fca5a5'
+                        : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                   }}
-                  title={task.errorMessage ?? task.result}
+                  title={
+                    task.errorMessage ??
+                    task.result ??
+                    (task.terminalReason === 'timeout' ? '子任务执行超时。' : task.terminalReason)
+                  }
                 >
-                  {task.errorMessage ? `✗ ${task.errorMessage}` : `✓ ${task.result ?? ''}`}
+                  {task.errorMessage
+                    ? `✗ ${task.errorMessage}`
+                    : task.result
+                      ? `✓ ${task.result}`
+                      : task.terminalReason === 'timeout'
+                        ? '✗ 子任务执行超时。'
+                        : `✗ ${task.terminalReason ?? ''}`}
                 </div>
               )}
             </div>

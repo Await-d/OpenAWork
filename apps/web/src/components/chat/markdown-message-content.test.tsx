@@ -66,10 +66,12 @@ describe('MarkdownMessageContent', () => {
 }`);
   });
 
-  it('keeps thinking fenced blocks collapsed by default and expands on click', async () => {
+  it('shows thinking fenced blocks expanded by default and lets users collapse to the summary view', async () => {
     await act(async () => {
       root!.render(
-        <MarkdownMessageContent content={'```thinking\n这里是思考过程\n```\n\n这是最终正文。'} />,
+        <MarkdownMessageContent
+          content={'```thinking\n这里是思考过程\n继续补充第二步\n```\n\n这是最终正文。'}
+        />,
       );
     });
 
@@ -81,19 +83,33 @@ describe('MarkdownMessageContent', () => {
     ) as HTMLButtonElement | null;
 
     expect(thinkingBlock).not.toBeNull();
-    expect(thinkingBlock?.dataset.open).toBe('false');
+    expect(thinkingBlock?.dataset.open).toBe('true');
     expect(container?.textContent).toContain('思考内容');
+    expect(container?.textContent).toContain('这里是思考过程');
+    expect(container?.textContent).toContain('继续补充第二步');
+    expect(container?.textContent).toContain('收起 ·');
     expect(container?.textContent).toContain('这是最终正文。');
-    expect(container?.querySelector('.chat-markdown-thinking-code')).toBeNull();
+    expect(container?.querySelector('.assistant-reasoning-preview')).toBeNull();
+    expect(container?.textContent).not.toContain('已显示摘要');
+
+    act(() => {
+      toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(thinkingBlock?.dataset.open).toBe('false');
+    expect(container?.textContent).toContain('已显示摘要 ·');
+    expect(container?.querySelector('.assistant-reasoning-preview')?.textContent).toBe(
+      '继续补充第二步',
+    );
+    expect(thinkingBlock?.querySelector('.assistant-reasoning-body')).toBeNull();
 
     act(() => {
       toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     expect(thinkingBlock?.dataset.open).toBe('true');
-    expect(container?.querySelector('.chat-markdown-thinking-code')?.textContent).toContain(
-      '这里是思考过程',
-    );
+    expect(container?.textContent).toContain('这里是思考过程');
+    expect(container?.textContent).toContain('继续补充第二步');
   });
 
   it('renders HTML fenced blocks with a safe preview tab', async () => {

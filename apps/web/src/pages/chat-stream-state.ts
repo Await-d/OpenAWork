@@ -15,6 +15,7 @@ type ChatPlanTask = PlanTask & {
   requestedSkills?: string[];
   result?: string;
   errorMessage?: string;
+  terminalReason?: string;
 };
 
 type ChatTaskUpdateEvent = Extract<RunEvent, { type: 'task_update' }> & {
@@ -264,6 +265,7 @@ function applyTaskUpdateEvent(
     requestedSkills: event.requestedSkills ?? existingTask?.requestedSkills,
     result: event.result ?? existingTask?.result,
     errorMessage: event.errorMessage ?? existingTask?.errorMessage,
+    terminalReason: event.reason ?? existingTask?.terminalReason,
   });
 
   const dagNodes = upsertById(state.dagNodes, event.taskId, {
@@ -299,6 +301,7 @@ function applyTaskUpdateEvent(
     event.assignedAgent,
     event.result,
     event.errorMessage,
+    event.reason,
   );
 
   return {
@@ -319,9 +322,12 @@ function buildTaskEventLabel(
   assignedAgent?: string,
   result?: string,
   errorMessage?: string,
+  reason?: string,
 ): string {
   const parts: string[] = [base];
   if (assignedAgent) parts.push(`代理：${assignedAgent}`);
+  if (reason === 'timeout') parts.push('原因：超时');
+  else if (reason) parts.push(`原因：${reason}`);
   if (errorMessage) parts.push(`错误：${truncate(errorMessage, 60)}`);
   else if (result) parts.push(`结果：${truncate(result, 60)}`);
   return parts.join(' · ');
@@ -415,6 +421,7 @@ function applyToolResultEvent(
       : event.isError
         ? ('failed' as const)
         : ('done' as const),
+    terminalReason: event.reason,
   });
 
   const dagNodes = upsertById(state.dagNodes, event.toolCallId, {
@@ -440,9 +447,15 @@ function applyToolResultEvent(
         isPendingPermission
           ? `等待权限：${event.toolName}`
           : event.isError
-            ? `工具失败：${event.toolName}`
+            ? event.reason === 'timeout'
+              ? `工具超时：${event.toolName}`
+              : `工具失败：${event.toolName}`
             : `工具完成：${event.toolName}`,
-        isPendingPermission || event.isError ? stringifyToolOutput(event.output) : undefined,
+        isPendingPermission || event.isError
+          ? event.reason === 'timeout'
+            ? `原因：超时 · ${stringifyToolOutput(event.output)}`
+            : stringifyToolOutput(event.output)
+          : undefined,
       ),
     ],
   };

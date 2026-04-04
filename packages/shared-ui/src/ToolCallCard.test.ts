@@ -113,6 +113,35 @@ describe('resolveToolCallCardDisplayData', () => {
     expect(displayData.taskMeta?.outputStatus).toBe('queued');
   });
 
+  it('prefers semantic task output message as the card preview for completed tasks', () => {
+    const displayData = resolveToolCallCardDisplayData({
+      toolName: 'task',
+      input: {
+        description: '让子代理写出结论',
+        prompt: '请给出最终结论',
+        subagent_type: 'explore',
+      },
+      output: {
+        taskId: 'task-finished',
+        sessionId: 'session-child-finished',
+        status: 'done',
+        result: '最终结论摘要',
+        message: [
+          'task_id: session-child-finished (for resuming to continue this task if needed)',
+          '',
+          '<task_result>',
+          '最终结论正文',
+          '</task_result>',
+        ].join('\n'),
+      },
+    });
+
+    expect(displayData.taskSummary?.preview).toBe('最终结论正文');
+    expect(displayData.taskMeta?.outputMessage).toContain('<task_result>');
+    expect(displayData.taskMeta?.outputResult).toBe('最终结论摘要');
+    expect(displayData.taskMeta?.extraOutput).toBeUndefined();
+  });
+
   it('keeps generic tool summaries untouched', () => {
     const displayData = resolveToolCallCardDisplayData({
       toolName: 'bash',

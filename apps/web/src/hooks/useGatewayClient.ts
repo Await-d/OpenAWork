@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth.js';
 import type {
   DialogueMode,
   RunEvent,
+  RunEventEnvelope,
   StreamChunk,
   StreamDoneChunk,
   StreamToolCallChunk,
@@ -28,6 +29,7 @@ interface StreamCallbacks {
 }
 
 interface GatewayClient {
+  attachToActiveStream: (sessionId: string, callbacks: StreamCallbacks) => Promise<boolean>;
   getActiveStreamSessionId: () => string | null;
   stream: (sessionId: string, message: string, callbacks: StreamCallbacks) => void;
   stopStream: () => Promise<boolean>;
@@ -35,13 +37,46 @@ interface GatewayClient {
 
 interface ActiveStreamSnapshot {
   clientRequestId: string;
+  lastSeq: number;
   sessionId: string;
   startedAt: number;
+  transport: 'attach-sse' | 'sse' | 'ws';
 }
 
 interface ThinkingDeltaChunkLike {
   type: 'thinking_delta';
   delta: string;
+}
+
+function createGatewayEventSource(url: string): EventSource {
+  if (typeof window !== 'undefined') {
+    const maybeFactory = (
+      window as typeof window & {
+        __OPENAWORK_TEST_EVENT_SOURCE_FACTORY?: (url: string) => EventSource;
+      }
+    ).__OPENAWORK_TEST_EVENT_SOURCE_FACTORY;
+    if (typeof maybeFactory === 'function') {
+      return maybeFactory(url);
+    }
+  }
+
+  return new EventSource(url);
+}
+
+function isRunEventEnvelope(value: unknown): value is RunEventEnvelope {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  const payload = record['payload'];
+  return (
+    record['aggregateType'] === 'run' &&
+    typeof record['seq'] === 'number' &&
+    payload !== null &&
+    typeof payload === 'object' &&
+    'event' in (payload as Record<string, unknown>)
+  );
 }
 
 function extractRuntimeTextDelta(value: unknown): string {
@@ -90,6 +125,7 @@ function readPersistedActiveStreamSnapshot(): ActiveStreamSnapshot | null {
     const parsed = JSON.parse(rawValue) as Record<string, unknown>;
     if (
       typeof parsed['clientRequestId'] !== 'string' ||
+      (parsed['lastSeq'] !== undefined && typeof parsed['lastSeq'] !== 'number') ||
       typeof parsed['sessionId'] !== 'string' ||
       typeof parsed['startedAt'] !== 'number'
     ) {
@@ -99,8 +135,13 @@ function readPersistedActiveStreamSnapshot(): ActiveStreamSnapshot | null {
 
     return {
       clientRequestId: parsed['clientRequestId'],
+      lastSeq: typeof parsed['lastSeq'] === 'number' ? parsed['lastSeq'] : 0,
       sessionId: parsed['sessionId'],
       startedAt: parsed['startedAt'],
+      transport:
+        parsed['transport'] === 'attach-sse' || parsed['transport'] === 'sse'
+          ? parsed['transport']
+          : 'ws',
     };
   } catch {
     window.sessionStorage.removeItem(getActiveStreamStorageKey());
@@ -132,6 +173,162 @@ export function useGatewayClient(token: string | null): GatewayClient {
   const callbacksRef = useRef<StreamCallbacks | null>(null);
   const activeRequestRef = useRef<ActiveStreamSnapshot | null>(readPersistedActiveStreamSnapshot());
   const stopRequestedRef = useRef(false);
+
+  const attachToActiveStream = useCallback(
+    async (sessionId: string, callbacks: StreamCallbacks): Promise<boolean> => {
+      if (!token) {
+        return false;
+      }
+
+      const gatewayUrl = useAuthStore.getState().gatewayUrl;
+      const sessionsClient = createSessionsClient(gatewayUrl);
+      const existingSnapshot = activeRequestRef.current;
+      let activeStream = null;
+      try {
+        activeStream = await sessionsClient.getActiveStream(token, sessionId);
+      } catch {
+        callbacksRef.current = null;
+        return false;
+      }
+
+      if (!activeStream) {
+        if (
+          activeRequestRef.current?.sessionId === sessionId &&
+          !wsRef.current &&
+          !sseRef.current
+        ) {
+          activeRequestRef.current = null;
+          persistActiveStreamSnapshot(null);
+        }
+        callbacksRef.current = null;
+        return false;
+      }
+
+      const requestedAfterSeq =
+        existingSnapshot?.sessionId === sessionId &&
+        existingSnapshot.clientRequestId === activeStream.clientRequestId
+          ? Math.min(existingSnapshot.lastSeq, activeStream.lastSeq)
+          : activeStream.lastSeq;
+
+      callbacksRef.current = callbacks;
+      wsRef.current?.close();
+      sseRef.current?.close();
+      stopRequestedRef.current = false;
+      activeRequestRef.current = {
+        clientRequestId: activeStream.clientRequestId,
+        lastSeq: requestedAfterSeq,
+        sessionId: activeStream.sessionId,
+        startedAt: activeStream.startedAtMs,
+        transport: 'attach-sse',
+      };
+      persistActiveStreamSnapshot(activeRequestRef.current);
+
+      return await new Promise<boolean>((resolve) => {
+        let settled = false;
+        let opened = false;
+
+        const cleanup = (clearSnapshot: boolean) => {
+          sseRef.current?.close();
+          if (sseRef.current === es) {
+            sseRef.current = null;
+          }
+          callbacksRef.current = null;
+          stopRequestedRef.current = false;
+          if (clearSnapshot) {
+            activeRequestRef.current = null;
+            persistActiveStreamSnapshot(null);
+          }
+        };
+
+        const handleChunk = (chunk: StreamChunk | RunEvent) => {
+          if (settled) return;
+          if (isThinkingDeltaChunk(chunk)) {
+            callbacks.onThinkingDelta?.(extractRuntimeTextDelta(chunk.delta));
+            callbacks.onEvent?.(chunk);
+            return;
+          }
+          switch (chunk.type) {
+            case 'text_delta':
+              callbacks.onDelta(extractRuntimeTextDelta(chunk.delta));
+              return;
+            case 'tool_call_delta':
+              callbacks.onToolCall?.(chunk);
+              callbacks.onEvent?.(chunk);
+              return;
+            case 'done':
+              settled = true;
+              cleanup(true);
+              callbacks.onEvent?.(chunk);
+              callbacks.onDone(chunk.stopReason);
+              return;
+            case 'error':
+              settled = true;
+              cleanup(true);
+              callbacks.onEvent?.(chunk);
+              callbacks.onError(chunk.code, chunk.message);
+              return;
+            default:
+              callbacks.onEvent?.(chunk);
+              return;
+          }
+        };
+
+        const params = new URLSearchParams({
+          afterSeq: String(requestedAfterSeq),
+          clientRequestId: activeStream.clientRequestId,
+          token: token ?? '',
+        });
+        const es = createGatewayEventSource(
+          `${gatewayUrl}/sessions/${sessionId}/stream/attach?${params.toString()}`,
+        );
+        sseRef.current = es;
+
+        es.onopen = () => {
+          opened = true;
+          resolve(true);
+        };
+
+        es.onmessage = (event) => {
+          const parsed = JSON.parse(event.data as string) as
+            | RunEventEnvelope
+            | StreamChunk
+            | RunEvent;
+          if (isRunEventEnvelope(parsed)) {
+            const cursorSeq = parsed.payload.cursor?.seq ?? parsed.seq;
+            if (activeRequestRef.current?.clientRequestId === activeStream.clientRequestId) {
+              activeRequestRef.current = {
+                ...activeRequestRef.current,
+                lastSeq: Math.max(activeRequestRef.current.lastSeq, cursorSeq),
+                transport: 'attach-sse',
+              };
+              persistActiveStreamSnapshot(activeRequestRef.current);
+            }
+            handleChunk(parsed.payload.event);
+            return;
+          }
+          handleChunk(parsed);
+        };
+
+        es.onerror = () => {
+          if (settled) {
+            return;
+          }
+          if (!opened) {
+            settled = true;
+            cleanup(true);
+            resolve(false);
+            return;
+          }
+          if (stopRequestedRef.current) {
+            settled = true;
+            cleanup(true);
+            callbacks.onDone('cancelled');
+          }
+        };
+      });
+    },
+    [token],
+  );
 
   const stopStream = useCallback(async (): Promise<boolean> => {
     const activeRequest = activeRequestRef.current;
@@ -175,7 +372,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
       const clientRequestId = crypto.randomUUID();
-      activeRequestRef.current = { clientRequestId, sessionId, startedAt: Date.now() };
+      activeRequestRef.current = {
+        clientRequestId,
+        lastSeq: 0,
+        sessionId,
+        startedAt: Date.now(),
+        transport: 'ws',
+      };
       persistActiveStreamSnapshot(activeRequestRef.current);
       stopRequestedRef.current = false;
       const model = callbacks.model ?? 'default';
@@ -243,6 +446,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
       const startSse = () => {
         if (fallbackStarted || settled) return;
         fallbackStarted = true;
+        if (activeRequestRef.current) {
+          activeRequestRef.current = {
+            ...activeRequestRef.current,
+            transport: 'sse',
+          };
+          persistActiveStreamSnapshot(activeRequestRef.current);
+        }
         const params = new URLSearchParams({
           ...(agentId ? { agentId } : {}),
           ...(dialogueMode ? { dialogueMode } : {}),
@@ -332,5 +542,5 @@ export function useGatewayClient(token: string | null): GatewayClient {
     [token],
   );
 
-  return { getActiveStreamSessionId, stream, stopStream };
+  return { attachToActiveStream, getActiveStreamSessionId, stream, stopStream };
 }

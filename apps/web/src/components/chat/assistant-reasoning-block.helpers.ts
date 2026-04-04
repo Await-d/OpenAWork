@@ -14,6 +14,7 @@ export const LOCAL_REASONING_UI_TOKENS = {
   labelBadgeRadiusPx: 999,
   labelFontSizePx: 11,
   labelLetterSpacingPx: 0.5,
+  excerptMaxChars: 160,
   previewMaxChars: 96,
   summaryGapPx: 12,
   summaryMainGapPx: 4,
@@ -75,6 +76,34 @@ export function extractLocalReasoningPreview(text: string): string | null {
     : firstLine;
 }
 
+export function extractLocalReasoningExcerpt(text: string): string | null {
+  const heading = extractLocalReasoningHeading(text);
+  const lines = text
+    .replace(/\r\n?/gu, '\n')
+    .split('\n')
+    .map((line) => cleanLocalReasoningInlineText(line))
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const previewLines = heading
+    ? lines[0] === heading
+      ? lines.slice(1, 3)
+      : lines.slice(0, Math.min(lines.length, 2))
+    : lines.slice(1, 3);
+
+  if (previewLines.length === 0) {
+    return heading ?? lines[0] ?? null;
+  }
+
+  const excerpt = previewLines.join(' · ');
+  return excerpt.length > LOCAL_REASONING_UI_TOKENS.excerptMaxChars
+    ? `${excerpt.slice(0, LOCAL_REASONING_UI_TOKENS.excerptMaxChars - 1)}…`
+    : excerpt;
+}
+
 export function cleanLocalReasoningInlineText(value: string): string {
   return value
     .replace(/`([^`]+)`/gu, '$1')
@@ -101,9 +130,13 @@ export function getLocalReasoningHint(options: {
   open: boolean;
   streaming: boolean;
 }): string {
+  if (options.streaming) {
+    return options.open ? '持续更新中 · 点击收起' : '已显示摘要 · 点击展开';
+  }
+
   if (options.open) {
     return `收起 · ${options.charCount} 字`;
   }
 
-  return options.streaming ? '展开查看推理过程' : `展开 · ${options.charCount} 字`;
+  return `已显示摘要 · ${options.charCount} 字`;
 }

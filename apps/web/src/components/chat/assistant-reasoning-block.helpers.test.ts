@@ -3,24 +3,18 @@ import {
   buildReasoningBlockKey,
   extractReasoningHeading,
   extractReasoningPreview,
-  getReasoningHint,
   getReasoningLabel,
-  REASONING_UI_TOKENS,
 } from '@openAwork/shared';
 import {
   buildLocalReasoningBlockKey,
+  extractLocalReasoningExcerpt,
   extractLocalReasoningHeading,
   extractLocalReasoningPreview,
   getLocalReasoningHint,
   getLocalReasoningLabel,
-  LOCAL_REASONING_UI_TOKENS,
 } from './assistant-reasoning-block.helpers.js';
 
 describe('assistant-reasoning-block.helpers', () => {
-  it('keeps local reasoning ui tokens aligned with shared tokens', () => {
-    expect(LOCAL_REASONING_UI_TOKENS).toEqual(REASONING_UI_TOKENS);
-  });
-
   it.each([
     '## 先比较约束\n- 再确认边界\n最后组织答复',
     '<h3>计划 <code>foo</code></h3>\r\n正文',
@@ -41,10 +35,22 @@ describe('assistant-reasoning-block.helpers', () => {
       getReasoningLabel({ index: 1, streaming: false, total: 2 }),
     );
     expect(getLocalReasoningHint({ charCount: 42, open: false, streaming: true })).toBe(
-      getReasoningHint({ charCount: 42, open: false, streaming: true }),
+      '已显示摘要 · 点击展开',
+    );
+    expect(getLocalReasoningHint({ charCount: 42, open: true, streaming: true })).toBe(
+      '持续更新中 · 点击收起',
+    );
+    expect(getLocalReasoningHint({ charCount: 42, open: false, streaming: false })).toBe(
+      '已显示摘要 · 42 字',
     );
     expect(getLocalReasoningHint({ charCount: 42, open: true, streaming: false })).toBe(
-      getReasoningHint({ charCount: 42, open: true, streaming: false }),
+      '收起 · 42 字',
+    );
+  });
+
+  it('builds a collapsed excerpt without repeating the preview line when no heading exists', () => {
+    expect(extractLocalReasoningExcerpt('先比较约束\n再检查边界\n最后组织答复')).toBe(
+      '再检查边界 · 最后组织答复',
     );
   });
 });

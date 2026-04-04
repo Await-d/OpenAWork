@@ -268,7 +268,7 @@ function MetaLine({
 
 export function renderChatMessageContent(m: ChatMessage) {
   if (m.role !== 'assistant') return m.content;
-  return renderAssistantMessageContentValue(m.content);
+  return renderAssistantMessageContentValue(m.content, { messageId: m.id });
 }
 
 export function renderStreamingChatMessageContent(content: string) {
@@ -276,6 +276,7 @@ export function renderStreamingChatMessageContent(content: string) {
 }
 
 export interface ChatToolRenderOptions {
+  messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
   selectedChildSessionId?: string | null;
   streaming?: boolean;
@@ -287,7 +288,7 @@ export function renderChatMessageContentWithOptions(
   options?: Omit<ChatToolRenderOptions, 'streaming'>,
 ) {
   if (m.role !== 'assistant') return m.content;
-  return renderAssistantMessageContentValue(m.content, options);
+  return renderAssistantMessageContentValue(m.content, { ...options, messageId: m.id });
 }
 
 export function renderStreamingChatMessageContentWithOptions(
@@ -354,6 +355,7 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
   if (assistantTrace) {
     return (
       <AssistantTraceContent
+        messageId={options?.messageId}
         payload={assistantTrace}
         streaming={options?.streaming}
         onOpenChildSession={options?.onOpenChildSession}
@@ -426,12 +428,14 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
 }
 
 function AssistantTraceContent({
+  messageId,
   onOpenChildSession,
   payload,
   selectedChildSessionId,
   streaming = false,
   taskRuntimeLookup,
 }: {
+  messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
   payload: AssistantTracePayload;
   selectedChildSessionId?: string | null;
@@ -442,12 +446,15 @@ function AssistantTraceContent({
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {(payload.reasoningBlocks ?? []).map((reasoning, index) => (
         <AssistantReasoningBlock
-          key={buildReasoningBlockKey(reasoning, index)}
+          key={
+            streaming ? `streaming-reasoning-${index}` : buildReasoningBlockKey(reasoning, index)
+          }
           content={reasoning}
           index={index}
           renderBody={(reasoningContent, isStreaming) => (
             <AssistantRichContentBody content={reasoningContent} streaming={isStreaming} />
           )}
+          stateKey={messageId ? `${messageId}:${index}` : undefined}
           streaming={streaming}
           total={payload.reasoningBlocks?.length ?? 0}
         />

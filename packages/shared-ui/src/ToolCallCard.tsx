@@ -537,13 +537,22 @@ function resolveTaskToolMeta(
   const outputTaskId = readNonEmptyString(outputRecord?.['taskId']);
   const outputSessionId = readNonEmptyString(outputRecord?.['sessionId']);
   const outputStatus = readNonEmptyString(outputRecord?.['status']);
+  const outputMessage = readNonEmptyString(outputRecord?.['message']);
+  const outputResult = readNonEmptyString(outputRecord?.['result']);
+  const outputErrorMessage = readNonEmptyString(outputRecord?.['errorMessage']);
   const readonly = detectReadonlyTask({ command, description, prompt });
   const extraOutput =
     outputRecord === null
       ? output
       : Object.fromEntries(
           Object.entries(outputRecord).filter(
-            ([key]) => key !== 'taskId' && key !== 'sessionId' && key !== 'status',
+            ([key]) =>
+              key !== 'taskId' &&
+              key !== 'sessionId' &&
+              key !== 'status' &&
+              key !== 'message' &&
+              key !== 'result' &&
+              key !== 'errorMessage',
           ),
         );
   const normalizedExtraOutput =
@@ -577,6 +586,9 @@ function resolveTaskToolMeta(
     outputTaskId,
     outputSessionId,
     outputStatus,
+    outputErrorMessage,
+    outputMessage,
+    outputResult,
     readonly,
     extraOutput: normalizedExtraOutput,
     hasAdditionalInputFields,
@@ -641,6 +653,11 @@ function resolveTaskPreview(
   title: string,
   subtitle?: string,
 ): string | undefined {
+  const semanticPreview = resolveTaskSemanticPreview(meta);
+  if (semanticPreview) {
+    return semanticPreview;
+  }
+
   if (!meta.prompt) {
     return undefined;
   }
@@ -650,6 +667,17 @@ function resolveTaskPreview(
   }
 
   return truncateText(meta.prompt, 160);
+}
+
+function resolveTaskSemanticPreview(meta: TaskToolMeta): string | undefined {
+  const preferred = meta.outputErrorMessage ?? meta.outputMessage ?? meta.outputResult;
+  if (!preferred) {
+    return undefined;
+  }
+
+  const taskResultMatch = preferred.match(/<task_result>\s*([\s\S]*?)\s*<\/task_result>/u);
+  const normalized = (taskResultMatch?.[1] ?? preferred).trim();
+  return normalized.length > 0 ? truncateText(normalized, 160) : undefined;
 }
 
 function resolveTaskFooter(meta: TaskToolMeta): string | undefined {
@@ -1447,6 +1475,23 @@ export function ToolCallCard({
             <ToolField label="提示词" tone="muted" value={displayData.taskMeta.prompt} />
           )}
           {taskMetaDetails && <ToolField label="任务信息" value={taskMetaDetails} />}
+          {displayData.taskMeta?.outputMessage && (
+            <ToolField
+              label={isError ? '语义错误' : '语义输出'}
+              tone={isError ? 'danger' : 'default'}
+              value={displayData.taskMeta.outputMessage}
+            />
+          )}
+          {displayData.taskMeta?.outputErrorMessage && !displayData.taskMeta.outputMessage && (
+            <ToolField
+              label="错误摘要"
+              tone="danger"
+              value={displayData.taskMeta.outputErrorMessage}
+            />
+          )}
+          {displayData.taskMeta?.outputResult && !displayData.taskMeta.outputMessage && (
+            <ToolField label="结果摘要" value={displayData.taskMeta.outputResult} />
+          )}
           {displayData.taskMeta !== undefined && showInputField && (
             <ToolField label="输入" tone="muted" value={stringifyValue(input)} />
           )}

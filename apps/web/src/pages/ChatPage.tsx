@@ -121,6 +121,7 @@ import {
   calculateStreamingRevealDelay,
   calculateStreamingRevealStep,
 } from './chat-page/streaming-reveal.js';
+import { isScrollTopNearLatest, resolveLatestScrollTop } from './chat-page/scroll-alignment.js';
 import { buildChatContextUsageSnapshot } from './chat-page/context-usage.js';
 import {
   hasUsableReportedUsageSnapshot,
@@ -498,6 +499,7 @@ export default function ChatPage() {
   >(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const contentColumnRef = useRef<HTMLDivElement>(null);
   const scrollRegionRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -582,11 +584,13 @@ export default function ChatPage() {
   const queueFlushInFlightRef = useRef(false);
   const queueHydratingRef = useRef(false);
   const stoppingStreamRef = useRef(false);
+  const currentAssistantStreamMessageIdRef = useRef<string | null>(null);
   const streamRevealTargetRef = useRef('');
   const streamRevealVisibleRef = useRef('');
   const streamRevealTargetCodePointsRef = useRef<string[]>([]);
   const streamRevealVisibleCodePointCountRef = useRef(0);
   const streamRevealNextAllowedAtRef = useRef(0);
+  const attachAttemptedSessionRef = useRef<string | null>(null);
   const sendMessageRef = useRef<
     (
       overrideText?: string,
@@ -705,6 +709,7 @@ export default function ChatPage() {
     setStoppingStream(false);
     setActiveStreamStartedAt(null);
     setActiveStreamFirstTokenLatencyMs(null);
+    currentAssistantStreamMessageIdRef.current = null;
   }, []);
 
   const scheduleStreamReveal = useCallback(() => {
@@ -1760,6 +1765,44 @@ export default function ChatPage() {
     return groups[groups.length - 1] ?? bottomRef.current;
   }, []);
 
+  const getLatestAnchorMetrics = useCallback(
+    (
+      scrollRegion: HTMLDivElement | null,
+    ): {
+      anchorHeight: number;
+      anchorTop: number;
+      clientHeight: number;
+      maxScrollTop: number;
+    } | null => {
+      if (!scrollRegion || scrollRegion.clientHeight <= 0) {
+        return null;
+      }
+
+      const latestAnchor = getLatestAssistantAnchor();
+      if (
+        !latestAnchor ||
+        latestAnchor === bottomRef.current ||
+        !scrollRegion.contains(latestAnchor)
+      ) {
+        return null;
+      }
+
+      const scrollRegionRect = scrollRegion.getBoundingClientRect();
+      const latestAnchorRect = latestAnchor.getBoundingClientRect();
+      if (scrollRegionRect.height === 0 || latestAnchorRect.height === 0) {
+        return null;
+      }
+
+      return {
+        anchorHeight: latestAnchorRect.height,
+        anchorTop: scrollRegion.scrollTop + (latestAnchorRect.top - scrollRegionRect.top),
+        clientHeight: scrollRegion.clientHeight,
+        maxScrollTop: Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight),
+      };
+    },
+    [getLatestAssistantAnchor],
+  );
+
   const isScrollRegionNearLatest = useCallback(
     (scrollRegion: HTMLDivElement | null): boolean => {
       if (!scrollRegion) {
@@ -1772,31 +1815,28 @@ export default function ChatPage() {
         return true;
       }
 
-      const latestAnchor = getLatestAssistantAnchor();
-      if (
-        !latestAnchor ||
-        latestAnchor === bottomRef.current ||
-        !scrollRegion.contains(latestAnchor)
-      ) {
+      const latestAnchorMetrics = getLatestAnchorMetrics(scrollRegion);
+      if (!latestAnchorMetrics) {
         return (
           scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight <
           CHAT_LATEST_REGION_FALLBACK_PX
         );
       }
 
-      const scrollRegionRect = scrollRegion.getBoundingClientRect();
-      const latestAnchorRect = latestAnchor.getBoundingClientRect();
-      const latestAnchorCenter =
-        latestAnchorRect.top - scrollRegionRect.top + latestAnchorRect.height / 2;
-      const viewportCenter = scrollRegion.clientHeight / 2;
-      const centerTolerance = Math.min(
+      const followTolerance = Math.min(
         160,
         Math.max(CHAT_LATEST_FOCUS_THRESHOLD_PX * 2, scrollRegion.clientHeight * 0.18),
       );
 
-      return Math.abs(latestAnchorCenter - viewportCenter) <= centerTolerance;
+      return isScrollTopNearLatest({
+        ...latestAnchorMetrics,
+        align: visibleStreaming ? 'center' : 'latest-edge',
+        centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
+        scrollTop: scrollRegion.scrollTop,
+        tolerancePx: followTolerance,
+      });
     },
-    [getLatestAssistantAnchor],
+    [getLatestAnchorMetrics, visibleStreaming],
   );
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
@@ -1831,28 +1871,20 @@ export default function ChatPage() {
       pendingScrollFrameRef.current = requestAnimationFrame(() => {
         if (scrollRegion) {
           const maxScrollTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
-          let nextTop = maxScrollTop;
-          let shouldForceScroll = scrollRegion.clientHeight === 0;
-
-          if (
-            align === 'center' &&
+          const latestAnchorMetrics =
             latestAnchor &&
             latestAnchor !== bottomRef.current &&
             scrollRegion.contains(latestAnchor)
-          ) {
-            const scrollRegionRect = scrollRegion.getBoundingClientRect();
-            const latestAnchorRect = latestAnchor.getBoundingClientRect();
-            shouldForceScroll =
-              shouldForceScroll || scrollRegionRect.height === 0 || latestAnchorRect.height === 0;
-            const latestAnchorCenter =
-              scrollRegion.scrollTop +
-              (latestAnchorRect.top - scrollRegionRect.top) +
-              latestAnchorRect.height / 2;
-            nextTop = Math.max(
-              0,
-              Math.min(maxScrollTop, latestAnchorCenter - scrollRegion.clientHeight / 2),
-            );
-          }
+              ? getLatestAnchorMetrics(scrollRegion)
+              : null;
+          const nextTop = latestAnchorMetrics
+            ? resolveLatestScrollTop({
+                ...latestAnchorMetrics,
+                align,
+                centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
+              })
+            : maxScrollTop;
+          const shouldForceScroll = scrollRegion.clientHeight === 0;
 
           if (
             shouldForceScroll ||
@@ -1869,7 +1901,7 @@ export default function ChatPage() {
         pendingScrollFrameRef.current = null;
       });
     },
-    [getLatestAssistantAnchor],
+    [getLatestAnchorMetrics, getLatestAssistantAnchor],
   );
 
   const focusComposerWithText = useCallback((text: string) => {
@@ -2104,6 +2136,35 @@ export default function ChatPage() {
       scrollToBottom('auto', 'latest-edge');
     }
   }, [messages.length, scrollToBottom]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const contentColumn = contentColumnRef.current;
+    if (!contentColumn) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (!isNearBottomRef.current) {
+        return;
+      }
+
+      if (messages.length === 0 && !visibleStreaming) {
+        return;
+      }
+
+      scrollToBottom('auto', visibleStreaming ? 'center' : 'latest-edge');
+    });
+
+    observer.observe(contentColumn);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [messages.length, scrollToBottom, visibleStreaming]);
 
   async function ensureSession(): Promise<string> {
     if (currentSessionId) {
@@ -2380,6 +2441,7 @@ export default function ChatPage() {
       }
     }
 
+    currentAssistantStreamMessageIdRef.current = crypto.randomUUID();
     setStreaming(true);
     setStoppingStream(false);
     stoppingStreamRef.current = false;
@@ -2708,7 +2770,7 @@ export default function ChatPage() {
           setMessages((prev) => [
             ...prev,
             {
-              id: crypto.randomUUID(),
+              id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
               role: 'assistant',
               content,
               createdAt: finishedAt,
@@ -2732,7 +2794,7 @@ export default function ChatPage() {
           setMessages((prev) => [
             ...prev,
             {
-              id: crypto.randomUUID(),
+              id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
               role: 'assistant',
               content,
               createdAt: finishedAt,
@@ -2989,6 +3051,373 @@ export default function ChatPage() {
     },
     [appendAssistantDerivedMessages, resolveAssistantEventKind],
   );
+
+  useEffect(() => {
+    const shouldAttemptAttach =
+      Boolean(currentSessionId) &&
+      sessionStateStatus === 'running' &&
+      isPageActive &&
+      !streaming &&
+      (recoveredStreamSnapshot !== null || activeGatewayStreamSessionId === currentSessionId);
+
+    if (!shouldAttemptAttach || !currentSessionId) {
+      if (!currentSessionId || sessionStateStatus !== 'running' || !isPageActive) {
+        attachAttemptedSessionRef.current = null;
+      }
+      return;
+    }
+
+    if (attachAttemptedSessionRef.current === currentSessionId) {
+      return;
+    }
+    attachAttemptedSessionRef.current = currentSessionId;
+
+    const sid = currentSessionId;
+    const initialText = recoveredStreamSnapshot?.text ?? '';
+    const initialThinking = recoveredStreamSnapshot?.thinking ?? '';
+    const initialUsage = recoveredStreamSnapshot?.usage ?? null;
+    const requestStartedAt = recoveredStreamSnapshot?.startedAt ?? Date.now();
+    const requestProviderId = activeProviderId || undefined;
+    const requestModelLabel = activeModelId || undefined;
+    const requestTextCodePoints = Array.from(initialText);
+    let attachStateInitialized = false;
+    let accumulated = initialText;
+    let accumulatedThinking = initialThinking;
+    let firstTokenObservedAt: number | null = null;
+    let pausedForPermission = false;
+    const toolCallIds = new Set<string>();
+    let cancelled = false;
+
+    const buildAttachTraceContent = (textContent: string): string => {
+      const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
+      if (reasoningBlocks.length === 0) {
+        return textContent;
+      }
+      return createAssistantTraceContent({ reasoningBlocks, text: textContent, toolCalls: [] });
+    };
+
+    const ensureAttachStateInitialized = () => {
+      if (attachStateInitialized) {
+        return;
+      }
+      attachStateInitialized = true;
+      currentAssistantStreamMessageIdRef.current = crypto.randomUUID();
+      stoppingStreamRef.current = false;
+      setStreaming(true);
+      setStoppingStream(false);
+      setSessionStateStatus('running');
+      setReportedStreamUsage(initialUsage);
+      setActiveStreamStartedAt(requestStartedAt);
+      setActiveStreamFirstTokenLatencyMs(null);
+      setStreamBuffer(initialText);
+      setStreamThinkingBuffer(initialThinking);
+      setRecoveredStreamSnapshot(null);
+      streamRevealTargetRef.current = initialText;
+      streamRevealVisibleRef.current = initialText;
+      streamRevealTargetCodePointsRef.current = requestTextCodePoints;
+      streamRevealVisibleCodePointCountRef.current = requestTextCodePoints.length;
+      streamRevealNextAllowedAtRef.current = 0;
+    };
+
+    void client
+      .attachToActiveStream(sid, {
+        onEvent: (event) => {
+          if (cancelled || activeSessionRef.current !== sid) {
+            return;
+          }
+          ensureAttachStateInitialized();
+
+          if (event.type === 'tool_call_delta' || event.type === 'tool_result') {
+            toolCallIds.add(event.toolCallId);
+          }
+
+          if (event.type === 'usage') {
+            setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
+          }
+
+          if (event.type === 'session_child') {
+            setChildSessions((previous) => {
+              if (previous.some((session) => session.id === event.sessionId)) {
+                return previous.map((session) =>
+                  session.id === event.sessionId
+                    ? { ...session, title: event.title ?? session.title }
+                    : session,
+                );
+              }
+
+              return [
+                {
+                  id: event.sessionId,
+                  title: event.title,
+                },
+                ...previous,
+              ];
+            });
+          }
+
+          if (event.type === 'task_update') {
+            setSessionTasks((previous) => {
+              const existingTask = previous.find((task) => task.id === event.taskId);
+              const nextTask: SessionTask = {
+                assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
+                blockedBy: existingTask?.blockedBy ?? [],
+                completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
+                createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
+                depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
+                errorMessage: event.errorMessage ?? existingTask?.errorMessage,
+                id: event.taskId,
+                parentTaskId: event.parentTaskId,
+                priority: existingTask?.priority ?? 'medium',
+                readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
+                result: event.result ?? existingTask?.result,
+                sessionId: event.sessionId ?? existingTask?.sessionId,
+                status:
+                  event.status === 'in_progress'
+                    ? 'running'
+                    : event.status === 'done'
+                      ? 'completed'
+                      : event.status,
+                subtaskCount: existingTask?.subtaskCount ?? 0,
+                tags: existingTask?.tags ?? [],
+                title: event.label,
+                unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
+                updatedAt: event.occurredAt ?? Date.now(),
+              };
+
+              const existingIndex = previous.findIndex((task) => task.id === event.taskId);
+              if (existingIndex === -1) {
+                return [nextTask, ...previous];
+              }
+
+              return previous.map((task, index) =>
+                index === existingIndex ? { ...task, ...nextTask } : task,
+              );
+            });
+          }
+
+          if (event.type === 'permission_asked') {
+            pausedForPermission = true;
+            setSessionStateStatus('paused');
+            setPendingPermissions((previous) => {
+              const nextPermission: PendingPermissionRequest = {
+                createdAt: new Date(event.occurredAt ?? Date.now()).toISOString(),
+                decision: undefined,
+                previewAction: event.previewAction,
+                reason: event.reason,
+                requestId: event.requestId,
+                riskLevel: event.riskLevel,
+                scope: event.scope,
+                sessionId: sid,
+                status: 'pending',
+                toolName: event.toolName,
+              };
+
+              const existingIndex = previous.findIndex(
+                (permission) => permission.requestId === event.requestId,
+              );
+              if (existingIndex === -1) {
+                return [nextPermission, ...previous];
+              }
+
+              return previous.map((permission, index) =>
+                index === existingIndex ? { ...permission, ...nextPermission } : permission,
+              );
+            });
+            resetStreamState();
+            requestSessionListRefresh();
+          }
+
+          if (event.type === 'permission_replied') {
+            if (event.decision !== 'reject') {
+              setSessionStateStatus('running');
+            }
+            setPendingPermissions((previous) =>
+              previous.filter((permission) => permission.requestId !== event.requestId),
+            );
+          }
+
+          setRightPanelState((prev) => {
+            if (
+              event.type === 'tool_call_delta' ||
+              event.type === 'done' ||
+              event.type === 'error'
+            ) {
+              return applyChatRightPanelChunk(prev, event);
+            }
+            return applyChatRightPanelEvent(prev, event);
+          });
+
+          if (!isNearBottomRef.current) {
+            setHasPendingFollowContent((previous) => previous || true);
+          }
+
+          if (shouldShowRunEventInTranscript(event)) {
+            appendAssistantEventMessages([event]);
+          }
+        },
+        onDelta: (delta) => {
+          if (cancelled || activeSessionRef.current !== sid || stoppingStreamRef.current) {
+            return;
+          }
+          ensureAttachStateInitialized();
+          if (firstTokenObservedAt === null) {
+            firstTokenObservedAt = Date.now();
+            setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
+          }
+          accumulated += delta;
+          streamRevealTargetRef.current = accumulated;
+          streamRevealTargetCodePointsRef.current.push(...Array.from(delta));
+          const shouldRevealStructuredContentImmediately =
+            isImmediatelyRenderableStructuredContent(accumulated);
+          if (prefersReducedMotion || shouldRevealStructuredContentImmediately) {
+            streamRevealVisibleRef.current = accumulated;
+            streamRevealVisibleCodePointCountRef.current =
+              streamRevealTargetCodePointsRef.current.length;
+            streamRevealNextAllowedAtRef.current = 0;
+            setStreamBuffer(accumulated);
+          } else {
+            scheduleStreamReveal();
+          }
+          if (!isNearBottomRef.current) {
+            setHasPendingFollowContent((previous) => previous || true);
+          }
+        },
+        onThinkingDelta: (delta) => {
+          if (cancelled || activeSessionRef.current !== sid || stoppingStreamRef.current) {
+            return;
+          }
+          ensureAttachStateInitialized();
+          accumulatedThinking += delta;
+          setStreamThinkingBuffer(accumulatedThinking);
+        },
+        onToolCall: (chunk) => {
+          if (cancelled || activeSessionRef.current !== sid) {
+            return;
+          }
+          ensureAttachStateInitialized();
+          toolCallIds.add(chunk.toolCallId);
+          if (!rightOpenRef.current) {
+            setRightTab('tools');
+            setRightOpen(true);
+          }
+        },
+        onDone: (stopReason) => {
+          if (cancelled || activeSessionRef.current !== sid) {
+            requestSessionListRefresh();
+            return;
+          }
+          ensureAttachStateInitialized();
+          const finishedAt = Date.now();
+          const resolvedStopReason = stopReason ?? 'end_turn';
+          const wasCancelled = String(resolvedStopReason) === 'cancelled';
+          const finalAccumulatedText = wasCancelled ? streamRevealVisibleRef.current : accumulated;
+          const hasRenderableAssistantReply =
+            finalAccumulatedText.trim().length > 0 || accumulatedThinking.trim().length > 0;
+          if (hasRenderableAssistantReply || !wasCancelled) {
+            const content = buildAttachTraceContent(finalAccumulatedText);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
+                role: 'assistant',
+                content,
+                createdAt: finishedAt,
+                durationMs: finishedAt - requestStartedAt,
+                stopReason: resolvedStopReason,
+                tokenEstimate: estimateTokenCount(
+                  [accumulatedThinking, finalAccumulatedText]
+                    .filter((item) => item.trim().length > 0)
+                    .join('\n\n'),
+                ),
+                toolCallCount: toolCallIds.size,
+                providerId: requestProviderId,
+                model: requestModelLabel,
+                firstTokenLatencyMs:
+                  firstTokenObservedAt !== null
+                    ? firstTokenObservedAt - requestStartedAt
+                    : undefined,
+                status: 'completed',
+              },
+            ]);
+          }
+          setSessionStateStatus('idle');
+          resetStreamState();
+          requestSessionListRefresh();
+        },
+        onError: (code, message) => {
+          if (cancelled || activeSessionRef.current !== sid) {
+            requestSessionListRefresh();
+            return;
+          }
+          ensureAttachStateInitialized();
+          if (pausedForPermission) {
+            requestSessionListRefresh();
+            return;
+          }
+          const finishedAt = Date.now();
+          const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
+          logger.error('attach stream error', message ? `${code}: ${message}` : code);
+          const content = buildAttachTraceContent(errorContent);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
+              role: 'assistant',
+              content,
+              createdAt: finishedAt,
+              durationMs: finishedAt - requestStartedAt,
+              stopReason: 'error',
+              tokenEstimate: estimateTokenCount(
+                [accumulatedThinking, errorContent]
+                  .filter((item) => item.trim().length > 0)
+                  .join('\n\n'),
+              ),
+              toolCallCount: toolCallIds.size,
+              providerId: requestProviderId,
+              model: requestModelLabel,
+              firstTokenLatencyMs:
+                firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
+              status: 'error',
+            },
+          ]);
+          setSessionStateStatus('idle');
+          resetStreamState();
+          setStreamError(message ? `${code}: ${message}` : code);
+          requestSessionListRefresh();
+        },
+      })
+      .then((attached) => {
+        if (cancelled || activeSessionRef.current !== sid) {
+          return;
+        }
+        if (attached) {
+          return;
+        }
+
+        attachAttemptedSessionRef.current = null;
+        resetStreamState();
+        void loadCurrentSessionSnapshot(sid).catch(() => undefined);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeModelId,
+    activeProviderId,
+    appendAssistantEventMessages,
+    activeGatewayStreamSessionId,
+    client,
+    currentSessionId,
+    isPageActive,
+    loadCurrentSessionSnapshot,
+    prefersReducedMotion,
+    recoveredStreamSnapshot,
+    resetStreamState,
+    scheduleStreamReveal,
+    sessionStateStatus,
+    streaming,
+  ]);
 
   async function handleRetryInCurrentSession() {
     if (!retryPrompt) return;
@@ -3542,7 +3971,7 @@ export default function ChatPage() {
 
     return {
       message: {
-        id: '__streaming__',
+        id: currentAssistantStreamMessageIdRef.current ?? '__streaming__',
         role: 'assistant',
         content:
           toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
@@ -3575,6 +4004,7 @@ export default function ChatPage() {
       },
       renderContent: (message) =>
         renderStreamingChatMessageContentWithOptions(message.content, {
+          messageId: message.id,
           onOpenChildSession: openChildSessionInspector,
           selectedChildSessionId,
           taskRuntimeLookup: taskToolRuntimeLookup,
@@ -3845,6 +4275,7 @@ export default function ChatPage() {
                 }}
               >
                 <div
+                  ref={contentColumnRef}
                   data-testid="chat-content-column"
                   style={{
                     width: '100%',

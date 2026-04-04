@@ -39,6 +39,7 @@ function createSessionTask(overrides: Partial<SessionTask>): SessionTask {
     unmetDependencyCount: overrides.unmetDependencyCount ?? 0,
     result: overrides.result,
     errorMessage: overrides.errorMessage,
+    terminalReason: overrides.terminalReason,
   };
 }
 
@@ -135,5 +136,24 @@ describe('sub-agent-run-list', () => {
 
     expect(html).toContain('会话 · child-1');
     expect(html).not.toContain('会话 · child-1 · MCP 文档检索');
+  });
+
+  it('surfaces timeout terminal reasons when no explicit error or result exists', () => {
+    const html = renderStatuses(
+      buildSubAgentRunItems(
+        [createSession({ id: 'child-timeout-1', title: '超时子代理', state_status: 'idle' })],
+        [
+          createSessionTask({
+            id: 'task-timeout-1',
+            title: '超时子代理',
+            status: 'failed',
+            sessionId: 'child-timeout-1',
+            terminalReason: 'timeout',
+          }),
+        ],
+      ),
+    );
+
+    expect(html).toContain('子代理执行超时');
   });
 });

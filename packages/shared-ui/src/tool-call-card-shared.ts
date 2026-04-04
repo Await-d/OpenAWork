@@ -9,6 +9,9 @@ export interface TaskToolMeta {
   outputTaskId?: string;
   outputSessionId?: string;
   outputStatus?: string;
+  outputErrorMessage?: string;
+  outputMessage?: string;
+  outputResult?: string;
   readonly: boolean;
   extraOutput?: unknown;
   hasAdditionalInputFields: boolean;

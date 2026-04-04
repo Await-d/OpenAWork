@@ -177,6 +177,13 @@ type MockSessionTodoLanes = {
 };
 
 const streamMock = vi.fn();
+type MockAttachStreamCallbacks = {
+  onDelta: (delta: string) => void;
+  onDone: (stopReason?: string) => void;
+};
+const attachToActiveStreamMock = vi.fn(
+  async (_sessionId: string, _callbacks: MockAttachStreamCallbacks) => false,
+);
 const activeStreamSessionIdRef: { current: string | null } = { current: null };
 const getActiveStreamSessionIdMock = vi.fn(() => activeStreamSessionIdRef.current);
 const stopStreamMock = vi.fn(async () => true);
@@ -255,6 +262,7 @@ vi.mock('../hooks/useWorkspace.js', () => ({
 
 vi.mock('../hooks/useGatewayClient.js', () => ({
   useGatewayClient: vi.fn(() => ({
+    attachToActiveStream: attachToActiveStreamMock,
     getActiveStreamSessionId: getActiveStreamSessionIdMock,
     stream: streamMock,
     stopStream: stopStreamMock,
@@ -520,7 +528,12 @@ vi.mock('@openAwork/shared-ui', async () => {
 
   return {
     PlanPanel: () => null,
-    AgentVizPanel: () => null,
+    AgentVizPanel: ({ events }: { events?: Array<{ label: string }> }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'mock-agent-viz-panel' },
+        (events ?? []).map((event) => event.label).join('|'),
+      ),
     canConfigureThinkingForModel: () => true,
     StatusPill: ({ label }: { label: string }) => React.createElement('span', null, label),
     ToolKindIcon: ({ kind }: { kind?: string }) =>
@@ -602,7 +615,18 @@ vi.mock('@openAwork/shared-ui', async () => {
       ),
     StreamRenderer: () => null,
     PlanHistoryPanel: () => null,
-    AgentDAGGraph: () => null,
+    AgentDAGGraph: ({
+      edges,
+      nodes,
+    }: {
+      edges?: Array<{ id: string }>;
+      nodes?: Array<{ id: string; label: string }>;
+    }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'mock-agent-dag-graph' },
+        `nodes:${nodes?.length ?? 0}|edges:${edges?.length ?? 0}|labels:${(nodes ?? []).map((node) => node.label).join('|')}`,
+      ),
     MCPServerList: ({ servers }: { servers: Array<{ name: string; status: string }> }) =>
       React.createElement(
         'div',
@@ -698,6 +722,8 @@ beforeEach(() => {
   workspaceMock.fetchWorkspaceRoots.mockClear();
   workspaceMock.fetchTree.mockClear();
   streamMock.mockReset();
+  attachToActiveStreamMock.mockReset();
+  attachToActiveStreamMock.mockImplementation(async () => false);
   activeStreamSessionIdRef.current = null;
   getActiveStreamSessionIdMock.mockClear();
   stopStreamMock.mockReset();
@@ -1939,6 +1965,85 @@ describe('ChatPage', () => {
     expect(stopStreamMock).not.toHaveBeenCalled();
   });
 
+  it('attaches to the active stream after refresh and appends live deltas', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '继续生成',
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      runEvents: [
+        {
+          type: 'text_delta',
+          delta: '已恢复',
+          runId: 'run-attach-1',
+          occurredAt: 10,
+        },
+      ],
+      state_status: 'running',
+    }));
+    attachToActiveStreamMock.mockImplementationOnce(
+      async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        callbacks.onDelta('继续输出');
+        callbacks.onDone('end_turn');
+        return true;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await flushEffects();
+
+    expect(attachToActiveStreamMock).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        onDelta: expect.any(Function),
+        onDone: expect.any(Function),
+      }),
+    );
+    expect(rendered.textContent).toContain('已恢复继续输出');
+  });
+
+  it('settles attach recovery into a final assistant message after completion', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '请继续输出当前分析',
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      runEvents: [
+        {
+          type: 'text_delta',
+          delta: '已恢复',
+          runId: 'run-attach-final',
+          occurredAt: 10,
+        },
+      ],
+      state_status: 'running',
+    }));
+    attachToActiveStreamMock.mockImplementationOnce(
+      async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        callbacks.onDelta('继续输出');
+        callbacks.onDone('end_turn');
+        return true;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await flushEffects();
+
+    expect(rendered.textContent).toContain('已恢复继续输出');
+    expect(rendered.textContent).not.toContain('会话持续运行中');
+    expect(rendered.textContent).not.toContain('当前运行流仍受此页控制');
+  });
+
   it('keeps queued messages visible when the refreshed session snapshot cannot be loaded', async () => {
     getSessionMock.mockRejectedValueOnce(new Error('network unavailable'));
     useChatQueueStore.setState({
@@ -2100,7 +2205,7 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('reduce motion 下应该立即显示完整文本');
   });
 
-  it('renders streamed thinking content as a collapsed thinking block after completion', async () => {
+  it('renders streamed thinking content expanded by default after completion', async () => {
     let pendingCallbacks:
       | {
           onDelta: (delta: string) => void;
@@ -2157,7 +2262,10 @@ describe('ChatPage', () => {
     ) as HTMLButtonElement | null;
 
     expect(thinkingToggle).not.toBeNull();
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
     expect(rendered.textContent).toContain('思考内容');
+    expect(rendered.textContent).toContain('先比较方案，再下结论。');
+    expect(rendered.textContent).toContain('收起 ·');
     expect(rendered.textContent).toContain('最终结论。');
   });
 
@@ -2216,8 +2324,10 @@ describe('ChatPage', () => {
     ) as HTMLButtonElement | null;
 
     expect(thinkingToggle).not.toBeNull();
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
     expect(rendered.textContent).toContain('思考中');
     expect(rendered.textContent).toContain('先比较方案');
+    expect(rendered.textContent).toContain('持续更新中');
   });
 
   it('ignores late thinking deltas after stopping the stream', async () => {
@@ -2324,7 +2434,7 @@ describe('ChatPage', () => {
     await flushEffects();
 
     await act(async () => {
-      pendingCallbacks?.onThinkingDelta?.('## 第一步\n先比较约束');
+      pendingCallbacks?.onThinkingDelta?.('## 第');
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -2335,11 +2445,20 @@ describe('ChatPage', () => {
 
     expect(thinkingToggle).not.toBeNull();
 
-    act(() => {
-      thinkingToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(rendered.textContent).toContain('第');
+
+    await act(async () => {
+      pendingCallbacks?.onThinkingDelta?.('一步\n先比较约束');
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
-    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
+    const updatedToggleAfterHeading = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(updatedToggleAfterHeading?.getAttribute('aria-expanded')).toBe('true');
     expect(rendered.textContent).toContain('先比较约束');
 
     await act(async () => {
@@ -2354,6 +2473,81 @@ describe('ChatPage', () => {
 
     expect(updatedToggle?.getAttribute('aria-expanded')).toBe('true');
     expect(rendered.textContent).toContain('再检查边界条件');
+  });
+
+  it('preserves a collapsed reasoning block when streaming completes', async () => {
+    let pendingCallbacks:
+      | {
+          onDone: (stopReason?: string) => void;
+          onThinkingDelta?: (delta: string) => void;
+        }
+      | undefined;
+
+    streamMock.mockImplementationOnce(
+      (
+        _sid: string,
+        _message: string,
+        callbacks: {
+          onDone: (stopReason?: string) => void;
+          onThinkingDelta?: (delta: string) => void;
+        },
+      ) => {
+        pendingCallbacks = callbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '完成前先收起思考');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    await act(async () => {
+      pendingCallbacks?.onThinkingDelta?.('先比较约束\n再检查边界');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const thinkingToggle = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
+
+    act(() => {
+      thinkingToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => {
+      pendingCallbacks?.onDone('end_turn');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const completedToggle = rendered.querySelector(
+      '[data-testid="chat-markdown-thinking-summary"]',
+    ) as HTMLButtonElement | null;
+
+    expect(completedToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(rendered.textContent).toContain('已显示摘要');
+    expect(rendered.textContent).toContain('再检查边界');
   });
 
   it('renders legacy fenced thinking markdown in historical chat messages', async () => {
@@ -2379,6 +2573,8 @@ describe('ChatPage', () => {
 
     expect(thinkingToggle).not.toBeNull();
     expect(rendered.textContent).toContain('思考内容');
+    expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(rendered.textContent).toContain('这里是旧格式思考');
     expect(rendered.textContent).toContain('这是旧格式正文。');
   });
 
@@ -6011,6 +6207,66 @@ describe('ChatPage', () => {
     });
 
     expect(restoredToolCard?.textContent).toContain('工作区状态已读取');
+  });
+
+  it('renders the viz tab from persisted run events after reload', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '帮我执行多步骤任务',
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      runEvents: [
+        {
+          type: 'task_update',
+          taskId: 'task-1',
+          label: '拆解任务',
+          status: 'running',
+          assignedAgent: 'explore',
+          occurredAt: 10,
+        },
+        {
+          type: 'permission_asked',
+          requestId: 'perm-1',
+          toolName: 'bash',
+          scope: 'session',
+          riskLevel: 'medium',
+          reason: '需要执行命令',
+          previewAction: '运行验证命令',
+          sessionId: 'session-1',
+          occurredAt: 11,
+        },
+      ],
+      state_status: 'running',
+    }));
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const openPanelButton = rendered.querySelector('button[title="展开面板"]');
+
+    act(() => {
+      openPanelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const vizTab = rendered.querySelector('#chat-right-tab-viz') as HTMLButtonElement | null;
+    act(() => {
+      vizTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(rendered.querySelector('[data-testid="mock-agent-dag-graph"]')?.textContent).toContain(
+      '当前对话',
+    );
+    expect(rendered.querySelector('[data-testid="mock-agent-viz-panel"]')?.textContent).toContain(
+      '开始处理用户请求',
+    );
+    expect(rendered.querySelector('[data-testid="mock-agent-viz-panel"]')?.textContent).toContain(
+      '等待权限：bash · 运行验证命令',
+    );
   });
 
   it('keeps one assistant bubble after tool calls finish streaming', async () => {
