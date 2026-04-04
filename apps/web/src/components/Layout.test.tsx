@@ -23,6 +23,7 @@ const listMock = vi.fn(async () => [
     metadata_json: JSON.stringify({ workingDirectory: '/repo/alpha' }),
   },
 ]);
+const searchSessionsMock = vi.fn(async () => []);
 const getMock = vi.fn(async () => ({ messages: [{ id: 'm1', role: 'user', content: 'hello' }] }));
 const renameMock = vi.fn(async () => undefined);
 const deleteMock = vi.fn(async () => undefined);
@@ -60,6 +61,7 @@ const listCommandsMock = vi.fn(async () => [
 vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: vi.fn(() => ({
     list: listMock,
+    search: searchSessionsMock,
     create: vi.fn(async () => ({ id: 'new-session' })),
     get: getMock,
     rename: renameMock,
@@ -98,6 +100,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   listMock.mockClear();
+  searchSessionsMock.mockClear();
   listCommandsMock.mockClear();
   getMock.mockClear();
   renameMock.mockClear();

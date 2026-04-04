@@ -10,14 +10,34 @@ export interface CommandItem {
 
 export interface CommandPaletteProps {
   commands: CommandItem[];
+  emptyLabel?: string;
   isOpen: boolean;
   onClose: () => void;
+  onQueryChange?: (query: string) => void;
+  placeholder?: string;
+  query?: string;
 }
 
-export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProps) {
-  const [query, setQuery] = useState('');
+export function CommandPalette({
+  commands,
+  emptyLabel = '没有匹配的命令',
+  isOpen,
+  onClose,
+  onQueryChange,
+  placeholder = '搜索命令…',
+  query: controlledQuery,
+}: CommandPaletteProps) {
+  const [internalQuery, setInternalQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const query = controlledQuery ?? internalQuery;
+
+  const updateQuery = (value: string) => {
+    if (controlledQuery === undefined) {
+      setInternalQuery(value);
+    }
+    onQueryChange?.(value);
+  };
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -34,7 +54,7 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
 
   useEffect(() => {
     if (!isOpen) {
-      setQuery('');
+      updateQuery('');
       setSelectedIndex(0);
       return;
     }
@@ -131,10 +151,10 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
             ref={inputRef}
             value={query}
             onChange={(event) => {
-              setQuery(event.target.value);
+              updateQuery(event.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="搜索命令…"
+            placeholder={placeholder}
             style={{
               width: '100%',
               border: '1px solid var(--color-border, #334155)',
@@ -157,7 +177,7 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
                 textAlign: 'center',
               }}
             >
-              没有匹配的命令
+              {emptyLabel}
             </div>
           ) : (
             filtered.map((command, index) => {

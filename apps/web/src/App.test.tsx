@@ -105,6 +105,75 @@ beforeEach(() => {
         } as Response;
       }
 
+      if (url.pathname.endsWith('/team/members')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 'member-1',
+              name: '林雾',
+              email: 'linwu@openawork.local',
+              role: 'owner',
+              avatarUrl: null,
+              status: 'working',
+              createdAt: '2026-04-04T00:00:00.000Z',
+            },
+          ],
+        } as Response;
+      }
+
+      if (url.pathname.endsWith('/team/tasks')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 'task-1',
+              title: '落地团队协作台',
+              assigneeId: 'member-1',
+              status: 'in_progress',
+              priority: 'high',
+              result: '正在推进',
+              createdAt: '2026-04-04T00:00:00.000Z',
+              updatedAt: '2026-04-04T00:00:00.000Z',
+            },
+          ],
+        } as Response;
+      }
+
+      if (url.pathname.endsWith('/team/messages')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 'msg-1',
+              memberId: 'member-1',
+              content: '我先认领协作页面。',
+              type: 'update',
+              timestamp: Date.parse('2026-04-04T00:00:00.000Z'),
+            },
+          ],
+        } as Response;
+      }
+
+      if (url.pathname.endsWith('/workflows/templates')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 'workflow-1',
+              name: '审批流模板',
+              description: '用于多人协作审批。',
+              category: 'team-playbook',
+              nodes: [
+                { id: 'start', label: '开始', type: 'start', x: 40, y: 40 },
+                { id: 'end', label: '结束', type: 'end', x: 320, y: 40 },
+              ],
+              edges: [{ id: 'edge-1', source: 'start', target: 'end' }],
+            },
+          ],
+        } as Response;
+      }
+
       return {
         ok: true,
         json: async () => ({
@@ -178,7 +247,7 @@ describe('App routing', () => {
     expect(container?.textContent).toContain('渠道模板库');
   });
 
-  it.each(['/workflows', '/prompt-optimizer', '/translation', '/team'])(
+  it.each(['/prompt-optimizer', '/translation'])(
     'redirects legacy route %s back to /chat',
     async (initialEntry) => {
       const { default: App } = await import('./App.js');
@@ -224,5 +293,43 @@ describe('App routing', () => {
     await waitForText('oracle');
     expect(container?.textContent).toContain('Agent 管理');
     expect(container?.textContent).toContain('oracle');
+  });
+
+  it('renders the workflows page on /workflows', async () => {
+    const { default: App } = await import('./App.js');
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/workflows']}>
+          <App />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForText('审批流模板');
+    expect(container?.textContent).toContain('工作流工作台');
+    expect(container?.textContent).toContain('审批流模板');
+  });
+
+  it('renders the team page on /team', async () => {
+    const { default: App } = await import('./App.js');
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team']}>
+          <App />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForText('林雾');
+    expect(container?.textContent).toContain('林雾');
+    expect(container?.textContent).toContain('落地团队协作台');
   });
 });

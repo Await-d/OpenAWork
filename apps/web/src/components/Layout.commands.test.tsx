@@ -7,12 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Layout from './Layout.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import { useAuthStore } from '../stores/auth.js';
+import type { SessionSearchResult } from '@openAwork/web-client';
 
 vi.mock('../routes/preloadable-route-modules.js', () => ({
   preloadRouteModuleByPath: vi.fn(() => null),
 }));
 
 const listMock = vi.fn(async () => []);
+const searchSessionsMock = vi.fn(async (): Promise<SessionSearchResult[]> => []);
 const listCommandsMock = vi.fn(async () => [
   {
     id: 'remote-chat',
@@ -30,6 +32,7 @@ const replyMock = vi.fn(async () => undefined);
 vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: vi.fn(() => ({
     list: listMock,
+    search: searchSessionsMock,
     create: vi.fn(async () => ({ id: 'new-session' })),
     get: vi.fn(async () => ({ messages: [] })),
     rename: vi.fn(async () => undefined),
@@ -65,6 +68,7 @@ beforeEach(() => {
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
   listMock.mockClear();
+  searchSessionsMock.mockClear();
   listCommandsMock.mockClear();
   listPendingMock.mockClear();
   replyMock.mockClear();
@@ -158,5 +162,56 @@ describe('Layout service-backed command palette', () => {
     });
 
     expect(preloadRouteModuleByPath).toHaveBeenCalledWith('/chat');
+  });
+
+  it('shows session search results inside the command palette when query is long enough', async () => {
+    const searchResults: SessionSearchResult[] = [
+      {
+        sessionId: 'session-search-1',
+        messageId: 'message-1',
+        snippet: '这里命中了关键上下文',
+        role: 'assistant',
+        title: '搜索命中会话',
+        createdAtMs: Date.now(),
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      },
+    ];
+    searchSessionsMock.mockResolvedValueOnce(searchResults);
+
+    const rendered = await renderLayout();
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }),
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const input = rendered.querySelector(
+      'input[placeholder="搜索命令、会话内容…"]',
+    ) as HTMLInputElement | null;
+    expect(input).toBeTruthy();
+
+    await act(async () => {
+      if (input) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, '关键上下文');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await Promise.resolve();
+    });
+
+    expect(searchSessionsMock).toHaveBeenCalledWith(
+      'token-123',
+      '关键上下文',
+      expect.objectContaining({ limit: 6, signal: expect.any(AbortSignal) }),
+    );
+    expect(rendered.textContent).toContain('会话 · 搜索命中会话');
+    expect(rendered.textContent).toContain('这里命中了关键上下文');
   });
 });

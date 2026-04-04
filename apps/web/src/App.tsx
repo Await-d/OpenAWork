@@ -195,10 +195,28 @@ export default function App() {
             }
           />
           <Route path="/channels" element={<Navigate to="/settings/channels" replace />} />
-          <Route path="/workflows" element={<Navigate to="/chat" replace />} />
+          <Route
+            path="/workflows"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.workflows.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.workflows.title}
+              />
+            }
+          />
           <Route path="/prompt-optimizer" element={<Navigate to="/chat" replace />} />
           <Route path="/translation" element={<Navigate to="/chat" replace />} />
-          <Route path="/team" element={<Navigate to="/chat" replace />} />
+          <Route
+            path="/team"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.team.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.team.title}
+              />
+            }
+          />
           <Route
             path="/agents"
             element={

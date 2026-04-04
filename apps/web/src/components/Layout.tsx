@@ -11,7 +11,8 @@ import type { CommandItem, PermissionDecision, PermissionItem } from '@openAwork
 import type { FileTreeNode } from './WorkspacePickerModal.js';
 import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
-import { createPermissionsClient } from '@openAwork/web-client';
+import { createPermissionsClient, createSessionsClient } from '@openAwork/web-client';
+import type { SessionSearchResult } from '@openAwork/web-client';
 import {
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
@@ -124,6 +125,8 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const isChatRoute = location.pathname.startsWith('/chat');
   const currentChatSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [paletteSearchResults, setPaletteSearchResults] = useState<SessionSearchResult[]>([]);
   const paletteDescriptors = useCommandRegistry('palette');
 
   const [pendingPermission, setPendingPermission] = useState<{
@@ -259,7 +262,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   }, [toggleLeftSidebar, navigateToHome, navigate, preloadRoute]);
 
   const paletteCommands = useMemo<CommandItem[]>(() => {
-    return paletteDescriptors.flatMap((command) => {
+    const commandItems = paletteDescriptors.flatMap((command) => {
       const action = command.action;
 
       switch (action.kind) {
@@ -291,7 +294,54 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           return [];
       }
     });
-  }, [navigate, onToggleTheme, paletteDescriptors, preloadRoute, theme]);
+
+    const searchItems = paletteSearchResults.map(
+      (result) =>
+        ({
+          id: `session-search:${result.messageId}`,
+          label: `会话 · ${result.title?.trim() || result.sessionId}`,
+          description: result.snippet.replaceAll('<mark>', '').replaceAll('</mark>', ''),
+          onExecute: () => {
+            preloadRoute('/chat');
+            void navigate(`/chat/${result.sessionId}`);
+          },
+          shortcut: '结果',
+        }) satisfies CommandItem,
+    );
+
+    return [...searchItems, ...commandItems];
+  }, [navigate, onToggleTheme, paletteDescriptors, paletteSearchResults, preloadRoute, theme]);
+
+  useEffect(() => {
+    if (!isPaletteOpen || !accessToken || paletteQuery.trim().length < 2) {
+      setPaletteSearchResults([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const handle = window.setTimeout(() => {
+      void createSessionsClient(gatewayUrl)
+        .search(accessToken, paletteQuery.trim(), {
+          limit: 6,
+          signal: controller.signal,
+        })
+        .then((results) => {
+          if (!controller.signal.aborted) {
+            setPaletteSearchResults(results);
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setPaletteSearchResults([]);
+          }
+        });
+    }, 120);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(handle);
+    };
+  }, [accessToken, gatewayUrl, isPaletteOpen, paletteQuery]);
 
   const shouldOverlaySessionSidebar = isChatRoute && isNarrowViewport;
   const sessionSidebarWidth = shouldOverlaySessionSidebar
@@ -312,8 +362,14 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     <>
       <CommandPalette
         commands={paletteCommands}
+        emptyLabel={
+          paletteQuery.trim().length >= 2 ? '没有匹配的命令或会话' : '输入至少 2 个字符开始搜索'
+        }
         isOpen={isPaletteOpen}
         onClose={() => setIsPaletteOpen(false)}
+        onQueryChange={setPaletteQuery}
+        placeholder="搜索命令、会话内容…"
+        query={paletteQuery}
       />
       {pendingPermission && (
         <PermissionPrompt

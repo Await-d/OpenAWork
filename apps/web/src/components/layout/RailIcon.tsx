@@ -5,6 +5,8 @@ export const railItems = [
   { to: '/sessions', label: 'Sessions' },
   { to: '/skills', label: 'Skills' },
   { to: '/agents', label: 'Agents' },
+  { to: '/workflows', label: 'Workflows' },
+  { to: '/team', label: 'Team' },
   { to: '/settings/channels', label: 'Channels' },
   { to: '/usage', label: 'Usage' },
   { to: '/schedules', label: 'Schedules' },
@@ -16,6 +18,8 @@ export const railLabelCn: Record<string, string> = {
   Settings: '设置',
   Skills: '技能',
   Agents: '智能体',
+  Workflows: '工作流',
+  Team: '团队',
   Channels: '频道',
   Usage: '用量',
   Schedules: '定时',
@@ -91,6 +95,26 @@ export function railIcon(label: string) {
           <rect x="14" y="4" width="7" height="7" rx="2" />
           <rect x="3" y="13" width="7" height="7" rx="2" />
           <rect x="14" y="13" width="7" height="7" rx="2" />
+        </I>
+      );
+    case 'Workflows':
+      return (
+        <I>
+          <circle cx="6" cy="6" r="2" />
+          <circle cx="18" cy="6" r="2" />
+          <circle cx="12" cy="18" r="2" />
+          <path d="M8 6h8" />
+          <path d="M7 7.5 10.8 15" />
+          <path d="M17 7.5 13.2 15" />
+        </I>
+      );
+    case 'Team':
+      return (
+        <I>
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </I>
       );
     case 'Settings':

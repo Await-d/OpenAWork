@@ -70,6 +70,12 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/SettingsPage.js'),
     '设置中心',
   ),
+  team: createPreloadableRouteModule('team', () => import('../pages/TeamPage.js'), '团队协作'),
+  workflows: createPreloadableRouteModule(
+    'workflows',
+    () => import('../pages/WorkflowsPage.js'),
+    '工作流工作台',
+  ),
   skills: createPreloadableRouteModule('skills', () => import('../pages/SkillsPage.js'), '技能库'),
   usage: createPreloadableRouteModule('usage', () => import('../pages/UsagePage.js'), '用量统计'),
 } as const;
