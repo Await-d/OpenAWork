@@ -6,6 +6,7 @@
   "references": [
     { "path": "./packages/shared" },
     { "path": "./packages/agent-core" },
+    { "path": "./packages/platform-adapter" },
     { "path": "./packages/skill-types" },
     { "path": "./packages/mcp-client" },
     { "path": "./services/agent-gateway" }

@@ -10,11 +10,11 @@ services:
       GATEWAY_HOST: 0.0.0.0
       JWT_SECRET: change-me-in-production-min-32-chars
       JWT_EXPIRES_IN: 15m
-      DATABASE_URL: postgresql://openAwork:openAwork@postgres:5432/openAwork
+      OPENAWORK_DATA_DIR: /var/lib/openawork
       REDIS_URL: redis://redis:6379
+    volumes:
+      - gateway_data:/var/lib/openawork
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -27,20 +27,6 @@ services:
     depends_on:
       - gateway
 
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: openAwork
-      POSTGRES_PASSWORD: openAwork
-      POSTGRES_DB: openAwork
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U openAwork']
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     healthcheck:
@@ -50,4 +36,4 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
+  gateway_data:

@@ -45,3 +45,4 @@ coverage
 .agentdocs/runtime/
 /**/**/*.db
 /**/**/*.db-*
+services/agent-gateway/data/

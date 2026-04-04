@@ -186,12 +186,14 @@ pnpm --filter @openAwork/agent-core exec vitest
 必需变量（参见 `.env.example`）：
 
 - `JWT_SECRET` — 最少 32 字符，生成：`openssl rand -base64 32`
-- `DATABASE_URL` — Postgres 连接字符串
+- `OPENAWORK_DATA_DIR` — Gateway 持久化数据根目录；默认走平台数据目录（Linux: `~/.local/share/OpenAWork/agent-gateway`）
+- `OPENAWORK_DATABASE_PATH` — 可选，显式 SQLite 文件路径；优先级高于 `OPENAWORK_DATA_DIR`
+- `DATABASE_URL` — 兼容保留的 SQLite 路径覆盖项，**不是** Postgres 连接串
 - `REDIS_URL` — Redis 连接字符串
 - `AI_API_KEY`、`AI_API_BASE_URL`、`AI_DEFAULT_MODEL`
 - `GATEWAY_PORT`（默认 3000）、`GATEWAY_HOST`
 
-Docker：`docker-compose up` 启动网关 + Web + Postgres + Redis。
+Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable 数据挂到 `gateway_data` 卷。
 
 ## 代码组织规则
 

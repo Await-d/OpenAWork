@@ -44,6 +44,13 @@ jobs:
       - name: Run unit tests
         run: pnpm --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" test
 
+      - name: Gateway durable verification gates
+        if: inputs.target == 'gateway'
+        run: |
+          pnpm --filter @openAwork/agent-gateway run test:restore
+          pnpm --filter @openAwork/agent-gateway run test:delete-cleanup
+          pnpm --filter @openAwork/agent-gateway run test:durable
+
       - name: Smoke check health endpoint
         if: inputs.target == 'gateway'
         run: |
