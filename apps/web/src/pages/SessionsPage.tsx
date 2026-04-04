@@ -1,42 +1,33 @@
-import { memo, useDeferredValue, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useDeferredValue, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
+import { createSessionsClient, withTokenRefresh } from '@openAwork/web-client';
+import type { TokenStore } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { exportSession, importSession } from '../utils/session-transfer.js';
-import { createSessionsClient, withTokenRefresh } from '@openAwork/web-client';
-import type { TokenStore } from '@openAwork/web-client';
 import { logger } from '../utils/logger.js';
 import { toast } from '../components/ToastNotification.js';
 import {
   buildWorkspaceSessionCollections,
   getWorkspaceGroupKey,
+  UNBOUND_WORKSPACE_GROUP_KEY,
 } from '../utils/session-grouping.js';
 import { subscribeSessionListRefresh } from '../utils/session-list-events.js';
 import {
   getSessionDeleteErrorMessage,
   isSessionAlreadyDeletedError,
 } from '../utils/session-delete.js';
-import { extractWorkingDirectory } from '../utils/session-metadata.js';
 import {
   buildSavedChatSessionMetadata,
   loadSavedChatSessionDefaults,
 } from '../utils/chat-session-defaults.js';
-import { FileChangeReviewPanel } from '@openAwork/shared-ui';
-import type { FileChange } from '@openAwork/shared-ui';
-import { SessionModeBadges } from '../components/SessionModeBadges.js';
 import WorkspacePickerModal from '../components/WorkspacePickerModal.js';
 import WorkspaceGroupMenu from '../components/layout/WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from '../components/layout/WorkspaceDeleteConfirmDialog.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
-import { UNBOUND_WORKSPACE_GROUP_KEY } from '../utils/session-grouping.js';
-
-interface SessionRow {
-  id: string;
-  title?: string;
-  state_status: string;
-  updated_at: string;
-  metadata_json?: string;
-}
+import { DetailPanel } from './sessions-page/detail-panel.js';
+import { SessionCard, SESSION_CARD_ACTION_BUTTON_STYLE } from './sessions-page/session-card.js';
+import type { SessionRow } from './sessions-page/session-page-types.js';
 
 function resolveDeletedSessionIds(
   result: { deletedSessionIds?: string[] } | void,
@@ -58,61 +49,6 @@ const PULSE_CSS = `
 `;
 
 const SESSION_PAGE_STYLE_ID = 'omo-sessions-page-animations';
-
-const SESSION_CARD_ACTION_BUTTON_STYLE: React.CSSProperties = {
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: 5,
-  padding: '2px 7px',
-  fontSize: 11,
-  color: 'var(--text-3)',
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-  lineHeight: 1.4,
-};
-
-function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return '刚刚';
-  if (mins < 60) return `${mins}分钟前`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}小时前`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}天前`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}周前`;
-  return `${Math.floor(days / 30)}个月前`;
-}
-
-function statusLabel(s: string): string {
-  if (s === 'idle') return '空闲';
-  if (s === 'running') return '运行中';
-  if (s === 'error') return '错误';
-  return s;
-}
-
-function statusDotColor(s: string): string {
-  if (s === 'running') return '#22c55e';
-  if (s === 'error') return 'var(--danger)';
-  return 'var(--accent)';
-}
-
-function statusBadgeBg(s: string): string {
-  if (s === 'running') return 'rgba(34,197,94,0.12)';
-  if (s === 'error') return 'rgba(239,68,68,0.12)';
-  return 'var(--accent-muted)';
-}
-
-function statusBadgeFg(s: string): string {
-  if (s === 'running') return '#22c55e';
-  if (s === 'error') return 'var(--danger)';
-  return 'var(--accent)';
-}
-
-function isNestedInteractiveTarget(target: EventTarget | null): target is Element {
-  return target instanceof Element && target.closest('button, input, textarea, select, a') !== null;
-}
 
 function SkeletonCard() {
   return (
@@ -175,8 +111,6 @@ export default function SessionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState(false);
   const [deletingSessionIds, setDeletingSessionIds] = useState<Set<string>>(() => new Set());
-  const [reviewChanges, setReviewChanges] = useState<FileChange[]>([]);
-  const [reviewDiff, setReviewDiff] = useState<Record<string, string>>({});
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [pendingWorkspacePath, setPendingWorkspacePath] = useState<string | null>(null);
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<{
@@ -243,7 +177,7 @@ export default function SessionsPage() {
         if (loadSessionsRequestIdRef.current !== requestId) {
           return;
         }
-        setSessions(list as unknown as SessionRow[]);
+        setSessions(list as SessionRow[]);
       } catch {
         return;
       } finally {
@@ -301,44 +235,6 @@ export default function SessionsPage() {
       cancelled = true;
     };
   }, [hoveredId, restoreHoveredSessionFromPointer, sessions]);
-
-  useEffect(() => {
-    if (!token || !selectedId) {
-      setReviewChanges([]);
-      setReviewDiff({});
-      return;
-    }
-
-    const selected = sessions.find((session) => session.id === selectedId);
-    const workingDirectory = extractWorkingDirectory(selected?.metadata_json);
-    if (!workingDirectory) {
-      setReviewChanges([]);
-      setReviewDiff({});
-      return;
-    }
-
-    let cancelled = false;
-    void fetch(
-      `${gatewayUrl}/workspace/review/status?path=${encodeURIComponent(workingDirectory)}`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    )
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('status'))))
-      .then((data: { changes: FileChange[] }) => {
-        if (!cancelled) {
-          setReviewChanges(data.changes ?? []);
-          setReviewDiff({});
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setReviewChanges([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedId, sessions, token, gatewayUrl]);
 
   async function createSession(inheritWorkspacePath?: string | null) {
     if (!token) return;
@@ -707,7 +603,7 @@ export default function SessionsPage() {
             if (!token) return;
             createSessionsClient(gatewayUrl)
               .list(token)
-              .then((list) => setSessions(list as unknown as SessionRow[]))
+              .then((list) => setSessions(list as SessionRow[]))
               .catch(() => null);
           }, 800);
         }}
@@ -936,10 +832,7 @@ export default function SessionsPage() {
             onCopyId={() => handleCopyId(selected.id)}
             gatewayUrl={gatewayUrl}
             token={token ?? ''}
-            reviewChanges={reviewChanges}
-            reviewDiff={reviewDiff}
-            setReviewChanges={setReviewChanges}
-            setReviewDiff={setReviewDiff}
+            onRefreshSessions={() => loadSessions(true)}
           />
         ) : (
           <EmptyDetail />
@@ -1012,549 +905,6 @@ export default function SessionsPage() {
           });
         }}
       />
-    </div>
-  );
-}
-
-interface SessionCardProps {
-  s: SessionRow;
-  isDeleting: boolean;
-  isSelected: boolean;
-  isHovered: boolean;
-  isRenaming: boolean;
-  renameValue: string;
-  smallBtn: React.CSSProperties;
-  onHoverEnter: (sessionId: string, position?: { x: number; y: number }) => void;
-  onHoverMove: (sessionId: string, position: { x: number; y: number }) => void;
-  onHoverLeave: (sessionId: string) => void;
-  onSelect: (sessionId: string) => void;
-  onRenameChange: (v: string) => void;
-  onRenameCommit: (sessionId: string) => void;
-  onRenameCancel: () => void;
-  onStartRename: (session: SessionRow) => void;
-  onExport: (session: SessionRow) => void;
-  onDelete: (sessionId: string) => void;
-}
-
-const SessionCard = memo(function SessionCard({
-  s,
-  isDeleting,
-  isSelected,
-  isHovered,
-  isRenaming,
-  renameValue,
-  smallBtn,
-  onHoverEnter,
-  onHoverMove,
-  onHoverLeave,
-  onSelect,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
-  onStartRename,
-  onExport,
-  onDelete,
-}: SessionCardProps) {
-  return (
-    <li
-      data-session-id={s.id}
-      data-session-state={s.state_status}
-      onClick={(event) => {
-        if (isNestedInteractiveTarget(event.target)) {
-          return;
-        }
-
-        onSelect(s.id);
-      }}
-      onKeyDown={(event) => {
-        if (isNestedInteractiveTarget(event.target)) {
-          return;
-        }
-
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onSelect(s.id);
-        }
-      }}
-      onMouseEnter={(event) => onHoverEnter(s.id, { x: event.clientX, y: event.clientY })}
-      onMouseMove={(event) => onHoverMove(s.id, { x: event.clientX, y: event.clientY })}
-      onMouseLeave={() => onHoverLeave(s.id)}
-      onFocusCapture={() => onHoverEnter(s.id)}
-      onBlurCapture={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          onHoverLeave(s.id);
-        }
-      }}
-      style={{
-        listStyle: 'none',
-        background: isSelected
-          ? 'var(--accent-muted)'
-          : isHovered
-            ? 'var(--surface-2)'
-            : 'var(--surface)',
-        border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
-        borderRadius: 9,
-        padding: '0.625rem 0.75rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 5,
-        transition: 'background 120ms, border-color 120ms',
-        contentVisibility: 'auto',
-        containIntrinsicSize: '58px',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span
-          data-session-running={s.state_status === 'running' ? 'true' : 'false'}
-          aria-hidden="true"
-          className={s.state_status === 'running' ? 'omo-session-running-dot' : undefined}
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            background: statusDotColor(s.state_status),
-            flexShrink: 0,
-            boxShadow: s.state_status === 'running' ? '0 0 6px #22c55e' : 'none',
-          }}
-        />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {isRenaming ? (
-            <input
-              ref={(el) => el?.focus()}
-              value={renameValue}
-              onChange={(e) => onRenameChange(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') onRenameCommit(s.id);
-                if (e.key === 'Escape') onRenameCancel();
-              }}
-              onBlur={() => onRenameCommit(s.id)}
-              style={{
-                flex: 1,
-                background: 'var(--bg-2)',
-                border: '1px solid var(--accent)',
-                borderRadius: 4,
-                padding: '2px 6px',
-                color: 'var(--text)',
-                fontSize: 12,
-                outline: 'none',
-              }}
-            />
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => onSelect(s.id)}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: 'var(--text)',
-                }}
-              >
-                <span
-                  title={s.title ?? s.id}
-                  style={{
-                    display: 'block',
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {s.title ?? (
-                    <span style={{ color: 'var(--text-3)', fontFamily: 'monospace', fontSize: 11 }}>
-                      {s.id.slice(0, 8)}…
-                    </span>
-                  )}
-                </span>
-              </button>
-            </>
-          )}
-          <div
-            style={{
-              position: 'relative',
-              width: 216,
-              height: 30,
-              flexShrink: 0,
-              marginLeft: 'auto',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                gap: 6,
-                opacity: !isRenaming && !isHovered ? 1 : 0,
-                transition: 'opacity 120ms ease-out',
-                pointerEvents: 'none',
-                willChange: 'opacity',
-              }}
-            >
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                {relativeTime(s.updated_at)}
-              </span>
-              <span
-                style={{
-                  fontSize: 10,
-                  padding: '2px 6px',
-                  borderRadius: 99,
-                  flexShrink: 0,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  background: statusBadgeBg(s.state_status),
-                  color: statusBadgeFg(s.state_status),
-                  fontWeight: 600,
-                }}
-              >
-                {s.state_status === 'running' ? (
-                  <span
-                    aria-hidden="true"
-                    className="omo-session-running-dot"
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: '50%',
-                      background: 'currentColor',
-                      flexShrink: 0,
-                    }}
-                  />
-                ) : null}
-                {statusLabel(s.state_status)}
-              </span>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  minWidth: 0,
-                  maxWidth: 112,
-                  overflow: 'hidden',
-                }}
-              >
-                <SessionModeBadges compact metadataJson={s.metadata_json} />
-              </span>
-            </span>
-            <span
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                gap: 6,
-                opacity: isHovered ? 1 : 0,
-                transition: 'opacity 120ms ease-out',
-                pointerEvents: isHovered ? 'auto' : 'none',
-                willChange: 'opacity',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => onStartRename(s)}
-                style={smallBtn}
-                tabIndex={isHovered ? 0 : -1}
-              >
-                重命名
-              </button>
-              <button
-                type="button"
-                onClick={() => onExport(s)}
-                style={smallBtn}
-                tabIndex={isHovered ? 0 : -1}
-              >
-                导出
-              </button>
-              <button
-                type="button"
-                onClick={() => onDelete(s.id)}
-                disabled={isDeleting}
-                tabIndex={isHovered ? 0 : -1}
-                style={{
-                  ...smallBtn,
-                  color: 'var(--danger)',
-                  borderColor: 'rgba(239,68,68,0.3)',
-                  opacity: isDeleting ? 0.5 : 1,
-                  cursor: isDeleting ? 'wait' : smallBtn.cursor,
-                }}
-              >
-                {isDeleting ? '删除中…' : '删除'}
-              </button>
-            </span>
-          </div>
-        </div>
-      </div>
-    </li>
-  );
-}, areSessionCardPropsEqual);
-
-function areSessionCardPropsEqual(previous: SessionCardProps, next: SessionCardProps): boolean {
-  const renameValueUnchanged =
-    (!previous.isRenaming && !next.isRenaming) || previous.renameValue === next.renameValue;
-
-  return (
-    previous.s === next.s &&
-    previous.isDeleting === next.isDeleting &&
-    previous.isSelected === next.isSelected &&
-    previous.isHovered === next.isHovered &&
-    previous.isRenaming === next.isRenaming &&
-    renameValueUnchanged &&
-    previous.smallBtn === next.smallBtn &&
-    previous.onHoverEnter === next.onHoverEnter &&
-    previous.onHoverMove === next.onHoverMove &&
-    previous.onHoverLeave === next.onHoverLeave &&
-    previous.onSelect === next.onSelect &&
-    previous.onRenameChange === next.onRenameChange &&
-    previous.onRenameCommit === next.onRenameCommit &&
-    previous.onRenameCancel === next.onRenameCancel &&
-    previous.onStartRename === next.onStartRename &&
-    previous.onExport === next.onExport &&
-    previous.onDelete === next.onDelete
-  );
-}
-
-function DetailPanel({
-  selected,
-  copiedId,
-  onOpenChat,
-  onPreloadChat,
-  onExport,
-  onCopyId,
-  gatewayUrl,
-  token,
-  reviewChanges,
-  reviewDiff,
-  setReviewChanges,
-  setReviewDiff,
-}: {
-  selected: SessionRow;
-  copiedId: boolean;
-  onOpenChat: () => void;
-  onPreloadChat: () => void;
-  onExport: () => void;
-  onCopyId: () => void;
-  gatewayUrl: string;
-  token: string;
-  reviewChanges: FileChange[];
-  reviewDiff: Record<string, string>;
-  setReviewChanges: React.Dispatch<React.SetStateAction<FileChange[]>>;
-  setReviewDiff: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-}) {
-  const selectedWorkingDirectory = extractWorkingDirectory(selected.metadata_json);
-
-  const ab: React.CSSProperties = {
-    background: 'transparent',
-    border: '1px solid var(--border)',
-    borderRadius: 5,
-    padding: '3px 10px',
-    fontSize: 12,
-    color: 'var(--text-3)',
-    cursor: 'pointer',
-  };
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        background: 'var(--bg-2)',
-      }}
-    >
-      <div
-        style={{
-          padding: '1.25rem 1.5rem',
-          borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 12,
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 16,
-                fontWeight: 700,
-                color: 'var(--text)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                marginBottom: 6,
-              }}
-            >
-              {selected.title ?? (
-                <span style={{ color: 'var(--text-3)', fontFamily: 'monospace', fontSize: 14 }}>
-                  {selected.id.slice(0, 8)}…
-                </span>
-              )}
-            </div>
-            <span
-              style={{
-                fontSize: 11,
-                padding: '2px 9px',
-                borderRadius: 99,
-                background: statusBadgeBg(selected.state_status),
-                color: statusBadgeFg(selected.state_status),
-                fontWeight: 600,
-              }}
-            >
-              {statusLabel(selected.state_status)}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onOpenChat}
-            onPointerEnter={onPreloadChat}
-            onFocus={onPreloadChat}
-            style={{
-              background: 'var(--accent)',
-              color: 'var(--accent-text)',
-              border: 'none',
-              borderRadius: 8,
-              padding: '7px 18px',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            打开对话
-          </button>
-        </div>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem' }}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '1rem 2rem',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 10,
-            padding: '1rem 1.25rem',
-            marginBottom: '1rem',
-          }}
-        >
-          <DetailField label="状态" value={statusLabel(selected.state_status)} />
-          <DetailField label="更新时间" value={new Date(selected.updated_at).toLocaleString()} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, gridColumn: '1 / -1' }}>
-            <span
-              style={{
-                fontSize: 10,
-                color: 'var(--text-3)',
-                textTransform: 'uppercase',
-                letterSpacing: 0.6,
-              }}
-            >
-              会话 ID
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace' }}>
-                {selected.id.slice(0, 8)}…
-              </span>
-              <button
-                type="button"
-                onClick={onCopyId}
-                style={{ ...ab, padding: '2px 8px', fontSize: 11 }}
-              >
-                {copiedId ? '已复制' : '复制'}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" onClick={onExport} style={ab}>
-            导出会话
-          </button>
-        </div>
-        {selected.metadata_json && selectedWorkingDirectory && (
-          <div style={{ marginTop: '1rem' }}>
-            <FileChangeReviewPanel
-              changes={reviewChanges}
-              loadDiff={async (filePath: string) => {
-                const cached = reviewDiff[filePath];
-                if (cached !== undefined) return cached;
-                const response = await fetch(
-                  `${gatewayUrl}/workspace/review/diff?path=${encodeURIComponent(selectedWorkingDirectory)}&filePath=${encodeURIComponent(filePath)}`,
-                  { headers: { Authorization: `Bearer ${token}` } },
-                );
-                if (!response.ok) return '';
-                const data = (await response.json()) as { diff: string };
-                setReviewDiff((prev) => ({ ...prev, [filePath]: data.diff ?? '' }));
-                return data.diff ?? '';
-              }}
-              onAccept={(filePath: string) => {
-                setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
-              }}
-              onRevert={async (filePath: string) => {
-                const response = await fetch(`${gatewayUrl}/workspace/review/revert`, {
-                  method: 'POST',
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    path: selectedWorkingDirectory,
-                    filePath,
-                  }),
-                });
-                if (!response.ok) {
-                  throw new Error('revert failed');
-                }
-                setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
-                setReviewDiff((prev) => {
-                  const next = { ...prev };
-                  delete next[filePath];
-                  return next;
-                });
-              }}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DetailField({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span
-        style={{
-          fontSize: 10,
-          color: 'var(--text-3)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 12,
-          color: 'var(--text)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {value}
-      </span>
     </div>
   );
 }

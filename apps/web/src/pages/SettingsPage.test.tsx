@@ -42,6 +42,7 @@ function createFetchMock(options?: {
     providers: typeof defaultProviders;
     activeSelection?: typeof defaultActiveSelection;
   }) => void;
+  onSaveUpstreamRetry?: (body: { maxRetries: number }) => void;
 }) {
   const providers = options?.providers ?? [];
   const activeSelection = options?.activeSelection ?? null;
@@ -80,6 +81,15 @@ function createFetchMock(options?: {
     }
     if (path.endsWith('/settings/mcp-servers')) {
       return jsonResponse({ servers: [] });
+    }
+    if (path.endsWith('/settings/upstream-retry')) {
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body)) as { maxRetries: number };
+        options?.onSaveUpstreamRetry?.(body);
+        return jsonResponse(body);
+      }
+
+      return jsonResponse({ maxRetries: 3 });
     }
     if (path.endsWith('/usage/records')) {
       return jsonResponse({ records: [], budgetUsd: 10 });
@@ -127,6 +137,15 @@ function createFetchMock(options?: {
     }
     if (path.endsWith('/settings/model-prices')) {
       return jsonResponse({ models: [] });
+    }
+    if (path.endsWith('/settings/version')) {
+      return jsonResponse({
+        currentVersion: '0.0.1',
+        latestVersion: null,
+        updateAvailable: false,
+        checkError: null,
+        checkedAt: '2026-03-21T00:00:00.000Z',
+      });
     }
     if (path.endsWith('/desktop-automation/status')) {
       return jsonResponse({ enabled: false });
@@ -239,6 +258,47 @@ describe('SettingsPage', () => {
     const rendered = await renderAt('usage');
     expect(rendered.textContent).toContain('接近预算：$8.5000 / $10.0000');
     expect(rendered.textContent).not.toContain('5.3300');
+  });
+
+  it('saves upstream retry settings from the connection tab', async () => {
+    const savedBodies: Array<{ maxRetries: number }> = [];
+    vi.stubGlobal(
+      'fetch',
+      createFetchMock({
+        onSaveUpstreamRetry: (body) => {
+          savedBodies.push(body);
+        },
+      }),
+    );
+
+    const rendered = await renderAt('connection');
+    const retryOptionButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '1 次',
+    );
+    const applyButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '已应用',
+    );
+
+    expect(retryOptionButton).not.toBeUndefined();
+    expect(applyButton).not.toBeUndefined();
+
+    await act(async () => {
+      retryOptionButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const nextApplyButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '应用策略',
+    );
+    expect(nextApplyButton).not.toBeUndefined();
+
+    await act(async () => {
+      nextApplyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(savedBodies).toEqual([{ maxRetries: 1 }]);
   });
 
   it('maps gateway model price payloads for the usage tab table', async () => {

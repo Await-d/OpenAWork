@@ -45,6 +45,19 @@ export interface SettingsDiagnosticRecord {
   toolName?: string;
 }
 
+export interface SettingsVersionInfo {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  checkError: string | null;
+  checkedAt: string | null;
+  checking: boolean;
+}
+
+export interface UpstreamRetrySettingsRef {
+  maxRetries: number;
+}
+
 export type DevtoolsSourceKey =
   | 'devLogs'
   | 'diagnostics'

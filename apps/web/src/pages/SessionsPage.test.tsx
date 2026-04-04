@@ -33,12 +33,157 @@ const listMock = vi.fn(async () => [
 const createMock = vi.fn(async () => ({ id: 'session-new' }));
 const getMock = vi.fn(async () => ({ messages: [] }));
 const deleteMock = vi.fn(async () => undefined as { deletedSessionIds?: string[] } | undefined);
+const getFileChangesReadModelMock = vi.fn(async () => ({
+  debugSurface: {
+    requestFileChangesRouteTemplate: '/sessions/:sessionId/requests/:clientRequestId/file-changes',
+    restorePreviewRoute: '/sessions/:sessionId/restore/preview',
+    sessionFileChangesRoute: '/sessions/:sessionId/file-changes',
+    snapshotCompareRoute: '/sessions/:sessionId/snapshots/compare',
+    snapshotDetailRouteTemplate: '/sessions/:sessionId/snapshots/:snapshotRef',
+  },
+  sessionSummary: {
+    latestSnapshotAt: '2026-03-22T10:00:00.000Z',
+    latestSnapshotRef: 'req:req-2',
+    latestSnapshotScopeKind: 'request',
+    snapshotCount: 2,
+    sourceKinds: ['structured_tool_diff'],
+    totalAdditions: 12,
+    totalDeletions: 4,
+    totalFileDiffs: 3,
+    turnCount: 2,
+    weakestGuaranteeLevel: 'strong',
+  },
+  turns: [
+    {
+      clientRequestId: 'req-2',
+      createdAt: '2026-03-22T10:00:00.000Z',
+      snapshotRef: 'req:req-2',
+      files: [
+        {
+          file: 'src/app.ts',
+          additions: 8,
+          deletions: 2,
+          guaranteeLevel: 'strong',
+          sourceKind: 'structured_tool_diff',
+          status: 'modified',
+        },
+      ],
+      summary: {
+        additions: 8,
+        deletions: 2,
+        files: 1,
+        guaranteeLevel: 'strong',
+        scopeKind: 'request',
+        sourceKinds: ['structured_tool_diff'],
+      },
+    },
+    {
+      clientRequestId: 'req-1',
+      createdAt: '2026-03-22T09:58:00.000Z',
+      snapshotRef: 'req:req-1',
+      files: [
+        {
+          file: 'src/legacy.ts',
+          additions: 4,
+          deletions: 2,
+          guaranteeLevel: 'medium',
+          sourceKind: 'session_snapshot',
+          status: 'modified',
+        },
+      ],
+      summary: {
+        additions: 4,
+        deletions: 2,
+        files: 1,
+        guaranteeLevel: 'medium',
+        scopeKind: 'request',
+        sourceKinds: ['session_snapshot'],
+      },
+    },
+  ],
+}));
+const compareSnapshotsMock = vi.fn(async () => ({
+  comparison: [
+    {
+      file: 'src/legacy.ts',
+      changed: true,
+      fromExists: true,
+      toExists: true,
+      fromStatus: 'modified',
+      toStatus: 'modified',
+      before: 'old',
+      after: 'new',
+    },
+  ],
+  from: {
+    snapshotRef: 'req:req-1',
+    scopeKind: 'request',
+    createdAt: '2026-03-22T09:58:00.000Z',
+    summary: { files: 1, additions: 4, deletions: 2 },
+  },
+  to: {
+    snapshotRef: 'req:req-2',
+    scopeKind: 'request',
+    createdAt: '2026-03-22T10:00:00.000Z',
+    summary: { files: 1, additions: 8, deletions: 2 },
+  },
+}));
+const previewRestoreMock = vi.fn(async () => ({
+  validateOnly: true,
+  mode: 'snapshot',
+  target: {
+    snapshotRef: 'req:req-1',
+    scopeKind: 'request',
+    createdAt: '2026-03-22T09:58:00.000Z',
+    summary: { files: 1, additions: 4, deletions: 2 },
+  },
+  validation: {
+    canRestore: true,
+    fileCount: 1,
+  },
+  workspaceReview: {
+    available: true,
+    conflicts: [],
+    dirtyCount: 0,
+    workspaceRoot: '/repo/project',
+  },
+  preview: [
+    {
+      changed: true,
+      currentExists: true,
+      validPath: true,
+      hashValidation: {
+        available: true,
+        matchesExpectedAfter: true,
+        matchesExpectedBefore: true,
+      },
+      diff: {
+        file: 'src/legacy.ts',
+        additions: 4,
+        deletions: 2,
+        status: 'modified',
+        before: 'old',
+        after: 'new',
+      },
+    },
+  ],
+}));
+const applyRestoreMock = vi.fn(async () => ({
+  applied: true,
+  clientRequestId: 'restore-apply-1',
+  fileCount: 1,
+  mode: 'snapshot',
+}));
 
 vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: vi.fn(() => ({
     list: listMock,
     create: createMock,
     get: getMock,
+    getFileChangesReadModel: getFileChangesReadModelMock,
+    compareSnapshots: compareSnapshotsMock,
+    previewRestore: previewRestoreMock,
+    applyRestore: applyRestoreMock,
     delete: deleteMock,
     rename: vi.fn(async () => undefined),
     importSession: vi.fn(async () => ({ sessionId: 'imported' })),
@@ -160,6 +305,10 @@ beforeEach(() => {
   listMock.mockClear();
   createMock.mockClear();
   deleteMock.mockClear();
+  getFileChangesReadModelMock.mockClear();
+  compareSnapshotsMock.mockClear();
+  previewRestoreMock.mockClear();
+  applyRestoreMock.mockClear();
   fetchMock.mockClear();
   useAuthStore.setState({
     accessToken: 'token-123',
@@ -241,12 +390,94 @@ describe('SessionsPage file review integration', () => {
     });
 
     expect(rendered.textContent).toContain('文件改动审阅');
+    expect(rendered.textContent).toContain('会话文件快照');
     expect(rendered.textContent).toContain('src/app.ts');
     expect(rendered.textContent).toContain('查看差异');
     expect(rendered.textContent).toContain('还原');
     expect(rendered.textContent).toContain('编程');
     expect(rendered.textContent).toContain('YOLO');
     expect(rendered.textContent).toContain('Claude Sonnet 4');
+    expect(getFileChangesReadModelMock).toHaveBeenCalledWith(
+      'token-123',
+      'session-1',
+      expect.any(Object),
+    );
+  });
+
+  it('supports comparing, previewing, and applying snapshot restore from the detail panel', async () => {
+    const rendered = await renderSessionsPage();
+
+    const cardButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('代码评审'),
+    );
+
+    act(() => {
+      cardButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const olderSnapshotButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('src/legacy.ts'),
+    );
+
+    act(() => {
+      olderSnapshotButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const compareButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '与最新对比',
+    );
+    const previewButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '恢复预览',
+    );
+    const applyButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '应用恢复',
+    );
+
+    act(() => {
+      compareButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      previewButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      applyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(compareSnapshotsMock).toHaveBeenCalledWith('token-123', 'session-1', {
+      from: 'req:req-1',
+      to: 'req:req-2',
+      includeText: true,
+    });
+    expect(previewRestoreMock).toHaveBeenCalledWith('token-123', 'session-1', {
+      snapshotRef: 'req:req-1',
+      includeText: true,
+    });
+    expect(applyRestoreMock).toHaveBeenCalledWith('token-123', 'session-1', {
+      snapshotRef: 'req:req-1',
+      includeText: true,
+      forceConflicts: false,
+    });
+    expect(rendered.textContent).toContain('恢复已应用');
+    expect(rendered.textContent).toContain('有变化');
+    expect(rendered.textContent).toContain('工作区检查完成');
   });
 
   it('selects a session when clicking the empty area of the card', async () => {

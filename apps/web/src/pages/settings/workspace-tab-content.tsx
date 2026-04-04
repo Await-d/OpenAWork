@@ -8,7 +8,7 @@ import {
   type SSHConnectionEntry,
   type SSHAuthType,
 } from '@openAwork/shared-ui';
-import type { DevtoolsSourceState } from '../settings-types.js';
+import type { DevtoolsSourceState, SettingsVersionInfo } from '../settings-types.js';
 import { InlineFailureNotice } from './devtools-workbench-primitives.js';
 
 interface GitHubTriggerConfig {
@@ -38,14 +38,7 @@ interface WorkspaceTabContentProps {
   onUploadSshFile: (file: File) => void;
   githubTriggers: Array<{ repo: string; events: string[] }>;
   providerUpdatesDetail: string;
-  versionInfo: {
-    currentVersion: string;
-    latestVersion: string | null;
-    updateAvailable: boolean;
-    checkError: string | null;
-    checkedAt: string | null;
-    checking: boolean;
-  };
+  versionInfo: SettingsVersionInfo;
   onCheckVersion: () => Promise<void>;
   onSaveGitHubTrigger: (config: GitHubTriggerConfig) => Promise<void>;
   onDesktopAutomationStart: (url?: string) => Promise<void>;
@@ -185,9 +178,13 @@ function eventPillStyle(event: string): React.CSSProperties {
 
 const TRIGGER_SCHEMA = `POST /github/triggers
 {
-  "repo": "org/repo",
-  "events": ["push", "pull_request.*"],
-  "agentId": "<your-agent-id>"
+  "appId": "<github-app-id>",
+  "privateKeyPem": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----",
+  "webhookSecretForHmacVerification": "<webhook-secret>",
+  "repoFullNameOwnerSlashRepo": "org/repo",
+  "events": ["push", "pull_request.opened"],
+  "agentPromptTemplate": "分析 {{repo}} 的 {{event}} 事件",
+  "autoApproveWithoutUserConfirmation": false
 }`;
 
 const EMPTY_SSH_FORM = {

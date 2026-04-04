@@ -11,6 +11,7 @@ import {
 } from '@openAwork/shared-ui';
 import type { ProviderEditData, ThinkingDefaultsRef, ThinkingModeRef } from '../settings-types.js';
 import { BP, IS, SS, ST, UV } from './settings-section-styles.js';
+import { UpstreamRetrySection } from './upstream-retry-section.js';
 
 interface ConnectionTabContentProps {
   providers: AIProviderRef[];
@@ -43,6 +44,11 @@ interface ConnectionTabContentProps {
   copied: boolean;
   copyAddress: () => void;
   isTauri: boolean;
+  savingUpstreamRetrySettings: boolean;
+  setUpstreamRetryMaxRetries: React.Dispatch<React.SetStateAction<number>>;
+  upstreamRetryMaxRetries: number;
+  saveUpstreamRetrySettings: () => void;
+  savedUpstreamRetryMaxRetries: number;
 }
 
 export function ConnectionTabContent({
@@ -76,6 +82,11 @@ export function ConnectionTabContent({
   copied,
   copyAddress,
   isTauri,
+  savingUpstreamRetrySettings,
+  setUpstreamRetryMaxRetries,
+  upstreamRetryMaxRetries,
+  saveUpstreamRetrySettings,
+  savedUpstreamRetryMaxRetries,
 }: ConnectionTabContentProps) {
   return (
     <>
@@ -98,6 +109,13 @@ export function ConnectionTabContent({
           </button>
         </div>
       </section>
+      <UpstreamRetrySection
+        isSaving={savingUpstreamRetrySettings}
+        maxRetries={upstreamRetryMaxRetries}
+        onChange={(value) => setUpstreamRetryMaxRetries(value)}
+        onSave={saveUpstreamRetrySettings}
+        savedMaxRetries={savedUpstreamRetryMaxRetries}
+      />
       <div>
         <h3 style={{ ...ST, marginBottom: 12 }}>模型与提供商</h3>
         <div style={UV}>

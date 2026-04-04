@@ -32,6 +32,23 @@ import type {
 import { ConnectionTabContent } from './settings/connection-tab-content.js';
 import { ChannelsTabContent } from './settings/channels-tab-content.js';
 import { DevtoolsTabContent } from './settings/devtools-tab-content.js';
+import {
+  BUILTIN_PROVIDER_TYPE_SET,
+  DEFAULT_THINKING_DEFAULTS,
+  isTauri,
+  normalizeActiveSelectionProviders,
+  normalizeThinkingDefaults,
+  parseStructuredPayload,
+  readErrorMessage,
+  SETTINGS_LAYOUT_SIDE_GUTTER,
+  SETTINGS_LAYOUT_MAX_WIDTH,
+  SETTINGS_TAB_CONTENT_GAP,
+  SETTINGS_TAB_NAV_WIDTH,
+  TABS,
+  type TabId,
+} from './settings/settings-page-helpers.js';
+import { useSettingsEnvironment } from './settings/use-settings-environment.js';
+import { useSettingsUpstreamRetry } from './settings/use-settings-upstream-retry.js';
 import { WorkspaceTabContent } from './settings/workspace-tab-content.js';
 import { SecurityTabContent } from './settings/security-tab-content.js';
 import { UsageTabContent } from './settings/usage-tab-content.js';
@@ -39,164 +56,46 @@ import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
   ProviderEditData,
-  ReasoningEffortRef,
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
   ThinkingDefaultsRef,
-  ThinkingModeRef,
 } from './settings-types.js';
-
-const TABS = [
-  { id: 'connection', label: '连接与模型' },
-  { id: 'channels', label: '消息频道' },
-  { id: 'usage', label: '用量与账单' },
-  { id: 'security', label: '安全与权限' },
-  { id: 'workspace', label: '工作区' },
-  { id: 'devtools', label: '开发者工具' },
-] as const;
-
-const SETTINGS_TAB_NAV_WIDTH = 192;
-const SETTINGS_TAB_CONTENT_GAP = 28;
-const SETTINGS_LAYOUT_SIDE_GUTTER = SETTINGS_TAB_NAV_WIDTH + SETTINGS_TAB_CONTENT_GAP;
-const SETTINGS_LAYOUT_MAX_WIDTH = `calc(var(--content-max-width) + ${SETTINGS_LAYOUT_SIDE_GUTTER * 2}px)`;
-
-const DEFAULT_THINKING_DEFAULTS: ThinkingDefaultsRef = {
-  chat: { enabled: false, effort: 'medium' },
-  fast: { enabled: false, effort: 'medium' },
-};
-
-function normalizeReasoningEffort(value: unknown): ReasoningEffortRef {
-  return value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh'
-    ? value
-    : 'medium';
-}
-
-function normalizeThinkingMode(value: unknown): ThinkingModeRef {
-  if (!value || typeof value !== 'object') {
-    return { enabled: false, effort: 'medium' };
-  }
-
-  const record = value as Record<string, unknown>;
-  return {
-    enabled: record['enabled'] === true,
-    effort: normalizeReasoningEffort(record['effort']),
-  };
-}
-
-function normalizeThinkingDefaults(value: unknown): ThinkingDefaultsRef {
-  if (!value || typeof value !== 'object') {
-    return {
-      chat: { ...DEFAULT_THINKING_DEFAULTS.chat },
-      fast: { ...DEFAULT_THINKING_DEFAULTS.fast },
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  return {
-    chat: normalizeThinkingMode(record['chat']),
-    fast: normalizeThinkingMode(record['fast']),
-  };
-}
-
-function parseStructuredPayload(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value;
-  }
-
-  try {
-    return JSON.parse(value) as unknown;
-  } catch (_error) {
-    return value;
-  }
-}
-
-async function readErrorMessage(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = (await response.json()) as { error?: string; message?: string };
-    if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
-      return payload.error;
-    }
-    if (typeof payload.message === 'string' && payload.message.trim().length > 0) {
-      return payload.message;
-    }
-  } catch (_error) {
-    return fallback;
-  }
-
-  return fallback;
-}
-
-function normalizeActiveSelectionProviders(
-  selection: ActiveSelectionRef,
-  providers: AIProviderRef[],
-): ActiveSelectionRef {
-  const enabledProviders = providers
-    .filter((provider) => provider.enabled)
-    .map((provider) => ({
-      ...provider,
-      defaultModels: provider.defaultModels.filter((model) => model.enabled),
-    }))
-    .filter((provider) => provider.defaultModels.length > 0);
-
-  const normalizeEntry = (entry: ActiveSelectionRef['chat']): ActiveSelectionRef['chat'] => {
-    const provider =
-      enabledProviders.find((item) => item.id === entry.providerId) ?? enabledProviders[0];
-
-    if (!provider) {
-      return entry;
-    }
-
-    const model =
-      provider.defaultModels.find((item) => item.id === entry.modelId) ?? provider.defaultModels[0];
-
-    return {
-      providerId: provider.id,
-      modelId: model?.id ?? entry.modelId,
-    };
-  };
-
-  return {
-    chat: normalizeEntry(selection.chat),
-    fast: normalizeEntry(selection.fast),
-  };
-}
-
-type TabId = (typeof TABS)[number]['id'];
-
-const BUILTIN_PROVIDER_TYPE_SET = new Set([
-  'anthropic',
-  'openai',
-  'deepseek',
-  'gemini',
-  'ollama',
-  'openrouter',
-  'qwen',
-  'moonshot',
-  'custom',
-]);
-
-async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const tauri = (
-    window as Window & {
-      __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<T> } };
-    }
-  ).__TAURI__;
-  if (!tauri) throw new Error('Not running in Tauri');
-  return tauri.core.invoke(cmd, args);
-}
-
-const isTauri =
-  typeof window !== 'undefined' && !!(window as Window & { __TAURI__?: unknown }).__TAURI__;
 
 export default function SettingsPage() {
   const { gatewayUrl, setGatewayUrl, webAccessEnabled, webPort, setWebAccess } = useAuthStore();
   const token = useAuthStore((s) => s.accessToken);
   const { tab } = useParams<{ tab: string }>();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
+  const {
+    apiFetch,
+    checkVersionUpdate,
+    copied,
+    copyAddress,
+    portInput,
+    saveGatewayUrl,
+    saveWebPort,
+    setPortInput,
+    setUrlInput,
+    toggleWebAccess,
+    urlInput,
+    urlSaved,
+    versionInfo,
+  } = useSettingsEnvironment({
+    gatewayUrl,
+    setGatewayUrl,
+    token,
+    webAccessEnabled,
+    webPort,
+    setWebAccess,
+  });
+  const {
+    loadUpstreamRetrySettings,
+    saveUpstreamRetrySettings,
+    savedUpstreamRetryMaxRetries,
+    savingUpstreamRetrySettings,
+    setUpstreamRetryMaxRetries,
+    upstreamRetryMaxRetries,
+  } = useSettingsUpstreamRetry({ apiFetch, token });
 
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
   const [providers, setProviders] = useState<AIProviderRef[]>([]);
@@ -217,27 +116,7 @@ export default function SettingsPage() {
     fast: { ...DEFAULT_THINKING_DEFAULTS.fast },
   });
   const [savingDefaultModelSettings, setSavingDefaultModelSettings] = useState(false);
-
-  const [urlInput, setUrlInput] = useState(gatewayUrl);
-  const [urlSaved, setUrlSaved] = useState(false);
-  const [portInput, setPortInput] = useState(String(webPort));
-  const [copied, setCopied] = useState(false);
   const [filePatterns, setFilePatterns] = useState<string[]>([]);
-  const [versionInfo, setVersionInfo] = React.useState<{
-    currentVersion: string;
-    latestVersion: string | null;
-    updateAvailable: boolean;
-    checkError: string | null;
-    checkedAt: string | null;
-    checking: boolean;
-  }>({
-    currentVersion: '0.0.1',
-    latestVersion: null,
-    updateAvailable: false,
-    checkError: null,
-    checkedAt: null,
-    checking: false,
-  });
   const [githubTriggers, setGithubTriggers] = useState<Array<{ repo: string; events: string[] }>>(
     [],
   );
@@ -805,28 +684,8 @@ export default function SettingsPage() {
       .then((r) => r.json() as Promise<{ triggers: Array<{ repo: string; events: string[] }> }>)
       .then((d) => setGithubTriggers(d.triggers ?? []))
       .catch(() => undefined);
-    void fetch(`${gatewayUrl}/settings/version`, { headers: h })
-      .then(
-        (r) =>
-          r.json() as Promise<{
-            currentVersion: string;
-            latestVersion: string | null;
-            updateAvailable: boolean;
-            checkError: string | null;
-            checkedAt: string;
-          }>,
-      )
-      .then((d) =>
-        setVersionInfo({
-          currentVersion: d.currentVersion,
-          latestVersion: d.latestVersion,
-          updateAvailable: d.updateAvailable,
-          checkError: d.checkError,
-          checkedAt: d.checkedAt,
-          checking: false,
-        }),
-      )
-      .catch(() => undefined);
+    void loadUpstreamRetrySettings().catch(() => undefined);
+    void checkVersionUpdate();
     void fetch(`${gatewayUrl}/channels`, { headers: h })
       .then(async (response) => {
         const payload = (await response.json()) as {
@@ -874,8 +733,10 @@ export default function SettingsPage() {
     loadDesktopAutomationStatus,
     loadDevLogs,
     loadDiagnostics,
+    loadUpstreamRetrySettings,
     loadSshConnections,
     loadWorkers,
+    checkVersionUpdate,
     token,
   ]);
 
@@ -1052,11 +913,6 @@ export default function SettingsPage() {
     }
   }, [token, savingDefaultModelSettings, saveProviders]);
 
-  function saveGatewayUrl() {
-    setGatewayUrl(urlInput.trim().replace(/\/$/, ''));
-    setUrlSaved(true);
-    setTimeout(() => setUrlSaved(false), 2000);
-  }
   function handleAddProvider(data?: ProviderEditData) {
     if (!data) return;
     setProviders((prev) => {
@@ -1198,66 +1054,6 @@ export default function SettingsPage() {
       });
       return next;
     });
-  }
-  const apiFetch = React.useCallback(
-    (path: string, init?: RequestInit) =>
-      fetch(`${gatewayUrl}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {}),
-        },
-      }),
-    [gatewayUrl, token],
-  );
-  const checkVersionUpdate = React.useCallback(async () => {
-    if (!token) return;
-    setVersionInfo((prev) => ({ ...prev, checking: true, checkError: null }));
-    try {
-      const response = await apiFetch('/settings/version');
-      const data = (await response.json()) as {
-        currentVersion: string;
-        latestVersion: string | null;
-        updateAvailable: boolean;
-        checkError: string | null;
-        checkedAt: string;
-      };
-      setVersionInfo({
-        currentVersion: data.currentVersion,
-        latestVersion: data.latestVersion,
-        updateAvailable: data.updateAvailable,
-        checkError: data.checkError,
-        checkedAt: data.checkedAt,
-        checking: false,
-      });
-    } catch (_err) {
-      setVersionInfo((prev) => ({ ...prev, checking: false, checkError: '检查失败，请稍后重试' }));
-    }
-  }, [apiFetch, token]);
-  async function toggleWebAccess() {
-    const port = parseInt(portInput, 10);
-    const validPort = Number.isFinite(port) && port > 0 && port < 65536 ? port : webPort;
-    try {
-      if (webAccessEnabled) {
-        await tauriInvoke('stop_gateway');
-        setWebAccess(false, validPort);
-      } else {
-        await tauriInvoke('start_gateway', { port: validPort });
-        setWebAccess(true, validPort);
-      }
-    } catch (e) {
-      logger.error('Gateway toggle failed:', e);
-    }
-  }
-  function saveWebPort() {
-    const port = parseInt(portInput, 10);
-    if (Number.isFinite(port) && port > 0 && port < 65536) setWebAccess(webAccessEnabled, port);
-  }
-  function copyAddress() {
-    void navigator.clipboard.writeText(`http://localhost:${webPort}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   const exportDevLogs = React.useCallback(() => {
@@ -1536,6 +1332,13 @@ export default function SettingsPage() {
                     copied={copied}
                     copyAddress={copyAddress}
                     isTauri={isTauri}
+                    savingUpstreamRetrySettings={savingUpstreamRetrySettings}
+                    setUpstreamRetryMaxRetries={setUpstreamRetryMaxRetries}
+                    upstreamRetryMaxRetries={upstreamRetryMaxRetries}
+                    saveUpstreamRetrySettings={() => {
+                      void saveUpstreamRetrySettings();
+                    }}
+                    savedUpstreamRetryMaxRetries={savedUpstreamRetryMaxRetries}
                   />
                 )}
                 {activeTab === 'channels' && (
@@ -1636,7 +1439,7 @@ export default function SettingsPage() {
                     }}
                     onDesktopAutomationScreenshot={async () => {
                       const response = await apiFetch('/desktop-automation/screenshot', {
-                        method: 'GET',
+                        method: 'POST',
                       });
                       const payload = (await response.json()) as { screenshotBase64: string };
                       return payload.screenshotBase64;
