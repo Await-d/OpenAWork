@@ -2,6 +2,7 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
 
@@ -79,20 +80,25 @@ describe('right panel todo sections', () => {
   it('renders todo counts in overview mode', async () => {
     await act(async () => {
       root!.render(
-        <ChatOverviewTabContent
-          attachmentItems={[]}
-          childSessions={[]}
-          compactions={[]}
-          currentSessionId="session-1"
-          dialogueMode="coding"
-          effectiveWorkingDirectory="/workspace"
-          messages={[]}
-          pendingPermissions={[]}
-          sessionTodos={sessionTodos}
-          sessionTasks={[]}
-          workspaceFileItems={[]}
-          yoloMode={false}
-        />,
+        <MemoryRouter>
+          <ChatOverviewTabContent
+            attachmentItems={[]}
+            artifactsWorkspaceHref="/artifacts?sessionId=session-1"
+            childSessions={[]}
+            compactions={[]}
+            contentArtifactCount={3}
+            contentArtifactCountStatus="ready"
+            currentSessionId="session-1"
+            dialogueMode="coding"
+            effectiveWorkingDirectory="/workspace"
+            messages={[]}
+            pendingPermissions={[]}
+            sessionTodos={sessionTodos}
+            sessionTasks={[]}
+            workspaceFileItems={[]}
+            yoloMode={false}
+          />
+        </MemoryRouter>,
       );
     });
 
@@ -100,5 +106,10 @@ describe('right panel todo sections', () => {
     expect(container?.textContent).toContain('主待办');
     expect(container?.textContent).toContain('临时待办');
     expect(container?.textContent).toContain('1/1 项');
+    expect(container?.textContent).toContain('当前会话 · 3 个');
+    expect(container?.textContent).toContain('打开产物工作区');
+
+    const workspaceLink = container?.querySelector('a');
+    expect(workspaceLink?.getAttribute('href')).toBe('/artifacts?sessionId=session-1');
   });
 });

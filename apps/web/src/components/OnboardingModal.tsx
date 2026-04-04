@@ -81,6 +81,7 @@ export default function OnboardingModal({ onComplete }: Props) {
     >
       <div
         style={{
+          position: 'relative',
           background: 'var(--surface)',
           border: '1px solid var(--border)',
           borderRadius: 16,
@@ -91,6 +92,48 @@ export default function OnboardingModal({ onComplete }: Props) {
           gap: '1.25rem',
         }}
       >
+        <button
+          type="button"
+          onClick={onComplete}
+          aria-label="关闭引导"
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 12,
+            width: 28,
+            height: 28,
+            borderRadius: 6,
+            background: 'transparent',
+            border: '1px solid var(--border)',
+            color: 'var(--text-3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'background 150ms ease, color 150ms ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--surface-hover)';
+            e.currentTarget.style.color = 'var(--text)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = 'var(--text-3)';
+          }}
+        >
+          <svg
+            aria-hidden="true"
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          >
+            <path d="M2 2l8 8M10 2l-8 8" />
+          </svg>
+        </button>
         <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>OpenAWork</h1>
         {step === 'connect' ? (
           <>
@@ -159,6 +202,28 @@ export default function OnboardingModal({ onComplete }: Props) {
                 继续
               </button>
             </div>
+            <button
+              type="button"
+              onClick={onComplete}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-3)',
+                fontSize: 12,
+                cursor: 'pointer',
+                alignSelf: 'center',
+                marginTop: '0.25rem',
+                transition: 'color 150ms ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = 'var(--text-2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-3)';
+              }}
+            >
+              跳过引导，直接登录
+            </button>
           </>
         ) : step === 'login' ? (
           <form

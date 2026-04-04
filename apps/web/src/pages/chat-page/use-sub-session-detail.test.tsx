@@ -24,6 +24,10 @@ vi.mock('./support.js', () => ({
   normalizeChatMessages: (_messages: unknown[]) => [],
 }));
 
+vi.mock('./transcript-visibility.js', () => ({
+  filterTranscriptMessages: (messages: unknown[]) => messages,
+}));
+
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: 'child-1',

@@ -24,6 +24,11 @@ interface ConnectionTabContentProps {
   saveDefaultModelSettings: () => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
   handleRemoveModel: (providerId: string, modelId: string) => void;
+  handleUpdateModel: (
+    providerId: string,
+    modelId: string,
+    updates: Partial<AIModelConfigItem>,
+  ) => void;
   handleToggleModel: (providerId: string, modelId: string) => void;
   handleToggleProvider: (id: string) => void;
   handleEditProvider: (id: string, data: ProviderEditData) => void;
@@ -62,6 +67,7 @@ export function ConnectionTabContent({
   saveDefaultModelSettings,
   handleAddModel,
   handleRemoveModel,
+  handleUpdateModel,
   handleToggleModel,
   handleToggleProvider,
   handleEditProvider,
@@ -150,6 +156,7 @@ export function ConnectionTabContent({
             onToggleModel={handleToggleModel}
             onAddModel={handleAddModel}
             onRemoveModel={handleRemoveModel}
+            onUpdateModel={handleUpdateModel}
           />
         </div>
       </div>

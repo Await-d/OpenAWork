@@ -69,6 +69,7 @@ import {
   parseToolCallInputText,
   parseSessionModeMetadata,
   reconcileSnapshotChatMessages,
+  sanitizeComposerPlainText,
   type ReasoningEffort,
   type ChatMessage,
   type ComposerMenuState,
@@ -77,9 +78,14 @@ import {
   type WorkspaceFileMentionItem,
 } from './chat-page/support.js';
 import { buildComposerSlashItems } from './chat-page/composer-slash-items.js';
+import {
+  filterTranscriptMessages,
+  shouldShowRunEventInTranscript,
+} from './chat-page/transcript-visibility.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './chat-page/right-panel-sections.js';
 import { executeServerCommand } from './chat-page/server-command-item.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
+import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
 import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
 import {
   SessionRunStateBar,
@@ -115,6 +121,16 @@ import {
   calculateStreamingRevealDelay,
   calculateStreamingRevealStep,
 } from './chat-page/streaming-reveal.js';
+import { buildChatContextUsageSnapshot } from './chat-page/context-usage.js';
+import {
+  hasUsableReportedUsageSnapshot,
+  mergeChatBackendUsageSnapshot,
+  type ChatBackendUsageSnapshot,
+} from './chat-page/stream-usage.js';
+import {
+  recoverActiveAssistantStream,
+  type RecoveredActiveAssistantStream,
+} from './chat-page/stream-recovery.js';
 import {
   createQueuedComposerPreview,
   hydrateQueuedComposerMessage,
@@ -171,6 +187,7 @@ interface LiveToolCallState {
 }
 
 const SESSION_SWITCH_DEFER_THRESHOLD = 32;
+const REMOTE_STREAM_RECOVERY_POLL_MS = 1000;
 const CHAT_SCROLL_BOTTOM_PADDING = '0.95rem';
 const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
 const CHAT_LATEST_FOCUS_THRESHOLD_PX = 32;
@@ -470,6 +487,11 @@ export default function ChatPage() {
   const [stoppingStream, setStoppingStream] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
   const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
+  const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
+    null,
+  );
+  const [recoveredStreamSnapshot, setRecoveredStreamSnapshot] =
+    useState<RecoveredActiveAssistantStream | null>(null);
   const [activeStreamStartedAt, setActiveStreamStartedAt] = useState<number | null>(null);
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
@@ -585,6 +607,16 @@ export default function ChatPage() {
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
+  const artifactsWorkspaceHref = currentSessionId
+    ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
+    : null;
+  const { contentArtifactCount, status: contentArtifactCountStatus } =
+    useSessionContentArtifactCount({
+      currentSessionId,
+      gatewayUrl,
+      refreshKey: sessionReloadNonce + messages.length,
+      token,
+    });
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog(Boolean(token));
   const agentOptions = useMemo(
     () =>
@@ -668,6 +700,7 @@ export default function ChatPage() {
     streamRevealNextAllowedAtRef.current = 0;
     setStreamBuffer('');
     setStreamThinkingBuffer('');
+    setRecoveredStreamSnapshot(null);
     setStreaming(false);
     setStoppingStream(false);
     setActiveStreamStartedAt(null);
@@ -922,6 +955,11 @@ export default function ChatPage() {
   }, [location.pathname, setLastChatPath]);
 
   useEffect(() => {
+    void currentSessionId;
+    setReportedStreamUsage(null);
+  }, [currentSessionId]);
+
+  useEffect(() => {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
   }, [effectiveWorkingDirectory, setFileTreeRootPath]);
 
@@ -1098,6 +1136,18 @@ export default function ChatPage() {
     [gatewayUrl, token],
   );
 
+  const syncRecoveredStreamSnapshot = useCallback(
+    (session: Session, nextSessionStateStatus: SessionStateStatus | null) => {
+      setRecoveredStreamSnapshot(
+        recoverActiveAssistantStream({
+          runEvents: Array.isArray(session.runEvents) ? session.runEvents : [],
+          sessionStateStatus: nextSessionStateStatus,
+        }),
+      );
+    },
+    [],
+  );
+
   const loadCurrentSessionSnapshot = useCallback(
     async (targetSessionId: string, signal?: AbortSignal) => {
       if (!token) {
@@ -1110,14 +1160,16 @@ export default function ChatPage() {
       }
 
       const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-      const normalizedMessages = normalizeChatMessages(session.messages);
+      const normalizedMessages = filterTranscriptMessages(normalizeChatMessages(session.messages));
+      const nextSessionStateStatus = sessionWithRuntime.state_status ?? null;
       setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
       setRightPanelState(buildRightPanelStateFromSessionSnapshot(session, normalizedMessages));
       setSessionTodos(Array.isArray(session.todos) ? session.todos : []);
-      setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+      setSessionStateStatus(nextSessionStateStatus);
+      syncRecoveredStreamSnapshot(session, nextSessionStateStatus);
       setIsSessionSnapshotReady(true);
     },
-    [gatewayUrl, token],
+    [gatewayUrl, syncRecoveredStreamSnapshot, token],
   );
 
   const remoteSessionBusyState = useMemo<Extract<
@@ -1162,6 +1214,15 @@ export default function ChatPage() {
     sessionStateStatus,
     streaming,
   ]);
+  const visibleStreaming = streaming || recoveredStreamSnapshot !== null;
+  const visibleStreamBuffer = streaming ? streamBuffer : (recoveredStreamSnapshot?.text ?? '');
+  const visibleStreamThinkingBuffer = streaming
+    ? streamThinkingBuffer
+    : (recoveredStreamSnapshot?.thinking ?? '');
+  const visibleStreamStartedAt = streaming
+    ? activeStreamStartedAt
+    : (recoveredStreamSnapshot?.startedAt ?? null);
+  const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
   const queuedComposerPreviews = useMemo(
     () => queuedComposerMessages.map((item) => createQueuedComposerPreview(item)),
     [queuedComposerMessages],
@@ -1227,7 +1288,9 @@ export default function ChatPage() {
 
         lastParentTaskSyncMarkerRef.current = nextMarker;
         const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-        const normalizedMessages = normalizeChatMessages(session.messages);
+        const normalizedMessages = filterTranscriptMessages(
+          normalizeChatMessages(session.messages),
+        );
         setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
         setSessionStateStatus(sessionWithRuntime.state_status ?? null);
       })
@@ -1372,12 +1435,14 @@ export default function ChatPage() {
             return;
           }
 
-          const normalizedMessages = normalizeChatMessages(s.messages);
+          const normalizedMessages = filterTranscriptMessages(normalizeChatMessages(s.messages));
+          const nextSessionStateStatus = sessionWithRuntime.state_status ?? null;
           startSessionSwitchTransition(() => {
             setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
             setRightPanelState(buildRightPanelStateFromSessionSnapshot(s, normalizedMessages));
             setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
-            setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+            setSessionStateStatus(nextSessionStateStatus);
+            syncRecoveredStreamSnapshot(s, nextSessionStateStatus);
             setIsSessionSnapshotReady(true);
           });
 
@@ -1425,18 +1490,20 @@ export default function ChatPage() {
           return;
         }
         const metadata = parseSessionModeMetadata(s.metadata_json);
+        const nextSessionStateStatus = sessionWithRuntime.state_status ?? null;
         const applySessionPayload = () => {
           if (cancelled || activeSessionRef.current !== requestedSessionId) {
             return;
           }
 
-          const normalizedMessages = normalizeChatMessages(s.messages);
+          const normalizedMessages = filterTranscriptMessages(normalizeChatMessages(s.messages));
 
           startSessionSwitchTransition(() => {
             setMessages(normalizedMessages);
             setRightPanelState(buildRightPanelStateFromSessionSnapshot(s, normalizedMessages));
             setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
-            setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+            setSessionStateStatus(nextSessionStateStatus);
+            syncRecoveredStreamSnapshot(s, nextSessionStateStatus);
             setIsSessionSnapshotReady(true);
             if (!sessionMetadataDirtyRef.current) {
               setDialogueMode(metadata.dialogueMode);
@@ -1516,6 +1583,7 @@ export default function ChatPage() {
     sessionId,
     sessionReloadNonce,
     loadSessionRuntimeSnapshot,
+    syncRecoveredStreamSnapshot,
     token,
   ]);
 
@@ -1625,8 +1693,8 @@ export default function ChatPage() {
 
     const targetSessionId = currentSessionId;
     const polling = startSequentialPolling({
-      initialDelayMs: 3000,
-      intervalMs: 3000,
+      initialDelayMs: REMOTE_STREAM_RECOVERY_POLL_MS,
+      intervalMs: REMOTE_STREAM_RECOVERY_POLL_MS,
       run: async (signal) => {
         await loadCurrentSessionSnapshot(targetSessionId, signal);
       },
@@ -1940,7 +2008,7 @@ export default function ChatPage() {
       activeSessionRef.current = imported.sessionId;
       pendingBootstrapSessionRef.current = imported.sessionId;
       setCurrentSessionId(imported.sessionId);
-      setMessages(normalizeChatMessages(truncatedMessages));
+      setMessages(filterTranscriptMessages(normalizeChatMessages(truncatedMessages)));
       clearSessionMetadataDirty();
       setSessionModesHydrated(true);
       resetStreamState();
@@ -2002,23 +2070,23 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (messages.length === 0 && !streaming && !streamBuffer) {
+    if (messages.length === 0 && !visibleStreaming && visibleStreamBuffer.length === 0) {
       setShowScrollToBottom(false);
       setHasPendingFollowContent(false);
     }
-  }, [messages.length, streamBuffer, streaming]);
+  }, [messages.length, visibleStreamBuffer.length, visibleStreaming]);
 
   useEffect(() => {
-    if (streaming && isNearBottomRef.current) {
+    if (visibleStreaming && isNearBottomRef.current) {
       scrollToBottom('auto');
     }
-  }, [scrollToBottom, streaming]);
+  }, [scrollToBottom, visibleStreaming]);
 
   useEffect(() => {
-    if (streaming && isNearBottomRef.current && streamBuffer.length > 0) {
+    if (visibleStreaming && isNearBottomRef.current && visibleStreamBuffer.length > 0) {
       scrollToBottom('auto');
     }
-  }, [scrollToBottom, streamBuffer.length, streaming]);
+  }, [scrollToBottom, visibleStreamBuffer.length, visibleStreaming]);
 
   useEffect(() => {
     if (editorMode) {
@@ -2149,7 +2217,7 @@ export default function ChatPage() {
   }, []);
 
   const enqueueComposerMessage = useCallback(async () => {
-    const nextText = input.trim();
+    const nextText = sanitizeComposerPlainText(input).trim();
     if (nextText.length === 0 && attachedFiles.length === 0) {
       return false;
     }
@@ -2231,7 +2299,7 @@ export default function ChatPage() {
       queuedMessageId?: string;
     },
   ): Promise<boolean> {
-    const sourceInput = overrideText ?? input;
+    const sourceInput = sanitizeComposerPlainText(overrideText ?? input);
     const effectiveFiles = options?.queuedFiles ?? attachedFiles;
     if (
       (!sourceInput.trim() && effectiveFiles.length === 0) ||
@@ -2270,7 +2338,7 @@ export default function ChatPage() {
           setRightPanelState((prev) =>
             events.reduce((next, event) => applyChatRightPanelEvent(next, event), prev),
           );
-          appendAssistantEventMessages(events);
+          appendAssistantEventMessages(events, { excludeCompaction: true });
         },
         onOpenRightPanel: () => setRightOpen(true),
       });
@@ -2316,6 +2384,7 @@ export default function ChatPage() {
     setStoppingStream(false);
     stoppingStreamRef.current = false;
     setSessionStateStatus('running');
+    setReportedStreamUsage(null);
     streamRevealTargetRef.current = '';
     streamRevealVisibleRef.current = '';
     streamRevealTargetCodePointsRef.current = [];
@@ -2428,6 +2497,10 @@ export default function ChatPage() {
             status: 'streaming',
             toolName: event.toolName,
           });
+        }
+
+        if (event.type === 'usage') {
+          setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
         }
 
         if (event.type === 'tool_result') {
@@ -2561,7 +2634,9 @@ export default function ChatPage() {
           setHasPendingFollowContent((previous) => previous || true);
         }
 
-        appendAssistantEventMessages([event]);
+        if (shouldShowRunEventInTranscript(event)) {
+          appendAssistantEventMessages([event]);
+        }
       },
       onDelta: (delta: string) => {
         if (activeSessionRef.current !== sid || stoppingStreamRef.current) {
@@ -2922,7 +2997,9 @@ export default function ChatPage() {
       currentSessionId,
       retryPrompt.sourceMessageId,
     );
-    const normalizedRemainingMessages = normalizeChatMessages(remainingMessages);
+    const normalizedRemainingMessages = filterTranscriptMessages(
+      normalizeChatMessages(remainingMessages),
+    );
     const fallbackMessages = trimMessagesFromSource(messages, retryPrompt.sourceMessageId);
     const truncateRemovedSource =
       normalizedRemainingMessages.findIndex(
@@ -3165,12 +3242,33 @@ export default function ChatPage() {
       });
 
     const pastedText = e.clipboardData.getData('text/plain');
+    const sanitizedPastedText = sanitizeComposerPlainText(pastedText);
+    const shouldInterceptTextPaste = sanitizedPastedText !== pastedText;
 
-    if (imageFiles.length > 0) {
-      if (!pastedText) {
-        e.preventDefault();
+    if (imageFiles.length > 0 || shouldInterceptTextPaste) {
+      e.preventDefault();
+
+      if (sanitizedPastedText.length > 0) {
+        const target = e.currentTarget;
+        const selectionStart = target.selectionStart ?? target.value.length;
+        const selectionEnd = target.selectionEnd ?? selectionStart;
+        const nextValue =
+          target.value.slice(0, selectionStart) +
+          sanitizedPastedText +
+          target.value.slice(selectionEnd);
+        const nextCaret = selectionStart + sanitizedPastedText.length;
+
+        setInput(nextValue);
+        updateComposerMenu(nextValue, nextCaret);
+        requestAnimationFrame(() => {
+          textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
+        });
       }
-      appendFiles(imageFiles);
+
+      if (imageFiles.length > 0) {
+        appendFiles(imageFiles);
+      }
+      return;
     }
   }
 
@@ -3275,7 +3373,10 @@ export default function ChatPage() {
   }, [composerMenu, workspaceFileItems]);
 
   const composerVariant =
-    messages.length === 0 && !streaming && !streamBuffer && !remoteSessionBusyState
+    messages.length === 0 &&
+    !visibleStreaming &&
+    visibleStreamBuffer.length === 0 &&
+    !remoteSessionBusyState
       ? 'home'
       : 'session';
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
@@ -3339,16 +3440,25 @@ export default function ChatPage() {
   }, [messages]);
 
   const streamingOutputTokens = useMemo(() => {
-    return streamBuffer.length > 0 ? estimateTokenCount(streamBuffer) : 0;
-  }, [streamBuffer]);
+    return visibleStreamBuffer.length > 0 ? estimateTokenCount(visibleStreamBuffer) : 0;
+  }, [visibleStreamBuffer]);
+
+  const effectiveReportedStreamUsage = useMemo(
+    () =>
+      hasUsableReportedUsageSnapshot(visibleReportedStreamUsage)
+        ? visibleReportedStreamUsage
+        : undefined,
+    [visibleReportedStreamUsage],
+  );
 
   const streamingUsageDetails = useMemo<ChatUsageDetails | undefined>(() => {
-    if (!streaming || streamBuffer.length === 0) {
+    if (!visibleStreaming || (visibleStreamBuffer.length === 0 && !effectiveReportedStreamUsage)) {
       return undefined;
     }
 
-    const inputTokens = messageInputTokens;
-    const outputTokens = streamingOutputTokens;
+    const inputTokens = effectiveReportedStreamUsage?.inputTokens ?? messageInputTokens;
+    const outputTokens = effectiveReportedStreamUsage?.outputTokens ?? streamingOutputTokens;
+    const totalTokens = effectiveReportedStreamUsage?.totalTokens ?? inputTokens + outputTokens;
     const matchedPrice = resolveModelPriceEntry(modelPrices, [
       activeModelId,
       activeModelOption?.label,
@@ -3357,13 +3467,15 @@ export default function ChatPage() {
       ? (inputTokens * matchedPrice.inputPer1m + outputTokens * matchedPrice.outputPer1m) /
         1_000_000
       : undefined;
-    const activeDurationMs = activeStreamStartedAt ? Date.now() - activeStreamStartedAt : undefined;
+    const activeDurationMs = visibleStreamStartedAt
+      ? Date.now() - visibleStreamStartedAt
+      : undefined;
 
     return {
       requestIndex: assistantUsageDetails.size + 1,
       inputTokens,
       outputTokens,
-      totalTokens: inputTokens + outputTokens,
+      totalTokens,
       estimatedCostUsd,
       durationMs: activeDurationMs,
       firstTokenLatencyMs: activeStreamFirstTokenLatencyMs ?? undefined,
@@ -3376,14 +3488,31 @@ export default function ChatPage() {
     activeModelId,
     activeModelOption?.label,
     activeStreamFirstTokenLatencyMs,
-    activeStreamStartedAt,
     assistantUsageDetails.size,
+    effectiveReportedStreamUsage,
     messageInputTokens,
     modelPrices,
     streamingOutputTokens,
-    streamBuffer.length,
-    streaming,
+    visibleStreamBuffer.length,
+    visibleStreamStartedAt,
+    visibleStreaming,
   ]);
+
+  const contextUsageSnapshot = useMemo(
+    () =>
+      buildChatContextUsageSnapshot({
+        contextWindow: activeModelOption?.contextWindow,
+        historicalTokens: messageInputTokens,
+        reportedTotalTokens: effectiveReportedStreamUsage?.totalTokens,
+        streamingTotalTokens: streamingUsageDetails?.totalTokens,
+      }),
+    [
+      activeModelOption?.contextWindow,
+      effectiveReportedStreamUsage?.totalTokens,
+      messageInputTokens,
+      streamingUsageDetails?.totalTokens,
+    ],
+  );
 
   const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(() => {
     return (Array.isArray(messages) ? messages : []).map((message) => ({
@@ -3407,7 +3536,7 @@ export default function ChatPage() {
   ]);
 
   const streamingRenderedMessageEntry = useMemo<ChatRenderEntry | null>(() => {
-    if (!streaming) {
+    if (!visibleStreaming) {
       return null;
     }
 
@@ -3416,12 +3545,12 @@ export default function ChatPage() {
         id: '__streaming__',
         role: 'assistant',
         content:
-          toolCallCards.length > 0 || streamThinkingBuffer.trim().length > 0
+          toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
             ? createAssistantTraceContent({
-                ...(streamThinkingBuffer.trim().length > 0
-                  ? { reasoningBlocks: [streamThinkingBuffer] }
+                ...(visibleStreamThinkingBuffer.trim().length > 0
+                  ? { reasoningBlocks: [visibleStreamThinkingBuffer] }
                   : {}),
-                text: streamBuffer,
+                text: visibleStreamBuffer,
                 toolCalls: toolCallCards.map((toolCall) => ({
                   kind: resolveAssistantCapabilityKind(toolCall.toolName),
                   toolCallId: toolCall.toolCallId,
@@ -3432,12 +3561,12 @@ export default function ChatPage() {
                   status: toolCall.status,
                 })),
               })
-            : streamBuffer,
+            : visibleStreamBuffer,
         model: (activeModelOption?.label ?? activeModelId) || undefined,
         providerId: activeProviderId || undefined,
-        createdAt: activeStreamStartedAt ?? Date.now(),
+        createdAt: visibleStreamStartedAt ?? Date.now(),
         tokenEstimate: estimateTokenCount(
-          [streamThinkingBuffer, streamBuffer]
+          [visibleStreamThinkingBuffer, visibleStreamBuffer]
             .filter((item) => item.trim().length > 0)
             .join('\n\n'),
         ),
@@ -3456,16 +3585,16 @@ export default function ChatPage() {
     activeModelId,
     activeModelOption?.label,
     activeProviderId,
-    activeStreamStartedAt,
     openChildSessionInspector,
     resolveAssistantCapabilityKind,
     selectedChildSessionId,
-    streamBuffer,
-    streamThinkingBuffer,
-    streaming,
     streamingUsageDetails,
     taskToolRuntimeLookup,
     toolCallCards,
+    visibleStreamBuffer,
+    visibleStreamStartedAt,
+    visibleStreamThinkingBuffer,
+    visibleStreaming,
   ]);
 
   const historicalGroupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
@@ -3582,6 +3711,9 @@ export default function ChatPage() {
             onToggleEditorMode={() => setEditorMode(!editorMode)}
             rightOpen={rightOpen}
             onToggleRightOpen={() => setRightOpen((o) => !o)}
+            contextUsedTokens={contextUsageSnapshot?.usedTokens}
+            contextMaxTokens={contextUsageSnapshot?.maxTokens}
+            contextIsEstimated={contextUsageSnapshot?.estimated}
           />
           {showModelPicker && (
             <ModelPicker
@@ -3727,7 +3859,7 @@ export default function ChatPage() {
                 >
                   {showSessionSwitchSkeleton ? (
                     <ChatSessionSkeleton />
-                  ) : messages.length === 0 && !streaming && !remoteSessionBusyState ? (
+                  ) : messages.length === 0 && !visibleStreaming && !remoteSessionBusyState ? (
                     <WelcomeScreen
                       hasWorkspace={!!effectiveWorkingDirectory}
                       onNewSession={() => void ensureSession()}
@@ -3764,7 +3896,7 @@ export default function ChatPage() {
                   data-testid="chat-scroll-bottom"
                   onClick={() => scrollToBottom('smooth', 'latest-edge')}
                   aria-label={
-                    streaming
+                    visibleStreaming
                       ? hasPendingFollowContent
                         ? '有新内容，恢复最新对话聚焦'
                         : '恢复最新对话聚焦'
@@ -4383,8 +4515,11 @@ export default function ChatPage() {
                       {rightTab === 'overview' && (
                         <ChatOverviewTabContent
                           attachmentItems={attachmentItems}
+                          artifactsWorkspaceHref={artifactsWorkspaceHref}
                           childSessions={childSessions}
                           compactions={compactions}
+                          contentArtifactCount={contentArtifactCount}
+                          contentArtifactCountStatus={contentArtifactCountStatus}
                           currentSessionId={currentSessionId}
                           dialogueMode={dialogueMode}
                           effectiveWorkingDirectory={effectiveWorkingDirectory}

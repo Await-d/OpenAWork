@@ -5,7 +5,6 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
-const CHAT_PREVIEW_MAX_HEIGHT_VH = 70;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript';
@@ -440,7 +439,7 @@ function StaticPreviewCodeBlock({
       return;
     }
 
-    const maxPx = (window.innerHeight * CHAT_PREVIEW_MAX_HEIGHT_VH) / 100;
+    const maxPx = window.innerHeight * 3;
     const clamped = Math.max(CHAT_PREVIEW_MIN_HEIGHT, Math.min(height, maxPx));
     setFrameHeight(clamped);
   }, []);
@@ -461,7 +460,7 @@ function StaticPreviewCodeBlock({
   }, [previewOpen]);
 
   return (
-    <div className="chat-markdown-code-block">
+    <div className="chat-markdown-code-block" data-preview-open={previewOpen ? 'true' : undefined}>
       <div className="chat-markdown-code-toolbar">
         <div className="chat-markdown-code-toolbar-meta">
           <div className="chat-markdown-code-label">{language ?? 'CODE'}</div>
@@ -505,7 +504,6 @@ function StaticPreviewCodeBlock({
             style={{
               minHeight: CHAT_PREVIEW_MIN_HEIGHT,
               height: frameHeight,
-              maxHeight: `${CHAT_PREVIEW_MAX_HEIGHT_VH}vh`,
             }}
           />
         </div>

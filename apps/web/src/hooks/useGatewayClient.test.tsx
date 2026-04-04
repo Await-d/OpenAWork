@@ -166,6 +166,13 @@ describe('useGatewayClient', () => {
     act(() => {
       ws.emitOpen();
       ws.emitChunk({ type: 'text_delta', delta: '你好' });
+      ws.emitChunk({
+        type: 'usage',
+        inputTokens: 48_000,
+        outputTokens: 2_000,
+        totalTokens: 50_000,
+        round: 1,
+      });
       ws.emitChunk({ type: 'done', stopReason: 'end_turn' });
     });
 
@@ -183,7 +190,7 @@ describe('useGatewayClient', () => {
 
     expect(MockEventSource.instances).toHaveLength(0);
     expect(deltas).toEqual(['你好']);
-    expect(eventTypes).toEqual(['done']);
+    expect(eventTypes).toEqual(['usage', 'done']);
     expect(done).toEqual(['end_turn']);
     expect(client!.getActiveStreamSessionId()).toBeNull();
   });

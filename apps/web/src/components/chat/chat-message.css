@@ -993,6 +993,10 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
 }
 
+.chat-markdown-code-block[data-preview-open='true'] {
+  overflow: visible;
+}
+
 .chat-markdown-thinking-block {
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border) 78%);

@@ -1,6 +1,7 @@
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import { PlanHistoryPanel } from '@openAwork/shared-ui';
 import type { AttachmentItem, HistoricalPlan } from '@openAwork/shared-ui';
+import { Link } from 'react-router';
 import type { DialogueMode } from '../dialogue-mode.js';
 import type { ChatMessage, WorkspaceFileMentionItem } from './support.js';
 
@@ -41,6 +42,28 @@ const PANEL_SECTION_EYEBROW_STYLE: React.CSSProperties = {
   color: 'var(--text-3)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
+};
+
+const PANEL_ACTION_LINK_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: 32,
+  padding: '0 12px',
+  borderRadius: 999,
+  border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border))',
+  background: 'color-mix(in oklch, var(--accent) 14%, var(--surface) 86%)',
+  color: 'var(--text)',
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1,
+  textDecoration: 'none',
+};
+
+const PANEL_ACTION_DISABLED_STYLE: React.CSSProperties = {
+  ...PANEL_ACTION_LINK_STYLE,
+  opacity: 0.56,
+  cursor: 'not-allowed',
 };
 
 function splitSessionTodosByLane(sessionTodos: SessionTodoItem[]): {
@@ -454,8 +477,11 @@ export function ChatHistoryTabContent(props: {
 
 export function ChatOverviewTabContent(props: {
   attachmentItems: AttachmentItem[];
+  artifactsWorkspaceHref: string | null;
   childSessions: Session[];
   compactions: CompactionItem[];
+  contentArtifactCount: number;
+  contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
   currentSessionId: string | null;
   dialogueMode: DialogueMode;
   effectiveWorkingDirectory: string | null;
@@ -468,8 +494,11 @@ export function ChatOverviewTabContent(props: {
 }) {
   const {
     attachmentItems,
+    artifactsWorkspaceHref,
     childSessions,
     compactions,
+    contentArtifactCount,
+    contentArtifactCountStatus,
     currentSessionId,
     dialogueMode,
     effectiveWorkingDirectory,
@@ -483,6 +512,21 @@ export function ChatOverviewTabContent(props: {
   const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
   const mainActiveCount = mainTodos.filter((todo) => todo.status !== 'completed').length;
   const tempActiveCount = tempTodos.filter((todo) => todo.status !== 'completed').length;
+  const artifactCountLabel =
+    contentArtifactCountStatus === 'loading'
+      ? '同步中…'
+      : contentArtifactCountStatus === 'error'
+        ? '暂不可用'
+        : `${contentArtifactCount} 个`;
+  const artifactDescription = !currentSessionId
+    ? '创建或切换到一个会话后，就可以直接进入对应的产物工作区。'
+    : contentArtifactCountStatus === 'loading'
+      ? '正在同步当前会话的内容型产物统计。'
+      : contentArtifactCountStatus === 'error'
+        ? '当前会话的产物统计暂时不可用，但仍可尝试进入工作区。'
+        : contentArtifactCount > 0
+          ? `当前会话已沉淀 ${contentArtifactCount} 个内容型产物，可直接切到工作区继续编辑。`
+          : '当前会话还没有内容型产物，但你仍然可以进入工作区查看和创建。';
 
   const overviewRows = [
     { label: '会话 ID', value: currentSessionId ? `${currentSessionId.slice(0, 8)}…` : '—' },
@@ -557,6 +601,36 @@ export function ChatOverviewTabContent(props: {
             </div>
           </div>
         ))}
+      </div>
+      <div style={PANEL_SECTION_STYLE}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>内容产物</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+              当前会话 · {artifactCountLabel}
+            </div>
+          </div>
+          {artifactsWorkspaceHref ? (
+            <Link style={PANEL_ACTION_LINK_STYLE} to={artifactsWorkspaceHref}>
+              打开产物工作区
+            </Link>
+          ) : (
+            <span aria-disabled="true" style={PANEL_ACTION_DISABLED_STYLE}>
+              打开产物工作区
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+          {artifactDescription}
+        </div>
       </div>
       <div style={PANEL_SECTION_STYLE}>
         <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文注入</div>

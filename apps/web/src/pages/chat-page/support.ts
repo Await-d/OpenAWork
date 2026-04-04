@@ -101,11 +101,25 @@ export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 type StatusTone = 'info' | 'success' | 'warning' | 'error';
 
 const SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS = 15_000;
+const BRACKETED_PASTE_START_MARKER = '\u001b[200~';
+const BRACKETED_PASTE_END_MARKER = '\u001b[201~';
+const HOST_PASTE_PREFIX_PATTERN = /^\s*\[Pasted(?:\s*~\d+)?\]?\s*/iu;
 
 export function estimateTokenCount(text: string): number {
   const normalized = text.trim();
   if (!normalized) return 0;
   return Math.max(1, Math.round(normalized.length / 4));
+}
+
+export function sanitizeComposerPlainText(text: string): string {
+  if (text.length === 0) {
+    return text;
+  }
+
+  return text
+    .replaceAll(BRACKETED_PASTE_START_MARKER, '')
+    .replaceAll(BRACKETED_PASTE_END_MARKER, '')
+    .replace(HOST_PASTE_PREFIX_PATTERN, '');
 }
 
 export function createAssistantTraceContent(payload: AssistantTracePayload): string {

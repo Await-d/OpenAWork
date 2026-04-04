@@ -5,6 +5,7 @@ import {
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
   reconcileSnapshotChatMessages,
+  sanitizeComposerPlainText,
 } from './support.js';
 
 describe('normalizeChatMessages', () => {
@@ -526,5 +527,19 @@ describe('createAssistantEventContent', () => {
 
     expect(content).toContain('问题已响应');
     expect(content).toContain('已回答，继续执行。');
+  });
+});
+
+describe('sanitizeComposerPlainText', () => {
+  it('strips terminal bracketed-paste markers and pasted host prefixes', () => {
+    expect(sanitizeComposerPlainText('\u001b[200~[Pasted ~4 会话已压缩\u001b[201~')).toBe(
+      '会话已压缩',
+    );
+  });
+
+  it('keeps normal user text unchanged', () => {
+    expect(sanitizeComposerPlainText('请保留 [Pasted] 这个词作为正文示例')).toBe(
+      '请保留 [Pasted] 这个词作为正文示例',
+    );
   });
 });

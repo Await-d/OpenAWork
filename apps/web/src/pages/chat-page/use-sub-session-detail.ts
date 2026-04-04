@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPermissionsClient, createSessionsClient } from '@openAwork/web-client';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import { normalizeChatMessages, type ChatMessage } from './support.js';
+import { filterTranscriptMessages } from './transcript-visibility.js';
 
 export interface SubSessionDetailState {
   error: string | null;
@@ -66,7 +67,7 @@ export function useSubSessionDetail(
       setState({
         error: null,
         loading: false,
-        messages: normalizeChatMessages(session.messages),
+        messages: filterTranscriptMessages(normalizeChatMessages(session.messages)),
         pendingPermissions: permissionsResult.perms,
         session,
         tasks: tasksResult.tasks,

@@ -182,7 +182,7 @@ export function FileEditorPanel({
               )}
             </div>
           </div>
-          <div style={{ flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {panelMode === 'preview' && activePreviewKind ? (
               <FilePreviewPane path={activeFile.path} content={activeFile.content} />
             ) : (

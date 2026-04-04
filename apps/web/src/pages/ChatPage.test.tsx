@@ -54,6 +54,7 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
               id: 'gpt-5',
               label: 'GPT-5',
               enabled: true,
+              contextWindow: 200_000,
               supportsThinking: true,
             },
           ],
@@ -68,6 +69,7 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
               id: 'claude-sonnet-4',
               label: 'Claude Sonnet 4',
               enabled: true,
+              contextWindow: 200_000,
             },
           ],
         },
@@ -940,6 +942,206 @@ describe('ChatPage', () => {
     expect(rendered.querySelector('[data-testid="chat-controls-bar"]')).not.toBeNull();
     expect(rendered.querySelector('[data-testid="dialogue-mode-toggle"]')).not.toBeNull();
     expect(rendered.textContent).toContain('alpha');
+  });
+
+  it('shows an estimated context usage meter in the chat header when the model has a context window', async () => {
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '准备一个很长的上下文',
+          tokenEstimate: 40_000,
+          createdAt: 1,
+          status: 'completed',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '这是当前助手的回复',
+          tokenEstimate: 10_000,
+          createdAt: 2,
+          status: 'completed',
+        },
+      ],
+    }));
+
+    const rendered = await renderChatPage('/chat/session-1');
+
+    await flushEffects();
+
+    const meter = rendered.querySelector(
+      '[data-testid="chat-context-usage-meter"]',
+    ) as HTMLDivElement | null;
+
+    expect(meter).not.toBeNull();
+    expect(meter?.textContent).toContain('25%');
+    expect(meter?.getAttribute('title')).toContain('上下文估算已用 50k / 200k（25%）');
+  });
+
+  it('switches the header context meter to precise gateway usage when a usage event arrives', async () => {
+    let callbacks:
+      | {
+          onDone: (stopReason?: string) => void;
+          onEvent: (event: { type: string } & Record<string, unknown>) => void;
+        }
+      | undefined;
+
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '准备一个很长的上下文',
+          tokenEstimate: 40_000,
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+    }));
+    streamMock.mockImplementationOnce(
+      (
+        _sid: string,
+        _message: string,
+        nextCallbacks: {
+          onDone: (stopReason?: string) => void;
+          onEvent: (event: { type: string } & Record<string, unknown>) => void;
+        },
+      ) => {
+        callbacks = nextCallbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '继续回答');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    expect(callbacks).toBeDefined();
+
+    await act(async () => {
+      callbacks?.onEvent({
+        type: 'usage',
+        inputTokens: 60_000,
+        outputTokens: 5_000,
+        totalTokens: 65_000,
+        round: 1,
+      });
+      callbacks?.onDone('end_turn');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const meter = rendered.querySelector(
+      '[data-testid="chat-context-usage-meter"]',
+    ) as HTMLDivElement | null;
+
+    expect(meter).not.toBeNull();
+    expect(meter?.textContent).toContain('33%');
+    expect(meter?.textContent).not.toContain('≈');
+    expect(meter?.getAttribute('title')).toContain('上下文已用 65k / 200k（33%）');
+    expect(meter?.getAttribute('title')).not.toContain('估算');
+  });
+
+  it('falls back to estimated context usage when the gateway reports zero tokens', async () => {
+    let callbacks:
+      | {
+          onDone: (stopReason?: string) => void;
+          onEvent: (event: { type: string } & Record<string, unknown>) => void;
+        }
+      | undefined;
+
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '准备一个很长的上下文',
+          tokenEstimate: 40_000,
+          createdAt: 1,
+          status: 'completed',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '这是当前助手的回复',
+          tokenEstimate: 10_000,
+          createdAt: 2,
+          status: 'completed',
+        },
+      ],
+    }));
+    streamMock.mockImplementationOnce(
+      (
+        _sid: string,
+        _message: string,
+        nextCallbacks: {
+          onDone: (stopReason?: string) => void;
+          onEvent: (event: { type: string } & Record<string, unknown>) => void;
+        },
+      ) => {
+        callbacks = nextCallbacks;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '继续回答');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    expect(callbacks).toBeDefined();
+
+    await act(async () => {
+      callbacks?.onEvent({
+        type: 'usage',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        round: 1,
+      });
+      callbacks?.onDone('end_turn');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const meter = rendered.querySelector(
+      '[data-testid="chat-context-usage-meter"]',
+    ) as HTMLDivElement | null;
+
+    expect(meter).not.toBeNull();
+    expect(meter?.textContent).toContain('25%');
+    expect(meter?.textContent).toContain('≈');
+    expect(meter?.getAttribute('title')).toContain('上下文估算已用 50k / 200k（25%）');
   });
 
   it('shows an inline todo bar in the chat view for session todos', async () => {
@@ -3223,7 +3425,7 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('上下文压缩完成');
   });
 
-  it('mirrors permission, task, child-session and compaction events into the assistant chat group', async () => {
+  it('mirrors permission, task and child-session events into the assistant chat group while keeping compaction out of the transcript', async () => {
     let pendingCallbacks: Record<string, unknown> | null = null;
     streamMock.mockImplementationOnce(
       (_sessionId: string, _message: string, callbacks: Record<string, unknown>) => {
@@ -3302,15 +3504,15 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('任务进行中 · 调用子代理整理上下文');
     expect(rendered.textContent).toContain('已创建子会话');
     expect(rendered.textContent).toContain('MCP 文档检索');
-    expect(rendered.textContent).toContain('会话已压缩');
     expect(rendered.textContent).toContain('PERMIT');
     expect(rendered.textContent).toContain('AGENT');
     expect(rendered.textContent).toContain('MCP');
-    expect(rendered.textContent).toContain('COMPACT');
     expect(rendered.textContent).toContain('暂停');
     expect(rendered.textContent).toContain('运行中');
     expect(rendered.textContent).toContain('成功');
     expect(rendered.textContent).toContain('全部调用已进入聊天列表');
+    expect(rendered.textContent).not.toContain('会话已压缩');
+    expect(rendered.textContent).not.toContain('已保留工具调用与 MCP 结果摘要');
   });
 
   it('renders a subagent run list above the composer and opens the child session panel on selection', async () => {
@@ -4329,6 +4531,75 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('请继续保留这条新问题');
     expect(rendered.textContent).toContain('这是本地刚完成的新回答');
     expect(rendered.querySelector('[data-testid="chat-session-skeleton"]')).toBeNull();
+  });
+
+  it('reconstructs in-progress assistant output from persisted run events after a refresh', async () => {
+    activeStreamSessionIdRef.current = null;
+    getSessionMock.mockImplementation(async (_token: string, requestedSessionId: string) => {
+      if (requestedSessionId !== 'session-1') {
+        return { messages: [] };
+      }
+
+      return {
+        messages: [
+          {
+            id: 'user-1',
+            role: 'user',
+            content: '请继续输出当前分析',
+            createdAt: 1,
+            status: 'completed',
+          },
+        ],
+        runEvents: [
+          {
+            type: 'thinking_delta',
+            delta: '先恢复思考',
+            runId: 'run-refresh-1',
+            occurredAt: 10,
+          },
+          {
+            type: 'text_delta',
+            delta: '正在恢复',
+            runId: 'run-refresh-1',
+            occurredAt: 11,
+          },
+          {
+            type: 'text_delta',
+            delta: '中的回复',
+            runId: 'run-refresh-1',
+            occurredAt: 12,
+          },
+          {
+            type: 'usage',
+            inputTokens: 120,
+            outputTokens: 30,
+            totalTokens: 150,
+            round: 1,
+            runId: 'run-refresh-1',
+            occurredAt: 13,
+          },
+        ],
+        state_status: 'running',
+      };
+    });
+
+    const rendered = await renderChatPage('/chat/session-1');
+
+    await flushEffects();
+
+    expect(streamMock).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('正在恢复中的回复');
+    expect(rendered.textContent).toContain('请继续输出当前分析');
+    expect(rendered.textContent).toContain('可尝试停止');
+    expect(rendered.textContent).toContain('会话持续运行中');
+    expect(rendered.querySelector('[data-testid="chat-session-runtime-status"]')).not.toBeNull();
+
+    const meter = rendered.querySelector(
+      '[data-testid="chat-context-usage-meter"]',
+    ) as HTMLDivElement | null;
+    expect(meter).not.toBeNull();
+    expect(meter?.textContent).not.toContain('≈');
+    expect(meter?.getAttribute('title')).toContain('上下文已用 150 / 200k');
   });
 
   it('does not append a stream error message after a permission pause', async () => {
@@ -5971,6 +6242,26 @@ describe('ChatPage', () => {
     expect(rendered.querySelector('[data-testid="image-preview"]')).not.toBeNull();
   });
 
+  it('strips bracketed paste host noise before text lands in the composer', async () => {
+    const rendered = await renderChatPage('/chat');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+
+    act(() => {
+      const event = new Event('paste', { bubbles: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: vi.fn(() => '\u001b[200~[Pasted ~4 会话已压缩\u001b[201~'),
+          items: [],
+        },
+      });
+      textarea!.dispatchEvent(event);
+    });
+
+    await flushEffects();
+
+    expect(textarea?.value).toBe('会话已压缩');
+  });
+
   it('uploads pasted screenshots as artifacts before sending the chat request', async () => {
     streamMock.mockImplementationOnce(() => undefined);
 
@@ -6029,5 +6320,34 @@ describe('ChatPage', () => {
     expect(String(streamMock.mock.calls[0]?.[1] ?? '')).toContain(
       '[附件]\n- pasted-image.png (artifact:artifact-1)',
     );
+  });
+
+  it('sanitizes pasted host noise again before sending the chat request', async () => {
+    streamMock.mockImplementationOnce(() => undefined);
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '\u001b[200~[Pasted ~4 继续总结今天的改动\u001b[201~');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const sendButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '发送',
+    ) as HTMLButtonElement | undefined;
+
+    act(() => {
+      sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    await flushEffects();
+
+    expect(String(streamMock.mock.calls[0]?.[1] ?? '')).toBe('继续总结今天的改动');
   });
 });

@@ -12,6 +12,12 @@ import {
   extractPrimaryMessage,
 } from './settings-derived.js';
 import { normalizeSettingsModelPrices } from './settings/usage-data.js';
+import {
+  addProviderModel,
+  removeProviderModel,
+  toggleProviderModel,
+  updateProviderModel,
+} from './settings/provider-model-mutations.js';
 import type {
   MCPServerEntry,
   AIProviderRef,
@@ -52,6 +58,8 @@ import { useSettingsUpstreamRetry } from './settings/use-settings-upstream-retry
 import { WorkspaceTabContent } from './settings/workspace-tab-content.js';
 import { SecurityTabContent } from './settings/security-tab-content.js';
 import { UsageTabContent } from './settings/usage-tab-content.js';
+import { MemoryTabContent } from './settings/memory-tab-content.js';
+import { useMemoryManagement } from './settings/use-memory-management.js';
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
@@ -96,6 +104,11 @@ export default function SettingsPage() {
     setUpstreamRetryMaxRetries,
     upstreamRetryMaxRetries,
   } = useSettingsUpstreamRetry({ apiFetch, token });
+  const memoryManagement = useMemoryManagement({
+    apiFetch,
+    token,
+    active: activeTab === 'memory',
+  });
 
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
   const [providers, setProviders] = useState<AIProviderRef[]>([]);
@@ -995,65 +1008,50 @@ export default function SettingsPage() {
       return next;
     });
   }
-  function handleToggleModel(providerId: string, modelId: string) {
+  function persistModelMutation(
+    mutate: (providers: AIProviderRef[]) => AIProviderRef[],
+    errorMessage: string,
+  ) {
     setProviders((prev) => {
-      const next = prev.map((p) =>
-        p.id === providerId
-          ? {
-              ...p,
-              defaultModels: p.defaultModels.map((m: AIModelConfigRef) =>
-                m.id === modelId ? { ...m, enabled: !m.enabled } : m,
-              ),
-            }
-          : p,
-      );
+      const next = mutate(prev);
       providersRef.current = next;
       const { savedSelection } = syncSelectionForProviders(next);
       void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
         syncDraft: false,
         syncSaved: true,
       }).catch((error: unknown) => {
-        logger.error('failed to save toggled model', error);
+        logger.error(errorMessage, error);
       });
       return next;
     });
+  }
+  function handleToggleModel(providerId: string, modelId: string) {
+    persistModelMutation(
+      (prev) => toggleProviderModel(prev, providerId, modelId),
+      'failed to save toggled model',
+    );
   }
   function handleAddModel(providerId: string, model: AIModelConfigItem) {
-    setProviders((prev) => {
-      const next = prev.map((p) =>
-        p.id === providerId ? { ...p, defaultModels: [...p.defaultModels, model] } : p,
-      );
-      providersRef.current = next;
-      const { savedSelection } = syncSelectionForProviders(next);
-      void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
-        syncDraft: false,
-        syncSaved: true,
-      }).catch((error: unknown) => {
-        logger.error('failed to save added model', error);
-      });
-      return next;
-    });
+    persistModelMutation(
+      (prev) => addProviderModel(prev, providerId, model),
+      'failed to save added model',
+    );
+  }
+  function handleUpdateModel(
+    providerId: string,
+    modelId: string,
+    updates: Partial<AIModelConfigRef>,
+  ) {
+    persistModelMutation(
+      (prev) => updateProviderModel(prev, providerId, modelId, updates),
+      'failed to save updated model settings',
+    );
   }
   function handleRemoveModel(providerId: string, modelId: string) {
-    setProviders((prev) => {
-      const next = prev.map((p) =>
-        p.id === providerId
-          ? {
-              ...p,
-              defaultModels: p.defaultModels.filter((m: AIModelConfigRef) => m.id !== modelId),
-            }
-          : p,
-      );
-      providersRef.current = next;
-      const { savedSelection } = syncSelectionForProviders(next);
-      void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
-        syncDraft: false,
-        syncSaved: true,
-      }).catch((error: unknown) => {
-        logger.error('failed to save removed model', error);
-      });
-      return next;
-    });
+    persistModelMutation(
+      (prev) => removeProviderModel(prev, providerId, modelId),
+      'failed to save removed model',
+    );
   }
 
   const exportDevLogs = React.useCallback(() => {
@@ -1312,6 +1310,7 @@ export default function SettingsPage() {
                     }}
                     handleAddModel={handleAddModel}
                     handleRemoveModel={handleRemoveModel}
+                    handleUpdateModel={handleUpdateModel}
                     handleToggleModel={handleToggleModel}
                     handleToggleProvider={handleToggleProvider}
                     handleEditProvider={handleEditProvider}
@@ -1357,6 +1356,7 @@ export default function SettingsPage() {
                     disconnectedCount={disconnectedCount}
                   />
                 )}
+                {activeTab === 'memory' && <MemoryTabContent memoryState={memoryManagement} />}
                 {activeTab === 'usage' && (
                   <UsageTabContent
                     usageRecords={usageRecords}

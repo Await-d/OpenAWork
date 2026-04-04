@@ -1,5 +1,6 @@
 import DialogueModeToggle from '../../pages/DialogueModeToggle.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
+import { ContextUsageMeter } from './context-usage-meter.js';
 
 interface ChatTopBarProps {
   agentOptions: Array<{ id: string; label: string }>;
@@ -15,6 +16,9 @@ interface ChatTopBarProps {
   onToggleEditorMode: () => void;
   rightOpen: boolean;
   onToggleRightOpen: () => void;
+  contextUsedTokens?: number;
+  contextMaxTokens?: number;
+  contextIsEstimated?: boolean;
 }
 
 export function ChatTopBar({
@@ -31,7 +35,12 @@ export function ChatTopBar({
   onToggleEditorMode,
   rightOpen,
   onToggleRightOpen,
+  contextUsedTokens,
+  contextMaxTokens,
+  contextIsEstimated,
 }: ChatTopBarProps) {
+  const showContextMeter =
+    contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0;
   return (
     <div
       data-testid="chat-controls-bar"
@@ -138,6 +147,24 @@ export function ChatTopBar({
           border: '1px solid var(--border-subtle)',
         }}
       >
+        {showContextMeter ? (
+          <>
+            <ContextUsageMeter
+              usedTokens={contextUsedTokens}
+              maxTokens={contextMaxTokens}
+              estimated={contextIsEstimated}
+            />
+            <div
+              aria-hidden="true"
+              style={{
+                width: 1,
+                height: 14,
+                background: 'var(--border-subtle)',
+                flexShrink: 0,
+              }}
+            />
+          </>
+        ) : null}
         <button
           type="button"
           aria-pressed={yoloMode}

@@ -124,7 +124,6 @@ describe('MarkdownMessageContent', () => {
     expect(previewFrame?.getAttribute('referrerpolicy')).toBe('no-referrer');
     expect(previewFrame?.style.minHeight).toBe('360px');
     expect(previewFrame?.style.height).toBe('360px');
-    expect(previewFrame?.style.maxHeight).toBe('70vh');
     expect(previewFrame?.getAttribute('srcdoc')).toContain(
       '<base href="about:srcdoc" target="_blank">',
     );
