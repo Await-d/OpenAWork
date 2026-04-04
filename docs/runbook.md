@@ -49,8 +49,11 @@ docker logs agent-gateway --tail 100
 # 2. Restart gateway (if OOM or crash loop)
 docker restart agent-gateway
 
-# 3. If DB unreachable — check Postgres
-psql $DATABASE_URL -c "SELECT 1"
+# 3. If durable storage looks unavailable — inspect gateway data root
+export OPENAWORK_DATA_ROOT="${OPENAWORK_DATA_DIR:-$HOME/.local/share/OpenAWork/agent-gateway}"
+export OPENAWORK_DB_PATH="${OPENAWORK_DATABASE_PATH:-$OPENAWORK_DATA_ROOT/openAwork.db}"
+ls -lah "$OPENAWORK_DATA_ROOT"
+sqlite3 "$OPENAWORK_DB_PATH" "SELECT 1;"
 
 # 4. If Redis unreachable
 redis-cli -u $REDIS_URL ping
@@ -147,27 +150,25 @@ curl https://github.com/openwork/openAwork/releases/latest/download/latest.json
 
 ---
 
-## Playbook E: Database Connection Exhaustion
+## Playbook E: SQLite Lock / Data Root Saturation
 
-**Symptoms:** `too many connections` errors in logs, gateway returning 500.
+**Symptoms:** `database is locked`, SQLite open failures, disk full errors, or gateway returning 500 during durable writes.
 
 ```bash
-# 1. Check active connections
-psql $DATABASE_URL -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active';"
+# 1. Resolve effective gateway data locations
+export OPENAWORK_DATA_ROOT="${OPENAWORK_DATA_DIR:-$HOME/.local/share/OpenAWork/agent-gateway}"
+export OPENAWORK_DB_PATH="${OPENAWORK_DATABASE_PATH:-$OPENAWORK_DATA_ROOT/openAwork.db}"
 
-# 2. Kill idle connections
-psql $DATABASE_URL -c "
-  SELECT pg_terminate_backend(pid)
-  FROM pg_stat_activity
-  WHERE state = 'idle'
-    AND query_start < NOW() - INTERVAL '5 minutes';
-"
+# 2. Check DB accessibility and WAL side files
+ls -lah "$OPENAWORK_DATA_ROOT"
+sqlite3 "$OPENAWORK_DB_PATH" "PRAGMA journal_mode; SELECT count(*) FROM sessions;"
 
-# 3. Reduce pool size in gateway (env var)
-export DB_POOL_MAX=5
+# 3. Check backup growth / disk pressure
+du -sh "$OPENAWORK_DATA_ROOT" "$OPENAWORK_DATA_ROOT/file-backups" 2>/dev/null
+df -h "$OPENAWORK_DATA_ROOT"
+
+# 4. If the volume is unhealthy or full, free space / remount / move OPENAWORK_DATA_DIR
 docker restart agent-gateway
-
-# 4. Long-term: add PgBouncer connection pooler
 ```
 
 ---
@@ -180,6 +181,34 @@ On-call Engineer
         → Engineering Manager (P0 unresolved after 1 hour)
             → CTO (business impact, public communication needed)
 ```
+
+## Playbook F: File Change Durability / Restore Chain Regression
+
+**Symptoms:** `restore/preview` or `restore/apply` returns unexpected 409/500, backups stop being written, or session delete leaves the gateway `file-backups/` directory growing unexpectedly.
+
+```bash
+# Resolve effective gateway data locations
+export OPENAWORK_DATA_ROOT="${OPENAWORK_DATA_DIR:-$HOME/.local/share/OpenAWork/agent-gateway}"
+export OPENAWORK_DB_PATH="${OPENAWORK_DATABASE_PATH:-$OPENAWORK_DATA_ROOT/openAwork.db}"
+
+# 1. Re-run gateway durability verification
+pnpm --filter @openAwork/agent-gateway run test:restore
+pnpm --filter @openAwork/agent-gateway run test:delete-cleanup
+pnpm --filter @openAwork/agent-gateway run test:durable
+
+# 2. Inspect backup rows for recent failures
+sqlite3 "$OPENAWORK_DB_PATH" "SELECT backup_id, session_id, file_path, content_tier, created_at FROM session_file_backups ORDER BY created_at DESC LIMIT 20;"
+
+# 3. Inspect durable diff rows missing backup refs
+sqlite3 "$OPENAWORK_DB_PATH" "SELECT session_id, client_request_id, file_path FROM session_file_diffs WHERE backup_before_ref_json IS NULL ORDER BY created_at DESC LIMIT 20;"
+
+# 4. Force safest behavior for backup writes
+export OPENAWORK_FILE_BACKUP_FAILURE_POLICY=block
+
+# 5. If restore/apply remains broken, stop gateway rollout and roll back
+```
+
+**Recovery target:** restore preview/apply and backup GC checks return to green before resuming rollout.
 
 ## Post-Incident
 

@@ -53,19 +53,22 @@ Services:
 
 - `web` — Nginx serving the SPA on port `5173`
 - `gateway` — Fastify API on port `3000`
-- `postgres` — PostgreSQL 16
 - `redis` — Redis 7
+
+Gateway durable storage is persisted via the named Docker volume mounted at `/var/lib/openawork`.
 
 Nginx proxies `/auth/`, `/sessions/` to the Gateway automatically.
 
 Environment variables (set in `docker-compose.yml` or `.env`):
 
-| Variable         | Default        | Required   |
-| ---------------- | -------------- | ---------- |
-| `JWT_SECRET`     | `change-me...` | Yes (prod) |
-| `JWT_EXPIRES_IN` | `15m`          | No         |
-| `DATABASE_URL`   | postgres://... | Yes        |
-| `REDIS_URL`      | redis://...    | Yes        |
+| Variable                  | Default                             | Required    |
+| ------------------------- | ----------------------------------- | ----------- |
+| `JWT_SECRET`              | `change-me...`                      | Yes (prod)  |
+| `JWT_EXPIRES_IN`          | `15m`                               | No          |
+| `OPENAWORK_DATA_DIR`      | `/var/lib/openawork`                | Recommended |
+| `OPENAWORK_DATABASE_PATH` | unset                               | No          |
+| `DATABASE_URL`            | unset (legacy SQLite path override) | No          |
+| `REDIS_URL`               | redis://...                         | Yes         |
 
 ---
 
