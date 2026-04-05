@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import {
   ChatMessageGroupList,
+  type ChatProviderDescriptor,
   type ChatRenderEntry,
   type ChatRenderGroup,
 } from '../../components/chat/chat-message-group-list.js';
@@ -179,6 +180,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   gatewayUrl,
   onOpenFullSession,
   parentTaskRuntimeLookup,
+  providerCatalog,
   token,
 }: {
   childSessionId: string | null;
@@ -186,6 +188,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   gatewayUrl: string;
   onOpenFullSession: (sessionId: string) => void;
   parentTaskRuntimeLookup?: TaskToolRuntimeLookup;
+  providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   token: string | null;
 }) {
   const { error, loading, messages, pendingPermissions, refresh, session, tasks } =
@@ -1005,6 +1008,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
                 bottomRef={bottomRef}
                 currentUserEmail={currentUserEmail}
                 groups={renderedMessages}
+                providerCatalog={providerCatalog}
                 scrollRegionRef={scrollRegionRef}
               />
             </div>

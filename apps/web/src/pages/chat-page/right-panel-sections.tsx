@@ -1,8 +1,9 @@
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
-import { PlanHistoryPanel } from '@openAwork/shared-ui';
-import type { AttachmentItem, HistoricalPlan } from '@openAwork/shared-ui';
+import { ContextPanel, PlanHistoryPanel } from '@openAwork/shared-ui';
+import type { AttachmentItem, ContextItem, HistoricalPlan } from '@openAwork/shared-ui';
 import { Link } from 'react-router';
 import type { DialogueMode } from '../dialogue-mode.js';
+import type { ChatContextUsageSnapshot } from './context-usage.js';
 import type { ChatMessage, WorkspaceFileMentionItem } from './support.js';
 
 type HierarchicalSessionTask = SessionTask & {
@@ -167,7 +168,9 @@ interface CompactionItem {
 }
 
 function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: string }) {
-  const activeCount = props.sessionTodos.filter((todo) => todo.status !== 'completed').length;
+  const activeCount = props.sessionTodos.filter(
+    (todo) => todo.status === 'pending' || todo.status === 'in_progress',
+  ).length;
 
   return (
     <div style={PANEL_SECTION_STYLE}>
@@ -491,6 +494,7 @@ export function ChatOverviewTabContent(props: {
   artifactsWorkspaceHref: string | null;
   childSessions: Session[];
   compactions: CompactionItem[];
+  contextUsageSnapshot: ChatContextUsageSnapshot | null;
   contentArtifactCount: number;
   contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
   currentSessionId: string | null;
@@ -498,16 +502,21 @@ export function ChatOverviewTabContent(props: {
   effectiveWorkingDirectory: string | null;
   messages: ChatMessage[];
   pendingPermissions: PendingPermissionRequest[];
+  pendingQuestionsCount: number;
+  sessionStateStatus: 'idle' | 'running' | 'paused' | 'completed' | 'error' | null;
   sessionTodos: SessionTodoItem[];
   sessionTasks: HierarchicalSessionTask[];
   workspaceFileItems: WorkspaceFileMentionItem[];
   yoloMode: boolean;
+  onCompactSession: () => void;
+  onOpenRecoveryStrategy: () => void;
 }) {
   const {
     attachmentItems,
     artifactsWorkspaceHref,
     childSessions,
     compactions,
+    contextUsageSnapshot,
     contentArtifactCount,
     contentArtifactCountStatus,
     currentSessionId,
@@ -515,14 +524,22 @@ export function ChatOverviewTabContent(props: {
     effectiveWorkingDirectory,
     messages,
     pendingPermissions,
+    pendingQuestionsCount,
+    sessionStateStatus,
     sessionTodos,
     sessionTasks,
     workspaceFileItems,
     yoloMode,
+    onCompactSession,
+    onOpenRecoveryStrategy,
   } = props;
   const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
-  const mainActiveCount = mainTodos.filter((todo) => todo.status !== 'completed').length;
-  const tempActiveCount = tempTodos.filter((todo) => todo.status !== 'completed').length;
+  const mainActiveCount = mainTodos.filter(
+    (todo) => todo.status === 'pending' || todo.status === 'in_progress',
+  ).length;
+  const tempActiveCount = tempTodos.filter(
+    (todo) => todo.status === 'pending' || todo.status === 'in_progress',
+  ).length;
   const artifactCountLabel =
     contentArtifactCountStatus === 'loading'
       ? '同步中…'
@@ -559,6 +576,43 @@ export function ChatOverviewTabContent(props: {
     { label: '临时待办', value: `${tempActiveCount}/${tempTodos.length} 项` },
     { label: '待处理审批', value: `${pendingPermissions.length} 项` },
   ];
+  const contextItems: ContextItem[] = [
+    ...attachmentItems.map((item) => ({
+      id: item.id,
+      kind: 'file' as const,
+      label: item.name,
+      description: `附件 · ${item.type}`,
+    })),
+    ...workspaceFileItems.slice(0, 8).map((item) => ({
+      id: item.path,
+      kind: 'file' as const,
+      label: item.label,
+      description: item.relativePath,
+    })),
+    ...(yoloMode
+      ? [
+          {
+            id: 'context-yolo-mode',
+            kind: 'custom' as const,
+            label: 'YOLO 模式',
+            description: '当前会话允许更激进的执行策略。',
+          },
+        ]
+      : []),
+  ];
+  const contextSummaryText = contextUsageSnapshot
+    ? `${contextUsageSnapshot.estimated ? '估算' : '精确'}用量 ${Math.round((contextUsageSnapshot.usedTokens / Math.max(1, contextUsageSnapshot.maxTokens)) * 100)}%`
+    : '当前模型未暴露上下文窗口';
+  const recoverySummary =
+    sessionStateStatus === 'paused'
+      ? pendingPermissions.length > 0
+        ? '当前会话已暂停，等待审批后会自动继续。'
+        : pendingQuestionsCount > 0
+          ? '当前会话已暂停，等待你回答问题后继续。'
+          : '当前会话已暂停，可从恢复策略里查看下一步动作。'
+      : compactions.length > 0
+        ? '当前会话已有最近检查点，可刷新页面后继续同步恢复。'
+        : '当前会话没有最近检查点，主要依赖实时 attach / replay 恢复。';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -624,6 +678,41 @@ export function ChatOverviewTabContent(props: {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>恢复策略</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+              {sessionStateStatus === 'paused' ? '等待处理中的会话' : '运行恢复已就绪'}
+            </div>
+          </div>
+          <button type="button" style={PANEL_ACTION_LINK_STYLE} onClick={onOpenRecoveryStrategy}>
+            打开恢复详情
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+          {recoverySummary}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ ...PANEL_ACTION_DISABLED_STYLE, opacity: 1, cursor: 'default' }}>
+            最近检查点 {compactions.length}
+          </span>
+          <span style={{ ...PANEL_ACTION_DISABLED_STYLE, opacity: 1, cursor: 'default' }}>
+            待审批 {pendingPermissions.length}
+          </span>
+          <span style={{ ...PANEL_ACTION_DISABLED_STYLE, opacity: 1, cursor: 'default' }}>
+            待回答 {pendingQuestionsCount}
+          </span>
+        </div>
+      </div>
+      <div style={PANEL_SECTION_STYLE}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={PANEL_SECTION_EYEBROW_STYLE}>内容产物</div>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
               当前会话 · {artifactCountLabel}
@@ -663,6 +752,35 @@ export function ChatOverviewTabContent(props: {
         {!yoloMode && attachmentItems.length === 0 && workspaceFileItems.length === 0 && (
           <div style={{ fontSize: 11, color: 'var(--text-3)' }}>无额外上下文</div>
         )}
+      </div>
+      <div style={PANEL_SECTION_STYLE}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文窗口</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+              {contextSummaryText}
+            </div>
+          </div>
+          <button type="button" style={PANEL_ACTION_LINK_STYLE} onClick={onCompactSession}>
+            立即压缩会话
+          </button>
+        </div>
+        <ContextPanel
+          items={contextItems}
+          totalTokens={contextUsageSnapshot?.usedTokens}
+          tokenLimit={contextUsageSnapshot?.maxTokens}
+        />
+        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          先展示当前上下文来源与窗口占用；更细的 Pin/Remove/压缩预览会继续放到后续阶段。
+        </div>
       </div>
     </div>
   );

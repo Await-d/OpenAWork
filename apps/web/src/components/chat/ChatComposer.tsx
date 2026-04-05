@@ -6,6 +6,7 @@ import type {
   MentionItem,
   SlashCommandItem,
 } from '../../pages/chat-page/support.js';
+import { ProviderMark } from './chat-provider-display.js';
 
 function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CSSProperties {
   switch (source) {
@@ -59,6 +60,8 @@ interface ChatComposerProps {
   variant: 'home' | 'session';
   editorMode?: boolean;
   activeProviderId: string;
+  activeProviderName?: string;
+  activeProviderType?: string;
   activeModelTooltip?: string;
   modelPickerRef: React.RefObject<HTMLButtonElement | null>;
   modelSettingsRef: React.RefObject<HTMLButtonElement | null>;
@@ -141,6 +144,8 @@ export function ChatComposer({
   variant,
   editorMode = false,
   activeProviderId,
+  activeProviderName,
+  activeProviderType,
   activeModelTooltip,
   modelPickerRef,
   modelSettingsRef,
@@ -713,20 +718,12 @@ export function ChatComposer({
                       transition: 'height 220ms ease, color 150ms ease, background 150ms ease',
                     }}
                   >
-                    {activeProviderId ? (
-                      <img
-                        src={`/logo-${activeProviderId}.svg`}
-                        alt={activeProviderId}
-                        width={12}
-                        height={12}
-                        style={{
-                          objectFit: 'contain',
-                          filter: 'var(--provider-logo-filter, none)',
-                          flexShrink: 0,
-                        }}
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = 'none';
-                        }}
+                    {activeProviderId || activeProviderType ? (
+                      <ProviderMark
+                        providerId={activeProviderId}
+                        providerName={activeProviderName}
+                        providerType={activeProviderType}
+                        size={12}
                       />
                     ) : (
                       <svg

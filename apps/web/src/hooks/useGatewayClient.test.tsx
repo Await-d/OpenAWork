@@ -492,7 +492,10 @@ describe('useGatewayClient', () => {
     });
 
     expect(client!.getActiveStreamSessionId()).toBe('session-restored');
-    await expect(client!.stopStream()).resolves.toBe(true);
+    await act(async () => {
+      await expect(client!.stopStream()).resolves.toBe(true);
+      await Promise.resolve();
+    });
     expect(client!.getActiveStreamSessionId()).toBeNull();
     expect(window.sessionStorage.getItem('openAwork-active-stream:anonymous')).toBeNull();
   });
@@ -524,7 +527,10 @@ describe('useGatewayClient', () => {
     });
 
     expect(client!.getActiveStreamSessionId()).toBe('session-stale');
-    await expect(client!.stopStream()).resolves.toBe(false);
+    await act(async () => {
+      await expect(client!.stopStream()).resolves.toBe(false);
+      await Promise.resolve();
+    });
     expect(client!.getActiveStreamSessionId()).toBeNull();
     expect(window.sessionStorage.getItem('openAwork-active-stream:anonymous')).toBeNull();
   });

@@ -59,7 +59,7 @@ describe('golden transcript baseline', () => {
     expect(transcript).toMatchInlineSnapshot(`
       [
         {
-          "content": "{\"type\":\"assistant_trace\",\"payload\":{\"text\":\"我先搜索，再等待权限。\",\"toolCalls\":[{\"toolCallId\":\"call-search\",\"toolName\":\"codesearch\",\"input\":{\"query\":\"fastify sse example\"},\"output\":\"snippet\",\"isError\":false,\"status\":\"completed\"},{\"toolCallId\":\"call-task\",\"toolName\":\"task\",\"input\":{\"prompt\":\"inspect workspace\"},\"output\":\"waiting for approval\",\"isError\":false,\"pendingPermissionRequestId\":\"perm-1\",\"status\":\"paused\"}]}}",
+          "content": "{\"type\":\"assistant_trace\",\"payload\":{\"text\":\"我先搜索，再等待权限。\",\"toolCalls\":[{\"toolCallId\":\"call-search\",\"toolName\":\"codesearch\",\"input\":{\"query\":\"fastify sse example\"},\"output\":\"snippet\",\"isError\":false,\"status\":\"completed\"},{\"toolCallId\":\"call-task\",\"toolName\":\"task\",\"input\":{\"prompt\":\"inspect workspace\"},\"output\":\"waiting for approval\",\"isError\":false,\"status\":\"paused\",\"pendingPermissionRequestId\":\"perm-1\"}]}}",
           "createdAt": 1,
           "durationMs": undefined,
           "firstTokenLatencyMs": undefined,
@@ -67,6 +67,28 @@ describe('golden transcript baseline', () => {
           "model": undefined,
           "modifiedFilesSummary": undefined,
           "providerId": undefined,
+          "rawContent": [
+            {
+              "text": "我先搜索，再等待权限。",
+              "type": "text",
+            },
+            {
+              "input": {
+                "query": "fastify sse example",
+              },
+              "toolCallId": "call-search",
+              "toolName": "codesearch",
+              "type": "tool_call",
+            },
+            {
+              "input": {
+                "prompt": "inspect workspace",
+              },
+              "toolCallId": "call-task",
+              "toolName": "task",
+              "type": "tool_call",
+            },
+          ],
           "role": "assistant",
           "status": "completed",
           "stopReason": undefined,

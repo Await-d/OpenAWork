@@ -28,13 +28,25 @@ import { useGatewayClient } from '../hooks/useGatewayClient.js';
 import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../hooks/useComposerWorkspaceCatalog.js';
 import { useWorkspace } from '../hooks/useWorkspace.js';
-import { createSessionsClient } from '@openAwork/web-client';
-import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
+import { toast } from '../components/ToastNotification.js';
+import { createAgentProfilesClient, createSessionsClient } from '@openAwork/web-client';
+import type {
+  AgentProfileRecord,
+  PendingPermissionRequest,
+  PendingQuestionRequest,
+  Session,
+  SessionMessageRatingRecord,
+  SessionMessageRatingValue,
+  SessionRecoveryReadModel,
+  SessionTask,
+} from '@openAwork/web-client';
 import type { CommandResultCard, Message, RunEvent } from '@openAwork/shared';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
 import { logger } from '../utils/logger.js';
 import {
   publishSessionPendingPermission,
+  publishSessionPendingQuestion,
+  requestCurrentSessionRefresh,
   requestSessionListRefresh,
   subscribeCurrentSessionRefresh,
 } from '../utils/session-list-events.js';
@@ -55,6 +67,7 @@ import RetryModeDialog from './chat-page/retry-mode-dialog.js';
 import { getDefaultAgentForDialogueMode, type DialogueMode } from './dialogue-mode.js';
 import {
   type AssistantEventKind,
+  clearResolvedPendingPermissionFromMessage,
   createAssistantEventContent,
   createAssistantTraceContent,
   createCommandCardContent,
@@ -62,6 +75,7 @@ import {
   detectComposerTrigger,
   estimateTokenCount,
   flattenWorkspaceFiles,
+  matchClientSlashCommand,
   matchServerSlashCommand,
   normalizeChatMessages,
   parseAssistantEventContent,
@@ -92,7 +106,6 @@ import {
   SessionRunStatePlaceholder,
 } from './chat-page/session-run-state-bar.js';
 import {
-  fetchSessionRuntimeSnapshot,
   flattenSessionTodoLanes,
   mergeChildSessions,
   mergeSessionTasks,
@@ -113,6 +126,7 @@ import {
   applyChatRightPanelEvent,
   applyChatRightPanelChunk,
   buildChatRightPanelStateFromRunEvents,
+  clearResolvedPendingPermissionToolCalls,
   createInitialChatRightPanelState,
   getToolCallCards,
   startChatRightPanelRun,
@@ -176,12 +190,40 @@ function buildRightPanelStateFromSessionSnapshot(session: Session, messages: Cha
   });
 }
 
+interface PreparedSessionRecoveryState {
+  messageRatings: Record<string, SessionMessageRatingRecord>;
+  metadata: ReturnType<typeof parseSessionModeMetadata>;
+  normalizedMessages: ChatMessage[];
+  session: Session;
+  sessionStateStatus: SessionStateStatus | null;
+  sessionTodos: SessionTodoItem[];
+}
+
+function prepareSessionRecoveryState(
+  recovery: SessionRecoveryReadModel,
+): PreparedSessionRecoveryState {
+  const session = recovery.session;
+  const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
+
+  return {
+    messageRatings: Object.fromEntries(
+      recovery.ratings.map((rating) => [rating.messageId, rating]),
+    ),
+    metadata: parseSessionModeMetadata(session.metadata_json),
+    normalizedMessages: filterTranscriptMessages(normalizeChatMessages(session.messages)),
+    session,
+    sessionStateStatus: sessionWithRuntime.state_status ?? null,
+    sessionTodos: flattenSessionTodoLanes(recovery.todoLanes),
+  };
+}
+
 interface LiveToolCallState {
   createdAt: number;
   inputText: string;
   isError?: boolean;
   output?: unknown;
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   status: 'streaming' | 'paused' | 'completed' | 'error';
   toolCallId: string;
   toolName: string;
@@ -344,17 +386,20 @@ type SessionsClientWithActiveStop = ReturnType<typeof createSessionsClient> & {
 };
 
 function createSessionMetadataSnapshot(metadata: {
+  agentId?: string;
   dialogueMode?: DialogueMode;
   modelId?: string;
   providerId?: string;
   reasoningEffort?: ReasoningEffort;
   thinkingEnabled?: boolean;
+  toolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   webSearchEnabled?: boolean;
   workingDirectory?: string | null;
   yoloMode?: boolean;
 }): string {
   const snapshot: Record<string, unknown> = {
     dialogueMode: metadata.dialogueMode ?? 'clarify',
+    toolSurfaceProfile: metadata.toolSurfaceProfile ?? 'openawork',
     yoloMode: metadata.yoloMode === true,
     webSearchEnabled: metadata.webSearchEnabled === true,
     thinkingEnabled: metadata.thinkingEnabled === true,
@@ -374,6 +419,15 @@ function createSessionMetadataSnapshot(metadata: {
   const workingDirectory = metadata.workingDirectory?.trim();
   if (workingDirectory) {
     snapshot['workingDirectory'] = workingDirectory;
+  }
+
+  if (metadata.toolSurfaceProfile && metadata.toolSurfaceProfile !== 'openawork') {
+    snapshot['toolSurfaceProfile'] = metadata.toolSurfaceProfile;
+  }
+
+  const agentId = metadata.agentId?.trim();
+  if (agentId) {
+    snapshot['agentId'] = agentId;
   }
 
   return JSON.stringify(snapshot);
@@ -477,6 +531,9 @@ export default function ChatPage() {
   const workspace = useWorkspace(currentSessionId);
   const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messageRatings, setMessageRatings] = useState<Record<string, SessionMessageRatingRecord>>(
+    {},
+  );
   const [activeProviderId, setActiveProviderId] = useState<string>('');
   const [activeModelId, setActiveModelId] = useState<string>('');
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
@@ -507,6 +564,12 @@ export default function ChatPage() {
   const pendingStreamRevealFrameRef = useRef<number | null>(null);
   const pendingSessionNormalizeTimeoutRef = useRef<number | null>(null);
   const activeSessionRef = useRef<string | null>(sessionId ?? null);
+  const currentLoadedSessionIdRef = useRef<string | null>(currentSessionId);
+  const sessionViewEpochRef = useRef(0);
+  const currentSessionViewRef = useRef<{ epoch: number; sessionId: string | null }>({
+    epoch: 0,
+    sessionId: sessionId ?? null,
+  });
   const lastParentTaskSyncMarkerRef = useRef<string | null>(null);
   const pendingBootstrapSessionRef = useRef<string | null>(null);
   const previousRouteSessionIdRef = useRef<string | null>(sessionId ?? null);
@@ -523,8 +586,13 @@ export default function ChatPage() {
   const [toolFilter, setToolFilter] = useState<'all' | 'lsp' | 'file' | 'network' | 'other'>('all');
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
   const [rightOpen, setRightOpen] = useState(false);
+  const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('clarify');
   const [manualAgentId, setManualAgentId] = useState('');
+  const [toolSurfaceProfile, setToolSurfaceProfile] = useState<
+    'openawork' | 'claude_code_default' | 'claude_code_simple'
+  >('openawork');
+  const [currentAgentProfile, setCurrentAgentProfile] = useState<AgentProfileRecord | null>(null);
   const [yoloMode, setYoloMode] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -544,6 +612,7 @@ export default function ChatPage() {
   const [sessionTodos, setSessionTodos] = useState<SessionTodoItem[]>([]);
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionRequest[]>([]);
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
@@ -591,6 +660,31 @@ export default function ChatPage() {
   const streamRevealVisibleCodePointCountRef = useRef(0);
   const streamRevealNextAllowedAtRef = useRef(0);
   const attachAttemptedSessionRef = useRef<string | null>(null);
+  const activateSessionView = useCallback(
+    (nextSessionId: string | null, options?: { incrementEpoch?: boolean }) => {
+      if (options?.incrementEpoch !== false) {
+        sessionViewEpochRef.current += 1;
+      }
+
+      currentSessionViewRef.current = {
+        epoch: sessionViewEpochRef.current,
+        sessionId: nextSessionId,
+      };
+      activeSessionRef.current = nextSessionId;
+      return sessionViewEpochRef.current;
+    },
+    [],
+  );
+  const isCurrentSessionView = useCallback((targetSessionId: string, expectedEpoch: number) => {
+    const current = currentSessionViewRef.current;
+    return current.sessionId === targetSessionId && current.epoch === expectedEpoch;
+  }, []);
+  const isCurrentSessionRequest = useCallback(
+    (targetSessionId: string, expectedEpoch: number) =>
+      activeSessionRef.current === targetSessionId &&
+      isCurrentSessionView(targetSessionId, expectedEpoch),
+    [isCurrentSessionView],
+  );
   const sendMessageRef = useRef<
     (
       overrideText?: string,
@@ -659,6 +753,7 @@ export default function ChatPage() {
     (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
       const metadata: Record<string, unknown> = {
         dialogueMode,
+        toolSurfaceProfile,
         yoloMode,
         webSearchEnabled,
         thinkingEnabled,
@@ -673,6 +768,10 @@ export default function ChatPage() {
         metadata['modelId'] = activeModelId;
       }
 
+      if (manualAgentId.trim()) {
+        metadata['agentId'] = manualAgentId.trim();
+      }
+
       if (effectiveWorkingDirectory) {
         metadata['workingDirectory'] = effectiveWorkingDirectory;
       }
@@ -684,8 +783,10 @@ export default function ChatPage() {
       activeProviderId,
       dialogueMode,
       effectiveWorkingDirectory,
+      manualAgentId,
       reasoningEffort,
       thinkingEnabled,
+      toolSurfaceProfile,
       webSearchEnabled,
       yoloMode,
     ],
@@ -825,13 +926,64 @@ export default function ChatPage() {
     [markSessionMetadataDirty],
   );
 
-  const handleManualAgentChange = useCallback((agentId: string) => {
-    setManualAgentId(agentId.trim());
-  }, []);
+  const handleManualAgentChange = useCallback(
+    (agentId: string) => {
+      setManualAgentId(agentId.trim());
+      markSessionMetadataDirty();
+    },
+    [markSessionMetadataDirty],
+  );
+
+  const handleToolSurfaceProfileChange = useCallback(
+    (profile: 'openawork' | 'claude_code_default' | 'claude_code_simple') => {
+      setToolSurfaceProfile(profile);
+      markSessionMetadataDirty();
+    },
+    [markSessionMetadataDirty],
+  );
 
   const handleClearManualAgentId = useCallback(() => {
     setManualAgentId('');
-  }, []);
+    markSessionMetadataDirty();
+  }, [markSessionMetadataDirty]);
+
+  const handleSaveWorkspaceProfile = useCallback(async () => {
+    if (!token || !effectiveWorkingDirectory) {
+      return;
+    }
+
+    const client = createAgentProfilesClient(gatewayUrl);
+    const payload = {
+      workspacePath: effectiveWorkingDirectory,
+      label:
+        currentAgentProfile?.label ??
+        effectiveWorkingDirectory.split('/').filter(Boolean).at(-1) ??
+        '项目配置',
+      ...(manualAgentId.trim() ? { agentId: manualAgentId.trim() } : {}),
+      ...(activeProviderId ? { providerId: activeProviderId } : {}),
+      ...(activeModelId ? { modelId: activeModelId } : {}),
+      toolSurfaceProfile,
+    };
+
+    try {
+      const nextProfile = currentAgentProfile
+        ? await client.update(token, currentAgentProfile.id, payload)
+        : await client.create(token, payload);
+      setCurrentAgentProfile(nextProfile);
+      toast(currentAgentProfile ? '已更新项目配置' : '已保存为项目配置', 'success');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '保存项目配置失败', 'error');
+    }
+  }, [
+    activeModelId,
+    activeProviderId,
+    currentAgentProfile,
+    effectiveWorkingDirectory,
+    gatewayUrl,
+    manualAgentId,
+    token,
+    toolSurfaceProfile,
+  ]);
 
   useEffect(() => {
     if (
@@ -854,6 +1006,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     activeSessionRef.current = sessionId ?? currentSessionId ?? null;
+    currentLoadedSessionIdRef.current = currentSessionId;
     lastParentTaskSyncMarkerRef.current = null;
   }, [currentSessionId, sessionId]);
 
@@ -962,11 +1115,37 @@ export default function ChatPage() {
   useEffect(() => {
     void currentSessionId;
     setReportedStreamUsage(null);
+    setMessageRatings({});
   }, [currentSessionId]);
 
   useEffect(() => {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
   }, [effectiveWorkingDirectory, setFileTreeRootPath]);
+
+  useEffect(() => {
+    if (!token || !effectiveWorkingDirectory) {
+      setCurrentAgentProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+    void createAgentProfilesClient(gatewayUrl)
+      .getCurrent(token, effectiveWorkingDirectory)
+      .then((profile) => {
+        if (!cancelled) {
+          setCurrentAgentProfile(profile);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentAgentProfile(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveWorkingDirectory, gatewayUrl, token]);
 
   useEffect(() => {
     openFileRef.current = (path: string) => {
@@ -1096,49 +1275,35 @@ export default function ChatPage() {
         if (!sessionId) {
           setThinkingEnabled(defaults.thinkingEnabled);
           setReasoningEffort(defaults.reasoningEffort);
+          setToolSurfaceProfile(defaults.toolSurfaceProfile);
         }
       })
       .catch(() => null);
   }, [loadSavedChatDefaults, sessionId, token]);
 
   const loadSessionRuntimeSnapshot = useCallback(
-    async (targetSessionId: string, signal?: AbortSignal) => {
+    async (targetSessionId: string, signal?: AbortSignal, expectedSessionViewEpoch?: number) => {
       if (!token) {
         return;
       }
 
-      const { childrenResult, pendingPermissionsResult, tasksResult, todoLanesResult } =
-        await fetchSessionRuntimeSnapshot({
-          gatewayUrl,
-          sessionId: targetSessionId,
-          signal,
-          token,
-        });
+      const sessionViewEpoch = expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
 
-      if (signal?.aborted || activeSessionRef.current !== targetSessionId) {
+      const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
+        signal,
+      });
+
+      if (signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) {
         return;
       }
 
-      setSessionTodos(
-        todoLanesResult.status === 'fulfilled'
-          ? flattenSessionTodoLanes(todoLanesResult.value)
-          : [],
-      );
-      setChildSessions((previous) =>
-        childrenResult.status === 'fulfilled'
-          ? mergeChildSessions(previous, childrenResult.value)
-          : previous,
-      );
-      setSessionTasks((previous) =>
-        tasksResult.status === 'fulfilled'
-          ? mergeSessionTasks(previous, tasksResult.value)
-          : previous,
-      );
-      setPendingPermissions(
-        pendingPermissionsResult.status === 'fulfilled' ? pendingPermissionsResult.value : [],
-      );
+      setSessionTodos(flattenSessionTodoLanes(recovery.todoLanes));
+      setChildSessions((previous) => mergeChildSessions(previous, recovery.children));
+      setSessionTasks((previous) => mergeSessionTasks(previous, recovery.tasks));
+      setPendingPermissions(recovery.pendingPermissions);
+      setPendingQuestions(recovery.pendingQuestions);
     },
-    [gatewayUrl, token],
+    [gatewayUrl, isCurrentSessionView, token],
   );
 
   const syncRecoveredStreamSnapshot = useCallback(
@@ -1154,27 +1319,86 @@ export default function ChatPage() {
   );
 
   const loadCurrentSessionSnapshot = useCallback(
-    async (targetSessionId: string, signal?: AbortSignal) => {
+    async (
+      targetSessionId: string,
+      options?: {
+        expectedSessionViewEpoch?: number;
+        replaceMessages?: boolean;
+        signal?: AbortSignal;
+      },
+    ) => {
       if (!token) {
         return;
       }
 
-      const session = await createSessionsClient(gatewayUrl).get(token, targetSessionId);
-      if (signal?.aborted || activeSessionRef.current !== targetSessionId) {
+      const sessionViewEpoch =
+        options?.expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
+
+      const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
+        signal: options?.signal,
+      });
+      if (options?.signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) {
         return;
       }
 
-      const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-      const normalizedMessages = filterTranscriptMessages(normalizeChatMessages(session.messages));
-      const nextSessionStateStatus = sessionWithRuntime.state_status ?? null;
-      setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
-      setRightPanelState(buildRightPanelStateFromSessionSnapshot(session, normalizedMessages));
-      setSessionTodos(Array.isArray(session.todos) ? session.todos : []);
-      setSessionStateStatus(nextSessionStateStatus);
-      syncRecoveredStreamSnapshot(session, nextSessionStateStatus);
+      const prepared = prepareSessionRecoveryState(recovery);
+      if (options?.replaceMessages === true) {
+        setMessages(prepared.normalizedMessages);
+      } else {
+        setMessages((previous) =>
+          reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+        );
+      }
+      setMessageRatings(prepared.messageRatings);
+      setRightPanelState(
+        buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
+      );
+      setSessionTodos(prepared.sessionTodos);
+      setChildSessions(recovery.children);
+      setSessionTasks(recovery.tasks);
+      setPendingPermissions(recovery.pendingPermissions);
+      setPendingQuestions(recovery.pendingQuestions);
+      setSessionStateStatus(prepared.sessionStateStatus);
+      syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
       setIsSessionSnapshotReady(true);
     },
-    [gatewayUrl, syncRecoveredStreamSnapshot, token],
+    [gatewayUrl, isCurrentSessionView, syncRecoveredStreamSnapshot, token],
+  );
+
+  const handleToggleMessageRating = useCallback(
+    async (message: ChatMessage, rating: SessionMessageRatingValue) => {
+      if (!token || !currentSessionId || message.role !== 'assistant' || !message.rawContent) {
+        return;
+      }
+
+      const existingRating = messageRatings[message.id]?.rating;
+      const sessionsClient = createSessionsClient(gatewayUrl);
+
+      try {
+        if (existingRating === rating) {
+          await sessionsClient.deleteMessageRating(token, currentSessionId, message.id);
+          setMessageRatings((previous) => {
+            const next = { ...previous };
+            delete next[message.id];
+            return next;
+          });
+          return;
+        }
+
+        const nextRating = await sessionsClient.setMessageRating(
+          token,
+          currentSessionId,
+          message.id,
+          {
+            rating,
+          },
+        );
+        setMessageRatings((previous) => ({ ...previous, [message.id]: nextRating }));
+      } catch (error) {
+        logger.error('message rating failed', error);
+      }
+    },
+    [currentSessionId, gatewayUrl, messageRatings, token],
   );
 
   const remoteSessionBusyState = useMemo<Extract<
@@ -1240,6 +1464,7 @@ export default function ChatPage() {
         token &&
         isPageActive &&
         !isSessionLoading &&
+        remoteSessionBusyState === null &&
         sessionModesHydrated &&
         shouldPollSessionRuntime({
           pendingPermissions,
@@ -1253,6 +1478,7 @@ export default function ChatPage() {
       isPageActive,
       isSessionLoading,
       pendingPermissions,
+      remoteSessionBusyState,
       sessionModesHydrated,
       sessionStateStatus,
       sessionTasks,
@@ -1283,28 +1509,47 @@ export default function ChatPage() {
 
     let cancelled = false;
     const targetSessionId = currentSessionId;
+    const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
 
     void createSessionsClient(gatewayUrl)
-      .get(token, targetSessionId)
+      .getRecovery(token, targetSessionId)
       .then((session) => {
-        if (cancelled || activeSessionRef.current !== targetSessionId) {
+        if (cancelled || !isCurrentSessionView(targetSessionId, expectedSessionViewEpoch)) {
           return;
         }
 
+        const prepared = prepareSessionRecoveryState(session);
         lastParentTaskSyncMarkerRef.current = nextMarker;
-        const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-        const normalizedMessages = filterTranscriptMessages(
-          normalizeChatMessages(session.messages),
+        setMessages((previous) =>
+          reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
         );
-        setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
-        setSessionStateStatus(sessionWithRuntime.state_status ?? null);
+        setMessageRatings(prepared.messageRatings);
+        setRightPanelState(
+          buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
+        );
+        setSessionTodos(prepared.sessionTodos);
+        setChildSessions(session.children);
+        setSessionTasks(session.tasks);
+        setPendingPermissions(session.pendingPermissions);
+        setPendingQuestions(session.pendingQuestions);
+        setSessionStateStatus(prepared.sessionStateStatus);
+        syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
       })
       .catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
-  }, [currentSessionId, gatewayUrl, isSessionLoading, sessionTasks, streaming, token]);
+  }, [
+    currentSessionId,
+    gatewayUrl,
+    isCurrentSessionView,
+    isSessionLoading,
+    sessionTasks,
+    streaming,
+    syncRecoveredStreamSnapshot,
+    token,
+  ]);
 
   useEffect(() => {
     if (!currentSessionId) {
@@ -1316,6 +1561,17 @@ export default function ChatPage() {
       toSessionPendingPermissionState(pendingPermissions),
     );
   }, [currentSessionId, pendingPermissions]);
+
+  useEffect(() => {
+    if (!currentSessionId) {
+      return;
+    }
+
+    publishSessionPendingQuestion(
+      currentSessionId,
+      pendingQuestions.find((question) => question.status === 'pending') ?? null,
+    );
+  }, [currentSessionId, pendingQuestions]);
 
   useSessionSidebarRunState({
     activeStreamSessionId: activeGatewayStreamSessionId,
@@ -1389,8 +1645,13 @@ export default function ChatPage() {
     const shouldSoftReloadCurrentSession =
       sessionReloadNonce > 0 &&
       requestedSessionId !== null &&
-      requestedSessionId === activeSessionRef.current;
+      requestedSessionId === currentLoadedSessionIdRef.current;
     void sessionReloadNonce;
+
+    const sessionViewEpoch =
+      shouldPreserveBootstrapState || shouldSoftReloadCurrentSession
+        ? activateSessionView(requestedSessionId, { incrementEpoch: false })
+        : activateSessionView(requestedSessionId);
 
     if (!requestedSessionId || !token) {
       navigateToHome();
@@ -1403,6 +1664,7 @@ export default function ChatPage() {
       setChildSessions([]);
       setSessionTasks([]);
       setPendingPermissions([]);
+      setPendingQuestions([]);
       setSessionStateStatus(null);
       setIsSessionSnapshotReady(true);
       setSessionModesHydrated(false);
@@ -1433,25 +1695,33 @@ export default function ChatPage() {
 
     if (shouldSoftReloadCurrentSession) {
       createSessionsClient(gatewayUrl)
-        .get(token, requestedSessionId)
-        .then((s) => {
-          const sessionWithRuntime = s as Session & { state_status?: SessionStateStatus };
-          if (cancelled || activeSessionRef.current !== requestedSessionId) {
+        .getRecovery(token, requestedSessionId, { signal: runtimeSnapshotController.signal })
+        .then((recovery) => {
+          if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
             return;
           }
 
-          const normalizedMessages = filterTranscriptMessages(normalizeChatMessages(s.messages));
-          const nextSessionStateStatus = sessionWithRuntime.state_status ?? null;
+          const prepared = prepareSessionRecoveryState(recovery);
           startSessionSwitchTransition(() => {
-            setMessages((previous) => reconcileSnapshotChatMessages(previous, normalizedMessages));
-            setRightPanelState(buildRightPanelStateFromSessionSnapshot(s, normalizedMessages));
-            setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
-            setSessionStateStatus(nextSessionStateStatus);
-            syncRecoveredStreamSnapshot(s, nextSessionStateStatus);
+            setMessages((previous) =>
+              reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+            );
+            setMessageRatings(prepared.messageRatings);
+            setRightPanelState(
+              buildRightPanelStateFromSessionSnapshot(
+                prepared.session,
+                prepared.normalizedMessages,
+              ),
+            );
+            setSessionTodos(prepared.sessionTodos);
+            setChildSessions(recovery.children);
+            setSessionTasks(recovery.tasks);
+            setPendingPermissions(recovery.pendingPermissions);
+            setPendingQuestions(recovery.pendingQuestions);
+            setSessionStateStatus(prepared.sessionStateStatus);
+            syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
             setIsSessionSnapshotReady(true);
           });
-
-          void loadSessionRuntimeSnapshot(requestedSessionId, runtimeSnapshotController.signal);
         })
         .catch(() => undefined);
 
@@ -1472,6 +1742,7 @@ export default function ChatPage() {
     setChildSessions([]);
     setSessionTasks([]);
     setPendingPermissions([]);
+    setPendingQuestions([]);
     setSessionStateStatus(null);
     setIsSessionSnapshotReady(false);
     setSessionModesHydrated(false);
@@ -1480,6 +1751,8 @@ export default function ChatPage() {
     resetStreamState();
     setStreamError(null);
     setDialogueMode('clarify');
+    setToolSurfaceProfile('openawork');
+    setManualAgentId('');
     setYoloMode(false);
     setWebSearchEnabled(false);
     setThinkingEnabled(false);
@@ -1488,30 +1761,39 @@ export default function ChatPage() {
     setActiveModelId('');
 
     createSessionsClient(gatewayUrl)
-      .get(token, requestedSessionId)
-      .then((s) => {
-        const sessionWithRuntime = s as Session & { state_status?: SessionStateStatus };
-        if (cancelled || activeSessionRef.current !== requestedSessionId) {
+      .getRecovery(token, requestedSessionId, { signal: runtimeSnapshotController.signal })
+      .then((recovery) => {
+        if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
           return;
         }
-        const metadata = parseSessionModeMetadata(s.metadata_json);
-        const nextSessionStateStatus = sessionWithRuntime.state_status ?? null;
+        const prepared = prepareSessionRecoveryState(recovery);
+        const metadata = prepared.metadata;
         const applySessionPayload = () => {
-          if (cancelled || activeSessionRef.current !== requestedSessionId) {
+          if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
             return;
           }
 
-          const normalizedMessages = filterTranscriptMessages(normalizeChatMessages(s.messages));
-
           startSessionSwitchTransition(() => {
-            setMessages(normalizedMessages);
-            setRightPanelState(buildRightPanelStateFromSessionSnapshot(s, normalizedMessages));
-            setSessionTodos(Array.isArray(s.todos) ? s.todos : []);
-            setSessionStateStatus(nextSessionStateStatus);
-            syncRecoveredStreamSnapshot(s, nextSessionStateStatus);
+            setMessages(prepared.normalizedMessages);
+            setMessageRatings(prepared.messageRatings);
+            setRightPanelState(
+              buildRightPanelStateFromSessionSnapshot(
+                prepared.session,
+                prepared.normalizedMessages,
+              ),
+            );
+            setSessionTodos(prepared.sessionTodos);
+            setChildSessions(recovery.children);
+            setSessionTasks(recovery.tasks);
+            setPendingPermissions(recovery.pendingPermissions);
+            setPendingQuestions(recovery.pendingQuestions);
+            setSessionStateStatus(prepared.sessionStateStatus);
+            syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
             setIsSessionSnapshotReady(true);
             if (!sessionMetadataDirtyRef.current) {
               setDialogueMode(metadata.dialogueMode);
+              setToolSurfaceProfile(metadata.toolSurfaceProfile);
+              setManualAgentId(metadata.agentId ?? '');
               setYoloMode(metadata.yoloMode);
               setWebSearchEnabled(metadata.webSearchEnabled);
               setThinkingEnabled(metadata.thinkingEnabled);
@@ -1521,13 +1803,15 @@ export default function ChatPage() {
             }
             lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
               dialogueMode: metadata.dialogueMode,
+              agentId: metadata.agentId,
+              toolSurfaceProfile: metadata.toolSurfaceProfile,
               yoloMode: metadata.yoloMode,
               webSearchEnabled: metadata.webSearchEnabled,
               thinkingEnabled: metadata.thinkingEnabled,
               reasoningEffort: metadata.reasoningEffort,
               providerId: metadata.providerId,
               modelId: metadata.modelId,
-              workingDirectory: extractWorkingDirectory(s.metadata_json),
+              workingDirectory: extractWorkingDirectory(prepared.session.metadata_json),
             });
             if (!sessionMetadataDirtyRef.current) {
               clearSessionMetadataDirty();
@@ -1535,16 +1819,9 @@ export default function ChatPage() {
             setSessionModesHydrated(true);
             setIsSessionLoading(false);
           });
-
-          if (
-            sessionWithRuntime.state_status !== 'paused' &&
-            sessionWithRuntime.state_status !== 'running'
-          ) {
-            void loadSessionRuntimeSnapshot(requestedSessionId, runtimeSnapshotController.signal);
-          }
         };
 
-        if (Array.isArray(s.messages) && s.messages.length > SESSION_SWITCH_DEFER_THRESHOLD) {
+        if (prepared.normalizedMessages.length > SESSION_SWITCH_DEFER_THRESHOLD) {
           if (pendingSessionNormalizeTimeoutRef.current !== null) {
             window.clearTimeout(pendingSessionNormalizeTimeoutRef.current);
           }
@@ -1558,7 +1835,7 @@ export default function ChatPage() {
         applySessionPayload();
       })
       .catch(() => {
-        if (cancelled || activeSessionRef.current !== requestedSessionId) {
+        if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
           return null;
         }
         setSessionTodos([]);
@@ -1580,14 +1857,15 @@ export default function ChatPage() {
       }
     };
   }, [
+    activateSessionView,
     clearSessionMetadataDirty,
     gatewayUrl,
+    isCurrentSessionView,
     navigateToHome,
     navigateToSession,
     resetStreamState,
     sessionId,
     sessionReloadNonce,
-    loadSessionRuntimeSnapshot,
     syncRecoveredStreamSnapshot,
     token,
   ]);
@@ -1672,18 +1950,26 @@ export default function ChatPage() {
     }
 
     const targetSessionId = currentSessionId;
+    const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
 
     const polling = startSequentialPolling({
+      initialDelayMs: streaming ? 0 : 3000,
       intervalMs: 3000,
       run: async (signal) => {
-        await loadSessionRuntimeSnapshot(targetSessionId, signal);
+        await loadSessionRuntimeSnapshot(targetSessionId, signal, expectedSessionViewEpoch);
       },
     });
 
     return () => {
       polling.cancel();
     };
-  }, [currentSessionId, loadSessionRuntimeSnapshot, shouldPollSessionSubresources, token]);
+  }, [
+    currentSessionId,
+    loadSessionRuntimeSnapshot,
+    shouldPollSessionSubresources,
+    streaming,
+    token,
+  ]);
 
   useEffect(() => {
     if (
@@ -1697,11 +1983,15 @@ export default function ChatPage() {
     }
 
     const targetSessionId = currentSessionId;
+    const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
     const polling = startSequentialPolling({
       initialDelayMs: REMOTE_STREAM_RECOVERY_POLL_MS,
       intervalMs: REMOTE_STREAM_RECOVERY_POLL_MS,
       run: async (signal) => {
-        await loadCurrentSessionSnapshot(targetSessionId, signal);
+        await loadCurrentSessionSnapshot(targetSessionId, {
+          expectedSessionViewEpoch,
+          signal,
+        });
       },
     });
 
@@ -2006,9 +2296,10 @@ export default function ChatPage() {
       if (!token) return;
       const originSessionId = activeSessionRef.current;
 
-      const baseSession = currentSessionId
-        ? await createSessionsClient(gatewayUrl).get(token, currentSessionId)
+      const baseRecovery = currentSessionId
+        ? await createSessionsClient(gatewayUrl).getRecovery(token, currentSessionId)
         : null;
+      const baseSession = baseRecovery?.session ?? null;
       const baseMessages = Array.isArray(baseSession?.messages) ? baseSession.messages : [];
       const sourceIndex = baseMessages.findIndex((message) => message.id === sourceMessageId);
       const truncatedMessages = (sourceIndex >= 0 ? baseMessages.slice(0, sourceIndex) : []).map(
@@ -2169,10 +2460,15 @@ export default function ChatPage() {
   async function ensureSession(): Promise<string> {
     if (currentSessionId) {
       activeSessionRef.current = currentSessionId;
+      currentSessionViewRef.current = {
+        ...currentSessionViewRef.current,
+        sessionId: currentSessionId,
+      };
       return currentSessionId;
     }
 
     const originSessionId = activeSessionRef.current;
+    const originSessionViewEpoch = currentSessionViewRef.current.epoch;
     let savedDefaults = savedChatDefaultsRef.current;
     if (!savedDefaults) {
       try {
@@ -2219,13 +2515,16 @@ export default function ChatPage() {
     const session = await createSessionsClient(gatewayUrl).create(token ?? '', {
       metadata: resolvedMetadata,
     });
-    if (activeSessionRef.current !== originSessionId) {
+    if (
+      activeSessionRef.current !== originSessionId ||
+      currentSessionViewRef.current.epoch !== originSessionViewEpoch
+    ) {
       throw new Error('当前会话已切换，请重试');
     }
 
     lastPersistedSessionMetadataSnapshotRef.current =
       createSessionMetadataSnapshot(resolvedMetadata);
-    activeSessionRef.current = session.id;
+    activateSessionView(session.id);
     pendingBootstrapSessionRef.current = session.id;
     setCurrentSessionId(session.id);
     clearSessionMetadataDirty();
@@ -2372,10 +2671,22 @@ export default function ChatPage() {
     const requestOriginSessionId = activeSessionRef.current;
     setStreamError(null);
     let text = sourceInput.trim();
+    const matchedClientCommand =
+      effectiveFiles.length === 0
+        ? matchClientSlashCommand(text, composerCommandDescriptors)
+        : null;
     const matchedServerCommand =
       effectiveFiles.length === 0
         ? matchServerSlashCommand(text, composerCommandDescriptors)
         : null;
+
+    if (matchedClientCommand?.action.kind === 'open_companion_panel') {
+      if (overrideText === undefined && options?.queuedFiles === undefined) {
+        clearComposerDraft();
+      }
+      setCompanionPanelSignal((value) => value + 1);
+      return true;
+    }
 
     if (matchedServerCommand) {
       if (overrideText === undefined && options?.queuedFiles === undefined) {
@@ -2496,6 +2807,7 @@ export default function ChatPage() {
           output: nextToolState.output,
           isError: nextToolState.isError,
           pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
+          resumedAfterApproval: nextToolState.resumedAfterApproval,
           status,
         };
       });
@@ -2535,6 +2847,7 @@ export default function ChatPage() {
     let firstTokenObservedAt: number | null = null;
     let toolPanelRevealed = false;
     let pausedForPermission = false;
+    let pausedForQuestion = false;
     const requestModelSupportsThinking = activeModelOption?.supportsThinking === true;
     setRightPanelState((prev) => startChatRightPanelRun(prev, text));
 
@@ -2555,6 +2868,7 @@ export default function ChatPage() {
             inputText: `${previous?.inputText ?? ''}${event.inputDelta}`,
             output: previous?.output,
             isError: previous?.isError,
+            resumedAfterApproval: previous?.resumedAfterApproval,
             toolCallId: event.toolCallId,
             status: 'streaming',
             toolName: event.toolName,
@@ -2574,6 +2888,7 @@ export default function ChatPage() {
             output: event.output,
             isError: event.pendingPermissionRequestId ? false : event.isError,
             pendingPermissionRequestId: event.pendingPermissionRequestId,
+            resumedAfterApproval: event.resumedAfterApproval,
             toolCallId: event.toolCallId,
             status: event.pendingPermissionRequestId
               ? 'paused'
@@ -2683,6 +2998,23 @@ export default function ChatPage() {
           setPendingPermissions((previous) =>
             previous.filter((permission) => permission.requestId !== event.requestId),
           );
+          pruneResolvedPendingPermissionMessages(event.requestId);
+          setRightPanelState((previous) =>
+            clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
+          );
+        }
+
+        if (event.type === 'question_asked') {
+          pausedForQuestion = true;
+          setSessionStateStatus('paused');
+          resetStreamState();
+          requestCurrentSessionRefresh(sid);
+          requestSessionListRefresh();
+        }
+
+        if (event.type === 'question_replied') {
+          setSessionStateStatus(event.status === 'answered' ? 'running' : 'idle');
+          requestCurrentSessionRefresh(sid);
         }
 
         setRightPanelState((prev) => {
@@ -2823,7 +3155,7 @@ export default function ChatPage() {
           requestSessionListRefresh();
           return;
         }
-        if (pausedForPermission) {
+        if (pausedForPermission || pausedForQuestion) {
           requestSessionListRefresh();
           return;
         }
@@ -2926,6 +3258,20 @@ export default function ChatPage() {
         label: '复制',
         onClick: () => handleCopyMessage(message),
       },
+      ...(message.role === 'assistant' && message.rawContent
+        ? [
+            {
+              id: 'rate-up',
+              label: messageRatings[message.id]?.rating === 'up' ? '👍 已赞' : '👍',
+              onClick: () => void handleToggleMessageRating(message, 'up'),
+            },
+            {
+              id: 'rate-down',
+              label: messageRatings[message.id]?.rating === 'down' ? '👎 已踩' : '👎',
+              onClick: () => void handleToggleMessageRating(message, 'down'),
+            },
+          ]
+        : []),
       ...(message.role === 'user'
         ? [
             {
@@ -2942,7 +3288,13 @@ export default function ChatPage() {
             },
           ]),
     ],
-    [handleCopyMessage, handleEditRetryMessage, handleRetryMessage],
+    [
+      handleCopyMessage,
+      handleEditRetryMessage,
+      handleRetryMessage,
+      handleToggleMessageRating,
+      messageRatings,
+    ],
   );
 
   const capabilityKindHints = useMemo(
@@ -3052,6 +3404,15 @@ export default function ChatPage() {
     [appendAssistantDerivedMessages, resolveAssistantEventKind],
   );
 
+  const pruneResolvedPendingPermissionMessages = useCallback((requestId: string) => {
+    setMessages((previous) =>
+      previous.flatMap((message) => {
+        const nextMessage = clearResolvedPendingPermissionFromMessage(message, requestId);
+        return nextMessage ? [nextMessage] : [];
+      }),
+    );
+  }, []);
+
   useEffect(() => {
     const shouldAttemptAttach =
       Boolean(currentSessionId) &&
@@ -3073,6 +3434,7 @@ export default function ChatPage() {
     attachAttemptedSessionRef.current = currentSessionId;
 
     const sid = currentSessionId;
+    const attachSessionViewEpoch = currentSessionViewRef.current.epoch;
     const initialText = recoveredStreamSnapshot?.text ?? '';
     const initialThinking = recoveredStreamSnapshot?.thinking ?? '';
     const initialUsage = recoveredStreamSnapshot?.usage ?? null;
@@ -3085,8 +3447,8 @@ export default function ChatPage() {
     let accumulatedThinking = initialThinking;
     let firstTokenObservedAt: number | null = null;
     let pausedForPermission = false;
+    let pausedForQuestion = false;
     const toolCallIds = new Set<string>();
-    let cancelled = false;
 
     const buildAttachTraceContent = (textContent: string): string => {
       const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
@@ -3122,7 +3484,7 @@ export default function ChatPage() {
     void client
       .attachToActiveStream(sid, {
         onEvent: (event) => {
-          if (cancelled || activeSessionRef.current !== sid) {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             return;
           }
           ensureAttachStateInitialized();
@@ -3234,6 +3596,23 @@ export default function ChatPage() {
             setPendingPermissions((previous) =>
               previous.filter((permission) => permission.requestId !== event.requestId),
             );
+            pruneResolvedPendingPermissionMessages(event.requestId);
+            setRightPanelState((previous) =>
+              clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
+            );
+          }
+
+          if (event.type === 'question_asked') {
+            pausedForQuestion = true;
+            setSessionStateStatus('paused');
+            resetStreamState();
+            requestCurrentSessionRefresh(sid);
+            requestSessionListRefresh();
+          }
+
+          if (event.type === 'question_replied') {
+            setSessionStateStatus(event.status === 'answered' ? 'running' : 'idle');
+            requestCurrentSessionRefresh(sid);
           }
 
           setRightPanelState((prev) => {
@@ -3250,13 +3629,9 @@ export default function ChatPage() {
           if (!isNearBottomRef.current) {
             setHasPendingFollowContent((previous) => previous || true);
           }
-
-          if (shouldShowRunEventInTranscript(event)) {
-            appendAssistantEventMessages([event]);
-          }
         },
         onDelta: (delta) => {
-          if (cancelled || activeSessionRef.current !== sid || stoppingStreamRef.current) {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch) || stoppingStreamRef.current) {
             return;
           }
           ensureAttachStateInitialized();
@@ -3283,7 +3658,7 @@ export default function ChatPage() {
           }
         },
         onThinkingDelta: (delta) => {
-          if (cancelled || activeSessionRef.current !== sid || stoppingStreamRef.current) {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch) || stoppingStreamRef.current) {
             return;
           }
           ensureAttachStateInitialized();
@@ -3291,7 +3666,7 @@ export default function ChatPage() {
           setStreamThinkingBuffer(accumulatedThinking);
         },
         onToolCall: (chunk) => {
-          if (cancelled || activeSessionRef.current !== sid) {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             return;
           }
           ensureAttachStateInitialized();
@@ -3302,7 +3677,7 @@ export default function ChatPage() {
           }
         },
         onDone: (stopReason) => {
-          if (cancelled || activeSessionRef.current !== sid) {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;
           }
@@ -3342,15 +3717,21 @@ export default function ChatPage() {
           }
           setSessionStateStatus('idle');
           resetStreamState();
+          window.setTimeout(() => {
+            void loadCurrentSessionSnapshot(sid, {
+              expectedSessionViewEpoch: attachSessionViewEpoch,
+              replaceMessages: true,
+            }).catch(() => undefined);
+          }, 0);
           requestSessionListRefresh();
         },
         onError: (code, message) => {
-          if (cancelled || activeSessionRef.current !== sid) {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;
           }
           ensureAttachStateInitialized();
-          if (pausedForPermission) {
+          if (pausedForPermission || pausedForQuestion) {
             requestSessionListRefresh();
             return;
           }
@@ -3383,35 +3764,39 @@ export default function ChatPage() {
           setSessionStateStatus('idle');
           resetStreamState();
           setStreamError(message ? `${code}: ${message}` : code);
+          window.setTimeout(() => {
+            void loadCurrentSessionSnapshot(sid, {
+              expectedSessionViewEpoch: attachSessionViewEpoch,
+              replaceMessages: true,
+            }).catch(() => undefined);
+          }, 0);
           requestSessionListRefresh();
         },
       })
       .then((attached) => {
-        if (cancelled || activeSessionRef.current !== sid) {
+        if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
           return;
         }
         if (attached) {
           return;
         }
 
-        attachAttemptedSessionRef.current = null;
         resetStreamState();
-        void loadCurrentSessionSnapshot(sid).catch(() => undefined);
+        void loadCurrentSessionSnapshot(sid, {
+          expectedSessionViewEpoch: attachSessionViewEpoch,
+        }).catch(() => undefined);
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     activeModelId,
     activeProviderId,
-    appendAssistantEventMessages,
     activeGatewayStreamSessionId,
     client,
     currentSessionId,
+    isCurrentSessionRequest,
     isPageActive,
     loadCurrentSessionSnapshot,
     prefersReducedMotion,
+    pruneResolvedPendingPermissionMessages,
     recoveredStreamSnapshot,
     resetStreamState,
     scheduleStreamReveal,
@@ -3462,6 +3847,7 @@ export default function ChatPage() {
     }
 
     stoppingStreamRef.current = true;
+    const stopSessionViewEpoch = currentSessionViewRef.current.epoch;
     if (pendingStreamRevealFrameRef.current !== null) {
       cancelAnimationFrame(pendingStreamRevealFrameRef.current);
       pendingStreamRevealFrameRef.current = null;
@@ -3486,7 +3872,9 @@ export default function ChatPage() {
         stoppingStreamRef.current = false;
         setStoppingStream(false);
         void (currentSessionId
-          ? loadCurrentSessionSnapshot(currentSessionId).catch(() => undefined)
+          ? loadCurrentSessionSnapshot(currentSessionId, {
+              expectedSessionViewEpoch: stopSessionViewEpoch,
+            }).catch(() => undefined)
           : Promise.resolve());
         if (stopCapability === 'best_effort') {
           setStreamError('当前会话没有可停止的活动运行，正在刷新状态。');
@@ -3500,7 +3888,9 @@ export default function ChatPage() {
         stoppingStreamRef.current = false;
         setStoppingStream(false);
         void (currentSessionId
-          ? loadCurrentSessionSnapshot(currentSessionId).catch(() => undefined)
+          ? loadCurrentSessionSnapshot(currentSessionId, {
+              expectedSessionViewEpoch: stopSessionViewEpoch,
+            }).catch(() => undefined)
           : Promise.resolve());
         requestSessionListRefresh();
       }
@@ -3747,6 +4137,48 @@ export default function ChatPage() {
     [appendAssistantDerivedMessages, resolveAssistantCapabilityKind],
   );
 
+  const handleCompactCurrentSession = useCallback(async () => {
+    const matchedCompactCommand = matchServerSlashCommand('/compact', composerCommandDescriptors);
+    if (!matchedCompactCommand) {
+      appendCommandCard({
+        type: 'status',
+        title: '压缩暂不可用',
+        message: '当前命令注册表里没有可执行的压缩命令。',
+        tone: 'warning',
+      });
+      setRightOpen(true);
+      setRightTab('overview');
+      return;
+    }
+
+    await executeServerCommand({
+      command: matchedCompactCommand,
+      currentSessionId,
+      gatewayUrl,
+      rawInput: matchedCompactCommand.label,
+      token,
+      unavailableTitle: '压缩暂不可用',
+      unavailableMessage: `需要先进入一个已有会话后再执行 ${matchedCompactCommand.label}。`,
+      onCard: (card) => appendCommandCard(card),
+      onEvents: (events) => {
+        setRightPanelState((prev) =>
+          events.reduce((next, event) => applyChatRightPanelEvent(next, event), prev),
+        );
+        appendAssistantEventMessages(events, { excludeCompaction: true });
+      },
+      onOpenRightPanel: () => setRightOpen(true),
+    });
+    setRightTab('overview');
+    requestSessionListRefresh();
+  }, [
+    appendAssistantEventMessages,
+    appendCommandCard,
+    composerCommandDescriptors,
+    currentSessionId,
+    gatewayUrl,
+    token,
+  ]);
+
   function updateComposerMenu(value: string, caret: number) {
     const trigger = detectComposerTrigger(value, caret);
     if (!trigger) {
@@ -3809,6 +4241,16 @@ export default function ChatPage() {
       ? 'home'
       : 'session';
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  const providerCatalog = useMemo(
+    () =>
+      new Map(
+        providers.map((provider) => [
+          provider.id,
+          { id: provider.id, name: provider.name, type: provider.type },
+        ]),
+      ),
+    [providers],
+  );
   const activeModelOption = activeProvider?.defaultModels.find(
     (model) => model.id === activeModelId,
   );
@@ -3943,8 +4385,44 @@ export default function ChatPage() {
     ],
   );
 
+  const sanitizedHistoricalMessages = useMemo(() => {
+    const activePendingPermissionIds = new Set(
+      pendingPermissions
+        .filter((permission) => permission.status === 'pending')
+        .map((permission) => permission.requestId),
+    );
+
+    return messages.flatMap((message) => {
+      if (message.role !== 'assistant') {
+        return [message];
+      }
+
+      let nextMessage: ChatMessage | null = message;
+      const assistantTrace = parseAssistantTraceContent(message.content);
+      if (!assistantTrace) {
+        return [message];
+      }
+
+      const stalePendingPermissionIds = assistantTrace.toolCalls.flatMap((toolCall) =>
+        toolCall.pendingPermissionRequestId &&
+        !activePendingPermissionIds.has(toolCall.pendingPermissionRequestId)
+          ? [toolCall.pendingPermissionRequestId]
+          : [],
+      );
+
+      for (const requestId of stalePendingPermissionIds) {
+        if (!nextMessage) {
+          break;
+        }
+        nextMessage = clearResolvedPendingPermissionFromMessage(nextMessage, requestId);
+      }
+
+      return nextMessage ? [nextMessage] : [];
+    });
+  }, [messages, pendingPermissions]);
+
   const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(() => {
-    return (Array.isArray(messages) ? messages : []).map((message) => ({
+    return sanitizedHistoricalMessages.map((message) => ({
       message,
       actions: buildMessageActions(message),
       renderContent: (currentMessage) =>
@@ -3958,9 +4436,9 @@ export default function ChatPage() {
   }, [
     assistantUsageDetails,
     buildMessageActions,
-    messages,
     openChildSessionInspector,
     selectedChildSessionId,
+    sanitizedHistoricalMessages,
     taskToolRuntimeLookup,
   ]);
 
@@ -3987,6 +4465,7 @@ export default function ChatPage() {
                   input: toolCall.input,
                   output: toolCall.output,
                   isError: toolCall.isError,
+                  resumedAfterApproval: toolCall.resumedAfterApproval,
                   status: toolCall.status,
                 })),
               })
@@ -4004,7 +4483,6 @@ export default function ChatPage() {
       },
       renderContent: (message) =>
         renderStreamingChatMessageContentWithOptions(message.content, {
-          messageId: message.id,
           onOpenChildSession: openChildSessionInspector,
           selectedChildSessionId,
           taskRuntimeLookup: taskToolRuntimeLookup,
@@ -4131,10 +4609,19 @@ export default function ChatPage() {
             agentOptions={agentOptions}
             defaultAgentLabel={defaultAgentLabel}
             dialogueMode={dialogueMode}
+            currentProfileLabel={
+              effectiveWorkingDirectory
+                ? (currentAgentProfile?.label ?? '当前工作区尚未保存项目配置')
+                : undefined
+            }
             onChangeDialogueMode={handleDialogueModeChange}
             manualAgentId={manualAgentId}
+            hasWorkspaceProfile={Boolean(currentAgentProfile)}
+            toolSurfaceProfile={toolSurfaceProfile}
             onChangeManualAgentId={handleManualAgentChange}
+            onChangeToolSurfaceProfile={handleToolSurfaceProfileChange}
             onClearManualAgentId={handleClearManualAgentId}
+            onSaveWorkspaceProfile={() => void handleSaveWorkspaceProfile()}
             yoloMode={yoloMode}
             onToggleYolo={handleToggleYolo}
             editorMode={editorMode}
@@ -4310,6 +4797,7 @@ export default function ChatPage() {
                       bottomRef={bottomRef}
                       currentUserEmail={currentUserEmail}
                       groups={groupedMessageEntries}
+                      providerCatalog={providerCatalog}
                       scrollRegionRef={scrollRegionRef}
                     />
                   ) : (
@@ -4459,7 +4947,17 @@ export default function ChatPage() {
           )}
 
           {remoteSessionBusyState && (
-            <SessionRunStateBar status={remoteSessionBusyState} stopCapability={stopCapability} />
+            <SessionRunStateBar
+              checkpointCount={compactions.length}
+              onOpenRecovery={() => {
+                setRightOpen(true);
+                setRightTab('overview');
+              }}
+              pendingPermissionsCount={pendingPermissions.length}
+              pendingQuestionsCount={pendingQuestions.length}
+              status={remoteSessionBusyState}
+              stopCapability={stopCapability}
+            />
           )}
 
           <SubAgentRunList
@@ -4471,10 +4969,12 @@ export default function ChatPage() {
           <ChatTodoBar sessionTodos={sessionTodos} editorMode={editorMode} rightOpen={rightOpen} />
 
           <CompanionStage
+            agentId={effectiveAgentId}
             attachedCount={attachmentItems.length}
             currentUserEmail={currentUserEmail}
             editorMode={editorMode}
             input={input}
+            panelOpenSignal={companionPanelSignal}
             pendingPermissionCount={pendingPermissions.length}
             prefersReducedMotion={prefersReducedMotion}
             queuedCount={queuedComposerPreviews.length}
@@ -4490,6 +4990,8 @@ export default function ChatPage() {
             variant={composerVariant}
             editorMode={editorMode}
             activeProviderId={activeProviderId}
+            activeProviderName={activeProvider?.name}
+            activeProviderType={activeProvider?.type}
             activeModelTooltip={activeModelTooltip}
             modelPickerRef={modelPickerBtnRef}
             modelSettingsRef={modelSettingsBtnRef}
@@ -4723,6 +5225,7 @@ export default function ChatPage() {
                       void navigate(`/chat/${nextSessionId}`);
                     }}
                     parentTaskRuntimeLookup={taskToolRuntimeLookup}
+                    providerCatalog={providerCatalog}
                     token={token}
                   />
                 </div>
@@ -4901,6 +5404,7 @@ export default function ChatPage() {
                                       input={toolCall.input}
                                       output={toolCall.output}
                                       isError={toolCall.isError}
+                                      resumedAfterApproval={toolCall.resumedAfterApproval}
                                       status={toolCall.status}
                                     />
                                   ),
@@ -4949,6 +5453,7 @@ export default function ChatPage() {
                           artifactsWorkspaceHref={artifactsWorkspaceHref}
                           childSessions={childSessions}
                           compactions={compactions}
+                          contextUsageSnapshot={contextUsageSnapshot}
                           contentArtifactCount={contentArtifactCount}
                           contentArtifactCountStatus={contentArtifactCountStatus}
                           currentSessionId={currentSessionId}
@@ -4956,10 +5461,17 @@ export default function ChatPage() {
                           effectiveWorkingDirectory={effectiveWorkingDirectory}
                           messages={messages}
                           pendingPermissions={pendingPermissions}
+                          pendingQuestionsCount={pendingQuestions.length}
+                          sessionStateStatus={sessionStateStatus ?? null}
                           sessionTodos={sessionTodos}
                           sessionTasks={sessionTasks}
                           workspaceFileItems={workspaceFileItems}
                           yoloMode={yoloMode}
+                          onCompactSession={() => void handleCompactCurrentSession()}
+                          onOpenRecoveryStrategy={() => {
+                            setRightOpen(true);
+                            setRightTab('history');
+                          }}
                         />
                       )}
                       {rightTab === 'mcp' && (

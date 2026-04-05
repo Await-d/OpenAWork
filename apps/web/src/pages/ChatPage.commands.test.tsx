@@ -35,6 +35,16 @@ const workspaceMock = {
 
 const createSessionMock = vi.fn(async () => ({ id: 'session-1' }));
 const getSessionMock = vi.fn(async () => ({ messages: [] }));
+const getRecoveryMock = vi.fn(async (_token: string, _sessionId: string) => ({
+  activeStream: null,
+  children: [],
+  pendingPermissions: [],
+  pendingQuestions: [],
+  ratings: [],
+  session: { messages: [] },
+  tasks: [],
+  todoLanes: { main: [], temp: [] },
+}));
 const getChildrenMock = vi.fn(async () => []);
 const getTodoLanesMock = vi.fn(async () => ({ main: [], temp: [] }));
 const getTasksMock = vi.fn(async () => []);
@@ -117,6 +127,14 @@ const listCommandsMock = vi.fn(async () => [
     execution: 'server',
     action: { kind: 'generate_handoff' },
   },
+  {
+    id: 'slash-buddy',
+    label: '/buddy',
+    description: '打开 Buddy 面板',
+    contexts: ['composer'],
+    execution: 'client',
+    action: { kind: 'open_companion_panel' },
+  },
 ]);
 const fetchMock = vi.fn(async (input: string | URL | Request) => {
   const rawUrl =
@@ -153,9 +171,13 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 vi.mock('@openAwork/web-client', () => ({
+  createAgentProfilesClient: vi.fn(() => ({
+    getCurrent: vi.fn(async () => null),
+  })),
   createSessionsClient: vi.fn(() => ({
     create: createSessionMock,
     get: getSessionMock,
+    getRecovery: getRecoveryMock,
     getChildren: getChildrenMock,
     getTodoLanes: getTodoLanesMock,
     getTasks: getTasksMock,
@@ -191,6 +213,7 @@ vi.mock('@openAwork/shared-ui', async () => {
     PlanHistoryPanel: () => null,
     AgentDAGGraph: () => null,
     RootCausePanel: () => null,
+    ContextPanel: () => null,
     WorkspaceSelector: () => null,
   };
 });
@@ -286,6 +309,7 @@ describe('ChatPage service-backed commands', () => {
     expect(rendered.textContent).toContain('/compact');
     expect(rendered.textContent).toContain('/summarize');
     expect(rendered.textContent).toContain('/handoff');
+    expect(rendered.textContent).toContain('/buddy');
   });
 
   it('shows installed skills and agent tools in slash suggestions when a workspace is loaded', async () => {
@@ -522,5 +546,33 @@ describe('ChatPage service-backed commands', () => {
 
     expect(executeCommandMock).not.toHaveBeenCalled();
     expect(rendered.textContent).toContain('需要先进入一个已有会话后再执行 /summarize。');
+  });
+
+  it('treats /buddy as a client-side companion action instead of a server command', async () => {
+    const rendered = await renderChatPage('/chat/session-1');
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '/buddy ');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' }),
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(executeCommandMock).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('最近会话输出');
   });
 });

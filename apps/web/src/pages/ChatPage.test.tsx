@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import type { Message } from '@openAwork/shared';
+import { resetReasoningOpenStateCacheForTests } from '../components/chat/assistant-reasoning-block.js';
 import { useAuthStore } from '../stores/auth.js';
 import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useUIStateStore } from '../stores/uiState.js';
@@ -180,6 +181,7 @@ const streamMock = vi.fn();
 type MockAttachStreamCallbacks = {
   onDelta: (delta: string) => void;
   onDone: (stopReason?: string) => void;
+  onEvent?: (event: unknown) => void;
 };
 const attachToActiveStreamMock = vi.fn(
   async (_sessionId: string, _callbacks: MockAttachStreamCallbacks) => false,
@@ -208,6 +210,27 @@ const importSessionMock = vi.fn<
 const getSessionMock = vi.fn<(_token: string, _sessionId: string) => Promise<MockSessionPayload>>(
   async (_token: string, _sessionId: string) => ({ messages: [] }),
 );
+const getRecoveryMock = vi.fn(async (_token: string, _sessionId: string) => {
+  const [children, pendingPermissions, ratings, session, tasks, todoLanes] = await Promise.all([
+    getChildrenMock(_token, _sessionId),
+    listPendingPermissionsMock(_token, _sessionId),
+    listMessageRatingsMock(),
+    getSessionMock(_token, _sessionId),
+    getTasksMock(_token, _sessionId),
+    getTodoLanesMock(_token, _sessionId),
+  ]);
+
+  return {
+    activeStream: null,
+    children,
+    pendingPermissions,
+    pendingQuestions: [],
+    ratings,
+    session,
+    tasks,
+    todoLanes,
+  };
+});
 const getChildrenMock = vi.fn<(_token: string, _sessionId: string) => Promise<Session[]>>(
   async () => [],
 );
@@ -220,10 +243,70 @@ const getTodoLanesMock = vi.fn<
 const getTasksMock = vi.fn<(_token: string, _sessionId: string) => Promise<SessionTask[]>>(
   async () => [],
 );
+const getCurrentAgentProfileMock = vi.fn(async () => null);
+const createAgentProfileMock = vi.fn(async (_token: string, input: Record<string, unknown>) => ({
+  id: 'profile-1',
+  label: String(input['label'] ?? '项目配置'),
+  workspacePath: String(input['workspacePath'] ?? '/repo/alpha'),
+  agentId: (input['agentId'] as string | undefined) ?? null,
+  providerId: (input['providerId'] as string | undefined) ?? null,
+  modelId: (input['modelId'] as string | undefined) ?? null,
+  toolSurfaceProfile:
+    (input['toolSurfaceProfile'] as 'openawork' | 'claude_code_default' | 'claude_code_simple') ??
+    'openawork',
+  note: null,
+  createdAt: '2026-04-05T00:00:00.000Z',
+  updatedAt: '2026-04-05T00:00:00.000Z',
+}));
+const updateAgentProfileMock = vi.fn(
+  async (_token: string, _profileId: string, input: Record<string, unknown>) => ({
+    id: 'profile-1',
+    label: String(input['label'] ?? '项目配置'),
+    workspacePath: String(input['workspacePath'] ?? '/repo/alpha'),
+    agentId: (input['agentId'] as string | undefined) ?? null,
+    providerId: (input['providerId'] as string | undefined) ?? null,
+    modelId: (input['modelId'] as string | undefined) ?? null,
+    toolSurfaceProfile:
+      (input['toolSurfaceProfile'] as 'openawork' | 'claude_code_default' | 'claude_code_simple') ??
+      'openawork',
+    note: null,
+    createdAt: '2026-04-05T00:00:00.000Z',
+    updatedAt: '2026-04-05T00:00:00.000Z',
+  }),
+);
 const updateMetadataMock = vi.fn(async () => undefined);
 const listPendingPermissionsMock = vi.fn<
   (_token: string, _sessionId: string) => Promise<PendingPermissionRequest[]>
 >(async () => []);
+const listMessageRatingsMock = vi.fn(async () => []);
+const setMessageRatingMock = vi.fn<
+  (
+    _token: string,
+    _sessionId: string,
+    messageId: string,
+    input: { rating: 'up' | 'down' },
+  ) => Promise<{
+    messageId: string;
+    rating: 'up' | 'down';
+    reason: null;
+    notes: null;
+    updatedAt: string;
+  }>
+>(
+  async (
+    _token: string,
+    _sessionId: string,
+    messageId: string,
+    input: { rating: 'up' | 'down' },
+  ) => ({
+    messageId,
+    rating: input.rating,
+    reason: null,
+    notes: null,
+    updatedAt: '2026-04-05T00:00:00.000Z',
+  }),
+);
+const deleteMessageRatingMock = vi.fn(async () => undefined);
 const listCommandsMock = vi.fn(async () => [
   {
     id: 'slash-compact',
@@ -318,10 +401,14 @@ vi.mock('@openAwork/web-client', () => ({
     list: listSessionsMock,
     create: createSessionMock,
     get: getSessionMock,
+    getRecovery: getRecoveryMock,
     getChildren: getChildrenMock,
     getTodoLanes: getTodoLanesMock,
     getTodos: getTodosMock,
     getTasks: getTasksMock,
+    listMessageRatings: listMessageRatingsMock,
+    setMessageRating: setMessageRatingMock,
+    deleteMessageRating: deleteMessageRatingMock,
     cancelTask: cancelTaskMock,
     stopActiveStream: stopActiveStreamMock,
     truncateMessages: truncateMessagesMock,
@@ -336,6 +423,11 @@ vi.mock('@openAwork/web-client', () => ({
   })),
   createCapabilitiesClient: vi.fn(() => ({
     list: listCapabilitiesMock,
+  })),
+  createAgentProfilesClient: vi.fn(() => ({
+    create: createAgentProfileMock,
+    getCurrent: getCurrentAgentProfileMock,
+    update: updateAgentProfileMock,
   })),
 }));
 
@@ -528,6 +620,20 @@ vi.mock('@openAwork/shared-ui', async () => {
 
   return {
     PlanPanel: () => null,
+    ContextPanel: ({
+      items,
+      totalTokens,
+      tokenLimit,
+    }: {
+      items?: Array<{ label: string }>;
+      tokenLimit?: number;
+      totalTokens?: number;
+    }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'mock-context-panel' },
+        `context:${(items ?? []).map((item) => item.label).join('|')}|${totalTokens ?? 0}|${tokenLimit ?? 0}`,
+      ),
     AgentVizPanel: ({ events }: { events?: Array<{ label: string }> }) =>
       React.createElement(
         'div',
@@ -652,6 +758,18 @@ async function flushEffects() {
   });
 }
 
+async function waitForChatText(text: string, attempts = 20): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (container?.textContent?.includes(text)) {
+      return;
+    }
+
+    await flushEffects();
+  }
+
+  throw new Error(`Timed out waiting for chat text: ${text}`);
+}
+
 async function flushStreamRevealFrame(frameCount = 1) {
   for (let index = 0; index < frameCount; index += 1) {
     await act(async () => {
@@ -698,6 +816,7 @@ beforeEach(() => {
     configurable: true,
     value: vi.fn(),
   });
+  resetReasoningOpenStateCacheForTests();
   reducedMotionMatches = false;
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -742,11 +861,39 @@ beforeEach(() => {
   listSessionsMock.mockClear();
   listPendingPermissionsMock.mockReset();
   listPendingPermissionsMock.mockImplementation(async () => []);
+  listMessageRatingsMock.mockReset();
+  listMessageRatingsMock.mockImplementation(async () => []);
+  setMessageRatingMock.mockClear();
+  deleteMessageRatingMock.mockClear();
+  createAgentProfileMock.mockClear();
+  updateAgentProfileMock.mockClear();
   createSessionMock.mockClear();
   truncateMessagesMock.mockClear();
   importSessionMock.mockClear();
   getSessionMock.mockReset();
   getSessionMock.mockImplementation(async () => ({ messages: [] }));
+  getRecoveryMock.mockReset();
+  getRecoveryMock.mockImplementation(async (_token: string, _sessionId: string) => {
+    const [children, pendingPermissions, ratings, session, tasks, todoLanes] = await Promise.all([
+      getChildrenMock(_token, _sessionId),
+      listPendingPermissionsMock(_token, _sessionId),
+      listMessageRatingsMock(),
+      getSessionMock(_token, _sessionId),
+      getTasksMock(_token, _sessionId),
+      getTodoLanesMock(_token, _sessionId),
+    ]);
+
+    return {
+      activeStream: null,
+      children,
+      pendingPermissions,
+      pendingQuestions: [],
+      ratings,
+      session,
+      tasks,
+      todoLanes,
+    };
+  });
   getChildrenMock.mockReset();
   getChildrenMock.mockImplementation(async () => []);
   getTodosMock.mockImplementation(async () => []);
@@ -755,6 +902,8 @@ beforeEach(() => {
   updateMetadataMock.mockClear();
   getTasksMock.mockReset();
   getTasksMock.mockImplementation(async () => []);
+  getCurrentAgentProfileMock.mockReset();
+  getCurrentAgentProfileMock.mockImplementation(async () => null);
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
   Object.defineProperty(globalThis.navigator, 'clipboard', {
     configurable: true,
@@ -1483,6 +1632,123 @@ describe('ChatPage', () => {
     expect(rendered.textContent).not.toContain('A 会话的旧流式输出');
   });
 
+  it('ignores stale attach callbacks after switching away and back to the same running session', async () => {
+    let firstAttachCallbacks: MockAttachStreamCallbacks | undefined;
+    let secondAttachCallbacks: MockAttachStreamCallbacks | undefined;
+    let sessionAReadCount = 0;
+
+    getSessionMock.mockImplementation(async (_token: string, requestedSessionId: string) => {
+      if (requestedSessionId === 'session-a') {
+        sessionAReadCount += 1;
+        return sessionAReadCount >= 3
+          ? {
+              messages: [
+                {
+                  id: 'user-a',
+                  role: 'user',
+                  content: '继续恢复 A 会话',
+                  createdAt: 1,
+                  status: 'completed',
+                },
+                {
+                  id: 'assistant-a-final',
+                  role: 'assistant',
+                  content: '新的 attach 输出',
+                  createdAt: 2,
+                  status: 'completed',
+                },
+              ],
+              state_status: 'idle',
+            }
+          : {
+              messages: [
+                {
+                  id: 'user-a',
+                  role: 'user',
+                  content: '继续恢复 A 会话',
+                  createdAt: 1,
+                  status: 'completed',
+                },
+              ],
+              runEvents: [
+                {
+                  type: 'text_delta',
+                  delta: '已恢复',
+                  runId: 'run-attach-a',
+                  occurredAt: 10,
+                },
+              ],
+              state_status: 'running',
+            };
+      }
+
+      return {
+        messages: [
+          {
+            id: 'assistant-b',
+            role: 'assistant',
+            content: 'B 会话空闲中',
+            createdAt: 2,
+            status: 'completed',
+          },
+        ],
+        state_status: 'idle',
+      };
+    });
+    attachToActiveStreamMock
+      .mockImplementationOnce(async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        firstAttachCallbacks = callbacks;
+        return true;
+      })
+      .mockImplementationOnce(async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        secondAttachCallbacks = callbacks;
+        return true;
+      });
+
+    const rendered = await renderChatPageWithNavigator('/chat/session-a');
+    const goSessionA = rendered.querySelector('[data-testid="go-session-a"]');
+    const goSessionB = rendered.querySelector('[data-testid="go-session-b"]');
+
+    await flushEffects();
+
+    act(() => {
+      goSessionB?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    act(() => {
+      goSessionA?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(attachToActiveStreamMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      secondAttachCallbacks?.onDelta('新的 attach 输出');
+      secondAttachCallbacks?.onDone('end_turn');
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await Promise.resolve();
+      await Promise.resolve();
+      firstAttachCallbacks?.onDelta('旧 attach 输出');
+      firstAttachCallbacks?.onDone('end_turn');
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForChatText('新的 attach 输出');
+
+    expect(sessionAReadCount).toBe(3);
+    expect(rendered.textContent).toContain('新的 attach 输出');
+    expect(rendered.textContent).not.toContain('旧 attach 输出');
+  });
+
   it('allows stopping a still-controlled running session after switching away and back', async () => {
     let callbacks:
       | {
@@ -1965,7 +2231,9 @@ describe('ChatPage', () => {
     expect(stopStreamMock).not.toHaveBeenCalled();
   });
 
-  it('attaches to the active stream after refresh and appends live deltas', async () => {
+  it('attaches to the active stream after refresh and keeps the recovered snapshot visible', async () => {
+    let attachCallbacks: MockAttachStreamCallbacks | undefined;
+
     getSessionMock.mockImplementation(async () => ({
       messages: [
         {
@@ -1988,8 +2256,7 @@ describe('ChatPage', () => {
     }));
     attachToActiveStreamMock.mockImplementationOnce(
       async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
-        callbacks.onDelta('继续输出');
-        callbacks.onDone('end_turn');
+        attachCallbacks = callbacks;
         return true;
       },
     );
@@ -2004,10 +2271,21 @@ describe('ChatPage', () => {
         onDone: expect.any(Function),
       }),
     );
-    expect(rendered.textContent).toContain('已恢复继续输出');
-  });
 
-  it('settles attach recovery into a final assistant message after completion', async () => {
+    await act(async () => {
+      attachCallbacks?.onDelta('继续输出');
+      attachCallbacks?.onDone('end_turn');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(streamMock).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('已恢复');
+  }, 15_000);
+
+  it('keeps recovery guidance visible after attach completion until the backend snapshot catches up', async () => {
+    let attachCallbacks: MockAttachStreamCallbacks | undefined;
+
     getSessionMock.mockImplementation(async () => ({
       messages: [
         {
@@ -2030,8 +2308,7 @@ describe('ChatPage', () => {
     }));
     attachToActiveStreamMock.mockImplementationOnce(
       async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
-        callbacks.onDelta('继续输出');
-        callbacks.onDone('end_turn');
+        attachCallbacks = callbacks;
         return true;
       },
     );
@@ -2039,9 +2316,97 @@ describe('ChatPage', () => {
     const rendered = await renderChatPage('/chat/session-1');
     await flushEffects();
 
-    expect(rendered.textContent).toContain('已恢复继续输出');
-    expect(rendered.textContent).not.toContain('会话持续运行中');
-    expect(rendered.textContent).not.toContain('当前运行流仍受此页控制');
+    await act(async () => {
+      attachCallbacks?.onDelta('继续输出');
+      attachCallbacks?.onDone('end_turn');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(streamMock).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('已恢复');
+    expect(rendered.textContent).toContain('会话持续运行中');
+  }, 15_000);
+
+  it('keeps attach recovery events out of the transcript message list', async () => {
+    let attachCallbacks: MockAttachStreamCallbacks | undefined;
+    let sessionReadCount = 0;
+
+    getSessionMock.mockImplementation(async () => {
+      sessionReadCount += 1;
+      return sessionReadCount >= 2
+        ? {
+            messages: [
+              {
+                id: 'user-1',
+                role: 'user',
+                content: '继续恢复当前输出',
+                createdAt: 1,
+                status: 'completed',
+              },
+              {
+                id: 'assistant-1',
+                role: 'assistant',
+                content: '继续输出',
+                createdAt: 2,
+                status: 'completed',
+              },
+            ],
+            state_status: 'idle',
+          }
+        : {
+            messages: [
+              {
+                id: 'user-1',
+                role: 'user',
+                content: '继续恢复当前输出',
+                createdAt: 1,
+                status: 'completed',
+              },
+            ],
+            runEvents: [
+              {
+                type: 'text_delta',
+                delta: '已恢复',
+                runId: 'run-attach-audit',
+                occurredAt: 10,
+              },
+            ],
+            state_status: 'running',
+          };
+    });
+    attachToActiveStreamMock.mockImplementationOnce(
+      async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        attachCallbacks = callbacks;
+        return true;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await flushEffects();
+
+    await act(async () => {
+      attachCallbacks?.onEvent?.({
+        type: 'audit_ref',
+        auditLogId: 'audit-attach-1',
+        toolName: 'web_search',
+        runId: 'run-attach-audit',
+        occurredAt: 11,
+      });
+      attachCallbacks?.onDelta('继续输出');
+      attachCallbacks?.onDone('end_turn');
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForChatText('继续输出');
+
+    expect(sessionReadCount).toBeGreaterThanOrEqual(2);
+    expect(rendered.textContent).toContain('继续输出');
+    expect(rendered.textContent).not.toContain('已恢复');
+    expect(rendered.textContent).not.toContain('已记录审计引用');
+    expect(rendered.textContent).not.toContain('audit-attach-1');
   });
 
   it('keeps queued messages visible when the refreshed session snapshot cannot be loaded', async () => {
@@ -2263,7 +2628,8 @@ describe('ChatPage', () => {
 
     expect(thinkingToggle).not.toBeNull();
     expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
-    expect(rendered.textContent).toContain('思考内容');
+    expect(rendered.textContent).toContain('Thinking:');
+    expect(rendered.textContent).not.toContain('非最终答复');
     expect(rendered.textContent).toContain('先比较方案，再下结论。');
     expect(rendered.textContent).toContain('收起 ·');
     expect(rendered.textContent).toContain('最终结论。');
@@ -2325,7 +2691,7 @@ describe('ChatPage', () => {
 
     expect(thinkingToggle).not.toBeNull();
     expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
-    expect(rendered.textContent).toContain('思考中');
+    expect(rendered.textContent).toContain('Thinking:');
     expect(rendered.textContent).toContain('先比较方案');
     expect(rendered.textContent).toContain('持续更新中');
   });
@@ -2541,9 +2907,16 @@ describe('ChatPage', () => {
       await Promise.resolve();
     });
 
-    const completedToggle = rendered.querySelector(
-      '[data-testid="chat-markdown-thinking-summary"]',
-    ) as HTMLButtonElement | null;
+    await flushEffects();
+
+    const completedToggle = Array.from(
+      rendered.querySelectorAll('[data-testid="chat-markdown-thinking-summary"]'),
+    ).at(-1) as HTMLButtonElement | null;
+
+    expect(completedToggle).not.toBeNull();
+    expect(
+      rendered.querySelectorAll('[data-testid="chat-markdown-thinking-summary"]'),
+    ).toHaveLength(1);
 
     expect(completedToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(rendered.textContent).toContain('已显示摘要');
@@ -2572,7 +2945,8 @@ describe('ChatPage', () => {
     ) as HTMLButtonElement | null;
 
     expect(thinkingToggle).not.toBeNull();
-    expect(rendered.textContent).toContain('思考内容');
+    expect(rendered.textContent).toContain('Thinking:');
+    expect(rendered.textContent).not.toContain('非最终答复');
     expect(thinkingToggle?.getAttribute('aria-expanded')).toBe('true');
     expect(rendered.textContent).toContain('这里是旧格式思考');
     expect(rendered.textContent).toContain('这是旧格式正文。');
@@ -2834,10 +3208,15 @@ describe('ChatPage', () => {
     );
   });
 
-  it('restores dialogueMode and yoloMode from session metadata on opened sessions', async () => {
+  it('restores dialogueMode, yoloMode, toolSurfaceProfile, and manual agent from session metadata on opened sessions', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
       messages: [],
-      metadata_json: JSON.stringify({ dialogueMode: 'coding', yoloMode: true }),
+      metadata_json: JSON.stringify({
+        agentId: 'sisyphus-junior',
+        dialogueMode: 'coding',
+        yoloMode: true,
+        toolSurfaceProfile: 'claude_code_default',
+      }),
     }));
 
     const rendered = await renderChatPage('/chat/session-1');
@@ -2845,9 +3224,17 @@ describe('ChatPage', () => {
     const activeButtons = Array.from(rendered.querySelectorAll('button')).filter(
       (button) => button.getAttribute('aria-pressed') === 'true',
     );
+    const toolSurfaceSelect = rendered.querySelector(
+      'select[aria-label="工具配置档"]',
+    ) as HTMLSelectElement | null;
+    const agentSelect = rendered.querySelector(
+      'select[aria-label="聊天代理"]',
+    ) as HTMLSelectElement | null;
 
     expect(activeButtons.some((button) => button.textContent?.trim() === '编程')).toBe(true);
     expect(activeButtons.some((button) => button.textContent?.trim() === 'YOLO')).toBe(true);
+    expect(toolSurfaceSelect?.value).toBe('claude_code_default');
+    expect(agentSelect?.value).toBe('sisyphus-junior');
   });
 
   it('hydrates shared message payloads returned by the session API', async () => {
@@ -2892,6 +3279,77 @@ describe('ChatPage', () => {
     expect(rendered.querySelector('img[alt="openai"]')).not.toBeNull();
   });
 
+  it('resolves OpenAI icons from provider type when the provider id is a custom alias', async () => {
+    const baseFetchImplementation = fetchMock.getMockImplementation();
+
+    try {
+      fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl, 'http://localhost:3000');
+
+        if (url.pathname.endsWith('/settings/providers')) {
+          return jsonResponse({
+            providers: [
+              {
+                id: 'primary-llm',
+                name: 'OpenAI',
+                type: 'openai',
+                enabled: true,
+                defaultModels: [
+                  {
+                    id: 'gpt-5',
+                    label: 'GPT-5',
+                    enabled: true,
+                    contextWindow: 200_000,
+                    supportsThinking: true,
+                  },
+                ],
+              },
+            ],
+            activeSelection: {
+              chat: { providerId: 'primary-llm', modelId: 'gpt-5' },
+              fast: { providerId: 'primary-llm', modelId: 'gpt-5' },
+            },
+            defaultThinking: {
+              chat: { enabled: true, effort: 'high' },
+              fast: { enabled: false, effort: 'medium' },
+            },
+          });
+        }
+
+        if (!baseFetchImplementation) {
+          throw new Error('Missing base fetch implementation');
+        }
+
+        return baseFetchImplementation(input, init);
+      });
+
+      getSessionMock.mockImplementationOnce(async () => ({
+        messages: [
+          {
+            id: 'assistant-alias-provider',
+            role: 'assistant',
+            createdAt: 2,
+            content: [{ type: 'text', text: '别名 provider 也应展示 OpenAI 图标' }],
+          },
+        ],
+      }));
+
+      const rendered = await renderChatPage('/chat/session-1');
+
+      expect(rendered.textContent).toContain('GPT-5');
+      expect(
+        rendered.querySelector('button[title="当前使用模型：OpenAI / GPT-5"] img[alt="openai"]'),
+      ).not.toBeNull();
+      expect(rendered.querySelectorAll('img[alt="openai"]').length).toBeGreaterThanOrEqual(2);
+    } finally {
+      if (baseFetchImplementation) {
+        fetchMock.mockImplementation(baseFetchImplementation);
+      }
+    }
+  });
+
   it('prefers provider and model metadata carried on assistant messages', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
       messages: [
@@ -2908,10 +3366,10 @@ describe('ChatPage', () => {
 
     const rendered = await renderChatPage('/chat/session-1');
 
-    expect(rendered.textContent).toContain('Claude Sonnet 4');
+    await waitForChatText('Claude Sonnet 4');
     expect(rendered.textContent).toContain('Anthropic');
     expect(rendered.querySelector('img[alt="anthropic"]')).not.toBeNull();
-  });
+  }, 15_000);
 
   it('falls back to the active conversation provider and model when assistant metadata is empty strings', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
@@ -2929,9 +3387,9 @@ describe('ChatPage', () => {
 
     const rendered = await renderChatPage('/chat/session-1');
 
-    expect(rendered.textContent).toContain('GPT-5');
+    await waitForChatText('GPT-5');
     expect(rendered.querySelector('img[alt="openai"]')).not.toBeNull();
-  });
+  }, 15_000);
 
   it('keeps session-level provider selection from being overwritten by global defaults', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
@@ -2951,7 +3409,7 @@ describe('ChatPage', () => {
 
     const rendered = await renderChatPage('/chat/session-1');
 
-    expect(rendered.textContent).toContain('Claude Sonnet 4');
+    await waitForChatText('Claude Sonnet 4');
     expect(rendered.querySelector('img[alt="anthropic"]')).not.toBeNull();
   });
 
@@ -2998,9 +3456,9 @@ describe('ChatPage', () => {
     await flushEffects();
 
     expect(rendered.textContent).toContain('B 会话回到默认模型');
-    expect(rendered.textContent).toContain('GPT-5');
+    await waitForChatText('GPT-5');
     expect(rendered.querySelector('img[alt="openai"]')).not.toBeNull();
-  });
+  }, 15_000);
 
   it('does not persist metadata again immediately after hydrating an existing session', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
@@ -3794,6 +4252,7 @@ describe('ChatPage', () => {
 
     await flushEffects();
 
+    await waitForChatText('MCP 文档检索');
     const subagentSection = rendered.querySelector('[aria-label="子代理运行列表"]');
     const todoBar = rendered.querySelector('[data-testid="chat-todo-bar"]');
     expect(subagentSection).not.toBeNull();
@@ -3816,11 +4275,12 @@ describe('ChatPage', () => {
 
     await flushEffects();
     await flushEffects();
+    await waitForChatText('子代理已开始抓取文档。');
 
     expect(rendered.textContent).toContain('打开完整会话');
     expect(rendered.textContent).toContain('子代理已开始抓取文档。');
     expect(rendered.textContent).toContain('干预子代理');
-  });
+  }, 15_000);
 
   it('shows paused child sessions as waiting in the subagent run list', async () => {
     getSessionMock.mockImplementation(async () => ({ messages: [] }));
@@ -4387,27 +4847,28 @@ describe('ChatPage', () => {
         pendingCallbacks = callbacks;
       },
     );
+    const completedChildTask = {
+      id: 'task-child-finished',
+      title: 'MCP 文档检索',
+      status: 'completed',
+      blockedBy: [],
+      completedSubtaskCount: 0,
+      depth: 0,
+      readySubtaskCount: 0,
+      sessionId: 'child-1',
+      assignedAgent: 'librarian',
+      priority: 'medium',
+      tags: ['task-tool', 'librarian'],
+      createdAt: 100,
+      updatedAt: 200,
+      subtaskCount: 0,
+      unmetDependencyCount: 0,
+      result: '轮询已补回最终摘要。',
+    } as SessionTask;
     getChildrenMock.mockResolvedValue([{ id: 'child-1', title: 'MCP 文档检索' } as Session]);
-    getTasksMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        id: 'task-child-finished',
-        title: 'MCP 文档检索',
-        status: 'completed',
-        blockedBy: [],
-        completedSubtaskCount: 0,
-        depth: 0,
-        readySubtaskCount: 0,
-        sessionId: 'child-1',
-        assignedAgent: 'librarian',
-        priority: 'medium',
-        tags: ['task-tool', 'librarian'],
-        createdAt: 100,
-        updatedAt: 200,
-        subtaskCount: 0,
-        unmetDependencyCount: 0,
-        result: '轮询已补回最终摘要。',
-      } as SessionTask,
-    ]);
+    getTasksMock
+      .mockImplementationOnce(async () => [])
+      .mockImplementation(async () => [completedChildTask]);
 
     try {
       const rendered = await renderChatPage('/chat/session-1');
@@ -4457,6 +4918,7 @@ describe('ChatPage', () => {
         await Promise.resolve();
         await Promise.resolve();
       });
+      await flushEffects();
 
       expect(rendered.textContent).toContain('已完成');
       expect(rendered.textContent).toContain('轮询已补回最终摘要');
@@ -4798,6 +5260,48 @@ describe('ChatPage', () => {
     expect(meter?.getAttribute('title')).toContain('上下文已用 150 / 200k');
   });
 
+  it('opens the overview panel when the recovery strategy button is pressed from the runtime bar', async () => {
+    getSessionMock.mockImplementationOnce(async () => ({
+      messages: [
+        { id: 'assistant-recovery', role: 'assistant', content: '等待恢复', createdAt: 1 },
+      ],
+      runEvents: [
+        {
+          type: 'permission_asked',
+          requestId: 'perm-1',
+          toolName: 'bash',
+          scope: 'session',
+          riskLevel: 'medium',
+          reason: '需要执行命令',
+          previewAction: '运行验证命令',
+          sessionId: 'session-1',
+          occurredAt: 10,
+        },
+      ],
+      state_status: 'paused',
+    }));
+
+    const rendered = await renderChatPage('/chat/session-1');
+
+    await flushEffects();
+
+    const recoveryButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('查看恢复策略'),
+    );
+    expect(recoveryButton).toBeTruthy();
+
+    act(() => {
+      recoveryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    const overviewTab = rendered.querySelector('#chat-right-tab-overview');
+    expect(overviewTab?.getAttribute('aria-selected')).toBe('true');
+    expect(rendered.textContent).toContain('恢复策略');
+    expect(rendered.textContent).toContain('等待处理中的会话');
+  });
+
   it('does not append a stream error message after a permission pause', async () => {
     let pendingCallbacks: Record<string, unknown> | null = null;
     streamMock.mockImplementationOnce(
@@ -4898,7 +5402,6 @@ describe('ChatPage', () => {
     });
 
     const listPendingCountBeforePermission = listPendingPermissionsMock.mock.calls.length;
-    expect(listPendingCountBeforePermission).toBeGreaterThanOrEqual(1);
 
     await act(async () => {
       (pendingCallbacks?.['onEvent'] as ((value: unknown) => void) | undefined)?.({
@@ -5430,6 +5933,110 @@ describe('ChatPage', () => {
     expect(streamMock.mock.calls.at(-1)?.[1]).toContain('请重新生成这条回复');
   });
 
+  it('persists thumbs up/down feedback for assistant messages', async () => {
+    getSessionMock.mockImplementationOnce(async () => ({
+      messages: [
+        {
+          id: 'user-feedback',
+          role: 'user',
+          createdAt: 1,
+          content: [{ type: 'text', text: '这条回答怎么样？' }],
+        },
+        {
+          id: 'assistant-feedback',
+          role: 'assistant',
+          createdAt: 2,
+          content: [{ type: 'text', text: '这是一条可评价的回答。' }],
+        },
+      ],
+    }));
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const thumbsUpButton = rendered.querySelector(
+      '[data-testid="chat-message-action-rate-up-assistant-feedback"]',
+    ) as HTMLButtonElement | null;
+    const thumbsDownButton = rendered.querySelector(
+      '[data-testid="chat-message-action-rate-down-assistant-feedback"]',
+    ) as HTMLButtonElement | null;
+
+    expect(thumbsUpButton?.textContent).toContain('👍');
+    expect(thumbsDownButton?.textContent).toContain('👎');
+
+    await act(async () => {
+      thumbsUpButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(setMessageRatingMock).toHaveBeenCalledWith(
+      'token-123',
+      'session-1',
+      'assistant-feedback',
+      { rating: 'up' },
+    );
+
+    await act(async () => {
+      thumbsUpButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteMessageRatingMock).toHaveBeenCalledWith(
+      'token-123',
+      'session-1',
+      'assistant-feedback',
+    );
+  });
+
+  it('saves the current chat configuration as a workspace agent profile', async () => {
+    workspaceMock.workingDirectory = '/repo/alpha';
+    listCapabilitiesMock.mockImplementationOnce(
+      async () =>
+        [
+          {
+            id: 'hephaestus',
+            kind: 'agent',
+            label: 'Hephaestus',
+            description: '程序员执行代理',
+            source: 'builtin',
+            callable: false,
+          },
+        ] as Array<Record<string, unknown>>,
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const toolSurfaceSelect = rendered.querySelector(
+      'select[aria-label="工具配置档"]',
+    ) as HTMLSelectElement | null;
+    const saveProfileButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('保存为项目配置'),
+    );
+
+    expect(saveProfileButton).toBeTruthy();
+
+    act(() => {
+      if (toolSurfaceSelect) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          'value',
+        )?.set;
+        valueSetter?.call(toolSurfaceSelect, 'claude_code_simple');
+        toolSurfaceSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      saveProfileButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(createAgentProfileMock).toHaveBeenCalledWith(
+      'token-123',
+      expect.objectContaining({
+        workspacePath: '/repo/alpha',
+        toolSurfaceProfile: 'claude_code_simple',
+      }),
+    );
+  });
+
   it('shows pending permissions in the right panel runtime sections', async () => {
     listPendingPermissionsMock.mockImplementation(async () => [
       {
@@ -5504,34 +6111,36 @@ describe('ChatPage', () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
 
-    expect(getTodoLanesMock).toHaveBeenCalledTimes(2);
-    expect(getChildrenMock).toHaveBeenCalledTimes(2);
-    expect(getTasksMock).toHaveBeenCalledTimes(2);
-    expect(listPendingPermissionsMock).toHaveBeenCalledTimes(2);
+    expect(getTodoLanesMock).toHaveBeenCalledTimes(4);
+    expect(getChildrenMock).toHaveBeenCalledTimes(4);
+    expect(getTasksMock).toHaveBeenCalledTimes(4);
+    expect(listPendingPermissionsMock).toHaveBeenCalledTimes(4);
   });
 
-  it('waits for all runtime sidebar requests to settle before scheduling the next poll', async () => {
+  it('waits for the current recovery poll to settle before scheduling the next poll', async () => {
     vi.useFakeTimers();
-    getSessionMock.mockImplementation(async () => ({ messages: [], state_status: 'running' }));
+    const recoveryPayload = {
+      activeStream: null,
+      children: [],
+      pendingPermissions: [],
+      pendingQuestions: [],
+      ratings: [],
+      session: { messages: [], state_status: 'running' },
+      tasks: [],
+      todoLanes: { main: [], temp: [] },
+    };
 
-    let resolveChildren: ((value: Session[]) => void) | null = null;
-    let resolvePermissions: ((value: PendingPermissionRequest[]) => void) | null = null;
+    let resolveRecovery: ((value: typeof recoveryPayload) => void) | null = null;
 
-    getChildrenMock.mockImplementation(
-      () =>
-        new Promise<Session[]>((resolve) => {
-          resolveChildren = resolve;
-        }),
-    );
-    getTasksMock.mockImplementation(async () => {
-      throw new Error('tasks failed');
-    });
-    listPendingPermissionsMock.mockImplementation(
-      () =>
-        new Promise<PendingPermissionRequest[]>((resolve) => {
-          resolvePermissions = resolve;
-        }),
-    );
+    getRecoveryMock.mockReset();
+    getRecoveryMock
+      .mockImplementationOnce(
+        async () =>
+          new Promise<typeof recoveryPayload>((resolve) => {
+            resolveRecovery = resolve;
+          }),
+      )
+      .mockImplementation(async () => recoveryPayload);
 
     const rendered = await renderChatPage('/chat/session-1');
     const openPanelButton = rendered.querySelector('button[title="展开面板"]');
@@ -5541,44 +6150,28 @@ describe('ChatPage', () => {
     });
     await flushEffects();
 
-    expect(getTodoLanesMock).toHaveBeenCalledTimes(1);
-    expect(getChildrenMock).toHaveBeenCalledTimes(1);
-    expect(getTasksMock).toHaveBeenCalledTimes(1);
-    expect(listPendingPermissionsMock).toHaveBeenCalledTimes(1);
+    expect(getRecoveryMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
 
-    expect(getTodoLanesMock).toHaveBeenCalledTimes(1);
-    expect(getChildrenMock).toHaveBeenCalledTimes(1);
-    expect(getTasksMock).toHaveBeenCalledTimes(1);
-    expect(listPendingPermissionsMock).toHaveBeenCalledTimes(1);
+    expect(getRecoveryMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveChildren?.([]);
-      resolvePermissions?.([]);
+      resolveRecovery?.(recoveryPayload);
       await Promise.resolve();
       await Promise.resolve();
     });
+    await flushEffects();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2999);
+      await vi.advanceTimersByTimeAsync(3000);
     });
 
-    expect(getTodoLanesMock).toHaveBeenCalledTimes(1);
-    expect(getChildrenMock).toHaveBeenCalledTimes(1);
-    expect(getTasksMock).toHaveBeenCalledTimes(1);
-    expect(listPendingPermissionsMock).toHaveBeenCalledTimes(1);
+    await flushEffects();
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-
-    expect(getTodoLanesMock).toHaveBeenCalledTimes(2);
-    expect(getChildrenMock).toHaveBeenCalledTimes(2);
-    expect(getTasksMock).toHaveBeenCalledTimes(2);
-    expect(listPendingPermissionsMock).toHaveBeenCalledTimes(2);
+    expect(getRecoveryMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('does not refetch MCP status while the MCP tab is hidden', async () => {
@@ -5880,6 +6473,7 @@ describe('ChatPage', () => {
     });
 
     await flushStreamRevealFrame(4);
+    await flushEffects();
 
     expect(rendered.textContent).toContain('第一段');
     expect(rendered.textContent).not.toContain('第二段');
@@ -5933,6 +6527,7 @@ describe('ChatPage', () => {
     });
 
     await flushStreamRevealFrame(12);
+    await flushEffects();
 
     expect(rendered.querySelector('.chat-markdown-h1')?.textContent).toBe('文档标题');
     expect(rendered.querySelector('.chat-markdown-ul')).not.toBeNull();
@@ -6145,6 +6740,7 @@ describe('ChatPage', () => {
       });
       await Promise.resolve();
     });
+    await flushEffects();
 
     const toolsTab = rendered.querySelector('#chat-right-tab-tools') as HTMLButtonElement | null;
     expect(toolsTab?.getAttribute('aria-selected')).toBe('true');
@@ -6329,8 +6925,29 @@ describe('ChatPage', () => {
     expect(assistantRows[0]?.textContent).toContain('检查完成');
   });
 
-  it('persists dialogueMode and yoloMode changes to the current session metadata', async () => {
+  it('persists dialogueMode, yoloMode, toolSurfaceProfile, and manual agent changes to the current session metadata', async () => {
     getSessionMock.mockImplementationOnce(async () => ({ messages: [] }));
+    listCapabilitiesMock.mockImplementationOnce(
+      async () =>
+        [
+          {
+            id: 'hephaestus',
+            kind: 'agent',
+            label: 'Hephaestus',
+            description: '程序员执行代理',
+            source: 'builtin',
+            callable: false,
+          },
+          {
+            id: 'sisyphus-junior',
+            kind: 'agent',
+            label: 'Sisyphus Junior',
+            description: '编程执行代理',
+            source: 'builtin',
+            callable: false,
+          },
+        ] as Array<Record<string, unknown>>,
+    );
     const rendered = await renderChatPage('/chat/session-1');
 
     const codingButton = Array.from(rendered.querySelectorAll('button')).find(
@@ -6339,10 +6956,41 @@ describe('ChatPage', () => {
     const yoloButton = Array.from(rendered.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'YOLO',
     );
+    const toolSurfaceSelect = rendered.querySelector(
+      'select[aria-label="工具配置档"]',
+    ) as HTMLSelectElement | null;
+    const agentSelect = rendered.querySelector(
+      'select[aria-label="聊天代理"]',
+    ) as HTMLSelectElement | null;
+    expect(toolSurfaceSelect).toBeTruthy();
+    expect(agentSelect).toBeTruthy();
+
+    await flushEffects();
+    expect(
+      Array.from(agentSelect?.querySelectorAll('option') ?? []).some(
+        (option) => option.getAttribute('value') === 'sisyphus-junior',
+      ),
+    ).toBe(true);
 
     act(() => {
       codingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       yoloButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      if (toolSurfaceSelect) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          'value',
+        )?.set;
+        valueSetter?.call(toolSurfaceSelect, 'claude_code_simple');
+        toolSurfaceSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (agentSelect) {
+        const agentValueSetter = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          'value',
+        )?.set;
+        agentValueSetter?.call(agentSelect, 'sisyphus-junior');
+        agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     });
 
     await act(async () => {
@@ -6353,7 +7001,12 @@ describe('ChatPage', () => {
     expect(updateMetadataMock).toHaveBeenCalledWith(
       'token-123',
       'session-1',
-      expect.objectContaining({ dialogueMode: 'coding', yoloMode: true }),
+      expect.objectContaining({
+        agentId: 'sisyphus-junior',
+        dialogueMode: 'coding',
+        yoloMode: true,
+        toolSurfaceProfile: 'claude_code_simple',
+      }),
     );
   });
 

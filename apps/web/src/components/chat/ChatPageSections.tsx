@@ -5,8 +5,8 @@ import type { GenerativeUIMessage } from '@openAwork/shared-ui';
 import { AssistantEventRow } from './assistant-event-row.js';
 import {
   normalizeProviderKey,
-  normalizeProviderLabel,
   ProviderAvatar,
+  resolveProviderIdentity,
   UserAvatar,
 } from './chat-provider-display.js';
 import { TaskToolInline } from './task-tool-inline.js';
@@ -58,6 +58,8 @@ const MarkdownMessageContent = React.lazy(() => import('./markdown-message-conte
 export function MessageRow({
   message,
   providerId,
+  providerName,
+  providerType,
   modelId,
   email,
   actions,
@@ -68,6 +70,8 @@ export function MessageRow({
 }: {
   message: ChatMessage;
   providerId: string;
+  providerName?: string;
+  providerType?: string;
   modelId: string;
   email: string;
   actions?: Array<{
@@ -83,14 +87,16 @@ export function MessageRow({
 }) {
   const isUser = message.role === 'user';
   const resolvedProviderId = message.providerId?.trim() || providerId.trim();
+  const resolvedProviderIdentity = resolveProviderIdentity({
+    providerId: resolvedProviderId,
+    providerName,
+    providerType,
+  });
   const resolvedModelLabel = message.model?.trim() || modelId.trim();
   const assistantModelLabel =
-    resolvedModelLabel ||
-    (resolvedProviderId ? normalizeProviderLabel(resolvedProviderId) : '助手');
+    resolvedModelLabel || (!isUser ? resolvedProviderIdentity.displayName : '助手');
   const normalizedAssistantLabel = normalizeProviderKey(assistantModelLabel);
-  const normalizedResolvedProvider = normalizeProviderKey(
-    normalizeProviderLabel(resolvedProviderId),
-  );
+  const normalizedResolvedProvider = normalizeProviderKey(resolvedProviderIdentity.displayName);
   const displayName = isUser ? email || '你' : assistantModelLabel;
   const timestamp = formatShortTime(message.createdAt);
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
@@ -98,7 +104,7 @@ export function MessageRow({
   const stopReasonLabel = !isUser ? formatStopReasonLabel(message.stopReason) : null;
   const providerLabel =
     !isUser && resolvedProviderId && normalizedAssistantLabel !== normalizedResolvedProvider
-      ? normalizeProviderLabel(resolvedProviderId)
+      ? resolvedProviderIdentity.displayName
       : null;
   const toolLabel = !isUser && message.toolCallCount ? `${message.toolCallCount} 工具` : null;
   const statusLabel =
@@ -163,7 +169,12 @@ export function MessageRow({
         {isUser ? (
           <UserAvatar email={email} size={28} />
         ) : (
-          <ProviderAvatar providerId={avatarProviderId} size={28} />
+          <ProviderAvatar
+            providerId={avatarProviderId}
+            providerName={providerName}
+            providerType={providerType}
+            size={28}
+          />
         )}
       </div>
       <div className="chat-message-main">
@@ -304,6 +315,7 @@ function renderToolCallContent(input: {
   onOpenChildSession?: (sessionId: string) => void;
   output?: unknown;
   reactKey?: React.Key;
+  resumedAfterApproval?: boolean;
   selectedChildSessionId?: string | null;
   status?: 'running' | 'paused' | 'completed' | 'failed';
   taskRuntimeLookup?: TaskToolRuntimeLookup;
@@ -341,6 +353,7 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
       output: copiedToolCard.output,
       isError: copiedToolCard.isError,
       onOpenChildSession: options?.onOpenChildSession,
+      resumedAfterApproval: copiedToolCard.resumedAfterApproval,
       selectedChildSessionId: options?.selectedChildSessionId,
       status: copiedToolCard.status,
       taskRuntimeLookup: options?.taskRuntimeLookup,
@@ -395,6 +408,7 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
             : {},
         output: payload['output'],
         isError: payload['isError'] === true,
+        resumedAfterApproval: payload['resumedAfterApproval'] === true,
         taskRuntimeLookup: options?.taskRuntimeLookup,
         status:
           payload['status'] === 'running' ||
@@ -469,6 +483,7 @@ function AssistantTraceContent({
           output: toolCall.output,
           isError: toolCall.isError,
           onOpenChildSession,
+          resumedAfterApproval: toolCall.resumedAfterApproval,
           selectedChildSessionId,
           status: toolCall.status,
           taskRuntimeLookup,

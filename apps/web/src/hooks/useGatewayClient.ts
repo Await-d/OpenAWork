@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import type {
@@ -168,11 +168,21 @@ function persistActiveStreamSnapshot(snapshot: ActiveStreamSnapshot | null): voi
 }
 
 export function useGatewayClient(token: string | null): GatewayClient {
+  const initialActiveRequest = readPersistedActiveStreamSnapshot();
   const wsRef = useRef<WebSocket | null>(null);
   const sseRef = useRef<EventSource | null>(null);
   const callbacksRef = useRef<StreamCallbacks | null>(null);
-  const activeRequestRef = useRef<ActiveStreamSnapshot | null>(readPersistedActiveStreamSnapshot());
+  const activeRequestRef = useRef<ActiveStreamSnapshot | null>(initialActiveRequest);
+  const [activeStreamSessionId, setActiveStreamSessionId] = useState<string | null>(
+    initialActiveRequest?.sessionId ?? null,
+  );
   const stopRequestedRef = useRef(false);
+
+  const syncActiveRequest = useCallback((snapshot: ActiveStreamSnapshot | null) => {
+    activeRequestRef.current = snapshot;
+    setActiveStreamSessionId(snapshot?.sessionId ?? null);
+    persistActiveStreamSnapshot(snapshot);
+  }, []);
 
   const attachToActiveStream = useCallback(
     async (sessionId: string, callbacks: StreamCallbacks): Promise<boolean> => {
@@ -197,8 +207,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           !wsRef.current &&
           !sseRef.current
         ) {
-          activeRequestRef.current = null;
-          persistActiveStreamSnapshot(null);
+          syncActiveRequest(null);
         }
         callbacksRef.current = null;
         return false;
@@ -214,14 +223,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
       wsRef.current?.close();
       sseRef.current?.close();
       stopRequestedRef.current = false;
-      activeRequestRef.current = {
+      syncActiveRequest({
         clientRequestId: activeStream.clientRequestId,
         lastSeq: requestedAfterSeq,
         sessionId: activeStream.sessionId,
         startedAt: activeStream.startedAtMs,
         transport: 'attach-sse',
-      };
-      persistActiveStreamSnapshot(activeRequestRef.current);
+      });
 
       return await new Promise<boolean>((resolve) => {
         let settled = false;
@@ -235,8 +243,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           callbacksRef.current = null;
           stopRequestedRef.current = false;
           if (clearSnapshot) {
-            activeRequestRef.current = null;
-            persistActiveStreamSnapshot(null);
+            syncActiveRequest(null);
           }
         };
 
@@ -296,12 +303,11 @@ export function useGatewayClient(token: string | null): GatewayClient {
           if (isRunEventEnvelope(parsed)) {
             const cursorSeq = parsed.payload.cursor?.seq ?? parsed.seq;
             if (activeRequestRef.current?.clientRequestId === activeStream.clientRequestId) {
-              activeRequestRef.current = {
+              syncActiveRequest({
                 ...activeRequestRef.current,
                 lastSeq: Math.max(activeRequestRef.current.lastSeq, cursorSeq),
                 transport: 'attach-sse',
-              };
-              persistActiveStreamSnapshot(activeRequestRef.current);
+              });
             }
             handleChunk(parsed.payload.event);
             return;
@@ -345,26 +351,24 @@ export function useGatewayClient(token: string | null): GatewayClient {
       activeRequest.clientRequestId,
     );
     if (!stopped) {
-      activeRequestRef.current = null;
-      persistActiveStreamSnapshot(null);
+      syncActiveRequest(null);
       stopRequestedRef.current = false;
       callbacksRef.current = null;
       return false;
     }
 
     if (!wsRef.current && !sseRef.current) {
-      activeRequestRef.current = null;
-      persistActiveStreamSnapshot(null);
+      syncActiveRequest(null);
       stopRequestedRef.current = false;
       callbacksRef.current = null;
     }
 
     return stopped;
-  }, [token]);
+  }, [syncActiveRequest, token]);
 
   const getActiveStreamSessionId = useCallback((): string | null => {
-    return activeRequestRef.current?.sessionId ?? null;
-  }, []);
+    return activeStreamSessionId;
+  }, [activeStreamSessionId]);
 
   const stream = useCallback(
     (sessionId: string, message: string, callbacks: StreamCallbacks) => {
@@ -372,14 +376,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
       const clientRequestId = crypto.randomUUID();
-      activeRequestRef.current = {
+      syncActiveRequest({
         clientRequestId,
         lastSeq: 0,
         sessionId,
         startedAt: Date.now(),
         transport: 'ws',
-      };
-      persistActiveStreamSnapshot(activeRequestRef.current);
+      });
       stopRequestedRef.current = false;
       const model = callbacks.model ?? 'default';
       const agentId = callbacks.agentId?.trim() || undefined;
@@ -405,8 +408,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         wsRef.current = null;
         sseRef.current = null;
         callbacksRef.current = null;
-        activeRequestRef.current = null;
-        persistActiveStreamSnapshot(null);
+        syncActiveRequest(null);
         stopRequestedRef.current = false;
       };
 
@@ -447,11 +449,10 @@ export function useGatewayClient(token: string | null): GatewayClient {
         if (fallbackStarted || settled) return;
         fallbackStarted = true;
         if (activeRequestRef.current) {
-          activeRequestRef.current = {
+          syncActiveRequest({
             ...activeRequestRef.current,
             transport: 'sse',
-          };
-          persistActiveStreamSnapshot(activeRequestRef.current);
+          });
         }
         const params = new URLSearchParams({
           ...(agentId ? { agentId } : {}),
@@ -539,7 +540,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         startSse();
       }
     },
-    [token],
+    [syncActiveRequest, token],
   );
 
   return { attachToActiveStream, getActiveStreamSessionId, stream, stopStream };

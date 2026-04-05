@@ -117,9 +117,17 @@ function StatusBadge({
 }
 
 export function SessionRunStateBar({
+  checkpointCount = 0,
+  onOpenRecovery,
+  pendingPermissionsCount = 0,
+  pendingQuestionsCount = 0,
   status,
   stopCapability = 'observe_only',
 }: {
+  checkpointCount?: number;
+  onOpenRecovery?: () => void;
+  pendingPermissionsCount?: number;
+  pendingQuestionsCount?: number;
   status: Extract<SessionStateStatus, 'running' | 'paused'>;
   stopCapability?: StopCapability;
 }) {
@@ -213,6 +221,25 @@ export function SessionRunStateBar({
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {onOpenRecovery ? (
+            <button
+              type="button"
+              onClick={onOpenRecovery}
+              style={{
+                height: 24,
+                padding: '0 8px',
+                borderRadius: 999,
+                border: '1px solid var(--border-subtle)',
+                background: 'color-mix(in oklch, var(--surface) 82%, transparent)',
+                color: 'var(--text)',
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              查看恢复策略
+            </button>
+          ) : null}
           <StatusBadge
             background={
               status === 'paused'
@@ -228,6 +255,14 @@ export function SessionRunStateBar({
             label={meta.badge}
           />
           {capabilityCopy && <StatusBadge {...capabilityTone} label={capabilityCopy.badge} />}
+          {(checkpointCount > 0 || pendingPermissionsCount > 0 || pendingQuestionsCount > 0) && (
+            <StatusBadge
+              background="color-mix(in oklch, var(--surface) 82%, transparent)"
+              border="1px solid var(--border-subtle)"
+              color="var(--text-2)"
+              label={`检查点 ${checkpointCount} · 审批 ${pendingPermissionsCount} · 问题 ${pendingQuestionsCount}`}
+            />
+          )}
         </div>
       </div>
     </div>
