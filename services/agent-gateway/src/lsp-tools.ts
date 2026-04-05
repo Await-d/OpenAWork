@@ -2,6 +2,16 @@ import { promises as fsp } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '@openAwork/agent-core';
+import {
+  gotoDefinitionInputSchema,
+  gotoImplementationInputSchema,
+  findReferencesInputSchema,
+  symbolsInputSchema,
+  prepareRenameInputSchema,
+  renameInputSchema,
+  hoverInputSchema,
+  callHierarchyInputSchema,
+} from '@openAwork/agent-core';
 import { z } from 'zod';
 import { lspManager } from './lsp/router.js';
 
@@ -38,37 +48,16 @@ type WorkspaceEdit = {
   >;
 };
 
-const gotoDefinitionInputSchema = z.object({
-  filePath: z.string().min(1),
-  line: z.number().int().min(1),
-  character: z.number().int().min(0),
+export const postWriteDiagnosticSchema = z.object({
+  file: z.string(),
+  severity: z.string(),
+  line: z.number(),
+  message: z.string(),
 });
 
-const findReferencesInputSchema = z.object({
-  filePath: z.string().min(1),
-  line: z.number().int().min(1),
-  character: z.number().int().min(0),
-  includeDeclaration: z.boolean().optional().default(true),
-});
-
-const symbolsInputSchema = z.object({
-  filePath: z.string().min(1),
-  scope: z.enum(['document', 'workspace']).optional().default('document'),
-  query: z.string().optional(),
-  limit: z.number().int().min(1).max(200).optional().default(50),
-});
-
-const prepareRenameInputSchema = z.object({
-  filePath: z.string().min(1),
-  line: z.number().int().min(1),
-  character: z.number().int().min(0),
-});
-
-const renameInputSchema = z.object({
-  filePath: z.string().min(1),
-  line: z.number().int().min(1),
-  character: z.number().int().min(0),
-  newName: z.string().min(1),
+const renameOutputSchema = z.object({
+  result: z.string(),
+  diagnostics: z.array(postWriteDiagnosticSchema).optional(),
 });
 
 function uriToPath(uri: string): string {
@@ -88,12 +77,54 @@ async function preTouchForQuery(filePath: string): Promise<void> {
   }
 }
 
+/** Simplified diagnostic entry for tool output. */
+export interface PostWriteDiagnostic {
+  file: string;
+  severity: string;
+  line: number;
+  message: string;
+}
+
+const MAX_POST_WRITE_DIAGNOSTICS = 20;
+
+/**
+ * Retrieve diagnostics for recently-written files from the LSP server.
+ * Best-effort: returns empty array on any error — never blocks the write operation.
+ */
+export async function getPostWriteDiagnostics(filePaths: string[]): Promise<PostWriteDiagnostic[]> {
+  try {
+    const allDiagnostics = await lspManager.diagnostics();
+    const pathSet = new Set(filePaths);
+    const result: PostWriteDiagnostic[] = [];
+
+    for (const [file, summaries] of Object.entries(allDiagnostics)) {
+      if (!pathSet.has(file)) continue;
+      for (const diag of summaries) {
+        result.push({
+          file,
+          severity: diag.severity,
+          line: diag.line,
+          message: diag.message,
+        });
+        if (result.length >= MAX_POST_WRITE_DIAGNOSTICS) {
+          return result;
+        }
+      }
+    }
+
+    return result;
+  } catch {
+    // Diagnostics retrieval is best-effort; never block the caller
+    return [];
+  }
+}
+
 /**
  * Post-write touch + diagnostics: sync LSP state after file modifications.
  * Mirrors opencode's tool/write.ts: `touchFile(true)` + `diagnostics()` after writes.
  * Failures are silently ignored — do not roll back successful file modifications.
  */
-async function postWriteTouch(filePaths: string[]): Promise<void> {
+async function postWriteTouch(filePaths: string[]): Promise<PostWriteDiagnostic[]> {
   try {
     for (const filePath of filePaths) {
       await lspManager.touchFile(filePath, true);
@@ -101,6 +132,7 @@ async function postWriteTouch(filePaths: string[]): Promise<void> {
   } catch {
     // Post-write LSP sync is best-effort; do not fail the rename operation
   }
+  return getPostWriteDiagnostics(filePaths);
 }
 
 function collectWorkspaceEditFiles(edit: WorkspaceEdit | null): string[] {
@@ -257,6 +289,29 @@ export const lspGotoDefinitionToolDefinition: ToolDefinition<
   },
 };
 
+export const lspGotoImplementationToolDefinition: ToolDefinition<
+  typeof gotoImplementationInputSchema,
+  z.ZodString
+> = {
+  name: 'lsp_goto_implementation',
+  description:
+    'Jump to symbol implementation. Find WHERE an interface or abstract method is concretely implemented.',
+  inputSchema: gotoImplementationInputSchema,
+  outputSchema: z.string(),
+  timeout: 30000,
+  execute: async (input) => {
+    await preTouchForQuery(input.filePath);
+    const result = await lspManager.implementation({
+      file: input.filePath,
+      line: input.line - 1,
+      character: input.character,
+    });
+    return result.length > 0
+      ? result.map((item) => formatLocation(item as Location | LocationLink)).join('\n')
+      : 'No implementation found';
+  },
+};
+
 export const lspFindReferencesToolDefinition: ToolDefinition<
   typeof findReferencesInputSchema,
   z.ZodString
@@ -272,6 +327,7 @@ export const lspFindReferencesToolDefinition: ToolDefinition<
       file: input.filePath,
       line: input.line - 1,
       character: input.character,
+      includeDeclaration: input.includeDeclaration,
     });
     return result.length > 0
       ? result.map((item) => formatLocation(item as Location)).join('\n')
@@ -334,12 +390,15 @@ export const lspPrepareRenameToolDefinition: ToolDefinition<
   },
 };
 
-export const lspRenameToolDefinition: ToolDefinition<typeof renameInputSchema, z.ZodString> = {
+export const lspRenameToolDefinition: ToolDefinition<
+  typeof renameInputSchema,
+  typeof renameOutputSchema
+> = {
   name: 'lsp_rename',
   description:
     'Rename symbol across entire workspace. APPLIES changes to all files. Use lsp_prepare_rename first to verify.',
   inputSchema: renameInputSchema,
-  outputSchema: z.string(),
+  outputSchema: renameOutputSchema,
   timeout: 30000,
   execute: async (input) => {
     await preTouchForQuery(input.filePath);
@@ -351,7 +410,161 @@ export const lspRenameToolDefinition: ToolDefinition<typeof renameInputSchema, z
     })) as WorkspaceEdit | null;
     const modifiedFiles = collectWorkspaceEditFiles(workspaceEdit);
     const result = await applyWorkspaceEdit(workspaceEdit);
-    await postWriteTouch(modifiedFiles);
-    return result;
+    const diagnostics = await postWriteTouch(modifiedFiles);
+    return {
+      result,
+      diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+    };
+  },
+};
+
+type MarkedString = string | { language: string; value: string };
+type MarkupContent = { kind: string; value: string };
+type HoverResult = {
+  contents: MarkupContent | MarkedString | MarkedString[];
+  range?: Range;
+} | null;
+
+function formatHoverResult(result: unknown): string {
+  if (!result || typeof result !== 'object') {
+    return 'No hover information available';
+  }
+
+  const hover = result as HoverResult;
+  if (!hover) {
+    return 'No hover information available';
+  }
+
+  const contents = hover.contents;
+
+  if (typeof contents === 'string') {
+    return contents || 'No hover information available';
+  }
+
+  if (typeof contents === 'object' && 'value' in contents) {
+    return (contents as MarkupContent).value || 'No hover information available';
+  }
+
+  if (Array.isArray(contents)) {
+    const parts = contents
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && 'value' in item) return item.value;
+        return '';
+      })
+      .filter(Boolean);
+    return parts.length > 0 ? parts.join('\n\n') : 'No hover information available';
+  }
+
+  return 'No hover information available';
+}
+
+export const lspHoverToolDefinition: ToolDefinition<typeof hoverInputSchema, z.ZodString> = {
+  name: 'lsp_hover',
+  description:
+    'Get hover information (type signature, documentation) for a symbol at a given position. Returns human-readable text.',
+  inputSchema: hoverInputSchema,
+  outputSchema: z.string(),
+  timeout: 30000,
+  execute: async (input) => {
+    await preTouchForQuery(input.filePath);
+    const result = await lspManager.hover({
+      file: input.filePath,
+      line: input.line - 1,
+      character: input.character,
+    });
+    return formatHoverResult(result);
+  },
+};
+
+type CallHierarchyItem = {
+  name: string;
+  kind: number;
+  uri: string;
+  range: Range;
+  selectionRange: Range;
+  detail?: string;
+  tags?: number[];
+  data?: unknown;
+};
+
+type IncomingCallHierarchyCall = {
+  from: CallHierarchyItem;
+  fromRanges: Range[];
+};
+
+type OutgoingCallHierarchyCall = {
+  to: CallHierarchyItem;
+  fromRanges: Range[];
+};
+
+function formatCallHierarchyItem(item: CallHierarchyItem): string {
+  const filePath = uriToPath(item.uri);
+  const line = item.selectionRange.start.line + 1;
+  const col = item.selectionRange.start.character;
+  const detail = item.detail ? ` (${item.detail})` : '';
+  return `${item.name}${detail} - ${filePath}:${line}:${col}`;
+}
+
+export const lspCallHierarchyToolDefinition: ToolDefinition<
+  typeof callHierarchyInputSchema,
+  z.ZodString
+> = {
+  name: 'lsp_call_hierarchy',
+  description:
+    'Get call hierarchy for a symbol: who calls it (incoming) and what it calls (outgoing). Single-hop only.',
+  inputSchema: callHierarchyInputSchema,
+  outputSchema: z.string(),
+  timeout: 30000,
+  execute: async (input) => {
+    await preTouchForQuery(input.filePath);
+
+    const items = (await lspManager.prepareCallHierarchy({
+      file: input.filePath,
+      line: input.line - 1,
+      character: input.character,
+    })) as CallHierarchyItem[];
+
+    if (items.length === 0) {
+      return 'No call hierarchy found';
+    }
+
+    const item = items[0]!;
+    const sections: string[] = [`Symbol: ${formatCallHierarchyItem(item)}`];
+
+    const wantIncoming = input.direction === 'incoming' || input.direction === 'both';
+    const wantOutgoing = input.direction === 'outgoing' || input.direction === 'both';
+
+    if (wantIncoming) {
+      const incoming = (await lspManager.incomingCalls({
+        file: input.filePath,
+        item,
+      })) as IncomingCallHierarchyCall[];
+      if (incoming.length > 0) {
+        sections.push(
+          '\nIncoming calls:',
+          ...incoming.map((call) => `  ${formatCallHierarchyItem(call.from)}`),
+        );
+      } else {
+        sections.push('\nNo incoming calls found');
+      }
+    }
+
+    if (wantOutgoing) {
+      const outgoing = (await lspManager.outgoingCalls({
+        file: input.filePath,
+        item,
+      })) as OutgoingCallHierarchyCall[];
+      if (outgoing.length > 0) {
+        sections.push(
+          '\nOutgoing calls:',
+          ...outgoing.map((call) => `  ${formatCallHierarchyItem(call.to)}`),
+        );
+      } else {
+        sections.push('\nNo outgoing calls found');
+      }
+    }
+
+    return sections.join('\n');
   },
 };
