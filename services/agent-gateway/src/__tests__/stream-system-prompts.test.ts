@@ -34,6 +34,20 @@ describe('stream system prompt integration', () => {
     expect(result.some((p) => p.startsWith('OpenAWork 执行偏好提醒：yolo'))).toBe(true);
   });
 
+  it('inserts companion prompt after capability context when provided', () => {
+    const result = buildRequestScopedSystemPrompts(
+      '使用 /buddy 看一下',
+      '## 系统 Agents\n- hephaestus',
+      {
+        companionPrompt: 'OpenAWork companion 上下文：\nBuddy 已进入当前上下文。',
+      },
+    );
+
+    expect(result[0]).toBe('## 系统 Agents\n- hephaestus');
+    expect(result[1]).toBe('OpenAWork companion 上下文：\nBuddy 已进入当前上下文。');
+    expect(result.some((p) => p.startsWith('LSP 工具使用策略'))).toBe(true);
+  });
+
   it('describes LSP fallback and forbidden automatic actions explicitly', () => {
     const result = buildRequestScopedSystemPrompts('帮我定位这个符号', '## 系统 Agents\n- oracle');
     const guidance = result.find((prompt) => prompt.startsWith('LSP 工具使用策略'));
@@ -83,7 +97,7 @@ describe('stream system prompt integration', () => {
       buildRoundSystemMessages({
         workspaceCtx: '<workspace />',
         routeSystemPrompt: 'route prompt',
-        requestSystemPrompts: ['[analyze-mode]', '## 系统 Agents'],
+        requestSystemPrompts: ['[analyze-mode]', '## 系统 Agents', 'OpenAWork companion 上下文'],
         shouldGuideToolOutputReadback: true,
       }),
     ).toEqual([
@@ -91,6 +105,7 @@ describe('stream system prompt integration', () => {
       { role: 'system', content: 'route prompt' },
       { role: 'system', content: '[analyze-mode]' },
       { role: 'system', content: '## 系统 Agents' },
+      { role: 'system', content: 'OpenAWork companion 上下文' },
       {
         role: 'system',
         content:

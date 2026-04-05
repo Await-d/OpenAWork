@@ -67,6 +67,7 @@ const LSP_TOOL_GUIDANCE_SYSTEM_PROMPT = [
 ].join('\n');
 
 interface RequestScopedPromptOptions {
+  companionPrompt?: string | null;
   dialogueMode?: DialogueMode;
   yoloMode?: boolean;
 }
@@ -85,6 +86,7 @@ export function buildRequestScopedSystemPrompts(
   return [
     detection.injectedPrompt,
     capabilityContext,
+    options.companionPrompt,
     LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
     dialogueModePrompt,
     yoloModePrompt,
