@@ -5,9 +5,12 @@ const GATEWAY_URL = 'http://localhost:3000';
 const ACTIVE_STREAM_STORAGE_KEY = 'openAwork-active-stream:tester@openawork.local';
 const ACTIVE_STREAM_ANONYMOUS_STORAGE_KEY = 'openAwork-active-stream:anonymous';
 
-async function primeAuthenticatedSession(page: Page): Promise<void> {
+async function primeAuthenticatedSession(
+  page: Page,
+  options?: { persistActiveStreamSnapshot?: boolean },
+): Promise<void> {
   await page.addInitScript(
-    ({ gatewayUrl, sessionId, storageKey, anonymousStorageKey }) => {
+    ({ gatewayUrl, sessionId, storageKey, anonymousStorageKey, persistActiveStreamSnapshot }) => {
       localStorage.setItem(
         'auth-store',
         JSON.stringify({
@@ -26,27 +29,36 @@ async function primeAuthenticatedSession(page: Page): Promise<void> {
       localStorage.setItem('onboarded', '1');
       localStorage.setItem('telemetry_consent_shown', '1');
 
-      const snapshot = JSON.stringify({
-        clientRequestId: 'req-attach-e2e-1',
-        lastSeq: 3,
-        sessionId,
-        startedAt: Date.now() - 1_000,
-        transport: 'attach-sse',
-      });
-      sessionStorage.setItem(storageKey, snapshot);
-      sessionStorage.setItem(anonymousStorageKey, snapshot);
+      if (persistActiveStreamSnapshot) {
+        const snapshot = JSON.stringify({
+          clientRequestId: 'req-attach-e2e-1',
+          lastSeq: 3,
+          sessionId,
+          startedAt: Date.now() - 1_000,
+          transport: 'attach-sse',
+        });
+        sessionStorage.setItem(storageKey, snapshot);
+        sessionStorage.setItem(anonymousStorageKey, snapshot);
+      } else {
+        sessionStorage.removeItem(storageKey);
+        sessionStorage.removeItem(anonymousStorageKey);
+      }
     },
     {
       gatewayUrl: GATEWAY_URL,
       sessionId: SESSION_ID,
       storageKey: ACTIVE_STREAM_STORAGE_KEY,
       anonymousStorageKey: ACTIVE_STREAM_ANONYMOUS_STORAGE_KEY,
+      persistActiveStreamSnapshot: options?.persistActiveStreamSnapshot ?? true,
     },
   );
 }
 
-async function mockChatRefreshRecovery(page: Page): Promise<{ activeUrls: string[] }> {
+async function mockChatRefreshRecovery(
+  page: Page,
+): Promise<{ activeUrls: string[]; attachUrls: string[] }> {
   const activeUrls: string[] = [];
+  const attachUrls: string[] = [];
   let activeCallCount = 0;
   await page.route(`${GATEWAY_URL}/**`, async (route) => {
     const request = route.request();
@@ -117,30 +129,39 @@ async function mockChatRefreshRecovery(page: Page): Promise<{ activeUrls: string
       return;
     }
 
-    if (pathname === `/sessions/${SESSION_ID}`) {
+    if (pathname === `/sessions/${SESSION_ID}/recovery`) {
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          session: {
-            id: SESSION_ID,
-            messages: [
-              {
-                id: 'user-1',
-                role: 'user',
-                createdAt: 1,
-                content: [{ type: 'text', text: '请继续输出当前分析' }],
-              },
-            ],
-            metadata_json: '{}',
-            runEvents: [
-              {
-                type: 'text_delta',
-                delta: '已恢复',
-                runId: 'run-attach-e2e',
-                occurredAt: 10,
-              },
-            ],
-            state_status: 'running',
+          recovery: {
+            activeStream: null,
+            children: [],
+            pendingPermissions: [],
+            pendingQuestions: [],
+            ratings: [],
+            session: {
+              id: SESSION_ID,
+              messages: [
+                {
+                  id: 'user-1',
+                  role: 'user',
+                  createdAt: 1,
+                  content: [{ type: 'text', text: '请继续输出当前分析' }],
+                },
+              ],
+              metadata_json: '{}',
+              runEvents: [
+                {
+                  type: 'text_delta',
+                  delta: '已恢复',
+                  runId: 'run-attach-e2e',
+                  occurredAt: 10,
+                },
+              ],
+              state_status: 'running',
+            },
+            tasks: [],
+            todoLanes: { main: [], temp: [] },
           },
         }),
       });
@@ -169,6 +190,7 @@ async function mockChatRefreshRecovery(page: Page): Promise<{ activeUrls: string
     }
 
     if (pathname === `/sessions/${SESSION_ID}/stream/attach`) {
+      attachUrls.push(request.url());
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
@@ -211,7 +233,7 @@ async function mockChatRefreshRecovery(page: Page): Promise<{ activeUrls: string
     });
   });
 
-  return { activeUrls };
+  return { activeUrls, attachUrls };
 }
 
 test.describe('Chat refresh recovery', () => {
@@ -229,5 +251,23 @@ test.describe('Chat refresh recovery', () => {
     await expect(page.getByText('会话持续运行中')).toBeVisible();
     await expect(page.getByText('当前运行流仍受此页控制')).toBeVisible();
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible();
+  });
+
+  test('attaches without persisted sessionStorage snapshot and preserves attach query params', async ({
+    page,
+  }) => {
+    await primeAuthenticatedSession(page, { persistActiveStreamSnapshot: false });
+    const { attachUrls } = await mockChatRefreshRecovery(page);
+
+    await page.goto(`/chat/${SESSION_ID}`);
+
+    await expect(page.getByText('请继续输出当前分析')).toBeVisible();
+    await expect(page.getByText('已恢复')).toBeVisible();
+    await expect(page.getByRole('button', { name: '停止' })).toBeVisible();
+
+    await expect.poll(() => attachUrls.length).toBe(1);
+    expect(attachUrls[0]).toContain('/sessions/session-attach-e2e/stream/attach?');
+    expect(attachUrls[0]).toContain('clientRequestId=req-attach-e2e-1');
+    expect(attachUrls[0]).toContain('afterSeq=4');
   });
 });
