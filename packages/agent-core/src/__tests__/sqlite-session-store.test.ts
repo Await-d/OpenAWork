@@ -1,5 +1,172 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, unlinkSync } from 'fs';
+
+const sqliteMock = vi.hoisted(() => {
+  interface MockSessionRow {
+    id: string;
+    created_at: number;
+    updated_at: number;
+    state_status: string;
+    messages_json: string;
+    metadata_json: string;
+  }
+
+  interface MockCheckpointRow {
+    checkpoint_at: number;
+    metadata_json: string;
+    messages_json: string;
+    session_id: string;
+    state_status: string;
+  }
+
+  interface MockDatabaseState {
+    checkpoints: MockCheckpointRow[];
+    sessions: Map<string, MockSessionRow>;
+  }
+
+  const stores = new Map<string, MockDatabaseState>();
+
+  const getState = (dbPath: string): MockDatabaseState => {
+    const existing = stores.get(dbPath);
+    if (existing) {
+      return existing;
+    }
+
+    const created: MockDatabaseState = {
+      checkpoints: [],
+      sessions: new Map<string, MockSessionRow>(),
+    };
+    stores.set(dbPath, created);
+    return created;
+  };
+
+  class MockStatement {
+    public constructor(
+      private readonly state: MockDatabaseState,
+      private readonly sql: string,
+    ) {}
+
+    public run(...args: unknown[]): { changes: number } {
+      if (this.sql.includes('INSERT INTO sessions')) {
+        const [id, createdAt, updatedAt, stateStatus, messagesJson, metadataJson] = args as [
+          string,
+          number,
+          number,
+          string,
+          string,
+          string,
+        ];
+        this.state.sessions.set(id, {
+          created_at: createdAt,
+          id,
+          messages_json: messagesJson,
+          metadata_json: metadataJson,
+          state_status: stateStatus,
+          updated_at: updatedAt,
+        });
+        return { changes: 1 };
+      }
+
+      if (this.sql.includes('UPDATE sessions SET')) {
+        const [updatedAt, stateStatus, messagesJson, metadataJson, id] = args as [
+          number,
+          string,
+          string,
+          string,
+          string,
+        ];
+        const current = this.state.sessions.get(id);
+        if (!current) {
+          return { changes: 0 };
+        }
+        this.state.sessions.set(id, {
+          ...current,
+          messages_json: messagesJson,
+          metadata_json: metadataJson,
+          state_status: stateStatus,
+          updated_at: updatedAt,
+        });
+        return { changes: 1 };
+      }
+
+      if (this.sql.includes('DELETE FROM sessions')) {
+        const [id] = args as [string];
+        this.state.sessions.delete(id);
+        return { changes: 1 };
+      }
+
+      if (this.sql.includes('INSERT INTO checkpoints')) {
+        const [sessionId, checkpointAt, stateStatus, messagesJson, metadataJson] = args as [
+          string,
+          number,
+          string,
+          string,
+          string,
+        ];
+        this.state.checkpoints.push({
+          checkpoint_at: checkpointAt,
+          metadata_json: metadataJson,
+          messages_json: messagesJson,
+          session_id: sessionId,
+          state_status: stateStatus,
+        });
+        return { changes: 1 };
+      }
+
+      return { changes: 0 };
+    }
+
+    public get(...args: unknown[]): MockSessionRow | undefined {
+      if (this.sql.includes('SELECT * FROM sessions WHERE id = ?')) {
+        const [id] = args as [string];
+        return this.state.sessions.get(id);
+      }
+
+      return undefined;
+    }
+
+    public all(...args: unknown[]): MockSessionRow[] {
+      if (this.sql.includes('SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?')) {
+        const [limit, offset] = args as [number, number];
+        return [...this.state.sessions.values()]
+          .sort((left, right) => right.updated_at - left.updated_at)
+          .slice(offset, offset + limit);
+      }
+
+      return [];
+    }
+  }
+
+  class MockDatabase {
+    private readonly state: MockDatabaseState;
+
+    public constructor(dbPath: string) {
+      this.state = getState(dbPath);
+    }
+
+    public pragma(_statement: string): void {}
+
+    public exec(_sql: string): void {}
+
+    public prepare(sql: string): MockStatement {
+      return new MockStatement(this.state, sql);
+    }
+
+    public close(): void {}
+  }
+
+  return {
+    MockDatabase,
+    clearDb: (dbPath: string) => {
+      stores.delete(dbPath);
+    },
+  };
+});
+
+vi.mock('better-sqlite3', () => ({
+  default: sqliteMock.MockDatabase,
+}));
+
 import { SQLiteSessionStore } from '../sqlite-session-store.js';
 import { SessionNotFoundError } from '../session-store.js';
 import type { Message } from '@openAwork/shared';
@@ -8,6 +175,7 @@ const TEST_DB = '/tmp/test-agent-core-sessions.db';
 
 function cleanup() {
   if (existsSync(TEST_DB)) unlinkSync(TEST_DB);
+  sqliteMock.clearDb(TEST_DB);
 }
 
 const makeMsg = (id: string): Message => ({
