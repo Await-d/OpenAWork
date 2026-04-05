@@ -2,8 +2,7 @@
 
 ## 活跃工作流
 
-- [260404-lsp-language-server-coverage-docker-生态第二阶段实施](./workflow/260404-lsp-language-server-coverage-docker-生态第二阶段实施.md) — richer LSP 在 Dockerfile coverage 之后，继续推进 Docker 生态第二阶段 coverage：Compose / Bake gateway-side server coverage 与受控文件名匹配
-- [260404-子代理超时调整方案](./workflow/260404-子代理超时调整方案.md) — 子代理 child session timeout / deadline 详细调整方案：聚焦 gateway 最小闭环、统一终结原因、父会话回流、Web/Mobile 可见性与 DAG 后续演进
+- [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
 - [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout（方案已冻结，全部 19 项待实施）
@@ -14,6 +13,17 @@
 
 ## 归档工作流（已完成）
 
+- [260405-仓库级稳定性收口](./workflow/done/260405-仓库级稳定性收口.md) — 已完成从 Buddy 链路扩展到仓库级验证闭环：根级 `pnpm typecheck` 与 `pnpm test` 全通过
+- [260405-chat-pr触发与恢复read-model实施](./workflow/done/260405-chat-pr触发与恢复read-model实施.md) — 已完成 chat 恢复链的下一轮收口：高风险 PR 自动触发 live gate，且 Web 主恢复链正式切到 `GET /sessions/:id/recovery` 聚合读取
+- [260405-buddy-语音参数与默认回退](./workflow/done/260405-buddy-语音参数与默认回退.md) — 已完成 Buddy-Agent 绑定的最后一层补全：绑定级语音参数生效，未绑定 Agent 统一回退到同一个默认 Buddy 人格
+- [260405-buddy-agent-绑定](./workflow/done/260405-buddy-agent-绑定.md) — 已完成 Buddy 与 Agent 的稳定绑定：Settings 管理映射，Chat 与 request-scoped companion prompt 按当前 effective agent 自动切换 persona / species / behavior
+- [260405-huddy-伴侣图标动画迁移](./workflow/done/260405-huddy-伴侣图标动画迁移.md) — 已完成 `temp/claude-code-sourcemap` buddy 视觉层的 Web 迁移：当前 companion hero 与 18 种 companion 图鉴均已在 Settings 中可视化展示并带 idle / pet 动画
+- [260405-huddy-伴侣功能实际完成](./workflow/done/260405-huddy-伴侣功能实际完成.md) — 已完成 buddy / companion 的实际功能收口：gateway deterministic profile、request-scoped prompt 注入、`/buddy` composer 触发、Chat 面板控制与 Settings Buddy tab
+- [260404-子代理超时调整方案](./workflow/done/260404-子代理超时调整方案.md) — 已完成 child session 首响应 timeout、request-scope race 清理、`terminalReason/effectiveDeadline` 投影、Web/Mobile timeout 可见性、DAG `executionTimeoutMs/approvalTimeoutMs` 与 gateway approval timeout 主链
+- [260405-chat-ci分层门禁实施](./workflow/done/260405-chat-ci分层门禁实施.md) — 已完成 chat 恢复链的 CI 分层：required fast gate + push-only live gate，并补齐 fast Web E2E 自启动 preview
+- [260405-chat-真实端到端负向边界验证实施](./workflow/done/260405-chat-真实端到端负向边界验证实施.md) — 已完成真实 gateway 驱动的负向边界浏览器 E2E：permission reject 与 question dismiss 都能稳定收口到 idle 语义
+- [260405-chat-真实端到端暂停恢复验证实施](./workflow/done/260405-chat-真实端到端暂停恢复验证实施.md) — 已完成真实 gateway 驱动的 paused/resumed 浏览器 E2E：question_asked 等待回答、刷新保留 paused、真实回答恢复并最终完成
+- [260405-chat-真实端到端停止验证实施](./workflow/done/260405-chat-真实端到端停止验证实施.md) — 已完成真实 gateway 驱动的刷新后停止验证，并修复 `useGatewayClient` active handle 不触发重渲染的状态漂移问题
 - [260404-chat-真实端到端验收实施](./workflow/done/260404-chat-真实端到端验收实施.md) — 已完成真实 gateway 驱动的 Chat 刷新恢复浏览器 E2E：real web + real gateway + mock upstream，覆盖发送、刷新、attach 恢复与最终消息落定
 - [260404-chat-浏览器续流最终落定实施](./workflow/done/260404-chat-浏览器续流最终落定实施.md) — 已完成刷新恢复最终落定验收分层：浏览器层保留恢复体验，最终消息落定转由 `ChatPage` 回归稳定覆盖
 - [260404-chat-浏览器续流验收实施](./workflow/done/260404-chat-浏览器续流验收实施.md) — 已完成 Chat 刷新恢复的浏览器层验收：新增 Playwright 用例验证恢复中的流内容、运行态提示与停止控制
@@ -21,7 +31,9 @@
 - [260404-chat-真正续流phase2b实施](./workflow/done/260404-chat-真正续流phase2b实施.md) — 已完成 Chat Phase 2B 竞态收口：attach 路径采用 buffer-live-then-replay，收紧 replay/live 窗口并通过 gateway 回归验证
 - [260404-chat-真正续流phase2a实施](./workflow/done/260404-chat-真正续流phase2a实施.md) — 已完成 Chat Phase 2A 真正续流实施：active-stream handshake、attach-only SSE、Web attach-first 恢复、Oracle 修正与全链路验证
 - [260404-chat-真正续流resume协议设计](./workflow/done/260404-chat-真正续流resume协议设计.md) — 已完成 Chat 从“快照恢复展示”演进到“真正 resume / reattach 协议”的二阶段技术设计，明确 attach-only SSE、`clientRequestId + seq` cursor、前端恢复顺序与验证矩阵
+- [260405-lsp-多server选择与eslint-biome实施](./workflow/done/260405-lsp-多server选择与eslint-biome实施.md) — 已完成 richer LSP 的最后结构缺口收口：gateway-side 现已支持多 server 命中、supplemental lint server 与 diagnostics 聚合，并正式对齐 `eslint` / `biome`
 - [260404-lsp-language-server-coverage-bash-实施](./workflow/done/260404-lsp-language-server-coverage-bash-实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `bash-language-server start`，在不扩散到 fish/powershell/shellcheck/shfmt 的前提下，让既有 LSP 工具对 `.sh/.bash/.zsh` 真正可用
+- [260404-lsp-language-server-coverage-docker-生态第二阶段实施](./workflow/done/260404-lsp-language-server-coverage-docker-生态第二阶段实施.md) — 已完成 richer LSP 的 Docker 生态第二阶段 coverage：gateway-side 现已补齐 Compose / Bake 的 `docker-language-server start --stdio` 接入，并通过受控 basename 匹配避免误吞全部 YAML/HCL
 - [260404-lsp-language-server-coverage-dockerfile-实施](./workflow/done/260404-lsp-language-server-coverage-dockerfile-实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `docker-language-server start --stdio`，并通过 filename-based server matching 让既有 LSP 工具对 Dockerfile 真正可用
 - [260404-lsp-language-server-coverage-yaml-实施](./workflow/done/260404-lsp-language-server-coverage-yaml-实施.md) — 已完成 richer LSP 的下一条 coverage 扩展：gateway-side 现已补齐 `yaml-language-server`，在不扩散到 eslint/docker/bash 或 YAML schema-store 深配置的前提下，让既有 LSP 工具对 YAML 真正可用
 - [260404-lsp-language-server-coverage-第二轮实施](./workflow/done/260404-lsp-language-server-coverage-第二轮实施.md) — 已完成 richer LSP 的第二轮 coverage 扩展：gateway-side 现已补齐 `vscode-json-language-server`、`vscode-html-language-server`、`vscode-css-language-server`，在不扩散到 eslint/yaml/docker/bash 的前提下，让既有 LSP 工具对 JSON / HTML / CSS 真正可用
@@ -56,24 +68,58 @@
 
 ## Architecture Decisions
 
+- [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
+- [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
+- [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
+- [2026-04-05] Chat 恢复链的 CI 采用 **required fast gate + push-only live gate**：fast 层承接 gateway targeted checks + web targeted regressions + lightweight browser recovery，live 层只在 push 上跑真实 web/gateway/mock upstream 全链路，避免 PR 门禁过重。
+- [2026-04-05] 真实权限暂停恢复的端到端验证采用 **custom provider + chat_completions tool_call mock upstream**：这样能稳定驱动 `permission_asked → paused → /permissions/reply → resumeApprovedPermissionRequest → completed`，而不与 openai/responses 默认协议路径相互干扰。
+- [2026-04-05] 真实提问暂停恢复的端到端验证同样采用 **custom provider + chat_completions tool_call mock upstream**：以 canonical `question` tool call 触发 `question_asked → paused → /questions/reply → resumeAnsweredQuestionRequest → completed`，前端最小新增点保持在 questions client + Layout prompt + ChatPage refresh bridge。
+- [2026-04-05] `useGatewayClient` 中的 active request 句柄不能只存在 ref；凡是会影响 stopCapability / UI 控制态的运行句柄，必须同步进 React state，避免刷新恢复后出现“内部句柄已失效，但界面仍显示 precise stop”的 stale control UI。
 - [2026-04-04] Chat attach 路径在 Phase 2B 收敛为 **buffer-live-then-replay**：先订阅、在 replay 期间缓冲匹配 request 的 live 事件，再按 `seq` 去重并顺序冲刷；不额外引入前端协议变更，优先在 gateway attach route 内部消掉 replay→subscribe 的竞态窗口。
 - [2026-04-04] T-06 的首批搜索收口采用 **SQLite FTS5 + gateway `/sessions/search` + Layout Cmd+K 动态结果注入**：先把会话全文搜索与统一命令面板打通，保留标签系统、suggestions、向量检索到后续迭代，而不是一开始就引入更重的检索栈。
 - [2026-04-04] T-03 的首批产品化收口采用 **复用现有会话文件快照 + 工作区改动审阅链路**：以 `SessionsPage` 详情页中的 `restore/preview`、`restore/apply` 与 `FileChangeReviewPanel` 作为 MVP 主入口，先满足“预览 + 接受/还原/应用”闭环，再决定是否后续扩展到聊天主线程中的 proposal 模型。
 - [2026-04-05] T-04 的首批产品化收口采用 **复用 `session_run_events` + ChatPage 右侧 `viz` tab**：以 `AgentDAGGraph + AgentVizPanel + run-event 投影` 作为 MVP 时间线主入口，先满足“执行路径 + 活动事件 + 子代理/权限状态可视化”，DAG 实时布局、性能图和更细粒度 span 继续后续扩展。
+- [2026-04-05] T-05 的首批产品化收口采用 **聊天顶部上下文 meter + 右侧概览中的上下文窗口面板 + 立即压缩会话动作**：先满足“看得见当前占用、看得见上下文来源、点得动压缩”，而 Pin/Remove/压缩 dry-run 等更细粒度管理继续后续迭代。
+- [2026-04-05] T-07 的首批产品化收口采用 **assistant 消息上的显式 👍/👎 反馈 + gateway `message_ratings` 持久化**：先把“质量信号本身”接通到会话级消息，再把原因分类、质量报告和自适应模型/代理降权留到后续阶段，而不是一开始就引入完整评分系统。
+- [2026-04-05] T-09 第二阶段的最小实体化继续采用 **workspacePath = project 键 + Chat 主流程保存入口**：先用 `agent_profiles` 真表、`/agent-profiles` CRUD 和 `useSessions.newSession()` 的 workspace-profile 覆盖，把 profile 从 session metadata 提升为可复用资源；完整的 profile 列表页、比较视图和批量继承策略继续后续扩展。
+- [2026-04-05] T-09 第三阶段继续采用 **Settings 页里的轻量 Profile 管理区块**：先把现有 `agent_profiles` 以只读列表 + 删除入口暴露出来，并提示从 Chat 主流程保存当前配置为项目配置；完整的 profile 编辑器、比较视图和批量应用继续后续扩展。
+- [2026-04-05] T-10 当前按 MVP 记账为 **既有恢复链显式验收完成**：`session_run_events`、attach/replay、权限/提问暂停恢复、运行状态条、停止控制与浏览器刷新恢复已经形成端到端链路；这一阶段先不额外新造 Checkpoint UI，而是把现有恢复能力通过 gateway/web/browser 三级验证收实。
+- [2026-04-05] T-10 第二阶段的最小外显继续采用 **运行状态条 + 右侧概览恢复策略区块**：先把 paused/running 状态、待审批/待回答数量、最近 checkpoint/压缩摘要和“查看恢复策略”入口显式暴露给用户，而不是先引入独立 Checkpoint 页面。
+- [2026-04-05] T-11 的首批产品化收口采用 **站内通知收件箱 + 关键异步事件落库**：先把 `permission_asked`、`question_asked`、`task_update(done/failed)` 这些真正需要用户返回处理的事件写入 `notifications`，并在 Web 顶栏铃铛里展示与已读跳转；桌面系统通知、Web Push、多渠道投递与偏好矩阵继续后续扩展。
+- [2026-04-05] T-11 第二阶段继续采用 **站内通知中心 + 浏览器 Notification API 的双轨交付**：标签页可见时优先靠站内通知中心，标签页不可见时对新未读通知触发 `new Notification(...)`；完整的通知偏好矩阵、Web Push 注册和多渠道投递继续后续扩展。
+- [2026-04-05] T-11 第三阶段继续采用 **站内通知常驻 + 浏览器提醒可配置**：`notification_preferences` 只控制页面隐藏时的浏览器通知，不影响站内通知中心留痕；浏览器权限必须在设置页显式申请，且当偏好加载失败时浏览器提醒默认 fail-closed。当前最小矩阵只开放 `web × {permission_asked, question_asked, task_update}`，先解决异步噪音控制，再把 DND、多渠道投递与 delivery log 留到后续扩展。
+- [2026-04-05] Buddy / Companion 收口优先采用 **gateway 作为 settings/profile 真相源 + request-scoped prompt injection + Web composer `/buddy` 客户端触发**：前端只消费 `/settings/companion` 返回并控制展示/开关，palette 扩展与 mobile phase 延后，避免再次退化成只有 UI 壳层的半成品。
+- [2026-04-05] 当需求从“有一个 active companion”升级为“全部伴侣可视化”时，优先采用 **共享 visual renderer + Settings 图鉴**：active companion 与全物种 gallery 共用同一套 sprite/frame/pet/bubble 渲染逻辑，避免一处像源仓、一处停留在临时实现。
+- [2026-04-05] 在 companion 基础迁移之后继续完善时，优先补 **rarity color + deterministic stats + 当前物种高亮 + `/buddy` trigger 强调** 这类高价值身份语义，而不是继续横向扩功能面；这样能显著提升 roster 感与点名反馈，但不会把实现重新扩散成新功能项目。
+- [2026-04-05] Buddy 与 Agent 建立绑定时，优先采用 **`/settings/companion` 作为 bindings 唯一真相源 + 会话只提供 effective agent**：全局 preferences 保持全局，bindings 只负责 persona/visual 配置，Chat 与 prompt 在运行时按当前 agent 解析，不把绑定表回写进 session metadata。
+- [2026-04-05] 当 Buddy-Agent 绑定继续深化时，优先扩展为 **外观 + 行为 override**（如 `behaviorTone / injectionMode / verbosity`），而不是把全局 preferences 拆碎；这样既能给不同 Agent 独立人格，又不会破坏用户总开关和设备级偏好。
+- [2026-04-05] Agent 专属 Buddy 语音参数应继续走 **binding override > 全局 preferences > 默认值** 的三层解析，并让未绑定 Agent 统一回退到 `userEmail` 的默认 Buddy persona；不要再按 `userEmail:agentId` 为每个未绑定 Agent 生成不同默认人格。
+- [2026-04-05] 当局部功能已完成但 broader suite 仍不稳时，优先按 **测试夹具漂移 / 时序脆弱 / 环境依赖缺口 / 真实实现回归** 四类来分类收敛；对原生依赖（如 `better-sqlite3`）优先在测试中引入可控 mock，避免把 CI 稳定性绑死在本地 native binding。
 - [2026-04-04] T-08/T-12 的首批产品化收口采用 **先开放真实 Web 入口，再复用既有 gateway route + shared-ui 组件做 MVP**：`/workflows` 先接模板库 + 画布 + 模板保存/删除，`/team` 先接成员/任务/消息协作工作台；深层执行、审批和共享权限继续在后续迭代扩展，而不是等全量能力齐备才开放入口。
+- [2026-04-05] T-12 第二阶段的最小深化继续采用 **session_shares 真表 + TeamPage 共享会话区块**：先把成员/任务/消息协作扩展到“按成员共享具体会话 + view/comment/operate 权限级别”，而不是一开始就做完整 presence/共享编辑/广播房间。
+- [2026-04-05] T-12 第三阶段继续采用 **共享权限即时可编辑 + 审计流可见**：在 `session_shares` 之上先补 `PATCH /team/session-shares/:id` 与 `team_audit_logs`，让 TeamPage 既能直接改 `view/comment/operate`，又能看到新增/调整/取消共享的轨迹；presence、共享编辑和审批流继续后续扩展。
+- [2026-04-05] T-12 第三阶段补审查后收口：**no-op 权限更新必须保留原始 `updatedAt`，失败表单必须保留用户输入**。否则协作页会出现假的“最近同步时间”，或在 share/member/task/message 创建失败时把用户刚选好的上下文直接清空。
+- [2026-04-05] T-12 的共享记录语义继续收口为 **session-scoped durable + workspace-aware projection**：`session_shares` 本身仍按 `session_id` 持久化，但对外 list/create/update 返回值必须从 `sessions.metadata_json.workingDirectory` 派生 `workspacePath`，并在 TeamPage 的记录卡片与会话选择器里显式展示，避免同名会话跨工作区时不可区分。
+- [2026-04-05] 只做 workspace-aware projection 还不够，`GET /team/session-shares` 的 SQL 也必须显式选出 `sess.metadata_json AS session_metadata_json`；否则 create/update 返回值虽然有 `workspacePath`，但刷新后的列表会丢失该字段，重新退化成同名会话不可区分。
+- [2026-04-05] T-12 的下一层最小真实授权闭环采用 **专用共享读取入口，而不是直接放开 owner 的主 sessions 路由**：先用 `JWT.email ↔ team_members.email` 映射出共享成员，再通过 `GET /sessions/shared-with-me` 与 `GET /sessions/shared-with-me/:sessionId` 提供真实只读访问；这样 `view/comment/operate` 至少先获得稳定的可读边界，再继续把评论/操作能力分层下放。
+- [2026-04-05] 共享只读访问的 route-level 覆盖应优先通过**独立 route 模块 + mock-based 网关测试**补齐，而不是依赖大而重的全路由集成测试；当前 `session-shared-read-routes.ts` + `session-shared-read-routes.test.ts` 就是这条收口后的模式。
+- [2026-04-05] 共享只读详情返回体必须保证 `share.stateStatus` 与 `session.state_status` 一致；如果详情先做 runtime reconcile，而摘要仍返回旧状态，会在同一响应里制造语义漂移。
+- [2026-04-05] `comment` 权限的最小真实闭环采用 **专用共享评论链**：用 `shared_session_comments` 承载共享会话评论，`view` 只能读评论，`comment / operate` 才能写；不要把共享评论混进全局 team message 板，否则权限边界会变糊。
 - [2026-04-04] Chat 真正续流的二阶段演进采用 **attach-only SSE + request-scoped `RunEventCursor(clientRequestId, seq)`**：现有 `/stream` 与 `/stream/sse` 继续只负责“发起新请求”，刷新/重连后的 resume 通过独立 attach 通道完成；一阶段 `session.runEvents` 快照恢复展示保留为降级兜底层，而不是被替换掉。
 - [2026-04-04] OpenAWork 的 call hierarchy 对外 surface 采用 **单个高层读工具 `lsp_call_hierarchy`**，内部再编排 `prepareCallHierarchy / incomingCalls / outgoingCalls` 三步协议；不要把协议镜像步骤直接暴露给模型，以免 `CallHierarchyItem.data` 这类 opaque payload 在多轮中被错误传递。
 - [2026-04-04] OpenAWork richer LSP 当前正式支持面已扩展为 **definition / implementation / references / symbols / prepareRename / rename / hover / call hierarchy / diagnostics / touch**；其中更多 language server coverage 扩展与 status/event/UI diagnostics 继续延后到独立工作流。
 
-- [2026-04-04] gateway-side language server coverage 采用 **incremental parity**：先将 Tauri 侧已验证的 `rust-analyzer` 最小引入 `packages/lsp-client/src/server.ts` / `ALL_SERVERS`，暂不把 `eslint` / `biome` 等更易引入额外诊断噪音的 server 一并带入。
+- [2026-04-04] gateway-side language server coverage 采用 **incremental parity**：先将 Tauri 侧已验证的 `rust-analyzer` 最小引入 `packages/lsp-client/src/server.ts` / `ALL_SERVERS`，随后在补齐多 server 选择/聚合底座后再对齐 `eslint` / `biome`，避免在单 server 架构下把语义 server 与 lint server 互相挤掉。
 
-- [2026-04-04] gateway-side language server coverage 第二轮继续采用 **low-noise extracted servers**：优先引入 `vscode-json-language-server`、`vscode-html-language-server`、`vscode-css-language-server` 这类与前端/配置文件高频场景直接相关、且不强绑定额外 lint 诊断语义的 server；`vscode-eslint-language-server` 继续延后。
+- [2026-04-04] gateway-side language server coverage 第二轮继续采用 **low-noise extracted servers**：优先引入 `vscode-json-language-server`、`vscode-html-language-server`、`vscode-css-language-server` 这类与前端/配置文件高频场景直接相关、且不强绑定额外 lint 诊断语义的 server；随后在 260405 多 server 底座完成后再接入 `vscode-eslint-language-server` 与 `biome`。
 
 - [2026-04-04] YAML coverage 继续采用 **standalone server-only** 策略：只接入 `yaml-language-server --stdio` 的 gateway-side parity，不顺带启用 schema-store、CRD store 或额外 telemetry 流转，以避免把单纯 coverage 扩展放大成网络/配置策略工程。
 
-- [2026-04-04] Dockerfile coverage 需要 **filename-based server matching**：仅靠扩展名无法命中 `Dockerfile`，因此 `findServerForFile()` 必须同时支持 basename 命中，才能让 `docker-language-server start --stdio` 真正生效；Compose / Bake 仍保持后续独立工作流。
+- [2026-04-04] Docker 生态 coverage 采用 **受控 basename 匹配 + 统一 `docker-language-server start --stdio`**：`Dockerfile`、Compose、Bake 都不应依赖泛化的扩展名吞吐；对 Dockerfile/Compose/Bake 需先 basename 命中，再回退扩展名，避免 Compose 被 YAML 抢占、Bake 被全量 HCL 误吞。
 
 - [2026-04-04] Bash coverage 继续采用 **shellscript-only** 策略：只接入 `bash-language-server start` 的 gateway-side parity，覆盖 `.sh/.bash/.zsh`，不把 `fish`、`powershell`、shellcheck、shfmt 或更深的 lint/format 配置一并带入。
+
+- [2026-04-05] JS/TS 生态下的 lint parity 采用 **primary semantic server + supplemental lint server**：`typescript` 继续负责 hover/definition/rename 等语义能力，`eslint` / `biome` 通过 `role/slot/priority` 进入 supplemental 路径，同槽只保留最高优先级 linter，并在 `diagnostics()` 中聚合多 client 结果而非相互覆盖。
 
 - [2026-04-04] `textDocument/implementation` 是 hover 之后的最小增量 follow-up：它与现有 `definition` 协议形状同构、接线与验证成本最低且能显著提升接口/抽象类型场景；call hierarchy 与 language server coverage 延后到独立工作流。
 
@@ -197,12 +243,21 @@
 
 ## Known Pitfalls
 
+- [2026-04-05] child session 首响应超时若只删 `session_run_events` 而不删同一 request-scope 的 assistant/tool messages、file diffs、request snapshot，重试成功后仍会残留旧 attempt 的晚到内容。
+- [2026-04-05] approval timeout 不能只靠 reconcile；如果 permission/question 的 reply 路由不在处理前先强制执行 `expires_at` 过期语义，已过期请求仍可能被 approve / answer，直接绕过 timeout 语义。
+- [2026-04-05] 做真实负向边界 E2E 时，`question dismiss` 不应强行断言问题文本彻底消失；question 本身可能继续作为 transcript/tool card 历史保留。更可靠的 idle 收口断言是：等待态 prompt 消失、提交入口消失、`会话等待处理` 不再出现，并出现 dismiss 结果事件文案。
+- [2026-04-05] 做 CI 分层时，不能把 `@openAwork/web test` 粗暴塞进通用 `jobs.test` 当作 chat fast gate；当前仓库仍有与 chat 恢复链无关的 web 历史失败，会把门禁目标污染掉。另一个易漏点是 fast Web E2E 必须自给自足启动 preview/server，不能假设 `localhost:5173` 已存在。
+- [2026-04-05] 用 mock upstream 驱动真实 paused/resumed E2E 时，若先按“原始 user prompt”分支匹配，再判断 request 中是否已包含 `tool` 结果消息，批准后的 resumed 请求会被误判成初始 tool-call 请求，表现为重复 `permission_asked` 或永远无法完成。
+- [2026-04-05] `question_asked` 这类等待回答型暂停并不会像 attach 一样依赖 active stream 才能恢复；刷新后真正保活的是 `sessions.state_status='paused' + question_requests.status='pending' + 历史 assistant/tool 卡片`，所以浏览器 E2E 应围绕“等待态仍可见 + 回答后 resumed 完成”来断言，而不是强绑 active attach UI。
+- [2026-04-05] 刷新恢复链上，若 active request 只保存在 hook ref 中而不驱动 React state，真实浏览器里会出现 stale stop UI：页面还显示“可直接停止”，但点击后既不发 stop 请求，也只会报“控制句柄已失效”。
 - [2026-04-05] 做真实 gateway 驱动的流式浏览器 E2E 时，mock upstream 只要 SSE 分隔符少一个空行，就会在 gateway 里表现成 `PARSE_ERROR: Failed to parse upstream stream chunk`；这类问题看起来像前端或 attach 故障，实际是上游流格式不合法。
 - [2026-04-04] 想把 Chat attach 的所有细节一次性塞进 Playwright 浏览器层时，最容易踩到 EventSource 与 reload 的时序不稳定；更可靠的做法是：浏览器层验“恢复体验”，`ChatPage` 回归验“最终消息落定”，gateway verification / hook tests 继续兜底协议细节。
 - [2026-04-04] 浏览器层验证 Chat 续流时，不要把所有 attach 协议细节都压进 Playwright 对 EventSource 的 mock；更稳定的做法是：浏览器层断言用户可见恢复体验，attach wire / cursor / replay 次序交给 gateway verification、hook tests 和 route tests 兜底。
 - [2026-04-04] Chat attach 恢复若只有 route unit test 和前端回归，没有一条真实 Fastify + in-memory DB 的 verification，很容易把“协议层能跑”误判成“gateway 验收已覆盖”；当前已用 `verify-stream-attach-recovery.ts` 把它纳入 `test:durable`。
 - [2026-04-04] attach 路径若采用“先 replay 后 subscribe”，会在两步之间留下真实漏事件窗口；但改成 buffer-live-then-replay 后，又必须确保 `listSessionRunEventsByRequestAfterSeq` 按 `seq` 升序返回，否则去重+冲刷逻辑会把低序号回放误判为已送达。
 - [2026-04-04] 给会话搜索补 FTS 时，不能只索引 `session_messages` 现存行就认为完成：像 `/sessions/import` 这类只写 `sessions.messages_json` 的 legacy/imported 会话，如果搜索前不做惰性水合，就会出现“会话可见但全文搜索命中为空”的假失败。
+- [2026-04-05] 做消息质量反馈时，不能把 `编辑重试 / 重试 / 新分支重试` 这些纠错动作自动等价成显式好坏评；它们更像隐式信号，应该和用户直接点的 👍/👎 分开存储，否则后续自适应会把“用户想继续探索”误判成“回答质量差”。
+- [2026-04-05] 做项目级 Agent 配置的手动 QA 时，浏览器会话一旦丢失 auth 或 session detail 请求 401，就会把“配置未恢复”伪装成产品 bug；这类链路至少要同时保留自动化回归和 API 级验证，避免把认证噪音误判成配置持久化失败。
 - [2026-04-04] 做竞品差异化能力时，最容易出现“后端表 / 路由 / shared-ui 组件都在，于是误判功能已完成”的假闭环；如果 `apps/web/src/App.tsx` 仍把 `/workflows`、`/team` 之类入口直接 `Navigate` 回 `/chat`，用户实际上依然无法使用该能力。
 - [2026-04-04] attach-only SSE 落地时，服务端与浏览器事件模型必须严格对齐：如果服务端显式写 `event: run`，客户端就不能只靠 `EventSource.onmessage`；同时 `afterSeq` 不能盲用服务端 `lastSeq`，应优先使用客户端已见 seq，否则快照→attach 窗口会漏增量。
 - [2026-04-04] 给 Chat 加真正续流时，不能把 attach 逻辑直接塞进现有 `/sessions/:id/stream/sse` 这类“创建请求”路由；该路由天然携带 `message/clientRequestId` 创建语义，重连时会有重复发送风险。正确做法是新增 attach-only 通道，并把 cursor 真相源固定在 `session_run_events(session_id + client_request_id + seq)` 上。

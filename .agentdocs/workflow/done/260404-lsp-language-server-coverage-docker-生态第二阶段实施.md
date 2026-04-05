@@ -52,19 +52,19 @@
 
 ### Phase 1：language + server coverage 接线
 
-- [ ] T-02：在 `packages/lsp-client/src/language.ts` 增加 Compose / Bake 的 basename → languageId 识别
-- [ ] T-03：在 `packages/lsp-client/src/server.ts` 新增 `DockerComposeServer` 与 `DockerBakeServer`，并纳入 `ALL_SERVERS`
-- [ ] T-04：在 `packages/lsp-client/src/lsp-filetypes.ts` 补齐 `dockercompose` / `dockerbake` 条目，并在 `index.ts` 导出新增 server
+- [x] T-02：在 `packages/lsp-client/src/language.ts` 增加 Compose / Bake 的 basename → languageId 识别
+- [x] T-03：在 `packages/lsp-client/src/server.ts` 新增 `DockerComposeServer` 与 `DockerBakeServer`，并纳入 `ALL_SERVERS`
+- [x] T-04：在 `packages/lsp-client/src/lsp-filetypes.ts` 补齐 `dockercompose` / `dockerbake` 条目，并在 `index.ts` 导出新增 server
 
 ### Phase 2：测试与验证
 
-- [ ] T-05：扩展现有测试，覆盖 Compose / Bake 文件名命中、server 列表与 languageId 断言
-- [ ] T-06：运行 diagnostics、`pnpm --filter @openAwork/lsp-client test`、`pnpm --filter @openAwork/lsp-client build`
+- [x] T-05：扩展现有测试，覆盖 Compose / Bake 文件名命中、server 列表与 languageId 断言
+- [x] T-06：运行 diagnostics、`pnpm --filter @openAwork/lsp-client test`、`pnpm --filter @openAwork/lsp-client build`
 
 ### Phase 3：文档收口与复核
 
-- [ ] T-07：同步 `.agentdocs/index.md` 与当前 workflow 状态
-- [ ] T-08：Oracle 只读复核并决定是否归档本 workflow
+- [x] T-07：同步 `.agentdocs/index.md` 与当前 workflow 状态
+- [x] T-08：Oracle 只读复核并决定是否归档本 workflow
 
 ## Notes
 
@@ -79,3 +79,18 @@
   - `dockerbake` 文件名：`docker-bake.hcl`、`docker-bake.override.hcl`
   - Compose / Bake 都继续复用 `docker-language-server start --stdio`
   - 不把所有 `.yaml` / `.hcl` 泛化给 Docker language server
+- 当前主线程验证已通过：
+  - `packages/lsp-client/src/language.ts`、`lsp-filetypes.ts`、`server.ts`、`index.ts`、`__tests__/language.test.ts`、`__tests__/server.test.ts` diagnostics 无错误
+  - `pnpm --filter @openAwork/lsp-client test` 通过
+  - `pnpm --filter @openAwork/lsp-client build` 通过
+- 本轮实际落地内容：
+  - `language.ts` 已新增 Compose / Bake 的 basename → languageId 映射（`dockercompose` / `dockerbake`）
+  - `server.ts` 已新增 `DockerComposeServer` / `DockerBakeServer`
+  - `ALL_SERVERS` 现已包含 `dockercompose` / `dockerbake`
+  - `lsp-filetypes.ts` 已补齐 Compose / Bake 条目，并新增 `getLanguageIdForFilePath` / `getRootMarkersForFilePath` 以统一 basename token 场景
+  - `index.ts` 已导出新增 server 与新的 file-path helper
+  - `language.test.ts` / `server.test.ts` 已覆盖 Compose / Bake 文件名命中、server 列表与 helper 断言
+  - 本轮真实踩到的根因已修复：`findServerForFile()` 之前在 basename 命中前就被 YAML 扩展名抢先匹配；现已改为“先 basename，后扩展名”的两阶段选择
+- Librarian 校准结论：Compose / Bake 继续复用同一个 `docker-language-server start --stdio`；本轮不扩到更深的 telemetry / initialization options。
+- Oracle 复核结论：当前 Docker 生态第二阶段 coverage 已满足范围冻结要求，`dockercompose` / `dockerbake`、basename→languageId 映射、server 选择优先级、测试与文档状态均已闭环，工作流可归档。
+- Memory sync: completed
