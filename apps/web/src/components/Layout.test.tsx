@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { logger } from '../utils/logger.js';
 import { publishSessionPendingPermission } from '../utils/session-list-events.js';
+import type { NotificationPreferenceRecord, NotificationRecord } from '@openAwork/web-client';
 
 vi.mock('../routes/preloadable-route-modules.js', () => ({
   preloadRouteModuleByPath: vi.fn(() => null),
@@ -27,8 +28,59 @@ const searchSessionsMock = vi.fn(async () => []);
 const getMock = vi.fn(async () => ({ messages: [{ id: 'm1', role: 'user', content: 'hello' }] }));
 const renameMock = vi.fn(async () => undefined);
 const deleteMock = vi.fn(async () => undefined);
-const listPendingPermissionsMock = vi.fn(async () => []);
+const listPendingPermissionsMock = vi.fn<
+  (
+    _token?: string,
+    _sessionId?: string,
+    _options?: { signal?: AbortSignal },
+  ) => Promise<Array<unknown>>
+>(async () => []);
+const listPendingQuestionsMock = vi.fn<
+  (
+    _token?: string,
+    _sessionId?: string,
+    _options?: { signal?: AbortSignal },
+  ) => Promise<Array<unknown>>
+>(async () => []);
 const replyPermissionMock = vi.fn(async () => undefined);
+const getRecoveryMock = vi.fn(
+  async (token: string, sessionId: string, options?: { signal?: AbortSignal }) => ({
+    activeStream: null,
+    children: [],
+    pendingPermissions: await listPendingPermissionsMock(token, sessionId, options),
+    pendingQuestions: await listPendingQuestionsMock(token, sessionId, options),
+    ratings: [],
+    session: { messages: [] },
+    tasks: [],
+    todoLanes: { main: [], temp: [] },
+  }),
+);
+const listNotificationsMock = vi.fn(async (): Promise<NotificationRecord[]> => []);
+const listNotificationPreferencesMock = vi.fn(
+  async (): Promise<NotificationPreferenceRecord[]> => [
+    {
+      channel: 'web',
+      enabled: true,
+      eventType: 'permission_asked',
+      updatedAt: '2026-04-05T00:00:00.000Z',
+    },
+    {
+      channel: 'web',
+      enabled: true,
+      eventType: 'question_asked',
+      updatedAt: '2026-04-05T00:00:00.000Z',
+    },
+    {
+      channel: 'web',
+      enabled: true,
+      eventType: 'task_update',
+      updatedAt: '2026-04-05T00:00:00.000Z',
+    },
+  ],
+);
+const markNotificationReadMock = vi.fn(async () => undefined);
+const notificationApiMock = vi.fn();
+const requestNotificationPermissionMock = vi.fn(async () => 'granted' as const);
 const listCommandsMock = vi.fn(async () => [
   {
     id: 'nav-chat',
@@ -64,15 +116,26 @@ vi.mock('@openAwork/web-client', () => ({
     search: searchSessionsMock,
     create: vi.fn(async () => ({ id: 'new-session' })),
     get: getMock,
+    getRecovery: getRecoveryMock,
     rename: renameMock,
     delete: deleteMock,
   })),
   createCommandsClient: vi.fn(() => ({
     list: listCommandsMock,
   })),
+  createNotificationsClient: vi.fn(() => ({
+    list: listNotificationsMock,
+    listPreferences: listNotificationPreferencesMock,
+    markRead: markNotificationReadMock,
+    updatePreferences: vi.fn(async () => []),
+  })),
   createPermissionsClient: vi.fn(() => ({
     listPending: listPendingPermissionsMock,
     reply: replyPermissionMock,
+  })),
+  createQuestionsClient: vi.fn(() => ({
+    listPending: listPendingQuestionsMock,
+    reply: vi.fn(async () => undefined),
   })),
   HttpError: class HttpError extends Error {
     status: number;
@@ -106,7 +169,34 @@ beforeEach(() => {
   renameMock.mockClear();
   deleteMock.mockClear();
   listPendingPermissionsMock.mockClear();
+  listPendingQuestionsMock.mockClear();
+  getRecoveryMock.mockClear();
   replyPermissionMock.mockClear();
+  listNotificationsMock.mockClear();
+  listNotificationPreferencesMock.mockClear();
+  markNotificationReadMock.mockClear();
+  notificationApiMock.mockClear();
+  requestNotificationPermissionMock.mockClear();
+  listNotificationPreferencesMock.mockResolvedValue([
+    {
+      channel: 'web',
+      enabled: true,
+      eventType: 'permission_asked',
+      updatedAt: '2026-04-05T00:00:00.000Z',
+    },
+    {
+      channel: 'web',
+      enabled: true,
+      eventType: 'question_asked',
+      updatedAt: '2026-04-05T00:00:00.000Z',
+    },
+    {
+      channel: 'web',
+      enabled: true,
+      eventType: 'task_update',
+      updatedAt: '2026-04-05T00:00:00.000Z',
+    },
+  ]);
   useAuthStore.setState({
     accessToken: 'token-123',
     refreshToken: null,
@@ -133,6 +223,17 @@ beforeEach(() => {
     openFilePaths: [],
     activeFilePath: null,
   });
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: 'visible',
+  });
+  vi.stubGlobal(
+    'Notification',
+    Object.assign(notificationApiMock, {
+      permission: 'granted' as const,
+      requestPermission: requestNotificationPermissionMock,
+    }),
+  );
 });
 
 afterEach(() => {
@@ -468,5 +569,156 @@ describe('Layout sidebar session quick actions', () => {
     });
 
     expect(preloadRouteModuleByPath).toHaveBeenCalledWith('/settings');
+  });
+
+  it('shows unread notifications and marks them read on open', async () => {
+    listNotificationsMock.mockResolvedValue([
+      {
+        id: 'notification-1',
+        sessionId: 'session-1',
+        eventType: 'permission_asked',
+        title: '等待权限 · bash',
+        body: '运行验证命令',
+        status: 'unread',
+        readAt: null,
+        createdAt: '2026-04-05T00:00:00.000Z',
+      },
+    ]);
+
+    const rendered = await renderLayoutWithRoutes('/chat/session-1');
+    const bellButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.getAttribute('title') === '通知中心',
+    );
+    expect(bellButton).toBeTruthy();
+
+    await act(async () => {
+      bellButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('通知中心');
+    expect(rendered.textContent).toContain('等待权限 · bash');
+
+    const notificationButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('等待权限 · bash'),
+    );
+    expect(notificationButton).toBeTruthy();
+
+    await act(async () => {
+      notificationButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(markNotificationReadMock).toHaveBeenCalledWith('token-123', 'notification-1');
+    expect(requestNotificationPermissionMock).not.toHaveBeenCalled();
+  });
+
+  it('fires browser notifications when unread items arrive in the background', async () => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    listNotificationsMock.mockResolvedValue([
+      {
+        id: 'notification-2',
+        sessionId: 'session-1',
+        eventType: 'task_update',
+        title: '任务已完成 · 冒烟验证',
+        body: '点击返回查看结果',
+        status: 'unread',
+        readAt: null,
+        createdAt: '2026-04-05T00:00:00.000Z',
+      },
+    ]);
+
+    await renderLayoutWithRoutes('/chat/session-1');
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(notificationApiMock).toHaveBeenCalledWith('任务已完成 · 冒烟验证', {
+      body: '点击返回查看结果',
+      tag: 'notification-2',
+    });
+  });
+
+  it('does not fire browser notifications for disabled event types', async () => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    listNotificationPreferencesMock.mockResolvedValue([
+      {
+        channel: 'web',
+        enabled: true,
+        eventType: 'permission_asked',
+        updatedAt: '2026-04-05T00:00:00.000Z',
+      },
+      {
+        channel: 'web',
+        enabled: true,
+        eventType: 'question_asked',
+        updatedAt: '2026-04-05T00:00:00.000Z',
+      },
+      {
+        channel: 'web',
+        enabled: false,
+        eventType: 'task_update',
+        updatedAt: '2026-04-05T00:00:00.000Z',
+      },
+    ]);
+    listNotificationsMock.mockResolvedValue([
+      {
+        id: 'notification-3',
+        sessionId: 'session-1',
+        eventType: 'task_update',
+        title: '任务失败 · 类型检查',
+        body: '请回到工作台查看失败详情',
+        status: 'unread',
+        readAt: null,
+        createdAt: '2026-04-05T00:00:00.000Z',
+      },
+    ]);
+
+    await renderLayoutWithRoutes('/chat/session-1');
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(notificationApiMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for browser notifications when preference loading fails', async () => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    listNotificationPreferencesMock.mockRejectedValueOnce(new Error('gateway unavailable'));
+    listNotificationsMock.mockResolvedValue([
+      {
+        id: 'notification-4',
+        sessionId: 'session-1',
+        eventType: 'permission_asked',
+        title: '等待权限 · read',
+        body: '请返回批准读取操作',
+        status: 'unread',
+        readAt: null,
+        createdAt: '2026-04-05T00:00:00.000Z',
+      },
+    ]);
+
+    await renderLayoutWithRoutes('/chat/session-1');
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(notificationApiMock).not.toHaveBeenCalled();
   });
 });

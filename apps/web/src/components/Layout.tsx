@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import NavRail from './layout/NavRail.js';
 import WorkspacePickerModal from './WorkspacePickerModal.js';
 import { SessionSidebar } from './layout/SessionSidebar.js';
 import { CachedRouteOutlet } from './CachedRouteOutlet.js';
+import QuestionPromptCard from './QuestionPromptCard.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
@@ -11,13 +12,192 @@ import type { CommandItem, PermissionDecision, PermissionItem } from '@openAwork
 import type { FileTreeNode } from './WorkspacePickerModal.js';
 import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
-import { createPermissionsClient, createSessionsClient } from '@openAwork/web-client';
-import type { SessionSearchResult } from '@openAwork/web-client';
+import {
+  createNotificationsClient,
+  createPermissionsClient,
+  createQuestionsClient,
+  createSessionsClient,
+} from '@openAwork/web-client';
+import type {
+  NotificationPreferenceEventType,
+  NotificationPreferenceRecord,
+  NotificationRecord,
+  PendingQuestionRequest,
+  SessionSearchResult,
+} from '@openAwork/web-client';
 import {
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
+  subscribeCurrentSessionRefresh,
   subscribeSessionPendingPermission,
+  subscribeSessionPendingQuestion,
 } from '../utils/session-list-events.js';
+import { subscribeNotificationPreferenceRefresh } from '../utils/notification-preference-events.js';
+import { toast } from './ToastNotification.js';
+
+type NotificationPreferenceMap = Record<NotificationPreferenceEventType, boolean>;
+
+const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferenceMap = {
+  permission_asked: false,
+  question_asked: false,
+  task_update: false,
+};
+
+function toNotificationPreferenceMap(
+  records: NotificationPreferenceRecord[],
+): NotificationPreferenceMap {
+  const nextPreferences: NotificationPreferenceMap = { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  records.forEach((record) => {
+    nextPreferences[record.eventType] = record.enabled;
+  });
+  return nextPreferences;
+}
+
+function isBrowserNotificationEnabled(
+  eventType: string,
+  preferences: NotificationPreferenceMap,
+): boolean {
+  if (
+    eventType === 'permission_asked' ||
+    eventType === 'question_asked' ||
+    eventType === 'task_update'
+  ) {
+    return preferences[eventType];
+  }
+
+  return true;
+}
+
+interface PendingPermissionPromptState {
+  requestId: string;
+  targetSessionId: string;
+  toolName: string;
+  scope: string;
+  reason: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  previewAction?: string;
+}
+
+type PendingQuestionReplyStatus = 'answered' | 'dismissed';
+
+function toPendingPermissionPromptState(
+  request: {
+    requestId: string;
+    sessionId: string;
+    toolName: string;
+    scope: string;
+    reason: string;
+    riskLevel: 'low' | 'medium' | 'high';
+    previewAction?: string;
+  } | null,
+): PendingPermissionPromptState | null {
+  if (!request) {
+    return null;
+  }
+
+  return {
+    requestId: request.requestId,
+    targetSessionId: request.sessionId,
+    toolName: request.toolName,
+    scope: request.scope,
+    reason: request.reason,
+    riskLevel: request.riskLevel,
+    previewAction: request.previewAction,
+  };
+}
+
+function resolvePermissionReplyError(error: unknown): {
+  dismissPrompt: boolean;
+  inlineMessage: string;
+  toastMessage?: string;
+} {
+  const httpError =
+    typeof error === 'object' && error !== null && typeof Reflect.get(error, 'status') === 'number'
+      ? {
+          status: Reflect.get(error, 'status') as number,
+          data: Reflect.get(error, 'data') as { error?: string } | undefined,
+        }
+      : null;
+
+  if (httpError) {
+    if (httpError.status === 409 && httpError.data?.error === 'Permission request expired') {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '该权限请求已过期，正在重新同步。',
+        toastMessage: '权限请求已过期，已重新同步状态。',
+      };
+    }
+
+    if (
+      httpError.status === 409 &&
+      httpError.data?.error === 'Permission request already resolved'
+    ) {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '该权限请求已被处理，正在重新同步。',
+        toastMessage: '权限请求已被处理，已重新同步状态。',
+      };
+    }
+
+    if (httpError.status === 404) {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '权限请求已不存在，正在重新同步。',
+        toastMessage: '权限请求已不存在，已重新同步状态。',
+      };
+    }
+  }
+
+  return {
+    dismissPrompt: false,
+    inlineMessage: error instanceof Error ? error.message : '权限处理失败，请重试。',
+  };
+}
+
+function resolveQuestionReplyError(error: unknown): {
+  dismissPrompt: boolean;
+  inlineMessage: string;
+  toastMessage?: string;
+} {
+  const httpError =
+    typeof error === 'object' && error !== null && typeof Reflect.get(error, 'status') === 'number'
+      ? {
+          status: Reflect.get(error, 'status') as number,
+          data: Reflect.get(error, 'data') as { error?: string } | undefined,
+        }
+      : null;
+
+  if (httpError) {
+    if (httpError.status === 409 && httpError.data?.error === 'Question request expired') {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '该问题已过期，正在重新同步。',
+        toastMessage: '问题已过期，已重新同步状态。',
+      };
+    }
+
+    if (httpError.status === 409 && httpError.data?.error === 'Question request already resolved') {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '该问题已被处理，正在重新同步。',
+        toastMessage: '问题已被处理，已重新同步状态。',
+      };
+    }
+
+    if (httpError.status === 404) {
+      return {
+        dismissPrompt: true,
+        inlineMessage: '问题已不存在，正在重新同步。',
+        toastMessage: '问题已不存在，已重新同步状态。',
+      };
+    }
+  }
+
+  return {
+    dismissPrompt: false,
+    inlineMessage: error instanceof Error ? error.message : '提交回答失败，请重试。',
+  };
+}
 
 interface LayoutProps {
   theme?: 'dark' | 'light';
@@ -127,22 +307,169 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteSearchResults, setPaletteSearchResults] = useState<SessionSearchResult[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferenceMap>(
+    DEFAULT_NOTIFICATION_PREFERENCES,
+  );
   const paletteDescriptors = useCommandRegistry('palette');
 
-  const [pendingPermission, setPendingPermission] = useState<{
-    requestId: string;
-    targetSessionId: string;
-    toolName: string;
-    scope: string;
-    reason: string;
-    riskLevel: 'low' | 'medium' | 'high';
-    previewAction?: string;
-  } | null>(null);
+  const [pendingPermission, setPendingPermission] = useState<PendingPermissionPromptState | null>(
+    null,
+  );
+  const [permissionReplyPendingDecision, setPermissionReplyPendingDecision] =
+    useState<PermissionDecision | null>(null);
+  const [permissionReplyError, setPermissionReplyError] = useState<string | null>(null);
   const [pendingConfirmDialog, setPendingConfirmDialog] = useState<{
     skillName: string;
     permissions: PermissionItem[];
     trustLevel: 'full' | 'standard' | 'restricted';
   } | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionRequest | null>(null);
+  const [pendingQuestionAnswers, setPendingQuestionAnswers] = useState<string[][]>([]);
+  const [pendingQuestionReplyStatus, setPendingQuestionReplyStatus] =
+    useState<PendingQuestionReplyStatus | null>(null);
+  const [pendingQuestionReplyError, setPendingQuestionReplyError] = useState<string | null>(null);
+  const seenNotificationIdsRef = useMemo(() => new Set<string>(), []);
+  const notificationPreferencesRef = useRef<NotificationPreferenceMap>(
+    DEFAULT_NOTIFICATION_PREFERENCES,
+  );
+
+  useEffect(() => {
+    notificationPreferencesRef.current = notificationPreferences;
+  }, [notificationPreferences]);
+
+  const updatePendingPermission = useCallback((next: PendingPermissionPromptState | null) => {
+    setPendingPermission(next);
+    setPermissionReplyPendingDecision(null);
+    setPermissionReplyError(null);
+  }, []);
+
+  const loadNotificationPreferences = useCallback(async (): Promise<NotificationPreferenceMap> => {
+    if (!accessToken) {
+      setNotificationPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
+      return DEFAULT_NOTIFICATION_PREFERENCES;
+    }
+
+    try {
+      const nextPreferences = toNotificationPreferenceMap(
+        await createNotificationsClient(gatewayUrl).listPreferences(accessToken, {
+          channel: 'web',
+        }),
+      );
+      setNotificationPreferences(nextPreferences);
+      return nextPreferences;
+    } catch {
+      return notificationPreferencesRef.current;
+    }
+  }, [accessToken, gatewayUrl]);
+
+  const loadNotifications = useCallback(
+    async (options?: { preferences?: NotificationPreferenceMap }) => {
+      if (!accessToken) {
+        setNotifications([]);
+        return;
+      }
+      const effectivePreferences = options?.preferences ?? notificationPreferencesRef.current;
+      const nextNotifications = await createNotificationsClient(gatewayUrl).list(accessToken, {
+        limit: 12,
+        status: 'unread',
+      });
+      setNotifications(nextNotifications);
+
+      if (
+        typeof window !== 'undefined' &&
+        document.visibilityState === 'hidden' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        nextNotifications.forEach((item) => {
+          if (seenNotificationIdsRef.has(item.id)) {
+            return;
+          }
+          seenNotificationIdsRef.add(item.id);
+          if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) {
+            return;
+          }
+          new Notification(item.title, { body: item.body, tag: item.id });
+        });
+      } else {
+        nextNotifications.forEach((item) => {
+          seenNotificationIdsRef.add(item.id);
+        });
+      }
+    },
+    [accessToken, gatewayUrl, seenNotificationIdsRef],
+  );
+
+  const handleOpenNotification = useCallback(
+    async (notification: NotificationRecord) => {
+      if (!accessToken) {
+        return;
+      }
+
+      await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
+      setNotifications((previous) => previous.filter((item) => item.id !== notification.id));
+      setNotificationsOpen(false);
+      if (notification.sessionId) {
+        preloadRoute('/chat');
+        void navigate(`/chat/${notification.sessionId}`);
+      }
+    },
+    [accessToken, gatewayUrl, navigate, preloadRoute],
+  );
+
+  const applyPendingQuestion = useCallback(
+    (
+      nextQuestion: PendingQuestionRequest | null,
+      options?: { preserveAnswersForSameRequest?: boolean },
+    ) => {
+      setPendingQuestion((previous) => {
+        const nextQuestionId = nextQuestion?.requestId ?? null;
+        const preserveAnswers =
+          options?.preserveAnswersForSameRequest === true &&
+          nextQuestionId !== null &&
+          previous?.requestId === nextQuestionId;
+
+        setPendingQuestionReplyStatus(null);
+        setPendingQuestionReplyError(null);
+        if (!preserveAnswers) {
+          setPendingQuestionAnswers(nextQuestion ? nextQuestion.questions.map(() => []) : []);
+        }
+
+        return nextQuestion;
+      });
+    },
+    [],
+  );
+
+  const loadPendingInteractionState = useCallback(
+    async (
+      sessionId: string,
+      options?: { preserveQuestionAnswersForSameRequest?: boolean; signal?: AbortSignal },
+    ) => {
+      if (!accessToken) {
+        updatePendingPermission(null);
+        applyPendingQuestion(null);
+        return;
+      }
+
+      const recovery = await createSessionsClient(gatewayUrl).getRecovery(
+        accessToken,
+        sessionId,
+        options,
+      );
+      const nextPermission =
+        recovery.pendingPermissions.find((request) => request.status === 'pending') ?? null;
+      const nextQuestion =
+        recovery.pendingQuestions.find((request) => request.status === 'pending') ?? null;
+      updatePendingPermission(toPendingPermissionPromptState(nextPermission));
+      applyPendingQuestion(nextQuestion, {
+        preserveAnswersForSameRequest: options?.preserveQuestionAnswersForSameRequest === true,
+      });
+    },
+    [accessToken, applyPendingQuestion, gatewayUrl, updatePendingPermission],
+  );
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
@@ -165,55 +492,185 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
 
   useEffect(() => {
     if (!accessToken || !currentChatSessionId) {
-      setPendingPermission(null);
+      updatePendingPermission(null);
       return;
     }
 
-    setPendingPermission(null);
+    updatePendingPermission(null);
 
     return subscribeSessionPendingPermission((sessionId, permission) => {
       if (sessionId === currentChatSessionId) {
-        setPendingPermission(permission);
+        updatePendingPermission(permission);
       }
     });
-  }, [accessToken, currentChatSessionId]);
+  }, [accessToken, currentChatSessionId, updatePendingPermission]);
 
   useEffect(() => {
-    if (!accessToken || !currentChatSessionId) {
+    if (!currentChatSessionId) {
+      applyPendingQuestion(null);
       return;
     }
 
+    applyPendingQuestion(null);
+
     const controller = new AbortController();
-    void createPermissionsClient(gatewayUrl)
-      .listPending(accessToken, currentChatSessionId, { signal: controller.signal })
-      .then((requests) => {
+    void loadPendingInteractionState(currentChatSessionId, { signal: controller.signal }).catch(
+      () => {
         if (controller.signal.aborted) {
           return;
         }
-
-        const pendingRequest = requests.find((request) => request.status === 'pending');
-        setPendingPermission(
-          pendingRequest
-            ? {
-                requestId: pendingRequest.requestId,
-                targetSessionId: pendingRequest.sessionId,
-                toolName: pendingRequest.toolName,
-                scope: pendingRequest.scope,
-                reason: pendingRequest.reason,
-                riskLevel: pendingRequest.riskLevel,
-                previewAction: pendingRequest.previewAction,
-              }
-            : null,
-        );
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setPendingPermission(null);
-        }
-      });
+      },
+    );
 
     return () => controller.abort();
-  }, [accessToken, currentChatSessionId, gatewayUrl]);
+  }, [applyPendingQuestion, currentChatSessionId, loadPendingInteractionState]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      setNotifications([]);
+      setNotificationPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
+      return;
+    }
+
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    void (async () => {
+      const preferences = await loadNotificationPreferences();
+      if (cancelled) {
+        return;
+      }
+      await loadNotifications({ preferences });
+      if (cancelled) {
+        return;
+      }
+      intervalId = window.setInterval(() => {
+        void loadNotifications().catch(() => undefined);
+      }, 15_000);
+    })().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [accessToken, loadNotificationPreferences, loadNotifications]);
+
+  useEffect(() => {
+    return subscribeNotificationPreferenceRefresh(() => {
+      void loadNotificationPreferences().catch(() => undefined);
+    });
+  }, [loadNotificationPreferences]);
+
+  useEffect(() => {
+    if (!currentChatSessionId) {
+      return;
+    }
+
+    return subscribeCurrentSessionRefresh((sessionId) => {
+      if (sessionId !== currentChatSessionId) {
+        return;
+      }
+      void loadPendingInteractionState(sessionId, {
+        preserveQuestionAnswersForSameRequest: true,
+      }).catch(() => {
+        return;
+      });
+    });
+  }, [currentChatSessionId, loadPendingInteractionState]);
+
+  const togglePendingQuestionAnswer = useCallback(
+    (questionIndex: number, optionLabel: string, multiple: boolean) => {
+      setPendingQuestionAnswers((previous) => {
+        const next = previous.map((answers) => [...answers]);
+        while (next.length <= questionIndex) {
+          next.push([]);
+        }
+        const currentAnswers = next[questionIndex] ?? [];
+        if (multiple) {
+          next[questionIndex] = currentAnswers.includes(optionLabel)
+            ? currentAnswers.filter((answer) => answer !== optionLabel)
+            : [...currentAnswers, optionLabel];
+        } else {
+          next[questionIndex] = currentAnswers.includes(optionLabel) ? [] : [optionLabel];
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const replyPendingQuestion = useCallback(
+    async (status: 'answered' | 'dismissed') => {
+      if (!accessToken || !pendingQuestion) {
+        applyPendingQuestion(null);
+        return;
+      }
+
+      const payload =
+        status === 'answered'
+          ? { answers: pendingQuestionAnswers, requestId: pendingQuestion.requestId, status }
+          : { requestId: pendingQuestion.requestId, status };
+      const currentSessionId = currentChatSessionId;
+      const targetSessionId = pendingQuestion.sessionId;
+
+      try {
+        setPendingQuestionReplyStatus(status);
+        setPendingQuestionReplyError(null);
+        await createQuestionsClient(gatewayUrl).reply(
+          accessToken,
+          pendingQuestion.sessionId,
+          payload,
+        );
+        applyPendingQuestion(null);
+        if (currentSessionId) {
+          requestCurrentSessionRefresh(currentSessionId);
+        }
+        if (targetSessionId !== currentSessionId) {
+          requestCurrentSessionRefresh(targetSessionId);
+        }
+        requestSessionListRefresh();
+      } catch (error) {
+        const resolved = resolveQuestionReplyError(error);
+        if (resolved.dismissPrompt) {
+          applyPendingQuestion(null);
+          toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
+          if (currentSessionId) {
+            requestCurrentSessionRefresh(currentSessionId);
+          }
+          if (targetSessionId !== currentSessionId) {
+            requestCurrentSessionRefresh(targetSessionId);
+          }
+          requestSessionListRefresh();
+        } else {
+          setPendingQuestionReplyError(resolved.inlineMessage);
+        }
+      } finally {
+        setPendingQuestionReplyStatus(null);
+      }
+    },
+    [
+      accessToken,
+      applyPendingQuestion,
+      currentChatSessionId,
+      gatewayUrl,
+      pendingQuestion,
+      pendingQuestionAnswers,
+    ],
+  );
+
+  useEffect(() => {
+    if (!currentChatSessionId) {
+      return;
+    }
+
+    return subscribeSessionPendingQuestion((sessionId, question) => {
+      if (sessionId === currentChatSessionId) {
+        applyPendingQuestion(question, { preserveAnswersForSameRequest: true });
+      }
+    });
+  }, [applyPendingQuestion, currentChatSessionId]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -358,6 +815,45 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     [addSavedWorkspacePath, setFileTreeRootPath, setSelectedWorkspacePath],
   );
 
+  const handlePermissionDecision = useCallback(
+    async (requestId: string, decision: PermissionDecision) => {
+      if (!accessToken || !currentChatSessionId || !pendingPermission) {
+        updatePendingPermission(null);
+        return;
+      }
+
+      setPermissionReplyPendingDecision(decision);
+      setPermissionReplyError(null);
+
+      try {
+        await createPermissionsClient(gatewayUrl).reply(
+          accessToken,
+          pendingPermission.targetSessionId,
+          {
+            requestId,
+            decision,
+          },
+        );
+        updatePendingPermission(null);
+        requestCurrentSessionRefresh(currentChatSessionId);
+        requestSessionListRefresh();
+      } catch (error) {
+        const resolved = resolvePermissionReplyError(error);
+        if (resolved.dismissPrompt) {
+          updatePendingPermission(null);
+          toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
+          requestCurrentSessionRefresh(currentChatSessionId);
+          requestSessionListRefresh();
+        } else {
+          setPermissionReplyError(resolved.inlineMessage);
+        }
+      } finally {
+        setPermissionReplyPendingDecision(null);
+      }
+    },
+    [accessToken, currentChatSessionId, gatewayUrl, pendingPermission, updatePendingPermission],
+  );
+
   return (
     <>
       <CommandPalette
@@ -379,20 +875,27 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           reason={pendingPermission.reason}
           riskLevel={pendingPermission.riskLevel}
           previewAction={pendingPermission.previewAction}
+          pendingDecision={permissionReplyPendingDecision}
+          errorMessage={permissionReplyError ?? undefined}
           onDecide={(requestId: string, decision: PermissionDecision) => {
-            if (!accessToken || !currentChatSessionId) {
-              setPendingPermission(null);
-              return;
-            }
-            void createPermissionsClient(gatewayUrl)
-              .reply(accessToken, pendingPermission.targetSessionId, { requestId, decision })
-              .finally(() => {
-                setPendingPermission(null);
-                requestCurrentSessionRefresh(currentChatSessionId);
-                requestSessionListRefresh();
-              });
+            void handlePermissionDecision(requestId, decision);
           }}
           style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 500 }}
+        />
+      )}
+      {pendingQuestion && (
+        <QuestionPromptCard
+          answers={pendingQuestionAnswers}
+          errorMessage={pendingQuestionReplyError ?? undefined}
+          pendingAction={pendingQuestionReplyStatus}
+          request={pendingQuestion}
+          onDismiss={() => {
+            void replyPendingQuestion('dismissed');
+          }}
+          onSubmit={() => {
+            void replyPendingQuestion('answered');
+          }}
+          onToggleOption={togglePendingQuestionAnswer}
         />
       )}
       <PermissionConfirmDialog
@@ -623,6 +1126,147 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                   </svg>
                   OpenAWork
                 </span>
+
+                {accessToken && (
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotificationsOpen((previous) => !previous);
+                        void loadNotifications().catch(() => undefined);
+                      }}
+                      title="通知中心"
+                      className="toolbar-btn"
+                      style={{
+                        display: 'flex',
+                        width: 30,
+                        height: 30,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 7,
+                        color: 'var(--text-3)',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--surface)',
+                        transition: 'color 150ms ease, background 150ms ease',
+                        cursor: 'pointer',
+                        position: 'relative',
+                      }}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.4V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
+                        <path d="M9 17a3 3 0 0 0 6 0" />
+                      </svg>
+                      {notifications.length > 0 ? (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: -4,
+                            right: -4,
+                            minWidth: 16,
+                            height: 16,
+                            padding: '0 4px',
+                            borderRadius: 999,
+                            background: 'var(--danger)',
+                            color: 'white',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            display: 'grid',
+                            placeItems: 'center',
+                          }}
+                        >
+                          {notifications.length > 9 ? '9+' : notifications.length}
+                        </span>
+                      ) : null}
+                    </button>
+                    {notificationsOpen ? (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 36,
+                          right: 0,
+                          width: 320,
+                          maxHeight: 420,
+                          overflow: 'auto',
+                          borderRadius: 14,
+                          border: '1px solid var(--border)',
+                          background: 'var(--surface)',
+                          boxShadow: 'var(--shadow-lg)',
+                          padding: 10,
+                          zIndex: 40,
+                          display: 'grid',
+                          gap: 8,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                            通知中心
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                            {notifications.length} 条未读
+                          </span>
+                        </div>
+                        {notifications.length === 0 ? (
+                          <div
+                            style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 8px' }}
+                          >
+                            暂无未读通知
+                          </div>
+                        ) : (
+                          notifications.map((notification) => (
+                            <button
+                              key={notification.id}
+                              type="button"
+                              onClick={() => void handleOpenNotification(notification)}
+                              style={{
+                                textAlign: 'left',
+                                display: 'grid',
+                                gap: 4,
+                                padding: '10px 12px',
+                                borderRadius: 12,
+                                border: '1px solid var(--border-subtle)',
+                                background: 'var(--bg-2)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                                {notification.title}
+                              </span>
+                              <span
+                                style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}
+                              >
+                                {notification.body}
+                              </span>
+                              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                                {new Date(notification.createdAt).toLocaleString('zh-CN', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
 
                 {onToggleTheme && (
                   <button
