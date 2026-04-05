@@ -55,8 +55,40 @@ export interface UpstreamChatMessage {
   }>;
 }
 
+export interface PreparedUpstreamConversationReport {
+  /** 被 artifact 过滤掉的消息数（message 级） */
+  artifactFilteredCount: number;
+  /** assistant content 中的 tool_call 数（content 级） */
+  assistantToolCallCount: number;
+  /** 被过滤掉的 assistant UI event text 数（content 级） */
+  assistantUiEventFilteredCount: number;
+  /** 是否注入了 compaction summary system message（布尔） */
+  compactSummaryInjected: boolean;
+  /** 被 compaction boundary 裁掉的 message 数（message 级） */
+  boundaryTrimmedMessageCount: number;
+  /** compaction boundary 之后剩余的历史消息数（message 级） */
+  historySinceBoundaryCount: number;
+  /** 原始输入消息数（message 级） */
+  inputMessageCount: number;
+  /** 被注入到 assistant 上下文中的 modified_files_summary 条目数（content 级） */
+  modifiedFilesSummaryInjectedCount: number;
+  /** artifact 过滤后的消息数（message 级） */
+  normalizedMessageCount: number;
+  /** 被 reference 化的大 tool_result 数（content 级） */
+  referencedToolOutputCount: number;
+  /** safe window 裁掉的消息数（message 级） */
+  safeWindowTrimmedMessageCount: number;
+  /** 最终参与 buildUpstreamConversationFromHistory 的历史消息数（message 级） */
+  selectedHistoryCount: number;
+  /** tool_result content 数（content 级） */
+  toolResultCount: number;
+  /** 最终发往 provider 的消息条数；若 compact summary 注入，则包含 prepend system message（message 级） */
+  upstreamMessageCount: number;
+}
+
 export interface PreparedUpstreamConversation {
   messages: UpstreamChatMessage[];
+  report?: PreparedUpstreamConversationReport;
 }
 
 export interface BuildPreparedUpstreamConversationOptions {
@@ -97,6 +129,7 @@ export interface StoredToolResult {
   isError: boolean;
   output: unknown;
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   observability?: ToolCallObservabilityAnnotation;
   toolCallId: string;
   toolName?: string;
@@ -229,6 +262,10 @@ function readLatestCompactionMarker(messages: Message[]): CompactionMarkerRecord
   }
 
   return null;
+}
+
+export function hasCompactionMarker(messages: Message[]): boolean {
+  return readLatestCompactionMarker(messages) !== null;
 }
 
 function isCommandCardPayload(value: string): boolean {
@@ -450,9 +487,18 @@ export function buildPreparedUpstreamConversation(
       ? historySinceBoundary
       : selectSafeConversationWindow(historySinceBoundary, maxMessages);
   const upstreamMessages = buildUpstreamConversationFromHistory(history);
+  const compactSummaryInjected = !!effectiveSummary && effectiveSummary.trim().length > 0;
+  const report = buildPreparedUpstreamConversationReport({
+    compactSummaryInjected,
+    history,
+    historySinceBoundary,
+    inputMessages: messages,
+    normalizedMessages,
+    upstreamMessages,
+  });
 
-  if (!effectiveSummary || effectiveSummary.trim().length === 0) {
-    return { messages: upstreamMessages };
+  if (!compactSummaryInjected) {
+    return { messages: upstreamMessages, report };
   }
 
   return {
@@ -468,6 +514,82 @@ export function buildPreparedUpstreamConversation(
       },
       ...upstreamMessages,
     ],
+    report: {
+      ...report,
+      upstreamMessageCount: upstreamMessages.length + 1,
+    },
+  };
+}
+
+function buildPreparedUpstreamConversationReport(input: {
+  compactSummaryInjected: boolean;
+  history: Message[];
+  historySinceBoundary: Message[];
+  inputMessages: Message[];
+  normalizedMessages: Message[];
+  upstreamMessages: UpstreamChatMessage[];
+}): PreparedUpstreamConversationReport {
+  const assistantToolCallCount = input.history.reduce((count, message) => {
+    if (message.role !== 'assistant') {
+      return count;
+    }
+
+    return count + message.content.filter((content) => content.type === 'tool_call').length;
+  }, 0);
+  const assistantUiEventFilteredCount = input.history.reduce((count, message) => {
+    if (message.role !== 'assistant') {
+      return count;
+    }
+
+    return (
+      count +
+      message.content.filter(
+        (content) =>
+          content.type === 'text' && isAssistantUiEventTextForMessage(content.text, message),
+      ).length
+    );
+  }, 0);
+  const modifiedFilesSummaryInjectedCount = input.history.reduce((count, message) => {
+    return (
+      count + message.content.filter((content) => content.type === 'modified_files_summary').length
+    );
+  }, 0);
+  const toolResultCount = input.history.reduce((count, message) => {
+    if (message.role !== 'tool') {
+      return count;
+    }
+
+    return count + message.content.filter((content) => content.type === 'tool_result').length;
+  }, 0);
+  const referencedToolOutputCount = input.history.reduce((count, message) => {
+    if (message.role !== 'tool') {
+      return count;
+    }
+
+    return (
+      count +
+      message.content.filter(
+        (content) => content.type === 'tool_result' && shouldReferenceToolOutput(content.output),
+      ).length
+    );
+  }, 0);
+
+  return {
+    inputMessageCount: input.inputMessages.length,
+    normalizedMessageCount: input.normalizedMessages.length,
+    artifactFilteredCount: input.inputMessages.length - input.normalizedMessages.length,
+    historySinceBoundaryCount: input.historySinceBoundary.length,
+    boundaryTrimmedMessageCount:
+      input.normalizedMessages.length - input.historySinceBoundary.length,
+    selectedHistoryCount: input.history.length,
+    safeWindowTrimmedMessageCount: input.historySinceBoundary.length - input.history.length,
+    compactSummaryInjected: input.compactSummaryInjected,
+    assistantUiEventFilteredCount,
+    modifiedFilesSummaryInjectedCount,
+    toolResultCount,
+    referencedToolOutputCount,
+    assistantToolCallCount,
+    upstreamMessageCount: input.upstreamMessages.length,
   };
 }
 
@@ -876,6 +998,7 @@ export function getSessionToolResultByCallId(input: {
         isError: content.isError,
         fileDiffs: content.fileDiffs,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
+        resumedAfterApproval: content.resumedAfterApproval,
         observability: content.observability,
       };
     }
@@ -915,6 +1038,7 @@ export function getLatestReferencedToolResult(input: {
         isError: content.isError,
         fileDiffs: content.fileDiffs,
         pendingPermissionRequestId: content.pendingPermissionRequestId,
+        resumedAfterApproval: content.resumedAfterApproval,
         observability: content.observability,
       };
     }
@@ -1373,16 +1497,17 @@ function parseMessageContentArray(raw: unknown[]): MessageContent[] {
         type: 'tool_result',
         toolCallId: record['toolCallId'],
         toolName: typeof record['toolName'] === 'string' ? record['toolName'] : undefined,
-        clientRequestId:
-          typeof record['clientRequestId'] === 'string' ? record['clientRequestId'] : undefined,
         output: record['output'],
         isError: record['isError'],
-        reason: typeof record['reason'] === 'string' ? record['reason'] : undefined,
+        ...(typeof record['clientRequestId'] === 'string'
+          ? { clientRequestId: record['clientRequestId'] }
+          : {}),
+        ...(typeof record['reason'] === 'string' ? { reason: record['reason'] } : {}),
         ...(fileDiffs.length > 0 ? { fileDiffs } : {}),
-        pendingPermissionRequestId:
-          typeof record['pendingPermissionRequestId'] === 'string'
-            ? record['pendingPermissionRequestId']
-            : undefined,
+        ...(typeof record['pendingPermissionRequestId'] === 'string'
+          ? { pendingPermissionRequestId: record['pendingPermissionRequestId'] }
+          : {}),
+        ...(record['resumedAfterApproval'] === true ? { resumedAfterApproval: true } : {}),
         ...(observability ? { observability } : {}),
       });
       return;

@@ -13,6 +13,7 @@ import {
   buildDurableCompactionSummary,
   buildPreparedUpstreamConversation,
   buildStructuredCompactionSummary,
+  hasCompactionMarker,
   type DurableCompactionSummary,
 } from './session-message-store.js';
 
@@ -96,10 +97,15 @@ export async function executeSessionCompaction(
   if (input.route) {
     const prunedMessages =
       input.prune === false ? input.messages : pruneMessagesForCompaction(input.messages);
+    const markerPresent = hasCompactionMarker(prunedMessages);
     const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
       contextWindow: 1,
-      llmCompactionSummary: readLastCompactionLlmSummary(input.metadataJson),
-      persistedMemory: existingMemory,
+      ...(markerPresent
+        ? {}
+        : {
+            llmCompactionSummary: readLastCompactionLlmSummary(input.metadataJson),
+            persistedMemory: existingMemory,
+          }),
     }).messages;
     try {
       const result = await callCompactionLlm({

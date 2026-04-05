@@ -66,7 +66,7 @@ vi.mock('../db.js', () => ({
     return undefined;
   },
   sqliteRun: (query: string, params: Array<string | number | null>) => {
-    if (query.startsWith('INSERT INTO session_messages')) {
+    if (query.startsWith('INSERT INTO session_messages (')) {
       rows.push({
         id: String(params[0]),
         session_id: String(params[1]),
@@ -107,6 +107,11 @@ vi.mock('../db.js', () => ({
       );
       return;
     }
+
+    if (query.startsWith('DELETE FROM session_messages WHERE id IN (')) {
+      const ids = new Set(params.map((value) => String(value)));
+      rows = rows.filter((row) => !ids.has(row.id));
+    }
   },
 }));
 
@@ -146,6 +151,82 @@ describe('session message store', () => {
     expect(stored?.status).toBe('final');
     expect(stored?.message.content[0]).toMatchObject({ type: 'text', text: '最终成功回复' });
     expect(listSessionMessages({ sessionId: 'session-1', userId: 'user-1' })).toHaveLength(1);
+  });
+
+  it('deletes assistant and tool messages by request scope without touching user messages', async () => {
+    const { appendSessionMessage, deleteSessionMessagesByRequestScope, listSessionMessages } =
+      await import('../session-message-store.js');
+
+    appendSessionMessage({
+      sessionId: 'session-a',
+      userId: 'user-a',
+      role: 'user',
+      content: [{ type: 'text', text: 'prompt' }],
+      clientRequestId: 'req-a',
+    });
+    appendSessionMessage({
+      sessionId: 'session-a',
+      userId: 'user-a',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'partial assistant' }],
+      clientRequestId: 'req-a',
+    });
+    appendSessionMessage({
+      sessionId: 'session-a',
+      userId: 'user-a',
+      role: 'tool',
+      content: [
+        {
+          type: 'tool_result',
+          toolCallId: 'tool-1',
+          toolName: 'bash',
+          output: 'partial tool',
+          isError: false,
+        },
+      ],
+      clientRequestId: 'req-a:tool:tool-1',
+    });
+
+    deleteSessionMessagesByRequestScope({
+      clientRequestId: 'req-a',
+      roles: ['assistant', 'tool'],
+      sessionId: 'session-a',
+      userId: 'user-a',
+    });
+
+    const remaining = listSessionMessages({ sessionId: 'session-a', userId: 'user-a' });
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.role).toBe('user');
+    expect(remaining[0]?.content).toEqual([{ type: 'text', text: 'prompt' }]);
+  });
+
+  it('round-trips tool_result reason from persisted messages', async () => {
+    const { appendSessionMessage, listSessionMessages } =
+      await import('../session-message-store.js');
+
+    appendSessionMessage({
+      sessionId: 'session-timeout',
+      userId: 'user-timeout',
+      role: 'tool',
+      clientRequestId: 'req-timeout:tool:task-1',
+      content: [
+        {
+          type: 'tool_result',
+          toolCallId: 'task-1',
+          toolName: 'task',
+          output: { status: 'failed' },
+          isError: true,
+          reason: 'timeout',
+        },
+      ],
+    });
+
+    const messages = listSessionMessages({ sessionId: 'session-timeout', userId: 'user-timeout' });
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'task-1',
+      reason: 'timeout',
+    });
   });
 
   it('keeps assistant tool_call paired with tool_result when truncating history', async () => {
@@ -628,6 +709,36 @@ describe('session message store', () => {
     ]);
   });
 
+  it('round-trips resumedAfterApproval inside persisted tool results', async () => {
+    const { appendSessionMessage, listSessionMessages } =
+      await import('../session-message-store.js');
+
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'tool',
+      clientRequestId: 'req-tool-resume-1',
+      content: [
+        {
+          type: 'tool_result',
+          toolCallId: 'call-resume-1',
+          toolName: 'bash',
+          output: { exitCode: 1, stderr: 'boom' },
+          isError: true,
+          resumedAfterApproval: true,
+        },
+      ],
+    });
+
+    expect(
+      listSessionMessages({ sessionId: 'session-1', userId: 'user-1' })[0]?.content[0],
+    ).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-resume-1',
+      resumedAfterApproval: true,
+    });
+  });
+
   it('round-trips toolName inside persisted tool results', async () => {
     const { appendSessionMessage, listSessionMessages } =
       await import('../session-message-store.js');
@@ -941,7 +1052,7 @@ describe('session message store', () => {
     expect(toolMessage?.content).toBe(exactInlineOutput);
   });
 
-  it('adds compact boundary and structured summary when prepared conversation omits history', async () => {
+  it('adds compact boundary and llm summary when persisted covered boundary omits history', async () => {
     const { buildPreparedUpstreamConversation } = await import('../session-message-store.js');
 
     const messages = Array.from({ length: 8 }, (_, index) => {
@@ -962,26 +1073,207 @@ describe('session message store', () => {
       ];
     }).flat();
 
-    const prepared = buildPreparedUpstreamConversation(messages, 4);
+    const prepared = buildPreparedUpstreamConversation(messages, {
+      llmCompactionSummary: 'test summary',
+      contextWindow: 128_000,
+      persistedMemory: {
+        schemaVersion: 1,
+        coveredUntilMessageId: 'assistant-5',
+        updatedAt: 1,
+        compactionCount: 1,
+        summarizedMessages: 10,
+        lastTrigger: 'automatic',
+        userGoals: ['用户目标 1'],
+        assistantProgress: ['助手进展 1'],
+        toolActivity: [],
+        filesReferenced: [],
+      },
+    });
 
-    expect(prepared.compaction).toBeDefined();
-    expect(prepared.compaction?.omittedMessages).toBeGreaterThan(0);
     expect(prepared.messages[0]).toMatchObject({
       role: 'system',
       content: expect.stringContaining('[COMPACT BOUNDARY]'),
     });
+    expect(prepared.messages[0]?.content).toContain('test summary');
     expect(prepared.messages[1]).toMatchObject({
-      role: 'system',
-      content: expect.stringContaining('Durable session compaction memory'),
-    });
-    expect(prepared.messages[2]).toMatchObject({
       role: 'user',
-      content: '用户目标 7',
+      content: '用户目标 6',
+    });
+    expect(prepared.messages).toHaveLength(7);
+  });
+
+  it('keeps full conversation when contextWindow is provided without llm summary', async () => {
+    const { buildPreparedUpstreamConversation } = await import('../session-message-store.js');
+
+    const messages = Array.from({ length: 10 }, (_, index) => {
+      const turn = index + 1;
+      return [
+        {
+          id: `user-room-${turn}`,
+          role: 'user' as const,
+          createdAt: turn * 2 - 1,
+          content: [{ type: 'text' as const, text: `问题 ${turn}` }],
+        },
+        {
+          id: `assistant-room-${turn}`,
+          role: 'assistant' as const,
+          createdAt: turn * 2,
+          content: [{ type: 'text' as const, text: `回答 ${turn}` }],
+        },
+      ];
+    }).flat();
+
+    const prepared = buildPreparedUpstreamConversation(messages, {
+      contextWindow: 400_000,
+      maxMessages: 12,
+    });
+
+    expect(prepared.messages).toHaveLength(messages.length);
+    expect(prepared.messages[0]).toMatchObject({ role: 'user', content: '问题 1' });
+    expect(prepared.messages.at(-1)).toMatchObject({ role: 'assistant', content: '回答 10' });
+  });
+
+  it('builds a transformation report for prepared upstream conversation', async () => {
+    const { buildPreparedUpstreamConversation } = await import('../session-message-store.js');
+
+    const messages = [
+      {
+        id: 'ui-event-1',
+        role: 'assistant' as const,
+        createdAt: 1,
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              type: 'assistant_event',
+              source: 'openawork_internal',
+              payload: { note: 'internal' },
+            }),
+          },
+        ],
+      },
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        createdAt: 2,
+        content: [{ type: 'text' as const, text: '用户目标 1' }],
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant' as const,
+        createdAt: 3,
+        content: [
+          { type: 'text' as const, text: '助手正文' },
+          {
+            type: 'modified_files_summary' as const,
+            title: '文件变更',
+            summary: '更新了 1 个文件',
+            files: [
+              {
+                file: 'src/app.ts',
+                status: 'modified' as const,
+                before: 'old',
+                after: 'new',
+                additions: 1,
+                deletions: 1,
+              },
+            ],
+          },
+          {
+            type: 'tool_call' as const,
+            toolCallId: 'call-1',
+            toolName: 'read_file',
+            input: { path: 'src/app.ts' },
+          },
+        ],
+      },
+      {
+        id: 'tool-1',
+        role: 'tool' as const,
+        createdAt: 4,
+        content: [
+          {
+            type: 'tool_result' as const,
+            toolCallId: 'call-1',
+            output: 'x'.repeat(8 * 1024 + 1),
+            isError: false,
+          },
+        ],
+      },
+    ];
+
+    const prepared = buildPreparedUpstreamConversation(messages, { maxMessages: 12 });
+
+    expect(prepared.report).toMatchObject({
+      inputMessageCount: 4,
+      normalizedMessageCount: 3,
+      artifactFilteredCount: 1,
+      historySinceBoundaryCount: 3,
+      selectedHistoryCount: 3,
+      compactSummaryInjected: false,
+      assistantUiEventFilteredCount: 0,
+      modifiedFilesSummaryInjectedCount: 1,
+      toolResultCount: 1,
+      referencedToolOutputCount: 1,
+      assistantToolCallCount: 1,
+      upstreamMessageCount: 3,
     });
   });
 
-  it('merges only newly omitted messages into persisted compaction memory', async () => {
+  it('marks compactSummaryInjected and counts prepended summary message in transformation report', async () => {
     const { buildPreparedUpstreamConversation } = await import('../session-message-store.js');
+
+    const messages = [
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        createdAt: 1,
+        content: [{ type: 'text' as const, text: '用户目标 1' }],
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant' as const,
+        createdAt: 2,
+        content: [{ type: 'text' as const, text: '助手进展 1' }],
+      },
+    ];
+
+    const prepared = buildPreparedUpstreamConversation(messages, {
+      llmCompactionSummary: '压缩总结',
+      contextWindow: 128_000,
+    });
+
+    expect(prepared.report).toMatchObject({
+      compactSummaryInjected: true,
+      inputMessageCount: 2,
+      normalizedMessageCount: 2,
+      historySinceBoundaryCount: 2,
+      selectedHistoryCount: 2,
+      upstreamMessageCount: 3,
+    });
+    expect(prepared.messages[0]).toMatchObject({
+      role: 'system',
+      content: expect.stringContaining('压缩总结'),
+    });
+  });
+
+  it('detects context overflow from token usage and context window', async () => {
+    const { isContextOverflow } = await import('../session-message-store.js');
+
+    expect(isContextOverflow({ inputTokens: 8_499 }, 10_000)).toBe(false);
+    expect(isContextOverflow({ inputTokens: 8_500 }, 10_000)).toBe(true);
+    expect(isContextOverflow({ inputTokens: 999_999 }, 0)).toBe(false);
+  });
+
+  it('honors reserved token buffer when detecting overflow', async () => {
+    const { isContextOverflow } = await import('../session-message-store.js');
+
+    expect(isContextOverflow({ inputTokens: 7_900 }, 10_000, 2_500)).toBe(true);
+    expect(isContextOverflow({ inputTokens: 7_900 }, 10_000, 1_000)).toBe(false);
+  });
+
+  it('merges only newly omitted messages into persisted compaction memory', async () => {
+    const { buildDurableCompactionSummary } = await import('../session-message-store.js');
 
     const messages = Array.from({ length: 4 }, (_, index) => {
       const turn = index + 1;
@@ -1001,9 +1293,11 @@ describe('session message store', () => {
       ];
     }).flat();
 
-    const prepared = buildPreparedUpstreamConversation(messages, {
-      maxMessages: 2,
-      persistedMemory: {
+    const summary = buildDurableCompactionSummary({
+      trigger: 'automatic',
+      recentMessagesKept: 2,
+      messages,
+      existingMemory: {
         schemaVersion: 1,
         coveredUntilMessageId: 'assistant-2',
         updatedAt: 1,
@@ -1019,15 +1313,16 @@ describe('session message store', () => {
       },
     });
 
-    expect(prepared.compaction).toBeDefined();
-    expect(prepared.compaction?.persistedMemory).toMatchObject({
+    expect(summary).not.toBeNull();
+    expect(summary?.newlySummarizedMessages).toBe(4);
+    expect(summary?.persistedMemory).toMatchObject({
       compactionCount: 2,
-      coveredUntilMessageId: 'assistant-3',
-      summarizedMessages: 6,
+      coveredUntilMessageId: 'assistant-4',
+      summarizedMessages: 8,
     });
-    expect(prepared.compaction?.structuredSummary).toContain('Durable session compaction memory');
-    expect(prepared.compaction?.structuredSummary).toContain('- 用户目标 3');
-    expect(prepared.compaction?.structuredSummary).toContain('- 助手进展 3');
+    expect(summary?.structuredSummary).toContain('Durable session compaction memory');
+    expect(summary?.structuredSummary).toContain('- 用户目标 3');
+    expect(summary?.structuredSummary).toContain('- 助手进展 4');
   });
 
   it('reuses covered persisted compaction memory without emitting a new compaction payload', async () => {
@@ -1052,32 +1347,139 @@ describe('session message store', () => {
     }).flat();
 
     const prepared = buildPreparedUpstreamConversation(messages, {
-      maxMessages: 2,
+      llmCompactionSummary: '已压缩总结',
+      contextWindow: 128_000,
       persistedMemory: {
         schemaVersion: 1,
-        coveredUntilMessageId: 'assistant-3',
+        coveredUntilMessageId: 'assistant-4',
         updatedAt: 1,
         compactionCount: 2,
-        summarizedMessages: 6,
+        summarizedMessages: 8,
         lastTrigger: 'automatic',
-        userGoals: ['用户目标 1', '用户目标 2', '用户目标 3'],
-        assistantProgress: ['助手进展 1', '助手进展 2', '助手进展 3'],
+        userGoals: ['用户目标 1', '用户目标 2', '用户目标 3', '用户目标 4'],
+        assistantProgress: ['助手进展 1', '助手进展 2', '助手进展 3', '助手进展 4'],
         toolActivity: [],
         filesReferenced: [],
-        latestUserRequest: '用户目标 3',
+        latestUserRequest: '用户目标 4',
         lastCompactionSignature: 'sig-2',
       },
     });
 
-    expect(prepared.compaction).toBeUndefined();
-    expect(prepared.messages[1]).toMatchObject({
+    expect(prepared.messages).toHaveLength(1);
+    expect(prepared.messages[0]).toMatchObject({
       role: 'system',
-      content: expect.stringContaining('Covered until message id: assistant-3'),
+      content: expect.stringContaining('已压缩总结'),
     });
   });
 
+  it('prefers compaction marker records over metadata fallback and hides markers from visible transcript', async () => {
+    const {
+      appendCompactionMarkerMessage,
+      appendSessionMessage,
+      buildPreparedUpstreamConversation,
+      filterVisibleSessionMessages,
+      listSessionMessages,
+    } = await import('../session-message-store.js');
+
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'user',
+      content: [{ type: 'text', text: '用户目标 1' }],
+      messageId: 'user-1',
+      createdAt: 1,
+    });
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      content: [{ type: 'text', text: '助手进展 1' }],
+      messageId: 'assistant-1',
+      createdAt: 2,
+    });
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'user',
+      content: [{ type: 'text', text: '用户目标 2' }],
+      messageId: 'user-2',
+      createdAt: 3,
+    });
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      content: [{ type: 'text', text: '助手进展 2' }],
+      messageId: 'assistant-2',
+      createdAt: 4,
+    });
+    appendCompactionMarkerMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      summary: 'marker summary',
+      trigger: 'automatic',
+      signature: 'marker-sig',
+      persistedMemory: {
+        schemaVersion: 1,
+        coveredUntilMessageId: 'assistant-2',
+        updatedAt: 5,
+        compactionCount: 1,
+        summarizedMessages: 4,
+        lastTrigger: 'automatic',
+        userGoals: ['用户目标 1', '用户目标 2'],
+        assistantProgress: ['助手进展 1', '助手进展 2'],
+        toolActivity: [],
+        filesReferenced: [],
+      },
+    });
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'user',
+      content: [{ type: 'text', text: '用户目标 3' }],
+      messageId: 'user-3',
+      createdAt: 6,
+    });
+    appendSessionMessage({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      content: [{ type: 'text', text: '助手进展 3' }],
+      messageId: 'assistant-3',
+      createdAt: 7,
+    });
+
+    const stored = listSessionMessages({ sessionId: 'session-1', userId: 'user-1' });
+    const visible = filterVisibleSessionMessages(stored);
+    const prepared = buildPreparedUpstreamConversation(stored, {
+      contextWindow: 128_000,
+      llmCompactionSummary: 'metadata summary',
+      persistedMemory: {
+        schemaVersion: 1,
+        coveredUntilMessageId: 'assistant-1',
+        updatedAt: 8,
+        compactionCount: 99,
+        summarizedMessages: 2,
+        lastTrigger: 'manual',
+        userGoals: [],
+        assistantProgress: [],
+        toolActivity: [],
+        filesReferenced: [],
+      },
+    });
+
+    expect(stored).toHaveLength(7);
+    expect(visible).toHaveLength(6);
+    expect(prepared.messages[0]).toMatchObject({
+      role: 'system',
+      content: expect.stringContaining('marker summary'),
+    });
+    expect(prepared.messages[1]).toMatchObject({ role: 'user', content: '用户目标 3' });
+    expect(prepared.messages[0]?.content).not.toContain('metadata summary');
+  });
+
   it('rebuilds compaction memory from omitted history when covered boundary is missing', async () => {
-    const { buildPreparedUpstreamConversation } = await import('../session-message-store.js');
+    const { buildDurableCompactionSummary } = await import('../session-message-store.js');
 
     const messages = Array.from({ length: 4 }, (_, index) => {
       const turn = index + 1;
@@ -1097,9 +1499,11 @@ describe('session message store', () => {
       ];
     }).flat();
 
-    const prepared = buildPreparedUpstreamConversation(messages, {
-      maxMessages: 2,
-      persistedMemory: {
+    const summary = buildDurableCompactionSummary({
+      trigger: 'automatic',
+      recentMessagesKept: 2,
+      messages,
+      existingMemory: {
         schemaVersion: 1,
         coveredUntilMessageId: 'assistant-missing',
         updatedAt: 1,
@@ -1115,17 +1519,15 @@ describe('session message store', () => {
       },
     });
 
-    expect(prepared.compaction).toBeDefined();
-    expect(prepared.compaction?.persistedMemory).toMatchObject({
+    expect(summary).not.toBeNull();
+    expect(summary?.persistedMemory).toMatchObject({
       compactionCount: 1,
-      coveredUntilMessageId: 'assistant-3',
-      summarizedMessages: 6,
+      coveredUntilMessageId: 'assistant-4',
+      summarizedMessages: 8,
       lastTrigger: 'automatic',
     });
-    expect(prepared.compaction?.structuredSummary).toContain('Cumulative summarized messages: 6');
-    expect(prepared.compaction?.structuredSummary).toContain(
-      'Covered until message id: assistant-3',
-    );
+    expect(summary?.structuredSummary).toContain('Cumulative summarized messages: 8');
+    expect(summary?.structuredSummary).toContain('Covered until message id: assistant-4');
   });
 
   it('switches to structured references using UTF-8 byte size instead of character count', async () => {

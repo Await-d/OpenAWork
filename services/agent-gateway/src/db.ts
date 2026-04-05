@@ -568,6 +568,8 @@ export async function migrate(): Promise<void> {
     CREATE TABLE IF NOT EXISTS team_audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      actor_email TEXT,
       action TEXT NOT NULL,
       entity_type TEXT NOT NULL,
       entity_id TEXT NOT NULL,
@@ -579,6 +581,8 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_team_audit_logs_user_created ON team_audit_logs(user_id, created_at DESC)',
   );
+  ensureColumn('team_audit_logs', 'actor_user_id', 'TEXT');
+  ensureColumn('team_audit_logs', 'actor_email', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS shared_session_comments (
@@ -593,6 +597,21 @@ export async function migrate(): Promise<void> {
   `);
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_shared_session_comments_owner_session_created ON shared_session_comments(owner_user_id, session_id, created_at ASC)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shared_session_presence (
+      owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      viewer_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      viewer_email TEXT NOT NULL,
+      first_seen_at_ms INTEGER NOT NULL,
+      last_seen_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (owner_user_id, session_id, viewer_user_id)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_shared_session_presence_owner_session_last_seen ON shared_session_presence(owner_user_id, session_id, last_seen_at_ms DESC)',
   );
 
   db.exec(`
