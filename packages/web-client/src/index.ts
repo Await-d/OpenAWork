@@ -10,18 +10,31 @@ export type {
 } from './gateway-ws.js';
 export { createCommandsClient } from './commands.js';
 export type { CommandsClient } from './commands.js';
+export { createNotificationsClient } from './notifications.js';
+export type {
+  NotificationPreferenceChannel,
+  NotificationPreferenceEventType,
+  NotificationPreferenceRecord,
+  NotificationRecord,
+  NotificationsClient,
+} from './notifications.js';
 export { createCapabilitiesClient } from './capabilities.js';
 export type { CapabilitiesClient } from './capabilities.js';
 export { createAgentsClient } from './agents.js';
 export type { AgentsClient } from './agents.js';
+export { createAgentProfilesClient } from './agent-profiles.js';
+export type { AgentProfileRecord, AgentProfilesClient } from './agent-profiles.js';
 export { createTeamClient } from './team.js';
 export type {
   CreateTeamMemberInput,
   CreateTeamMessageInput,
+  CreateTeamSessionShareInput,
   CreateTeamTaskInput,
+  TeamAuditLogRecord,
   TeamClient,
   TeamMemberRecord,
   TeamMessageRecord,
+  TeamSessionShareRecord,
   TeamTaskRecord,
   UpdateTeamTaskInput,
 } from './team.js';
@@ -39,6 +52,13 @@ export type {
   PermissionDecision,
   PermissionsClient,
 } from './permissions.js';
+export { createQuestionsClient } from './questions.js';
+export type {
+  PendingQuestionItem,
+  PendingQuestionOption,
+  PendingQuestionRequest,
+  QuestionsClient,
+} from './questions.js';
 export { createSessionsClient, HttpError } from './sessions.js';
 export type {
   DeleteSessionBlockReason,
@@ -52,6 +72,9 @@ export type {
   SessionFileChangesQueryOptions,
   SessionFileChangesSummary,
   SessionFileDiffEntry,
+  SessionMessageRatingRecord,
+  SessionMessageRatingValue,
+  SessionRecoveryReadModel,
   SessionRestoreApplyInput,
   SessionRestoreApplyResult,
   SessionSearchResult,
@@ -68,6 +91,10 @@ export type {
   SessionSnapshotRestorePreviewDiff,
   SessionSnapshotRestorePreviewResult,
   SessionSnapshotScopeKind,
+  SharedSessionCommentRecord,
+  SharedSessionDetailRecord,
+  SharedSessionPermission,
+  SharedSessionSummaryRecord,
   SessionTask,
   SessionTodo,
   SessionTodoLanes,

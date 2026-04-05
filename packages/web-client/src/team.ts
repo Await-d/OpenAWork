@@ -53,14 +53,55 @@ export interface CreateTeamMessageInput {
   type?: 'update' | 'question' | 'result' | 'error';
 }
 
+export interface TeamSessionShareRecord {
+  id: string;
+  sessionId: string;
+  sessionLabel: string;
+  workspacePath: string | null;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  permission: 'view' | 'comment' | 'operate';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamAuditLogRecord {
+  id: string;
+  action: 'share_created' | 'share_deleted' | 'share_permission_updated';
+  entityType: 'session_share';
+  entityId: string;
+  summary: string;
+  detail: string | null;
+  createdAt: string;
+}
+
+export interface CreateTeamSessionShareInput {
+  sessionId: string;
+  memberId: string;
+  permission?: 'view' | 'comment' | 'operate';
+}
+
 export interface TeamClient {
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
+  listAuditLogs(token: string, options?: { limit?: number }): Promise<TeamAuditLogRecord[]>;
   listTasks(token: string): Promise<TeamTaskRecord[]>;
   createTask(token: string, input: CreateTeamTaskInput): Promise<TeamTaskRecord>;
   updateTask(token: string, taskId: string, input: UpdateTeamTaskInput): Promise<void>;
   listMessages(token: string): Promise<TeamMessageRecord[]>;
   createMessage(token: string, input: CreateTeamMessageInput): Promise<TeamMessageRecord>;
+  listSessionShares(token: string): Promise<TeamSessionShareRecord[]>;
+  createSessionShare(
+    token: string,
+    input: CreateTeamSessionShareInput,
+  ): Promise<TeamSessionShareRecord>;
+  updateSessionShare(
+    token: string,
+    shareId: string,
+    input: { permission: TeamSessionShareRecord['permission'] },
+  ): Promise<TeamSessionShareRecord>;
+  deleteSessionShare(token: string, shareId: string): Promise<void>;
 }
 
 function buildAuthHeaders(token: string): HeadersInit {
@@ -69,6 +110,24 @@ function buildAuthHeaders(token: string): HeadersInit {
 
 export function createTeamClient(baseUrl: string): TeamClient {
   return {
+    async listAuditLogs(
+      token: string,
+      options?: { limit?: number },
+    ): Promise<TeamAuditLogRecord[]> {
+      const params = new URLSearchParams();
+      if (typeof options?.limit === 'number') {
+        params.set('limit', String(options.limit));
+      }
+      const suffix = params.toString();
+      const response = await fetch(`${baseUrl}/team/audit-logs${suffix ? `?${suffix}` : ''}`, {
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load team audit logs: ${response.status}`);
+      }
+      return (await response.json()) as TeamAuditLogRecord[];
+    },
+
     async listMembers(token: string): Promise<TeamMemberRecord[]> {
       const response = await fetch(`${baseUrl}/team/members`, {
         headers: buildAuthHeaders(token),
@@ -156,6 +215,69 @@ export function createTeamClient(baseUrl: string): TeamClient {
         throw new Error(`Failed to create team message: ${response.status}`);
       }
       return (await response.json()) as TeamMessageRecord;
+    },
+
+    async listSessionShares(token: string): Promise<TeamSessionShareRecord[]> {
+      const response = await fetch(`${baseUrl}/team/session-shares`, {
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load session shares: ${response.status}`);
+      }
+      return (await response.json()) as TeamSessionShareRecord[];
+    },
+
+    async createSessionShare(
+      token: string,
+      input: CreateTeamSessionShareInput,
+    ): Promise<TeamSessionShareRecord> {
+      const response = await fetch(`${baseUrl}/team/session-shares`, {
+        method: 'POST',
+        headers: {
+          ...buildAuthHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to create session share: ${response.status}`);
+      }
+      return (await response.json()) as TeamSessionShareRecord;
+    },
+
+    async deleteSessionShare(token: string, shareId: string): Promise<void> {
+      const response = await fetch(
+        `${baseUrl}/team/session-shares/${encodeURIComponent(shareId)}`,
+        {
+          method: 'DELETE',
+          headers: buildAuthHeaders(token),
+        },
+      );
+      if (!response.ok && response.status !== 204) {
+        throw new Error(`Failed to delete session share: ${response.status}`);
+      }
+    },
+
+    async updateSessionShare(
+      token: string,
+      shareId: string,
+      input: { permission: TeamSessionShareRecord['permission'] },
+    ): Promise<TeamSessionShareRecord> {
+      const response = await fetch(
+        `${baseUrl}/team/session-shares/${encodeURIComponent(shareId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to update session share: ${response.status}`);
+      }
+      return (await response.json()) as TeamSessionShareRecord;
     },
   };
 }

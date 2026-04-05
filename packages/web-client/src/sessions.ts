@@ -6,6 +6,8 @@ import type {
   Message,
   RunEvent,
 } from '@openAwork/shared';
+import type { PendingPermissionRequest } from './permissions.js';
+import type { PendingQuestionRequest } from './questions.js';
 
 export type SessionSnapshotScopeKind = 'request' | 'backup' | 'scope' | 'unknown';
 
@@ -262,6 +264,35 @@ export interface Session {
   fileChangesSummary?: SessionFileChangesSummary;
 }
 
+export interface SharedSessionCommentRecord {
+  authorEmail: string;
+  content: string;
+  createdAt: string;
+  id: string;
+  sessionId: string;
+}
+
+export type SharedSessionPermission = 'view' | 'comment' | 'operate';
+
+export interface SharedSessionSummaryRecord {
+  sessionId: string;
+  title: string | null;
+  stateStatus: string;
+  workspacePath: string | null;
+  sharedByEmail: string;
+  permission: SharedSessionPermission;
+  createdAt: string;
+  updatedAt: string;
+  shareCreatedAt: string;
+  shareUpdatedAt: string;
+}
+
+export interface SharedSessionDetailRecord {
+  comments: SharedSessionCommentRecord[];
+  share: SharedSessionSummaryRecord;
+  session: Session;
+}
+
 export interface SessionSearchResult {
   createdAtMs: number;
   messageId: string;
@@ -272,12 +303,33 @@ export interface SessionSearchResult {
   updatedAt: string;
 }
 
+export type SessionMessageRatingValue = 'up' | 'down';
+
+export interface SessionMessageRatingRecord {
+  messageId: string;
+  notes: string | null;
+  rating: SessionMessageRatingValue;
+  reason: string | null;
+  updatedAt: string;
+}
+
 export interface SessionActiveStream {
   clientRequestId: string;
   heartbeatAtMs: number;
   lastSeq: number;
   sessionId: string;
   startedAtMs: number;
+}
+
+export interface SessionRecoveryReadModel {
+  activeStream: SessionActiveStream | null;
+  children: Session[];
+  pendingPermissions: PendingPermissionRequest[];
+  pendingQuestions: PendingQuestionRequest[];
+  ratings: SessionMessageRatingRecord[];
+  session: Session;
+  tasks: SessionTask[];
+  todoLanes: SessionTodoLanes;
 }
 
 export interface SessionTask {
@@ -321,11 +373,30 @@ export interface DeleteSessionErrorData {
 
 export interface SessionsClient {
   list(token: string): Promise<Session[]>;
+  listSharedWithMe(
+    token: string,
+    options?: { limit?: number; offset?: number; signal?: AbortSignal },
+  ): Promise<SharedSessionSummaryRecord[]>;
   create(
     token: string,
     opts?: { title?: string; metadata?: Record<string, unknown> },
   ): Promise<Session>;
   get(token: string, sessionId: string): Promise<Session>;
+  getSharedWithMe(
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SharedSessionDetailRecord>;
+  createSharedComment(
+    token: string,
+    sessionId: string,
+    input: { content: string },
+  ): Promise<SharedSessionCommentRecord>;
+  getRecovery(
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionRecoveryReadModel>;
   getActiveStream(token: string, sessionId: string): Promise<SessionActiveStream | null>;
   getFileChangesReadModel(
     token: string,
@@ -379,6 +450,18 @@ export interface SessionsClient {
     query: string,
     options?: { limit?: number; signal?: AbortSignal },
   ): Promise<SessionSearchResult[]>;
+  listMessageRatings(
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionMessageRatingRecord[]>;
+  setMessageRating(
+    token: string,
+    sessionId: string,
+    messageId: string,
+    input: { rating: SessionMessageRatingValue; reason?: string; notes?: string },
+  ): Promise<SessionMessageRatingRecord>;
+  deleteMessageRating(token: string, sessionId: string, messageId: string): Promise<void>;
   getTasks(
     token: string,
     sessionId: string,
@@ -459,6 +542,33 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       return data.sessions ?? [];
     },
 
+    async listSharedWithMe(token, options) {
+      const params = new URLSearchParams();
+      if (typeof options?.limit === 'number') {
+        params.set('limit', String(options.limit));
+      }
+      if (typeof options?.offset === 'number') {
+        params.set('offset', String(options.offset));
+      }
+      const suffix = params.toString();
+      const res = await fetch(
+        `${gatewayUrl}/sessions/shared-with-me${suffix ? `?${suffix}` : ''}`,
+        {
+          headers: authHeader(token),
+          signal: options?.signal,
+        },
+      );
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to list shared sessions: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      const data = (await res.json()) as { sessions?: SharedSessionSummaryRecord[] };
+      return data.sessions ?? [];
+    },
+
     async create(token, opts = {}) {
       const res = await fetch(`${gatewayUrl}/sessions`, {
         method: 'POST',
@@ -479,6 +589,53 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       return data.session;
     },
 
+    async getSharedWithMe(token, sessionId, options) {
+      const res = await fetch(`${gatewayUrl}/sessions/shared-with-me/${sessionId}`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to get shared session: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      return (await res.json()) as SharedSessionDetailRecord;
+    },
+
+    async createSharedComment(token, sessionId, input) {
+      const res = await fetch(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/comments`, {
+        method: 'POST',
+        headers: {
+          ...authHeader(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to create shared comment: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      const data = (await res.json()) as { comment: SharedSessionCommentRecord };
+      return data.comment;
+    },
+
+    async getRecovery(token, sessionId, options) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/recovery`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!res.ok) {
+        throw new HttpError(`Failed to get session recovery: ${res.status}`, res.status);
+      }
+      const data = (await res.json()) as { recovery: SessionRecoveryReadModel };
+      return data.recovery;
+    },
+
     async search(token, query, options) {
       const params = new URLSearchParams({ q: query });
       if (typeof options?.limit === 'number') {
@@ -497,6 +654,59 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       }
       const data = (await res.json()) as { results?: SessionSearchResult[] };
       return data.results ?? [];
+    },
+
+    async listMessageRatings(token, sessionId, options) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/message-ratings`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to load message ratings: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      const data = (await res.json()) as { ratings?: SessionMessageRatingRecord[] };
+      return data.ratings ?? [];
+    },
+
+    async setMessageRating(token, sessionId, messageId, input) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/${messageId}/rating`, {
+        method: 'PUT',
+        headers: {
+          ...authHeader(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to save message rating: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      const data = (await res.json()) as { rating?: SessionMessageRatingRecord };
+      if (!data.rating) {
+        throw new Error('Missing rating payload');
+      }
+      return data.rating;
+    },
+
+    async deleteMessageRating(token, sessionId, messageId) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/${messageId}/rating`, {
+        method: 'DELETE',
+        headers: authHeader(token),
+      });
+      if (!res.ok && res.status !== 204) {
+        throw new HttpError(
+          `Failed to delete message rating: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
     },
 
     async getActiveStream(token, sessionId) {
