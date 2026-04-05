@@ -35,6 +35,82 @@ interface UpstreamThinkingConfig {
   supportsThinking: boolean;
 }
 
+const ANTHROPIC_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  minimal: 1024,
+  low: 4096,
+  medium: 8192,
+  high: 16000,
+  xhigh: 31999,
+};
+
+const GEMINI_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  minimal: 1024,
+  low: 4096,
+  medium: 8192,
+  high: 16000,
+  xhigh: 24576,
+};
+
+function readObjectRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function mergeGeminiThinkingConfig(
+  body: UpstreamRequestBody,
+  value: Record<string, unknown>,
+): void {
+  const extraBody = readObjectRecord(body['extra_body']);
+  const googleBody = readObjectRecord(extraBody['google']);
+
+  body['extra_body'] = {
+    ...extraBody,
+    google: {
+      ...googleBody,
+      thinking_config: {
+        ...readObjectRecord(googleBody['thinking_config']),
+        ...value,
+      },
+    },
+  };
+}
+
+function mapAnthropicThinkingBudget(effort: ReasoningEffort): number {
+  return ANTHROPIC_THINKING_BUDGETS[effort];
+}
+
+function mapGeminiThinkingBudget(effort: ReasoningEffort): number {
+  return GEMINI_THINKING_BUDGETS[effort];
+}
+
+function mapGeminiThinkingLevel(effort: ReasoningEffort): 'low' | 'medium' | 'high' {
+  if (effort === 'minimal' || effort === 'low') {
+    return 'low';
+  }
+
+  if (effort === 'xhigh') {
+    return 'high';
+  }
+
+  return effort;
+}
+
+function supportsOpenRouterReasoning(model: string): boolean {
+  return model.includes('gpt') || model.includes('claude') || model.includes('gemini-3');
+}
+
+function isMoonshotThinkingModel(model: string): boolean {
+  return (
+    model.includes('kimi-k2.5') ||
+    model.includes('kimi-k2-thinking') ||
+    model.includes('kimi-k2p5') ||
+    model.includes('kimi-k2-5')
+  );
+}
+
 export function applyRequestOverridesToBody(
   body: UpstreamRequestBody,
   requestOverrides: RequestOverrides,
@@ -79,7 +155,8 @@ function applyThinkingConfigToBody(
   }
 
   const nextBody: UpstreamRequestBody = { ...body };
-  const model = typeof nextBody['model'] === 'string' ? nextBody['model'] : '';
+  const modelValue = typeof nextBody['model'] === 'string' ? nextBody['model'] : '';
+  const model = modelValue.toLowerCase();
 
   switch (thinking.providerType) {
     case 'openai':
@@ -105,8 +182,49 @@ function applyThinkingConfigToBody(
         delete nextBody['thinking'];
       }
       return nextBody;
+    case 'anthropic':
+      if (thinking.enabled) {
+        nextBody['thinking'] = {
+          type: 'enabled',
+          budget_tokens: mapAnthropicThinkingBudget(thinking.effort),
+        };
+      } else {
+        delete nextBody['thinking'];
+      }
+      return nextBody;
+    case 'gemini':
+      if (!thinking.enabled) {
+        mergeGeminiThinkingConfig(nextBody, {
+          thinking_budget: 0,
+        });
+        return nextBody;
+      }
+
+      if (model.includes('gemini-3')) {
+        mergeGeminiThinkingConfig(nextBody, {
+          include_thoughts: true,
+          thinking_level: mapGeminiThinkingLevel(thinking.effort),
+        });
+        return nextBody;
+      }
+
+      mergeGeminiThinkingConfig(nextBody, {
+        include_thoughts: true,
+        thinking_budget: mapGeminiThinkingBudget(thinking.effort),
+      });
+      return nextBody;
+    case 'openrouter':
+      if (!supportsOpenRouterReasoning(model)) {
+        return nextBody;
+      }
+
+      nextBody['reasoning'] = thinking.enabled ? { effort: thinking.effort } : { enabled: false };
+      return nextBody;
+    case 'qwen':
+      nextBody['enable_thinking'] = thinking.enabled;
+      return nextBody;
     case 'moonshot':
-      if (model === 'kimi-k2.5') {
+      if (isMoonshotThinkingModel(model)) {
         nextBody['thinking'] = { type: thinking.enabled ? 'enabled' : 'disabled' };
       }
       return nextBody;

@@ -230,6 +230,162 @@ describe('buildUpstreamRequestBody', () => {
 
     expect(body['thinking']).toEqual({ type: 'disabled' });
   });
+
+  it('maps Anthropic thinking settings into Claude thinking payloads', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'claude-sonnet-4-0',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: true,
+        effort: 'xhigh',
+        providerType: 'anthropic',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '请给出详细思考过程' }],
+    });
+
+    expect(body['thinking']).toEqual({
+      type: 'enabled',
+      budget_tokens: 31999,
+    });
+  });
+
+  it('maps Gemini thinking settings into openai-compatible extra_body payloads', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'gemini-2.5-pro',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: true,
+        effort: 'high',
+        providerType: 'gemini',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '请展开推理' }],
+    });
+
+    expect(body['extra_body']).toEqual({
+      google: {
+        thinking_config: {
+          include_thoughts: true,
+          thinking_budget: 16000,
+        },
+      },
+    });
+  });
+
+  it('uses zero thinking budget when Gemini request disables thinking', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'gemini-2.5-flash',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: false,
+        effort: 'medium',
+        providerType: 'gemini',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '关闭思考' }],
+    });
+
+    expect(body['extra_body']).toEqual({
+      google: {
+        thinking_config: {
+          thinking_budget: 0,
+        },
+      },
+    });
+  });
+
+  it('maps OpenRouter reasoning settings into reasoning payloads', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'openai/gpt-4.1',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: true,
+        effort: 'high',
+        providerType: 'openrouter',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '请展示 reasoning' }],
+    });
+
+    expect(body['reasoning']).toEqual({ effort: 'high' });
+  });
+
+  it('skips OpenRouter reasoning payloads for unsupported model families', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'deepseek/deepseek-chat-v3-0324',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: true,
+        effort: 'high',
+        providerType: 'openrouter',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '不应附加 reasoning 字段' }],
+    });
+
+    expect(body).not.toHaveProperty('reasoning');
+  });
+
+  it('maps Qwen thinking toggle into enable_thinking payloads', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'qwen3-235b-a22b',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: true,
+        effort: 'medium',
+        providerType: 'qwen',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '开启千问思考' }],
+    });
+
+    expect(body['enable_thinking']).toBe(true);
+  });
+
+  it('matches Moonshot thinking models case-insensitively', () => {
+    const body = buildUpstreamRequestBody({
+      protocol: 'chat_completions',
+      model: 'KIMI-K2.5',
+      maxTokens: 2048,
+      temperature: 1,
+      requestOverrides: {},
+      thinking: {
+        enabled: true,
+        effort: 'medium',
+        providerType: 'moonshot',
+        supportsThinking: true,
+      },
+      tools: [],
+      messages: [{ role: 'user', content: '开启 Kimi 思考' }],
+    });
+
+    expect(body['thinking']).toEqual({ type: 'enabled' });
+  });
 });
 
 describe('parseUpstreamDataLine', () => {
