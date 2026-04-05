@@ -5,19 +5,33 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@openAwork/shared": ["../../packages/shared/src/index.ts"],
       "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"],
+      "@openAwork/artifacts": ["../../packages/artifacts/src/index.ts"],
+      "@openAwork/browser-automation": ["../../packages/browser-automation/src/index.ts"],
+      "@openAwork/logger": ["../../packages/logger/src/index.ts"],
+      "@openAwork/lsp-client": ["../../packages/lsp-client/src/index.ts"],
       "@openAwork/mcp-client": ["../../packages/mcp-client/src/index.ts"],
+      "@openAwork/pairing": ["../../packages/pairing/src/index.ts"],
       "@openAwork/platform-adapter": ["../../packages/platform-adapter/src/index.ts"],
+      "@openAwork/shared": ["../../packages/shared/src/index.ts"],
+      "@openAwork/skill-registry": ["../../packages/skill-registry/src/index.ts"],
+      "@openAwork/skills": ["../../packages/skills/src/index.ts"],
       "@openAwork/skill-types": ["../../packages/skill-types/src/index.ts"]
     }
   },
   "references": [
-    { "path": "../../packages/shared" },
     { "path": "../../packages/agent-core" },
-    { "path": "../../packages/skill-types" },
+    { "path": "../../packages/artifacts" },
+    { "path": "../../packages/browser-automation" },
+    { "path": "../../packages/logger" },
+    { "path": "../../packages/lsp-client" },
     { "path": "../../packages/mcp-client" },
-    { "path": "../../packages/platform-adapter" }
+    { "path": "../../packages/pairing" },
+    { "path": "../../packages/platform-adapter" },
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/skill-registry" },
+    { "path": "../../packages/skills" },
+    { "path": "../../packages/skill-types" }
   ],
   "include": ["src"]
 }
