@@ -34,6 +34,7 @@ import { streamRoutes } from './routes/stream-routes-plugin.js';
 import { usageRoutes } from './routes/usage.js';
 import { agentsRoutes } from './routes/agents.js';
 import { teamRoutes } from './routes/team.js';
+import { agentProfilesRoutes } from './routes/agent-profiles.js';
 import { settingsRoutes } from './routes/settings.js';
 import { workflowRoutes } from './routes/workflows.js';
 import webStaticPlugin from './web-static.js';
@@ -50,6 +51,7 @@ import { reconcileAllSessionRuntimes } from './session-runtime-reconciler.js';
 import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
+import { notificationsRoutes } from './routes/notifications.js';
 
 const app = Fastify({ logger: true, disableRequestLogging: true });
 
@@ -68,6 +70,7 @@ await app.register(streamRoutes);
 await app.register(usageRoutes);
 await app.register(agentsRoutes);
 await app.register(teamRoutes);
+await app.register(agentProfilesRoutes);
 await app.register(settingsRoutes);
 await app.register(workflowRoutes);
 await app.register(webStaticPlugin);
@@ -85,6 +88,7 @@ await app.register(skillsRoutes);
 await app.register(capabilitiesRoutes);
 await app.register(pairingRoutes);
 await app.register(memoriesRoutes);
+await app.register(notificationsRoutes);
 
 app.get('/health', (request, reply) => {
   const { step } = startRequestWorkflow(request, 'gateway.health');
