@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { PermissionPrompt } from '@openAwork/shared-ui';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
@@ -7,6 +9,7 @@ import type {
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
+import QuestionPromptCard from '../../components/QuestionPromptCard.js';
 
 const panelStyle: React.CSSProperties = {
   display: 'flex',
@@ -90,6 +93,12 @@ export function getMessageTypeMeta(type: TeamMessageRecord['type']) {
 
 export function getAuditActionMeta(action: TeamAuditLogRecord['action']) {
   switch (action) {
+    case 'shared_comment_created':
+      return { label: '共享评论', style: pillStyle('#f9a8d4', 'rgba(236, 72, 153, 0.16)') };
+    case 'shared_permission_replied':
+      return { label: '权限处理', style: pillStyle('#c4b5fd', 'rgba(139, 92, 246, 0.18)') };
+    case 'shared_question_replied':
+      return { label: '问题处理', style: pillStyle('#fcd34d', 'rgba(245, 158, 11, 0.18)') };
     case 'share_permission_updated':
       return { label: '权限变更', style: pillStyle('#93c5fd', 'rgba(59, 130, 246, 0.16)') };
     case 'share_deleted':
@@ -656,10 +665,21 @@ export function TeamSessionSharesPanel({
 interface TeamSharedSessionsPanelProps {
   commentDraft: string;
   onCommentDraftChange: (value: string) => void;
+  onReplyPermission: (
+    requestId: string,
+    decision: 'once' | 'session' | 'permanent' | 'reject',
+  ) => void;
+  onReplyQuestion: (input: {
+    answers?: string[][];
+    requestId: string;
+    status: 'answered' | 'dismissed';
+  }) => void;
   onSubmitComment: () => void;
   selectedSessionDetail: SharedSessionDetailRecord | null;
   selectedSessionId: string | null;
   sharedCommentBusy: boolean;
+  sharedOperateBusy: boolean;
+  sharedOperateError: string | null;
   sharedSessionLoading: boolean;
   sharedSessions: SharedSessionSummaryRecord[];
   onSelectSession: (sessionId: string) => void;
@@ -668,19 +688,63 @@ interface TeamSharedSessionsPanelProps {
 export function TeamSharedSessionsPanel({
   commentDraft,
   onCommentDraftChange,
+  onReplyPermission,
+  onReplyQuestion,
   onSubmitComment,
   selectedSessionDetail,
   selectedSessionId,
   sharedCommentBusy,
+  sharedOperateBusy,
+  sharedOperateError,
   sharedSessionLoading,
   sharedSessions,
   onSelectSession,
 }: TeamSharedSessionsPanelProps) {
   const previewMessages = (selectedSessionDetail?.session.messages ?? []).slice(-8);
   const sharedComments = selectedSessionDetail?.comments ?? [];
+  const sharedPresence = selectedSessionDetail?.presence ?? [];
+  const activeViewers = sharedPresence.filter((entry) => entry.active);
+  const pendingPermission = selectedSessionDetail?.pendingPermissions[0] ?? null;
+  const pendingQuestion = selectedSessionDetail?.pendingQuestions[0] ?? null;
   const canComment =
     selectedSessionDetail?.share.permission === 'comment' ||
     selectedSessionDetail?.share.permission === 'operate';
+  const canOperate = selectedSessionDetail?.share.permission === 'operate';
+  const [questionAnswers, setQuestionAnswers] = useState<string[][]>([]);
+
+  useEffect(() => {
+    if (!pendingQuestion) {
+      setQuestionAnswers([]);
+      return;
+    }
+
+    setQuestionAnswers((current) => {
+      if (current.length === pendingQuestion.questions.length) {
+        return current;
+      }
+      return pendingQuestion.questions.map(() => []);
+    });
+  }, [pendingQuestion]);
+
+  const handleToggleQuestionOption = (
+    questionIndex: number,
+    optionLabel: string,
+    multiple: boolean,
+  ) => {
+    setQuestionAnswers((current) => {
+      const next = current.map((answers) => [...answers]);
+      const existing = next[questionIndex] ?? [];
+      const selected = existing.includes(optionLabel);
+      if (multiple) {
+        next[questionIndex] = selected
+          ? existing.filter((answer) => answer !== optionLabel)
+          : [...existing, optionLabel];
+      } else {
+        next[questionIndex] = selected ? [] : [optionLabel];
+      }
+      return next;
+    });
+  };
 
   return (
     <section style={panelStyle}>
@@ -772,6 +836,57 @@ export function TeamSharedSessionsPanel({
                   <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
                     工作区：{formatWorkspacePath(selectedSessionDetail.share.workspacePath)}
                   </span>
+                </div>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                      在线查看者
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      {activeViewers.length > 0
+                        ? `${activeViewers.length} 人在线`
+                        : `${sharedPresence.length} 人最近查看`}
+                    </span>
+                  </div>
+                  {sharedPresence.length === 0 ? (
+                    <div style={{ color: 'var(--text-3)' }}>
+                      还没有查看轨迹。有人打开这条共享会话后，这里会显示最近查看者。
+                    </div>
+                  ) : (
+                    sharedPresence.map((entry) => (
+                      <div
+                        key={entry.viewerUserId}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          alignItems: 'center',
+                          padding: 10,
+                          borderRadius: 12,
+                          border: '1px solid color-mix(in srgb, var(--border) 82%, transparent)',
+                          background:
+                            'color-mix(in srgb, var(--surface) 96%, rgba(91, 140, 255, 0.05))',
+                        }}
+                      >
+                        <div style={{ display: 'grid', gap: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                            {entry.viewerEmail}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                            最近查看：{new Date(entry.lastSeenAt).toLocaleString('zh-CN')}
+                          </span>
+                        </div>
+                        <span
+                          style={pillStyle(
+                            entry.active ? '#86efac' : '#cbd5f5',
+                            entry.active ? 'rgba(34, 197, 94, 0.18)' : 'rgba(148, 163, 184, 0.16)',
+                          )}
+                        >
+                          {entry.active ? '在线' : '最近查看'}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <div style={{ display: 'grid', gap: 10 }}>
                   {previewMessages.length === 0 ? (
@@ -873,6 +988,57 @@ export function TeamSharedSessionsPanel({
                     </div>
                   ) : null}
                 </div>
+                {canOperate && pendingPermission ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                      待审批权限
+                    </span>
+                    <PermissionPrompt
+                      requestId={pendingPermission.requestId}
+                      toolName={pendingPermission.toolName}
+                      scope={pendingPermission.scope}
+                      reason={pendingPermission.reason}
+                      riskLevel={pendingPermission.riskLevel}
+                      previewAction={pendingPermission.previewAction}
+                      errorMessage={sharedOperateError ?? undefined}
+                      onDecide={onReplyPermission}
+                      style={{ maxWidth: '100%', position: 'static', boxShadow: 'none' }}
+                    />
+                  </div>
+                ) : null}
+                {canOperate && pendingQuestion ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                      待回答问题
+                    </span>
+                    <QuestionPromptCard
+                      answers={questionAnswers}
+                      errorMessage={sharedOperateError ?? undefined}
+                      pendingAction={sharedOperateBusy ? 'answered' : null}
+                      request={pendingQuestion}
+                      onDismiss={() =>
+                        onReplyQuestion({
+                          requestId: pendingQuestion.requestId,
+                          status: 'dismissed',
+                        })
+                      }
+                      onSubmit={() =>
+                        onReplyQuestion({
+                          answers: questionAnswers,
+                          requestId: pendingQuestion.requestId,
+                          status: 'answered',
+                        })
+                      }
+                      onToggleOption={handleToggleQuestionOption}
+                      style={{
+                        maxWidth: '100%',
+                        position: 'static',
+                        right: 'auto',
+                        bottom: 'auto',
+                      }}
+                    />
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -892,12 +1058,12 @@ export function TeamAuditPanel({ auditLogs }: TeamAuditPanelProps) {
       <TeamSectionHeader
         eyebrow="Audit trail"
         title="协作审计流"
-        description="把共享权限的新增、调整和取消留成一条可追溯的时间线，减少口头同步后的事实漂移。"
+        description="把共享权限、共享评论和共享操作都留成可追溯时间线，减少口头同步后的事实漂移。"
       />
       <div style={{ display: 'grid', gap: 10, maxHeight: 480, overflowY: 'auto', paddingRight: 4 }}>
         {auditLogs.length === 0 ? (
           <div className="content-card" style={{ padding: 14, color: 'var(--text-3)' }}>
-            还没有审计记录。共享会话开始运转后，这里会留下权限调整的真实轨迹。
+            还没有审计记录。共享会话开始运转后，这里会留下评论、权限与操作的真实轨迹。
           </div>
         ) : (
           auditLogs.map((log) => {
@@ -925,6 +1091,11 @@ export function TeamAuditPanel({ auditLogs }: TeamAuditPanelProps) {
                   <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
                     {log.detail}
                   </div>
+                ) : null}
+                {log.actorEmail ? (
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    执行人：{log.actorEmail}
+                  </span>
                 ) : null}
                 <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
                   {new Date(log.createdAt).toLocaleString('zh-CN')}

@@ -104,6 +104,8 @@ export function useTeamCollaboration() {
   const [selectedSharedSession, setSelectedSharedSession] =
     useState<SharedSessionDetailRecord | null>(null);
   const [sharedCommentBusy, setSharedCommentBusy] = useState(false);
+  const [sharedOperateBusy, setSharedOperateBusy] = useState(false);
+  const [sharedOperateError, setSharedOperateError] = useState<string | null>(null);
   const [sharedSessionLoading, setSharedSessionLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -256,15 +258,32 @@ export function useTeamCollaboration() {
     if (!accessToken || !selectedSharedSessionId) {
       setSelectedSharedSession(null);
       setSharedSessionLoading(false);
+      setSharedOperateError(null);
       return;
     }
 
     let cancelled = false;
     setSharedSessionLoading(true);
     loadSelectedSharedSessionDetail(selectedSharedSessionId)
-      .then((detail) => {
+      .then(async (detail) => {
+        if (!detail) {
+          return;
+        }
+
+        let nextDetail = detail;
+        try {
+          const presence = await sessionsClient.touchSharedPresence(
+            accessToken,
+            selectedSharedSessionId,
+          );
+          nextDetail = { ...detail, presence };
+        } catch (_error) {
+          nextDetail = detail;
+        }
+
         if (!cancelled) {
-          setSelectedSharedSession(detail);
+          setSelectedSharedSession(nextDetail);
+          setSharedOperateError(null);
         }
       })
       .catch((reason) => {
@@ -283,7 +302,42 @@ export function useTeamCollaboration() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, loadSelectedSharedSessionDetail, selectedSharedSessionId]);
+  }, [accessToken, loadSelectedSharedSessionDetail, selectedSharedSessionId, sessionsClient]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedSharedSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    const syncPresence = async () => {
+      try {
+        const presence = await sessionsClient.touchSharedPresence(
+          accessToken,
+          selectedSharedSessionId,
+        );
+        if (!cancelled) {
+          setSelectedSharedSession((current) =>
+            current && current.share.sessionId === selectedSharedSessionId
+              ? { ...current, presence }
+              : current,
+          );
+        }
+      } catch (_error) {
+        return;
+      }
+    };
+
+    void syncPresence();
+    const intervalId = window.setInterval(() => {
+      void syncPresence();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [accessToken, selectedSharedSessionId, sessionsClient]);
 
   const createSharedSessionComment = useCallback(
     async (sessionId: string, input: { content: string }) => {
@@ -298,6 +352,9 @@ export function useTeamCollaboration() {
         await sessionsClient.createSharedComment(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
         setSelectedSharedSession(refreshedDetail);
+        const snapshot = await loadSnapshot();
+        setAuditLogs(snapshot.auditLogs);
+        setSharedSessions(snapshot.sharedSessions);
         setFeedback({ message: '已发送共享评论', tone: 'success' });
         return true;
       } catch (reason) {
@@ -309,7 +366,73 @@ export function useTeamCollaboration() {
         setSharedCommentBusy(false);
       }
     },
-    [accessToken, loadSelectedSharedSessionDetail, sessionsClient],
+    [accessToken, loadSelectedSharedSessionDetail, loadSnapshot, sessionsClient],
+  );
+
+  const replySharedPermission = useCallback(
+    async (
+      sessionId: string,
+      input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+    ) => {
+      if (!accessToken) {
+        return false;
+      }
+
+      setSharedOperateBusy(true);
+      setSharedOperateError(null);
+      setFeedback(null);
+      try {
+        await sessionsClient.replySharedPermission(accessToken, sessionId, input);
+        const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
+        setSelectedSharedSession(refreshedDetail);
+        const snapshot = await loadSnapshot();
+        setAuditLogs(snapshot.auditLogs);
+        setSharedSessions(snapshot.sharedSessions);
+        setFeedback({ message: '已处理共享权限请求', tone: 'success' });
+        return true;
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : '处理共享权限请求失败';
+        setSharedOperateError(message);
+        setFeedback({ message, tone: 'error' });
+        return false;
+      } finally {
+        setSharedOperateBusy(false);
+      }
+    },
+    [accessToken, loadSelectedSharedSessionDetail, loadSnapshot, sessionsClient],
+  );
+
+  const replySharedQuestion = useCallback(
+    async (
+      sessionId: string,
+      input: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
+    ) => {
+      if (!accessToken) {
+        return false;
+      }
+
+      setSharedOperateBusy(true);
+      setSharedOperateError(null);
+      setFeedback(null);
+      try {
+        await sessionsClient.replySharedQuestion(accessToken, sessionId, input);
+        const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
+        setSelectedSharedSession(refreshedDetail);
+        const snapshot = await loadSnapshot();
+        setAuditLogs(snapshot.auditLogs);
+        setSharedSessions(snapshot.sharedSessions);
+        setFeedback({ message: '已处理共享提问', tone: 'success' });
+        return true;
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : '处理共享提问失败';
+        setSharedOperateError(message);
+        setFeedback({ message, tone: 'error' });
+        return false;
+      } finally {
+        setSharedOperateBusy(false);
+      }
+    },
+    [accessToken, loadSelectedSharedSessionDetail, loadSnapshot, sessionsClient],
   );
 
   const createMember = useCallback(
@@ -410,11 +533,15 @@ export function useTeamCollaboration() {
     loading,
     members,
     messages,
+    replySharedPermission,
+    replySharedQuestion,
     selectedSharedSession,
     selectedSharedSessionId,
     refresh,
     sessionShares,
     sharedCommentBusy,
+    sharedOperateBusy,
+    sharedOperateError,
     sharedSessionLoading,
     sharedSessions,
     sessions,

@@ -100,11 +100,14 @@ beforeEach(() => {
         json: async () => [
           {
             id: 'audit-1',
-            action: 'share_created',
-            entityType: 'session_share',
-            entityId: 'share-1',
-            summary: '已将“设计讨论”共享给 林雾（comment）',
-            detail: '会话：设计讨论；工作区：/repo/apps/web；成员：林雾；权限：comment',
+            action: 'shared_permission_replied',
+            actorEmail: 'viewer@openawork.local',
+            actorUserId: 'viewer-1',
+            entityType: 'permission_request',
+            entityId: 'perm-1',
+            summary: 'viewer@openawork.local 处理了“上线回顾”的权限请求（once）',
+            detail:
+              '会话：上线回顾；工作区：/repo/apps/api；工具：read_file；范围：/repo/apps/api；决策：once',
             createdAt: '2026-04-04T02:00:00.000Z',
           },
         ],
@@ -137,7 +140,7 @@ beforeEach(() => {
               stateStatus: 'paused',
               workspacePath: '/repo/apps/api',
               sharedByEmail: 'owner@openawork.local',
-              permission: 'comment',
+              permission: 'operate',
               createdAt: '2026-04-04T03:00:00.000Z',
               updatedAt: '2026-04-04T03:30:00.000Z',
               shareCreatedAt: '2026-04-04T04:00:00.000Z',
@@ -158,7 +161,7 @@ beforeEach(() => {
             stateStatus: 'paused',
             workspacePath: '/repo/apps/api',
             sharedByEmail: 'owner@openawork.local',
-            permission: 'comment',
+            permission: 'operate',
             createdAt: '2026-04-04T03:00:00.000Z',
             updatedAt: '2026-04-04T03:30:00.000Z',
             shareCreatedAt: '2026-04-04T04:00:00.000Z',
@@ -171,6 +174,52 @@ beforeEach(() => {
               authorEmail: 'viewer@openawork.local',
               content: '我补充了事故发生时间线。',
               createdAt: '2026-04-04T05:00:00.000Z',
+            },
+          ],
+          presence: [
+            {
+              viewerUserId: 'viewer-1',
+              viewerEmail: 'viewer@openawork.local',
+              firstSeenAt: '2026-04-04T04:45:00.000Z',
+              lastSeenAt: '2026-04-04T05:30:00.000Z',
+              active: true,
+            },
+            {
+              viewerUserId: 'viewer-2',
+              viewerEmail: 'observer@openawork.local',
+              firstSeenAt: '2026-04-04T03:45:00.000Z',
+              lastSeenAt: '2026-04-04T04:20:00.000Z',
+              active: false,
+            },
+          ],
+          pendingPermissions: [
+            {
+              requestId: 'perm-1',
+              sessionId: 'shared-session-1',
+              toolName: 'read_file',
+              scope: '/repo/apps/api',
+              reason: '需要读取配置',
+              riskLevel: 'medium',
+              previewAction: 'read package.json',
+              status: 'pending',
+              createdAt: '2026-04-04T05:20:00.000Z',
+            },
+          ],
+          pendingQuestions: [
+            {
+              requestId: 'question-1',
+              sessionId: 'shared-session-1',
+              toolName: 'Question',
+              title: '请选择下一步',
+              questions: [
+                {
+                  header: '下一步',
+                  question: '你希望我先处理什么？',
+                  options: [{ label: '修复', description: '先修问题' }],
+                },
+              ],
+              status: 'pending',
+              createdAt: '2026-04-04T05:25:00.000Z',
             },
           ],
           session: {
@@ -196,6 +245,47 @@ beforeEach(() => {
           },
         }),
       } as Response;
+    }
+
+    if (
+      url.pathname.endsWith('/sessions/shared-with-me/shared-session-1/presence') &&
+      method === 'POST'
+    ) {
+      return {
+        ok: true,
+        json: async () => ({
+          presence: [
+            {
+              viewerUserId: 'viewer-1',
+              viewerEmail: 'viewer@openawork.local',
+              firstSeenAt: '2026-04-04T04:45:00.000Z',
+              lastSeenAt: '2026-04-04T05:31:00.000Z',
+              active: true,
+            },
+            {
+              viewerUserId: 'viewer-2',
+              viewerEmail: 'observer@openawork.local',
+              firstSeenAt: '2026-04-04T03:45:00.000Z',
+              lastSeenAt: '2026-04-04T04:20:00.000Z',
+              active: false,
+            },
+          ],
+        }),
+      } as Response;
+    }
+
+    if (
+      url.pathname.endsWith('/sessions/shared-with-me/shared-session-1/permissions/reply') &&
+      method === 'POST'
+    ) {
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
+    }
+
+    if (
+      url.pathname.endsWith('/sessions/shared-with-me/shared-session-1/questions/reply') &&
+      method === 'POST'
+    ) {
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
     }
 
     if (
@@ -367,9 +457,22 @@ describe('TeamPage', () => {
     expect(container?.textContent).toContain('owner@openawork.local');
     expect(container?.textContent).toContain('请帮我复盘今天的上线。');
     expect(container?.textContent).toContain('我补充了事故发生时间线。');
+    expect(container?.textContent).toContain('在线查看者');
+    expect(container?.textContent).toContain('viewer@openawork.local');
+    expect(container?.textContent).toContain('observer@openawork.local');
     expect(container?.textContent).toContain('发送协作评论');
     expect(container?.textContent).toContain('协作审计流');
-    expect(container?.textContent).toContain('已将“设计讨论”共享给 林雾（comment）');
+    expect(container?.textContent).toContain(
+      'viewer@openawork.local 处理了“上线回顾”的权限请求（once）',
+    );
+    expect(container?.textContent).toContain('执行人：viewer@openawork.local');
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          input === 'http://localhost:3000/sessions/shared-with-me/shared-session-1/presence' &&
+          (init as RequestInit | undefined)?.method === 'POST',
+      ),
+    ).toBe(true);
   });
 
   it('creates a new team task from the composer', async () => {
@@ -555,6 +658,65 @@ describe('TeamPage', () => {
       fetchMock.mock.calls.some(
         ([input, init]) =>
           input === 'http://localhost:3000/sessions/shared-with-me/shared-session-1/comments' &&
+          (init as RequestInit | undefined)?.method === 'POST',
+      ),
+    ).toBe(true);
+  });
+
+  it('replies to a shared permission request from the operate panel', async () => {
+    await renderPage();
+
+    const approveButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('同意本次'),
+    );
+    expect(approveButton).toBeTruthy();
+
+    await act(async () => {
+      approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          input ===
+            'http://localhost:3000/sessions/shared-with-me/shared-session-1/permissions/reply' &&
+          (init as RequestInit | undefined)?.method === 'POST',
+      ),
+    ).toBe(true);
+  });
+
+  it('answers a shared pending question from the operate panel', async () => {
+    await renderPage();
+
+    const answerOption = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('修复'),
+    );
+    const submitAnswerButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.includes('提交回答'),
+    );
+    expect(answerOption).toBeTruthy();
+    expect(submitAnswerButton).toBeTruthy();
+
+    await act(async () => {
+      answerOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      submitAnswerButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          input ===
+            'http://localhost:3000/sessions/shared-with-me/shared-session-1/questions/reply' &&
           (init as RequestInit | undefined)?.method === 'POST',
       ),
     ).toBe(true);

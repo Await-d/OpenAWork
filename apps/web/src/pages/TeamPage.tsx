@@ -30,11 +30,15 @@ export default function TeamPage() {
     loading,
     members,
     messages,
+    replySharedPermission,
+    replySharedQuestion,
     selectedSharedSession,
     selectedSharedSessionId,
     tasks,
     sessionShares,
     sharedCommentBusy,
+    sharedOperateBusy,
+    sharedOperateError,
     sharedSessionLoading,
     sharedSessions,
     sessions,
@@ -351,6 +355,18 @@ export default function TeamPage() {
               <TeamSharedSessionsPanel
                 commentDraft={sharedCommentDraft}
                 onCommentDraftChange={setSharedCommentDraft}
+                onReplyPermission={(requestId, decision) => {
+                  if (!selectedSharedSessionId) {
+                    return;
+                  }
+                  void replySharedPermission(selectedSharedSessionId, { requestId, decision });
+                }}
+                onReplyQuestion={(input) => {
+                  if (!selectedSharedSessionId) {
+                    return;
+                  }
+                  void replySharedQuestion(selectedSharedSessionId, input);
+                }}
                 onSubmitComment={() => void handleCreateSharedComment()}
                 onSelectSession={(sessionId) => {
                   setSelectedSharedSessionId(sessionId);
@@ -359,6 +375,8 @@ export default function TeamPage() {
                 selectedSessionDetail={selectedSharedSession}
                 selectedSessionId={selectedSharedSessionId}
                 sharedCommentBusy={sharedCommentBusy}
+                sharedOperateBusy={sharedOperateBusy}
+                sharedOperateError={sharedOperateError}
                 sharedSessionLoading={sharedSessionLoading}
                 sharedSessions={sharedSessions}
               />

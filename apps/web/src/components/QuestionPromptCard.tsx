@@ -9,6 +9,7 @@ interface QuestionPromptCardProps {
   onToggleOption: (questionIndex: number, optionLabel: string, multiple: boolean) => void;
   pendingAction?: 'answered' | 'dismissed' | null;
   request: PendingQuestionRequest;
+  style?: CSSProperties;
 }
 
 export default function QuestionPromptCard({
@@ -19,6 +20,7 @@ export default function QuestionPromptCard({
   onToggleOption,
   pendingAction = null,
   request,
+  style,
 }: QuestionPromptCardProps) {
   const isSubmitting = pendingAction !== null;
   const isSubmitDisabled =
@@ -27,7 +29,7 @@ export default function QuestionPromptCard({
   const pendingLabel = pendingAction === 'dismissed' ? '正在处理跳过…' : '正在提交回答…';
 
   return (
-    <div style={containerStyle} aria-busy={isSubmitting}>
+    <div style={{ ...containerStyle, ...style }} aria-busy={isSubmitting}>
       <div style={headerRowStyle}>
         <span style={labelStyle}>会话等待回答</span>
         <span style={toolStyle}>{request.toolName}</span>
