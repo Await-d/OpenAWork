@@ -2,5 +2,6 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "tsBuildInfoFile": "/tmp/openawork-mcp-client.typecheck.tsbuildinfo"
-  }
+  },
+  "references": [{ "path": "../skill-types" }]
 }
