@@ -841,3 +841,43 @@ const normalizedMessages = messages.filter((message) => !isContextArtifactMessag
 - 当前不建议先做 installer/doctor；那是 overlay 产品化阶段工作，不是架构收敛第一步
 - 当前不建议把 oh-my-opencode 的 agents/hooks 原样搬进 OpenAWork；应先建立 ABI，再逐步迁入最有价值的增强能力
 - 当前建议优先处理发送链路的可观测性，否则后续很难判断“是否完整发送”
+
+### Phase 0 MVP 实施记录（2026-04-05）
+
+- 已在 `services/agent-gateway/src/session-message-store.ts` 为 `buildPreparedUpstreamConversation()` 增加结构化 `report`，覆盖：
+  - 输入消息数
+  - artifact 过滤数
+  - compaction boundary / safe window 裁剪数
+  - modified_files_summary 注入数
+  - tool_result 数与 reference 化数
+  - assistant tool_call 数
+  - 最终 upstream message 数
+- 已在 `services/agent-gateway/src/routes/stream-model-round.ts` 在发起 `fetchUpstreamStreamWithRetry()` 之前生成 transformation report，并通过 `writeAuditLog()` 以非错误审计事件 `llm:UPSTREAM_TRANSFORM` 写入。
+- 当前实现属于 **Phase 0 最小可用基线**：
+  - 已覆盖 prepared conversation 层与主发送汇合点
+  - 尚未把 report 拆成完整的三层 builder/transform/body 模块
+  - 尚未把所有审计结果投影到开发者 UI
+- 已完成 Oracle 建议的 3 个补强项：
+  - 为 `writeAuditLog()` 增加先于 `fetchUpstreamStreamWithRetry()` 的顺序断言
+  - 为 `compactSummaryInjected = true` 增加定点测试
+  - 为 `PreparedUpstreamConversationReport` 字段补充“message 级 / content 级 / 协议级”语义注释
+
+### Phase 1 起步实施记录（2026-04-05）
+
+- 已新增 `packages/shared/src/message-schema.ts`，先抽离**现有核心 message/content 类型**，作为后续 canonical 化的落点：
+  - `MessageRole`
+  - `TextContent`
+  - `ToolCallContent`
+  - `ToolResultContent`
+  - `FileBackupRef / FileDiffContent`
+  - `ModifiedFilesSummaryContent`
+  - `MessageContent`
+  - `Message`
+  - `ToolSurfaceProfile / ToolCallObservabilityAnnotation`
+- 已更新 `packages/shared/src/index.ts`，改为从 `message-schema.ts` 重导出上述消息 schema 类型，保持 `@openAwork/shared` 根入口兼容。
+- 已验证 `packages/shared`、`packages/agent-core`、`services/agent-gateway`、`apps/web` 构建不受影响，说明本次抽离是安全的最小切入。
+- 手动 QA：已直接加载 `packages/shared/dist/index.js`，确认根入口导出仍可被正常消费。
+- 当前这一步 **不包含**：
+  - `StreamChunk` / `RunEvent` / task 类型抽离
+  - gateway 持久化层改写为 canonical truth
+  - Web/Mobile 解析器切换到新运行时 schema parser

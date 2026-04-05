@@ -106,6 +106,12 @@
 - [2026-04-05] 共享只读详情返回体必须保证 `share.stateStatus` 与 `session.state_status` 一致；如果详情先做 runtime reconcile，而摘要仍返回旧状态，会在同一响应里制造语义漂移。
 - [2026-04-05] `comment` 权限的最小真实闭环采用 **专用共享评论链**：用 `shared_session_comments` 承载共享会话评论，`view` 只能读评论，`comment / operate` 才能写；不要把共享评论混进全局 team message 板，否则权限边界会变糊。
 - [2026-04-05] 共享评论创建的 POST 返回体应尽量回读 durable `created_at`，并显式覆盖 `view` 读评论、`operate` 写评论这两个边界；否则会留下时间格式漂移和权限覆盖面不足的隐患。
+- [2026-04-05] `operate` 权限的最小真实闭环采用 **共享入口内处理待审批/待回答交互**：不要直接放开 owner 的完整 Chat 写链；先让 `operate` 在 `/sessions/shared-with-me/:sessionId` 的上下文里处理 `pendingPermissions / pendingQuestions`，既能提供真实操作能力，又能保持授权边界清晰。
+- [2026-04-05] 共享入口里的 `pendingPermissions / pendingQuestions` 在返回前必须先做 expire 清理，并显式覆盖 `comment` 403 / `operate` 可执行的 route-level 回归；否则 operate 用户会看到已过期请求，且权限边界容易在后续回归中漂移。
+- [2026-04-05] 团队协作的共享链必须带 actor 审计：仅记录“发生了什么”不够，`shared_comment_created / shared_permission_replied / shared_question_replied` 这类动作都要把 `actor_email` 写进 `team_audit_logs`，并在 TeamPage 审计流里直接展示执行人。
+- [2026-04-05] actor 审计的回归不能只靠 audit list 结果间接证明，owner 侧 `share_created / share_permission_updated / share_deleted` 也要在 route 测试里直接断言 `actorEmail / actorUserId` 已落库。
+- [2026-04-06] presence/shared viewing 的最小真实闭环采用 **shared detail + heartbeat**：共享详情直接返回最近查看者列表，选中共享会话后通过 `POST /sessions/shared-with-me/:sessionId/presence` 刷新 `lastSeenAt`，TeamPage 则展示在线/最近查看者。先把 shared viewing 做实，再考虑更重的 shared editing。
+- [2026-04-06] shared presence 读取前必须清理已撤销共享关系的旧 viewer 记录，并在首次进入共享详情时立即合并 heartbeat 结果；否则会出现“被取消共享的人仍在最近查看者里”以及“刚进入但自己不立刻出现”的语义错误。
 - [2026-04-04] Chat 真正续流的二阶段演进采用 **attach-only SSE + request-scoped `RunEventCursor(clientRequestId, seq)`**：现有 `/stream` 与 `/stream/sse` 继续只负责“发起新请求”，刷新/重连后的 resume 通过独立 attach 通道完成；一阶段 `session.runEvents` 快照恢复展示保留为降级兜底层，而不是被替换掉。
 - [2026-04-04] OpenAWork 的 call hierarchy 对外 surface 采用 **单个高层读工具 `lsp_call_hierarchy`**，内部再编排 `prepareCallHierarchy / incomingCalls / outgoingCalls` 三步协议；不要把协议镜像步骤直接暴露给模型，以免 `CallHierarchyItem.data` 这类 opaque payload 在多轮中被错误传递。
 - [2026-04-04] OpenAWork richer LSP 当前正式支持面已扩展为 **definition / implementation / references / symbols / prepareRename / rename / hover / call hierarchy / diagnostics / touch**；其中更多 language server coverage 扩展与 status/event/UI diagnostics 继续延后到独立工作流。
