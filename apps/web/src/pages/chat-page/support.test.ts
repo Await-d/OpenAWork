@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clearResolvedPendingPermissionFromMessage,
   createAssistantEventContent,
   normalizeChatMessages,
   parseAssistantTraceContent,
@@ -130,6 +131,174 @@ describe('normalizeChatMessages', () => {
     ]);
   });
 
+  it('preserves resumedAfterApproval on failed tool results after message normalization', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-resume',
+        role: 'assistant',
+        createdAt: 1,
+        content: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-resume-1',
+            toolName: 'bash',
+            input: { command: 'find . | head -20' },
+          },
+        ],
+      },
+      {
+        id: 'tool-resume',
+        role: 'tool',
+        createdAt: 2,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-resume-1',
+            toolName: 'bash',
+            output: {
+              stderr:
+                'bash command cannot contain shell chaining, piping, or redirection operators',
+            },
+            isError: true,
+            resumedAfterApproval: true,
+          },
+        ],
+      },
+    ]);
+
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-resume-1',
+        toolName: 'bash',
+        input: { command: 'find . | head -20' },
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        resumedAfterApproval: true,
+        status: 'failed',
+      },
+    ]);
+  });
+
+  it('clears pending permission state after a later approved tool result arrives', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-perm-complete',
+        role: 'assistant',
+        createdAt: 1,
+        content: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-perm-complete-1',
+            toolName: 'bash',
+            input: { command: 'pwd' },
+          },
+        ],
+      },
+      {
+        id: 'tool-perm-pending',
+        role: 'tool',
+        createdAt: 2,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-perm-complete-1',
+            toolName: 'bash',
+            output: 'waiting for approval',
+            isError: false,
+            pendingPermissionRequestId: 'perm-complete-1',
+          },
+        ],
+      },
+      {
+        id: 'tool-perm-final',
+        role: 'tool',
+        createdAt: 3,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-perm-complete-1',
+            toolName: 'bash',
+            output: '/home/await/project/OpenAWork',
+            isError: false,
+            resumedAfterApproval: true,
+          },
+        ],
+      },
+    ]);
+
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-perm-complete-1',
+        toolName: 'bash',
+        input: { command: 'pwd' },
+        output: '/home/await/project/OpenAWork',
+        isError: false,
+        resumedAfterApproval: true,
+        status: 'completed',
+      },
+    ]);
+  });
+
+  it('merges final tool results back into persisted assistant_trace messages', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-trace-paused',
+        role: 'assistant',
+        createdAt: 1,
+        content: JSON.stringify({
+          type: 'assistant_trace',
+          payload: {
+            text: '',
+            toolCalls: [
+              {
+                toolCallId: 'call-assistant-trace-1',
+                toolName: 'bash',
+                input: { command: 'pwd' },
+                output: 'waiting for approval',
+                isError: false,
+                pendingPermissionRequestId: 'perm-assistant-trace-1',
+                status: 'paused',
+              },
+            ],
+          },
+        }),
+      },
+      {
+        id: 'tool-assistant-trace-final',
+        role: 'tool',
+        createdAt: 2,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-assistant-trace-1',
+            toolName: 'bash',
+            output: '/home/await/project/OpenAWork',
+            isError: false,
+            resumedAfterApproval: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-assistant-trace-1',
+        toolName: 'bash',
+        input: { command: 'pwd' },
+        output: '/home/await/project/OpenAWork',
+        isError: false,
+        resumedAfterApproval: true,
+        status: 'completed',
+      },
+    ]);
+  });
+
   it('uses durable tool_result.toolName when no matching tool_call exists', () => {
     const messages = normalizeChatMessages([
       {
@@ -154,6 +323,55 @@ describe('normalizeChatMessages', () => {
       toolName: 'codesearch',
       output: 'snippet',
     });
+  });
+
+  it('updates fallback tool-result assistant messages when a later result with the same toolCallId arrives', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'tool-fallback-pending',
+        role: 'tool',
+        createdAt: 1,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-fallback-1',
+            toolName: 'bash',
+            output: 'waiting for approval',
+            isError: false,
+            pendingPermissionRequestId: 'perm-fallback-1',
+          },
+        ],
+      },
+      {
+        id: 'tool-fallback-final',
+        role: 'tool',
+        createdAt: 2,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-fallback-1',
+            toolName: 'bash',
+            output: '/home/await/project/OpenAWork',
+            isError: false,
+            resumedAfterApproval: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-fallback-1',
+        toolName: 'bash',
+        input: {},
+        output: '/home/await/project/OpenAWork',
+        isError: false,
+        resumedAfterApproval: true,
+        status: 'completed',
+      },
+    ]);
   });
 
   it('matches tool results by toolCallId even when the same tool repeats with identical input', () => {
@@ -293,7 +511,7 @@ describe('normalizeChatMessages', () => {
     const copiedText = `工具：todowrite
 类型：TOOL
 状态：完成
-摘要：2 项待办
+摘要：2 项主待办
 
 输入
 {
@@ -313,7 +531,7 @@ describe('normalizeChatMessages', () => {
 
 输出
 {
-  "title": "2 todos",
+  "title": "2 main todos",
   "output": "[]",
   "metadata": {
     "todos": [
@@ -345,7 +563,7 @@ describe('normalizeChatMessages', () => {
         ],
       },
       output: {
-        title: '2 todos',
+        title: '2 main todos',
       },
     });
 
@@ -367,6 +585,108 @@ describe('normalizeChatMessages', () => {
         status: 'completed',
       },
     ]);
+  });
+
+  it('recovers copied temporary todo cards with lane-aware titles', () => {
+    const copiedText = `工具：subtodowrite
+类型：TOOL
+状态：完成
+摘要：1 项临时待办
+
+输入
+{
+  "todos": [
+    {
+      "content": "Record a follow-up for the temporary lane",
+      "priority": "low",
+      "status": "pending"
+    }
+  ]
+}
+
+输出
+{
+  "title": "1 temporary todo",
+  "output": "[]",
+  "metadata": {
+    "todos": [
+      {
+        "content": "Record a follow-up for the temporary lane",
+        "status": "pending",
+        "priority": "low"
+      }
+    ]
+  }
+}`;
+
+    expect(parseCopiedToolCardContent(copiedText)).toMatchObject({
+      toolName: 'subtodowrite',
+      kind: 'tool',
+      status: 'completed',
+      input: {
+        todos: [
+          {
+            content: 'Record a follow-up for the temporary lane',
+            priority: 'low',
+            status: 'pending',
+          },
+        ],
+      },
+      output: {
+        title: '1 temporary todo',
+      },
+    });
+  });
+
+  it('recovers copied todo cards when the output title is localized in chinese', () => {
+    const copiedText = `工具：todowrite
+类型：TOOL
+状态：完成
+摘要：1 项主待办
+
+输入
+{
+  "todos": [
+    {
+      "content": "整理主计划",
+      "priority": "high",
+      "status": "in_progress"
+    }
+  ]
+}
+
+输出
+{
+  "title": "1 项主待办",
+  "output": "[]",
+  "metadata": {
+    "todos": [
+      {
+        "content": "整理主计划",
+        "status": "in_progress",
+        "priority": "high"
+      }
+    ]
+  }
+}`;
+
+    expect(parseCopiedToolCardContent(copiedText)).toMatchObject({
+      toolName: 'todowrite',
+      kind: 'tool',
+      status: 'completed',
+      input: {
+        todos: [
+          {
+            content: '整理主计划',
+            priority: 'high',
+            status: 'in_progress',
+          },
+        ],
+      },
+      output: {
+        title: '1 项主待办',
+      },
+    });
   });
 
   it('normalizes localized Claude-first copied tool names back to canonical names', () => {
@@ -404,6 +724,96 @@ describe('normalizeChatMessages', () => {
         ],
       },
     });
+  });
+
+  it('preserves approval-resume semantics when recovering copied tool card text', () => {
+    const copiedText = `工具：bash
+类型：TOOL
+状态：恢复后失败
+摘要：find . | head -20
+恢复：审批已通过后继续执行
+
+输入
+{
+  "command": "find . | head -20"
+}
+
+错误输出
+{
+  "stderr": "bash command cannot contain shell chaining, piping, or redirection operators"
+}`;
+
+    expect(parseCopiedToolCardContent(copiedText)).toMatchObject({
+      toolName: 'bash',
+      status: 'failed',
+      resumedAfterApproval: true,
+      isError: true,
+    });
+  });
+
+  it('preserves approval-resume semantics from legacy tool_call payloads', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-legacy-resume',
+        role: 'assistant',
+        createdAt: 1,
+        content: JSON.stringify({
+          type: 'tool_call',
+          payload: {
+            toolCallId: 'legacy-call-1',
+            toolName: 'bash',
+            input: { command: 'find . | head -20' },
+            output: {
+              stderr:
+                'bash command cannot contain shell chaining, piping, or redirection operators',
+            },
+            isError: true,
+            resumedAfterApproval: true,
+            status: 'failed',
+          },
+        }),
+      },
+    ]);
+
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls[0]).toMatchObject({
+      toolCallId: 'legacy-call-1',
+      toolName: 'bash',
+      resumedAfterApproval: true,
+      status: 'failed',
+    });
+  });
+
+  it('removes resolved pending permission tool cards from local assistant messages', () => {
+    const updated = clearResolvedPendingPermissionFromMessage(
+      {
+        id: 'assistant-local-perm',
+        role: 'assistant',
+        content: JSON.stringify({
+          type: 'assistant_trace',
+          payload: {
+            text: '',
+            toolCalls: [
+              {
+                toolCallId: 'call-local-perm-1',
+                toolName: 'bash',
+                input: { command: 'pwd' },
+                output: 'waiting for approval',
+                isError: false,
+                pendingPermissionRequestId: 'perm-local-1',
+                status: 'paused',
+              },
+            ],
+          },
+        }),
+        createdAt: 1,
+        status: 'completed',
+        toolCallCount: 1,
+      },
+      'perm-local-1',
+    );
+
+    expect(updated).toBeNull();
   });
 
   it('keeps the local tail when a same-session snapshot is only a prefix of current messages', () => {

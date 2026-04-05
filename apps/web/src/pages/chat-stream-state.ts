@@ -32,6 +32,7 @@ export interface ChatToolCallEntry {
   output?: unknown;
   isError?: boolean;
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   status: 'running' | 'paused' | 'completed' | 'failed';
 }
 
@@ -57,6 +58,7 @@ export interface ToolCallCardModel {
   input: Record<string, unknown>;
   output?: unknown;
   isError: boolean;
+  resumedAfterApproval?: boolean;
   status: ChatToolCallEntry['status'];
 }
 
@@ -122,8 +124,65 @@ export function getToolCallCards(state: ChatRightPanelState): ToolCallCardModel[
     input: toolCall.input,
     output: toolCall.output,
     isError: toolCall.isError === true || toolCall.status === 'failed',
+    ...(toolCall.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     status: toolCall.status,
   }));
+}
+
+export function clearResolvedPendingPermissionToolCalls(
+  state: ChatRightPanelState,
+  requestId: string,
+  decision: Extract<RunEvent, { type: 'permission_replied' }>['decision'],
+): ChatRightPanelState {
+  const resumedToolCallIds = new Set(
+    state.toolCalls
+      .filter((toolCall) => toolCall.pendingPermissionRequestId === requestId)
+      .map((toolCall) => toolCall.toolCallId),
+  );
+
+  if (resumedToolCallIds.size === 0) {
+    return state;
+  }
+
+  return {
+    ...state,
+    toolCalls: state.toolCalls.map((toolCall) => {
+      if (!resumedToolCallIds.has(toolCall.toolCallId)) {
+        return toolCall;
+      }
+
+      const {
+        pendingPermissionRequestId: _resolvedPendingPermissionRequestId,
+        output: _waitingOutput,
+        ...baseToolCall
+      } = toolCall;
+
+      return {
+        ...baseToolCall,
+        isError: decision === 'reject',
+        ...(decision === 'reject' ? { output: '权限已拒绝，工具未执行。' } : {}),
+        status: decision === 'reject' ? ('failed' as const) : ('running' as const),
+      };
+    }),
+    planTasks: state.planTasks.map((task) =>
+      resumedToolCallIds.has(task.id)
+        ? {
+            ...task,
+            status: decision === 'reject' ? ('cancelled' as const) : ('in_progress' as const),
+            errorMessage: undefined,
+            terminalReason: decision === 'reject' ? 'permission_rejected' : undefined,
+          }
+        : task,
+    ),
+    dagNodes: state.dagNodes.map((node) =>
+      resumedToolCallIds.has(node.id)
+        ? {
+            ...node,
+            status: decision === 'reject' ? ('skipped' as const) : ('running' as const),
+          }
+        : node,
+    ),
+  };
 }
 
 export function applyChatRightPanelChunk(
@@ -187,10 +246,15 @@ export function applyChatRightPanelEvent(
   }
 
   if (event.type === 'permission_replied') {
+    const clearedState = clearResolvedPendingPermissionToolCalls(
+      state,
+      event.requestId,
+      event.decision,
+    );
     return {
-      ...state,
+      ...clearedState,
       agentEvents: [
-        ...state.agentEvents,
+        ...clearedState.agentEvents,
         createEvent('agent_done', `权限已响应：${formatPermissionDecision(event.decision)}`),
       ],
     };
@@ -396,6 +460,7 @@ function applyToolResultEvent(
   event: Extract<RunEvent, { type: 'tool_result' }>,
 ): ChatRightPanelState {
   const isPendingPermission = typeof event.pendingPermissionRequestId === 'string';
+  const resumedAfterApproval = event.resumedAfterApproval === true;
   const status = isPendingPermission
     ? ('paused' as const)
     : event.isError
@@ -410,6 +475,7 @@ function applyToolResultEvent(
     output: event.output,
     isError: isPendingPermission ? false : event.isError,
     pendingPermissionRequestId: event.pendingPermissionRequestId,
+    ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     status,
   });
 
@@ -449,12 +515,17 @@ function applyToolResultEvent(
           : event.isError
             ? event.reason === 'timeout'
               ? `工具超时：${event.toolName}`
-              : `工具失败：${event.toolName}`
+              : resumedAfterApproval
+                ? `审批后执行失败：${event.toolName}`
+                : `工具失败：${event.toolName}`
             : `工具完成：${event.toolName}`,
         isPendingPermission || event.isError
           ? event.reason === 'timeout'
             ? `原因：超时 · ${stringifyToolOutput(event.output)}`
-            : stringifyToolOutput(event.output)
+            : resumedAfterApproval
+              ? `审批已通过并恢复执行。
+${stringifyToolOutput(event.output)}`
+              : stringifyToolOutput(event.output)
           : undefined,
       ),
     ],

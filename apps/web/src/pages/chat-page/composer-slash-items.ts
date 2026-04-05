@@ -22,9 +22,9 @@ interface BuildComposerSlashItemsParams {
 }
 
 export function buildComposerSlashItems(params: BuildComposerSlashItemsParams): SlashCommandItem[] {
-  const commandItems = params.commandDescriptors
-    .filter((command) => command.execution === 'server')
-    .map((command) => createServerSlashCommandItem(command));
+  const commandItems = params.commandDescriptors.map((command) =>
+    createServerSlashCommandItem(command),
+  );
 
   const skillItems = (params.installedSkills ?? []).map<SlashCommandItem>((skill) => ({
     id: `skill:${skill.id}`,

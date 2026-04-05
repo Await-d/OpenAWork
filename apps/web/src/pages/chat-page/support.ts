@@ -47,6 +47,7 @@ export interface AssistantTraceToolCall {
   observability?: ToolCallObservabilityAnnotation;
   output?: unknown;
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   status?: 'running' | 'paused' | 'completed' | 'failed';
 }
 
@@ -62,6 +63,7 @@ interface CopiedToolCardSections {
   isError?: boolean;
   kind?: AssistantTraceToolCall['kind'];
   outputText?: string;
+  resumedAfterApproval?: boolean;
   status?: AssistantTraceToolCall['status'];
   toolName: string;
 }
@@ -442,31 +444,32 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
 
           return [
             {
-              kind:
-                record['kind'] === 'agent' ||
-                record['kind'] === 'mcp' ||
-                record['kind'] === 'skill' ||
-                record['kind'] === 'tool'
-                  ? record['kind']
-                  : undefined,
-              clientRequestId:
-                typeof record['clientRequestId'] === 'string'
-                  ? record['clientRequestId']
-                  : undefined,
-              fileDiffs: Array.isArray(record['fileDiffs'])
-                ? record['fileDiffs'].flatMap((item) => parseFileDiffContent(item))
-                : undefined,
-              toolCallId:
-                typeof record['toolCallId'] === 'string' ? record['toolCallId'] : undefined,
+              ...(record['kind'] === 'agent' ||
+              record['kind'] === 'mcp' ||
+              record['kind'] === 'skill' ||
+              record['kind'] === 'tool'
+                ? { kind: record['kind'] }
+                : {}),
+              ...(typeof record['clientRequestId'] === 'string'
+                ? { clientRequestId: record['clientRequestId'] }
+                : {}),
+              ...(Array.isArray(record['fileDiffs'])
+                ? { fileDiffs: record['fileDiffs'].flatMap((item) => parseFileDiffContent(item)) }
+                : {}),
+              ...(typeof record['toolCallId'] === 'string'
+                ? { toolCallId: record['toolCallId'] }
+                : {}),
               toolName: record['toolName'],
               input,
               output: record['output'],
               isError: record['isError'] === true,
-              observability: parseToolCallObservability(record['observability']),
-              pendingPermissionRequestId:
-                typeof record['pendingPermissionRequestId'] === 'string'
-                  ? record['pendingPermissionRequestId']
-                  : undefined,
+              ...(parseToolCallObservability(record['observability'])
+                ? { observability: parseToolCallObservability(record['observability']) }
+                : {}),
+              ...(typeof record['pendingPermissionRequestId'] === 'string'
+                ? { pendingPermissionRequestId: record['pendingPermissionRequestId'] }
+                : {}),
+              ...(record['resumedAfterApproval'] === true ? { resumedAfterApproval: true } : {}),
               status:
                 record['status'] === 'running' ||
                 record['status'] === 'paused' ||
@@ -492,6 +495,59 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
   } catch {
     return null;
   }
+}
+
+export function clearResolvedPendingPermissionFromMessage(
+  message: ChatMessage,
+  requestId: string,
+): ChatMessage | null {
+  if (message.role !== 'assistant') {
+    return message;
+  }
+
+  const assistantTrace = parseAssistantTraceContent(message.content);
+  if (!assistantTrace) {
+    return message;
+  }
+
+  const remainingToolCalls = assistantTrace.toolCalls.filter(
+    (toolCall) => toolCall.pendingPermissionRequestId !== requestId,
+  );
+  if (remainingToolCalls.length === assistantTrace.toolCalls.length) {
+    return message;
+  }
+
+  const hasReasoningBlocks = (assistantTrace.reasoningBlocks?.length ?? 0) > 0;
+  const hasModifiedFilesSummary = Boolean(assistantTrace.modifiedFilesSummary);
+  const hasText = assistantTrace.text.trim().length > 0;
+
+  if (
+    !hasText &&
+    !hasReasoningBlocks &&
+    !hasModifiedFilesSummary &&
+    remainingToolCalls.length === 0
+  ) {
+    return null;
+  }
+
+  const nextContent =
+    remainingToolCalls.length === 0 && !hasReasoningBlocks && !hasModifiedFilesSummary
+      ? assistantTrace.text
+      : createAssistantTraceContent({
+          ...(hasModifiedFilesSummary
+            ? { modifiedFilesSummary: assistantTrace.modifiedFilesSummary }
+            : {}),
+          ...(hasReasoningBlocks ? { reasoningBlocks: assistantTrace.reasoningBlocks } : {}),
+          text: assistantTrace.text,
+          toolCalls: remainingToolCalls,
+        });
+
+  return {
+    ...message,
+    content: nextContent,
+    modifiedFilesSummary: hasModifiedFilesSummary ? assistantTrace.modifiedFilesSummary : undefined,
+    toolCallCount: remainingToolCalls.length > 0 ? remainingToolCalls.length : undefined,
+  };
 }
 
 function parseCopiedToolCardJson(value: string): unknown {
@@ -538,6 +594,7 @@ function mapCopiedToolCardStatus(value: string | undefined): AssistantTraceToolC
 
   if (normalized === '完成') return 'completed';
   if (normalized === '失败') return 'failed';
+  if (normalized === '恢复后失败') return 'failed';
   if (normalized === '执行中') return 'running';
   if (
     normalized === '等待权限' ||
@@ -600,6 +657,7 @@ function parseCopiedToolCardSections(content: string): CopiedToolCardSections | 
   const typeLine = headerLines.find((line) => line.startsWith('类型：'));
   const statusLine = headerLines.find((line) => line.startsWith('状态：'));
   const summaryLine = headerLines.find((line) => line.startsWith('摘要：'));
+  const resumeLine = headerLines.find((line) => line.startsWith('恢复：'));
   if (!toolLine || !typeLine || !statusLine || !summaryLine) {
     return null;
   }
@@ -654,6 +712,7 @@ function parseCopiedToolCardSections(content: string): CopiedToolCardSections | 
     isError,
     kind: mapCopiedToolCardKind(typeLine.slice('类型：'.length)),
     outputText,
+    resumedAfterApproval: resumeLine?.slice('恢复：'.length).trim() === '审批已通过后继续执行',
     status: mapCopiedToolCardStatus(statusLine.slice('状态：'.length)),
     toolName: normalizeCopiedToolCardName(rawToolName),
   };
@@ -671,6 +730,7 @@ export function parseCopiedToolCardContent(content: string): AssistantTraceToolC
     input: parseCopiedToolCardInput(sections.inputText),
     output: sections.outputText ? parseCopiedToolCardJson(sections.outputText) : undefined,
     isError: sections.isError,
+    ...(sections.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     status: sections.status,
   };
 }
@@ -703,6 +763,7 @@ function parseLegacyToolCallContent(content: string): AssistantTraceToolCall | n
           : {},
       output: payload['output'],
       isError: payload['isError'] === true,
+      ...(payload['resumedAfterApproval'] === true ? { resumedAfterApproval: true } : {}),
       pendingPermissionRequestId:
         typeof payload['pendingPermissionRequestId'] === 'string'
           ? payload['pendingPermissionRequestId']
@@ -929,7 +990,9 @@ export function flattenWorkspaceFiles(
 }
 
 export function parseSessionModeMetadata(metadataJson: string | undefined): {
+  agentId?: string;
   dialogueMode: DialogueMode;
+  toolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   yoloMode: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
@@ -940,6 +1003,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
   if (!metadataJson) {
     return {
       dialogueMode: 'clarify',
+      toolSurfaceProfile: 'openawork',
       yoloMode: false,
       webSearchEnabled: false,
       thinkingEnabled: false,
@@ -950,20 +1014,28 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
   try {
     const parsed = JSON.parse(metadataJson) as {
       dialogueMode?: DialogueMode;
+      agentId?: string;
       yoloMode?: boolean;
       webSearchEnabled?: boolean;
       thinkingEnabled?: boolean;
       reasoningEffort?: ReasoningEffort;
       providerId?: string;
       modelId?: string;
+      toolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
     };
     return {
+      agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
       dialogueMode:
         parsed.dialogueMode === 'clarify' ||
         parsed.dialogueMode === 'coding' ||
         parsed.dialogueMode === 'programmer'
           ? parsed.dialogueMode
           : 'clarify',
+      toolSurfaceProfile:
+        parsed['toolSurfaceProfile'] === 'claude_code_simple' ||
+        parsed['toolSurfaceProfile'] === 'claude_code_default'
+          ? parsed['toolSurfaceProfile']
+          : 'openawork',
       yoloMode: parsed.yoloMode === true,
       webSearchEnabled: parsed.webSearchEnabled === true,
       thinkingEnabled: parsed.thinkingEnabled === true,
@@ -980,7 +1052,9 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
     };
   } catch {
     return {
+      agentId: undefined,
       dialogueMode: 'clarify',
+      toolSurfaceProfile: 'openawork',
       yoloMode: false,
       webSearchEnabled: false,
       thinkingEnabled: false,
@@ -1107,6 +1181,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
 
         if (role === 'assistant') {
           const legacyToolCall = parseLegacyToolCallContent(record['content']);
+          const assistantTrace = parseAssistantTraceContent(record['content']);
           const previousMessage = normalizedMessages[normalizedMessages.length - 1];
 
           if (legacyToolCall && previousMessage?.role === 'assistant') {
@@ -1123,6 +1198,29 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
               content: createAssistantTraceContent({ text: '', toolCalls: [legacyToolCall] }),
               toolCallCount: 1,
               tokenEstimate: nextMessage.tokenEstimate ?? 0,
+            });
+            continue;
+          }
+
+          if (assistantTrace) {
+            const messageIndex = normalizedMessages.length;
+            normalizedMessages.push({
+              ...nextMessage,
+              modifiedFilesSummary: assistantTrace.modifiedFilesSummary ?? undefined,
+              toolCallCount:
+                assistantTrace.toolCalls.length > 0 ? assistantTrace.toolCalls.length : undefined,
+            });
+
+            assistantTrace.toolCalls.forEach((toolCall) => {
+              if (!toolCall.toolCallId) {
+                return;
+              }
+
+              toolCallMap.set(toolCall.toolCallId, {
+                input: toolCall.input,
+                toolName: toolCall.toolName,
+              });
+              assistantMessageIndexByToolCallId.set(toolCall.toolCallId, messageIndex);
             });
             continue;
           }
@@ -1234,27 +1332,43 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
               ? { reasoningBlocks: parsedTrace.reasoningBlocks }
               : {}),
             text: parsedTrace.text,
-            toolCalls: parsedTrace.toolCalls.map((item) =>
-              item.toolName === (toolCall?.toolName ?? item.toolName) &&
-              (item.toolCallId
-                ? item.toolCallId === toolResult.toolCallId
-                : JSON.stringify(item.input) === JSON.stringify(toolCall?.input ?? item.input))
-                ? {
-                    ...item,
-                    clientRequestId: toolResult.clientRequestId,
-                    fileDiffs: toolResult.fileDiffs,
-                    output: toolResult.output,
-                    isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
-                    observability: toolResult.observability,
-                    pendingPermissionRequestId: toolResult.pendingPermissionRequestId,
-                    status: toolResult.pendingPermissionRequestId
-                      ? 'paused'
-                      : toolResult.isError
-                        ? 'failed'
-                        : 'completed',
-                  }
-                : item,
-            ),
+            toolCalls: parsedTrace.toolCalls.map((item) => {
+              const matchesToolResult =
+                item.toolName === (toolCall?.toolName ?? item.toolName) &&
+                (item.toolCallId
+                  ? item.toolCallId === toolResult.toolCallId
+                  : JSON.stringify(item.input) === JSON.stringify(toolCall?.input ?? item.input));
+
+              if (!matchesToolResult) {
+                return item;
+              }
+
+              const {
+                pendingPermissionRequestId: _stalePendingPermissionRequestId,
+                resumedAfterApproval: _staleResumedAfterApproval,
+                ...baseItem
+              } = item;
+
+              return {
+                ...baseItem,
+                ...(toolResult.clientRequestId
+                  ? { clientRequestId: toolResult.clientRequestId }
+                  : {}),
+                ...(toolResult.fileDiffs ? { fileDiffs: toolResult.fileDiffs } : {}),
+                output: toolResult.output,
+                isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
+                ...(toolResult.observability ? { observability: toolResult.observability } : {}),
+                ...(toolResult.pendingPermissionRequestId
+                  ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
+                  : {}),
+                ...(toolResult.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+                status: toolResult.pendingPermissionRequestId
+                  ? 'paused'
+                  : toolResult.isError
+                    ? 'failed'
+                    : 'completed',
+              };
+            }),
           });
         }
         continue;
@@ -1267,15 +1381,20 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           text: '',
           toolCalls: [
             {
-              clientRequestId: toolResult.clientRequestId,
-              fileDiffs: toolResult.fileDiffs,
+              ...(toolResult.clientRequestId
+                ? { clientRequestId: toolResult.clientRequestId }
+                : {}),
+              ...(toolResult.fileDiffs ? { fileDiffs: toolResult.fileDiffs } : {}),
               toolCallId: toolResult.toolCallId,
               toolName: toolResult.toolName ?? toolCall?.toolName ?? 'tool',
               input: toolCall?.input ?? {},
               output: toolResult.output,
               isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
-              observability: toolResult.observability,
-              pendingPermissionRequestId: toolResult.pendingPermissionRequestId,
+              ...(toolResult.observability ? { observability: toolResult.observability } : {}),
+              ...(toolResult.pendingPermissionRequestId
+                ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
+                : {}),
+              ...(toolResult.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
               status: toolResult.pendingPermissionRequestId
                 ? 'paused'
                 : toolResult.isError
@@ -1299,6 +1418,13 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
             ? 'error'
             : 'completed',
       });
+      assistantMessageIndexByToolCallId.set(toolResult.toolCallId, normalizedMessages.length - 1);
+      if (!toolCall) {
+        toolCallMap.set(toolResult.toolCallId, {
+          input: {},
+          toolName: toolResult.toolName ?? 'tool',
+        });
+      }
     }
   }
 
@@ -1327,6 +1453,24 @@ export function matchServerSlashCommand(
     commands.find(
       (command) =>
         command.execution === 'server' &&
+        command.label.toLowerCase() === commandToken.toLowerCase(),
+    ) ?? null
+  );
+}
+
+export function matchClientSlashCommand(
+  input: string,
+  commands: CommandDescriptor[],
+): CommandDescriptor | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('/')) return null;
+  const [commandToken] = trimmed.split(/\s+/, 1);
+  if (!commandToken) return null;
+
+  return (
+    commands.find(
+      (command) =>
+        command.execution === 'client' &&
         command.label.toLowerCase() === commandToken.toLowerCase(),
     ) ?? null
   );
@@ -1443,6 +1587,7 @@ function extractToolResults(rawContent: unknown[]): Array<{
   isError: boolean;
   observability?: ToolCallObservabilityAnnotation;
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
 }> {
   return rawContent.flatMap((item) => {
     if (!item || typeof item !== 'object') return [];
@@ -1450,20 +1595,23 @@ function extractToolResults(rawContent: unknown[]): Array<{
     if (content['type'] === 'tool_result' && typeof content['toolCallId'] === 'string') {
       return [
         {
-          clientRequestId:
-            typeof content['clientRequestId'] === 'string' ? content['clientRequestId'] : undefined,
-          fileDiffs: Array.isArray(content['fileDiffs'])
-            ? content['fileDiffs'].flatMap((item) => parseFileDiffContent(item))
-            : undefined,
+          ...(typeof content['clientRequestId'] === 'string'
+            ? { clientRequestId: content['clientRequestId'] }
+            : {}),
+          ...(Array.isArray(content['fileDiffs'])
+            ? { fileDiffs: content['fileDiffs'].flatMap((item) => parseFileDiffContent(item)) }
+            : {}),
           toolCallId: content['toolCallId'],
-          toolName: typeof content['toolName'] === 'string' ? content['toolName'] : undefined,
+          ...(typeof content['toolName'] === 'string' ? { toolName: content['toolName'] } : {}),
           output: content['output'],
           isError: content['isError'] === true,
-          observability: parseToolCallObservability(content['observability']),
-          pendingPermissionRequestId:
-            typeof content['pendingPermissionRequestId'] === 'string'
-              ? content['pendingPermissionRequestId']
-              : undefined,
+          ...(parseToolCallObservability(content['observability'])
+            ? { observability: parseToolCallObservability(content['observability']) }
+            : {}),
+          ...(typeof content['pendingPermissionRequestId'] === 'string'
+            ? { pendingPermissionRequestId: content['pendingPermissionRequestId'] }
+            : {}),
+          ...(content['resumedAfterApproval'] === true ? { resumedAfterApproval: true } : {}),
         },
       ];
     }

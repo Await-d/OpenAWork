@@ -3,6 +3,7 @@ import {
   applyChatRightPanelEvent,
   applyChatRightPanelChunk,
   buildChatRightPanelStateFromRunEvents,
+  clearResolvedPendingPermissionToolCalls,
   createInitialChatRightPanelState,
   getToolCallCards,
   startChatRightPanelRun,
@@ -244,6 +245,188 @@ describe('chat-stream-state', () => {
     ]);
   });
 
+  it('resumes pending tool calls after a permission reply while preserving their input context', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '调用 bash 工具');
+    const running = applyChatRightPanelChunk(started, {
+      type: 'tool_call_delta',
+      toolCallId: 'call_perm_clear',
+      toolName: 'bash',
+      inputDelta: '{"command":"pwd"}',
+    });
+
+    const paused = applyChatRightPanelEvent(running, {
+      type: 'tool_result',
+      toolCallId: 'call_perm_clear',
+      toolName: 'bash',
+      output: 'waiting for approval',
+      isError: false,
+      pendingPermissionRequestId: 'perm-clear-1',
+      eventId: 'evt-tool-perm-clear',
+      runId: 'run-tool-perm-clear',
+      occurredAt: 500,
+    });
+
+    const cleared = clearResolvedPendingPermissionToolCalls(paused, 'perm-clear-1', 'once');
+
+    expect(getToolCallCards(cleared)).toEqual([
+      {
+        toolCallId: 'call_perm_clear',
+        toolName: 'bash',
+        input: { command: 'pwd' },
+        isError: false,
+        status: 'running',
+      },
+    ]);
+    expect(cleared.planTasks).toEqual([
+      {
+        id: 'call_perm_clear',
+        label: 'bash',
+        status: 'in_progress',
+      },
+    ]);
+    expect(cleared.dagNodes.find((node) => node.id === 'call_perm_clear')).toMatchObject({
+      status: 'running',
+    });
+    expect(cleared.dagEdges.some((edge) => edge.target === 'call_perm_clear')).toBe(true);
+  });
+
+  it('marks pending tool calls as not executed when permission is rejected', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '调用 bash 工具');
+    const running = applyChatRightPanelChunk(started, {
+      type: 'tool_call_delta',
+      toolCallId: 'call_perm_reject',
+      toolName: 'bash',
+      inputDelta: '{"command":"pwd"}',
+    });
+
+    const paused = applyChatRightPanelEvent(running, {
+      type: 'tool_result',
+      toolCallId: 'call_perm_reject',
+      toolName: 'bash',
+      output: 'waiting for approval',
+      isError: false,
+      pendingPermissionRequestId: 'perm-reject-1',
+      eventId: 'evt-tool-perm-reject',
+      runId: 'run-tool-perm-reject',
+      occurredAt: 500,
+    });
+
+    const rejected = clearResolvedPendingPermissionToolCalls(paused, 'perm-reject-1', 'reject');
+
+    expect(getToolCallCards(rejected)).toEqual([
+      {
+        toolCallId: 'call_perm_reject',
+        toolName: 'bash',
+        input: { command: 'pwd' },
+        output: '权限已拒绝，工具未执行。',
+        isError: true,
+        status: 'failed',
+      },
+    ]);
+    expect(rejected.planTasks).toEqual([
+      {
+        id: 'call_perm_reject',
+        label: 'bash',
+        status: 'cancelled',
+        terminalReason: 'permission_rejected',
+      },
+    ]);
+    expect(rejected.dagNodes.find((node) => node.id === 'call_perm_reject')).toMatchObject({
+      status: 'skipped',
+    });
+  });
+
+  it('preserves resumed tool input when the final tool result arrives after permission reply', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '调用 bash 工具');
+    const running = applyChatRightPanelChunk(started, {
+      type: 'tool_call_delta',
+      toolCallId: 'call_perm_resume',
+      toolName: 'bash',
+      inputDelta: '{"command":"pwd"}',
+    });
+    const paused = applyChatRightPanelEvent(running, {
+      type: 'tool_result',
+      toolCallId: 'call_perm_resume',
+      toolName: 'bash',
+      output: 'waiting for approval',
+      isError: false,
+      pendingPermissionRequestId: 'perm-resume-1',
+      eventId: 'evt-tool-perm-resume',
+      runId: 'run-tool-perm-resume',
+      occurredAt: 501,
+    });
+    const replied = applyChatRightPanelEvent(paused, {
+      type: 'permission_replied',
+      requestId: 'perm-resume-1',
+      decision: 'once',
+      eventId: 'evt-perm-resume-1',
+      runId: 'run-tool-perm-resume',
+      occurredAt: 502,
+    });
+    const completed = applyChatRightPanelEvent(replied, {
+      type: 'tool_result',
+      toolCallId: 'call_perm_resume',
+      toolName: 'bash',
+      output: '/home/await/project/OpenAWork',
+      isError: false,
+      eventId: 'evt-tool-perm-resume-final',
+      runId: 'run-tool-perm-resume',
+      occurredAt: 503,
+    });
+
+    expect(getToolCallCards(completed)).toEqual([
+      {
+        toolCallId: 'call_perm_resume',
+        toolName: 'bash',
+        input: { command: 'pwd' },
+        output: '/home/await/project/OpenAWork',
+        isError: false,
+        status: 'completed',
+      },
+    ]);
+    expect(completed.dagEdges.some((edge) => edge.target === 'call_perm_resume')).toBe(true);
+  });
+
+  it('marks resumed approval failures distinctly in right-panel tool cards and events', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '恢复执行 bash');
+    const running = applyChatRightPanelChunk(started, {
+      type: 'tool_call_delta',
+      toolCallId: 'call_resume',
+      toolName: 'bash',
+      inputDelta: '{"command":"find . | head -20"}',
+    });
+
+    const state = applyChatRightPanelEvent(running, {
+      type: 'tool_result',
+      toolCallId: 'call_resume',
+      toolName: 'bash',
+      output: {
+        stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+      },
+      isError: true,
+      resumedAfterApproval: true,
+      eventId: 'evt-tool-resume',
+      runId: 'run-tool-resume',
+      occurredAt: 789,
+    });
+
+    expect(getToolCallCards(state)).toEqual([
+      {
+        toolCallId: 'call_resume',
+        toolName: 'bash',
+        input: { command: 'find . | head -20' },
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        resumedAfterApproval: true,
+        status: 'failed',
+      },
+    ]);
+    expect(state.agentEvents.at(-1)?.label).toContain('审批后执行失败：bash');
+    expect(state.agentEvents.at(-1)?.error).toContain('审批已通过并恢复执行');
+  });
+
   it('records permission and child-session events instead of discarding them', () => {
     const withPermission = applyChatRightPanelEvent(createInitialChatRightPanelState(), {
       type: 'permission_asked',
@@ -257,7 +440,18 @@ describe('chat-stream-state', () => {
       runId: 'run-perm-1',
       occurredAt: 123,
     });
-    const withReply = applyChatRightPanelEvent(withPermission, {
+    const withPendingTool = applyChatRightPanelEvent(withPermission, {
+      type: 'tool_result',
+      toolCallId: 'call-perm-1',
+      toolName: 'bash',
+      output: 'waiting for approval',
+      isError: false,
+      pendingPermissionRequestId: 'perm-1',
+      eventId: 'evt-tool-perm-1',
+      runId: 'run-perm-1',
+      occurredAt: 123,
+    });
+    const withReply = applyChatRightPanelEvent(withPendingTool, {
       type: 'permission_replied',
       requestId: 'perm-1',
       decision: 'once',
@@ -275,11 +469,66 @@ describe('chat-stream-state', () => {
       occurredAt: 125,
     });
 
+    expect(getToolCallCards(withReply)).toEqual([
+      {
+        toolCallId: 'call-perm-1',
+        toolName: 'bash',
+        input: {},
+        isError: false,
+        status: 'running',
+      },
+    ]);
     expect(withChild.agentEvents.map((event) => event.label)).toEqual([
       '等待权限：bash · pnpm test',
+      '等待权限：bash',
       '权限已响应：本次允许',
       '已创建子会话：子任务会话',
     ]);
+  });
+
+  it('does not revive rejected permission replies into running state', () => {
+    const withPendingTool = applyChatRightPanelEvent(createInitialChatRightPanelState(), {
+      type: 'tool_result',
+      toolCallId: 'call-perm-reject-event',
+      toolName: 'bash',
+      output: 'waiting for approval',
+      isError: false,
+      pendingPermissionRequestId: 'perm-reject-event',
+      eventId: 'evt-tool-perm-reject-event',
+      runId: 'run-perm-reject-event',
+      occurredAt: 123,
+    });
+    const withReply = applyChatRightPanelEvent(withPendingTool, {
+      type: 'permission_replied',
+      requestId: 'perm-reject-event',
+      decision: 'reject',
+      eventId: 'evt-perm-reject-event',
+      runId: 'run-perm-reject-event',
+      occurredAt: 124,
+    });
+
+    expect(getToolCallCards(withReply)).toEqual([
+      {
+        toolCallId: 'call-perm-reject-event',
+        toolName: 'bash',
+        input: {},
+        output: '权限已拒绝，工具未执行。',
+        isError: true,
+        status: 'failed',
+      },
+    ]);
+    expect(withReply.planTasks).toEqual([
+      {
+        id: 'call-perm-reject-event',
+        label: 'bash',
+        status: 'cancelled',
+        terminalReason: 'permission_rejected',
+      },
+    ]);
+    expect(withReply.dagNodes.find((node) => node.id === 'call-perm-reject-event')).toMatchObject({
+      status: 'skipped',
+    });
+    expect(withReply.agentEvents.at(-1)?.label).toBe('权限已响应：已拒绝');
   });
 
   it('records question asked and replied events for waiting states', () => {

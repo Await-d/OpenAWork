@@ -38,4 +38,23 @@ describe('buildComposerSlashItems', () => {
     expect(items).toHaveLength(1);
     expect(items[0]?.description).toBe('通用 agent');
   });
+
+  it('includes client-side /buddy command from the command registry', () => {
+    const items = buildComposerSlashItems({
+      commandDescriptors: [
+        {
+          id: 'slash-buddy',
+          label: '/buddy',
+          description: '打开 Buddy 面板',
+          contexts: ['composer'],
+          execution: 'client',
+          action: { kind: 'open_companion_panel' },
+        },
+      ],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.label).toBe('/buddy');
+    expect(items[0]?.insertText).toBe('/buddy ');
+  });
 });
