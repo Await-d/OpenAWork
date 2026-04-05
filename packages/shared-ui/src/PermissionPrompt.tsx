@@ -14,6 +14,8 @@ export interface PermissionPromptProps {
   reason: string;
   riskLevel: 'low' | 'medium' | 'high';
   previewAction?: string;
+  pendingDecision?: PermissionDecision | null;
+  errorMessage?: string;
   onDecide: (requestId: string, decision: PermissionDecision) => void;
   style?: CSSProperties;
 }
@@ -37,11 +39,17 @@ export function PermissionPrompt({
   reason,
   riskLevel,
   previewAction,
+  pendingDecision = null,
+  errorMessage,
   onDecide,
   style,
 }: PermissionPromptProps) {
   const riskColor = RISK_COLORS[riskLevel] ?? '#94a3b8';
   const decisionOptions = getPermissionDecisionOptions(riskLevel);
+  const activeDecision = pendingDecision
+    ? (decisionOptions.find((option) => option.decision === pendingDecision) ?? null)
+    : null;
+  const isSubmitting = activeDecision !== null;
 
   return (
     <div
@@ -54,8 +62,10 @@ export function PermissionPrompt({
         flexDirection: 'column',
         gap: 10,
         maxWidth: 400,
+        boxShadow: '0 18px 48px rgba(15, 23, 42, 0.35)',
         ...style,
       }}
+      aria-busy={isSubmitting}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>权限请求</span>
@@ -101,13 +111,41 @@ export function PermissionPrompt({
         </div>
       )}
 
+      {(isSubmitting || errorMessage) && (
+        <div
+          role={errorMessage ? 'alert' : 'status'}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            padding: '0.55rem 0.7rem',
+            borderRadius: 8,
+            border: errorMessage ? '1px solid rgba(248,113,113,0.28)' : `1px solid ${riskColor}33`,
+            background: errorMessage ? 'rgba(127, 29, 29, 0.22)' : `${riskColor}12`,
+            color: errorMessage ? '#fecaca' : 'var(--color-text, #f1f5f9)',
+            fontSize: 11,
+            lineHeight: 1.5,
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 12, lineHeight: 1.2 }}>
+            {errorMessage ? '⚠' : '⏳'}
+          </span>
+          <span>{errorMessage ?? `正在提交“${activeDecision?.label ?? '审批'}”，请稍候…`}</span>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
         {decisionOptions.map((option) => (
           <button
             key={option.decision}
             type="button"
+            aria-busy={pendingDecision === option.decision}
+            disabled={isSubmitting}
             onClick={() => onDecide(requestId, option.decision)}
-            style={btnStyle(option.color)}
+            style={btnStyle(option.color, {
+              active: pendingDecision === option.decision,
+              disabled: isSubmitting,
+            })}
           >
             {option.label}
           </button>
@@ -128,15 +166,21 @@ export function getPermissionDecisionOptions(
   ];
 }
 
-function btnStyle(color: string): CSSProperties {
+function btnStyle(
+  color: string,
+  options?: { active?: boolean; disabled?: boolean },
+): CSSProperties {
   return {
-    background: `${color}22`,
+    background: options?.active ? `${color}2f` : `${color}22`,
     color,
     border: `1px solid ${color}44`,
     borderRadius: 6,
     padding: '0.35rem 0.75rem',
     fontSize: 12,
-    cursor: 'pointer',
+    cursor: options?.disabled ? 'not-allowed' : 'pointer',
     fontWeight: 600,
+    opacity: options?.disabled ? 0.72 : 1,
+    transform: options?.active ? 'translateY(-1px)' : undefined,
+    transition: 'opacity 120ms ease, transform 120ms ease, background 120ms ease',
   };
 }

@@ -26,6 +26,7 @@ export interface ToolCallCardProps {
   input: Record<string, unknown>;
   output?: unknown;
   isError?: boolean;
+  resumedAfterApproval?: boolean;
   status?: ToolCardStatus;
   style?: CSSProperties;
 }
@@ -713,7 +714,7 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
   const displayPath = typeof fileLikePath === 'string' ? trimInputPath(fileLikePath) : undefined;
 
   if (normalizedToolName === 'todowrite' && Array.isArray(input['todos'])) {
-    return `${input['todos'].length} 项待办`;
+    return `${input['todos'].length} 项主待办`;
   }
 
   if (normalizedToolName === 'subtodowrite' && Array.isArray(input['todos'])) {
@@ -721,7 +722,7 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
   }
 
   if (normalizedToolName === 'todoread') {
-    return '读取当前待办';
+    return '读取当前主待办';
   }
 
   if (normalizedToolName === 'subtodoread') {
@@ -804,6 +805,14 @@ function summarizeOutputPreview(output: unknown): string | undefined {
 
   const record = asRecord(output);
   if (record) {
+    const todoMetadata = asRecord(record['metadata']);
+    if (Array.isArray(todoMetadata?.['todos'])) {
+      const title = readNonEmptyString(record['title']);
+      if (title) {
+        return truncateText(title, 120);
+      }
+    }
+
     for (const key of ['summary', 'message', 'result', 'stdout', 'text', 'detail']) {
       const value = readNonEmptyString(record[key]);
       if (value) {
@@ -1005,6 +1014,7 @@ function buildToolCopyText({
   input,
   isError,
   output,
+  resumedAfterApproval,
   statusLabel,
   summary,
   toolKindLabel,
@@ -1014,6 +1024,7 @@ function buildToolCopyText({
   input: Record<string, unknown>;
   isError?: boolean;
   output?: unknown;
+  resumedAfterApproval?: boolean;
   statusLabel: string;
   summary: string;
   toolKindLabel: string;
@@ -1024,6 +1035,10 @@ function buildToolCopyText({
     `状态：${statusLabel}`,
     `摘要：${summary || '查看详情'}`,
   ];
+
+  if (resumedAfterApproval) {
+    sections.push('恢复：审批已通过后继续执行');
+  }
 
   if (displayData.diffView?.summary) {
     sections.push(`变更：${displayData.diffView.summary}`);
@@ -1088,6 +1103,7 @@ export function ToolCallCard({
   input,
   output,
   isError,
+  resumedAfterApproval,
   status,
   style,
 }: ToolCallCardProps) {
@@ -1110,6 +1126,14 @@ export function ToolCallCard({
     () => resolveStatusMeta(normalizedStatus, toolName),
     [normalizedStatus, toolName],
   );
+  const effectiveStatusLabel =
+    resumedAfterApproval && normalizedStatus === 'failed' ? '恢复后失败' : statusMeta.label;
+  const resumeContextMessage =
+    resumedAfterApproval && normalizedStatus === 'failed'
+      ? '已根据你的审批恢复执行；当前失败来自恢复后的工具运行结果，不是审批未生效。'
+      : resumedAfterApproval
+        ? '该工具调用已根据审批恢复执行。'
+        : undefined;
   const displayData = useMemo(
     () =>
       resolveToolCallCardDisplayData({
@@ -1144,7 +1168,8 @@ export function ToolCallCard({
         input,
         isError,
         output,
-        statusLabel: statusMeta.label,
+        resumedAfterApproval,
+        statusLabel: effectiveStatusLabel,
         summary,
         toolKindLabel,
       }),
@@ -1154,7 +1179,8 @@ export function ToolCallCard({
       input,
       isError,
       output,
-      statusMeta.label,
+      resumedAfterApproval,
+      effectiveStatusLabel,
       summary,
       toolKindLabel,
     ],
@@ -1298,6 +1324,28 @@ export function ToolCallCard({
             >
               {toolKindLabel}
             </span>
+            {resumedAfterApproval && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  border: `1px solid ${
+                    normalizedStatus === 'failed' ? tokens.color.danger : tokens.color.borderSubtle
+                  }`,
+                  background:
+                    normalizedStatus === 'failed'
+                      ? `color-mix(in srgb, ${tokens.color.danger} 12%, transparent)`
+                      : `color-mix(in srgb, ${tokens.color.surface2} 82%, transparent)`,
+                  color: normalizedStatus === 'failed' ? tokens.color.danger : tokens.color.muted,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                }}
+              >
+                审批后恢复
+              </span>
+            )}
             <span
               style={{
                 minWidth: 0,
@@ -1320,7 +1368,7 @@ export function ToolCallCard({
                 color: statusMeta.color,
               }}
             >
-              {statusMeta.label}
+              {effectiveStatusLabel}
             </span>
             <Chevron open={effectiveOpen} />
           </button>
@@ -1392,6 +1440,28 @@ export function ToolCallCard({
             >
               {toolKindLabel}
             </span>
+            {resumedAfterApproval && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  border: `1px solid ${
+                    normalizedStatus === 'failed' ? tokens.color.danger : tokens.color.borderSubtle
+                  }`,
+                  background:
+                    normalizedStatus === 'failed'
+                      ? `color-mix(in srgb, ${tokens.color.danger} 12%, transparent)`
+                      : `color-mix(in srgb, ${tokens.color.surface2} 82%, transparent)`,
+                  color: normalizedStatus === 'failed' ? tokens.color.danger : tokens.color.muted,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                }}
+              >
+                审批后恢复
+              </span>
+            )}
             <span
               style={{
                 minWidth: 0,
@@ -1405,6 +1475,16 @@ export function ToolCallCard({
               title={compactSummary}
             >
               {compactSummary}
+            </span>
+            <span
+              style={{
+                flexShrink: 0,
+                fontSize: 10,
+                fontWeight: 700,
+                color: statusMeta.color,
+              }}
+            >
+              {effectiveStatusLabel}
             </span>
           </div>
           <CopyActionButton state={copyState} onClick={handleCopy} />
@@ -1462,6 +1542,13 @@ export function ToolCallCard({
               readonly={displayData.taskMeta.readonly}
               executionStatus={formatTaskExecutionStatus(displayData.taskMeta.outputStatus)}
               executionTone={resolveTaskStatusTone(displayData.taskMeta.outputStatus)}
+            />
+          )}
+          {resumeContextMessage && (
+            <ToolField
+              label="恢复说明"
+              tone={normalizedStatus === 'failed' ? 'danger' : 'muted'}
+              value={resumeContextMessage}
             />
           )}
           {displayData.taskMeta?.command && (

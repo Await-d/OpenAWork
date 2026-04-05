@@ -224,6 +224,50 @@ export interface AgentPreferenceRecord {
   updatedAt: string;
 }
 
+export type CompanionThemeVariant = 'default' | 'playful';
+
+export type CompanionVerbosity = 'minimal' | 'normal';
+
+export type CompanionInjectionMode = 'off' | 'mention_only' | 'always';
+
+export type CompanionBehaviorTone = 'supportive' | 'focused' | 'playful';
+
+export type CompanionVoiceOutputMode = 'off' | 'buddy_only' | 'important_only';
+
+export type CompanionVoiceVariant = 'system' | 'bright' | 'calm';
+
+export type CompanionSpecies =
+  | 'duck'
+  | 'goose'
+  | 'blob'
+  | 'cat'
+  | 'dragon'
+  | 'octopus'
+  | 'owl'
+  | 'penguin'
+  | 'turtle'
+  | 'snail'
+  | 'ghost'
+  | 'axolotl'
+  | 'capybara'
+  | 'cactus'
+  | 'robot'
+  | 'rabbit'
+  | 'mushroom'
+  | 'chonk';
+
+export interface CompanionAgentBinding {
+  displayName?: string;
+  species: CompanionSpecies;
+  themeVariant?: CompanionThemeVariant;
+  behaviorTone?: CompanionBehaviorTone;
+  injectionMode?: CompanionInjectionMode;
+  verbosity?: CompanionVerbosity;
+  voiceOutputMode?: CompanionVoiceOutputMode;
+  voiceRate?: number;
+  voiceVariant?: CompanionVoiceVariant;
+}
+
 export interface UpdateAgentPreferenceInput {
   displayNameOverride?: string;
   note?: string;
@@ -235,6 +279,7 @@ export type CommandExecutionMode = 'client' | 'server';
 
 export type CommandAction =
   | { kind: 'navigate'; to: '/chat' | '/sessions' | '/settings' }
+  | { kind: 'open_companion_panel' }
   | { kind: 'create_session' }
   | { kind: 'create_child_session' }
   | { kind: 'open_workspace_picker' }
@@ -405,6 +450,7 @@ export interface ToolResultContent {
   reason?: string;
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   observability?: ToolCallObservabilityAnnotation;
 }
 
@@ -521,6 +567,7 @@ export interface StreamToolResultChunk {
   reason?: string;
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   observability?: ToolCallObservabilityAnnotation;
   eventId?: string;
   runId?: string;
