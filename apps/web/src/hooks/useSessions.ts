@@ -3,7 +3,12 @@ import { useNavigate, useParams } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { readPersistedActiveStreamSessionId } from './useGatewayClient.js';
-import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
+import {
+  createAgentProfilesClient,
+  createSessionsClient,
+  withTokenRefresh,
+  HttpError,
+} from '@openAwork/web-client';
 import type { TokenStore } from '@openAwork/web-client';
 import { toast } from '../components/ToastNotification.js';
 import { exportSession } from '../utils/session-transfer.js';
@@ -156,6 +161,23 @@ export function useSessions() {
             parentSessionId,
             workingDirectory: workspacePath,
           });
+          if (workspacePath) {
+            const profile = await createAgentProfilesClient(gatewayUrl).getCurrent(
+              accessToken,
+              workspacePath,
+            );
+            if (profile) {
+              metadata = {
+                ...metadata,
+                ...(profile.agentId ? { agentId: profile.agentId } : {}),
+                ...(profile.providerId ? { providerId: profile.providerId } : {}),
+                ...(profile.modelId ? { modelId: profile.modelId } : {}),
+                ...(profile.toolSurfaceProfile !== 'openawork'
+                  ? { toolSurfaceProfile: profile.toolSurfaceProfile }
+                  : {}),
+              };
+            }
+          }
         } catch {
           if (workspacePath) {
             metadata['workingDirectory'] = workspacePath;

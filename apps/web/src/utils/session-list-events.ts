@@ -1,12 +1,17 @@
+import type { PendingQuestionRequest } from '@openAwork/web-client';
+
 const SESSION_LIST_REFRESH_EVENT = 'openAwork:sessions-refresh';
 const CURRENT_SESSION_REFRESH_EVENT = 'openAwork:current-session-refresh';
 const SESSION_PENDING_PERMISSION_EVENT = 'openAwork:session-pending-permission';
+const SESSION_PENDING_QUESTION_EVENT = 'openAwork:session-pending-question';
 const SESSION_RUN_STATE_EVENT = 'openAwork:session-run-state';
 
 let refreshScheduled = false;
 let pendingPermissionDispatchScheduled = false;
+let pendingQuestionDispatchScheduled = false;
 let runStateDispatchScheduled = false;
 const pendingPermissionStateBySession = new Map<string, SessionPendingPermissionState | null>();
+const pendingQuestionStateBySession = new Map<string, PendingQuestionRequest | null>();
 const runStateBySession = new Map<string, SessionRunState>();
 
 export type SessionRunState = 'idle' | 'running' | 'paused';
@@ -134,6 +139,67 @@ export function subscribeSessionPendingPermission(
 
   window.addEventListener(SESSION_PENDING_PERMISSION_EVENT, handleChange);
   return () => window.removeEventListener(SESSION_PENDING_PERMISSION_EVENT, handleChange);
+}
+
+export function publishSessionPendingQuestion(
+  sessionId: string,
+  question: PendingQuestionRequest | null,
+): void {
+  if (typeof window === 'undefined' || sessionId.trim().length === 0) {
+    return;
+  }
+
+  pendingQuestionStateBySession.set(sessionId, question);
+  if (pendingQuestionDispatchScheduled) {
+    return;
+  }
+
+  pendingQuestionDispatchScheduled = true;
+  queueMicrotask(() => {
+    pendingQuestionDispatchScheduled = false;
+    const pendingEntries = Array.from(pendingQuestionStateBySession.entries());
+    pendingQuestionStateBySession.clear();
+
+    for (const [pendingSessionId, pendingQuestion] of pendingEntries) {
+      window.dispatchEvent(
+        new CustomEvent<{ question: PendingQuestionRequest | null; sessionId: string }>(
+          SESSION_PENDING_QUESTION_EVENT,
+          {
+            detail: {
+              question: pendingQuestion,
+              sessionId: pendingSessionId,
+            },
+          },
+        ),
+      );
+    }
+  });
+}
+
+export function subscribeSessionPendingQuestion(
+  onChange: (sessionId: string, question: PendingQuestionRequest | null) => void,
+): () => void {
+  if (typeof window === 'undefined') {
+    return () => undefined;
+  }
+
+  const handleChange = (event: Event) => {
+    const detail = (
+      event as CustomEvent<{
+        question?: PendingQuestionRequest | null;
+        sessionId?: string;
+      }>
+    ).detail;
+    const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId : '';
+    if (sessionId.trim().length === 0) {
+      return;
+    }
+
+    onChange(sessionId, detail?.question ?? null);
+  };
+
+  window.addEventListener(SESSION_PENDING_QUESTION_EVENT, handleChange);
+  return () => window.removeEventListener(SESSION_PENDING_QUESTION_EVENT, handleChange);
 }
 
 export function publishSessionRunState(sessionId: string, state: SessionRunState): void {
