@@ -1,20 +1,45 @@
 import { useMemo, useState } from 'react';
-import type { TeamMemberRecord, TeamMessageRecord, TeamTaskRecord } from '@openAwork/web-client';
-import { TeamMembersPanel, TeamMessagesPanel, TeamTasksPanel } from './team/team-page-sections.js';
+import type {
+  TeamMemberRecord,
+  TeamMessageRecord,
+  TeamSessionShareRecord,
+  TeamTaskRecord,
+} from '@openAwork/web-client';
+import {
+  TeamAuditPanel,
+  TeamMembersPanel,
+  TeamMessagesPanel,
+  TeamSessionSharesPanel,
+  TeamSharedSessionsPanel,
+  TeamTasksPanel,
+} from './team/team-page-sections.js';
 import { useTeamCollaboration } from './team/use-team-collaboration.js';
 
 export default function TeamPage() {
   const {
+    auditLogs,
     busy,
     createMember,
     createMessage,
+    createSharedSessionComment,
+    createSessionShare,
     createTask,
+    deleteSessionShare,
     error,
     feedback,
     loading,
     members,
     messages,
+    selectedSharedSession,
+    selectedSharedSessionId,
     tasks,
+    sessionShares,
+    sharedCommentBusy,
+    sharedSessionLoading,
+    sharedSessions,
+    sessions,
+    setSelectedSharedSessionId,
+    updateSessionShare,
     updateTask,
   } = useTeamCollaboration();
 
@@ -39,6 +64,12 @@ export default function TeamPage() {
     senderId: string;
     type: TeamMessageRecord['type'];
   }>({ content: '', senderId: '', type: 'update' });
+  const [shareForm, setShareForm] = useState<{
+    memberId: string;
+    permission: TeamSessionShareRecord['permission'];
+    sessionId: string;
+  }>({ memberId: '', permission: 'view', sessionId: '' });
+  const [sharedCommentDraft, setSharedCommentDraft] = useState('');
 
   const stats = useMemo(() => {
     const inProgress = tasks.filter((task) => task.status === 'in_progress').length;
@@ -48,8 +79,10 @@ export default function TeamPage() {
       { label: '推进中', value: inProgress, hint: '当前正在处理的任务' },
       { label: '已完成', value: completed, hint: '已经交付的结果' },
       { label: '消息', value: messages.length, hint: '共享更新与阻塞同步' },
+      { label: '审计', value: auditLogs.length, hint: '共享权限的变更轨迹' },
+      { label: '共享给我', value: sharedSessions.length, hint: '我可直接读取的共享会话' },
     ];
-  }, [members.length, messages.length, tasks]);
+  }, [auditLogs.length, members.length, messages.length, sharedSessions.length, tasks]);
 
   const memberNameMap = useMemo(
     () => new Map(members.map((member) => [member.id, member.name])),
@@ -57,31 +90,61 @@ export default function TeamPage() {
   );
 
   const handleCreateMember = async () => {
-    await createMember({
+    const succeeded = await createMember({
       name: memberForm.name.trim(),
       email: memberForm.email.trim(),
       role: memberForm.role,
       ...(memberForm.avatarUrl.trim() ? { avatarUrl: memberForm.avatarUrl.trim() } : {}),
     });
-    setMemberForm({ avatarUrl: '', email: '', name: '', role: 'member' });
+    if (succeeded) {
+      setMemberForm({ avatarUrl: '', email: '', name: '', role: 'member' });
+    }
   };
 
   const handleCreateTask = async () => {
-    await createTask({
+    const succeeded = await createTask({
       title: taskForm.title.trim(),
       priority: taskForm.priority,
       ...(taskForm.assigneeId ? { assigneeId: taskForm.assigneeId } : {}),
     });
-    setTaskForm({ assigneeId: '', priority: 'medium', title: '' });
+    if (succeeded) {
+      setTaskForm({ assigneeId: '', priority: 'medium', title: '' });
+    }
   };
 
   const handleCreateMessage = async () => {
-    await createMessage({
+    const succeeded = await createMessage({
       content: messageForm.content.trim(),
       type: messageForm.type,
       ...(messageForm.senderId ? { senderId: messageForm.senderId } : {}),
     });
-    setMessageForm((current) => ({ ...current, content: '' }));
+    if (succeeded) {
+      setMessageForm((current) => ({ ...current, content: '' }));
+    }
+  };
+
+  const handleCreateSessionShare = async () => {
+    const succeeded = await createSessionShare({
+      memberId: shareForm.memberId,
+      permission: shareForm.permission,
+      sessionId: shareForm.sessionId,
+    });
+    if (succeeded) {
+      setShareForm({ memberId: '', permission: 'view', sessionId: '' });
+    }
+  };
+
+  const handleCreateSharedComment = async () => {
+    if (!selectedSharedSessionId) {
+      return;
+    }
+
+    const succeeded = await createSharedSessionComment(selectedSharedSessionId, {
+      content: sharedCommentDraft.trim(),
+    });
+    if (succeeded) {
+      setSharedCommentDraft('');
+    }
   };
 
   return (
@@ -264,6 +327,42 @@ export default function TeamPage() {
                 onSubmit={() => void handleCreateMessage()}
                 onTypeChange={(value) => setMessageForm((current) => ({ ...current, type: value }))}
               />
+              <TeamSessionSharesPanel
+                busy={busy}
+                form={shareForm}
+                members={members}
+                onDelete={(shareId) => void deleteSessionShare(shareId)}
+                onMemberIdChange={(value) =>
+                  setShareForm((current) => ({ ...current, memberId: value }))
+                }
+                onPermissionChange={(value) =>
+                  setShareForm((current) => ({ ...current, permission: value }))
+                }
+                onSharePermissionUpdate={(shareId, permission) =>
+                  void updateSessionShare(shareId, { permission })
+                }
+                onSessionIdChange={(value) =>
+                  setShareForm((current) => ({ ...current, sessionId: value }))
+                }
+                onSubmit={() => void handleCreateSessionShare()}
+                sessionShares={sessionShares}
+                sessions={sessions}
+              />
+              <TeamSharedSessionsPanel
+                commentDraft={sharedCommentDraft}
+                onCommentDraftChange={setSharedCommentDraft}
+                onSubmitComment={() => void handleCreateSharedComment()}
+                onSelectSession={(sessionId) => {
+                  setSelectedSharedSessionId(sessionId);
+                  setSharedCommentDraft('');
+                }}
+                selectedSessionDetail={selectedSharedSession}
+                selectedSessionId={selectedSharedSessionId}
+                sharedCommentBusy={sharedCommentBusy}
+                sharedSessionLoading={sharedSessionLoading}
+                sharedSessions={sharedSessions}
+              />
+              <TeamAuditPanel auditLogs={auditLogs} />
             </section>
           )}
         </div>

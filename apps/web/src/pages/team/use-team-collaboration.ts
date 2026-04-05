@@ -3,17 +3,27 @@ import {
   createTeamClient,
   type CreateTeamMemberInput,
   type CreateTeamMessageInput,
+  type CreateTeamSessionShareInput,
   type CreateTeamTaskInput,
+  type SharedSessionDetailRecord,
+  type SharedSessionSummaryRecord,
+  type TeamAuditLogRecord,
   type TeamMemberRecord,
   type TeamMessageRecord,
+  type TeamSessionShareRecord,
   type TeamTaskRecord,
   type UpdateTeamTaskInput,
 } from '@openAwork/web-client';
+import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth.js';
 
 interface TeamSnapshot {
+  auditLogs: TeamAuditLogRecord[];
   members: TeamMemberRecord[];
   messages: TeamMessageRecord[];
+  sessionShares: TeamSessionShareRecord[];
+  sharedSessions: SharedSessionSummaryRecord[];
+  sessions: Array<{ id: string; title: string | null; workspacePath: string | null }>;
   tasks: TeamTaskRecord[];
 }
 
@@ -50,42 +60,126 @@ function sortMessages(messages: TeamMessageRecord[]): TeamMessageRecord[] {
   return [...messages].sort((left, right) => left.timestamp - right.timestamp);
 }
 
+function sortSessionShares(shares: TeamSessionShareRecord[]): TeamSessionShareRecord[] {
+  return [...shares].sort((left, right) => right.createdAt.localeCompare(left.createdAt, 'zh-CN'));
+}
+
+function sortAuditLogs(logs: TeamAuditLogRecord[]): TeamAuditLogRecord[] {
+  return [...logs].sort((left, right) => right.createdAt.localeCompare(left.createdAt, 'zh-CN'));
+}
+
+function sortSharedSessions(sessions: SharedSessionSummaryRecord[]): SharedSessionSummaryRecord[] {
+  return [...sessions].sort((left, right) =>
+    right.shareUpdatedAt.localeCompare(left.shareUpdatedAt, 'zh-CN'),
+  );
+}
+
+function extractWorkspacePathFromSessionMetadata(metadataJson?: string): string | null {
+  if (!metadataJson) {
+    return null;
+  }
+
+  try {
+    const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
+    const workingDirectory = metadata['workingDirectory'];
+    return typeof workingDirectory === 'string' ? workingDirectory : null;
+  } catch {
+    return null;
+  }
+}
+
 export function useTeamCollaboration() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
+  const [auditLogs, setAuditLogs] = useState<TeamAuditLogRecord[]>([]);
   const [members, setMembers] = useState<TeamMemberRecord[]>([]);
   const [tasks, setTasks] = useState<TeamTaskRecord[]>([]);
   const [messages, setMessages] = useState<TeamMessageRecord[]>([]);
+  const [sessionShares, setSessionShares] = useState<TeamSessionShareRecord[]>([]);
+  const [sharedSessions, setSharedSessions] = useState<SharedSessionSummaryRecord[]>([]);
+  const [sessions, setSessions] = useState<
+    Array<{ id: string; title: string | null; workspacePath: string | null }>
+  >([]);
+  const [selectedSharedSessionId, setSelectedSharedSessionId] = useState<string | null>(null);
+  const [selectedSharedSession, setSelectedSharedSession] =
+    useState<SharedSessionDetailRecord | null>(null);
+  const [sharedCommentBusy, setSharedCommentBusy] = useState(false);
+  const [sharedSessionLoading, setSharedSessionLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<TeamActionFeedback | null>(null);
 
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
+  const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
+
+  const loadSelectedSharedSessionDetail = useCallback(
+    async (sessionId: string) => {
+      if (!accessToken) {
+        return null;
+      }
+      return sessionsClient.getSharedWithMe(accessToken, sessionId);
+    },
+    [accessToken, sessionsClient],
+  );
 
   const loadSnapshot = useCallback(async (): Promise<TeamSnapshot> => {
     if (!accessToken) {
-      return { members: [], messages: [], tasks: [] };
+      return {
+        auditLogs: [],
+        members: [],
+        messages: [],
+        sessionShares: [],
+        sharedSessions: [],
+        sessions: [],
+        tasks: [],
+      };
     }
 
-    const [nextMembers, nextTasks, nextMessages] = await Promise.all([
+    const [
+      nextMembers,
+      nextTasks,
+      nextMessages,
+      nextSessionShares,
+      nextSessions,
+      nextAuditLogs,
+      nextSharedSessions,
+    ] = await Promise.all([
       client.listMembers(accessToken),
       client.listTasks(accessToken),
       client.listMessages(accessToken),
+      client.listSessionShares(accessToken),
+      sessionsClient.list(accessToken),
+      client.listAuditLogs(accessToken, { limit: 24 }),
+      sessionsClient.listSharedWithMe(accessToken, { limit: 24 }),
     ]);
 
     return {
+      auditLogs: sortAuditLogs(nextAuditLogs),
       members: sortMembers(nextMembers),
       messages: sortMessages(nextMessages),
+      sessionShares: sortSessionShares(nextSessionShares),
+      sharedSessions: sortSharedSessions(nextSharedSessions),
+      sessions: nextSessions.map((session) => ({
+        id: session.id,
+        title: session.title ?? null,
+        workspacePath: extractWorkspacePathFromSessionMetadata(session.metadata_json),
+      })),
       tasks: sortTasks(nextTasks),
     };
-  }, [accessToken, client]);
+  }, [accessToken, client, sessionsClient]);
 
   const refresh = useCallback(async () => {
     if (!accessToken) {
+      setAuditLogs([]);
       setMembers([]);
       setTasks([]);
       setMessages([]);
+      setSessionShares([]);
+      setSharedSessions([]);
+      setSessions([]);
+      setSelectedSharedSessionId(null);
+      setSelectedSharedSession(null);
       setLoading(false);
       return;
     }
@@ -94,9 +188,13 @@ export function useTeamCollaboration() {
     setError(null);
     try {
       const snapshot = await loadSnapshot();
+      setAuditLogs(snapshot.auditLogs);
       setMembers(snapshot.members);
       setTasks(snapshot.tasks);
       setMessages(snapshot.messages);
+      setSessionShares(snapshot.sessionShares);
+      setSharedSessions(snapshot.sharedSessions);
+      setSessions(snapshot.sessions);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '加载团队协作数据失败');
     } finally {
@@ -116,14 +214,20 @@ export function useTeamCollaboration() {
       try {
         await action();
         const snapshot = await loadSnapshot();
+        setAuditLogs(snapshot.auditLogs);
         setMembers(snapshot.members);
         setTasks(snapshot.tasks);
         setMessages(snapshot.messages);
+        setSessionShares(snapshot.sessionShares);
+        setSharedSessions(snapshot.sharedSessions);
+        setSessions(snapshot.sessions);
         setFeedback({ message: successMessage, tone: 'success' });
+        return true;
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : '团队协作操作失败';
         setError(message);
         setFeedback({ message, tone: 'error' });
+        return false;
       } finally {
         setBusy(false);
       }
@@ -131,12 +235,89 @@ export function useTeamCollaboration() {
     [loadSnapshot],
   );
 
+  useEffect(() => {
+    if (sharedSessions.length === 0) {
+      setSelectedSharedSessionId(null);
+      setSelectedSharedSession(null);
+      return;
+    }
+
+    if (
+      selectedSharedSessionId &&
+      sharedSessions.some((session) => session.sessionId === selectedSharedSessionId)
+    ) {
+      return;
+    }
+
+    setSelectedSharedSessionId(sharedSessions[0]?.sessionId ?? null);
+  }, [selectedSharedSessionId, sharedSessions]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedSharedSessionId) {
+      setSelectedSharedSession(null);
+      setSharedSessionLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSharedSessionLoading(true);
+    loadSelectedSharedSessionDetail(selectedSharedSessionId)
+      .then((detail) => {
+        if (!cancelled) {
+          setSelectedSharedSession(detail);
+        }
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          const message = reason instanceof Error ? reason.message : '加载共享会话失败';
+          setError(message);
+          setSelectedSharedSession(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSharedSessionLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, loadSelectedSharedSessionDetail, selectedSharedSessionId]);
+
+  const createSharedSessionComment = useCallback(
+    async (sessionId: string, input: { content: string }) => {
+      if (!accessToken) {
+        return false;
+      }
+
+      setSharedCommentBusy(true);
+      setError(null);
+      setFeedback(null);
+      try {
+        await sessionsClient.createSharedComment(accessToken, sessionId, input);
+        const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
+        setSelectedSharedSession(refreshedDetail);
+        setFeedback({ message: '已发送共享评论', tone: 'success' });
+        return true;
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : '发送共享评论失败';
+        setError(message);
+        setFeedback({ message, tone: 'error' });
+        return false;
+      } finally {
+        setSharedCommentBusy(false);
+      }
+    },
+    [accessToken, loadSelectedSharedSessionDetail, sessionsClient],
+  );
+
   const createMember = useCallback(
     async (input: CreateTeamMemberInput) => {
       if (!accessToken) {
-        return;
+        return false;
       }
-      await runMutation(async () => {
+      return runMutation(async () => {
         await client.createMember(accessToken, input);
       }, '已新增团队成员');
     },
@@ -146,9 +327,9 @@ export function useTeamCollaboration() {
   const createTask = useCallback(
     async (input: CreateTeamTaskInput) => {
       if (!accessToken) {
-        return;
+        return false;
       }
-      await runMutation(async () => {
+      return runMutation(async () => {
         await client.createTask(accessToken, input);
       }, '已创建协作任务');
     },
@@ -158,9 +339,9 @@ export function useTeamCollaboration() {
   const updateTask = useCallback(
     async (taskId: string, input: UpdateTeamTaskInput) => {
       if (!accessToken) {
-        return;
+        return false;
       }
-      await runMutation(async () => {
+      return runMutation(async () => {
         await client.updateTask(accessToken, taskId, input);
       }, '已更新任务状态');
     },
@@ -170,27 +351,76 @@ export function useTeamCollaboration() {
   const createMessage = useCallback(
     async (input: CreateTeamMessageInput) => {
       if (!accessToken) {
-        return;
+        return false;
       }
-      await runMutation(async () => {
+      return runMutation(async () => {
         await client.createMessage(accessToken, input);
       }, '已发送团队消息');
     },
     [accessToken, client, runMutation],
   );
 
+  const createSessionShare = useCallback(
+    async (input: CreateTeamSessionShareInput) => {
+      if (!accessToken) {
+        return false;
+      }
+      return runMutation(async () => {
+        await client.createSessionShare(accessToken, input);
+      }, '已共享会话给团队成员');
+    },
+    [accessToken, client, runMutation],
+  );
+
+  const updateSessionShare = useCallback(
+    async (shareId: string, input: { permission: TeamSessionShareRecord['permission'] }) => {
+      if (!accessToken) {
+        return false;
+      }
+      return runMutation(async () => {
+        await client.updateSessionShare(accessToken, shareId, input);
+      }, '已更新共享权限');
+    },
+    [accessToken, client, runMutation],
+  );
+
+  const deleteSessionShare = useCallback(
+    async (shareId: string) => {
+      if (!accessToken) {
+        return false;
+      }
+      return runMutation(async () => {
+        await client.deleteSessionShare(accessToken, shareId);
+      }, '已取消共享会话');
+    },
+    [accessToken, client, runMutation],
+  );
+
   return {
+    auditLogs,
     busy,
     createMember,
     createMessage,
+    createSharedSessionComment,
+    createSessionShare,
     createTask,
+    deleteSessionShare,
     error,
     feedback,
     loading,
     members,
     messages,
+    selectedSharedSession,
+    selectedSharedSessionId,
     refresh,
+    sessionShares,
+    sharedCommentBusy,
+    sharedSessionLoading,
+    sharedSessions,
+    sessions,
+    setSelectedSharedSessionId,
     tasks,
+    updateSessionShare,
     updateTask,
   };
 }
