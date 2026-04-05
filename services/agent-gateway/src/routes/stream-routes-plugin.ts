@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { RunEvent } from '@openAwork/shared';
 import type { WebSocket } from '@fastify/websocket';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
@@ -13,11 +15,75 @@ import {
   streamRequestSchema,
   createStreamErrorChunk,
 } from './stream.js';
+import { buildRunEventEnvelope, deriveRunEventBookend } from '../run-event-envelope.js';
+import {
+  getLatestSessionRunEventSeqByRequest,
+  listSessionRunEventsByRequest,
+  listSessionRunEventsByRequestAfterSeq,
+  subscribeSessionRunEvents,
+  type PublishRunEventMeta,
+} from '../session-run-events.js';
+import { getFreshSessionRuntimeThread } from '../session-runtime-thread-store.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
 import {
   stopAnyInFlightStreamRequestForSession,
   stopInFlightStreamRequest,
 } from './stream-cancellation.js';
+
+const streamAttachQuerySchema = z.object({
+  afterSeq: z.coerce.number().int().min(0).default(0),
+  clientRequestId: z.string().trim().min(1),
+  token: z.string().trim().min(1),
+});
+
+function parseSseCursorFromLastEventId(
+  lastEventId: string | undefined,
+  clientRequestId: string,
+): number | null {
+  if (!lastEventId) {
+    return null;
+  }
+
+  const separatorIndex = lastEventId.lastIndexOf(':');
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  const rawRequestId = lastEventId.slice(0, separatorIndex);
+  const rawSeq = lastEventId.slice(separatorIndex + 1);
+  if (rawRequestId !== clientRequestId) {
+    return null;
+  }
+
+  const parsedSeq = Number.parseInt(rawSeq, 10);
+  return Number.isFinite(parsedSeq) && parsedSeq >= 0 ? parsedSeq : null;
+}
+
+function writeSseRunEnvelope(
+  reply: FastifyReply,
+  envelope: ReturnType<typeof buildRunEventEnvelope>,
+): void {
+  const requestId = envelope.payload.cursor?.clientRequestId ?? envelope.payload.clientRequestId;
+  const lastEventId = requestId ? `${requestId}:${envelope.seq}` : String(envelope.seq);
+  reply.raw.write(`id: ${lastEventId}\n`);
+  reply.raw.write(`data: ${JSON.stringify(envelope)}\n\n`);
+}
+
+function buildAttachRunEnvelope(input: { clientRequestId: string; event: RunEvent; seq: number }) {
+  return buildRunEventEnvelope({
+    aggregateId: input.event.runId ?? input.clientRequestId,
+    aggregateType: 'run',
+    clientRequestId: input.clientRequestId,
+    cursor: {
+      clientRequestId: input.clientRequestId,
+      seq: input.seq,
+    },
+    event: input.event,
+    outputOffset: input.seq,
+    seq: input.seq,
+    timestamp: input.event.occurredAt ?? Date.now(),
+  });
+}
 
 export async function streamRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -48,6 +114,40 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         clearPendingTaskParentAutoResumesForSession({ sessionId, userId: user.sub });
       }
       return reply.status(200).send({ stopped });
+    },
+  );
+
+  app.get(
+    '/sessions/:id/stream/active',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const sessionId = (request.params as { id: string }).id;
+      const sessionRow = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!sessionRow) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const activeThread = getFreshSessionRuntimeThread({ sessionId, userId: user.sub });
+      if (!activeThread) {
+        return reply.status(200).send({ active: null });
+      }
+
+      return reply.status(200).send({
+        active: {
+          clientRequestId: activeThread.clientRequestId,
+          heartbeatAtMs: activeThread.heartbeatAtMs,
+          lastSeq: getLatestSessionRunEventSeqByRequest({
+            sessionId,
+            clientRequestId: activeThread.clientRequestId,
+          }),
+          sessionId: activeThread.sessionId,
+          startedAtMs: activeThread.startedAtMs,
+        },
+      });
     },
   );
 
@@ -362,5 +462,211 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       reply.raw.end();
     }
+  });
+
+  app.get('/sessions/:id/stream/attach', async (request: FastifyRequest, reply: FastifyReply) => {
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext(
+      request.method,
+      request.url,
+      request.headers as Record<string, string | string[] | undefined>,
+      request.ip,
+    );
+    const routeStep = wl.start('stream.attach.connect');
+    const authStep = wl.startChild(routeStep, 'stream.attach.auth');
+    const rawQuery = request.query as Record<string, string>;
+    const attachToken = rawQuery['token'];
+    let user: JwtPayload;
+    try {
+      user = request.server.jwt.verify<JwtPayload>(attachToken ?? '');
+    } catch {
+      wl.fail(authStep, 'unauthorized');
+      wl.fail(routeStep, 'unauthorized');
+      wl.flush(ctx, 401);
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+    wl.succeed(authStep);
+
+    const { id: sessionId } = request.params as { id: string };
+    const parseStep = wl.startChild(routeStep, 'stream.attach.parse-query', undefined, {
+      sessionId,
+    });
+    const query = streamAttachQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      wl.fail(parseStep, 'invalid query');
+      wl.fail(routeStep, 'invalid query');
+      wl.flush(ctx, 400);
+      return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
+    }
+    wl.succeed(parseStep);
+
+    const sessionStep = wl.startChild(routeStep, 'stream.attach.session-check', undefined, {
+      sessionId,
+    });
+    const sessionRow = sqliteGet<{ id: string }>(
+      'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      [sessionId, user.sub],
+    );
+    if (!sessionRow) {
+      wl.fail(sessionStep, 'session not found');
+      wl.fail(routeStep, 'session not found');
+      wl.flush(ctx, 404);
+      return reply.status(404).send({ error: 'Session not found' });
+    }
+    wl.succeed(sessionStep);
+
+    const currentActiveThread = getFreshSessionRuntimeThread({ sessionId, userId: user.sub });
+    const requestedEvents = listSessionRunEventsByRequest({
+      sessionId,
+      clientRequestId: query.data.clientRequestId,
+    });
+    const latestRequestedEvent = requestedEvents.at(-1);
+    const latestRequestedBookend = latestRequestedEvent
+      ? deriveRunEventBookend(latestRequestedEvent)
+      : undefined;
+    const isRequestedRequestActive =
+      currentActiveThread?.clientRequestId === query.data.clientRequestId;
+    const canReplayRequestedRequestToTerminal = latestRequestedBookend?.terminal === true;
+
+    if (!isRequestedRequestActive && !canReplayRequestedRequestToTerminal) {
+      wl.fail(routeStep, 'attach request mismatch', {
+        activeClientRequestId: currentActiveThread?.clientRequestId ?? 'none',
+        requestedClientRequestId: query.data.clientRequestId,
+        sessionId,
+      });
+      wl.flush(ctx, 409);
+      return reply.status(409).send({
+        activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
+        error: 'Requested stream is no longer active',
+      });
+    }
+
+    const afterSeq =
+      parseSseCursorFromLastEventId(
+        request.headers['last-event-id'] as string | undefined,
+        query.data.clientRequestId,
+      ) ?? query.data.afterSeq;
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    reply.raw.write('retry: 1000\n\n');
+
+    if (!isRequestedRequestActive) {
+      const replayEvents = listSessionRunEventsByRequestAfterSeq({
+        sessionId,
+        clientRequestId: query.data.clientRequestId,
+        afterSeq,
+      });
+      for (const replayEvent of replayEvents) {
+        writeSseRunEnvelope(
+          reply,
+          buildAttachRunEnvelope({
+            clientRequestId: query.data.clientRequestId,
+            event: replayEvent.event,
+            seq: replayEvent.seq,
+          }),
+        );
+      }
+
+      wl.succeed(routeStep, undefined, {
+        attached: false,
+        clientRequestId: query.data.clientRequestId,
+        replayedCount: replayEvents.length,
+        sessionId,
+      });
+      wl.flush(ctx, 200);
+      reply.raw.end();
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let lastSeq = afterSeq;
+      let replayCompleted = false;
+      const pendingLiveEvents: Array<{ event: RunEvent; seq: number }> = [];
+      let replayedCount = 0;
+      const noopUnsubscribe: () => void = () => undefined;
+      let unsubscribe: () => void = noopUnsubscribe;
+
+      const deliverEvent = (event: RunEvent, seq: number) => {
+        if (settled || seq <= lastSeq) {
+          return;
+        }
+        lastSeq = seq;
+        writeSseRunEnvelope(
+          reply,
+          buildAttachRunEnvelope({
+            clientRequestId: query.data.clientRequestId,
+            event,
+            seq,
+          }),
+        );
+        if (deriveRunEventBookend(event)?.terminal === true) {
+          cleanup();
+        }
+      };
+
+      const heartbeat = setInterval(() => {
+        reply.raw.write(': keepalive\n\n');
+      }, 10_000);
+      const cleanup = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+        request.raw.off('close', cleanup);
+        reply.raw.end();
+        resolve();
+      };
+      unsubscribe = subscribeSessionRunEvents(sessionId, (event, meta?: PublishRunEventMeta) => {
+        if (meta?.clientRequestId !== query.data.clientRequestId || typeof meta.seq !== 'number') {
+          return;
+        }
+        if (meta.seq <= lastSeq) {
+          return;
+        }
+
+        if (!replayCompleted) {
+          pendingLiveEvents.push({ event, seq: meta.seq });
+          return;
+        }
+
+        deliverEvent(event, meta.seq);
+      });
+
+      request.raw.on('close', cleanup);
+
+      const replayEvents = listSessionRunEventsByRequestAfterSeq({
+        sessionId,
+        clientRequestId: query.data.clientRequestId,
+        afterSeq,
+      });
+      replayedCount = replayEvents.length;
+      for (const replayEvent of replayEvents) {
+        deliverEvent(replayEvent.event, replayEvent.seq);
+      }
+
+      replayCompleted = true;
+      pendingLiveEvents.sort((left, right) => left.seq - right.seq);
+      for (const pendingEvent of pendingLiveEvents) {
+        deliverEvent(pendingEvent.event, pendingEvent.seq);
+      }
+
+      if (!settled) {
+        wl.succeed(routeStep, undefined, {
+          attached: true,
+          clientRequestId: query.data.clientRequestId,
+          replayedCount,
+          sessionId,
+        });
+        wl.flush(ctx, 200);
+      }
+    });
   });
 }

@@ -10,7 +10,7 @@ import type {
 } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
-import { mergeCompactionMetadata, readPersistedCompactionMemory } from '../compaction-metadata.js';
+import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction-policy.js';
 import { sqliteGet, sqliteRun } from '../db.js';
 import { writeAuditLog } from '../audit-log.js';
 import {
@@ -24,13 +24,12 @@ import { getCompactionProviderConfig, getProviderConfigForSelection } from '../p
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import {
   appendSessionMessage,
-  buildDurableCompactionSummary,
-  buildPreparedUpstreamConversation,
   getSessionMessageByRequestId,
   isContextOverflow,
   listSessionMessages,
   listSessionMessagesByRequestScope,
 } from '../session-message-store.js';
+import { executeSessionCompaction } from '../session-compaction.js';
 import { persistStreamUserMessage } from '../stream-session-title.js';
 import { buildCapabilityContext } from './capabilities.js';
 import { buildRequestScopedSystemPrompts } from './stream-system-prompts.js';
@@ -90,7 +89,7 @@ import {
   upstreamRetryMaxRetriesSchema,
 } from '../upstream-retry-policy.js';
 import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
-import { callCompactionLlm } from '../compaction-llm.js';
+import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../companion-settings.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -153,6 +152,8 @@ export function isWebSearchEnabled(metadataJson: string): boolean {
   }
 }
 
+const reasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
 export const streamRequestSchema = modelRequestSchema.omit({ model: true }).extend({
   agentId: z.string().trim().min(1).max(120).optional(),
   displayMessage: z.string().min(1).max(32768).optional(),
@@ -161,6 +162,15 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
   model: z.string().min(1).max(200).optional(),
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
+  thinkingEnabled: z
+    .preprocess((value) => {
+      if (typeof value === 'boolean') return value;
+      if (value === '1' || value === 'true') return true;
+      if (value === '0' || value === 'false') return false;
+      return value;
+    }, z.boolean())
+    .optional(),
+  reasoningEffort: reasoningEffortSchema.optional(),
   webSearchEnabled: z
     .preprocess((value) => {
       if (typeof value === 'boolean') return value;
@@ -1019,10 +1029,17 @@ export async function handleStreamRequest(input: {
     metadataJson: input.sessionContext.metadataJson,
     requestData,
   });
+  const companionPrompt = buildCompanionPrompt(
+    loadCompanionSettingsForUser(input.user.sub, input.user.email, requestData.agentId),
+    requestData.message,
+  );
   const requestSystemPrompts = buildRequestScopedSystemPrompts(
     requestData.message,
     buildCapabilityContext(input.user.sub, input.sessionId),
-    interactionModes,
+    {
+      ...interactionModes,
+      companionPrompt,
+    },
   );
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
@@ -1182,6 +1199,14 @@ export async function handleStreamRequest(input: {
         input.user.sub,
         input.sessionContext.metadataJson,
       );
+      const compactionSettingsRow = sqliteGet<{ value: string }>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+        [input.user.sub, COMPACTION_SETTINGS_KEY],
+      );
+      const compactionSettings = readCompactionSettings(
+        parseStoredJson(compactionSettingsRow?.value),
+      );
+      let syntheticContinuationPrompt: string | undefined;
 
       for (let round = 1; ; round += 1) {
         const result = await runModelRound({
@@ -1200,11 +1225,15 @@ export async function handleStreamRequest(input: {
           userId: input.user.sub,
           wl,
           ctx,
+          compactionAutoEnabled: compactionSettings.auto,
+          compactionReservedTokens: compactionSettings.reserved,
           workspaceCtx,
           requestSystemPrompts,
+          syntheticContinuationPrompt,
           memoryBlock,
           writeChunk: emitChunk,
         });
+        syntheticContinuationPrompt = undefined;
 
         if (result.usage) {
           emitChunk(
@@ -1224,12 +1253,16 @@ export async function handleStreamRequest(input: {
           });
         }
 
-        if (
-          result.usage &&
+        let recoveredFromOverflowError = false;
+        const shouldAutoCompact =
+          compactionSettings.auto &&
           result.overflow === true &&
-          typeof route.contextWindow === 'number' &&
-          isContextOverflow(result.usage, route.contextWindow)
-        ) {
+          ((result.usage &&
+            typeof route.contextWindow === 'number' &&
+            isContextOverflow(result.usage, route.contextWindow, compactionSettings.reserved)) ||
+            (!result.usage && result.stopReason === 'error'));
+
+        if (shouldAutoCompact) {
           try {
             const providerRow = sqliteGet<{ value: string }>(
               `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
@@ -1256,58 +1289,125 @@ export async function handleStreamRequest(input: {
               legacyMessagesJson: input.sessionContext.legacyMessagesJson,
               statuses: ['final'],
             });
-            const conversationMessages = buildPreparedUpstreamConversation(allMessages, {
-              contextWindow: 1,
-            }).messages;
-            const compactionResult = await callCompactionLlm({
-              conversationMessages,
-              route: compactionRoute,
-              signal: abortController.signal,
-            });
-
-            const durableSummary = buildDurableCompactionSummary({
-              existingMemory: readPersistedCompactionMemory(input.sessionContext.metadataJson),
-              messages: allMessages,
-              recentMessagesKept: 0,
-              trigger: 'automatic',
-            });
-            const mergedMetadata = mergeCompactionMetadata(input.sessionContext.metadataJson, {
-              persistedMemory: durableSummary?.persistedMemory,
-              summary: compactionResult.summary,
-              trigger: 'automatic',
-              omittedMessages: durableSummary?.totalRepresentedMessages ?? allMessages.length,
-              recentMessagesKept: 0,
-              signature: durableSummary?.signature,
-            });
-            const metadata = {
-              ...mergedMetadata,
-              lastCompactionLlmSummary: compactionResult.summary,
-            };
-            const metadataJson = JSON.stringify(metadata);
-            sqliteRun(
-              "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-              [metadataJson, input.sessionId, input.user.sub],
-            );
-            input.sessionContext.metadataJson = metadataJson;
-
-            const signature = durableSummary?.signature ?? String(Date.now());
-            const compactedCount = durableSummary?.newlySummarizedMessages ?? allMessages.length;
-            const representedCount = durableSummary?.totalRepresentedMessages ?? allMessages.length;
+            const latestFinalMessage = allMessages.at(-1);
+            const replayMessage =
+              !result.usage && result.stopReason === 'error' && latestFinalMessage?.role === 'user'
+                ? latestFinalMessage
+                : null;
+            const cause = result.usage ? 'usage_overflow' : 'provider_overflow';
+            const strategy = replayMessage
+              ? ('replay' as const)
+              : !result.usage && result.stopReason === 'error'
+                ? ('synthetic_continue' as const)
+                : ('summary_only' as const);
+            const messagesForCompaction = replayMessage ? allMessages.slice(0, -1) : allMessages;
+            if (messagesForCompaction.length === 0) {
+              throw new Error('no earlier history available for overflow compaction recovery');
+            }
+            const startedAt = Date.now();
             publishSessionRunEvent(
               input.sessionId,
               {
                 type: 'compaction',
-                summary: `已自动压缩新增的 ${compactedCount} 条较早消息，累计覆盖 ${representedCount} 条消息。`,
+                summary: '正在压缩会话上下文。',
                 trigger: 'automatic',
-                eventId: `${requestData.clientRequestId}:auto-compact:${round}:${signature}`,
+                phase: 'started',
+                cause,
+                strategy,
+                eventId: `${requestData.clientRequestId}:auto-compact:${round}:started`,
+                runId,
+                occurredAt: startedAt,
+              },
+              { clientRequestId: requestData.clientRequestId },
+            );
+            const compactionResult = await executeSessionCompaction({
+              legacyMessagesJson: input.sessionContext.legacyMessagesJson,
+              metadataJson: input.sessionContext.metadataJson,
+              messages: messagesForCompaction,
+              prune: compactionSettings.prune,
+              route: compactionRoute,
+              sessionId: input.sessionId,
+              signal: abortController.signal,
+              trigger: 'automatic',
+              userId: input.user.sub,
+            });
+            input.sessionContext.metadataJson = compactionResult.metadataJson;
+
+            const signature = compactionResult.durableSummary?.signature ?? String(Date.now());
+            const compactedCount =
+              compactionResult.durableSummary?.newlySummarizedMessages ??
+              messagesForCompaction.length;
+            const representedCount =
+              compactionResult.durableSummary?.totalRepresentedMessages ??
+              messagesForCompaction.length;
+            if (compactionResult.llmErrorMessage) {
+              publishSessionRunEvent(
+                input.sessionId,
+                {
+                  type: 'compaction',
+                  summary: `压缩 LLM 失败，已回退到结构化摘要：${compactionResult.llmErrorMessage}`,
+                  trigger: 'automatic',
+                  phase: 'failed',
+                  cause,
+                  strategy: 'summary_only',
+                  eventId: `${requestData.clientRequestId}:auto-compact:${round}:${signature}:llm-failed`,
+                  runId,
+                  occurredAt: Date.now(),
+                },
+                { clientRequestId: requestData.clientRequestId },
+              );
+            }
+            publishSessionRunEvent(
+              input.sessionId,
+              {
+                type: 'compaction',
+                summary: replayMessage
+                  ? `已在上下文溢出后压缩 ${compactedCount} 条较早消息，并保留当前用户请求继续执行。`
+                  : `已在上下文溢出后压缩 ${compactedCount} 条较早消息，并注入继续执行提示。`,
+                trigger: 'automatic',
+                phase: 'completed',
+                cause,
+                strategy,
+                compactedMessages: compactedCount,
+                representedMessages: representedCount,
+                eventId: `${requestData.clientRequestId}:auto-compact:${round}:${signature}:completed`,
                 runId,
                 occurredAt: Date.now(),
               },
               { clientRequestId: requestData.clientRequestId },
             );
+            recoveredFromOverflowError = replayMessage !== null;
+            if (!replayMessage) {
+              syntheticContinuationPrompt =
+                'The conversation was compacted after a context overflow. Continue if you have clear next steps, or ask for clarification if additional user input is required.';
+            }
           } catch (error: unknown) {
+            publishSessionRunEvent(
+              input.sessionId,
+              {
+                type: 'compaction',
+                summary:
+                  error instanceof Error ? error.message : '自动压缩失败，保留当前上下文状态。',
+                trigger: 'automatic',
+                phase: 'failed',
+                cause: result.usage ? 'usage_overflow' : 'provider_overflow',
+                strategy: 'summary_only',
+                eventId: `${requestData.clientRequestId}:auto-compact:${round}:failed`,
+                runId,
+                occurredAt: Date.now(),
+              },
+              { clientRequestId: requestData.clientRequestId },
+            );
             console.warn('automatic llm compaction failed', error);
           }
+        }
+
+        if (
+          result.stopReason === 'error' &&
+          result.overflow === true &&
+          recoveredFromOverflowError
+        ) {
+          continue;
         }
 
         if (result.stopReason === 'error' || result.shouldStop) {

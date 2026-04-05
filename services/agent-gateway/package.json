@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "pnpm run test:unit && pnpm run test:verification",
+    "test:chat:fast": "vitest run src/__tests__/stream-attach-route.test.ts src/__tests__/stream-stop-route.test.ts src/__tests__/session-run-events.test.ts && tsx src/verification/verify-stream-attach-recovery.ts",
     "test:unit": "vitest run --passWithNoTests",
     "test:verification": "pnpm run test:responses && pnpm run test:permissions && pnpm run test:session-tasks && pnpm run test:task-tool && pnpm run test:file-changes && pnpm run test:restore && pnpm run test:delete-cleanup && pnpm run test:durable && pnpm run test:claude-tools",
     "test:responses": "tsx src/verification/verify-openai-responses.ts",
