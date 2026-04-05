@@ -29,12 +29,13 @@ vi.mock('../task-model-selection.js', () => ({
 }));
 
 vi.mock('../provider-config.js', () => ({
+  getCompactionProviderConfig: vi.fn(async () => null),
   getProviderConfigForSelection: mocks.getProviderConfigForSelectionMock,
 }));
 
 vi.mock('../model-router.js', () => {
   const modelRequestSchema = z.object({
-    model: z.string().min(1).max(200).optional().default('gpt-4o'),
+    model: z.string().min(1).max(200).optional().default('default'),
     variant: z.string().min(1).max(80).optional(),
     systemPrompt: z.string().max(4000).optional(),
     maxTokens: z.number().int().min(1).max(16384).optional().default(2048),
@@ -144,6 +145,28 @@ describe('stream agent resolution', () => {
 
     expect(parsed.agentId).toBe('hephaestus');
     expect(parsed.message).toBe('请修复这个 bug');
+  }, 10000);
+
+  it('parses request-scoped thinking settings for websocket and sse payloads', async () => {
+    const { streamRequestSchema } = await import('../routes/stream.js');
+
+    const wsParsed = streamRequestSchema.parse({
+      clientRequestId: 'req-thinking-ws',
+      message: '请认真思考后回答',
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+    const sseParsed = streamRequestSchema.parse({
+      clientRequestId: 'req-thinking-sse',
+      message: '请认真思考后回答',
+      thinkingEnabled: '1',
+      reasoningEffort: 'xhigh',
+    });
+
+    expect(wsParsed.thinkingEnabled).toBe(true);
+    expect(wsParsed.reasoningEffort).toBe('high');
+    expect(sseParsed.thinkingEnabled).toBe(true);
+    expect(sseParsed.reasoningEffort).toBe('xhigh');
   });
 
   it('keeps request-scoped upstream retry ahead of metadata and stored settings', async () => {

@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
     occurredAt: 123,
   })),
   fetchUpstreamStreamWithRetryMock: vi.fn(),
+  hasCompactionMarkerMock: vi.fn(() => false),
   hasToolOutputReferenceMock: vi.fn(() => false),
   isUpstreamContextOverflowErrorMock: vi.fn(() => false),
   listSessionMessagesMock: vi.fn<() => Message[]>(() => []),
@@ -79,6 +80,7 @@ vi.mock('../session-message-store.js', () => ({
       typeof options === 'number' ? options : options,
     ),
   buildUpstreamConversation: mocks.buildUpstreamConversationMock,
+  hasCompactionMarker: mocks.hasCompactionMarkerMock,
   hasToolOutputReference: mocks.hasToolOutputReferenceMock,
   listSessionMessages: mocks.listSessionMessagesMock,
   updateSessionMessagesStatusByRequestScope: mocks.updateSessionMessagesStatusByRequestScopeMock,
@@ -151,6 +153,8 @@ describe('runModelRound', () => {
     mocks.createStreamParseStateMock.mockClear();
     mocks.createRunEventMetaMock.mockClear();
     mocks.fetchUpstreamStreamWithRetryMock.mockReset();
+    mocks.hasCompactionMarkerMock.mockReset();
+    mocks.hasCompactionMarkerMock.mockReturnValue(false);
     mocks.hasToolOutputReferenceMock.mockClear();
     mocks.listSessionMessagesMock.mockReset();
     mocks.updateSessionMessagesStatusByRequestScopeMock.mockReset();
@@ -161,6 +165,8 @@ describe('runModelRound', () => {
     mocks.parseUpstreamFrameMock.mockReset();
     mocks.upsertArtifactsFromAssistantMessageMock.mockReset();
     mocks.persistSessionSnapshotMock.mockClear();
+    mocks.readLastCompactionLlmSummaryMock.mockReset();
+    mocks.readLastCompactionLlmSummaryMock.mockReturnValue(undefined);
     mocks.readPersistedCompactionMemoryMock.mockReset();
     mocks.readPersistedCompactionMemoryMock.mockReturnValue(null);
     mocks.readUpstreamErrorMock.mockClear();
@@ -506,6 +512,93 @@ describe('runModelRound', () => {
     expect(writeChunk).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
   });
 
+  it('skips metadata fallback when a compaction marker is already present', async () => {
+    mocks.listSessionMessagesMock.mockReturnValue([
+      {
+        id: 'marker-1',
+        role: 'assistant',
+        createdAt: 1,
+        content: [{ type: 'text', text: 'hidden marker' }],
+      },
+      {
+        id: 'user-1',
+        role: 'user',
+        createdAt: 2,
+        content: [{ type: 'text', text: '继续执行' }],
+      },
+    ]);
+    mocks.hasCompactionMarkerMock.mockReturnValue(true);
+    mocks.buildPreparedUpstreamConversationMock.mockReturnValue({
+      messages: [{ role: 'system', content: 'marker summary' }],
+    });
+    mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      body: null,
+    });
+    mocks.readUpstreamErrorMock.mockResolvedValue({
+      code: 'UPSTREAM_ERROR',
+      message: 'upstream failed',
+    });
+
+    const { runModelRound } = await import('../routes/stream-model-round.js');
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext('TEST', '/stream', {}, 'local');
+
+    await runModelRound({
+      clientRequestId: 'req-marker',
+      enabledTools: [],
+      eventSequence: { value: 1 },
+      requestData: {
+        clientRequestId: 'req-marker',
+        maxTokens: 1024,
+        message: '继续执行',
+        temperature: 0,
+      },
+      round: 1,
+      route: {
+        apiKey: '',
+        apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
+        maxTokens: 1024,
+        model: 'test-model',
+        requestOverrides: {},
+        supportsThinking: false,
+        temperature: 0,
+        upstreamProtocol: 'responses',
+        variant: undefined,
+      },
+      runId: 'run-marker',
+      signal: new AbortController().signal,
+      sessionContext: {
+        legacyMessagesJson: '[]',
+        metadataJson:
+          '{"compactionMemory":{"coveredUntilMessageId":"assistant-2"},"lastCompactionLlmSummary":"legacy summary"}',
+      },
+      sessionId: 'session-marker',
+      transport: 'SSE',
+      turnFileDiffs: undefined,
+      userId: 'user-1',
+      wl,
+      ctx,
+      workspaceCtx: null,
+      requestSystemPrompts: [],
+      writeChunk: vi.fn(),
+    });
+
+    expect(mocks.readPersistedCompactionMemoryMock).not.toHaveBeenCalled();
+    expect(mocks.readLastCompactionLlmSummaryMock).not.toHaveBeenCalled();
+    expect(mocks.buildPreparedUpstreamConversationMock).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        contextWindow: 128_000,
+      }),
+    );
+    expect(mocks.buildPreparedUpstreamConversationMock.mock.calls.at(-1)?.[1]).not.toMatchObject({
+      persistedMemory: expect.anything(),
+    });
+  });
+
   it('appends a synthetic continuation user prompt when requested', async () => {
     const encoder = new TextEncoder();
     let readCount = 0;
@@ -575,6 +668,85 @@ describe('runModelRound', () => {
         messages: expect.arrayContaining([
           expect.objectContaining({ role: 'user', content: 'Continue after compaction.' }),
         ]),
+      }),
+    );
+  });
+
+  it('forwards request-scoped thinking settings into upstream request construction', async () => {
+    const encoder = new TextEncoder();
+    let readCount = 0;
+
+    mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount += 1;
+            if (readCount === 1) {
+              return { done: false, value: encoder.encode('data: first\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+        }),
+      },
+    });
+    mocks.parseUpstreamFrameMock.mockImplementation((frame: string) =>
+      frame.includes('data:') ? [{ type: 'done', stopReason: 'end_turn' }] : [],
+    );
+
+    const { runModelRound } = await import('../routes/stream-model-round.js');
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext('TEST', '/stream', {}, 'local');
+
+    await runModelRound({
+      clientRequestId: 'req-thinking',
+      enabledTools: [],
+      eventSequence: { value: 1 },
+      requestData: {
+        clientRequestId: 'req-thinking',
+        maxTokens: 1024,
+        message: '请深度推理',
+        reasoningEffort: 'high',
+        temperature: 0,
+        thinkingEnabled: true,
+      },
+      round: 0,
+      route: {
+        apiKey: '',
+        apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
+        maxTokens: 1024,
+        model: 'o3',
+        providerType: 'openai',
+        requestOverrides: {},
+        supportsThinking: true,
+        temperature: 0,
+        upstreamProtocol: 'responses',
+        variant: undefined,
+      },
+      runId: 'run-thinking',
+      signal: new AbortController().signal,
+      sessionContext: { legacyMessagesJson: '[]', metadataJson: '{}' },
+      sessionId: 'session-1',
+      transport: 'SSE',
+      turnFileDiffs: undefined,
+      userId: 'user-1',
+      wl,
+      ctx,
+      workspaceCtx: null,
+      requestSystemPrompts: [],
+      writeChunk: vi.fn(),
+    });
+
+    expect(mocks.buildUpstreamRequestBodyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thinking: {
+          enabled: true,
+          effort: 'high',
+          providerType: 'openai',
+          supportsThinking: true,
+        },
       }),
     );
   });

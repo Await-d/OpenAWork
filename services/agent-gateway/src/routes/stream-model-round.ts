@@ -7,6 +7,7 @@ import {
 import {
   appendSessionMessage,
   buildPreparedUpstreamConversation,
+  hasCompactionMarker,
   hasToolOutputReference,
   isContextOverflow,
   listSessionMessages,
@@ -180,19 +181,22 @@ export async function runModelRound(input: {
   usageOccurredAt?: number;
 }> {
   const compactionAutoEnabled = input.compactionAutoEnabled ?? true;
-  const preparedConversation = buildPreparedUpstreamConversation(
-    listSessionMessages({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      legacyMessagesJson: input.sessionContext.legacyMessagesJson,
-      statuses: ['final'],
-    }),
-    {
-      contextWindow: input.route.contextWindow,
-      llmCompactionSummary: readLastCompactionLlmSummary(input.sessionContext.metadataJson),
-      persistedMemory: readPersistedCompactionMemory(input.sessionContext.metadataJson),
-    },
-  );
+  const finalMessages = listSessionMessages({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    legacyMessagesJson: input.sessionContext.legacyMessagesJson,
+    statuses: ['final'],
+  });
+  const markerPresent = hasCompactionMarker(finalMessages);
+  const preparedConversation = buildPreparedUpstreamConversation(finalMessages, {
+    contextWindow: input.route.contextWindow,
+    ...(markerPresent
+      ? {}
+      : {
+          llmCompactionSummary: readLastCompactionLlmSummary(input.sessionContext.metadataJson),
+          persistedMemory: readPersistedCompactionMemory(input.sessionContext.metadataJson),
+        }),
+  });
   const conversation = preparedConversation.messages;
   const shouldGuideToolOutputReadback = hasToolOutputReference(conversation);
   const upstreamMessages = [
@@ -210,6 +214,9 @@ export async function runModelRound(input: {
   ];
   const upstreamPath =
     input.route.upstreamProtocol === 'responses' ? '/responses' : '/chat/completions';
+  const shouldApplyThinkingConfig =
+    input.requestData.thinkingEnabled !== undefined ||
+    input.requestData.reasoningEffort !== undefined;
   const upstreamBody = buildUpstreamRequestBody({
     protocol: input.route.upstreamProtocol,
     model: input.route.model,
@@ -219,6 +226,14 @@ export async function runModelRound(input: {
     messages: upstreamMessages,
     tools: input.enabledTools,
     requestOverrides: input.route.requestOverrides,
+    thinking: shouldApplyThinkingConfig
+      ? {
+          enabled: input.requestData.thinkingEnabled === true,
+          effort: input.requestData.reasoningEffort ?? 'medium',
+          providerType: input.route.providerType,
+          supportsThinking: input.route.supportsThinking,
+        }
+      : undefined,
   });
 
   const stepUpstream = input.wl.start(`upstream.fetch.${input.round}`, undefined, {
