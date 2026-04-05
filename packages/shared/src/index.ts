@@ -1,4 +1,21 @@
-export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
+import type { FileDiffContent, ToolCallObservabilityAnnotation } from './message-schema.js';
+
+export type {
+  FileBackupKind,
+  FileBackupRef,
+  FileChangeGuaranteeLevel,
+  FileChangeSourceKind,
+  FileDiffContent,
+  Message,
+  MessageContent,
+  MessageRole,
+  ModifiedFilesSummaryContent,
+  TextContent,
+  ToolCallContent,
+  ToolCallObservabilityAnnotation,
+  ToolResultContent,
+  ToolSurfaceProfile,
+} from './message-schema.js';
 
 export type DialogueMode = 'clarify' | 'coding' | 'programmer';
 
@@ -428,89 +445,6 @@ export interface SessionContextRecord {
   updatedAt: number;
 }
 
-export interface TextContent {
-  type: 'text';
-  text: string;
-}
-
-export interface ToolCallContent {
-  type: 'tool_call';
-  toolCallId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-export interface ToolResultContent {
-  type: 'tool_result';
-  toolCallId: string;
-  toolName?: string;
-  clientRequestId?: string;
-  output: unknown;
-  isError: boolean;
-  reason?: string;
-  fileDiffs?: FileDiffContent[];
-  pendingPermissionRequestId?: string;
-  resumedAfterApproval?: boolean;
-  observability?: ToolCallObservabilityAnnotation;
-}
-
-export type FileChangeGuaranteeLevel = 'strong' | 'medium' | 'weak';
-
-export type FileChangeSourceKind =
-  | 'structured_tool_diff'
-  | 'session_snapshot'
-  | 'restore_replay'
-  | 'workspace_reconcile'
-  | 'manual_revert';
-
-export type FileBackupKind = 'before_write' | 'after_write' | 'snapshot_base';
-
-export interface FileBackupRef {
-  backupId: string;
-  kind: FileBackupKind;
-  storagePath?: string;
-  artifactId?: string;
-  contentHash?: string;
-}
-
-export interface FileDiffContent {
-  file: string;
-  before: string;
-  after: string;
-  additions: number;
-  deletions: number;
-  status?: 'added' | 'deleted' | 'modified';
-  clientRequestId?: string;
-  requestId?: string;
-  toolName?: string;
-  toolCallId?: string;
-  sourceKind?: FileChangeSourceKind;
-  guaranteeLevel?: FileChangeGuaranteeLevel;
-  backupBeforeRef?: FileBackupRef;
-  backupAfterRef?: FileBackupRef;
-  observability?: ToolCallObservabilityAnnotation;
-}
-
-export interface ModifiedFilesSummaryContent {
-  type: 'modified_files_summary';
-  title: string;
-  summary: string;
-  files: FileDiffContent[];
-}
-
-export type MessageContent =
-  | TextContent
-  | ToolCallContent
-  | ToolResultContent
-  | ModifiedFilesSummaryContent;
-
-export interface Message {
-  id: string;
-  role: MessageRole;
-  content: MessageContent[];
-  createdAt: number;
-}
-
 export interface StreamTextChunk {
   type: 'text_delta';
   delta: string;
@@ -777,43 +711,6 @@ export function isRetryableError(error: ApiError): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Claude Code 工具环境可观测性类型骨架（Phase 1 — 仅类型，无运行时变更）
-// ---------------------------------------------------------------------------
-
-/**
- * 工具呈现层（Claude Code 工具面）标识符。
- * 用于区分 Claude Code 原生工具名 vs OpenAWork 内部规范名。
- */
-export type ToolSurfaceProfile = 'openawork' | 'claude_code_simple' | 'claude_code_default';
-
-/**
- * 工具调用的可观测性标注，附加在对话/请求的工具调用追踪条目上。
- * 所有字段均可选——缺失时退化为无标注，不影响现有运行时逻辑。
- */
-export interface ToolCallObservabilityAnnotation {
-  /**
-   * 呈现给模型的工具名（Claude Code 侧可见名称，可能为别名）。
-   * 例："bash"（Claude Code 侧）vs "execute_bash"（内部规范名）
-   */
-  presentedToolName?: string;
-
-  /**
-   * 系统内部规范化工具名（tool-contract 注册名）。
-   */
-  canonicalToolName?: string;
-
-  /**
-   * 工具调用来源的工具面剖面。
-   */
-  toolSurfaceProfile?: ToolSurfaceProfile;
-
-  /**
-   * 适配器版本号，用于在多版本 Claude Code 适配器共存时区分行为差异。
-   * 语义版本字符串，如 "1.0.0"。
-   */
-  adapterVersion?: string;
-}
-
 /**
  * 关联模型：将一次工具调用追踪条目锚定到 session + request + toolCall 三元组。
  *

@@ -272,6 +272,14 @@ export interface SharedSessionCommentRecord {
   sessionId: string;
 }
 
+export interface SharedSessionPresenceRecord {
+  active: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  viewerEmail: string;
+  viewerUserId: string;
+}
+
 export type SharedSessionPermission = 'view' | 'comment' | 'operate';
 
 export interface SharedSessionSummaryRecord {
@@ -289,6 +297,9 @@ export interface SharedSessionSummaryRecord {
 
 export interface SharedSessionDetailRecord {
   comments: SharedSessionCommentRecord[];
+  pendingPermissions: PendingPermissionRequest[];
+  pendingQuestions: PendingQuestionRequest[];
+  presence: SharedSessionPresenceRecord[];
   share: SharedSessionSummaryRecord;
   session: Session;
 }
@@ -392,6 +403,17 @@ export interface SessionsClient {
     sessionId: string,
     input: { content: string },
   ): Promise<SharedSessionCommentRecord>;
+  touchSharedPresence(token: string, sessionId: string): Promise<SharedSessionPresenceRecord[]>;
+  replySharedPermission(
+    token: string,
+    sessionId: string,
+    input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+  ): Promise<void>;
+  replySharedQuestion(
+    token: string,
+    sessionId: string,
+    input: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
+  ): Promise<void>;
   getRecovery(
     token: string,
     sessionId: string,
@@ -622,6 +644,64 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       }
       const data = (await res.json()) as { comment: SharedSessionCommentRecord };
       return data.comment;
+    },
+
+    async touchSharedPresence(token, sessionId) {
+      const res = await fetch(`${gatewayUrl}/sessions/shared-with-me/${sessionId}/presence`, {
+        method: 'POST',
+        headers: authHeader(token),
+      });
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to update shared presence: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+      const data = (await res.json()) as { presence?: SharedSessionPresenceRecord[] };
+      return data.presence ?? [];
+    },
+
+    async replySharedPermission(token, sessionId, input) {
+      const res = await fetch(
+        `${gatewayUrl}/sessions/shared-with-me/${sessionId}/permissions/reply`,
+        {
+          method: 'POST',
+          headers: {
+            ...authHeader(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to reply shared permission: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
+    },
+
+    async replySharedQuestion(token, sessionId, input) {
+      const res = await fetch(
+        `${gatewayUrl}/sessions/shared-with-me/${sessionId}/questions/reply`,
+        {
+          method: 'POST',
+          headers: {
+            ...authHeader(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!res.ok) {
+        throw new HttpError(
+          `Failed to reply shared question: ${res.status}`,
+          res.status,
+          await readJsonErrorData(res),
+        );
+      }
     },
 
     async getRecovery(token, sessionId, options) {

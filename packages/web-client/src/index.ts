@@ -94,6 +94,7 @@ export type {
   SharedSessionCommentRecord,
   SharedSessionDetailRecord,
   SharedSessionPermission,
+  SharedSessionPresenceRecord,
   SharedSessionSummaryRecord,
   SessionTask,
   SessionTodo,
