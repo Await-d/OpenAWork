@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { AgentProfileRecord } from '@openAwork/web-client';
 import {
   MCPServerConfig,
   MCPServerList,
@@ -17,11 +18,17 @@ interface ConnectionTabContentProps {
   providers: AIProviderRef[];
   activeSelection: ActiveSelectionRef;
   defaultThinking: ThinkingDefaultsRef;
+  defaultToolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
+  agentProfiles: AgentProfileRecord[];
   hasUnsavedDefaultChanges: boolean;
   isSavingDefaultChanges: boolean;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelectionRef>>;
   setDefaultThinking: React.Dispatch<React.SetStateAction<ThinkingDefaultsRef>>;
+  setDefaultToolSurfaceProfile: React.Dispatch<
+    React.SetStateAction<'openawork' | 'claude_code_default' | 'claude_code_simple'>
+  >;
   saveDefaultModelSettings: () => void;
+  deleteAgentProfile: (profileId: string) => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
   handleRemoveModel: (providerId: string, modelId: string) => void;
   handleUpdateModel: (
@@ -60,11 +67,15 @@ export function ConnectionTabContent({
   providers,
   activeSelection,
   defaultThinking,
+  defaultToolSurfaceProfile,
+  agentProfiles,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   setActiveSelection,
   setDefaultThinking,
+  setDefaultToolSurfaceProfile,
   saveDefaultModelSettings,
+  deleteAgentProfile,
   handleAddModel,
   handleRemoveModel,
   handleUpdateModel,
@@ -124,6 +135,54 @@ export function ConnectionTabContent({
       />
       <div>
         <h3 style={{ ...ST, marginBottom: 12 }}>模型与提供商</h3>
+        <div style={{ ...SS, marginBottom: 12 }}>
+          <div
+            style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
+          >
+            <div style={{ display: 'grid', gap: 6, maxWidth: 320 }}>
+              <h4 style={{ ...ST, fontSize: 13, marginBottom: 0 }}>默认工具配置档</h4>
+              <select
+                aria-label="默认工具配置档"
+                value={defaultToolSurfaceProfile}
+                onChange={(event) =>
+                  setDefaultToolSurfaceProfile(
+                    event.target.value as
+                      | 'openawork'
+                      | 'claude_code_default'
+                      | 'claude_code_simple',
+                  )
+                }
+                style={IS}
+              >
+                <option value="openawork">OpenAWork 全功能</option>
+                <option value="claude_code_default">Claude Code 默认</option>
+                <option value="claude_code_simple">Claude Code 精简</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={saveDefaultModelSettings}
+              disabled={isSavingDefaultChanges || !hasUnsavedDefaultChanges}
+              style={{
+                ...BP,
+                minWidth: 116,
+                alignSelf: 'flex-start',
+                opacity: isSavingDefaultChanges || !hasUnsavedDefaultChanges ? 0.72 : 1,
+              }}
+            >
+              {isSavingDefaultChanges
+                ? '保存中…'
+                : hasUnsavedDefaultChanges
+                  ? '保存默认配置档'
+                  : '已保存'}
+            </button>
+          </div>
+          <div style={{ display: 'grid', gap: 6, maxWidth: 520 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+              新建会话会默认继承这里的工具配置档；进入具体会话后，仍可在聊天顶部继续临时切换。
+            </span>
+          </div>
+        </div>
         <div style={UV}>
           <ProviderSettings
             providers={providers}
@@ -158,6 +217,56 @@ export function ConnectionTabContent({
             onRemoveModel={handleRemoveModel}
             onUpdateModel={handleUpdateModel}
           />
+        </div>
+        <div style={{ ...SS, marginTop: 12 }}>
+          <h4 style={{ ...ST, fontSize: 13, marginBottom: 8 }}>项目配置档</h4>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {agentProfiles.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                还没有保存任何项目配置。进入具体会话后，可以在聊天顶部使用“保存为项目配置”把当前
+                agent / 模型 / 工具配置档固化到对应工作区。
+              </div>
+            ) : (
+              agentProfiles.map((profile) => (
+                <div
+                  key={profile.id}
+                  style={{
+                    display: 'grid',
+                    gap: 6,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: '1px solid var(--border-subtle)',
+                    background: 'color-mix(in oklab, var(--surface) 86%, var(--bg-2) 14%)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      alignItems: 'start',
+                    }}
+                  >
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                        {profile.label}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        {profile.workspacePath}
+                      </span>
+                    </div>
+                    <button type="button" onClick={() => deleteAgentProfile(profile.id)} style={BP}>
+                      删除
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                    代理：{profile.agentId ?? '默认'} · Provider：{profile.providerId ?? '默认'} ·
+                    Model：{profile.modelId ?? '默认'} · 配置档：{profile.toolSurfaceProfile}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
       <section style={SS}>

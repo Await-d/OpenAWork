@@ -87,11 +87,15 @@ function buildProps(
       chat: { enabled: false, effort: 'medium' },
       fast: { enabled: false, effort: 'medium' },
     },
+    defaultToolSurfaceProfile: 'openawork',
+    agentProfiles: [],
     hasUnsavedDefaultChanges: false,
     isSavingDefaultChanges: false,
     setActiveSelection: vi.fn(),
     setDefaultThinking: vi.fn(),
+    setDefaultToolSurfaceProfile: vi.fn(),
     saveDefaultModelSettings: vi.fn(),
+    deleteAgentProfile: vi.fn(),
     handleAddModel: vi.fn(),
     handleRemoveModel: vi.fn(),
     handleUpdateModel,
@@ -321,5 +325,21 @@ describe('ConnectionTabContent', () => {
 
     expect(handleUpdateModel).not.toHaveBeenCalled();
     expect(targetInput.value).toBe('0.6');
+  });
+
+  it('renders the default tool surface profile selector', async () => {
+    await renderConnectionTabContent([
+      {
+        id: 'gpt-5',
+        label: 'GPT-5',
+        enabled: true,
+      },
+    ]);
+
+    expect(getRenderedText()).toContain('默认工具配置档');
+    const select = container?.querySelector(
+      'select[aria-label="默认工具配置档"]',
+    ) as HTMLSelectElement | null;
+    expect(select?.value).toBe('openawork');
   });
 });

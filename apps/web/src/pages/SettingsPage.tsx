@@ -59,7 +59,11 @@ import { WorkspaceTabContent } from './settings/workspace-tab-content.js';
 import { SecurityTabContent } from './settings/security-tab-content.js';
 import { UsageTabContent } from './settings/usage-tab-content.js';
 import { MemoryTabContent } from './settings/memory-tab-content.js';
+import { CompanionTabContent } from './settings/companion-tab-content.js';
 import { useMemoryManagement } from './settings/use-memory-management.js';
+import { useSettingsTabActions } from './settings/use-settings-tab-actions.js';
+import { createAgentProfilesClient } from '@openAwork/web-client';
+import type { AgentProfileRecord } from '@openAwork/web-client';
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
@@ -111,6 +115,7 @@ export default function SettingsPage() {
   });
 
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfileRecord[]>([]);
   const [providers, setProviders] = useState<AIProviderRef[]>([]);
   const [activeSelection, setActiveSelectionState] = useState<ActiveSelectionRef>({
     chat: { providerId: '', modelId: '' },
@@ -128,6 +133,12 @@ export default function SettingsPage() {
     chat: { ...DEFAULT_THINKING_DEFAULTS.chat },
     fast: { ...DEFAULT_THINKING_DEFAULTS.fast },
   });
+  const [defaultToolSurfaceProfile, setDefaultToolSurfaceProfileState] = useState<
+    'openawork' | 'claude_code_default' | 'claude_code_simple'
+  >('openawork');
+  const [savedDefaultToolSurfaceProfile, setSavedDefaultToolSurfaceProfile] = useState<
+    'openawork' | 'claude_code_default' | 'claude_code_simple'
+  >('openawork');
   const [savingDefaultModelSettings, setSavingDefaultModelSettings] = useState(false);
   const [filePatterns, setFilePatterns] = useState<string[]>([]);
   const [githubTriggers, setGithubTriggers] = useState<Array<{ repo: string; events: string[] }>>(
@@ -159,6 +170,22 @@ export default function SettingsPage() {
   const [diagnostics, setDiagnostics] = useState<SettingsDiagnosticRecord[]>([]);
   const [diagnosticsAvailableDates, setDiagnosticsAvailableDates] = useState<string[]>([]);
   const [diagnosticsDateFilter, setDiagnosticsDateFilter] = React.useState<string | null>(null);
+  const {
+    handleClearDiagnostics,
+    handleDesktopAutomationClick,
+    handleDesktopAutomationGoto,
+    handleDesktopAutomationScreenshot,
+    handleDesktopAutomationStart,
+    handleDesktopAutomationType,
+    handleSaveGitHubTrigger,
+  } = useSettingsTabActions({
+    apiFetch,
+    gatewayUrl,
+    token,
+    setDiagnostics,
+    setDiagnosticsAvailableDates,
+    setGithubTriggers,
+  });
   const [devtoolsSourceStates, setDevtoolsSourceStates] = useState(() =>
     createInitialDevtoolsSourceStates(),
   );
@@ -238,8 +265,16 @@ export default function SettingsPage() {
   const hasUnsavedDefaultModelChanges = React.useMemo(
     () =>
       JSON.stringify(activeSelection) !== JSON.stringify(savedActiveSelection) ||
-      JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking),
-    [activeSelection, savedActiveSelection, defaultThinking, savedDefaultThinking],
+      JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking) ||
+      defaultToolSurfaceProfile !== savedDefaultToolSurfaceProfile,
+    [
+      activeSelection,
+      savedActiveSelection,
+      defaultThinking,
+      savedDefaultThinking,
+      defaultToolSurfaceProfile,
+      savedDefaultToolSurfaceProfile,
+    ],
   );
 
   const updateDevtoolsSourceState = React.useCallback(
@@ -554,6 +589,7 @@ export default function SettingsPage() {
             providers: AIProviderRef[] | null;
             activeSelection?: ActiveSelectionRef | null;
             defaultThinking?: ThinkingDefaultsRef | null;
+            defaultToolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
           }>,
       )
       .then((d) => {
@@ -573,10 +609,24 @@ export default function SettingsPage() {
         savedDefaultThinkingRef.current = normalizedThinking;
         setDefaultThinkingState(normalizedThinking);
         setSavedDefaultThinkingState(normalizedThinking);
+        const normalizedToolSurfaceProfile =
+          d.defaultToolSurfaceProfile === 'claude_code_default' ||
+          d.defaultToolSurfaceProfile === 'claude_code_simple'
+            ? d.defaultToolSurfaceProfile
+            : 'openawork';
+        setDefaultToolSurfaceProfileState(normalizedToolSurfaceProfile);
+        setSavedDefaultToolSurfaceProfile(normalizedToolSurfaceProfile);
       });
     void fetch(`${gatewayUrl}/settings/mcp-servers`, { headers: h })
       .then((r) => r.json() as Promise<{ servers: MCPServerEntry[] }>)
       .then((d) => setMcpServersState(d.servers ?? []));
+    void createAgentProfilesClient(gatewayUrl)
+      .list(token)
+      .then((profiles) => setAgentProfiles(profiles))
+      .catch((error: unknown) => {
+        logger.error('failed to load agent profiles', error);
+        setAgentProfiles([]);
+      });
     void fetch(`${gatewayUrl}/usage/records`, { headers: h })
       .then(async (response) => {
         if (!response.ok) {
@@ -777,6 +827,7 @@ export default function SettingsPage() {
             providers: next,
             activeSelection: nextSel,
             defaultThinking: nextThinking,
+            defaultToolSurfaceProfile,
           }),
         });
 
@@ -784,6 +835,7 @@ export default function SettingsPage() {
           providers?: AIProviderRef[];
           activeSelection?: ActiveSelectionRef;
           defaultThinking?: ThinkingDefaultsRef;
+          defaultToolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
           error?: string;
         };
 
@@ -824,6 +876,13 @@ export default function SettingsPage() {
             setSavedDefaultThinkingState(normalizedThinking);
           }
         }
+        const normalizedToolSurfaceProfile =
+          data.defaultToolSurfaceProfile === 'claude_code_default' ||
+          data.defaultToolSurfaceProfile === 'claude_code_simple'
+            ? data.defaultToolSurfaceProfile
+            : 'openawork';
+        setDefaultToolSurfaceProfileState(normalizedToolSurfaceProfile);
+        setSavedDefaultToolSurfaceProfile(normalizedToolSurfaceProfile);
       };
 
       const queuedSave = providerSaveQueueRef.current.catch(() => undefined).then(runSave);
@@ -833,7 +892,7 @@ export default function SettingsPage() {
       );
       await queuedSave;
     },
-    [token, gatewayUrl],
+    [token, gatewayUrl, defaultToolSurfaceProfile],
   );
 
   const setMcpServers = React.useCallback(
@@ -925,6 +984,31 @@ export default function SettingsPage() {
       setSavingDefaultModelSettings(false);
     }
   }, [token, savingDefaultModelSettings, saveProviders]);
+
+  const setDefaultToolSurfaceProfile = React.useCallback(
+    (updater: React.SetStateAction<'openawork' | 'claude_code_default' | 'claude_code_simple'>) => {
+      setDefaultToolSurfaceProfileState((prev) =>
+        typeof updater === 'function' ? updater(prev) : updater,
+      );
+    },
+    [],
+  );
+
+  const deleteAgentProfile = React.useCallback(
+    async (profileId: string) => {
+      if (!token) {
+        return;
+      }
+
+      try {
+        await createAgentProfilesClient(gatewayUrl).remove(token, profileId);
+        setAgentProfiles((previous) => previous.filter((profile) => profile.id !== profileId));
+      } catch (error) {
+        logger.error('failed to delete agent profile', error);
+      }
+    },
+    [gatewayUrl, token],
+  );
 
   function handleAddProvider(data?: ProviderEditData) {
     if (!data) return;
@@ -1298,15 +1382,21 @@ export default function SettingsPage() {
               <div style={{ width: '100%' }}>
                 {activeTab === 'connection' && (
                   <ConnectionTabContent
+                    agentProfiles={agentProfiles}
                     providers={providers}
                     activeSelection={activeSelection}
                     defaultThinking={defaultThinking}
+                    defaultToolSurfaceProfile={defaultToolSurfaceProfile}
                     hasUnsavedDefaultChanges={hasUnsavedDefaultModelChanges}
                     isSavingDefaultChanges={savingDefaultModelSettings}
                     setActiveSelection={setActiveSelection}
                     setDefaultThinking={setDefaultThinking}
+                    setDefaultToolSurfaceProfile={setDefaultToolSurfaceProfile}
                     saveDefaultModelSettings={() => {
                       void saveDefaultModelSettings();
+                    }}
+                    deleteAgentProfile={(profileId) => {
+                      void deleteAgentProfile(profileId);
                     }}
                     handleAddModel={handleAddModel}
                     handleRemoveModel={handleRemoveModel}
@@ -1357,6 +1447,7 @@ export default function SettingsPage() {
                   />
                 )}
                 {activeTab === 'memory' && <MemoryTabContent memoryState={memoryManagement} />}
+                {activeTab === 'companion' && <CompanionTabContent />}
                 {activeTab === 'usage' && (
                   <UsageTabContent
                     usageRecords={usageRecords}
@@ -1399,51 +1490,12 @@ export default function SettingsPage() {
                     providerUpdatesDetail={devtoolsSourceStates.providerUpdates.detail}
                     versionInfo={versionInfo}
                     onCheckVersion={checkVersionUpdate}
-                    onSaveGitHubTrigger={async (config) => {
-                      const response = await apiFetch('/github/triggers', {
-                        method: 'POST',
-                        body: JSON.stringify(config),
-                      });
-                      if (!response.ok) {
-                        const err = (await response.json()) as { message?: string };
-                        throw new Error(err.message ?? '注册失败');
-                      }
-                      setGithubTriggers((prev) => [
-                        ...prev,
-                        { repo: config.repoFullNameOwnerSlashRepo, events: config.events },
-                      ]);
-                    }}
-                    onDesktopAutomationStart={async (url) => {
-                      await apiFetch('/desktop-automation/start', {
-                        method: 'POST',
-                        body: JSON.stringify({ url }),
-                      });
-                    }}
-                    onDesktopAutomationGoto={async (url) => {
-                      await apiFetch('/desktop-automation/goto', {
-                        method: 'POST',
-                        body: JSON.stringify({ url }),
-                      });
-                    }}
-                    onDesktopAutomationClick={async (selector) => {
-                      await apiFetch('/desktop-automation/click', {
-                        method: 'POST',
-                        body: JSON.stringify({ selector }),
-                      });
-                    }}
-                    onDesktopAutomationType={async (selector, text) => {
-                      await apiFetch('/desktop-automation/type', {
-                        method: 'POST',
-                        body: JSON.stringify({ selector, text }),
-                      });
-                    }}
-                    onDesktopAutomationScreenshot={async () => {
-                      const response = await apiFetch('/desktop-automation/screenshot', {
-                        method: 'POST',
-                      });
-                      const payload = (await response.json()) as { screenshotBase64: string };
-                      return payload.screenshotBase64;
-                    }}
+                    onSaveGitHubTrigger={handleSaveGitHubTrigger}
+                    onDesktopAutomationStart={handleDesktopAutomationStart}
+                    onDesktopAutomationGoto={handleDesktopAutomationGoto}
+                    onDesktopAutomationClick={handleDesktopAutomationClick}
+                    onDesktopAutomationType={handleDesktopAutomationType}
+                    onDesktopAutomationScreenshot={handleDesktopAutomationScreenshot}
                   />
                 )}
                 {activeTab === 'devtools' && (
@@ -1454,20 +1506,7 @@ export default function SettingsPage() {
                     diagnosticsAvailableDates={diagnosticsAvailableDates}
                     diagnosticsDateFilter={diagnosticsDateFilter}
                     onSetDiagnosticsDateFilter={setDiagnosticsDateFilter}
-                    onClearDiagnostics={async () => {
-                      try {
-                        const resp = await fetch(`${gatewayUrl}/settings/diagnostics`, {
-                          method: 'DELETE',
-                          headers: { Authorization: `Bearer ${token ?? ''}` },
-                        });
-                        if (resp.ok) {
-                          setDiagnostics([]);
-                          setDiagnosticsAvailableDates([]);
-                        }
-                      } catch (_err) {
-                        void 0;
-                      }
-                    }}
+                    onClearDiagnostics={handleClearDiagnostics}
                     sourceStates={devtoolsSourceStates}
                     workers={workers}
                     onExportLogs={exportDevLogs}

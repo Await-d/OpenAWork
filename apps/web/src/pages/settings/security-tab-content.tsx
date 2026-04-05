@@ -9,6 +9,7 @@ import type { AttributionConfig, PermissionDecisionRecord } from '@openAwork/sha
 import type { DevtoolsSourceState, SettingsDiagnosticRecord } from '../settings-types.js';
 import { groupDiagnosticsByFile } from '../settings-derived.js';
 import { BP, SS, ST, UV } from './settings-section-styles.js';
+import { NotificationPreferencePanel } from './notification-preference-panel.js';
 
 interface SecurityTabContentProps {
   permissions: PermissionDecisionRecord[];
@@ -30,6 +31,7 @@ export function SecurityTabContent({
 
   return (
     <>
+      <NotificationPreferencePanel />
       <section style={SS}>
         <h3 style={ST}>权限记录</h3>
         <div style={UV}>

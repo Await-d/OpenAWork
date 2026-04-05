@@ -42,6 +42,13 @@ function createFetchMock(options?: {
     providers: typeof defaultProviders;
     activeSelection?: typeof defaultActiveSelection;
   }) => void;
+  onSaveNotificationPreferences?: (body: {
+    channel?: 'web';
+    preferences: Array<{
+      enabled: boolean;
+      eventType: 'permission_asked' | 'question_asked' | 'task_update';
+    }>;
+  }) => void;
   onSaveUpstreamRetry?: (body: { maxRetries: number }) => void;
 }) {
   const providers = options?.providers ?? [];
@@ -79,6 +86,9 @@ function createFetchMock(options?: {
 
       return jsonResponse({ providers, activeSelection });
     }
+    if (path.endsWith('/agent-profiles')) {
+      return jsonResponse({ profiles: [] });
+    }
     if (path.endsWith('/settings/mcp-servers')) {
       return jsonResponse({ servers: [] });
     }
@@ -99,6 +109,49 @@ function createFetchMock(options?: {
     }
     if (path.endsWith('/settings/permissions')) {
       return jsonResponse({ decisions: [] });
+    }
+    if (path.endsWith('/notifications/preferences')) {
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body)) as {
+          channel?: 'web';
+          preferences: Array<{
+            enabled: boolean;
+            eventType: 'permission_asked' | 'question_asked' | 'task_update';
+          }>;
+        };
+        options?.onSaveNotificationPreferences?.(body);
+        return jsonResponse({
+          preferences: body.preferences.map((preference) => ({
+            channel: body.channel ?? 'web',
+            enabled: preference.enabled,
+            eventType: preference.eventType,
+            updatedAt: '2026-04-05T00:00:00.000Z',
+          })),
+        });
+      }
+
+      return jsonResponse({
+        preferences: [
+          {
+            channel: 'web',
+            enabled: true,
+            eventType: 'permission_asked',
+            updatedAt: '2026-04-05T00:00:00.000Z',
+          },
+          {
+            channel: 'web',
+            enabled: true,
+            eventType: 'question_asked',
+            updatedAt: '2026-04-05T00:00:00.000Z',
+          },
+          {
+            channel: 'web',
+            enabled: true,
+            eventType: 'task_update',
+            updatedAt: '2026-04-05T00:00:00.000Z',
+          },
+        ],
+      });
     }
     if (path.endsWith('/settings/dev-logs')) {
       return jsonResponse({
@@ -413,6 +466,60 @@ describe('SettingsPage', () => {
     expect(rendered.textContent).toContain('诊断信息加载失败');
     expect(rendered.textContent).toContain('诊断服务暂时不可用');
     expect(rendered.textContent).not.toContain('暂无诊断数据');
+  });
+
+  it('saves notification preferences on the security tab', async () => {
+    const savedBodies: Array<{
+      channel?: 'web';
+      preferences: Array<{
+        enabled: boolean;
+        eventType: 'permission_asked' | 'question_asked' | 'task_update';
+      }>;
+    }> = [];
+    vi.stubGlobal(
+      'fetch',
+      createFetchMock({
+        onSaveNotificationPreferences: (body) => {
+          savedBodies.push(body);
+        },
+      }),
+    );
+
+    const rendered = await renderAt('security');
+    const taskUpdateCheckbox = Array.from(rendered.querySelectorAll('input')).find(
+      (input) =>
+        input instanceof HTMLInputElement &&
+        input.type === 'checkbox' &&
+        input.getAttribute('aria-label') === '任务状态',
+    ) as HTMLInputElement | undefined;
+    expect(taskUpdateCheckbox?.checked).toBe(true);
+
+    await act(async () => {
+      taskUpdateCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const saveButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('保存通知偏好'),
+    );
+    expect(saveButton).not.toBeNull();
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(savedBodies).toHaveLength(1);
+    expect(savedBodies[0]).toEqual({
+      channel: 'web',
+      preferences: [
+        { eventType: 'permission_asked', enabled: true },
+        { eventType: 'question_asked', enabled: true },
+        { eventType: 'task_update', enabled: false },
+      ],
+    });
+    expect(rendered.textContent).toContain('通知偏好已同步');
   });
 
   it('shows source overview and real diagnostics on the devtools tab when sources are healthy', async () => {

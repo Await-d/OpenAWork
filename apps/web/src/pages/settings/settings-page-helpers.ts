@@ -8,6 +8,7 @@ import type {
 export const TABS = [
   { id: 'connection', label: '连接与模型' },
   { id: 'channels', label: '消息频道' },
+  { id: 'companion', label: 'Buddy 伴侣' },
   { id: 'memory', label: '记忆管理' },
   { id: 'usage', label: '用量与账单' },
   { id: 'security', label: '安全与权限' },
