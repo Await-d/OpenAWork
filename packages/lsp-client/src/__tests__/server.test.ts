@@ -12,9 +12,12 @@ import {
   DockerfileServer,
   DockerComposeServer,
   DockerBakeServer,
+  ESLintServer,
+  BiomeServer,
   ShellscriptServer,
   RustAnalyzerServer,
   ALL_SERVERS,
+  findServersForFile,
 } from '../server.js';
 import { getLanguageIdForFilePath, getRootMarkersForFilePath } from '../lsp-filetypes.js';
 import { tmpdir } from 'os';
@@ -115,6 +118,11 @@ describe('findServerForFile', () => {
     expect(server?.id).toBe('dockerbake');
   });
 
+  it('returns TypescriptServer as primary for .ts files even with lint servers available', () => {
+    const server = findServerForFile('/src/app.ts');
+    expect(server?.id).toBe('typescript');
+  });
+
   it('returns ShellscriptServer for .sh files', () => {
     const server = findServerForFile('/scripts/run.sh');
     expect(server?.id).toBe('shellscript');
@@ -140,7 +148,7 @@ describe('findServerForFile', () => {
     expect(server).toBeUndefined();
   });
 
-  it('ALL_SERVERS contains typescript, gopls, pyright, json, html, css, yaml, dockerfile, dockercompose, dockerbake, shellscript, rust-analyzer', () => {
+  it('ALL_SERVERS contains typescript, gopls, pyright, json, html, css, yaml, dockerfile, dockercompose, dockerbake, eslint, biome, shellscript, rust-analyzer', () => {
     const ids = ALL_SERVERS.map((s) => s.id);
     expect(ids).toContain('typescript');
     expect(ids).toContain('gopls');
@@ -152,6 +160,8 @@ describe('findServerForFile', () => {
     expect(ids).toContain('dockerfile');
     expect(ids).toContain('dockercompose');
     expect(ids).toContain('dockerbake');
+    expect(ids).toContain('eslint');
+    expect(ids).toContain('biome');
     expect(ids).toContain('shellscript');
     expect(ids).toContain('rust-analyzer');
   });
@@ -203,6 +213,16 @@ describe('findServerForFile', () => {
     expect(DockerBakeServer.extensions).toContain('docker-bake.override.hcl');
   });
 
+  it('ESLintServer extensions include .ts and .js', () => {
+    expect(ESLintServer.extensions).toContain('.ts');
+    expect(ESLintServer.extensions).toContain('.js');
+  });
+
+  it('BiomeServer extensions include .ts and .json', () => {
+    expect(BiomeServer.extensions).toContain('.ts');
+    expect(BiomeServer.extensions).toContain('.json');
+  });
+
   it('ShellscriptServer extensions include .sh, .bash, and .zsh', () => {
     expect(ShellscriptServer.extensions).toContain('.sh');
     expect(ShellscriptServer.extensions).toContain('.bash');
@@ -221,5 +241,12 @@ describe('findServerForFile', () => {
   it('getRootMarkersForFilePath resolves compose and bake root markers', () => {
     expect(getRootMarkersForFilePath('/workspace/compose.yaml')).toContain('compose.yaml');
     expect(getRootMarkersForFilePath('/workspace/docker-bake.hcl')).toContain('docker-bake.hcl');
+  });
+
+  it('findServersForFile returns primary and supplemental matches for JS/TS files', () => {
+    const ids = findServersForFile('/src/app.ts').map((server) => server.id);
+    expect(ids).toContain('typescript');
+    expect(ids).toContain('eslint');
+    expect(ids).toContain('biome');
   });
 });

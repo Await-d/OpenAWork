@@ -12,8 +12,16 @@ export interface LSPServerHandle {
 export interface LSPServerInfo {
   id: string;
   extensions: string[];
+  role?: 'primary' | 'supplemental';
+  slot?: string;
+  priority?: number;
   root: RootFunction;
   spawn(root: string): Promise<LSPServerHandle | undefined>;
+}
+
+export interface LSPManagerOptions {
+  servers?: LSPServerInfo[];
+  disabledServerIds?: string[];
 }
 
 export interface LSPClientInfo {

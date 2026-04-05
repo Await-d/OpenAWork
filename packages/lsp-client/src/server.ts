@@ -239,6 +239,50 @@ export const DockerBakeServer: LSPServerInfo = {
   },
 };
 
+export const ESLintServer: LSPServerInfo = {
+  id: 'eslint',
+  extensions: ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'],
+  role: 'supplemental',
+  slot: 'js-lint',
+  priority: 1,
+  root: NearestRoot([
+    '.eslintrc',
+    '.eslintrc.js',
+    '.eslintrc.json',
+    '.eslintrc.cjs',
+    'eslint.config.js',
+    'eslint.config.ts',
+  ]),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('vscode-eslint-language-server');
+    if (!bin) return undefined;
+    return {
+      process: spawn(bin, ['--stdio'], { cwd: root }),
+      initialization: {
+        validate: 'on',
+        codeAction: {
+          disableRuleComment: { enable: true },
+          showDocumentation: { enable: true },
+        },
+      },
+    };
+  },
+};
+
+export const BiomeServer: LSPServerInfo = {
+  id: 'biome',
+  extensions: ['.js', '.jsx', '.ts', '.tsx', '.json', '.jsonc'],
+  role: 'supplemental',
+  slot: 'js-lint',
+  priority: 2,
+  root: NearestRoot(['biome.json', 'biome.jsonc']),
+  async spawn(root: string): Promise<LSPServerHandle | undefined> {
+    const bin = whichSync('biome');
+    if (!bin) return undefined;
+    return { process: spawn(bin, ['lsp-proxy'], { cwd: root }) };
+  },
+};
+
 export const ShellscriptServer: LSPServerInfo = {
   id: 'shellscript',
   extensions: ['.sh', '.bash', '.zsh'],
@@ -272,16 +316,34 @@ export const ALL_SERVERS: LSPServerInfo[] = [
   DockerfileServer,
   DockerComposeServer,
   DockerBakeServer,
+  ESLintServer,
+  BiomeServer,
   ShellscriptServer,
   RustAnalyzerServer,
 ];
 
-export function findServerForFile(filePath: string): LSPServerInfo | undefined {
+function splitMatches(filePath: string, servers: readonly LSPServerInfo[]) {
   const idx = filePath.lastIndexOf('.');
   const ext = idx >= 0 ? filePath.slice(idx).toLowerCase() : '';
   const name = basename(filePath).toLowerCase();
-  return (
-    ALL_SERVERS.find((s) => s.extensions.some((value) => value.toLowerCase() === name)) ??
-    ALL_SERVERS.find((s) => s.extensions.some((value) => value.toLowerCase() === ext))
+  const byName = servers.filter((s) => s.extensions.some((value) => value.toLowerCase() === name));
+  const byExt = servers.filter(
+    (s) => !byName.includes(s) && s.extensions.some((value) => value.toLowerCase() === ext),
   );
+  return [...byName, ...byExt];
+}
+
+export function findServersForFile(
+  filePath: string,
+  servers: readonly LSPServerInfo[] = ALL_SERVERS,
+): LSPServerInfo[] {
+  return splitMatches(filePath, servers);
+}
+
+export function findServerForFile(
+  filePath: string,
+  servers: readonly LSPServerInfo[] = ALL_SERVERS,
+): LSPServerInfo | undefined {
+  const matches = findServersForFile(filePath, servers);
+  return matches.find((s) => s.role !== 'supplemental') ?? matches[0];
 }

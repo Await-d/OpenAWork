@@ -1,6 +1,12 @@
-import { findServerForFile, ALL_SERVERS } from './server.js';
+import { findServerForFile, findServersForFile, ALL_SERVERS } from './server.js';
 import { createLSPClient } from './client.js';
-import type { LSPServerInfo, LSPClientInfo, LSPServerStatus, DiagnosticSummary } from './types.js';
+import type {
+  LSPServerInfo,
+  LSPClientInfo,
+  LSPServerStatus,
+  DiagnosticSummary,
+  LSPManagerOptions,
+} from './types.js';
 import type { Diagnostic } from 'vscode-languageserver-types';
 
 const SEVERITY_MAP: Record<number, DiagnosticSummary['severity']> = {
@@ -17,8 +23,10 @@ export class LSPManager {
   private servers: LSPServerInfo[];
   private diagnosticHandlers: Array<(path: string, diagnostics: Diagnostic[]) => void> = [];
 
-  constructor(servers: LSPServerInfo[] = ALL_SERVERS) {
-    this.servers = servers;
+  constructor(input: LSPServerInfo[] | LSPManagerOptions = ALL_SERVERS) {
+    const opts = Array.isArray(input) ? { servers: input } : input;
+    const disabled = new Set(opts.disabledServerIds ?? []);
+    this.servers = (opts.servers ?? ALL_SERVERS).filter((server) => !disabled.has(server.id));
   }
 
   private clientKey(serverId: string, root: string): string {
@@ -72,20 +80,35 @@ export class LSPManager {
     return spawning;
   }
 
+  private async resolveServers(
+    filePath: string,
+  ): Promise<Array<{ info: LSPServerInfo; root: string }>> {
+    const selected = new Map<string, { info: LSPServerInfo; root: string }>();
+    for (const info of findServersForFile(filePath, this.servers)) {
+      const root = await info.root(filePath);
+      if (!root) continue;
+      const slot = info.slot ?? info.id;
+      const prev = selected.get(slot);
+      if (!prev || (info.priority ?? 0) > (prev.info.priority ?? 0)) {
+        selected.set(slot, { info, root });
+      }
+    }
+    return [...selected.values()];
+  }
+
+  private async clientsForFile(filePath: string): Promise<LSPClientInfo[]> {
+    const infos = await this.resolveServers(filePath);
+    const clients = await Promise.all(
+      infos.map((entry) => this.getOrSpawnClient(entry.info, entry.root)),
+    );
+    return clients.filter((client): client is LSPClientInfo => client !== undefined);
+  }
+
   async touchFile(filePath: string, waitForDiagnostics = false): Promise<void> {
-    const serverInfo = findServerForFile(filePath);
-    if (!serverInfo) return;
-
-    const root = await serverInfo.root(filePath);
-    if (!root) return;
-
-    const client = await this.getOrSpawnClient(serverInfo, root);
-    if (!client) return;
-
-    await client.notify.open({ path: filePath });
-
+    const clients = await this.clientsForFile(filePath);
+    await Promise.all(clients.map((client) => client.notify.open({ path: filePath })));
     if (waitForDiagnostics) {
-      await client.waitForDiagnostics({ path: filePath });
+      await Promise.all(clients.map((client) => client.waitForDiagnostics({ path: filePath })));
     }
   }
 
@@ -93,14 +116,15 @@ export class LSPManager {
     const result: Record<string, DiagnosticSummary[]> = {};
     for (const client of this.clients) {
       for (const [filePath, diags] of client.diagnostics) {
-        result[filePath] = diags.map((d) => ({
+        const next = diags.map((d) => ({
           severity: SEVERITY_MAP[d.severity ?? 1] ?? 'error',
           line: d.range.start.line + 1,
           col: d.range.start.character + 1,
           message: d.message,
-          source: d.source,
+          source: d.source ?? client.serverID,
           code: typeof d.code === 'number' || typeof d.code === 'string' ? d.code : undefined,
         }));
+        result[filePath] = [...(result[filePath] ?? []), ...next];
       }
     }
     return result;
@@ -205,7 +229,7 @@ export class LSPManager {
   }
 
   private async clientForFile(filePath: string): Promise<LSPClientInfo | undefined> {
-    const serverInfo = findServerForFile(filePath);
+    const serverInfo = findServerForFile(filePath, this.servers);
     if (!serverInfo) return undefined;
     const root = await serverInfo.root(filePath);
     if (!root) return undefined;
@@ -225,9 +249,12 @@ export {
   DockerfileServer,
   DockerComposeServer,
   DockerBakeServer,
+  ESLintServer,
+  BiomeServer,
   ShellscriptServer,
   RustAnalyzerServer,
   NearestRoot,
+  findServersForFile,
 } from './server.js';
 export { createLSPClient } from './client.js';
 export { getLanguageId, LANGUAGE_EXTENSIONS } from './language.js';
@@ -238,6 +265,7 @@ export type {
   LSPServerStatus,
   DiagnosticSummary,
   RootFunction,
+  LSPManagerOptions,
 } from './types.js';
 
 export { LSPWebSocketClient } from './ws-client.js';
