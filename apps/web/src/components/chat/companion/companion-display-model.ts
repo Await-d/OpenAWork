@@ -1,8 +1,10 @@
 import {
   createCompanionSpriteBones,
+  createCompanionSpriteBonesForSpecies,
   spriteDisplayLabel,
   spriteRarityStars,
   type CompanionSpriteBones,
+  type CompanionSpriteSpecies,
 } from './companion-sprite-model.js';
 
 export interface CompanionActivitySnapshot {
@@ -121,6 +123,28 @@ export function createCompanionProfile(seedInput: string): CompanionProfile {
     species: spriteDisplayLabel(sprite.species),
     sprite,
     traits: [...pickBySeed(COMPANION_TRAIT_SETS, seed, 4)],
+  };
+}
+
+export function createCompanionPreviewProfile(
+  species: CompanionSpriteSpecies,
+  seedInput: string,
+): CompanionProfile {
+  const normalizedSeed = `${seedInput.trim().toLowerCase() || 'guest'}:${species}:preview`;
+  const seed = hashString(normalizedSeed);
+  const palette = pickBySeed(COMPANION_PALETTES, seed, 1);
+  const sprite = createCompanionSpriteBonesForSpecies(normalizedSeed, species);
+  return {
+    accentColor: palette.accentColor,
+    accentTint: palette.accentTint,
+    archetype: pickBySeed(COMPANION_ARCHETYPES, seed, 2),
+    glyph: pickBySeed(COMPANION_GLYPHS, seed, 4),
+    name: pickBySeed(COMPANION_NAMES, seed),
+    note: pickBySeed(COMPANION_NOTES, seed, 5),
+    rarityStars: spriteRarityStars(sprite.rarity),
+    species: spriteDisplayLabel(sprite.species),
+    sprite,
+    traits: [...pickBySeed(COMPANION_TRAIT_SETS, seed, 3)],
   };
 }
 

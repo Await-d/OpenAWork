@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CompanionVoiceOutputMode, CompanionVoiceVariant } from '@openAwork/shared';
 import {
   deriveCompanionOutputPolicy,
   type CompanionUtteranceSeed,
@@ -17,6 +18,9 @@ interface BuddyVoiceOutputOptions {
   muted: boolean;
   profileName: string;
   quietMode: boolean;
+  voiceOutputMode: CompanionVoiceOutputMode;
+  voiceRate: number;
+  voiceVariant: CompanionVoiceVariant;
   voiceInputVisible: boolean;
 }
 
@@ -46,6 +50,21 @@ function buildUtteranceCooldownKey(output: CompanionUtteranceSeed): string {
   return `${output.tone}:${output.badge}`;
 }
 
+function resolveVoiceVariantTuning(voiceVariant: CompanionVoiceVariant): {
+  pitch: number;
+  rateOffset: number;
+  volume: number;
+} {
+  switch (voiceVariant) {
+    case 'bright':
+      return { pitch: 1.12, rateOffset: 0.06, volume: 0.9 };
+    case 'calm':
+      return { pitch: 0.92, rateOffset: -0.08, volume: 0.82 };
+    default:
+      return { pitch: 1, rateOffset: 0, volume: 0.85 };
+  }
+}
+
 export function useBuddyVoiceOutput({
   enabled,
   featureEnabled,
@@ -55,6 +74,9 @@ export function useBuddyVoiceOutput({
   muted,
   profileName,
   quietMode,
+  voiceOutputMode,
+  voiceRate,
+  voiceVariant,
   voiceInputVisible,
 }: BuddyVoiceOutputOptions): BuddyVoiceOutputState {
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -74,7 +96,14 @@ export function useBuddyVoiceOutput({
       return;
     }
 
-    if (!featureReady || !featureEnabled || !enabled || muted || voiceInputVisible) {
+    if (
+      !featureReady ||
+      !featureEnabled ||
+      !enabled ||
+      muted ||
+      voiceInputVisible ||
+      voiceOutputMode === 'off'
+    ) {
       globalThis.window.speechSynthesis.cancel();
       setIsSpeaking(false);
       return;
@@ -93,6 +122,10 @@ export function useBuddyVoiceOutput({
       return;
     }
 
+    if (voiceOutputMode === 'important_only' && liveOutput.tone !== 'notice') {
+      return;
+    }
+
     const nextCooldownKey = buildUtteranceCooldownKey(liveOutput);
     const previousSpokenAt = lastSpokenAtByKeyRef.current.get(nextCooldownKey);
     const cooldownWindow = liveOutput.tone === 'notice' ? NOTICE_COOLDOWN_MS : ACTIVE_COOLDOWN_MS;
@@ -104,9 +137,10 @@ export function useBuddyVoiceOutput({
     const utterance = new globalThis.SpeechSynthesisUtterance(
       buildSpokenText(profileName, liveOutput),
     );
-    utterance.rate = 1.02;
-    utterance.pitch = 1;
-    utterance.volume = 0.85;
+    const tuning = resolveVoiceVariantTuning(voiceVariant);
+    utterance.rate = Math.min(2, Math.max(0.5, voiceRate + tuning.rateOffset));
+    utterance.pitch = tuning.pitch;
+    utterance.volume = tuning.volume;
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
@@ -129,6 +163,9 @@ export function useBuddyVoiceOutput({
     muted,
     profileName,
     quietMode,
+    voiceOutputMode,
+    voiceRate,
+    voiceVariant,
     voiceInputVisible,
   ]);
 
@@ -182,6 +219,14 @@ export function useBuddyVoiceOutput({
     };
   }
 
+  if (voiceOutputMode === 'off') {
+    return {
+      isSpeaking: false,
+      isVoiceOutputAvailable: true,
+      speechStatusLabel: '当前绑定关闭了播报模式',
+    };
+  }
+
   if (voiceInputVisible) {
     return {
       isSpeaking: false,
@@ -193,7 +238,14 @@ export function useBuddyVoiceOutput({
   return {
     isSpeaking,
     isVoiceOutputAvailable: true,
-    speechStatusLabel: isSpeaking ? 'Buddy 正在播报短句' : 'Buddy 播报待命中',
+    speechStatusLabel:
+      voiceOutputMode === 'important_only'
+        ? isSpeaking
+          ? 'Buddy 正在播报重点提醒'
+          : 'Buddy 仅播报重点提醒'
+        : isSpeaking
+          ? 'Buddy 正在播报短句'
+          : 'Buddy 播报待命中',
   };
 }
 

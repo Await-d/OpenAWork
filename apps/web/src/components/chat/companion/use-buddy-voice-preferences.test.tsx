@@ -3,30 +3,54 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CompanionAgentBinding } from '@openAwork/shared';
 import { useBuddyVoicePreferences } from './use-buddy-voice-preferences.js';
 import { useAuthStore } from '../../../stores/auth.js';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
-function Harness({ scope }: { scope: string }) {
+function Harness({ agentId, scope }: { agentId?: string; scope: string }) {
   const {
+    bindings,
     companionFeatureMode,
+    enabled,
+    injectionMode,
     isVoiceOutputFeatureReady,
     isVoiceOutputFeatureEnabled,
     muted,
     quietMode,
+    reducedMotion,
     syncStatusLabel,
+    setEnabled,
+    setInjectionMode,
     setMuted,
     setQuietMode,
+    setReducedMotion,
     voiceOutputEnabled,
     setVoiceOutputEnabled,
-  } = useBuddyVoicePreferences(scope);
+    saveAgentBinding,
+  } = useBuddyVoicePreferences(scope, agentId);
+
+  const sampleBinding: CompanionAgentBinding = {
+    behaviorTone: 'focused',
+    displayName: 'Heph 小锤',
+    injectionMode: 'always',
+    species: 'robot',
+    themeVariant: 'playful',
+    verbosity: 'minimal',
+    voiceOutputMode: 'important_only',
+    voiceRate: 1.15,
+    voiceVariant: 'bright',
+  };
 
   return (
     <div>
       <button type="button" onClick={() => setVoiceOutputEnabled((value) => !value)}>
         {voiceOutputEnabled ? 'voice:on' : 'voice:off'}
+      </button>
+      <button type="button" onClick={() => setEnabled((value) => !value)}>
+        {enabled ? 'companion:on' : 'companion:off'}
       </button>
       <button type="button" onClick={() => setMuted((value) => !value)}>
         {muted ? 'muted:on' : 'muted:off'}
@@ -34,10 +58,25 @@ function Harness({ scope }: { scope: string }) {
       <button type="button" onClick={() => setQuietMode((value) => !value)}>
         {quietMode ? 'quiet:on' : 'quiet:off'}
       </button>
+      <button type="button" onClick={() => setReducedMotion((value) => !value)}>
+        {reducedMotion ? 'motion:reduced' : 'motion:full'}
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setInjectionMode((value) => (value === 'always' ? 'mention_only' : 'always'))
+        }
+      >
+        {`inject:${injectionMode}`}
+      </button>
+      <button type="button" onClick={() => void saveAgentBinding('hephaestus', sampleBinding)}>
+        save-binding
+      </button>
       <span>{isVoiceOutputFeatureEnabled ? 'feature:on' : 'feature:off'}</span>
       <span>{isVoiceOutputFeatureReady ? 'feature:ready' : 'feature:loading'}</span>
       <span>{`mode:${companionFeatureMode}`}</span>
       <span>{`sync:${syncStatusLabel}`}</span>
+      <span>{`bindings:${Object.keys(bindings).length}`}</span>
     </div>
   );
 }
@@ -134,8 +173,19 @@ describe('useBuddyVoicePreferences', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            activeBinding: undefined,
             feature: { enabled: false, mode: 'off' },
-            preferences: { voiceOutputEnabled: true, muted: true, verbosity: 'minimal' },
+            preferences: {
+              enabled: false,
+              injectionMode: 'always',
+              voiceOutputEnabled: true,
+              voiceOutputMode: 'buddy_only',
+              voiceRate: 1.02,
+              voiceVariant: 'system',
+              muted: true,
+              reducedMotion: true,
+              verbosity: 'minimal',
+            },
             profile: null,
           }),
           { status: 200 },
@@ -144,20 +194,27 @@ describe('useBuddyVoicePreferences', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
 
     await act(async () => {
-      root?.render(<Harness scope="buddy@example.com" />);
+      root?.render(<Harness scope="buddy@example.com" agentId="hephaestus" />);
     });
 
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/settings/companion', {
-      headers: { Authorization: 'Bearer token-a' },
-      signal: expect.any(AbortSignal),
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/companion?agentId=hephaestus',
+      {
+        headers: { Authorization: 'Bearer token-a' },
+        signal: expect.any(AbortSignal),
+      },
+    );
     expect(container?.textContent).toContain('voice:on');
+    expect(container?.textContent).toContain('companion:off');
     expect(container?.textContent).toContain('muted:on');
     expect(container?.textContent).toContain('quiet:on');
+    expect(container?.textContent).toContain('motion:reduced');
+    expect(container?.textContent).toContain('inject:always');
     expect(container?.textContent).toContain('feature:off');
     expect(container?.textContent).toContain('feature:ready');
     expect(container?.textContent).toContain('mode:off');
     expect(container?.textContent).toContain('sync:已同步');
+    expect(container?.textContent).toContain('bindings:0');
 
     const button = container?.querySelectorAll('button')[0];
     act(() => {
@@ -171,20 +228,29 @@ describe('useBuddyVoicePreferences', () => {
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenLastCalledWith('http://localhost:3000/settings/companion', {
-      method: 'PUT',
-      headers: {
-        Authorization: 'Bearer token-a',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        preferences: {
-          muted: true,
-          verbosity: 'minimal',
-          voiceOutputEnabled: false,
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'http://localhost:3000/settings/companion?agentId=hephaestus',
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer token-a',
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          preferences: {
+            enabled: false,
+            injectionMode: 'always',
+            muted: true,
+            reducedMotion: true,
+            verbosity: 'minimal',
+            voiceOutputEnabled: false,
+            voiceOutputMode: 'buddy_only',
+            voiceRate: 1.02,
+            voiceVariant: 'system',
+          },
+        }),
+      },
+    );
     expect(container?.textContent).toContain('sync:已同步');
   });
 
@@ -194,8 +260,19 @@ describe('useBuddyVoicePreferences', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            activeBinding: undefined,
             feature: { enabled: true, mode: 'beta' },
-            preferences: { voiceOutputEnabled: false, muted: false, verbosity: 'normal' },
+            preferences: {
+              enabled: true,
+              injectionMode: 'mention_only',
+              voiceOutputEnabled: false,
+              voiceOutputMode: 'buddy_only',
+              voiceRate: 1.02,
+              voiceVariant: 'system',
+              muted: false,
+              reducedMotion: false,
+              verbosity: 'normal',
+            },
             profile: null,
           }),
           { status: 200 },
@@ -231,9 +308,15 @@ describe('useBuddyVoicePreferences', () => {
       },
       body: JSON.stringify({
         preferences: {
+          enabled: true,
+          injectionMode: 'mention_only',
           muted: false,
+          reducedMotion: false,
           verbosity: 'normal',
           voiceOutputEnabled: true,
+          voiceOutputMode: 'buddy_only',
+          voiceRate: 1.02,
+          voiceVariant: 'system',
         },
       }),
     });
@@ -246,8 +329,19 @@ describe('useBuddyVoicePreferences', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            activeBinding: undefined,
             feature: { enabled: true, mode: 'beta' },
-            preferences: { voiceOutputEnabled: false, muted: false, verbosity: 'normal' },
+            preferences: {
+              enabled: true,
+              injectionMode: 'mention_only',
+              voiceOutputEnabled: false,
+              voiceOutputMode: 'buddy_only',
+              voiceRate: 1.02,
+              voiceVariant: 'system',
+              muted: false,
+              reducedMotion: false,
+              verbosity: 'normal',
+            },
             profile: null,
           }),
           { status: 200 },
@@ -259,7 +353,7 @@ describe('useBuddyVoicePreferences', () => {
       root?.render(<Harness scope="buddy@example.com" />);
     });
 
-    const muteButton = container?.querySelectorAll('button')[1];
+    const muteButton = container?.querySelectorAll('button')[2];
     act(() => {
       muteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -272,5 +366,133 @@ describe('useBuddyVoicePreferences', () => {
     });
 
     expect(container?.textContent).toContain('sync:同步失败，先本地生效');
+  });
+
+  it('saves buddy-agent bindings through the companion settings route', async () => {
+    useAuthStore.setState({ accessToken: 'token-a', gatewayUrl: 'http://localhost:3000' });
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            bindings: {},
+            activeBinding: undefined,
+            feature: { enabled: true, mode: 'beta' },
+            preferences: {
+              enabled: true,
+              injectionMode: 'mention_only',
+              voiceOutputEnabled: false,
+              voiceOutputMode: 'buddy_only',
+              voiceRate: 1.02,
+              voiceVariant: 'system',
+              muted: false,
+              reducedMotion: false,
+              verbosity: 'normal',
+            },
+            profile: null,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            bindings: {
+              hephaestus: {
+                behaviorTone: 'focused',
+                displayName: 'Heph 小锤',
+                injectionMode: 'always',
+                species: 'robot',
+                themeVariant: 'playful',
+                verbosity: 'minimal',
+                voiceOutputMode: 'important_only',
+                voiceRate: 1.15,
+                voiceVariant: 'bright',
+              },
+            },
+            activeBinding: {
+              behaviorTone: 'focused',
+              displayName: 'Heph 小锤',
+              injectionMode: 'always',
+              species: 'robot',
+              themeVariant: 'playful',
+              verbosity: 'minimal',
+              voiceOutputMode: 'important_only',
+              voiceRate: 1.15,
+              voiceVariant: 'bright',
+            },
+            feature: { enabled: true, mode: 'beta' },
+            preferences: {
+              enabled: true,
+              injectionMode: 'mention_only',
+              voiceOutputEnabled: false,
+              voiceOutputMode: 'buddy_only',
+              voiceRate: 1.02,
+              voiceVariant: 'system',
+              muted: false,
+              reducedMotion: false,
+              verbosity: 'normal',
+            },
+            profile: {
+              accentColor: 'var(--accent)',
+              accentTint: 'color-mix(in oklch, var(--accent) 14%, transparent)',
+              archetype: '工作台回声体',
+              glyph: '✦',
+              name: 'Heph 小锤',
+              note: '只在你需要时露面，不抢主助手的话筒。',
+              rarityStars: '★★★',
+              species: '机械体',
+              sprite: {
+                eye: '✦',
+                hat: 'none',
+                rarity: 'rare',
+                shiny: false,
+                species: 'robot',
+              },
+              traits: ['低打扰', '跟命令'],
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await act(async () => {
+      root?.render(<Harness scope="buddy@example.com" agentId="hephaestus" />);
+    });
+
+    const saveBindingButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.includes('save-binding'),
+    );
+
+    await act(async () => {
+      saveBindingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'http://localhost:3000/settings/companion?agentId=hephaestus',
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer token-a',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bindings: {
+            hephaestus: {
+              behaviorTone: 'focused',
+              displayName: 'Heph 小锤',
+              injectionMode: 'always',
+              species: 'robot',
+              themeVariant: 'playful',
+              verbosity: 'minimal',
+              voiceOutputMode: 'important_only',
+              voiceRate: 1.15,
+              voiceVariant: 'bright',
+            },
+          },
+        }),
+      },
+    );
+    expect(container?.textContent).toContain('bindings:1');
   });
 });

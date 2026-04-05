@@ -87,7 +87,7 @@ describe('CompanionStage', () => {
     expect(container?.textContent).toContain('最近会话输出');
     expect(container?.textContent).toContain('当前环境无本地播报');
     expect(container?.textContent).toContain('仅本地保存');
-    expect(container?.textContent).toContain('终端同款精灵壳层；本地 TTS MVP 只播稳定短句。');
+    expect(container?.textContent).toContain('终端同款精灵壳层；注入模式：beta。');
   });
 
   it('hides the reaction bubble after muting', async () => {
@@ -192,6 +192,7 @@ describe('CompanionStage', () => {
     });
 
     expect(container?.querySelector('[data-testid="companion-pet-hearts"]')).not.toBeNull();
+    expect(container?.textContent).toContain('/buddy');
   });
 
   it('toggles buddy voice output UI when local speech synthesis is available', async () => {
@@ -227,7 +228,14 @@ describe('CompanionStage', () => {
       new Response(
         JSON.stringify({
           feature: { enabled: false, mode: 'off' },
-          preferences: { voiceOutputEnabled: true, muted: false, verbosity: 'normal' },
+          preferences: {
+            enabled: false,
+            voiceOutputEnabled: true,
+            muted: false,
+            reducedMotion: false,
+            injectionMode: 'mention_only',
+            verbosity: 'normal',
+          },
           profile: null,
         }),
         { status: 200 },
@@ -237,10 +245,6 @@ describe('CompanionStage', () => {
 
     await renderStage();
 
-    expect(container?.textContent).toContain('功能关闭');
-    const voiceButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('功能关闭'),
-    );
-    expect(voiceButton?.getAttribute('disabled')).not.toBeNull();
+    expect(container?.querySelector('[data-testid="companion-stage"]')).toBeNull();
   });
 });

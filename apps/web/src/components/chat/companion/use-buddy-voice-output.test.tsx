@@ -3,6 +3,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CompanionVoiceOutputMode, CompanionVoiceVariant } from '@openAwork/shared';
 import { useBuddyVoiceOutput } from './use-buddy-voice-output.js';
 import type { CompanionUtteranceSeed } from './companion-display-model.js';
 
@@ -31,6 +32,9 @@ function Harness(props: {
   liveOutputId: string | null;
   muted: boolean;
   quietMode: boolean;
+  voiceOutputMode?: CompanionVoiceOutputMode;
+  voiceRate?: number;
+  voiceVariant?: CompanionVoiceVariant;
   voiceInputVisible: boolean;
 }) {
   const state = useBuddyVoiceOutput({
@@ -42,6 +46,9 @@ function Harness(props: {
     muted: props.muted,
     profileName: '稜镜',
     quietMode: props.quietMode,
+    voiceOutputMode: props.voiceOutputMode ?? 'buddy_only',
+    voiceRate: props.voiceRate ?? 1.02,
+    voiceVariant: props.voiceVariant ?? 'system',
     voiceInputVisible: props.voiceInputVisible,
   });
 
@@ -104,7 +111,29 @@ describe('useBuddyVoiceOutput', () => {
 
     expect(speak).toHaveBeenCalledTimes(1);
     expect((speak.mock.calls[0]?.[0] as MockSpeechSynthesisUtterance).text).toContain('稜镜提醒');
+    expect((speak.mock.calls[0]?.[0] as MockSpeechSynthesisUtterance).rate).toBeCloseTo(1.02, 2);
     expect(container?.textContent).toContain('Buddy 正在播报短句');
+  });
+
+  it('applies voice variant and rate overrides to the utterance', async () => {
+    await act(async () => {
+      root?.render(
+        <Harness
+          enabled={true}
+          liveOutput={{ badge: '待确认', text: '右侧还有 1 项待确认动作。', tone: 'notice' }}
+          liveOutputId="variant-bright"
+          muted={false}
+          quietMode={false}
+          voiceInputVisible={false}
+          voiceRate={1.15}
+          voiceVariant="bright"
+        />,
+      );
+    });
+
+    const utterance = speak.mock.calls[0]?.[0] as MockSpeechSynthesisUtterance;
+    expect(utterance.rate).toBeCloseTo(1.21, 2);
+    expect(utterance.pitch).toBeCloseTo(1.12, 2);
   });
 
   it('does not speak intro or ambient cues', async () => {
@@ -140,6 +169,44 @@ describe('useBuddyVoiceOutput', () => {
 
     expect(speak).not.toHaveBeenCalled();
     expect(container?.textContent).toContain('Buddy 播报待命中');
+  });
+
+  it('suppresses non-notice speech in important-only mode', async () => {
+    await act(async () => {
+      root?.render(
+        <Harness
+          enabled={true}
+          liveOutput={{ badge: '跟随生成', text: '主助手正在生成。', tone: 'active' }}
+          liveOutputId="important-only"
+          muted={false}
+          quietMode={false}
+          voiceInputVisible={false}
+          voiceOutputMode="important_only"
+        />,
+      );
+    });
+
+    expect(speak).not.toHaveBeenCalled();
+    expect(container?.textContent).toContain('Buddy 仅播报重点提醒');
+  });
+
+  it('treats off voice mode as a hard stop even when voice output is enabled', async () => {
+    await act(async () => {
+      root?.render(
+        <Harness
+          enabled={true}
+          liveOutput={{ badge: '待确认', text: '右侧还有 1 项待确认动作。', tone: 'notice' }}
+          liveOutputId="voice-off"
+          muted={false}
+          quietMode={false}
+          voiceInputVisible={false}
+          voiceOutputMode="off"
+        />,
+      );
+    });
+
+    expect(speak).not.toHaveBeenCalled();
+    expect(container?.textContent).toContain('当前绑定关闭了播报模式');
   });
 
   it('deduplicates repeated speech for the same live output id', async () => {

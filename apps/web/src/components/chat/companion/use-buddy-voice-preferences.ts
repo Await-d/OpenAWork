@@ -7,41 +7,102 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
+import type {
+  CompanionAgentBinding,
+  CompanionVoiceOutputMode,
+  CompanionVoiceVariant,
+} from '@openAwork/shared';
+import type { CompanionProfile } from './companion-display-model.js';
 import { useAuthStore } from '../../../stores/auth.js';
 
 const STORAGE_KEY_PREFIX = 'openawork-buddy-voice-output';
 const REMOTE_SAVE_DEBOUNCE_MS = 500;
 
+type CompanionFeatureMode = 'off' | 'beta' | 'ga';
+type CompanionInjectionMode = 'off' | 'mention_only' | 'always';
+type PreferenceSyncState = 'local' | 'loading' | 'saving' | 'synced' | 'error';
+
 interface CompanionSettingsResponse {
+  activeBinding?: CompanionAgentBinding;
+  bindings?: Record<string, CompanionAgentBinding>;
   feature?: {
     enabled?: boolean;
-    mode?: 'off' | 'beta' | 'ga';
+    mode?: CompanionFeatureMode;
   };
   preferences?: {
+    enabled?: boolean;
+    injectionMode?: CompanionInjectionMode;
     muted?: boolean;
+    reducedMotion?: boolean;
     verbosity?: 'minimal' | 'normal';
     voiceOutputEnabled?: boolean;
+    voiceOutputMode?: CompanionVoiceOutputMode;
+    voiceRate?: number;
+    voiceVariant?: CompanionVoiceVariant;
   };
-  profile?: unknown;
+  profile?: CompanionProfile | null;
 }
 
 interface BuddyVoicePreferencesState {
+  enabled: boolean;
+  injectionMode: CompanionInjectionMode;
   muted: boolean;
   quietMode: boolean;
+  reducedMotion: boolean;
   voiceOutputEnabled: boolean;
+  voiceOutputMode: CompanionVoiceOutputMode;
+  voiceRate: number;
+  voiceVariant: CompanionVoiceVariant;
 }
 
-type CompanionFeatureMode = 'off' | 'beta' | 'ga';
-type PreferenceSyncState = 'local' | 'loading' | 'saving' | 'synced' | 'error';
+export type BuddyAgentBindings = Record<string, CompanionAgentBinding>;
+
+function normalizeAgentId(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeBuddyBindings(
+  value: Record<string, CompanionAgentBinding> | undefined,
+): BuddyAgentBindings {
+  if (!value) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([agentId, binding]) => {
+      const normalizedAgentId = normalizeAgentId(agentId);
+      if (!normalizedAgentId) {
+        return [];
+      }
+
+      return [[normalizedAgentId, binding] as const];
+    }),
+  );
+}
 
 const DEFAULT_BUDDY_VOICE_PREFERENCES: BuddyVoicePreferencesState = {
+  enabled: true,
+  injectionMode: 'mention_only',
   muted: false,
   quietMode: false,
+  reducedMotion: false,
   voiceOutputEnabled: false,
+  voiceOutputMode: 'buddy_only',
+  voiceRate: 1.02,
+  voiceVariant: 'system',
 };
 
 function buildStorageKey(scope: string): string {
   return `${STORAGE_KEY_PREFIX}:${scope}`;
+}
+
+function normalizeInjectionMode(value: unknown): CompanionInjectionMode {
+  return value === 'off' || value === 'always' || value === 'mention_only' ? value : 'mention_only';
 }
 
 function readStoredVoicePreferences(scope: string): BuddyVoicePreferencesState {
@@ -64,34 +125,62 @@ function readStoredVoicePreferences(scope: string): BuddyVoicePreferencesState {
 
     const parsed = JSON.parse(rawValue) as Partial<BuddyVoicePreferencesState>;
     return {
+      enabled: parsed.enabled !== false,
+      injectionMode: normalizeInjectionMode(parsed.injectionMode),
       muted: parsed.muted === true,
       quietMode: parsed.quietMode === true,
+      reducedMotion: parsed.reducedMotion === true,
       voiceOutputEnabled: parsed.voiceOutputEnabled === true,
+      voiceOutputMode: 'buddy_only',
+      voiceRate: 1.02,
+      voiceVariant: 'system',
     };
   } catch {
     return DEFAULT_BUDDY_VOICE_PREFERENCES;
   }
 }
 
-export function useBuddyVoicePreferences(scopeInput: string): {
+export function useBuddyVoicePreferences(
+  scopeInput: string,
+  agentIdInput?: string,
+): {
+  activeBinding?: CompanionAgentBinding;
+  bindings: BuddyAgentBindings;
   companionFeatureMode: CompanionFeatureMode;
+  effectiveVoiceOutputMode: CompanionVoiceOutputMode;
+  effectiveVoiceRate: number;
+  effectiveVoiceVariant: CompanionVoiceVariant;
+  enabled: boolean;
+  injectionMode: CompanionInjectionMode;
+  isCompanionFeatureEnabled: boolean;
   isVoiceOutputFeatureReady: boolean;
   isVoiceOutputFeatureEnabled: boolean;
   muted: boolean;
+  profile: CompanionProfile | null;
   quietMode: boolean;
+  reducedMotion: boolean;
   syncStatus: PreferenceSyncState;
   syncStatusLabel: string;
+  setEnabled: Dispatch<SetStateAction<boolean>>;
+  setInjectionMode: Dispatch<SetStateAction<CompanionInjectionMode>>;
   setMuted: Dispatch<SetStateAction<boolean>>;
   setQuietMode: Dispatch<SetStateAction<boolean>>;
+  setReducedMotion: Dispatch<SetStateAction<boolean>>;
   voiceOutputEnabled: boolean;
   setVoiceOutputEnabled: Dispatch<SetStateAction<boolean>>;
+  saveAgentBinding: (agentId: string, binding: CompanionAgentBinding) => Promise<void>;
+  removeAgentBinding: (agentId: string) => Promise<void>;
 } {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const scope = useMemo(() => scopeInput.trim().toLowerCase() || 'guest', [scopeInput]);
+  const agentId = useMemo(() => normalizeAgentId(agentIdInput), [agentIdInput]);
   const [preferences, setPreferences] = useState<BuddyVoicePreferencesState>(() =>
     readStoredVoicePreferences(scope),
   );
+  const [bindings, setBindings] = useState<BuddyAgentBindings>({});
+  const [activeBinding, setActiveBinding] = useState<CompanionAgentBinding | undefined>(undefined);
+  const [profile, setProfile] = useState<CompanionProfile | null>(null);
   const [companionFeatureMode, setCompanionFeatureMode] = useState<CompanionFeatureMode>('beta');
   const [hasRemoteHydrated, setHasRemoteHydrated] = useState(false);
   const [syncStatus, setSyncStatus] = useState<PreferenceSyncState>('local');
@@ -105,7 +194,10 @@ export function useBuddyVoicePreferences(scopeInput: string): {
   const serializeRemotePreferences = useCallback(
     (value: BuddyVoicePreferencesState) =>
       JSON.stringify({
+        enabled: value.enabled,
+        injectionMode: value.injectionMode,
         muted: value.muted,
+        reducedMotion: value.reducedMotion,
         verbosity: value.quietMode ? 'minimal' : 'normal',
         voiceOutputEnabled: value.voiceOutputEnabled,
       }),
@@ -118,6 +210,31 @@ export function useBuddyVoicePreferences(scopeInput: string): {
       setPreferences((current) => recipe(current));
     },
     [],
+  );
+
+  const setEnabledWithTracking = useCallback<Dispatch<SetStateAction<boolean>>>(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        enabled: typeof value === 'function' ? value(current.enabled) : value,
+      }));
+    },
+    [updatePreference],
+  );
+
+  const setInjectionModeWithTracking = useCallback<
+    Dispatch<SetStateAction<CompanionInjectionMode>>
+  >(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        injectionMode:
+          typeof value === 'function'
+            ? normalizeInjectionMode(value(current.injectionMode))
+            : value,
+      }));
+    },
+    [updatePreference],
   );
 
   const setVoiceOutputEnabledWithTracking = useCallback<Dispatch<SetStateAction<boolean>>>(
@@ -150,8 +267,21 @@ export function useBuddyVoicePreferences(scopeInput: string): {
     [updatePreference],
   );
 
+  const setReducedMotionWithTracking = useCallback<Dispatch<SetStateAction<boolean>>>(
+    (value) => {
+      updatePreference((current) => ({
+        ...current,
+        reducedMotion: typeof value === 'function' ? value(current.reducedMotion) : value,
+      }));
+    },
+    [updatePreference],
+  );
+
   useEffect(() => {
     setPreferences(readStoredVoicePreferences(scope));
+    setActiveBinding(undefined);
+    setBindings({});
+    setProfile(null);
     setCompanionFeatureMode('beta');
     setHasRemoteHydrated(false);
     setSyncStatus(accessToken ? 'loading' : 'local');
@@ -169,7 +299,8 @@ export function useBuddyVoicePreferences(scopeInput: string): {
 
     setSyncStatus('loading');
     const abortController = new AbortController();
-    void fetch(`${gatewayUrl}/settings/companion`, {
+    const queryString = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
+    void fetch(`${gatewayUrl}/settings/companion${queryString}`, {
       signal: abortController.signal,
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -180,14 +311,23 @@ export function useBuddyVoicePreferences(scopeInput: string): {
       )
       .then((data: CompanionSettingsResponse) => {
         const remotePreferences: BuddyVoicePreferencesState = {
+          enabled: data.preferences?.enabled !== false,
+          injectionMode: normalizeInjectionMode(data.preferences?.injectionMode),
           muted: data.preferences?.muted === true,
           quietMode: data.preferences?.verbosity === 'minimal',
+          reducedMotion: data.preferences?.reducedMotion === true,
           voiceOutputEnabled: data.preferences?.voiceOutputEnabled === true,
+          voiceOutputMode: data.preferences?.voiceOutputMode ?? 'buddy_only',
+          voiceRate: data.preferences?.voiceRate ?? 1.02,
+          voiceVariant: data.preferences?.voiceVariant ?? 'system',
         };
         remoteValueRef.current = serializeRemotePreferences(remotePreferences);
+        setActiveBinding(data.activeBinding);
+        setBindings(normalizeBuddyBindings(data.bindings));
         setCompanionFeatureMode(
           data.feature?.mode ?? (data.feature?.enabled === false ? 'off' : 'beta'),
         );
+        setProfile(data.profile ?? null);
         remoteLoadSucceededRef.current = true;
         if (!hasLocalOverrideRef.current) {
           setPreferences(remotePreferences);
@@ -206,7 +346,7 @@ export function useBuddyVoicePreferences(scopeInput: string): {
     return () => {
       abortController.abort();
     };
-  }, [accessToken, gatewayUrl, scope]);
+  }, [accessToken, agentId, gatewayUrl, serializeRemotePreferences]);
 
   useEffect(() => {
     if (typeof globalThis.window === 'undefined') {
@@ -221,10 +361,6 @@ export function useBuddyVoicePreferences(scopeInput: string): {
   }, [preferences, scope]);
 
   useEffect(() => {
-    if (!accessToken) {
-      return;
-    }
-
     if (!accessToken || !hasRemoteHydrated) {
       return;
     }
@@ -250,7 +386,8 @@ export function useBuddyVoicePreferences(scopeInput: string): {
       const queuedSave = saveQueueRef.current
         .catch(() => undefined)
         .then(async () => {
-          const response = await fetch(`${gatewayUrl}/settings/companion`, {
+          const queryString = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
+          const response = await fetch(`${gatewayUrl}/settings/companion${queryString}`, {
             method: 'PUT',
             headers: {
               Authorization: `Bearer ${accessToken}`,
@@ -258,9 +395,15 @@ export function useBuddyVoicePreferences(scopeInput: string): {
             },
             body: JSON.stringify({
               preferences: {
+                enabled: preferences.enabled,
+                injectionMode: preferences.injectionMode,
                 muted: preferences.muted,
+                reducedMotion: preferences.reducedMotion,
                 verbosity: preferences.quietMode ? 'minimal' : 'normal',
                 voiceOutputEnabled: preferences.voiceOutputEnabled,
+                voiceOutputMode: preferences.voiceOutputMode,
+                voiceRate: preferences.voiceRate,
+                voiceVariant: preferences.voiceVariant,
               },
             }),
           });
@@ -269,6 +412,10 @@ export function useBuddyVoicePreferences(scopeInput: string): {
             throw new Error('save failed');
           }
 
+          const data = (await response.json()) as CompanionSettingsResponse;
+          setActiveBinding(data.activeBinding);
+          setBindings(normalizeBuddyBindings(data.bindings));
+
           if (requestSeq !== saveSeqRef.current) {
             return;
           }
@@ -276,6 +423,10 @@ export function useBuddyVoicePreferences(scopeInput: string): {
           remoteValueRef.current = nextSerializedPreferences;
           hasLocalOverrideRef.current = false;
           remoteLoadSucceededRef.current = true;
+          setProfile(data.profile ?? null);
+          setCompanionFeatureMode(
+            data.feature?.mode ?? (data.feature?.enabled === false ? 'off' : 'beta'),
+          );
           setSyncStatus('synced');
         });
 
@@ -297,7 +448,80 @@ export function useBuddyVoicePreferences(scopeInput: string): {
         saveTimerRef.current = null;
       }
     };
-  }, [accessToken, gatewayUrl, hasRemoteHydrated, preferences, serializeRemotePreferences]);
+  }, [
+    accessToken,
+    agentId,
+    gatewayUrl,
+    hasRemoteHydrated,
+    preferences,
+    serializeRemotePreferences,
+  ]);
+
+  const persistBindings = useCallback(
+    async (nextBindings: BuddyAgentBindings) => {
+      if (!accessToken) {
+        setBindings(nextBindings);
+        return;
+      }
+
+      const queryString = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
+      setSyncStatus('saving');
+      const response = await fetch(`${gatewayUrl}/settings/companion${queryString}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bindings: nextBindings,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('save failed');
+      }
+
+      const data = (await response.json()) as CompanionSettingsResponse;
+      setActiveBinding(data.activeBinding);
+      setBindings(normalizeBuddyBindings(data.bindings));
+      setProfile(data.profile ?? null);
+      setCompanionFeatureMode(
+        data.feature?.mode ?? (data.feature?.enabled === false ? 'off' : 'beta'),
+      );
+      setSyncStatus('synced');
+    },
+    [accessToken, agentId, gatewayUrl],
+  );
+
+  const saveAgentBinding = useCallback(
+    async (targetAgentId: string, binding: CompanionAgentBinding) => {
+      const normalizedAgentId = normalizeAgentId(targetAgentId);
+      if (!normalizedAgentId) {
+        return;
+      }
+
+      const nextBindings = {
+        ...bindings,
+        [normalizedAgentId]: binding,
+      };
+      await persistBindings(nextBindings);
+    },
+    [bindings, persistBindings],
+  );
+
+  const removeAgentBinding = useCallback(
+    async (targetAgentId: string) => {
+      const normalizedAgentId = normalizeAgentId(targetAgentId);
+      if (!normalizedAgentId) {
+        return;
+      }
+
+      const nextBindings = { ...bindings };
+      delete nextBindings[normalizedAgentId];
+      await persistBindings(nextBindings);
+    },
+    [bindings, persistBindings],
+  );
 
   useEffect(() => {
     return () => {
@@ -322,21 +546,44 @@ export function useBuddyVoicePreferences(scopeInput: string): {
     }
   }, [syncStatus]);
 
+  const isCompanionFeatureEnabled = !accessToken
+    ? preferences.enabled
+    : hasRemoteHydrated
+      ? companionFeatureMode !== 'off' && preferences.enabled
+      : preferences.enabled;
+
+  const effectiveVoiceOutputMode = activeBinding?.voiceOutputMode ?? preferences.voiceOutputMode;
+  const effectiveVoiceRate = activeBinding?.voiceRate ?? preferences.voiceRate;
+  const effectiveVoiceVariant = activeBinding?.voiceVariant ?? preferences.voiceVariant;
+
   return {
+    activeBinding,
+    bindings,
     companionFeatureMode,
+    effectiveVoiceOutputMode,
+    effectiveVoiceRate,
+    effectiveVoiceVariant,
+    enabled: preferences.enabled,
+    injectionMode: preferences.injectionMode,
+    isCompanionFeatureEnabled,
     isVoiceOutputFeatureReady: !accessToken || hasRemoteHydrated,
-    isVoiceOutputFeatureEnabled: !accessToken
-      ? true
-      : hasRemoteHydrated && companionFeatureMode !== 'off',
+    isVoiceOutputFeatureEnabled: isCompanionFeatureEnabled,
     muted: preferences.muted,
+    profile,
     quietMode: preferences.quietMode,
+    reducedMotion: preferences.reducedMotion,
     syncStatus,
     syncStatusLabel,
+    setEnabled: setEnabledWithTracking,
+    setInjectionMode: setInjectionModeWithTracking,
     setMuted: setMutedWithTracking,
     setQuietMode: setQuietModeWithTracking,
+    setReducedMotion: setReducedMotionWithTracking,
     voiceOutputEnabled: preferences.voiceOutputEnabled,
     setVoiceOutputEnabled: setVoiceOutputEnabledWithTracking,
+    saveAgentBinding,
+    removeAgentBinding,
   };
 }
 
-export { buildStorageKey, readStoredVoicePreferences };
+export { buildStorageKey, normalizeBuddyBindings, readStoredVoicePreferences, normalizeAgentId };

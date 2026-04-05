@@ -9,12 +9,15 @@ import {
   type CompanionActivitySnapshot,
   type CompanionUtteranceSeed,
 } from './companion-display-model.js';
+import { deriveCompanionStats, getCompanionRarityVisual } from './companion-visual-metadata.js';
 import { CompanionTerminalSprite } from './companion-terminal-sprite.js';
 import { useBuddyVoicePreferences } from './use-buddy-voice-preferences.js';
 import { useBuddyVoiceOutput } from './use-buddy-voice-output.js';
 
 export interface CompanionStageProps extends CompanionActivitySnapshot {
+  agentId?: string;
   editorMode: boolean;
+  panelOpenSignal?: number;
   prefersReducedMotion: boolean;
 }
 
@@ -28,6 +31,12 @@ type CompanionSyncState = 'local' | 'loading' | 'saving' | 'synced' | 'error';
 const LIVE_OUTPUT_FADE_MS = 7000;
 const LIVE_OUTPUT_CLEAR_MS = 10000;
 const OUTPUT_HISTORY_LIMIT = 3;
+const RAINBOW_SWATCHES = [
+  'var(--accent)',
+  'var(--success)',
+  'var(--warning)',
+  'var(--danger)',
+] as const;
 
 function CompanionModeButton({
   active,
@@ -169,6 +178,41 @@ function CompanionSyncBadge({ label, state }: { label: string; state: CompanionS
   );
 }
 
+function RainbowTriggerBadge({ text }: { text: string }) {
+  const keyCounts = new Map<string, number>();
+
+  return (
+    <span
+      style={{
+        height: 17,
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '0 5px',
+        borderRadius: 999,
+        background:
+          'linear-gradient(90deg, color-mix(in oklch, var(--accent) 12%, transparent), color-mix(in oklch, var(--success) 10%, transparent), color-mix(in oklch, var(--warning) 12%, transparent))',
+        border: '1px solid color-mix(in oklch, var(--accent) 34%, transparent)',
+        fontSize: 8,
+        fontWeight: 800,
+        gap: 1,
+      }}
+    >
+      {[...text].map((character) => {
+        const nextCount = (keyCounts.get(character) ?? 0) + 1;
+        keyCounts.set(character, nextCount);
+        return (
+          <span
+            key={`${character}-${nextCount}`}
+            style={{ color: RAINBOW_SWATCHES[(nextCount - 1) % RAINBOW_SWATCHES.length] }}
+          >
+            {character}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function CompanionOutputRow({
   entry,
   isLatest,
@@ -261,10 +305,12 @@ function CompanionOutputRow({
 }
 
 export function CompanionStage({
+  agentId,
   attachedCount,
   currentUserEmail,
   editorMode,
   input,
+  panelOpenSignal = 0,
   pendingPermissionCount,
   prefersReducedMotion,
   queuedCount,
@@ -283,6 +329,7 @@ export function CompanionStage({
   const lastIntroKeyRef = useRef<string | null>(null);
   const lastOutputKeyRef = useRef<string | null>(null);
   const buddyMentionActiveRef = useRef(false);
+  const lastPanelOpenSignalRef = useRef(panelOpenSignal);
 
   useEffect(() => {
     setPanelOpen(sessionId === null);
@@ -317,27 +364,44 @@ export function CompanionStage({
     ],
   );
 
-  const profile = useMemo(
-    () => createCompanionProfile((currentUserEmail || sessionId) ?? 'guest'),
-    [currentUserEmail, sessionId],
-  );
   const {
+    activeBinding,
     companionFeatureMode,
+    effectiveVoiceOutputMode,
+    effectiveVoiceRate,
+    effectiveVoiceVariant,
+    enabled,
+    isCompanionFeatureEnabled,
     isVoiceOutputFeatureReady,
     isVoiceOutputFeatureEnabled,
     muted,
+    profile: remoteProfile,
     quietMode,
+    reducedMotion,
     syncStatus,
     syncStatusLabel,
+    setEnabled,
     setMuted,
     setQuietMode,
+    setReducedMotion,
     voiceOutputEnabled,
     setVoiceOutputEnabled,
-  } = useBuddyVoicePreferences(currentUserEmail || sessionId || 'guest');
+  } = useBuddyVoicePreferences(currentUserEmail || sessionId || 'guest', agentId);
+  const profile = useMemo(
+    () => remoteProfile ?? createCompanionProfile((currentUserEmail || sessionId) ?? 'guest'),
+    [currentUserEmail, remoteProfile, sessionId],
+  );
   const introText = useMemo(() => buildCompanionIntroText(profile), [profile]);
   const reaction = useMemo(() => deriveCompanionReaction(snapshot), [snapshot]);
   const statusText = useMemo(() => deriveCompanionStatus(snapshot), [snapshot]);
   const focusTags = useMemo(() => deriveCompanionFocusTags(snapshot), [snapshot]);
+  const companionStats = useMemo(() => deriveCompanionStats(profile), [profile]);
+  const rarityVisual = useMemo(
+    () => getCompanionRarityVisual(profile.sprite.rarity),
+    [profile.sprite.rarity],
+  );
+  const effectiveReducedMotion = prefersReducedMotion || reducedMotion;
+  const buddyTriggerActive = input.includes('/buddy');
   const introOutputPolicy = useMemo(
     () =>
       deriveCompanionOutputPolicy(
@@ -354,7 +418,7 @@ export function CompanionStage({
       ),
     [muted, quietMode, reaction.badge, reaction.importance, reaction.text],
   );
-  const baseTransition = prefersReducedMotion
+  const baseTransition = effectiveReducedMotion
     ? 'none'
     : 'transform 220ms ease, opacity 220ms ease, box-shadow 220ms ease, background 220ms ease';
 
@@ -455,6 +519,9 @@ export function CompanionStage({
     muted,
     profileName: profile.name,
     quietMode,
+    voiceOutputMode: effectiveVoiceOutputMode,
+    voiceRate: effectiveVoiceRate,
+    voiceVariant: effectiveVoiceVariant,
     voiceInputVisible: showVoice,
   });
 
@@ -462,9 +529,22 @@ export function CompanionStage({
     const mentionsBuddy = input.includes('/buddy');
     if (mentionsBuddy && !buddyMentionActiveRef.current) {
       setPetNonce((current) => current + 1);
+      setPanelOpen(true);
     }
     buddyMentionActiveRef.current = mentionsBuddy;
   }, [input]);
+
+  useEffect(() => {
+    if (panelOpenSignal === lastPanelOpenSignalRef.current) {
+      return;
+    }
+    lastPanelOpenSignalRef.current = panelOpenSignal;
+    setPanelOpen(true);
+  }, [panelOpenSignal]);
+
+  if (isVoiceOutputFeatureReady && !isCompanionFeatureEnabled) {
+    return null;
+  }
 
   return (
     <section
@@ -511,7 +591,7 @@ export function CompanionStage({
               fading={liveOutput !== null && fadingOutputId === liveOutput.id}
               liveOutput={muted ? null : liveOutput}
               petNonce={petNonce}
-              prefersReducedMotion={prefersReducedMotion}
+              prefersReducedMotion={effectiveReducedMotion}
               profile={profile}
             />
             <button
@@ -551,6 +631,41 @@ export function CompanionStage({
                 >
                   Buddy 精灵
                 </span>
+                <span
+                  style={{
+                    height: 17,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '0 5px',
+                    borderRadius: 999,
+                    background: rarityVisual.background,
+                    border: `1px solid ${rarityVisual.borderColor}`,
+                    color: rarityVisual.color,
+                    fontSize: 8.5,
+                    fontWeight: 800,
+                  }}
+                >
+                  {rarityVisual.label}
+                </span>
+                {activeBinding?.behaviorTone ? (
+                  <span
+                    style={{
+                      height: 17,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '0 5px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
+                      color: 'var(--text-2)',
+                      fontSize: 8.5,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {activeBinding.behaviorTone}
+                  </span>
+                ) : null}
+                {buddyTriggerActive ? <RainbowTriggerBadge text="/buddy" /> : null}
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
                 <span
@@ -598,6 +713,12 @@ export function CompanionStage({
             }}
           >
             <CompanionModeButton
+              active={enabled}
+              ariaLabel={enabled ? '关闭 Buddy 主开关' : '开启 Buddy 主开关'}
+              label={enabled ? '伴侣开' : '伴侣关'}
+              onClick={() => setEnabled((value) => !value)}
+            />
+            <CompanionModeButton
               active={voiceOutputEffectiveEnabled && isVoiceOutputAvailable}
               ariaLabel={
                 !isVoiceOutputFeatureReady
@@ -644,6 +765,12 @@ export function CompanionStage({
               ariaLabel={muted ? '取消 Buddy 静音' : '将 Buddy 设为静音'}
               label={muted ? '已静音' : '可出声'}
               onClick={() => setMuted((value) => !value)}
+            />
+            <CompanionModeButton
+              active={reducedMotion}
+              ariaLabel={reducedMotion ? '关闭 Buddy 减少动效' : '开启 Buddy 减少动效'}
+              label={reducedMotion ? '减动效' : '完整动效'}
+              onClick={() => setReducedMotion((value) => !value)}
             />
             <CompanionModeButton
               active={panelOpen}
@@ -696,6 +823,28 @@ export function CompanionStage({
                   }}
                 >
                   {profile.note}
+                </div>
+                <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {companionStats.map((stat) => (
+                    <span
+                      key={stat.key}
+                      style={{
+                        height: 17,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '0 5px',
+                        borderRadius: 999,
+                        background: 'color-mix(in oklch, var(--surface-hover) 88%, transparent)',
+                        color: 'var(--text-2)',
+                        fontSize: 8,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <span>{stat.label}</span>
+                      <span style={{ color: 'var(--text)' }}>{stat.value}</span>
+                    </span>
+                  ))}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
@@ -753,7 +902,24 @@ export function CompanionStage({
               />
               <CompanionMetaCard
                 label="当前阶段"
-                value="终端同款精灵壳层；本地 TTS MVP 只播稳定短句。"
+                value={`终端同款精灵壳层；注入模式：${enabled ? companionFeatureMode : 'off'}。`}
+              />
+              <CompanionMetaCard
+                label="稀有度"
+                value={
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      justifyContent: 'flex-end',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <span>{profile.rarityStars}</span>
+                    <span style={{ color: rarityVisual.color }}>{rarityVisual.label}</span>
+                  </span>
+                }
               />
             </div>
 

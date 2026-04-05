@@ -235,6 +235,21 @@ export function createCompanionSpriteBones(seedInput: string): CompanionSpriteBo
   };
 }
 
+export function createCompanionSpriteBonesForSpecies(
+  seedInput: string,
+  species: CompanionSpriteSpecies,
+): CompanionSpriteBones {
+  const rng = mulberry32(hashString(`${seedInput}:${species}:friend-2026-401`));
+  const rarity = rollSpriteRarity(rng);
+  return {
+    eye: pick(rng, SPRITE_EYES),
+    hat: rarity === 'common' ? 'none' : pick(rng, SPRITE_HATS),
+    rarity,
+    shiny: rng() < 0.01,
+    species,
+  };
+}
+
 export function spriteDisplayLabel(species: CompanionSpriteSpecies): string {
   return SPRITE_SPECIES_LABELS[species];
 }
