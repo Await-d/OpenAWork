@@ -18,6 +18,8 @@ vi.mock('../request-workflow.js', () => ({
 }));
 
 vi.mock('../db.js', () => ({
+  WORKSPACE_ACCESS_RESTRICTED: false,
+  WORKSPACE_ROOTS: ['/repo'],
   sqliteAll: sqliteAllMock,
   sqliteRun: sqliteRunMock,
   sqliteGet: sqliteGetMock,
@@ -29,6 +31,7 @@ let app: ReturnType<typeof Fastify>;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  let currentSharePermission: 'view' | 'comment' | 'operate' = 'comment';
   sqliteAllMock.mockImplementation((sql: string) => {
     if (sql.includes('FROM team_tasks')) {
       return [
@@ -55,9 +58,79 @@ beforeEach(async () => {
         },
       ];
     }
+    if (sql.includes('FROM session_shares')) {
+      return [
+        {
+          id: 'share-1',
+          session_id: 'session-1',
+          member_id: 'member-1',
+          permission: currentSharePermission,
+          created_at: '2026-03-22T00:00:00.000Z',
+          updated_at: '2026-03-22T01:00:00.000Z',
+          member_name: '林雾',
+          member_email: 'linwu@openawork.local',
+          label: '设计讨论',
+          session_metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+        },
+      ];
+    }
+    if (sql.includes('FROM team_audit_logs')) {
+      return [
+        {
+          id: 1,
+          action: 'share_created',
+          entity_type: 'session_share',
+          entity_id: 'share-1',
+          summary: '已将“设计讨论”共享给 林雾（comment）',
+          detail: '会话：设计讨论；成员：林雾；权限：comment',
+          created_at: '2026-03-22T02:00:00.000Z',
+        },
+      ];
+    }
     return [];
   });
-  sqliteGetMock.mockReturnValue({ id: 'task-1' });
+  sqliteGetMock.mockImplementation((sql: string) => {
+    if (sql.includes('FROM team_tasks')) {
+      return { id: 'task-1' };
+    }
+    if (sql.includes('FROM sessions')) {
+      return {
+        id: 'session-1',
+        title: '设计讨论',
+        metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+      };
+    }
+    if (sql.includes('FROM team_members')) {
+      return { id: 'member-1', name: '林雾', email: 'linwu@openawork.local' };
+    }
+    if (sql.includes('FROM session_shares')) {
+      if (sql.includes('JOIN team_members')) {
+        return {
+          id: 'share-1',
+          session_id: 'session-1',
+          member_id: 'member-1',
+          permission: currentSharePermission,
+          created_at: '2026-03-22T00:00:00.000Z',
+          updated_at: '2026-03-22T01:00:00.000Z',
+          member_name: '林雾',
+          member_email: 'linwu@openawork.local',
+          label: '设计讨论',
+          session_metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+        };
+      }
+      return undefined;
+    }
+    return { id: 'task-1' };
+  });
+  sqliteRunMock.mockImplementation((sql: string, params?: unknown[]) => {
+    if (sql.includes('INSERT INTO session_shares') && Array.isArray(params) && params[4]) {
+      currentSharePermission = params[4] as 'view' | 'comment' | 'operate';
+    }
+
+    if (sql.includes('UPDATE session_shares') && Array.isArray(params) && params[0]) {
+      currentSharePermission = params[0] as 'view' | 'comment' | 'operate';
+    }
+  });
 
   app = Fastify();
   app.decorateRequest('user', {
@@ -131,5 +204,103 @@ describe('teamRoutes collaboration slice', () => {
       type: 'question',
       timestamp: expect.any(Number),
     });
+  });
+
+  it('creates and lists session shares with permission levels', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/team/session-shares',
+      payload: {
+        sessionId: 'session-1',
+        memberId: 'member-1',
+        permission: 'operate',
+      },
+    });
+    const listRes = await app.inject({ method: 'GET', url: '/team/session-shares' });
+
+    expect(createRes.statusCode).toBe(201);
+    expect(JSON.parse(createRes.body)).toMatchObject({
+      sessionId: 'session-1',
+      memberId: 'member-1',
+      permission: 'operate',
+      sessionLabel: '设计讨论',
+      workspacePath: '/repo/apps/web',
+    });
+    expect(JSON.parse(listRes.body)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'share-1',
+          sessionId: 'session-1',
+          memberId: 'member-1',
+          permission: 'operate',
+          workspacePath: '/repo/apps/web',
+          updatedAt: '2026-03-22T01:00:00.000Z',
+        }),
+      ]),
+    );
+    expect(
+      sqliteAllMock.mock.calls.some(
+        ([sql]) =>
+          typeof sql === 'string' && sql.includes('sess.metadata_json AS session_metadata_json'),
+      ),
+    ).toBe(true);
+  });
+
+  it('updates a session share permission and exposes audit logs', async () => {
+    const updateRes = await app.inject({
+      method: 'PATCH',
+      url: '/team/session-shares/share-1',
+      payload: {
+        permission: 'operate',
+      },
+    });
+    const auditRes = await app.inject({ method: 'GET', url: '/team/audit-logs?limit=10' });
+
+    expect(updateRes.statusCode).toBe(200);
+    expect(JSON.parse(updateRes.body)).toMatchObject({
+      id: 'share-1',
+      permission: 'operate',
+      sessionLabel: '设计讨论',
+      workspacePath: '/repo/apps/web',
+    });
+    expect(sqliteRunMock).toHaveBeenCalledWith(expect.stringContaining('UPDATE session_shares'), [
+      'operate',
+      'share-1',
+      'user-1',
+    ]);
+    expect(JSON.parse(auditRes.body)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'share_created',
+          entityType: 'session_share',
+          entityId: 'share-1',
+        }),
+      ]),
+    );
+  });
+
+  it('preserves the original updatedAt when session share permission is unchanged', async () => {
+    sqliteRunMock.mockClear();
+
+    const updateRes = await app.inject({
+      method: 'PATCH',
+      url: '/team/session-shares/share-1',
+      payload: {
+        permission: 'comment',
+      },
+    });
+
+    expect(updateRes.statusCode).toBe(200);
+    expect(JSON.parse(updateRes.body)).toMatchObject({
+      id: 'share-1',
+      permission: 'comment',
+      workspacePath: '/repo/apps/web',
+      updatedAt: '2026-03-22T01:00:00.000Z',
+    });
+    expect(
+      sqliteRunMock.mock.calls.some(([sql]) =>
+        typeof sql === 'string' ? sql.includes('UPDATE session_shares') : false,
+      ),
+    ).toBe(false);
   });
 });
