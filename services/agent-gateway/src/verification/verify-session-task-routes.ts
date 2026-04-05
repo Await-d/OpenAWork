@@ -50,6 +50,7 @@ async function main(): Promise<void> {
         const graph = await taskManager.loadOrCreate(dbModule.WORKSPACE_ROOT, sessionId);
         const childSessionId = randomUUID();
         const grandchildSessionId = randomUUID();
+        const staleTimeoutSessionId = randomUUID();
         dbModule.sqliteRun(
           `INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, '[]', 'idle', ?, ?)`,
           [childSessionId, userId, JSON.stringify({ parentSessionId: sessionId }), '子代理会话'],
@@ -61,6 +62,20 @@ async function main(): Promise<void> {
             userId,
             JSON.stringify({ parentSessionId: childSessionId }),
             '孙子代理会话',
+          ],
+        );
+        dbModule.sqliteRun(
+          `INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, '[]', 'running', ?, ?)`,
+          [
+            staleTimeoutSessionId,
+            userId,
+            JSON.stringify({
+              parentSessionId: sessionId,
+              createdByTool: 'task',
+              subagentType: 'explore',
+              deadlineMs: Date.now() - 1_000,
+            }),
+            '过期子代理会话',
           ],
         );
         const parentTask = taskManager.addTask(graph, {
@@ -101,6 +116,16 @@ async function main(): Promise<void> {
           tags: ['task-tool', 'librarian'],
           result: '文档摘要已返回给父线程。',
         });
+        const staleTimeoutTask = taskManager.addTask(graph, {
+          title: '已过期的子代理任务',
+          description: '等待 reconcile 收敛成 timeout',
+          status: 'running',
+          blockedBy: [],
+          sessionId: staleTimeoutSessionId,
+          assignedAgent: 'explore',
+          priority: 'medium',
+          tags: ['task-tool'],
+        });
         await taskManager.save(graph);
 
         const childGraph = await taskManager.loadOrCreate(dbModule.WORKSPACE_ROOT, childSessionId);
@@ -116,8 +141,13 @@ async function main(): Promise<void> {
         });
         await taskManager.save(childGraph);
 
+        const effectiveDeadline = Date.now() + 60_000;
         dbModule.sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
-          JSON.stringify({ parentSessionId: sessionId, terminalReason: 'timeout' }),
+          JSON.stringify({
+            parentSessionId: sessionId,
+            terminalReason: 'timeout',
+            deadlineMs: effectiveDeadline,
+          }),
           childSessionId,
           userId,
         ]);
@@ -174,19 +204,25 @@ async function main(): Promise<void> {
           tasks: Array<{
             id: string;
             title: string;
+            status: string;
             parentTaskId?: string;
             depth: number;
             subtaskCount: number;
             blockedBy: string[];
             sessionId?: string;
+            terminalReason?: string;
+            effectiveDeadline?: number;
           }>;
         };
 
-        assert(payload.tasks.length === 6, 'session tasks route should return projected tasks');
+        assert(payload.tasks.length === 7, 'session tasks route should return projected tasks');
         const parentProjectedTask = payload.tasks.find((task) => task.id === parentTask.id);
         const childProjectedTask = payload.tasks.find((task) => task.id === childTask.id);
         const siblingProjectedTask = payload.tasks.find((task) => task.id === siblingTask.id);
         const delegatedProjectedTask = payload.tasks.find((task) => task.id === delegatedTask.id);
+        const staleTimeoutProjectedTask = payload.tasks.find(
+          (task) => task.id === staleTimeoutTask.id,
+        );
         const grandchildProjectedTask = payload.tasks.find((task) => task.id === grandchildTask.id);
 
         assert(parentProjectedTask?.depth === 0, 'root task depth should be 0');
@@ -215,6 +251,20 @@ async function main(): Promise<void> {
           (delegatedProjectedTask as { terminalReason?: string } | undefined)?.terminalReason ===
             'timeout',
           'delegated child-session task should expose terminalReason from child session metadata',
+        );
+        assert(
+          (delegatedProjectedTask as { effectiveDeadline?: number } | undefined)
+            ?.effectiveDeadline === effectiveDeadline,
+          'delegated child-session task should expose effectiveDeadline from child session metadata',
+        );
+        assert(
+          staleTimeoutProjectedTask?.status === 'failed',
+          'session tasks route should reconcile stale expired child sessions into failed tasks on the same response',
+        );
+        assert(
+          (staleTimeoutProjectedTask as { terminalReason?: string } | undefined)?.terminalReason ===
+            'timeout',
+          'session tasks route should expose terminalReason=timeout immediately after reconcile',
         );
         assert(
           grandchildProjectedTask?.sessionId === grandchildSessionId,
