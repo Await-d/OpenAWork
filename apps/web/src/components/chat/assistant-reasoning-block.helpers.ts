@@ -118,11 +118,8 @@ export function getLocalReasoningLabel(options: {
   streaming: boolean;
   total: number;
 }): string {
-  return options.total > 1
-    ? `思考内容 ${options.index + 1}`
-    : options.streaming
-      ? '思考中'
-      : '思考内容';
+  const base = 'Thinking:';
+  return options.total > 1 ? `${base} ${options.index + 1}` : base;
 }
 
 export function getLocalReasoningHint(options: {

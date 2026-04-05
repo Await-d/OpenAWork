@@ -23,6 +23,12 @@ export interface ChatRenderGroup {
   role: ChatMessage['role'];
 }
 
+export interface ChatProviderDescriptor {
+  id: string;
+  name?: string;
+  type?: string;
+}
+
 interface ChatMessageGroupListProps {
   activeModelId: string;
   activeModelLabel?: string;
@@ -30,6 +36,7 @@ interface ChatMessageGroupListProps {
   bottomRef: React.RefObject<HTMLDivElement | null>;
   currentUserEmail: string;
   groups: ChatRenderGroup[];
+  providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -47,6 +54,7 @@ export function ChatMessageGroupList({
   bottomRef,
   currentUserEmail,
   groups,
+  providerCatalog,
   scrollRegionRef,
 }: ChatMessageGroupListProps) {
   const shouldVirtualize = groups.length >= VIRTUALIZATION_GROUP_THRESHOLD;
@@ -62,6 +70,7 @@ export function ChatMessageGroupList({
             activeProviderId={activeProviderId}
             currentUserEmail={currentUserEmail}
             group={group}
+            providerCatalog={providerCatalog}
           />
         ))}
         <div ref={bottomRef} style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }} />
@@ -77,6 +86,7 @@ export function ChatMessageGroupList({
       bottomRef={bottomRef}
       currentUserEmail={currentUserEmail}
       groups={groups}
+      providerCatalog={providerCatalog}
       scrollRegionRef={scrollRegionRef}
     />
   );
@@ -89,6 +99,7 @@ function VirtualizedChatGroupViewport({
   bottomRef,
   currentUserEmail,
   groups,
+  providerCatalog,
   scrollRegionRef,
 }: ChatMessageGroupListProps) {
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
@@ -173,9 +184,12 @@ function VirtualizedChatGroupViewport({
     }
   }, [groups]);
 
+  const measurementVersion = measuredVersion;
   const layout = useMemo(() => {
     const offsets: number[] = [];
     let totalHeight = 0;
+
+    void measurementVersion;
 
     for (const group of groups) {
       offsets.push(totalHeight);
@@ -187,7 +201,7 @@ function VirtualizedChatGroupViewport({
       offsets,
       totalHeight: totalHeight > 0 ? totalHeight - GROUP_GAP_PX : 0,
     };
-  }, [groups, measuredVersion]);
+  }, [groups, measurementVersion]);
 
   const visibleRange = useMemo(() => {
     const startBoundary = Math.max(0, scrollTop - OVERSCAN_PX);
@@ -273,6 +287,7 @@ function VirtualizedChatGroupViewport({
                 activeProviderId={activeProviderId}
                 currentUserEmail={currentUserEmail}
                 group={group}
+                providerCatalog={providerCatalog}
               />
             </div>
           );
@@ -289,12 +304,14 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   activeProviderId,
   currentUserEmail,
   group,
+  providerCatalog,
 }: {
   activeModelId: string;
   activeModelLabel?: string;
   activeProviderId: string;
   currentUserEmail: string;
   group: ChatRenderGroup;
+  providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
 }) {
   return (
     <div
@@ -303,20 +320,29 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
       data-group-key={group.key}
       data-role={group.role}
     >
-      {group.entries.map((entry, entryIndex) => (
-        <MessageRow
-          key={entry.message.id}
-          message={entry.message}
-          providerId={entry.message.providerId?.trim() || activeProviderId}
-          modelId={entry.message.model?.trim() || activeModelLabel || activeModelId}
-          email={currentUserEmail}
-          actions={entryIndex === 0 ? (group.actions ?? entry.actions) : entry.actions}
-          groupedWithPrevious={entryIndex > 0}
-          renderContent={entry.renderContent}
-          sharedUiThemeVars={sharedUiThemeVars}
-          usageDetails={entry.usageDetails}
-        />
-      ))}
+      {group.entries.map((entry, entryIndex) => {
+        const resolvedProviderId = entry.message.providerId?.trim() || activeProviderId;
+        const resolvedProvider = resolvedProviderId
+          ? providerCatalog?.get(resolvedProviderId)
+          : undefined;
+
+        return (
+          <MessageRow
+            key={entry.message.id}
+            message={entry.message}
+            providerId={resolvedProviderId}
+            providerName={resolvedProvider?.name}
+            providerType={resolvedProvider?.type}
+            modelId={entry.message.model?.trim() || activeModelLabel || activeModelId}
+            email={currentUserEmail}
+            actions={entryIndex === 0 ? (group.actions ?? entry.actions) : entry.actions}
+            groupedWithPrevious={entryIndex > 0}
+            renderContent={entry.renderContent}
+            sharedUiThemeVars={sharedUiThemeVars}
+            usageDetails={entry.usageDetails}
+          />
+        );
+      })}
     </div>
   );
 });

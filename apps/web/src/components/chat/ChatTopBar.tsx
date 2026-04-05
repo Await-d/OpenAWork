@@ -6,10 +6,17 @@ interface ChatTopBarProps {
   agentOptions: Array<{ id: string; label: string }>;
   dialogueMode: DialogueMode;
   defaultAgentLabel: string;
+  currentProfileLabel?: string;
+  hasWorkspaceProfile: boolean;
   manualAgentId: string;
+  toolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   onChangeDialogueMode: (mode: DialogueMode) => void;
   onChangeManualAgentId: (agentId: string) => void;
+  onChangeToolSurfaceProfile: (
+    profile: 'openawork' | 'claude_code_default' | 'claude_code_simple',
+  ) => void;
   onClearManualAgentId: () => void;
+  onSaveWorkspaceProfile: () => void;
   yoloMode: boolean;
   onToggleYolo: () => void;
   editorMode: boolean;
@@ -25,10 +32,15 @@ export function ChatTopBar({
   agentOptions,
   dialogueMode,
   defaultAgentLabel,
+  currentProfileLabel,
+  hasWorkspaceProfile,
   manualAgentId,
+  toolSurfaceProfile,
   onChangeDialogueMode,
   onChangeManualAgentId,
+  onChangeToolSurfaceProfile,
   onClearManualAgentId,
+  onSaveWorkspaceProfile,
   yoloMode,
   onToggleYolo,
   editorMode,
@@ -131,6 +143,75 @@ export function ChatTopBar({
             </button>
           ) : null}
         </div>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 6px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>配置</span>
+          <select
+            aria-label="工具配置档"
+            value={toolSurfaceProfile}
+            onChange={(event) =>
+              onChangeToolSurfaceProfile(
+                event.target.value as 'openawork' | 'claude_code_default' | 'claude_code_simple',
+              )
+            }
+            style={{
+              minWidth: 168,
+              height: 30,
+              borderRadius: 8,
+              border: '1px solid var(--border-subtle)',
+              background: 'var(--surface)',
+              color: 'var(--text-1)',
+              fontSize: 12,
+              padding: '0 8px',
+            }}
+          >
+            <option value="openawork">OpenAWork 全功能</option>
+            <option value="claude_code_default">Claude Code 默认</option>
+            <option value="claude_code_simple">Claude Code 精简</option>
+          </select>
+        </div>
+        {currentProfileLabel !== undefined ? (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 6px',
+              borderRadius: 10,
+              border: '1px solid var(--border-subtle)',
+              background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
+            }}
+          >
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>项目配置</span>
+            <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{currentProfileLabel}</span>
+            <button
+              type="button"
+              onClick={onSaveWorkspaceProfile}
+              style={{
+                height: 28,
+                padding: '0 8px',
+                borderRadius: 7,
+                border: '1px solid var(--border-subtle)',
+                background: 'transparent',
+                color: 'var(--text)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {hasWorkspaceProfile ? '更新项目配置' : '保存为项目配置'}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* Right group: YOLO + editor + panel — unified pill container */}

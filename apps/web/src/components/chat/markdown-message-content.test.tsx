@@ -3,6 +3,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetReasoningOpenStateCacheForTests } from './assistant-reasoning-block.js';
 import MarkdownMessageContent from './markdown-message-content.js';
 
 let root: Root | null = null;
@@ -21,6 +22,7 @@ beforeEach(() => {
     value: { writeText: writeClipboardMock },
   });
   writeClipboardMock.mockClear();
+  resetReasoningOpenStateCacheForTests();
 });
 
 afterEach(() => {
@@ -84,7 +86,8 @@ describe('MarkdownMessageContent', () => {
 
     expect(thinkingBlock).not.toBeNull();
     expect(thinkingBlock?.dataset.open).toBe('true');
-    expect(container?.textContent).toContain('思考内容');
+    expect(container?.textContent).toContain('Thinking:');
+    expect(container?.textContent).not.toContain('非最终答复');
     expect(container?.textContent).toContain('这里是思考过程');
     expect(container?.textContent).toContain('继续补充第二步');
     expect(container?.textContent).toContain('收起 ·');

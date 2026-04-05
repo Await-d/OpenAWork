@@ -53,6 +53,10 @@ const reasoningOpenStateCache = new Map<string, boolean>();
 
 export const buildReasoningBlockKey = buildLocalReasoningBlockKey;
 
+export function resetReasoningOpenStateCacheForTests() {
+  reasoningOpenStateCache.clear();
+}
+
 export function AssistantReasoningBlock({
   content,
   index,
@@ -68,12 +72,16 @@ export function AssistantReasoningBlock({
   streaming?: boolean;
   total: number;
 }) {
+  const contentStateKey = React.useMemo(
+    () => buildLocalReasoningBlockKey(content, index),
+    [content, index],
+  );
   const [open, setOpen] = React.useState(() => {
-    if (!stateKey) {
-      return true;
+    if (stateKey && reasoningOpenStateCache.has(stateKey)) {
+      return reasoningOpenStateCache.get(stateKey) ?? true;
     }
 
-    return reasoningOpenStateCache.get(stateKey) ?? true;
+    return reasoningOpenStateCache.get(contentStateKey) ?? true;
   });
   const heading = React.useMemo(() => extractLocalReasoningHeading(content), [content]);
   const preview = React.useMemo(
@@ -88,12 +96,16 @@ export function AssistantReasoningBlock({
   const visibleHeading = open ? heading : preview;
 
   React.useEffect(() => {
-    if (!stateKey) {
+    const cachedState =
+      (stateKey ? reasoningOpenStateCache.get(stateKey) : undefined) ??
+      reasoningOpenStateCache.get(contentStateKey);
+
+    if (cachedState === undefined) {
       return;
     }
 
-    setOpen(reasoningOpenStateCache.get(stateKey) ?? true);
-  }, [stateKey]);
+    setOpen(cachedState);
+  }, [contentStateKey, stateKey]);
 
   const handleToggle = React.useCallback(() => {
     setOpen((previous) => {
@@ -101,9 +113,10 @@ export function AssistantReasoningBlock({
       if (stateKey) {
         reasoningOpenStateCache.set(stateKey, next);
       }
+      reasoningOpenStateCache.set(contentStateKey, next);
       return next;
     });
-  }, [stateKey]);
+  }, [contentStateKey, stateKey]);
 
   return (
     <section

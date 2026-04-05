@@ -532,6 +532,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
   const charCount = Array.from(previewSource).length;
   const statusText = open ? '历史推理正文' : '摘要视图';
   const visibleHeading = open ? heading : preview;
+  const label = 'Thinking:';
 
   return (
     <div className="chat-markdown-thinking-block" data-open={open ? 'true' : 'false'}>
@@ -547,7 +548,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
             <span className="assistant-reasoning-summary-head">
               <span className="assistant-reasoning-status-cluster">
                 <span className="assistant-reasoning-status-dot" aria-hidden="true" />
-                <span className="chat-markdown-thinking-label">思考内容</span>
+                <span className="chat-markdown-thinking-label">{label}</span>
               </span>
               <span className="assistant-reasoning-status-text">{statusText}</span>
             </span>

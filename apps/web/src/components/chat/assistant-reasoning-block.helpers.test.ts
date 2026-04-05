@@ -3,7 +3,6 @@ import {
   buildReasoningBlockKey,
   extractReasoningHeading,
   extractReasoningPreview,
-  getReasoningLabel,
 } from '@openAwork/shared';
 import {
   buildLocalReasoningBlockKey,
@@ -27,13 +26,11 @@ describe('assistant-reasoning-block.helpers', () => {
     expect(buildLocalReasoningBlockKey(content, 0)).toBe(buildReasoningBlockKey(content, 0));
   });
 
-  it('matches shared copy rules for label and hint', () => {
-    expect(getLocalReasoningLabel({ index: 0, streaming: true, total: 1 })).toBe(
-      getReasoningLabel({ index: 0, streaming: true, total: 1 }),
-    );
-    expect(getLocalReasoningLabel({ index: 1, streaming: false, total: 2 })).toBe(
-      getReasoningLabel({ index: 1, streaming: false, total: 2 }),
-    );
+  it('uses CLI-aligned local label and hint copy', () => {
+    expect(getLocalReasoningLabel({ index: 0, streaming: true, total: 1 })).toBe('Thinking:');
+    expect(getLocalReasoningLabel({ index: 0, streaming: false, total: 1 })).toBe('Thinking:');
+    expect(getLocalReasoningLabel({ index: 1, streaming: true, total: 2 })).toBe('Thinking: 2');
+    expect(getLocalReasoningLabel({ index: 1, streaming: false, total: 2 })).toBe('Thinking: 2');
     expect(getLocalReasoningHint({ charCount: 42, open: false, streaming: true })).toBe(
       '已显示摘要 · 点击展开',
     );

@@ -1043,7 +1043,6 @@
   font-size: var(--reasoning-label-font-size, 10px);
   font-weight: 700;
   letter-spacing: var(--reasoning-label-letter-spacing, 0.08em);
-  text-transform: uppercase;
 }
 
 .assistant-reasoning-block[data-streaming='true'] .chat-markdown-thinking-label {
@@ -1307,6 +1306,18 @@
   100% {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-reasoning-block[data-streaming='true'] .chat-markdown-thinking-label::after,
+  .assistant-reasoning-block[data-streaming='true'] .assistant-reasoning-status-dot,
+  .assistant-reasoning-heading {
+    animation: none;
+  }
+
+  .assistant-reasoning-heading {
+    transform: none;
   }
 }
 

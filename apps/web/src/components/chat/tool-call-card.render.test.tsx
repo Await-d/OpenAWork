@@ -156,4 +156,22 @@ describe('ToolCallCard rendering', () => {
     expect(html).toContain('提交计划审批');
     expect(html).toContain('等待确认');
   });
+
+  it('renders approval-resumed failures with explicit recovery wording', () => {
+    const html = renderToStaticMarkup(
+      <ToolCallCard
+        toolName="bash"
+        status="failed"
+        isError={true}
+        resumedAfterApproval={true}
+        input={{ command: 'find . | head -20' }}
+        output={{
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        }}
+      />,
+    );
+
+    expect(html).toContain('审批后恢复');
+    expect(html).toContain('恢复后失败');
+  });
 });

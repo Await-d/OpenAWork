@@ -162,7 +162,7 @@ describe('chat task tool rendering', () => {
       content: `工具：todowrite
 类型：TOOL
 状态：完成
-摘要：2 项待办
+摘要：2 项主待办
 
 输入
 {
@@ -177,7 +177,7 @@ describe('chat task tool rendering', () => {
 
 输出
 {
-  "title": "2 todos"
+  "title": "2 main todos"
 }`,
     };
 
@@ -185,8 +185,79 @@ describe('chat task tool rendering', () => {
 
     expect(html).toContain('data-tool-card-root="true"');
     expect(html).toContain('todowrite');
-    expect(html).toContain('1 项待办');
-    expect(html).not.toContain('摘要：2 项待办');
+    expect(html).toContain('1 项主待办');
+    expect(html).toContain('完成');
+    expect(html).not.toContain('摘要：2 项主待办');
+  });
+
+  it('renders copied temporary todo cards with temporary-lane summaries', () => {
+    const message: ChatMessage = {
+      id: 'msg-copied-subtodowrite',
+      role: 'assistant',
+      content: `工具：subtodowrite
+类型：TOOL
+状态：完成
+摘要：1 项临时待办
+
+输入
+{
+  "todos": [
+    {
+      "content": "Record a follow-up for the temporary lane",
+      "priority": "low",
+      "status": "pending"
+    }
+  ]
+}
+
+输出
+{
+  "title": "1 temporary todo"
+}`,
+    };
+
+    const html = renderToStaticMarkup(<>{renderChatMessageContent(message)}</>);
+
+    expect(html).toContain('data-tool-card-root="true"');
+    expect(html).toContain('subtodowrite');
+    expect(html).toContain('1 项临时待办');
+    expect(html).toContain('完成');
+    expect(html).not.toContain('摘要：1 项临时待办');
+  });
+
+  it('renders copied todo cards when the output title is localized in chinese', () => {
+    const message: ChatMessage = {
+      id: 'msg-copied-todowrite-zh-title',
+      role: 'assistant',
+      content: `工具：todowrite
+类型：TOOL
+状态：完成
+摘要：1 项主待办
+
+输入
+{
+  "todos": [
+    {
+      "content": "整理主计划",
+      "priority": "high",
+      "status": "in_progress"
+    }
+  ]
+}
+
+输出
+{
+  "title": "1 项主待办"
+}`,
+    };
+
+    const html = renderToStaticMarkup(<>{renderChatMessageContent(message)}</>);
+
+    expect(html).toContain('data-tool-card-root="true"');
+    expect(html).toContain('todowrite');
+    expect(html).toContain('1 项主待办');
+    expect(html).toContain('完成');
+    expect(html).not.toContain('摘要：1 项主待办');
   });
 
   it('renders mixed assistant_trace payloads with both inline task and normal tool card branches', () => {

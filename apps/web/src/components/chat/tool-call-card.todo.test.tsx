@@ -1,8 +1,7 @@
-import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ToolCallCard } from '@openAwork/shared-ui';
+import { resolveToolCallCardDisplayData, ToolCallCard } from '@openAwork/shared-ui';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -36,10 +35,17 @@ describe('ToolCallCard todo summaries', () => {
       .IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('shows summary labels for temp todo tools', async () => {
+  it('shows lane-aware summary labels for todo tools', async () => {
     await act(async () => {
       root!.render(
         <div>
+          <ToolCallCard
+            toolName="todowrite"
+            input={{
+              todos: [{ content: '整理主计划', status: 'in_progress', priority: 'high' }],
+            }}
+          />
+          <ToolCallCard toolName="todoread" input={{}} />
           <ToolCallCard
             toolName="subtodowrite"
             input={{
@@ -56,7 +62,29 @@ describe('ToolCallCard todo summaries', () => {
 
     await flushEffects();
 
+    expect(container?.textContent).toContain('1 项主待办');
+    expect(container?.textContent).toContain('读取当前主待办');
     expect(container?.textContent).toContain('2 项临时待办');
     expect(container?.textContent).toContain('读取当前临时待办');
+  });
+
+  it('extracts lane-aware todo output titles into the preview model', () => {
+    const displayData = resolveToolCallCardDisplayData({
+      toolName: 'todowrite',
+      input: {
+        todos: [{ content: '整理主计划', status: 'in_progress', priority: 'high' }],
+      },
+      output: {
+        title: '1 项主待办',
+        output: '[]',
+        metadata: {
+          todos: [{ content: '整理主计划', status: 'in_progress', priority: 'high' }],
+        },
+      },
+      includeOutputDetails: true,
+    });
+
+    expect(displayData.summary).toBe('1 项主待办');
+    expect(displayData.outputPreview).toBe('1 项主待办');
   });
 });
