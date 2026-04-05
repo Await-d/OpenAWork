@@ -105,6 +105,7 @@
 - [2026-04-05] 共享只读访问的 route-level 覆盖应优先通过**独立 route 模块 + mock-based 网关测试**补齐，而不是依赖大而重的全路由集成测试；当前 `session-shared-read-routes.ts` + `session-shared-read-routes.test.ts` 就是这条收口后的模式。
 - [2026-04-05] 共享只读详情返回体必须保证 `share.stateStatus` 与 `session.state_status` 一致；如果详情先做 runtime reconcile，而摘要仍返回旧状态，会在同一响应里制造语义漂移。
 - [2026-04-05] `comment` 权限的最小真实闭环采用 **专用共享评论链**：用 `shared_session_comments` 承载共享会话评论，`view` 只能读评论，`comment / operate` 才能写；不要把共享评论混进全局 team message 板，否则权限边界会变糊。
+- [2026-04-05] 共享评论创建的 POST 返回体应尽量回读 durable `created_at`，并显式覆盖 `view` 读评论、`operate` 写评论这两个边界；否则会留下时间格式漂移和权限覆盖面不足的隐患。
 - [2026-04-04] Chat 真正续流的二阶段演进采用 **attach-only SSE + request-scoped `RunEventCursor(clientRequestId, seq)`**：现有 `/stream` 与 `/stream/sse` 继续只负责“发起新请求”，刷新/重连后的 resume 通过独立 attach 通道完成；一阶段 `session.runEvents` 快照恢复展示保留为降级兜底层，而不是被替换掉。
 - [2026-04-04] OpenAWork 的 call hierarchy 对外 surface 采用 **单个高层读工具 `lsp_call_hierarchy`**，内部再编排 `prepareCallHierarchy / incomingCalls / outgoingCalls` 三步协议；不要把协议镜像步骤直接暴露给模型，以免 `CallHierarchyItem.data` 这类 opaque payload 在多轮中被错误传递。
 - [2026-04-04] OpenAWork richer LSP 当前正式支持面已扩展为 **definition / implementation / references / symbols / prepareRename / rename / hover / call hierarchy / diagnostics / touch**；其中更多 language server coverage 扩展与 status/event/UI diagnostics 继续延后到独立工作流。
