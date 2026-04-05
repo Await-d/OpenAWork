@@ -21,6 +21,9 @@ vi.mock('../request-workflow.js', () => ({
 }));
 
 vi.mock('../db.js', () => ({
+  WORKSPACE_ACCESS_RESTRICTED: false,
+  WORKSPACE_ROOT: '/workspace',
+  WORKSPACE_ROOTS: ['/workspace'],
   sqliteAll: sqliteAllMock,
   sqliteGet: sqliteGetMock,
   sqliteRun: sqliteRunMock,
