@@ -9,6 +9,10 @@ import {
   createSharedSessionComment,
   listSharedSessionComments,
 } from '../session-shared-comment-store.js';
+import {
+  listSharedSessionPresence,
+  touchSharedSessionPresence,
+} from '../session-shared-presence-store.js';
 import { filterVisibleSessionMessages, listSessionMessages } from '../session-message-store.js';
 import {
   getSharedSessionForRecipient,
@@ -39,6 +43,7 @@ import {
   streamRequestSchema as permissionResumeRequestSchema,
 } from './stream.js';
 import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
+import { logTeamAudit } from '../team-audit-store.js';
 import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 
@@ -447,6 +452,22 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         listSessionTodos(sessionId),
         listSessionRunEvents(sessionId),
       );
+      if (canOperateSharedSession(sharedAccess.permission)) {
+        const expiredPermissionCount = expirePendingPermissionRequests({
+          nowMs: Date.now(),
+          sessionId,
+        });
+        const expiredQuestionCount = expirePendingQuestionRequests({
+          nowMs: Date.now(),
+          sessionId,
+        });
+        if (expiredPermissionCount > 0 || expiredQuestionCount > 0) {
+          await terminateTaskChildSessionAsTimeout({
+            childSessionId: sessionId,
+            userId: sharedAccess.ownerUserId,
+          });
+        }
+      }
       const pendingPermissions = canOperateSharedSession(sharedAccess.permission)
         ? listSharedPendingPermissionRequests({ sessionId })
         : [];
@@ -469,6 +490,10 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           shareUpdatedAt: sharedAccess.shareUpdatedAt,
         },
         comments: listSharedSessionComments({
+          ownerUserId: sharedAccess.ownerUserId,
+          sessionId,
+        }),
+        presence: listSharedSessionPresence({
           ownerUserId: sharedAccess.ownerUserId,
           sessionId,
         }),
@@ -518,8 +543,46 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         authorEmail: user.email,
         content: body.data.content,
       });
+      logTeamAudit({
+        action: 'shared_comment_created',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；评论：${body.data.content}`,
+        entityId: comment.id,
+        entityType: 'shared_session_comment',
+        summary: `${user.email} 在“${sharedAccess.session.title ?? sessionId}”中新增了一条共享评论`,
+        userId: sharedAccess.ownerUserId,
+      });
       step.succeed(undefined, { commentId: comment.id });
       return reply.status(201).send({ comment });
+    },
+  );
+
+  app.post(
+    '/sessions/shared-with-me/:sessionId/presence',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.shared.presence.touch', undefined, {
+        sessionId,
+      });
+
+      const sharedAccess = getSharedSessionForRecipient({ email: user.email, sessionId });
+      if (!sharedAccess) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Shared session not found' });
+      }
+
+      const presence = touchSharedSessionPresence({
+        ownerUserId: sharedAccess.ownerUserId,
+        sessionId,
+        viewerUserId: user.sub,
+        viewerEmail: user.email,
+      });
+
+      step.succeed(undefined, { count: presence.length });
+      return reply.send({ presence });
     },
   );
 
@@ -650,6 +713,16 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           );
         });
       }
+      logTeamAudit({
+        action: 'shared_permission_replied',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；工具：${permissionRequest.tool_name}；范围：${permissionRequest.scope}；决策：${body.data.decision}`,
+        entityId: body.data.requestId,
+        entityType: 'permission_request',
+        summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的权限请求（${body.data.decision}）`,
+        userId: sharedAccess.ownerUserId,
+      });
 
       step.succeed(undefined, { requestId: body.data.requestId, decision: body.data.decision });
       return reply.send({ ok: true });
@@ -774,6 +847,16 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           });
         }
       }
+      logTeamAudit({
+        action: 'shared_question_replied',
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        detail: `会话：${sharedAccess.session.title ?? sessionId}；工作区：${sharedAccess.session.workspacePath ?? '未绑定工作区'}；问题：${questionRequest.title}；结果：${body.data.status}`,
+        entityId: body.data.requestId,
+        entityType: 'question_request',
+        summary: `${user.email} 处理了“${sharedAccess.session.title ?? sessionId}”的待回答问题（${body.data.status}）`,
+        userId: sharedAccess.ownerUserId,
+      });
 
       step.succeed(undefined, { requestId: body.data.requestId, status: body.data.status });
       return reply.send({ ok: true });
