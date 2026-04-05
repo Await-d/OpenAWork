@@ -18,7 +18,6 @@ describe('WorkflowLogger', () => {
   });
 
   it('renders the final workflow branch as terminal even when ip and user agent follow', () => {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const logger = new WorkflowLogger();
     const context: RequestContext = {
@@ -49,7 +48,6 @@ describe('WorkflowLogger', () => {
   });
 
   it('treats 1xx and 3xx responses as non-error request headers', () => {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cases = [
       { statusCode: 101, expectedEmoji: '🟢' },
