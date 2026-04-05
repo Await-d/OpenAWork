@@ -68,8 +68,20 @@ export interface TeamSessionShareRecord {
 
 export interface TeamAuditLogRecord {
   id: string;
-  action: 'share_created' | 'share_deleted' | 'share_permission_updated';
-  entityType: 'session_share';
+  action:
+    | 'share_created'
+    | 'share_deleted'
+    | 'share_permission_updated'
+    | 'shared_comment_created'
+    | 'shared_permission_replied'
+    | 'shared_question_replied';
+  actorEmail: string | null;
+  actorUserId: string | null;
+  entityType:
+    | 'session_share'
+    | 'shared_session_comment'
+    | 'permission_request'
+    | 'question_request';
   entityId: string;
   summary: string;
   detail: string | null;
