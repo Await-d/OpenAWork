@@ -53,7 +53,13 @@ async function main(): Promise<void> {
 
         assert(createRes.statusCode === 201, 'permission create route should succeed');
         const created = JSON.parse(createRes.body) as {
-          request: { requestId: string; toolName: string; sessionId: string };
+          request: {
+            requestId: string;
+            toolName: string;
+            sessionId: string;
+            status: string;
+            createdAt: string;
+          };
         };
         assert(
           created.request.toolName === 'file_write',
@@ -62,6 +68,14 @@ async function main(): Promise<void> {
         assert(
           created.request.sessionId === sessionId,
           'created permission should keep session id',
+        );
+        assert(
+          created.request.status === 'pending',
+          'created permission should expose pending status',
+        );
+        assert(
+          typeof created.request.createdAt === 'string' && created.request.createdAt.length > 0,
+          'created permission should expose createdAt',
         );
 
         const listRes = await app.inject({

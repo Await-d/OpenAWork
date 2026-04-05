@@ -10,6 +10,7 @@ import {
 } from '../session-permission-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
 import { startRequestWorkflow } from '../request-workflow.js';
+import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
 import {
   type ApprovedPermissionResumePayload,
   streamRequestSchema as permissionResumeRequestSchema,
@@ -47,7 +48,41 @@ interface PermissionRequestRow {
   status: 'pending' | 'approved' | 'rejected' | 'consumed';
   decision: 'once' | 'session' | 'permanent' | 'reject' | null;
   request_payload_json: string | null;
+  expires_at: number | null;
   created_at: string;
+}
+
+export function expirePendingPermissionRequests(input: {
+  nowMs?: number;
+  sessionId: string;
+}): number {
+  const nowMs = input.nowMs ?? Date.now();
+  const requests = sqliteAll<PermissionRequestRow>(
+    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+     FROM permission_requests
+     WHERE session_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
+     ORDER BY created_at ASC`,
+    [input.sessionId, nowMs],
+  );
+
+  for (const request of requests) {
+    sqliteRun(
+      `UPDATE permission_requests
+       SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
+       WHERE id = ? AND session_id = ? AND status = 'pending'`,
+      [request.id, input.sessionId],
+    );
+    const requestClientRequestId = parsePermissionRequestClientRequestId(
+      request.request_payload_json,
+    );
+    publishSessionRunEvent(
+      input.sessionId,
+      createPermissionRepliedEvent({ requestId: request.id, decision: 'reject' }),
+      requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
+    );
+  }
+
+  return requests.length;
 }
 
 export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
@@ -66,8 +101,13 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
+      const expiredCount = expirePendingPermissionRequests({ nowMs: Date.now(), sessionId });
+      if (expiredCount > 0) {
+        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
+      }
+
       const requests = sqliteAll<PermissionRequestRow>(
-        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, created_at
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
          FROM permission_requests
          WHERE session_id = ? AND status = 'pending'
          ORDER BY created_at ASC`,
@@ -102,10 +142,14 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
 
       const requestId = randomUUID();
       const clientRequestId = body.data.clientRequestId ?? `permission:${requestId}`;
+      const expiresAt = (() => {
+        const timeoutMs = getPermissionRequestTimeoutMs();
+        return typeof timeoutMs === 'number' ? Date.now() + timeoutMs : null;
+      })();
       sqliteRun(
         `INSERT INTO permission_requests
-         (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           requestId,
           sessionId,
@@ -115,6 +159,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           body.data.riskLevel,
           body.data.previewAction ?? null,
           JSON.stringify({ clientRequestId }),
+          expiresAt,
         ],
       );
 
@@ -131,17 +176,29 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         { clientRequestId },
       );
 
+      const createdRequest = sqliteGet<PermissionRequestRow>(
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+         FROM permission_requests
+         WHERE id = ? AND session_id = ?
+         LIMIT 1`,
+        [requestId, sessionId],
+      );
+
       step.succeed(undefined, { requestId });
       return reply.status(201).send({
-        request: {
-          requestId,
-          sessionId,
-          toolName: body.data.toolName,
-          scope: body.data.scope,
-          reason: body.data.reason,
-          riskLevel: body.data.riskLevel,
-          previewAction: body.data.previewAction,
-        },
+        request: createdRequest
+          ? mapPermissionRequestRow(createdRequest)
+          : {
+              requestId,
+              sessionId,
+              toolName: body.data.toolName,
+              scope: body.data.scope,
+              reason: body.data.reason,
+              riskLevel: body.data.riskLevel,
+              previewAction: body.data.previewAction,
+              status: 'pending',
+              createdAt: new Date().toISOString(),
+            },
       });
     },
   );
@@ -168,7 +225,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const permissionRequest = sqliteGet<PermissionRequestRow>(
-        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, created_at
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
          FROM permission_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
@@ -177,6 +234,16 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       if (!permissionRequest) {
         step.fail('permission request not found');
         return reply.status(404).send({ error: 'Permission request not found' });
+      }
+      if (
+        permissionRequest.status === 'pending' &&
+        typeof permissionRequest.expires_at === 'number' &&
+        permissionRequest.expires_at <= Date.now()
+      ) {
+        expirePendingPermissionRequests({ nowMs: Date.now(), sessionId });
+        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
+        step.fail('permission request expired');
+        return reply.status(409).send({ error: 'Permission request expired' });
       }
       if (permissionRequest.status !== 'pending') {
         step.fail('permission request already resolved');
@@ -251,6 +318,20 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true });
     },
   );
+}
+
+function getPermissionRequestTimeoutMs(): number | undefined {
+  const raw = process.env['OPENAWORK_PERMISSION_REQUEST_TIMEOUT_MS'];
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return Math.floor(parsed);
 }
 
 function ownsSession(sessionId: string, userId: string): boolean {

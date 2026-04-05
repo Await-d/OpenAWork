@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   sqliteRunMock: vi.fn(),
   publishSessionRunEventMock: vi.fn(),
   resumeApprovedPermissionRequestMock: vi.fn(),
+  terminateTaskChildSessionAsTimeoutMock: vi.fn(),
 }));
 
 vi.mock('../auth.js', () => ({
@@ -30,6 +31,10 @@ vi.mock('../routes/stream-runtime.js', () => ({
   resumeApprovedPermissionRequest: mocks.resumeApprovedPermissionRequestMock,
 }));
 
+vi.mock('../tool-sandbox.js', () => ({
+  terminateTaskChildSessionAsTimeout: mocks.terminateTaskChildSessionAsTimeoutMock,
+}));
+
 describe('permissions request binding', () => {
   let app: Awaited<ReturnType<typeof Fastify>>;
 
@@ -39,7 +44,9 @@ describe('permissions request binding', () => {
     mocks.sqliteRunMock.mockReset();
     mocks.publishSessionRunEventMock.mockReset();
     mocks.resumeApprovedPermissionRequestMock.mockReset();
+    mocks.terminateTaskChildSessionAsTimeoutMock.mockReset();
     mocks.resumeApprovedPermissionRequestMock.mockResolvedValue(undefined);
+    mocks.terminateTaskChildSessionAsTimeoutMock.mockResolvedValue(false);
     mocks.sqliteGetMock.mockReturnValue({ id: 'session-a', user_id: 'user-a' });
 
     const { permissionsRoutes } = await import('../routes/permissions.js');
@@ -58,6 +65,7 @@ describe('permissions request binding', () => {
   });
 
   it('stores and publishes a request-scoped clientRequestId', async () => {
+    vi.stubEnv('OPENAWORK_PERMISSION_REQUEST_TIMEOUT_MS', '1500');
     const response = await app.inject({
       method: 'POST',
       url: '/sessions/session-a/permissions/requests',
@@ -73,11 +81,13 @@ describe('permissions request binding', () => {
     expect(response.statusCode).toBe(201);
     const insertParams = mocks.sqliteRunMock.mock.calls[0]?.[1] as unknown[];
     expect(JSON.parse(String(insertParams?.[7]))).toEqual({ clientRequestId: 'req-1' });
+    expect(insertParams?.[8]).toEqual(expect.any(Number));
     expect(mocks.publishSessionRunEventMock).toHaveBeenCalledWith(
       'session-a',
       expect.objectContaining({ type: 'permission_asked' }),
       { clientRequestId: 'req-1' },
     );
+    vi.unstubAllEnvs();
   });
 
   it('preserves agentId when resuming an approved permission request', async () => {
@@ -104,6 +114,7 @@ describe('permissions request binding', () => {
           },
           toolCallId: 'tool-1',
         }),
+        expires_at: Date.now() + 10_000,
         created_at: '2026-04-02T00:00:00.000Z',
       });
 
@@ -129,6 +140,58 @@ describe('permissions request binding', () => {
         toolName: 'bash',
       }),
       sessionId: 'session-a',
+      userId: 'user-a',
+    });
+  });
+
+  it('rejects expired permission requests before approval can continue', async () => {
+    mocks.sqliteGetMock
+      .mockReturnValueOnce({ id: 'session-a', user_id: 'user-a' })
+      .mockReturnValueOnce({
+        id: 'permission-expired',
+        session_id: 'session-a',
+        tool_name: 'bash',
+        scope: '/repo',
+        reason: 'need shell',
+        risk_level: 'high',
+        preview_action: null,
+        status: 'pending',
+        decision: null,
+        request_payload_json: JSON.stringify({ clientRequestId: 'expired-req-1' }),
+        expires_at: Date.now() - 1_000,
+        created_at: '2026-04-02T00:00:00.000Z',
+      });
+    mocks.sqliteAllMock.mockReturnValue([
+      {
+        id: 'permission-expired',
+        session_id: 'session-a',
+        tool_name: 'bash',
+        scope: '/repo',
+        reason: 'need shell',
+        risk_level: 'high',
+        preview_action: null,
+        status: 'pending',
+        decision: null,
+        request_payload_json: JSON.stringify({ clientRequestId: 'expired-req-1' }),
+        expires_at: Date.now() - 1_000,
+        created_at: '2026-04-02T00:00:00.000Z',
+      },
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-a/permissions/reply',
+      payload: {
+        requestId: 'permission-expired',
+        decision: 'once',
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(JSON.parse(response.body)).toEqual({ error: 'Permission request expired' });
+    expect(mocks.resumeApprovedPermissionRequestMock).not.toHaveBeenCalled();
+    expect(mocks.terminateTaskChildSessionAsTimeoutMock).toHaveBeenCalledWith({
+      childSessionId: 'session-a',
       userId: 'user-a',
     });
   });
