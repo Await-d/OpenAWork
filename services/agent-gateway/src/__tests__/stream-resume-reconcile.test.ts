@@ -251,6 +251,7 @@ describe('resume reconcile fallback', () => {
           expect.objectContaining({
             type: 'tool_result',
             toolName: 'Agent',
+            resumedAfterApproval: true,
             observability: {
               presentedToolName: 'Agent',
               canonicalToolName: 'call_omo_agent',
@@ -266,6 +267,7 @@ describe('resume reconcile fallback', () => {
       expect.objectContaining({
         type: 'tool_result',
         toolName: 'Agent',
+        resumedAfterApproval: true,
         observability: {
           presentedToolName: 'Agent',
           canonicalToolName: 'call_omo_agent',
@@ -284,6 +286,44 @@ describe('resume reconcile fallback', () => {
       },
       userId: 'user-1',
     });
+  });
+
+  it('does not mark answered question resumes as approval resumes', async () => {
+    const { resumeAnsweredQuestionRequest } = await import('../routes/stream-runtime.js');
+
+    await resumeAnsweredQuestionRequest({
+      payload: {
+        clientRequestId: 'resume-question-1',
+        nextRound: 2,
+        rawInput: { header: '执行策略' },
+        requestData: {
+          clientRequestId: 'resume-question-1',
+          message: 'resume answered question',
+        },
+        toolCallId: 'tool-call-question-1',
+        toolName: 'question',
+      },
+      answerOutput: '已选择 workspace',
+      sessionId: 'question-session-1',
+      userId: 'user-1',
+    });
+
+    expect(appendSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.not.objectContaining({
+            resumedAfterApproval: true,
+          }),
+        ],
+      }),
+    );
+    expect(persistRunEventMock).toHaveBeenCalledWith(
+      'question-session-1',
+      expect.not.objectContaining({
+        resumedAfterApproval: true,
+      }),
+      { clientRequestId: 'resume-question-1' },
+    );
   });
 
   it('persists a usage run event when resume rounds report exact token usage', async () => {

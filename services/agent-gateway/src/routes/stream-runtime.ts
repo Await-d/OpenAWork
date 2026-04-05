@@ -52,6 +52,7 @@ import {
   touchSessionRuntimeThread,
   upsertSessionRuntimeThread,
 } from '../session-runtime-thread-store.js';
+import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../companion-settings.js';
 
 async function continueFromApprovedToolResult(input: {
   initialToolResult: {
@@ -61,6 +62,7 @@ async function continueFromApprovedToolResult(input: {
     toolName: string;
   };
   payload: ApprovedPermissionResumePayload;
+  resumedAfterApproval?: boolean;
   sessionId: string;
   userId: string;
 }): Promise<{ pendingInteraction: boolean; statusCode: number }> {
@@ -88,10 +90,18 @@ async function continueFromApprovedToolResult(input: {
     userId: input.userId,
   });
   const workspaceCtx = await buildWorkspaceContext(sessionContext.metadataJson);
+  const resumedUser = loadSessionUser(input.sessionId, input.userId);
+  const companionPrompt = resumedUser
+    ? buildCompanionPrompt(
+        loadCompanionSettingsForUser(resumedUser.sub, resumedUser.email, requestData.agentId),
+        requestData.message,
+      )
+    : null;
   const requestSystemPrompts = buildRequestScopedSystemPrompts(
     requestData.message,
     buildCapabilityContext(input.userId, input.sessionId),
     {
+      companionPrompt,
       dialogueMode: requestData.dialogueMode,
       yoloMode: requestData.yoloMode,
     },
@@ -178,6 +188,7 @@ async function continueFromApprovedToolResult(input: {
           output: input.initialToolResult.output,
           isError: input.initialToolResult.isError,
           fileDiffs: resumedFileDiffs,
+          resumedAfterApproval: input.resumedAfterApproval === true,
           observability,
         }),
       ],
@@ -205,6 +216,7 @@ async function continueFromApprovedToolResult(input: {
         output: input.initialToolResult.output,
         isError: input.initialToolResult.isError,
         fileDiffs: resumedFileDiffs,
+        resumedAfterApproval: input.resumedAfterApproval === true,
         observability,
         eventMeta: createRunEventMeta(runId, eventSequence),
       }),
@@ -411,6 +423,7 @@ export async function resumeApprovedPermissionRequest(input: {
         toolName: input.payload.toolName,
       },
       payload: input.payload,
+      resumedAfterApproval: true,
       sessionId: input.sessionId,
       userId: input.userId,
     });

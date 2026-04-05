@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
   sqliteAllMock: vi.fn(),
+  expirePendingPermissionRequestsMock: vi.fn(),
+  expirePendingQuestionRequestsMock: vi.fn(),
   reconcileResumedTaskChildSessionMock: vi.fn(),
   reconcileTimedOutTaskChildSessionIfExpiredMock: vi.fn(),
   reconcileSessionStateStatusMock: vi.fn(),
+  terminateTaskChildSessionAsTimeoutMock: vi.fn(),
 }));
 
 vi.mock('../db.js', () => ({
@@ -14,9 +17,18 @@ vi.mock('../db.js', () => ({
   sqliteAll: mocked.sqliteAllMock,
 }));
 
+vi.mock('../routes/permissions.js', () => ({
+  expirePendingPermissionRequests: mocked.expirePendingPermissionRequestsMock,
+}));
+
+vi.mock('../routes/questions.js', () => ({
+  expirePendingQuestionRequests: mocked.expirePendingQuestionRequestsMock,
+}));
+
 vi.mock('../tool-sandbox.js', () => ({
   reconcileResumedTaskChildSession: mocked.reconcileResumedTaskChildSessionMock,
   reconcileTimedOutTaskChildSessionIfExpired: mocked.reconcileTimedOutTaskChildSessionIfExpiredMock,
+  terminateTaskChildSessionAsTimeout: mocked.terminateTaskChildSessionAsTimeoutMock,
 }));
 
 vi.mock('../session-runtime-state.js', () => ({
@@ -31,10 +43,16 @@ import {
 describe('session-runtime-reconciler', () => {
   beforeEach(() => {
     mocked.sqliteAllMock.mockReset();
+    mocked.expirePendingPermissionRequestsMock.mockReset();
+    mocked.expirePendingQuestionRequestsMock.mockReset();
     mocked.reconcileResumedTaskChildSessionMock.mockReset();
     mocked.reconcileTimedOutTaskChildSessionIfExpiredMock.mockReset();
     mocked.reconcileSessionStateStatusMock.mockReset();
+    mocked.terminateTaskChildSessionAsTimeoutMock.mockReset();
+    mocked.expirePendingPermissionRequestsMock.mockReturnValue(0);
+    mocked.expirePendingQuestionRequestsMock.mockReturnValue(0);
     mocked.reconcileTimedOutTaskChildSessionIfExpiredMock.mockResolvedValue(false);
+    mocked.terminateTaskChildSessionAsTimeoutMock.mockResolvedValue(false);
   });
 
   it('reconciles parent task graph when a stale child session is reset', async () => {
@@ -96,6 +114,30 @@ describe('session-runtime-reconciler', () => {
       userId: 'user-1',
     });
     expect(mocked.reconcileResumedTaskChildSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('expires pending interactions before runtime reconciliation and terminates timed out child sessions', async () => {
+    mocked.reconcileSessionStateStatusMock.mockReturnValue({
+      previousStatus: 'paused',
+      status: 'idle',
+      wasReset: false,
+    });
+    mocked.expirePendingPermissionRequestsMock.mockReturnValue(1);
+
+    await reconcileSessionRuntime({ nowMs: 456, sessionId: 'child-paused-1', userId: 'user-1' });
+
+    expect(mocked.expirePendingPermissionRequestsMock).toHaveBeenCalledWith({
+      nowMs: 456,
+      sessionId: 'child-paused-1',
+    });
+    expect(mocked.expirePendingQuestionRequestsMock).toHaveBeenCalledWith({
+      nowMs: 456,
+      sessionId: 'child-paused-1',
+    });
+    expect(mocked.terminateTaskChildSessionAsTimeoutMock).toHaveBeenCalledWith({
+      childSessionId: 'child-paused-1',
+      userId: 'user-1',
+    });
   });
 
   it('batch-reconciles startup candidates and tracks resets/pauses/failures', async () => {
