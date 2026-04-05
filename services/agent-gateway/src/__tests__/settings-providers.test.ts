@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AIProvider, ProviderType } from '@openAwork/agent-core';
+
+vi.mock('../session-workspace-metadata.js', () => ({
+  TOOL_SURFACE_PROFILES: ['openawork', 'claude_code_default', 'claude_code_simple'],
+}));
 
 const normalizeProviderBaseUrl = (baseUrl: string): string => {
   const trimmed = baseUrl.trim();
@@ -40,7 +45,9 @@ const buildRequestOverrides = (
   };
 };
 
-const buildBuiltinProvider = (type: string) => {
+type MockBuiltinProviderType = Extract<ProviderType, 'anthropic' | 'openai' | 'gemini'>;
+
+const buildBuiltinProvider = (type: MockBuiltinProviderType): AIProvider => {
   const now = new Date().toISOString();
   if (type === 'anthropic') {
     return {
@@ -58,6 +65,27 @@ const buildBuiltinProvider = (type: string) => {
     };
   }
 
+  if (type === 'gemini') {
+    return {
+      id: 'gemini',
+      type: 'gemini',
+      name: 'Google Gemini',
+      enabled: true,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKeyEnv: 'GEMINI_API_KEY',
+      defaultModels: [
+        {
+          id: 'gemini-2.5-pro',
+          label: 'Gemini 2.5 Pro',
+          enabled: true,
+          supportsThinking: true,
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
   return {
     id: 'openai',
     type: 'openai',
@@ -68,6 +96,7 @@ const buildBuiltinProvider = (type: string) => {
     defaultModels: [
       { id: 'gpt-5', label: 'GPT-5', enabled: true },
       { id: 'gpt-5-mini', label: 'GPT-5 Mini', enabled: true },
+      { id: 'o3', label: 'o3', enabled: true, supportsThinking: true },
     ],
     createdAt: now,
     updatedAt: now,
@@ -101,7 +130,7 @@ class MockProviderManagerImpl {
   }
 
   public syncBuiltinPresets(): Array<ReturnType<typeof buildBuiltinProvider>> {
-    for (const type of ['openai', 'anthropic']) {
+    for (const type of ['openai', 'anthropic', 'gemini'] as const) {
       if (!this.providers.some((provider) => provider.type === type)) {
         this.providers.push(buildBuiltinProvider(type));
       }
@@ -191,16 +220,20 @@ class MockProviderManagerImpl {
 vi.mock('@openAwork/agent-core', () => ({
   ProviderManagerImpl: MockProviderManagerImpl,
   buildRequestOverrides,
-  getBuiltinProviderPreset: (type: string) => buildBuiltinProvider(type),
+  getBuiltinProviderPreset: (type: MockBuiltinProviderType) => buildBuiltinProvider(type),
+  getAllBuiltinPresets: () => [
+    buildBuiltinProvider('openai'),
+    buildBuiltinProvider('anthropic'),
+    buildBuiltinProvider('gemini'),
+  ],
   getModelsDevDataSync: () => null,
   normalizeProviderBaseUrl,
 }));
 
-const agentCore = await import('@openAwork/agent-core');
 const providerConfigModule = await import('../provider-config.js');
 const modelRouterModule = await import('../model-router.js');
 
-const { getBuiltinProviderPreset } = agentCore;
+const getBuiltinProviderPreset = (type: MockBuiltinProviderType) => buildBuiltinProvider(type);
 const {
   filterEnabledProviderConfig,
   getActiveChatProviderConfig,
@@ -480,11 +513,38 @@ describe('resolveModelRoute', () => {
     expect(route.model).toBe('moonshot-v1-32k');
   });
 
+  it('treats omitted model the same as the default sentinel', () => {
+    vi.stubEnv('AI_DEFAULT_MODEL', 'moonshot-v1-32k');
+    const parsed = validateModelRequest({ maxTokens: 2048, temperature: 1 });
+    const route = resolveModelRoute(parsed);
+
+    expect(parsed.model).toBe('default');
+    expect(route.model).toBe('moonshot-v1-32k');
+  });
+
   it('accepts dynamic model ids returned by provider settings', () => {
     const parsed = validateModelRequest({ model: 'gpt-5', maxTokens: 2048, temperature: 1 });
 
     expect(parsed.model).toBe('gpt-5');
     expect(resolveModelRoute(parsed).model).toBe('gpt-5');
+  });
+
+  it('hydrates builtin provider metadata for fallback reasoning models', () => {
+    const route = resolveModelRoute({ model: 'o3', maxTokens: 2048, temperature: 1 });
+
+    expect(route.providerType).toBe('openai');
+    expect(route.upstreamProtocol).toBe('responses');
+    expect(route.supportsThinking).toBe(true);
+    expect(route.apiBaseUrl).toBe('https://api.openai.com/v1');
+  });
+
+  it('uses builtin provider baseUrl and thinking metadata for non-openai fallback models', () => {
+    const route = resolveModelRoute({ model: 'gemini-2.5-pro', maxTokens: 2048, temperature: 1 });
+
+    expect(route.providerType).toBe('gemini');
+    expect(route.upstreamProtocol).toBe('chat_completions');
+    expect(route.supportsThinking).toBe(true);
+    expect(route.apiBaseUrl).toBe('https://generativelanguage.googleapis.com/v1beta');
   });
 });
 
@@ -546,7 +606,14 @@ describe('resolveModelRouteFromProvider', () => {
   it('routes openai providers with alias model ids to responses protocol', () => {
     const provider = {
       ...getBuiltinProviderPreset('openai'),
-      defaultModels: [{ id: 'team-model-alias', label: 'Team Alias', enabled: true }],
+      defaultModels: [
+        {
+          id: 'team-model-alias',
+          label: 'Team Alias',
+          enabled: true,
+          contextWindow: 128_000,
+        },
+      ],
     };
 
     const route = resolveModelRouteFromProvider(provider, 'team-model-alias', {
@@ -555,6 +622,7 @@ describe('resolveModelRouteFromProvider', () => {
     });
 
     expect(route.upstreamProtocol).toBe('responses');
+    expect(route.contextWindow).toBe(128_000);
   });
 
   it('exposes provider thinking metadata for upstream request mapping', () => {

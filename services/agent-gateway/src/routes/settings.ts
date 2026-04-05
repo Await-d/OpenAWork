@@ -16,6 +16,7 @@ import {
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
 } from '../provider-config.js';
+import { TOOL_SURFACE_PROFILES } from '../session-workspace-metadata.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
 import {
@@ -23,6 +24,13 @@ import {
   UPSTREAM_RETRY_SETTINGS_KEY,
   upstreamRetrySettingsSchema,
 } from '../upstream-retry-policy.js';
+import {
+  buildCompanionFeatureState,
+  companionSettingsUpdateSchema,
+  resolveCompanionProfileForAgent,
+  getCompanionSettingsKey,
+  loadCompanionSettingsForUser,
+} from '../companion-settings.js';
 import { z } from 'zod';
 
 interface RootPackageJson {
@@ -96,64 +104,13 @@ interface UserSettingRow {
   value: string;
 }
 
-const companionInjectionModeSchema = z.enum(['off', 'mention_only', 'always']);
-const companionVerbositySchema = z.enum(['minimal', 'normal']);
-const companionThemeVariantSchema = z.enum(['default', 'playful']);
-const companionVoiceOutputModeSchema = z.enum(['off', 'buddy_only', 'important_only']);
-const companionVoiceVariantSchema = z.enum(['system', 'bright', 'calm']);
+const defaultToolSurfaceProfileSchema = z.enum(TOOL_SURFACE_PROFILES);
 
-const companionPreferencesSchema = z.object({
-  enabled: z.boolean().default(true),
-  muted: z.boolean().default(false),
-  reducedMotion: z.boolean().default(false),
-  verbosity: companionVerbositySchema.default('normal'),
-  injectionMode: companionInjectionModeSchema.default('mention_only'),
-  themeVariant: companionThemeVariantSchema.default('default'),
-  voiceOutputEnabled: z.boolean().default(false),
-  voiceOutputMode: companionVoiceOutputModeSchema.default('buddy_only'),
-  voiceRate: z.number().min(0.5).max(2).default(1.02),
-  voiceVariant: companionVoiceVariantSchema.default('system'),
-});
-
-const companionSettingsStoredSchema = z.object({
-  preferences: companionPreferencesSchema,
-  profile: z.null().default(null),
-  updatedAt: z.string().optional(),
-});
-
-const companionSettingsUpdateSchema = z.object({
-  preferences: companionPreferencesSchema.partial(),
-});
-
-const DEFAULT_COMPANION_PREFERENCES = companionPreferencesSchema.parse({});
-
-type CompanionSettingsRecord = {
-  preferences: z.infer<typeof companionPreferencesSchema>;
-  profile: null;
-  updatedAt?: string;
-};
-
-function readCompanionSettings(value: string | undefined): CompanionSettingsRecord {
-  const parsed = companionSettingsStoredSchema.safeParse(parseStoredJson(value));
-  if (parsed.success) {
-    return {
-      preferences: parsed.data.preferences,
-      profile: parsed.data.profile,
-      ...(parsed.data.updatedAt ? { updatedAt: parsed.data.updatedAt } : {}),
-    };
-  }
-
-  return {
-    preferences: DEFAULT_COMPANION_PREFERENCES,
-    profile: null,
-  };
-}
-
-function buildCompanionFeatureState(preferences: z.infer<typeof companionPreferencesSchema>): {
-  enabled: boolean;
-  mode: 'off' | 'beta';
-} {
-  return preferences.enabled ? { enabled: true, mode: 'beta' } : { enabled: false, mode: 'off' };
+function readDefaultToolSurfaceProfile(
+  value: string | undefined,
+): 'openawork' | 'claude_code_simple' | 'claude_code_default' {
+  const parsed = defaultToolSurfaceProfileSchema.safeParse(parseStoredJson(value));
+  return parsed.success ? parsed.data : 'openawork';
 }
 
 const AUDIT_PAYLOAD_MAX_STRING_LENGTH = 1000;
@@ -267,6 +224,10 @@ function sanitizeAuditPayload(payload: unknown, depth = 0): unknown {
 }
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
+  const companionSettingsQuerySchema = z.object({
+    agentId: z.string().trim().min(1).max(120).optional(),
+  });
+
   app.get(
     '/settings/companion',
     { onRequest: [requireAuth] },
@@ -274,16 +235,26 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'settings.companion.get');
       const user = request.user as JwtPayload;
 
-      const loadStep = child('load');
-      const row = sqliteGet<UserSettingRow>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'companion_preferences_v1'`,
-        [user.sub],
-      );
-      loadStep.succeed(undefined, { found: row !== undefined });
+      const queryStep = child('parse-query');
+      const parsedQuery = companionSettingsQuerySchema.safeParse(request.query ?? {});
+      if (!parsedQuery.success) {
+        queryStep.fail('invalid companion query');
+        step.fail('invalid companion query');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid companion query', issues: parsedQuery.error.issues });
+      }
+      queryStep.succeed(undefined, {
+        agentId: parsedQuery.data.agentId ?? 'default',
+      });
 
-      const settings = readCompanionSettings(row?.value);
+      const loadStep = child('load');
+      const settings = loadCompanionSettingsForUser(user.sub, user.email, parsedQuery.data.agentId);
+      loadStep.succeed(undefined, { found: true });
       step.succeed(undefined, { voiceOutputEnabled: settings.preferences.voiceOutputEnabled });
       return reply.send({
+        activeBinding: settings.activeBinding,
+        bindings: settings.bindings,
         feature: buildCompanionFeatureState(settings.preferences),
         preferences: settings.preferences,
         profile: settings.profile,
@@ -298,6 +269,19 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'settings.companion.put');
       const user = request.user as JwtPayload;
 
+      const queryStep = child('parse-query');
+      const parsedQuery = companionSettingsQuerySchema.safeParse(request.query ?? {});
+      if (!parsedQuery.success) {
+        queryStep.fail('invalid companion query');
+        step.fail('invalid companion query');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid companion query', issues: parsedQuery.error.issues });
+      }
+      queryStep.succeed(undefined, {
+        agentId: parsedQuery.data.agentId ?? 'default',
+      });
+
       const parseStep = child('parse-body');
       const parsed = companionSettingsUpdateSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -307,20 +291,19 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           .status(400)
           .send({ error: 'Invalid companion settings', issues: parsed.error.issues });
       }
-      parseStep.succeed(undefined, { keys: Object.keys(parsed.data.preferences).length });
+      parseStep.succeed(undefined, {
+        bindingCount: parsed.data.bindings ? Object.keys(parsed.data.bindings).length : 0,
+        preferenceCount: parsed.data.preferences ? Object.keys(parsed.data.preferences).length : 0,
+      });
 
       const loadStep = child('load-existing');
-      const row = sqliteGet<UserSettingRow>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'companion_preferences_v1'`,
-        [user.sub],
-      );
-      loadStep.succeed(undefined, { found: row !== undefined });
-
-      const existing = readCompanionSettings(row?.value);
+      const existing = loadCompanionSettingsForUser(user.sub, user.email, parsedQuery.data.agentId);
+      loadStep.succeed(undefined, { found: true });
       const nextSettings = {
+        bindings: parsed.data.bindings ?? existing.bindings,
         preferences: {
           ...existing.preferences,
-          ...parsed.data.preferences,
+          ...(parsed.data.preferences ?? {}),
         },
         profile: existing.profile,
         updatedAt: new Date().toISOString(),
@@ -328,19 +311,34 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
       const saveStep = child('save');
       sqliteRun(
-        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'companion_preferences_v1', ?)
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, JSON.stringify(nextSettings)],
+        [user.sub, getCompanionSettingsKey(), JSON.stringify(nextSettings)],
       );
       saveStep.succeed(undefined, {
         voiceOutputEnabled: nextSettings.preferences.voiceOutputEnabled,
       });
       step.succeed(undefined, { saved: true });
 
+      const resolved = {
+        ...nextSettings,
+        activeBinding: parsedQuery.data.agentId
+          ? nextSettings.bindings[parsedQuery.data.agentId]
+          : undefined,
+        profile: resolveCompanionProfileForAgent({
+          agentId: parsedQuery.data.agentId,
+          bindings: nextSettings.bindings,
+          preferences: nextSettings.preferences,
+          userEmail: user.email,
+        }),
+      };
+
       return reply.send({
-        feature: buildCompanionFeatureState(nextSettings.preferences),
-        preferences: nextSettings.preferences,
-        profile: nextSettings.profile,
+        activeBinding: resolved.activeBinding,
+        bindings: resolved.bindings,
+        feature: buildCompanionFeatureState(resolved.preferences),
+        preferences: resolved.preferences,
+        profile: resolved.profile,
       });
     },
   );
@@ -588,6 +586,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
         [user.sub],
       );
+      const toolSurfaceRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_tool_surface_profile'`,
+        [user.sub],
+      );
       loadStep.succeed();
 
       const materializeStep = child('materialize');
@@ -599,10 +601,16 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         ? filterEnabledProviderConfig(materialized)
         : materialized;
       const defaultThinking = parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
+      const defaultToolSurfaceProfile = readDefaultToolSurfaceProfile(toolSurfaceRow?.value);
       materializeStep.succeed(undefined, { providers: providers.length });
       step.succeed(undefined, { providers: providers.length });
 
-      return reply.send({ providers, activeSelection, defaultThinking });
+      return reply.send({
+        providers,
+        activeSelection,
+        defaultThinking,
+        defaultToolSurfaceProfile,
+      });
     },
   );
 
@@ -620,6 +628,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       );
       const thinkingRow = sqliteGet<UserSettingRow>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
+        [user.sub],
+      );
+      const toolSurfaceRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_tool_surface_profile'`,
         [user.sub],
       );
       loadSelectionStep.succeed(undefined, { found: selectionRow !== undefined });
@@ -643,6 +655,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const defaultThinking = parsed.data.defaultThinking
         ? parsed.data.defaultThinking
         : parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
+      const defaultToolSurfaceProfile = parsed.data.defaultToolSurfaceProfile
+        ? parsed.data.defaultToolSurfaceProfile
+        : readDefaultToolSurfaceProfile(toolSurfaceRow?.value);
       materializeStep.succeed(undefined, { providers: providers.length });
 
       const saveProvidersStep = child('save-providers');
@@ -667,9 +682,21 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, JSON.stringify(defaultThinking)],
       );
       saveThinkingStep.succeed();
+      const saveToolSurfaceStep = child('save-default-tool-surface-profile');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'default_tool_surface_profile', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(defaultToolSurfaceProfile)],
+      );
+      saveToolSurfaceStep.succeed();
       step.succeed(undefined, { providers: providers.length });
 
-      return reply.send({ providers, activeSelection, defaultThinking });
+      return reply.send({
+        providers,
+        activeSelection,
+        defaultThinking,
+        defaultToolSurfaceProfile,
+      });
     },
   );
 
