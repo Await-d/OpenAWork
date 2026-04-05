@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   sqliteRunMock: vi.fn(),
   publishSessionRunEventMock: vi.fn(),
   resumeAnsweredQuestionRequestMock: vi.fn(),
+  terminateTaskChildSessionAsTimeoutMock: vi.fn(),
 }));
 
 vi.mock('../auth.js', () => ({
@@ -30,6 +31,10 @@ vi.mock('../routes/stream-runtime.js', () => ({
   resumeAnsweredQuestionRequest: mocks.resumeAnsweredQuestionRequestMock,
 }));
 
+vi.mock('../tool-sandbox.js', () => ({
+  terminateTaskChildSessionAsTimeout: mocks.terminateTaskChildSessionAsTimeoutMock,
+}));
+
 describe('questions routes plan mode integration', () => {
   let app: Awaited<ReturnType<typeof Fastify>>;
 
@@ -39,7 +44,9 @@ describe('questions routes plan mode integration', () => {
     mocks.sqliteRunMock.mockReset();
     mocks.publishSessionRunEventMock.mockReset();
     mocks.resumeAnsweredQuestionRequestMock.mockReset();
+    mocks.terminateTaskChildSessionAsTimeoutMock.mockReset();
     mocks.resumeAnsweredQuestionRequestMock.mockResolvedValue(undefined);
+    mocks.terminateTaskChildSessionAsTimeoutMock.mockResolvedValue(false);
 
     const { questionsRoutes } = await import('../routes/questions.js');
     const requestWorkflowPlugin = (await import('../request-workflow.js')).default;
@@ -222,6 +229,7 @@ describe('questions routes plan mode integration', () => {
               message: '请先问我一个问题再继续',
             },
           }),
+          expires_at: Date.now() + 10_000,
           status: 'pending',
           created_at: '2026-04-02T00:00:00.000Z',
         };
@@ -259,6 +267,63 @@ describe('questions routes plan mode integration', () => {
         sessionId: 'session-a',
         userId: 'user-a',
       });
+    });
+  });
+
+  it('rejects expired question requests before answers can continue', async () => {
+    mocks.sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('SELECT id, user_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1')) {
+        return { id: 'session-a', user_id: 'user-a' };
+      }
+      if (query.includes('FROM question_requests')) {
+        return {
+          id: 'question-expired',
+          session_id: 'session-a',
+          user_id: 'user-a',
+          tool_name: 'question',
+          title: 'Need input',
+          questions_json: JSON.stringify([{ question: '请选择目录' }]),
+          answer_json: null,
+          request_payload_json: JSON.stringify({ clientRequestId: 'expired-question-1' }),
+          expires_at: Date.now() - 1_000,
+          status: 'pending',
+          created_at: '2026-04-02T00:00:00.000Z',
+        };
+      }
+      return undefined;
+    });
+    mocks.sqliteAllMock.mockReturnValue([
+      {
+        id: 'question-expired',
+        session_id: 'session-a',
+        user_id: 'user-a',
+        tool_name: 'question',
+        title: 'Need input',
+        questions_json: JSON.stringify([{ question: '请选择目录' }]),
+        answer_json: null,
+        request_payload_json: JSON.stringify({ clientRequestId: 'expired-question-1' }),
+        expires_at: Date.now() - 1_000,
+        status: 'pending',
+        created_at: '2026-04-02T00:00:00.000Z',
+      },
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-a/questions/reply',
+      payload: {
+        requestId: 'question-expired',
+        status: 'answered',
+        answers: [['workspace']],
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(JSON.parse(response.body)).toEqual({ error: 'Question request expired' });
+    expect(mocks.resumeAnsweredQuestionRequestMock).not.toHaveBeenCalled();
+    expect(mocks.terminateTaskChildSessionAsTimeoutMock).toHaveBeenCalledWith({
+      childSessionId: 'session-a',
+      userId: 'user-a',
     });
   });
 });

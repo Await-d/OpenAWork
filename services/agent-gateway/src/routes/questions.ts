@@ -9,6 +9,7 @@ import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { createQuestionRepliedEvent } from '../session-question-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
 import { shouldExitPlanModeFromAnswers } from '../plan-mode-tools.js';
+import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
 import { type ApprovedPermissionResumePayload } from './stream.js';
 import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
 
@@ -32,8 +33,42 @@ interface QuestionRequestRow {
   questions_json: string;
   answer_json: string | null;
   request_payload_json: string | null;
+  expires_at: number | null;
   status: 'pending' | 'answered' | 'dismissed';
   created_at: string;
+}
+
+export function expirePendingQuestionRequests(input: {
+  nowMs?: number;
+  sessionId: string;
+}): number {
+  const nowMs = input.nowMs ?? Date.now();
+  const requests = sqliteAll<QuestionRequestRow>(
+    `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
+     FROM question_requests
+     WHERE session_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
+     ORDER BY created_at ASC`,
+    [input.sessionId, nowMs],
+  );
+
+  for (const request of requests) {
+    sqliteRun(
+      `UPDATE question_requests
+       SET status = 'dismissed', updated_at = datetime('now')
+       WHERE id = ? AND session_id = ? AND status = 'pending'`,
+      [request.id, input.sessionId],
+    );
+    const requestClientRequestId = parseQuestionRequestClientRequestId(
+      request.request_payload_json,
+    );
+    publishSessionRunEvent(
+      input.sessionId,
+      createQuestionRepliedEvent({ requestId: request.id, status: 'dismissed' }),
+      requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
+    );
+  }
+
+  return requests.length;
 }
 
 export async function questionsRoutes(app: FastifyInstance): Promise<void> {
@@ -52,8 +87,13 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
+      const expiredCount = expirePendingQuestionRequests({ nowMs: Date.now(), sessionId });
+      if (expiredCount > 0) {
+        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
+      }
+
       const requests = sqliteAll<QuestionRequestRow>(
-        `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, status, created_at
+        `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
          FROM question_requests
          WHERE session_id = ? AND status = 'pending'
          ORDER BY created_at ASC`,
@@ -94,7 +134,7 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const questionRequest = sqliteGet<QuestionRequestRow>(
-        `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, status, created_at
+        `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
          FROM question_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
@@ -103,6 +143,16 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       if (!questionRequest) {
         step.fail('question request not found');
         return reply.status(404).send({ error: 'Question request not found' });
+      }
+      if (
+        questionRequest.status === 'pending' &&
+        typeof questionRequest.expires_at === 'number' &&
+        questionRequest.expires_at <= Date.now()
+      ) {
+        expirePendingQuestionRequests({ nowMs: Date.now(), sessionId });
+        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
+        step.fail('question request expired');
+        return reply.status(409).send({ error: 'Question request expired' });
       }
       if (questionRequest.status !== 'pending') {
         step.fail('question request already resolved');

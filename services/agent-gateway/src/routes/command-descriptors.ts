@@ -27,6 +27,14 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
       action: { kind: 'generate_handoff' },
     },
     {
+      id: 'slash-buddy',
+      label: '/buddy',
+      description: 'Open Buddy companion panel — 打开 Buddy 伴侣面板并显式唤起陪跑模式',
+      contexts: ['composer'],
+      execution: 'client',
+      action: { kind: 'open_companion_panel' },
+    },
+    {
       id: 'nav-chat',
       label: '新建对话',
       description: '前往 Chat 页面',
