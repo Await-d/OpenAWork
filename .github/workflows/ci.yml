@@ -91,6 +91,44 @@ jobs:
       - name: Test
         run: pnpm --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" test
 
+  chat-recovery-fast:
+    name: Chat Recovery Fast Gates
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter "@openAwork/web" exec playwright install --with-deps chromium chromium-headless-shell
+
+      - name: Build web preview bundle
+        run: pnpm --filter "@openAwork/shared" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" build
+
+      - name: Start web preview
+        run: pnpm --filter "@openAwork/web" run preview:ci > /tmp/openawork-chat-fast-preview.log 2>&1 &
+
+      - name: Wait for web preview
+        run: |
+          node -e "const http=require('http'); const url='http://127.0.0.1:4173'; let attempts=0; const max=60; const ping=()=>{attempts+=1; http.get(url,(res)=>{if(res.statusCode&&res.statusCode<500){process.exit(0);} retry();}).on('error', retry)}; const retry=()=>{if(attempts>=max){console.error('Timed out waiting for '+url); process.exit(1);} setTimeout(ping,1000)}; ping();"
+
+      - name: Run gateway chat fast checks
+        run: pnpm --filter "@openAwork/agent-gateway" run test:chat:fast
+
+      - name: Run web chat fast checks
+        run: pnpm --filter "@openAwork/web" run test:chat:fast
+        env:
+          BASE_URL: http://127.0.0.1:4173
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -129,7 +167,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm --filter "@openAwork/web" exec playwright install --with-deps chromium
+        run: pnpm --filter "@openAwork/web" exec playwright install --with-deps chromium chromium-headless-shell
 
       - name: Build web
         run: pnpm --filter "@openAwork/shared" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" build
@@ -143,5 +181,88 @@ jobs:
         if: failure()
         with:
           name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+  chat-recovery-scope:
+    name: Chat Recovery Scope
+    runs-on: ubuntu-latest
+    outputs:
+      live: ${{ steps.filter.outputs.live }}
+      live_pr: ${{ steps.filter.outputs.live_pr }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            live:
+              - '.github/workflows/ci.yml'
+              - 'apps/web/**'
+              - 'services/agent-gateway/**'
+              - 'packages/web-client/**'
+              - 'packages/shared/**'
+              - 'packages/shared-ui/**'
+              - 'packages/agent-core/**'
+              - 'pnpm-lock.yaml'
+            live_pr:
+              - '.github/workflows/ci.yml'
+              - 'apps/web/e2e/chat-stream-attach-live.spec.ts'
+              - 'apps/web/e2e/mock-openai-upstream.mjs'
+              - 'apps/web/src/hooks/useGatewayClient.ts'
+              - 'apps/web/src/pages/ChatPage.tsx'
+              - 'apps/web/src/components/Layout.tsx'
+              - 'apps/web/src/components/QuestionPromptCard.tsx'
+              - 'packages/web-client/src/index.ts'
+              - 'packages/web-client/src/sessions.ts'
+              - 'packages/web-client/src/permissions.ts'
+              - 'packages/web-client/src/questions.ts'
+              - 'services/agent-gateway/src/routes/stream.ts'
+              - 'services/agent-gateway/src/routes/stream-routes-plugin.ts'
+              - 'services/agent-gateway/src/routes/stream-runtime.ts'
+              - 'services/agent-gateway/src/routes/permissions.ts'
+              - 'services/agent-gateway/src/routes/questions.ts'
+              - 'services/agent-gateway/src/routes/stream-cancellation.ts'
+              - 'services/agent-gateway/src/session-run-events.ts'
+              - 'services/agent-gateway/src/session-runtime-thread-store.ts'
+              - 'services/agent-gateway/src/session-runtime-state.ts'
+              - 'services/agent-gateway/src/verification/verify-stream-attach-recovery.ts'
+              - 'services/agent-gateway/src/verification/verify-task-tool-pending-interaction-resume.ts'
+              - 'services/agent-gateway/src/verification/verify-task-tool-question-resume.ts'
+              - 'pnpm-lock.yaml'
+
+  chat-recovery-live:
+    name: Chat Recovery Live E2E
+    if: |
+      (github.event_name == 'push' && needs.chat-recovery-scope.outputs.live == 'true') ||
+      (github.event_name == 'pull_request' && (needs.chat-recovery-scope.outputs.live_pr == 'true' || contains(join(github.event.pull_request.labels.*.name, ','), 'chat-recovery-live')))
+    runs-on: ubuntu-latest
+    needs: [chat-recovery-fast, chat-recovery-scope]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter "@openAwork/web" exec playwright install --with-deps chromium chromium-headless-shell
+
+      - name: Run chat live recovery suite
+        run: pnpm --filter "@openAwork/web" run test:e2e:attach-live
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: chat-recovery-live-playwright-report
           path: apps/web/playwright-report/
           retention-days: 7
