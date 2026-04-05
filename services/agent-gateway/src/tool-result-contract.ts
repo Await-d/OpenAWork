@@ -14,6 +14,7 @@ export interface ToolResultPayloadInput {
   reason?: string;
   fileDiffs?: FileDiffContent[];
   pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
   observability?: ToolCallObservabilityAnnotation;
 }
 
@@ -31,6 +32,7 @@ export function buildToolResultContent(input: ToolResultPayloadInput): ToolResul
     ...(input.pendingPermissionRequestId
       ? { pendingPermissionRequestId: input.pendingPermissionRequestId }
       : {}),
+    ...(input.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
   };
 }
 
@@ -52,6 +54,7 @@ export function buildToolResultRunEvent(
     ...(input.pendingPermissionRequestId
       ? { pendingPermissionRequestId: input.pendingPermissionRequestId }
       : {}),
+    ...(input.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     ...input.eventMeta,
   };
 }

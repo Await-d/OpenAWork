@@ -265,8 +265,13 @@ describe('buildGatewayToolDefinitions', () => {
     expect(byName.get('todowrite')?.function.parameters).toMatchObject({
       properties: {
         todos: {
+          description: 'The updated todo list for the current session',
           items: {
             properties: {
+              content: {
+                description:
+                  "Brief imperative description of the task written in the user's current language",
+              },
               status: {
                 enum: ['pending', 'in_progress', 'completed', 'cancelled'],
               },
@@ -280,6 +285,20 @@ describe('buildGatewayToolDefinitions', () => {
     });
     expect(byName.get('todoread')?.function.parameters.required).toEqual([]);
     expect(byName.get('subtodowrite')?.function.parameters.required).toEqual(['todos']);
+    expect(byName.get('subtodowrite')?.function.parameters).toMatchObject({
+      properties: {
+        todos: {
+          items: {
+            properties: {
+              content: {
+                description:
+                  "Brief imperative description of the task written in the user's current language",
+              },
+            },
+          },
+        },
+      },
+    });
     expect(byName.get('subtodoread')?.function.parameters.required).toEqual([]);
     expect(byName.get('websearch')?.function.parameters.required).toEqual(['query']);
     expect(byName.get('codesearch')?.function.parameters.required).toEqual(['query']);

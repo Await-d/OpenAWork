@@ -1074,11 +1074,15 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         properties: {
           todos: {
             type: 'array',
-            description: 'The updated todo list',
+            description: 'The updated todo list for the current session',
             items: {
               type: 'object',
               properties: {
-                content: { type: 'string', description: 'Brief description of the task' },
+                content: {
+                  type: 'string',
+                  description:
+                    "Brief imperative description of the task written in the user's current language",
+                },
                 status: {
                   type: 'string',
                   enum: ['pending', 'in_progress', 'completed', 'cancelled'],

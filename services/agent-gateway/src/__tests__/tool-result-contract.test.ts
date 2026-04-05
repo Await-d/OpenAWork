@@ -163,4 +163,41 @@ describe('tool-result-contract', () => {
       reason: 'timeout',
     });
   });
+
+  it('preserves resumedAfterApproval on tool_result content and run events', () => {
+    expect(
+      buildToolResultContent({
+        toolCallId: 'call-resume-1',
+        toolName: 'bash',
+        clientRequestId: 'req-resume-1',
+        output: { exitCode: 1 },
+        isError: true,
+        resumedAfterApproval: true,
+      }),
+    ).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-resume-1',
+      resumedAfterApproval: true,
+    });
+
+    expect(
+      buildToolResultRunEvent({
+        toolCallId: 'call-resume-1',
+        toolName: 'bash',
+        clientRequestId: 'req-resume-1',
+        output: { exitCode: 1 },
+        isError: true,
+        resumedAfterApproval: true,
+        eventMeta: {
+          eventId: 'evt-resume-1',
+          runId: 'run-resume-1',
+          occurredAt: 1,
+        },
+      }),
+    ).toMatchObject({
+      type: 'tool_result',
+      toolCallId: 'call-resume-1',
+      resumedAfterApproval: true,
+    });
+  });
 });
