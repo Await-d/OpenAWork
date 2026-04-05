@@ -246,8 +246,9 @@ test.describe('Chat refresh recovery', () => {
     await page.goto(`/chat/${SESSION_ID}`);
     await page.reload();
 
+    const chatContent = page.getByTestId('chat-content-column');
     await expect(page.getByText('请继续输出当前分析')).toBeVisible();
-    await expect(page.getByText('已恢复')).toBeVisible();
+    await expect(chatContent.getByText('已恢复')).toBeVisible();
     await expect(page.getByText('会话持续运行中')).toBeVisible();
     await expect(page.getByText('当前运行流仍受此页控制')).toBeVisible();
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible();
@@ -261,8 +262,9 @@ test.describe('Chat refresh recovery', () => {
 
     await page.goto(`/chat/${SESSION_ID}`);
 
+    const chatContent = page.getByTestId('chat-content-column');
     await expect(page.getByText('请继续输出当前分析')).toBeVisible();
-    await expect(page.getByText('已恢复')).toBeVisible();
+    await expect(chatContent.getByText('已恢复')).toBeVisible();
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible();
 
     await expect.poll(() => attachUrls.length).toBe(1);
