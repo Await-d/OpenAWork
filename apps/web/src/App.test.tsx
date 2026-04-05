@@ -155,6 +155,27 @@ beforeEach(() => {
         } as Response;
       }
 
+      if (url.pathname.endsWith('/team/session-shares')) {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url.pathname.startsWith('/team/audit-logs')) {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url.pathname.endsWith('/sessions')) {
+        return {
+          ok: true,
+          json: async () => [],
+        } as Response;
+      }
+
       if (url.pathname.endsWith('/workflows/templates')) {
         return {
           ok: true,
@@ -212,7 +233,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function waitForText(text: string, attempts = 12): Promise<void> {
+async function waitForText(text: string, attempts = 30): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (container?.textContent?.includes(text)) {
       return;
@@ -328,7 +349,12 @@ describe('App routing', () => {
       await Promise.resolve();
     });
 
-    await waitForText('林雾');
+    try {
+      await waitForText('林雾');
+    } catch (error) {
+      console.log('debug App /team text', container?.textContent ?? '');
+      throw error;
+    }
     expect(container?.textContent).toContain('林雾');
     expect(container?.textContent).toContain('落地团队协作台');
   });

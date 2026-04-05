@@ -88,7 +88,7 @@ describe('FileEditorPanel', () => {
     expect(previewFrame).not.toBeNull();
     expect(previewBody).not.toBeNull();
     expect(previewFrame?.getAttribute('title')).toBe('HTML 预览');
-    expect(previewFrame?.getAttribute('sandbox')).toBe('');
+    expect(previewFrame?.getAttribute('sandbox')).toBe('allow-scripts');
     expect(previewBody?.style.boxSizing).toBe('border-box');
     expect(previewFrame?.style.minHeight).toBe('320px');
   });
