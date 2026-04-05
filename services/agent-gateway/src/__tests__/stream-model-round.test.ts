@@ -3,10 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Message, StreamChunk } from '@openAwork/shared';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import type { PersistedCompactionMemory } from '../compaction-metadata.js';
-import type { UpstreamChatMessage } from '../session-message-store.js';
+import type {
+  PreparedUpstreamConversationReport,
+  UpstreamChatMessage,
+} from '../session-message-store.js';
 
 interface PreparedConversationMockResult {
   messages: UpstreamChatMessage[];
+  report?: PreparedUpstreamConversationReport;
 }
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +28,7 @@ const mocks = vi.hoisted(() => ({
           },
     ) => PreparedConversationMockResult
   >(() => ({ messages: [] as UpstreamChatMessage[] })),
-  buildRoundSystemMessagesMock: vi.fn(() => []),
+  buildRoundSystemMessagesMock: vi.fn<() => Array<{ role: 'system'; content: string }>>(() => []),
   buildUpstreamConversationMock: vi.fn<
     (messages: Message[], maxMessages?: number) => UpstreamChatMessage[]
   >(() => []),
@@ -60,6 +64,7 @@ const mocks = vi.hoisted(() => ({
   >(() => null),
   readUpstreamErrorMock: vi.fn(),
   resolveEofRoundDecisionMock: vi.fn(() => ({ stopReason: 'end_turn' })),
+  writeAuditLogMock: vi.fn(),
 }));
 
 vi.mock('../session-message-store.js', () => ({
@@ -139,7 +144,7 @@ vi.mock('../routes/upstream-stream-retry.js', () => ({
 }));
 
 vi.mock('../audit-log.js', () => ({
-  writeAuditLog: vi.fn(),
+  writeAuditLog: mocks.writeAuditLogMock,
 }));
 
 describe('runModelRound', () => {
@@ -171,6 +176,7 @@ describe('runModelRound', () => {
     mocks.readPersistedCompactionMemoryMock.mockReturnValue(null);
     mocks.readUpstreamErrorMock.mockClear();
     mocks.resolveEofRoundDecisionMock.mockClear();
+    mocks.writeAuditLogMock.mockReset();
   });
 
   it('excludes error messages from upstream history and persists partial assistant output on cancellation', async () => {
@@ -447,6 +453,125 @@ describe('runModelRound', () => {
       }),
     );
     expect(result.stopReason).toBe('error');
+  });
+
+  it('writes a non-error upstream transformation audit before sending upstream', async () => {
+    mocks.listSessionMessagesMock.mockReturnValue([
+      {
+        id: 'user-1',
+        role: 'user',
+        createdAt: 1,
+        content: [{ type: 'text', text: '继续执行' }],
+      },
+    ]);
+    mocks.buildPreparedUpstreamConversationMock.mockReturnValue({
+      messages: [{ role: 'user', content: '继续执行' }],
+      report: {
+        inputMessageCount: 1,
+        normalizedMessageCount: 1,
+        artifactFilteredCount: 0,
+        historySinceBoundaryCount: 1,
+        boundaryTrimmedMessageCount: 0,
+        selectedHistoryCount: 1,
+        safeWindowTrimmedMessageCount: 0,
+        compactSummaryInjected: false,
+        assistantUiEventFilteredCount: 0,
+        modifiedFilesSummaryInjectedCount: 0,
+        toolResultCount: 0,
+        referencedToolOutputCount: 0,
+        assistantToolCallCount: 0,
+        upstreamMessageCount: 1,
+      },
+    });
+    mocks.buildRoundSystemMessagesMock.mockReturnValue([{ role: 'system', content: 'sys' }]);
+    mocks.buildUpstreamRequestBodyMock.mockReturnValue({
+      model: 'test-model',
+      input: [],
+      stream: true,
+    });
+    mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      body: null,
+    });
+    mocks.readUpstreamErrorMock.mockResolvedValue({
+      code: 'UPSTREAM_ERROR',
+      message: 'upstream failed',
+    });
+
+    const { runModelRound } = await import('../routes/stream-model-round.js');
+    const wl = new WorkflowLogger();
+    const ctx = createRequestContext('TEST', '/stream', {}, 'local');
+
+    await runModelRound({
+      clientRequestId: 'req-audit',
+      enabledTools: [],
+      eventSequence: { value: 1 },
+      requestData: {
+        clientRequestId: 'req-audit',
+        maxTokens: 1024,
+        message: '继续执行',
+        temperature: 0,
+      },
+      round: 0,
+      route: {
+        apiKey: '',
+        apiBaseUrl: 'https://example.invalid',
+        contextWindow: 128_000,
+        maxTokens: 1024,
+        model: 'test-model',
+        requestOverrides: { body: { foo: 'bar' }, omitBodyKeys: ['temperature'] },
+        supportsThinking: false,
+        temperature: 0,
+        upstreamProtocol: 'responses',
+        variant: undefined,
+      },
+      runId: 'run-audit',
+      signal: new AbortController().signal,
+      sessionContext: { legacyMessagesJson: '[]', metadataJson: '{}' },
+      sessionId: 'session-audit',
+      transport: 'SSE',
+      turnFileDiffs: undefined,
+      userId: 'user-1',
+      wl,
+      ctx,
+      workspaceCtx: 'workspace ctx',
+      requestSystemPrompts: ['request ctx'],
+      writeChunk: vi.fn(),
+    });
+
+    expect(mocks.writeAuditLogMock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.fetchUpstreamStreamWithRetryMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+
+    expect(mocks.writeAuditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'llm',
+        sourceName: 'UPSTREAM_TRANSFORM',
+        requestId: 'req-audit',
+        isError: false,
+        input: expect.objectContaining({
+          model: 'test-model',
+          round: 0,
+          transformationReport: expect.objectContaining({
+            protocol: 'responses',
+            workspaceContextInjected: true,
+            requestSystemPromptCount: 1,
+            requestOverrideBodyKeys: ['foo'],
+            omittedBodyKeys: ['temperature'],
+            prepared: expect.objectContaining({
+              inputMessageCount: 1,
+              upstreamMessageCount: 1,
+            }),
+          }),
+        }),
+        output: expect.objectContaining({
+          message: 'upstream transformation report',
+          protocol: 'responses',
+          requestBodyKeys: expect.arrayContaining(['input', 'model', 'stream']),
+        }),
+      }),
+    );
   });
 
   it('returns overflow recovery signal when upstream rejects oversized context', async () => {

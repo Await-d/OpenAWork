@@ -11,6 +11,7 @@ import {
   hasToolOutputReference,
   isContextOverflow,
   listSessionMessages,
+  type PreparedUpstreamConversationReport,
   updateSessionMessagesStatusByRequestScope,
 } from '../session-message-store.js';
 import { buildModifiedFilesSummaryContent } from '../modified-files-summary.js';
@@ -48,6 +49,37 @@ function createAccumulationState(): StreamAccumulationState {
     assistantThinking: '',
     assistantText: '',
     toolCalls: new Map(),
+  };
+}
+
+function buildUpstreamTransformationReport(input: {
+  memoryBlock?: string | null;
+  outboundBody: Record<string, unknown>;
+  outboundMessageCount: number;
+  preparedReport?: PreparedUpstreamConversationReport;
+  requestSystemPrompts: string[];
+  requestOverrides: { body?: Record<string, unknown>; omitBodyKeys?: string[] };
+  routeSystemPrompt?: string;
+  syntheticContinuationPrompt?: string;
+  thinkingApplied: boolean;
+  toolOutputReadbackGuidanceInjected: boolean;
+  upstreamProtocol: string;
+  workspaceCtx: string | null;
+}): Record<string, unknown> {
+  return {
+    prepared: input.preparedReport ?? null,
+    protocol: input.upstreamProtocol,
+    workspaceContextInjected: !!input.workspaceCtx,
+    routeSystemPromptInjected: !!input.routeSystemPrompt,
+    requestSystemPromptCount: input.requestSystemPrompts.length,
+    memoryBlockInjected: !!input.memoryBlock,
+    toolOutputReadbackGuidanceInjected: input.toolOutputReadbackGuidanceInjected,
+    syntheticContinuationInjected: !!input.syntheticContinuationPrompt,
+    outboundMessageCount: input.outboundMessageCount,
+    requestOverrideBodyKeys: Object.keys(input.requestOverrides.body ?? {}),
+    omittedBodyKeys: input.requestOverrides.omitBodyKeys ?? [],
+    thinkingConfigApplied: input.thinkingApplied,
+    requestBodyKeys: Object.keys(input.outboundBody),
   };
 }
 
@@ -234,6 +266,37 @@ export async function runModelRound(input: {
           supportsThinking: input.route.supportsThinking,
         }
       : undefined,
+  });
+  const transformationReport = buildUpstreamTransformationReport({
+    memoryBlock: input.memoryBlock,
+    outboundBody: upstreamBody,
+    outboundMessageCount: upstreamMessages.length,
+    preparedReport: preparedConversation.report,
+    requestOverrides: input.route.requestOverrides,
+    requestSystemPrompts: input.requestSystemPrompts,
+    routeSystemPrompt: input.route.systemPrompt,
+    syntheticContinuationPrompt: input.syntheticContinuationPrompt,
+    thinkingApplied: shouldApplyThinkingConfig,
+    toolOutputReadbackGuidanceInjected: shouldGuideToolOutputReadback,
+    upstreamProtocol: input.route.upstreamProtocol,
+    workspaceCtx: input.workspaceCtx,
+  });
+  writeAuditLog({
+    sessionId: input.sessionId,
+    category: 'llm',
+    sourceName: 'UPSTREAM_TRANSFORM',
+    requestId: input.clientRequestId,
+    input: {
+      model: input.route.model,
+      round: input.round,
+      transformationReport,
+    },
+    output: {
+      message: 'upstream transformation report',
+      protocol: input.route.upstreamProtocol,
+      requestBodyKeys: Object.keys(upstreamBody),
+    },
+    isError: false,
   });
 
   const stepUpstream = input.wl.start(`upstream.fetch.${input.round}`, undefined, {
