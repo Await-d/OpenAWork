@@ -9,6 +9,7 @@ import {
   extractSessionWorkingDirectory,
   parseSessionMetadataJson,
 } from '../session-workspace-metadata.js';
+import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-audit-store.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -70,16 +71,6 @@ interface SessionShareRow {
   updated_at: string;
 }
 
-interface TeamAuditLogRow {
-  action: 'share_created' | 'share_deleted' | 'share_permission_updated';
-  created_at: string;
-  detail: string | null;
-  entity_id: string;
-  entity_type: 'session_share';
-  id: number;
-  summary: string;
-}
-
 interface MemberRow {
   id: string;
   name: string;
@@ -113,20 +104,6 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   const normalizeMemberStatus = (status: string): 'idle' | 'working' | 'done' | 'error' => {
     if (status === 'working' || status === 'done' || status === 'error') return status;
     return 'idle';
-  };
-
-  const logTeamAudit = (input: {
-    action: TeamAuditLogRow['action'];
-    detail?: string;
-    entityId: string;
-    summary: string;
-    userId: string;
-  }) => {
-    sqliteRun(
-      `INSERT INTO team_audit_logs (user_id, action, entity_type, entity_id, summary, detail, created_at)
-       VALUES (?, ?, 'session_share', ?, ?, ?, datetime('now'))`,
-      [input.userId, input.action, input.entityId, input.summary, input.detail ?? null],
-    );
   };
 
   const getWorkspacePathFromMetadataJson = (metadataJson: string): string | null =>
@@ -530,9 +507,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const sessionWorkspacePath = getWorkspacePathFromMetadataJson(session.metadata_json);
       logTeamAudit({
-        action: 'share_created',
+        action: 'share_created' satisfies TeamAuditAction,
+        actorEmail: user.email,
+        actorUserId: user.sub,
         detail: `会话：${session.title ?? body.data.sessionId}；工作区：${sessionWorkspacePath ?? '未绑定工作区'}；成员：${member.name}；权限：${body.data.permission}`,
         entityId: shareId,
+        entityType: 'session_share',
         summary: `已将“${session.title ?? body.data.sessionId}”共享给 ${member.name}（${body.data.permission}）`,
         userId: user.sub,
       });
@@ -603,9 +583,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         updateStep.succeed();
 
         logTeamAudit({
-          action: 'share_permission_updated',
+          action: 'share_permission_updated' satisfies TeamAuditAction,
+          actorEmail: user.email,
+          actorUserId: user.sub,
           detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson(existing.session_metadata_json) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.data.permission}`,
           entityId: shareId,
+          entityType: 'session_share',
           summary: `已将 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的权限从 ${existing.permission} 调整为 ${body.data.permission}`,
           userId: user.sub,
         });
@@ -639,27 +622,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
       queryStep.succeed(undefined, { limit: query.data.limit });
 
-      const rows = sqliteAll<TeamAuditLogRow>(
-        `SELECT id, action, entity_type, entity_id, summary, detail, created_at
-         FROM team_audit_logs
-         WHERE user_id = ?
-         ORDER BY created_at DESC, id DESC
-         LIMIT ?`,
-        [user.sub, query.data.limit],
-      );
+      const rows = listTeamAuditLogs({ userId: user.sub, limit: query.data.limit });
       step.succeed(undefined, { count: rows.length });
 
-      return reply.send(
-        rows.map((row) => ({
-          id: String(row.id),
-          action: row.action,
-          entityType: row.entity_type,
-          entityId: row.entity_id,
-          summary: row.summary,
-          detail: row.detail,
-          createdAt: row.created_at,
-        })),
-      );
+      return reply.send(rows);
     },
   );
 
@@ -678,9 +644,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       if (existing) {
         logTeamAudit({
-          action: 'share_deleted',
+          action: 'share_deleted' satisfies TeamAuditAction,
+          actorEmail: user.email,
+          actorUserId: user.sub,
           detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson(existing.session_metadata_json) ?? '未绑定工作区'}；成员：${existing.member_name}；删除前权限：${existing.permission}`,
           entityId: shareId,
+          entityType: 'session_share',
           summary: `已取消 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的共享权限`,
           userId: user.sub,
         });

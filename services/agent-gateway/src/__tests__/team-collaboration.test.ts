@@ -79,6 +79,8 @@ beforeEach(async () => {
         {
           id: 1,
           action: 'share_created',
+          actor_user_id: 'user-1',
+          actor_email: 'owner@openawork.local',
           entity_type: 'session_share',
           entity_id: 'share-1',
           summary: '已将“设计讨论”共享给 林雾（comment）',
@@ -135,7 +137,7 @@ beforeEach(async () => {
   app = Fastify();
   app.decorateRequest('user', {
     getter() {
-      return { sub: 'user-1' };
+      return { sub: 'user-1', email: 'owner@openawork.local' };
     },
   });
   await app.register(teamRoutes);
@@ -207,6 +209,7 @@ describe('teamRoutes collaboration slice', () => {
   });
 
   it('creates and lists session shares with permission levels', async () => {
+    sqliteRunMock.mockClear();
     const createRes = await app.inject({
       method: 'POST',
       url: '/team/session-shares',
@@ -244,9 +247,21 @@ describe('teamRoutes collaboration slice', () => {
           typeof sql === 'string' && sql.includes('sess.metadata_json AS session_metadata_json'),
       ),
     ).toBe(true);
+    expect(
+      sqliteRunMock.mock.calls.some(
+        ([sql, params]) =>
+          typeof sql === 'string' &&
+          sql.includes('INSERT INTO team_audit_logs') &&
+          Array.isArray(params) &&
+          params.includes('share_created') &&
+          params.includes('owner@openawork.local') &&
+          params.includes('user-1'),
+      ),
+    ).toBe(true);
   });
 
   it('updates a session share permission and exposes audit logs', async () => {
+    sqliteRunMock.mockClear();
     const updateRes = await app.inject({
       method: 'PATCH',
       url: '/team/session-shares/share-1',
@@ -268,10 +283,22 @@ describe('teamRoutes collaboration slice', () => {
       'share-1',
       'user-1',
     ]);
+    expect(
+      sqliteRunMock.mock.calls.some(
+        ([sql, params]) =>
+          typeof sql === 'string' &&
+          sql.includes('INSERT INTO team_audit_logs') &&
+          Array.isArray(params) &&
+          params.includes('share_permission_updated') &&
+          params.includes('owner@openawork.local') &&
+          params.includes('user-1'),
+      ),
+    ).toBe(true);
     expect(JSON.parse(auditRes.body)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           action: 'share_created',
+          actorEmail: 'owner@openawork.local',
           entityType: 'session_share',
           entityId: 'share-1',
         }),
@@ -302,5 +329,27 @@ describe('teamRoutes collaboration slice', () => {
         typeof sql === 'string' ? sql.includes('UPDATE session_shares') : false,
       ),
     ).toBe(false);
+  });
+
+  it('logs actor attribution when deleting a session share', async () => {
+    sqliteRunMock.mockClear();
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/team/session-shares/share-1',
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(
+      sqliteRunMock.mock.calls.some(
+        ([sql, params]) =>
+          typeof sql === 'string' &&
+          sql.includes('INSERT INTO team_audit_logs') &&
+          Array.isArray(params) &&
+          params.includes('share_deleted') &&
+          params.includes('owner@openawork.local') &&
+          params.includes('user-1'),
+      ),
+    ).toBe(true);
   });
 });
