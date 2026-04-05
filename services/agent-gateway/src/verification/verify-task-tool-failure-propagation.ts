@@ -117,10 +117,15 @@ async function main(): Promise<void> {
             );
             const taskOutput = result.output;
 
-            await waitFor(async () => {
-              const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
-              return graph.tasks[taskOutput.taskId]?.status === 'failed';
-            }, 'delegated child task should propagate failed status to the parent task');
+            await waitFor(
+              async () => {
+                const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+                return graph.tasks[taskOutput.taskId]?.status === 'failed';
+              },
+              'delegated child task should propagate failed status to the parent task',
+              240,
+              50,
+            );
 
             const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
             const task = graph.tasks[taskOutput.taskId];

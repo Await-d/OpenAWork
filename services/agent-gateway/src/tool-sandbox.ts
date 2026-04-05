@@ -11,6 +11,7 @@ import {
 import { AgentTaskManagerImpl, defaultIgnoreManager } from '@openAwork/agent-core';
 import { webSearchTool, lspDiagnosticsTool, lspTouchTool } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from './db.js';
+import { writeAuditLog } from './audit-log.js';
 import { lspManager } from './lsp/router.js';
 import {
   executeWorkspaceCreateFile,
@@ -89,8 +90,26 @@ import {
 import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
 import { dispatchClaudeCodeTool } from './claude-code-tool-dispatch.js';
 import {
+  buildCallOmoAgentBackgroundOutput,
+  buildCallOmoAgentSyncOutput,
+  buildDelegatedChildClientRequestId,
+} from './call-omo-agent-output.js';
+import {
+  buildBackgroundCancelAllMessage,
+  buildBackgroundCancelSingleMessage,
+  buildBackgroundTaskResultMessage,
+  buildBackgroundTaskStatusMessage,
+  buildTaskToolBackgroundMessage,
+  buildTaskToolTerminalMessage,
+  collectDelegatedSessionText,
+  extractLatestDelegatedSessionMessage,
+} from './delegated-task-display.js';
+import {
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
+  lspGotoImplementationToolDefinition,
+  lspHoverToolDefinition,
+  lspCallHierarchyToolDefinition,
   lspPrepareRenameToolDefinition,
   lspRenameToolDefinition,
   lspSymbolsToolDefinition,
@@ -125,13 +144,14 @@ import {
 } from './todo-tools.js';
 import { createPermissionAskedEvent } from './session-permission-events.js';
 import { createQuestionAskedEvent } from './session-question-events.js';
-import { publishSessionRunEvent } from './session-run-events.js';
+import { deleteSessionRunEventsByRequest, publishSessionRunEvent } from './session-run-events.js';
 import { reconcileSessionStateStatus } from './session-runtime-state.js';
 import {
   extractToolSurfaceProfile,
   parseSessionMetadataJson,
 } from './session-workspace-metadata.js';
 import {
+  DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
   normalizeUpstreamRetryMaxRetries,
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
 } from './upstream-retry-policy.js';
@@ -142,10 +162,14 @@ import {
 } from './session-tool-visibility.js';
 import {
   appendSessionMessage,
+  deleteSessionMessagesByRequestScope,
   getLatestReferencedToolResult,
   getSessionToolResultByCallId,
   listSessionMessages,
+  listSessionMessagesByRequestScope,
 } from './session-message-store.js';
+import { deleteRequestFileDiffs } from './session-file-diff-store.js';
+import { deleteRequestSnapshots } from './session-snapshot-store.js';
 import { extractLatestChildSessionSummary } from './task-result-extraction.js';
 import {
   clearTaskParentAutoResumeContext,
@@ -196,6 +220,7 @@ const PERMISSION_GATED_TOOLS = new Set([
   'workspace_create_directory',
   'workspace_review_revert',
   'mcp_call',
+  'lsp_rename',
   desktopAutomationToolDefinition.name,
 ]);
 
@@ -233,10 +258,13 @@ const TOOL_WHITELIST = new Set<string>([
   'lsp_diagnostics',
   'lsp_touch',
   'lsp_goto_definition',
+  'lsp_goto_implementation',
   'lsp_find_references',
   'lsp_symbols',
   'lsp_prepare_rename',
   'lsp_rename',
+  'lsp_hover',
+  'lsp_call_hierarchy',
   'task_create',
   'task_get',
   'task_list',
@@ -309,6 +337,7 @@ interface PermissionRequestPayload {
 
 interface TaskBackgroundRunResult {
   pendingInteraction: boolean;
+  reason?: ChildSessionTerminalReason;
   statusCode: number;
   summary: string;
 }
@@ -337,6 +366,306 @@ interface ParsedTaskSessionRow extends TaskSessionRow {
 const MAX_TASK_CHILD_SESSION_DEPTH = 4;
 const MAX_TASK_CHILD_SESSION_DESCENDANTS = 24;
 const MAX_RUNNING_TASK_CHILD_SESSIONS_PER_ROOT = 4;
+
+/** Terminal reason written to child session metadata and propagated through events. */
+export type ChildSessionTerminalReason = 'timeout' | 'cancelled';
+
+const CHILD_SESSION_DEADLINE_KEY = 'deadlineMs';
+const CHILD_SESSION_TERMINAL_REASON_KEY = 'terminalReason';
+const DEFAULT_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS = 30_000;
+
+/**
+ * In-memory timers keyed by childSessionId.
+ * Each timer fires `terminateChildSession` with reason='timeout' when the deadline expires.
+ */
+const childSessionTimeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearChildSessionTimeoutTimer(childSessionId: string): void {
+  const timer = childSessionTimeoutTimers.get(childSessionId);
+  if (timer) {
+    clearTimeout(timer);
+    childSessionTimeoutTimers.delete(childSessionId);
+  }
+}
+
+function readChildSessionTerminalReason(
+  metadata: Record<string, unknown>,
+): ChildSessionTerminalReason | undefined {
+  const value = metadata[CHILD_SESSION_TERMINAL_REASON_KEY];
+  return value === 'timeout' || value === 'cancelled' ? value : undefined;
+}
+
+function readChildSessionDeadlineMs(metadata: Record<string, unknown>): number | undefined {
+  const value = metadata[CHILD_SESSION_DEADLINE_KEY];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function resolveTaskChildEffectiveDeadlineMs(input: {
+  nowMs: number;
+  parentMetadata: Record<string, unknown>;
+  requestedTimeoutMs?: number;
+}): number | undefined {
+  const inheritedDeadlineMs = readChildSessionDeadlineMs(input.parentMetadata);
+  const requestedDeadlineMs =
+    typeof input.requestedTimeoutMs === 'number' && input.requestedTimeoutMs > 0
+      ? input.nowMs + input.requestedTimeoutMs
+      : undefined;
+
+  if (inheritedDeadlineMs === undefined) {
+    return requestedDeadlineMs;
+  }
+  if (requestedDeadlineMs === undefined) {
+    return inheritedDeadlineMs;
+  }
+  return Math.min(inheritedDeadlineMs, requestedDeadlineMs);
+}
+
+function writeChildSessionTerminalReason(input: {
+  childSessionId: string;
+  reason: ChildSessionTerminalReason;
+  userId: string;
+}): void {
+  const childSession = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.childSessionId, input.userId],
+  );
+  const childMetadata = childSession ? parseSessionMetadataJson(childSession.metadata_json) : {};
+  childMetadata[CHILD_SESSION_TERMINAL_REASON_KEY] = input.reason;
+  sqliteRun(
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(childMetadata), input.childSessionId, input.userId],
+  );
+}
+
+function getTaskChildFirstResponseTimeoutMs(): number {
+  const raw = process.env['OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS'];
+  if (!raw) {
+    return DEFAULT_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS;
+  }
+
+  return Math.floor(parsed);
+}
+
+function getTaskChildFirstResponseRetryMaxRetries(requestData: Record<string, unknown>): number {
+  return (
+    normalizeUpstreamRetryMaxRetries(requestData[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
+    DEFAULT_UPSTREAM_RETRY_MAX_RETRIES
+  );
+}
+
+function getPendingPermissionTimeoutMs(): number | undefined {
+  const raw = process.env['OPENAWORK_PERMISSION_REQUEST_TIMEOUT_MS'];
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
+}
+
+function getPendingQuestionTimeoutMs(): number | undefined {
+  const raw = process.env['OPENAWORK_QUESTION_REQUEST_TIMEOUT_MS'];
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
+}
+
+function isChildSessionFirstResponseEvent(
+  event: RunEvent,
+  timedOut: boolean,
+  alreadyReceived: boolean,
+): boolean {
+  if (timedOut || alreadyReceived) {
+    return false;
+  }
+
+  return event.type !== 'task_update';
+}
+
+function clearTimedOutChildSessionAttemptArtifacts(input: {
+  childSessionId: string;
+  clientRequestId?: string;
+  userId: string;
+}): void {
+  if (!input.clientRequestId) {
+    return;
+  }
+
+  deleteSessionMessagesByRequestScope({
+    clientRequestId: input.clientRequestId,
+    roles: ['assistant', 'tool'],
+    sessionId: input.childSessionId,
+    userId: input.userId,
+  });
+  deleteRequestFileDiffs({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.childSessionId,
+    userId: input.userId,
+  });
+  deleteRequestSnapshots({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.childSessionId,
+    userId: input.userId,
+  });
+  deleteSessionRunEventsByRequest({
+    sessionId: input.childSessionId,
+    clientRequestId: input.clientRequestId,
+  });
+}
+
+/**
+ * Unified termination entry point for a child session.
+ * Handles: abort stream → mark task failed/cancelled → sync parent tool result → publish event → propagate to parent chain.
+ * Uses `failed + terminalReason=timeout` for timeout; `cancelled` for explicit cancel.
+ */
+export async function terminateChildSession(input: {
+  childSessionId: string;
+  graphSessionId: string;
+  reason: ChildSessionTerminalReason;
+  taskId: string;
+  userId: string;
+}): Promise<{ stopped: boolean; terminated: boolean }> {
+  clearChildSessionTimeoutTimer(input.childSessionId);
+
+  const taskManager = new AgentTaskManagerImpl();
+  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, input.graphSessionId);
+  const taskEntry = graph.tasks[input.taskId];
+  if (!taskEntry) {
+    return { stopped: false, terminated: false };
+  }
+
+  if (
+    taskEntry.status === 'completed' ||
+    taskEntry.status === 'failed' ||
+    taskEntry.status === 'cancelled'
+  ) {
+    return { stopped: false, terminated: false };
+  }
+
+  const taskStatus = input.reason === 'timeout' ? 'failed' : 'cancelled';
+  const terminalErrorMessage =
+    input.reason === 'timeout' ? '子代理执行已超时，已被终止。' : '子代理已被取消。';
+
+  graph.tasks[input.taskId] = {
+    ...taskEntry,
+    status: taskStatus,
+    errorMessage: terminalErrorMessage,
+    completedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  await taskManager.save(graph);
+
+  clearTaskParentAutoResumeContext({ childSessionId: input.childSessionId, userId: input.userId });
+  sqliteRun(
+    "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [input.childSessionId, input.userId],
+  );
+
+  const childSession = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.childSessionId, input.userId],
+  );
+  const childMetadata = childSession ? parseSessionMetadataJson(childSession.metadata_json) : {};
+  childMetadata[CHILD_SESSION_TERMINAL_REASON_KEY] = input.reason;
+  sqliteRun(
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(childMetadata), input.childSessionId, input.userId],
+  );
+
+  const stopped = await stopAnyInFlightStreamRequestForSession({
+    sessionId: input.childSessionId,
+    userId: input.userId,
+  });
+
+  const assignedAgent =
+    taskEntry.assignedAgent ??
+    (typeof childMetadata['subagentType'] === 'string' ? childMetadata['subagentType'] : 'task');
+  const category =
+    typeof childMetadata['taskCategory'] === 'string' ? childMetadata['taskCategory'] : undefined;
+  const requestedSkills = readTaskRequestedSkills(childMetadata);
+  const parentToolReference = readTaskParentToolReference(childMetadata);
+  const toolOutputStatus: TaskToolOutputStatus =
+    input.reason === 'timeout' ? 'failed' : 'cancelled';
+
+  syncParentTaskToolResult({
+    assignedAgent,
+    category,
+    errorMessage: terminalErrorMessage,
+    parentSessionId: input.graphSessionId,
+    parentToolReference,
+    reason: input.reason,
+    requestedSkills,
+    sessionId: input.childSessionId,
+    status: toolOutputStatus,
+    taskId: taskEntry.id,
+    userId: input.userId,
+  });
+
+  appendParentTaskCompletionReminder({
+    assignedAgent,
+    childSessionId: input.childSessionId,
+    errorMessage: terminalErrorMessage,
+    parentSessionId: input.graphSessionId,
+    reason: input.reason,
+    status: toolOutputStatus,
+    taskId: taskEntry.id,
+    taskTitle: taskEntry.title,
+    taskUpdatedAt: Date.now(),
+    userId: input.userId,
+  });
+
+  publishSessionRunEvent(
+    input.graphSessionId,
+    buildTaskUpdateEvent({
+      assignedAgent,
+      category,
+      childSessionId: input.childSessionId,
+      errorMessage: terminalErrorMessage,
+      parentSessionId: input.graphSessionId,
+      reason: input.reason,
+      requestedSkills,
+      status: input.reason === 'timeout' ? 'failed' : 'cancelled',
+      taskId: taskEntry.id,
+      taskTitle: taskEntry.title,
+    }),
+  );
+
+  return { stopped, terminated: true };
+}
+
+function scheduleChildSessionTimeout(input: {
+  childSessionId: string;
+  deadlineMs: number;
+  graphSessionId: string;
+  taskId: string;
+  userId: string;
+}): void {
+  clearChildSessionTimeoutTimer(input.childSessionId);
+  const delayMs = Math.max(0, input.deadlineMs - Date.now());
+  const timer = setTimeout(() => {
+    childSessionTimeoutTimers.delete(input.childSessionId);
+    void terminateChildSession({
+      childSessionId: input.childSessionId,
+      graphSessionId: input.graphSessionId,
+      reason: 'timeout',
+      taskId: input.taskId,
+      userId: input.userId,
+    });
+  }, delayMs);
+  childSessionTimeoutTimers.set(input.childSessionId, timer);
+}
 
 function mapTaskStatusToToolOutputStatus(status: string): TaskToolOutputStatus {
   switch (status) {
@@ -385,6 +714,8 @@ function buildTaskToolOutput(input: {
   assignedAgent: string;
   category?: string;
   errorMessage?: string;
+  message?: string;
+  reason?: string;
   requestedSkills?: string[];
   result?: string;
   sessionId: string;
@@ -402,6 +733,8 @@ function buildTaskToolOutput(input: {
       : {}),
     ...(input.result ? { result: input.result } : {}),
     ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+    ...(input.message ? { message: input.message } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
   };
 }
 
@@ -418,6 +751,7 @@ function buildTaskCompletionAssistantEventText(input: {
   assignedAgent: string;
   childSessionId: string;
   errorMessage?: string;
+  reason?: string;
   result?: string;
   status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
   taskTitle: string;
@@ -425,6 +759,7 @@ function buildTaskCompletionAssistantEventText(input: {
   const primaryMessage = truncateTaskReminderText(
     input.errorMessage ?? input.result ?? '子代理执行已结束。',
   );
+  const titleSuffix = input.reason === 'timeout' ? '（超时）' : '';
   const payload = {
     source: 'openawork_internal',
     type: 'assistant_event',
@@ -432,13 +767,14 @@ function buildTaskCompletionAssistantEventText(input: {
       kind: 'agent',
       title:
         input.status === 'failed'
-          ? `子代理失败 · ${input.taskTitle}`
+          ? `子代理失败${titleSuffix} · ${input.taskTitle}`
           : input.status === 'cancelled'
             ? `子代理已取消 · ${input.taskTitle}`
             : `子代理已完成 · ${input.taskTitle}`,
       message: [
         `代理：${input.assignedAgent}`,
         input.errorMessage ? `错误：${primaryMessage}` : `结果：${primaryMessage}`,
+        ...(input.reason ? [`原因：${input.reason}`] : []),
         `会话：${input.childSessionId}`,
       ].join('\n'),
       status:
@@ -462,6 +798,7 @@ function appendParentTaskCompletionReminder(input: {
   childSessionId: string;
   errorMessage?: string;
   parentSessionId: string;
+  reason?: string;
   result?: string;
   status: Extract<TaskToolOutputStatus, 'cancelled' | 'done' | 'failed'>;
   taskId: string;
@@ -480,6 +817,7 @@ function appendParentTaskCompletionReminder(input: {
           assignedAgent: input.assignedAgent,
           childSessionId: input.childSessionId,
           errorMessage: input.errorMessage,
+          reason: input.reason,
           result: input.result,
           status: input.status,
           taskTitle: input.taskTitle,
@@ -652,7 +990,10 @@ function buildDelegatedChildRequestData(input: {
   return {
     ...input.executionContext.requestData,
     agentId: input.agentId,
-    clientRequestId: `task:${input.executionContext.clientRequestId ?? 'child'}:child:${input.childSessionId}`,
+    clientRequestId: buildDelegatedChildClientRequestId({
+      childSessionId: input.childSessionId,
+      parentClientRequestId: input.executionContext.clientRequestId,
+    }),
     displayMessage: input.prompt,
     message: input.prompt,
     ...(input.modelSelection?.modelId ? { model: input.modelSelection.modelId } : {}),
@@ -761,12 +1102,82 @@ export async function reconcileResumedTaskChildSession(input: {
   });
 }
 
+export async function reconcileTimedOutTaskChildSessionIfExpired(input: {
+  childSessionId: string;
+  nowMs?: number;
+  userId: string;
+}): Promise<boolean> {
+  const childSession = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.childSessionId, input.userId],
+  );
+  if (!childSession) {
+    return false;
+  }
+
+  const metadata = parseSessionMetadataJson(childSession.metadata_json);
+  if (!isTaskCreatedSessionMetadata(metadata)) {
+    return false;
+  }
+
+  const effectiveDeadline = readChildSessionDeadlineMs(metadata);
+  if (effectiveDeadline === undefined || effectiveDeadline > (input.nowMs ?? Date.now())) {
+    return false;
+  }
+
+  return terminateTaskChildSessionAsTimeout({
+    childSessionId: input.childSessionId,
+    userId: input.userId,
+  });
+}
+
+export async function terminateTaskChildSessionAsTimeout(input: {
+  childSessionId: string;
+  userId: string;
+}): Promise<boolean> {
+  const childSession = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.childSessionId, input.userId],
+  );
+  if (!childSession) {
+    return false;
+  }
+
+  const metadata = parseSessionMetadataJson(childSession.metadata_json);
+  if (!isTaskCreatedSessionMetadata(metadata)) {
+    return false;
+  }
+
+  const parentSessionId =
+    typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : null;
+  if (!parentSessionId) {
+    return false;
+  }
+
+  const taskManager = new AgentTaskManagerImpl();
+  const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+  const task = findTaskBySessionId(graph, input.childSessionId);
+  if (!task) {
+    return false;
+  }
+
+  const result = await terminateChildSession({
+    childSessionId: input.childSessionId,
+    graphSessionId: parentSessionId,
+    reason: 'timeout',
+    taskId: task.id,
+    userId: input.userId,
+  });
+  return result.terminated;
+}
+
 export function syncParentTaskToolResult(input: {
   assignedAgent: string;
   category?: string;
   errorMessage?: string;
   parentSessionId: string;
   parentToolReference?: TaskParentToolReference;
+  reason?: string;
   requestedSkills?: string[];
   result?: string;
   sessionId: string;
@@ -786,10 +1197,24 @@ export function syncParentTaskToolResult(input: {
     return;
   }
 
+  const terminalMessage =
+    input.status === 'done' || input.status === 'failed' || input.status === 'cancelled'
+      ? buildTaskToolTerminalMessage({
+          agent: input.assignedAgent,
+          category: input.category,
+          errorMessage: input.errorMessage,
+          resultText: input.result,
+          sessionId: input.sessionId,
+          status: input.status,
+        })
+      : undefined;
+
   const output = buildTaskToolOutput({
     assignedAgent: input.assignedAgent,
     category: input.category,
     errorMessage: input.errorMessage,
+    ...(terminalMessage ? { message: terminalMessage } : {}),
+    reason: input.reason,
     requestedSkills: input.requestedSkills,
     result: input.result,
     sessionId: input.sessionId,
@@ -811,6 +1236,7 @@ export function syncParentTaskToolResult(input: {
         clientRequestId: parentToolResultClientRequestId,
         output,
         isError: input.status === 'failed',
+        reason: input.reason,
       }),
     ],
     clientRequestId: parentToolResultClientRequestId,
@@ -825,6 +1251,7 @@ export function syncParentTaskToolResult(input: {
       clientRequestId: parentToolResultClientRequestId,
       output,
       isError: input.status === 'failed',
+      reason: input.reason,
       eventMeta: {
         eventId: `${input.parentSessionId}:${input.parentToolReference.toolCallId}:tool_result`,
         runId: `task:${input.taskId}`,
@@ -1079,6 +1506,17 @@ function buildPermissionRequestContext(
         reason: '需要操作桌面 sidecar 的浏览器自动化能力',
         riskLevel: 'high',
         previewAction: target ? `桌面自动化 ${action}: ${target}` : `桌面自动化 ${action}`,
+      };
+    }
+    case 'lsp_rename': {
+      const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
+      const newName = typeof rawInput['newName'] === 'string' ? rawInput['newName'].trim() : '';
+      if (!safePath || !newName) return null;
+      return {
+        scope: `lsp_rename:${safePath}:${newName}`,
+        reason: '需要通过 LSP 跨文件重命名符号',
+        riskLevel: 'high',
+        previewAction: `LSP 重命名 ${safePath} → ${newName}`,
       };
     }
     default:
@@ -1563,25 +2001,47 @@ async function executeGatewayManagedTool(
         'taskId' in taskResult.output
       ) {
         const taskOutput = taskResult.output as {
+          errorMessage?: string;
           sessionId: string;
           taskId: string;
           status?: string;
           result?: string;
         };
+        const childUserId = getSessionOwnerUserId(taskOutput.sessionId);
+        const childClientRequestId = buildDelegatedChildClientRequestId({
+          childSessionId: taskOutput.sessionId,
+          parentClientRequestId: executionContext?.clientRequestId,
+        });
+        const childMessages =
+          childUserId && executionContext?.clientRequestId
+            ? listSessionMessagesByRequestScope({
+                clientRequestId: childClientRequestId,
+                sessionId: taskOutput.sessionId,
+                userId: childUserId,
+              })
+            : childUserId
+              ? listSessionMessages({
+                  sessionId: taskOutput.sessionId,
+                  userId: childUserId,
+                })
+              : [];
         const output = parsed.data.run_in_background
-          ? [
-              `Background task started for ${normalizedAgent}.`,
-              `Task ID: ${taskOutput.taskId}`,
-              `Session ID: ${taskOutput.sessionId}`,
-              `Use background_output with task_id="${taskOutput.taskId}" to retrieve results.`,
-            ].join('\n')
-          : [
-              taskOutput.result ?? `Completed ${normalizedAgent} session ${taskOutput.sessionId}.`,
-              '',
-              '<task_metadata>',
-              `session_id: ${taskOutput.sessionId}`,
-              '</task_metadata>',
-            ].join('\n');
+          ? buildCallOmoAgentBackgroundOutput({
+              agent: normalizedAgent,
+              description: parsed.data.description,
+              sessionId: taskOutput.sessionId,
+              status: taskOutput.status ?? 'pending',
+              taskId: taskOutput.taskId,
+            })
+          : buildCallOmoAgentSyncOutput({
+              fallbackText:
+                taskOutput.errorMessage ??
+                taskOutput.result ??
+                `Completed ${normalizedAgent} session ${taskOutput.sessionId}.`,
+              isError: taskResult.isError,
+              messages: childMessages,
+              sessionId: taskOutput.sessionId,
+            });
         return {
           toolCallId: request.toolCallId,
           toolName: request.toolName,
@@ -2324,6 +2784,15 @@ async function executeGatewayManagedTool(
       if (category) {
         childSessionMetadata['taskCategory'] = category;
       }
+      const taskTimeoutMs = parsed.data.timeout_ms;
+      const effectiveTaskDeadlineMs = resolveTaskChildEffectiveDeadlineMs({
+        nowMs: Date.now(),
+        parentMetadata: parentSessionMetadata,
+        requestedTimeoutMs: taskTimeoutMs,
+      });
+      if (typeof effectiveTaskDeadlineMs === 'number') {
+        childSessionMetadata[CHILD_SESSION_DEADLINE_KEY] = effectiveTaskDeadlineMs;
+      }
       const inheritedWorkingDirectory = parentSessionMetadata['workingDirectory'];
       if (typeof inheritedWorkingDirectory === 'string') {
         childSessionMetadata['workingDirectory'] = inheritedWorkingDirectory;
@@ -2375,6 +2844,9 @@ async function executeGatewayManagedTool(
         } catch {
           mergedMetadata = childSessionMetadata;
         }
+        if (effectiveTaskDeadlineMs === undefined) {
+          delete mergedMetadata[CHILD_SESSION_DEADLINE_KEY];
+        }
         sqliteRun(
           "UPDATE sessions SET metadata_json = ?, title = COALESCE(title, ?), updated_at = datetime('now') WHERE id = ? AND user_id = ?",
           [JSON.stringify(mergedMetadata), childSessionTitle, childSessionId, userId],
@@ -2389,6 +2861,7 @@ async function executeGatewayManagedTool(
       const buildCurrentTaskOutput = (taskState: {
         assignedAgent?: string;
         errorMessage?: string;
+        message?: string;
         result?: string;
         status: string;
         taskId: string;
@@ -2397,6 +2870,7 @@ async function executeGatewayManagedTool(
           assignedAgent: taskState.assignedAgent ?? resolvedAgent.agentId,
           category,
           errorMessage: taskState.errorMessage,
+          message: taskState.message,
           requestedSkills,
           result: taskState.result,
           sessionId: childSessionId,
@@ -2420,6 +2894,14 @@ async function executeGatewayManagedTool(
             output: buildCurrentTaskOutput({
               assignedAgent: resumableTask.assignedAgent,
               errorMessage: resumableTask.errorMessage,
+              message: buildTaskToolBackgroundMessage({
+                agent: resumableTask.assignedAgent ?? resolvedAgent.agentId,
+                category,
+                description: parsed.data.description,
+                sessionId: childSessionId,
+                status: mapTaskStatusToToolOutputStatus(resumableTask.status),
+                taskId: resumableTask.id,
+              }),
               result: resumableTask.result,
               status: resumableTask.status,
               taskId: resumableTask.id,
@@ -2475,11 +2957,23 @@ async function executeGatewayManagedTool(
           assignedAgent: resolvedAgent.agentId,
           ...(category ? { category } : {}),
           ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
+          ...(typeof effectiveTaskDeadlineMs === 'number'
+            ? { effectiveDeadline: effectiveTaskDeadlineMs }
+            : {}),
           sessionId: childSessionId,
           parentSessionId: sessionId,
         });
 
         if (shouldRunInBackground && childRequestData) {
+          if (typeof effectiveTaskDeadlineMs === 'number') {
+            scheduleChildSessionTimeout({
+              childSessionId,
+              deadlineMs: effectiveTaskDeadlineMs,
+              graphSessionId: sessionId,
+              taskId: resumableTask.id,
+              userId,
+            });
+          }
           setTimeout(() => {
             void runChildTaskSessionInBackground({
               assignedAgent: resolvedAgent.agentId,
@@ -2497,6 +2991,15 @@ async function executeGatewayManagedTool(
         }
 
         if (!shouldRunInBackground && childRequestData) {
+          if (typeof effectiveTaskDeadlineMs === 'number') {
+            scheduleChildSessionTimeout({
+              childSessionId,
+              deadlineMs: effectiveTaskDeadlineMs,
+              graphSessionId: sessionId,
+              taskId: resumableTask.id,
+              userId,
+            });
+          }
           await runChildTaskSessionInBackground({
             assignedAgent: resolvedAgent.agentId,
             childSessionId,
@@ -2517,6 +3020,24 @@ async function executeGatewayManagedTool(
             output: buildCurrentTaskOutput({
               assignedAgent: refreshedTask.assignedAgent,
               errorMessage: refreshedTask.errorMessage,
+              message: buildTaskToolTerminalMessage({
+                agent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
+                category,
+                completedAt: refreshedTask.completedAt,
+                errorMessage: refreshedTask.errorMessage,
+                resultText:
+                  collectDelegatedSessionText(
+                    listSessionMessages({ sessionId: childSessionId, userId }),
+                  ) || refreshedTask.result,
+                sessionId: childSessionId,
+                startedAt: refreshedTask.startedAt,
+                status:
+                  refreshedTask.status === 'failed'
+                    ? 'failed'
+                    : refreshedTask.status === 'cancelled'
+                      ? 'cancelled'
+                      : 'done',
+              }),
               result: refreshedTask.result,
               status: refreshedTask.status,
               taskId: refreshedTask.id,
@@ -2531,6 +3052,14 @@ async function executeGatewayManagedTool(
           toolName: request.toolName,
           output: buildCurrentTaskOutput({
             assignedAgent: resolvedAgent.agentId,
+            message: buildTaskToolBackgroundMessage({
+              agent: resolvedAgent.agentId,
+              category,
+              description: parsed.data.description,
+              sessionId: childSessionId,
+              status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
+              taskId: resumableTask.id,
+            }),
             status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
             taskId: resumableTask.id,
           }),
@@ -2593,11 +3122,23 @@ async function executeGatewayManagedTool(
         assignedAgent: resolvedAgent.agentId,
         ...(category ? { category } : {}),
         ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
+        ...(typeof effectiveTaskDeadlineMs === 'number'
+          ? { effectiveDeadline: effectiveTaskDeadlineMs }
+          : {}),
         sessionId: childSessionId,
         parentSessionId: sessionId,
       });
 
       if (shouldRunInBackground && childRequestData) {
+        if (typeof effectiveTaskDeadlineMs === 'number') {
+          scheduleChildSessionTimeout({
+            childSessionId,
+            deadlineMs: effectiveTaskDeadlineMs,
+            graphSessionId: sessionId,
+            taskId: childTask.id,
+            userId,
+          });
+        }
         setTimeout(() => {
           void runChildTaskSessionInBackground({
             assignedAgent: resolvedAgent.agentId,
@@ -2615,6 +3156,15 @@ async function executeGatewayManagedTool(
       }
 
       if (!shouldRunInBackground && childRequestData) {
+        if (typeof effectiveTaskDeadlineMs === 'number') {
+          scheduleChildSessionTimeout({
+            childSessionId,
+            deadlineMs: effectiveTaskDeadlineMs,
+            graphSessionId: sessionId,
+            taskId: childTask.id,
+            userId,
+          });
+        }
         await runChildTaskSessionInBackground({
           assignedAgent: resolvedAgent.agentId,
           childSessionId,
@@ -2636,6 +3186,24 @@ async function executeGatewayManagedTool(
             assignedAgent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
             category,
             errorMessage: refreshedTask.errorMessage,
+            message: buildTaskToolTerminalMessage({
+              agent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
+              category,
+              completedAt: refreshedTask.completedAt,
+              errorMessage: refreshedTask.errorMessage,
+              resultText:
+                collectDelegatedSessionText(
+                  listSessionMessages({ sessionId: childSessionId, userId }),
+                ) || refreshedTask.result,
+              sessionId: childSessionId,
+              startedAt: refreshedTask.startedAt,
+              status:
+                refreshedTask.status === 'failed'
+                  ? 'failed'
+                  : refreshedTask.status === 'cancelled'
+                    ? 'cancelled'
+                    : 'done',
+            }),
             requestedSkills,
             result: refreshedTask.result,
             sessionId: childSessionId,
@@ -2653,6 +3221,14 @@ async function executeGatewayManagedTool(
         output: buildTaskToolOutput({
           assignedAgent: resolvedAgent.agentId,
           category,
+          message: buildTaskToolBackgroundMessage({
+            agent: resolvedAgent.agentId,
+            category,
+            description: parsed.data.description,
+            sessionId: childSessionId,
+            status: shouldRunInBackground ? 'running' : 'pending',
+            taskId: childTask.id,
+          }),
           requestedSkills,
           sessionId: childSessionId,
           status: shouldRunInBackground ? 'running' : 'pending',
@@ -2699,13 +3275,16 @@ async function executeGatewayManagedTool(
         };
       }
 
+      let waitTimedOut = false;
       if (parsed.data.block) {
-        task = await waitForTaskTerminalState({
+        const waitResult = await waitForTaskTerminalState({
           sessionId,
           taskId: parsed.data.task_id,
           timeoutMs: parsed.data.timeout,
           signal,
         });
+        task = waitResult.task;
+        waitTimedOut = waitResult.timedOut;
         graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
       }
 
@@ -2754,10 +3333,38 @@ async function executeGatewayManagedTool(
         }
       }
 
+      const childMessages = listSessionMessages({ sessionId: childSessionId, userId });
+      const childDisplayText = collectDelegatedSessionText(childMessages);
+      const latestChildMessage = extractLatestDelegatedSessionMessage(childMessages);
+      const taskMessage =
+        task.status === 'completed'
+          ? buildBackgroundTaskResultMessage({
+              agent: task.assignedAgent ?? 'task',
+              completedAt: task.completedAt,
+              description: task.title ?? task.id,
+              resultText:
+                childDisplayText || task.result || getChildSessionSummary(childSessionId, userId),
+              sessionId: childSessionId,
+              startedAt: task.startedAt,
+              taskId: task.id,
+            })
+          : buildBackgroundTaskStatusMessage({
+              agent: task.assignedAgent ?? 'task',
+              description: task.title ?? task.id,
+              lastMessage: latestChildMessage?.text,
+              lastMessageAt: latestChildMessage?.createdAt,
+              prompt: task.description ?? '',
+              queuedAt: task.createdAt,
+              sessionId: childSessionId,
+              startedAt: task.startedAt,
+              status: task.status,
+              taskId: task.id,
+            });
       const baseOutput = buildTaskToolOutput({
         assignedAgent: task.assignedAgent ?? 'task',
         errorMessage: task.errorMessage,
-        result: task.result ?? getChildSessionSummary(childSessionId, userId),
+        message: taskMessage,
+        result: childDisplayText || task.result || getChildSessionSummary(childSessionId, userId),
         sessionId: childSessionId,
         status: mapTaskStatusToToolOutputStatus(task.status),
         taskId: task.id,
@@ -2765,6 +3372,7 @@ async function executeGatewayManagedTool(
       const output = parsed.data.full_session
         ? {
             ...baseOutput,
+            ...(waitTimedOut ? { timedOut: true } : {}),
             messages: formatBackgroundOutputMessages({
               includeThinking: parsed.data.include_thinking,
               includeToolResults: parsed.data.include_tool_results,
@@ -2775,7 +3383,9 @@ async function executeGatewayManagedTool(
               sessionId: childSessionId,
             }),
           }
-        : baseOutput;
+        : waitTimedOut
+          ? `Timeout exceeded (${parsed.data.timeout}ms). Task still ${task.status}.\n\n${taskMessage}`
+          : taskMessage;
 
       return {
         toolCallId: request.toolCallId,
@@ -2826,14 +3436,18 @@ async function executeGatewayManagedTool(
           toolCallId: request.toolCallId,
           toolName: request.toolName,
           output: parsed.data.all
-            ? { cancelled: [], message: 'No cancellable background tasks found' }
-            : { cancelled: [], message: `Background task ${parsed.data.taskId} was not found` },
+            ? 'No running or pending background tasks to cancel.'
+            : `[ERROR] Task not found: ${parsed.data.taskId}`,
           isError: parsed.data.all !== true,
           durationMs: 0,
         };
       }
 
       const cancelled = [] as Array<{
+        agent: string;
+        description: string;
+        previousStatus: string;
+        requestedSkills: string[];
         taskId: string;
         sessionId?: string;
         status: string;
@@ -2852,13 +3466,55 @@ async function executeGatewayManagedTool(
       }
       await taskManager.save(graph);
 
+      if (!parsed.data.all) {
+        const target = cancelled[0];
+        if (!target) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: `[ERROR] Task not found: ${parsed.data.taskId}`,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+
+        if (target.previousStatus !== 'pending' && target.previousStatus !== 'running') {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: `[ERROR] Cannot cancel task: current status is "${target.previousStatus}".\nOnly running or pending tasks can be cancelled.`,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: buildBackgroundCancelSingleMessage({
+            description: target.description,
+            sessionId: target.sessionId,
+            status: target.status,
+            taskId: target.taskId,
+          }),
+          isError: false,
+          durationMs: 0,
+        };
+      }
+
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: {
-          cancelled,
-          all: parsed.data.all,
-        },
+        output: buildBackgroundCancelAllMessage({
+          tasks: cancelled.map((task) => ({
+            agent: task.agent,
+            description: task.description,
+            requestedSkills: task.requestedSkills,
+            sessionId: task.sessionId,
+            status: task.previousStatus,
+            taskId: task.taskId,
+          })),
+        }),
         isError: false,
         durationMs: 0,
       };
@@ -2902,8 +3558,10 @@ export function buildTaskUpdateEvent(input: {
   assignedAgent: string;
   category?: string;
   childSessionId: string;
+  effectiveDeadline?: number;
   errorMessage?: string;
   parentSessionId: string;
+  reason?: string;
   requestedSkills?: string[];
   result?: string;
   status: 'pending' | 'in_progress' | 'done' | 'failed' | 'cancelled';
@@ -2922,6 +3580,10 @@ export function buildTaskUpdateEvent(input: {
       : {}),
     ...(input.result ? { result: input.result } : {}),
     ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
+    ...(typeof input.effectiveDeadline === 'number'
+      ? { effectiveDeadline: input.effectiveDeadline }
+      : {}),
     sessionId: input.childSessionId,
     parentSessionId: input.parentSessionId,
     eventId: `${input.parentSessionId}:${input.taskId}:${input.status}`,
@@ -3002,10 +3664,10 @@ async function waitForTaskTerminalState(input: {
     const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, input.sessionId);
     const task = graph.tasks[input.taskId];
     if (!task || (task.status !== 'running' && task.status !== 'pending')) {
-      return task;
+      return { task, timedOut: false };
     }
     if (Date.now() >= deadline) {
-      return task;
+      return { task, timedOut: true };
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -3014,9 +3676,19 @@ async function waitForTaskTerminalState(input: {
 async function cancelBackgroundTaskEntry(input: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   graphSessionId: string;
+  reason?: ChildSessionTerminalReason;
   taskId: string;
   userId: string;
-}) {
+}): Promise<{
+  agent: string;
+  description: string;
+  previousStatus: string;
+  requestedSkills: string[];
+  taskId: string;
+  sessionId?: string;
+  status: string;
+  stopped: boolean;
+} | null> {
   const taskEntry = input.graph.tasks[input.taskId];
   if (!taskEntry) {
     return null;
@@ -3028,12 +3700,19 @@ async function cancelBackgroundTaskEntry(input: {
     taskEntry.status === 'cancelled'
   ) {
     return {
+      agent: taskEntry.assignedAgent ?? 'task',
+      description: taskEntry.title ?? taskEntry.id,
+      previousStatus: taskEntry.status,
+      requestedSkills: [],
       taskId: taskEntry.id,
       sessionId: taskEntry.sessionId,
       status: taskEntry.status,
       stopped: false,
     };
   }
+
+  const reason = input.reason ?? 'cancelled';
+  const previousStatus = taskEntry.status;
 
   input.graph.tasks[input.taskId] = {
     ...taskEntry,
@@ -3044,9 +3723,19 @@ async function cancelBackgroundTaskEntry(input: {
 
   const childSessionId = taskEntry.sessionId;
   if (!childSessionId) {
-    return { taskId: taskEntry.id, sessionId: undefined, status: 'cancelled', stopped: false };
+    return {
+      agent: taskEntry.assignedAgent ?? 'task',
+      description: taskEntry.title ?? taskEntry.id,
+      previousStatus,
+      requestedSkills: [],
+      taskId: taskEntry.id,
+      sessionId: undefined,
+      status: 'cancelled',
+      stopped: false,
+    };
   }
 
+  clearChildSessionTimeoutTimer(childSessionId);
   clearTaskParentAutoResumeContext({ childSessionId, userId: input.userId });
   sqliteRun(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
@@ -3066,12 +3755,14 @@ async function cancelBackgroundTaskEntry(input: {
     (typeof childMetadata['subagentType'] === 'string' ? childMetadata['subagentType'] : 'task');
   const category =
     typeof childMetadata['taskCategory'] === 'string' ? childMetadata['taskCategory'] : undefined;
+  const requestedSkills = readTaskRequestedSkills(childMetadata) ?? [];
   syncParentTaskToolResult({
     assignedAgent,
     category,
     parentSessionId: input.graphSessionId,
     parentToolReference: readTaskParentToolReference(childMetadata),
-    requestedSkills: readTaskRequestedSkills(childMetadata),
+    reason,
+    requestedSkills,
     sessionId: childSessionId,
     status: 'cancelled',
     taskId: taskEntry.id,
@@ -3084,14 +3775,24 @@ async function cancelBackgroundTaskEntry(input: {
       category,
       childSessionId,
       parentSessionId: input.graphSessionId,
-      requestedSkills: readTaskRequestedSkills(childMetadata),
+      reason,
+      requestedSkills,
       status: 'cancelled',
       taskId: taskEntry.id,
-      taskTitle: taskEntry.title,
+      taskTitle: taskEntry.title ?? taskEntry.id,
     }),
   );
 
-  return { taskId: taskEntry.id, sessionId: childSessionId, status: 'cancelled', stopped };
+  return {
+    agent: assignedAgent,
+    description: taskEntry.title ?? taskEntry.id,
+    previousStatus,
+    requestedSkills,
+    taskId: taskEntry.id,
+    sessionId: childSessionId,
+    status: 'cancelled',
+    stopped,
+  };
 }
 
 async function runChildTaskSessionInBackground(input: {
@@ -3107,25 +3808,125 @@ async function runChildTaskSessionInBackground(input: {
   userId: string;
 }): Promise<void> {
   const taskManager = new AgentTaskManagerImpl();
+  const requestClientRequestId =
+    typeof input.requestData['clientRequestId'] === 'string'
+      ? input.requestData['clientRequestId']
+      : undefined;
+  const firstResponseTimeoutMs = getTaskChildFirstResponseTimeoutMs();
+  const firstResponseRetryMaxRetries = getTaskChildFirstResponseRetryMaxRetries(input.requestData);
 
   try {
     const { runSessionInBackground } = await import('./routes/stream-runtime.js');
-    let pendingInteraction = false;
-    const result = await runSessionInBackground({
-      requestData: input.requestData,
-      sessionId: input.childSessionId,
-      userId: input.userId,
-      writeChunk: (chunk: RunEvent) => {
-        if (chunk.type === 'permission_asked') {
-          pendingInteraction = true;
-          return;
+    let finalResult: TaskBackgroundRunResult | null = null;
+
+    for (let attempt = 0; attempt <= firstResponseRetryMaxRetries; attempt += 1) {
+      let pendingInteraction = false;
+      let firstResponseReceived = false;
+      let firstResponseTimedOut = false;
+      const firstResponseTimer = setTimeout(() => {
+        firstResponseTimedOut = true;
+        void stopAnyInFlightStreamRequestForSession({
+          sessionId: input.childSessionId,
+          userId: input.userId,
+        });
+      }, firstResponseTimeoutMs);
+
+      try {
+        const result = await runSessionInBackground({
+          requestData: input.requestData,
+          sessionId: input.childSessionId,
+          userId: input.userId,
+          writeChunk: (chunk: RunEvent) => {
+            if (
+              isChildSessionFirstResponseEvent(chunk, firstResponseTimedOut, firstResponseReceived)
+            ) {
+              firstResponseReceived = true;
+              clearTimeout(firstResponseTimer);
+            }
+
+            if (chunk.type === 'permission_asked') {
+              pendingInteraction = true;
+              return;
+            }
+
+            if (
+              chunk.type === 'tool_result' &&
+              typeof chunk.pendingPermissionRequestId === 'string'
+            ) {
+              pendingInteraction = true;
+            }
+          },
+        });
+
+        clearTimeout(firstResponseTimer);
+
+        if (firstResponseTimedOut && !firstResponseReceived) {
+          clearTimedOutChildSessionAttemptArtifacts({
+            childSessionId: input.childSessionId,
+            clientRequestId: requestClientRequestId,
+            userId: input.userId,
+          });
+
+          if (attempt < firstResponseRetryMaxRetries) {
+            continue;
+          }
+
+          writeChildSessionTerminalReason({
+            childSessionId: input.childSessionId,
+            reason: 'timeout',
+            userId: input.userId,
+          });
+          finalResult = {
+            pendingInteraction: false,
+            reason: 'timeout',
+            statusCode: 504,
+            summary: `子代理首条响应在 ${firstResponseTimeoutMs}ms 内未返回，已重试 ${attempt} 次后停止。`,
+          };
+          break;
         }
 
-        if (chunk.type === 'tool_result' && typeof chunk.pendingPermissionRequestId === 'string') {
-          pendingInteraction = true;
+        finalResult = {
+          pendingInteraction,
+          statusCode: result.statusCode,
+          summary: getChildSessionSummary(input.childSessionId, input.userId),
+        };
+        break;
+      } catch (error) {
+        clearTimeout(firstResponseTimer);
+
+        if (firstResponseTimedOut && !firstResponseReceived) {
+          clearTimedOutChildSessionAttemptArtifacts({
+            childSessionId: input.childSessionId,
+            clientRequestId: requestClientRequestId,
+            userId: input.userId,
+          });
+
+          if (attempt < firstResponseRetryMaxRetries) {
+            continue;
+          }
+
+          writeChildSessionTerminalReason({
+            childSessionId: input.childSessionId,
+            reason: 'timeout',
+            userId: input.userId,
+          });
+          finalResult = {
+            pendingInteraction: false,
+            reason: 'timeout',
+            statusCode: 504,
+            summary: `子代理首条响应在 ${firstResponseTimeoutMs}ms 内未返回，已重试 ${attempt} 次后停止。`,
+          };
+          break;
         }
-      },
-    });
+
+        finalResult = {
+          pendingInteraction: false,
+          statusCode: 500,
+          summary: error instanceof Error ? error.message : String(error),
+        };
+        break;
+      }
+    }
 
     await finalizeChildTaskRun({
       childSessionId: input.childSessionId,
@@ -3134,10 +3935,10 @@ async function runChildTaskSessionInBackground(input: {
       parentToolReference: input.parentToolReference,
       parentSessionId: input.parentSessionId,
       requestedSkills: input.requestedSkills,
-      result: {
-        pendingInteraction,
-        statusCode: result.statusCode,
-        summary: getChildSessionSummary(input.childSessionId, input.userId),
+      result: finalResult ?? {
+        pendingInteraction: false,
+        statusCode: 500,
+        summary: '子代理执行失败：未产生可用结果。',
       },
       taskCategory: input.taskCategory,
       taskManager,
@@ -3178,6 +3979,14 @@ async function finalizeChildTaskRun(input: {
   taskTitle: string;
   userId: string;
 }): Promise<void> {
+  clearChildSessionTimeoutTimer(input.childSessionId);
+  if (input.result.reason) {
+    writeChildSessionTerminalReason({
+      childSessionId: input.childSessionId,
+      reason: input.result.reason,
+      userId: input.userId,
+    });
+  }
   const summary = input.result.summary || '子代理执行已结束。';
   sqliteRun(
     "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
@@ -3194,43 +4003,64 @@ async function finalizeChildTaskRun(input: {
     return;
   }
 
-  if (task.status === 'cancelled') {
+  if (task.status === 'cancelled' || task.status === 'failed' || task.status === 'completed') {
     await input.taskManager.save(graph);
     clearTaskParentAutoResumeContext({
       childSessionId: input.childSessionId,
       userId: input.userId,
     });
     const assignedAgent = task.assignedAgent ?? input.assignedAgent;
+    const terminalOutputStatus = mapTaskStatusToToolOutputStatus(task.status);
+    const terminalUpdateStatus = mapTaskStatusToUpdateStatus(task.status);
+    const childMetadata = getSessionMetadata(input.childSessionId);
+    const terminalReason = input.result.reason ?? readChildSessionTerminalReason(childMetadata);
+    const effectiveDeadline = readChildSessionDeadlineMs(childMetadata);
     syncParentTaskToolResult({
       assignedAgent,
       category: input.taskCategory,
+      errorMessage: task.errorMessage,
       parentSessionId: input.parentSessionId,
       parentToolReference: input.parentToolReference,
+      reason: terminalReason,
       requestedSkills: input.requestedSkills,
+      result: task.result,
       sessionId: input.childSessionId,
-      status: 'cancelled',
+      status: terminalOutputStatus,
       taskId: task.id,
       userId: input.userId,
     });
-    appendParentTaskCompletionReminder({
-      assignedAgent,
-      childSessionId: input.childSessionId,
-      parentSessionId: input.parentSessionId,
-      status: 'cancelled',
-      taskId: task.id,
-      taskTitle: input.taskTitle,
-      taskUpdatedAt: task.updatedAt,
-      userId: input.userId,
-    });
+    if (
+      terminalOutputStatus === 'cancelled' ||
+      terminalOutputStatus === 'failed' ||
+      terminalOutputStatus === 'done'
+    ) {
+      appendParentTaskCompletionReminder({
+        assignedAgent,
+        childSessionId: input.childSessionId,
+        errorMessage: task.errorMessage,
+        parentSessionId: input.parentSessionId,
+        reason: terminalReason,
+        result: task.result,
+        status: terminalOutputStatus,
+        taskId: task.id,
+        taskTitle: input.taskTitle,
+        taskUpdatedAt: task.updatedAt,
+        userId: input.userId,
+      });
+    }
     publishSessionRunEvent(
       input.parentSessionId,
       buildTaskUpdateEvent({
         assignedAgent,
         category: input.taskCategory,
         childSessionId: input.childSessionId,
+        effectiveDeadline,
+        errorMessage: task.errorMessage,
         parentSessionId: input.parentSessionId,
+        reason: terminalReason,
         requestedSkills: input.requestedSkills,
-        status: 'cancelled',
+        result: task.result,
+        status: terminalUpdateStatus,
         taskId: task.id,
         taskTitle: input.taskTitle,
       }),
@@ -3244,6 +4074,7 @@ async function finalizeChildTaskRun(input: {
     });
     await input.taskManager.save(graph);
     const nextTask = graph.tasks[input.childTaskId] ?? task;
+    const effectiveDeadline = readChildSessionDeadlineMs(getSessionMetadata(input.childSessionId));
     syncParentTaskToolResult({
       assignedAgent: nextTask.assignedAgent ?? input.assignedAgent,
       category: input.taskCategory,
@@ -3262,6 +4093,7 @@ async function finalizeChildTaskRun(input: {
         assignedAgent: nextTask.assignedAgent ?? input.assignedAgent,
         category: input.taskCategory,
         childSessionId: input.childSessionId,
+        effectiveDeadline,
         parentSessionId: input.parentSessionId,
         requestedSkills: input.requestedSkills,
         result: nextTask.result,
@@ -3288,6 +4120,7 @@ async function finalizeChildTaskRun(input: {
 
   await input.taskManager.save(graph);
   const nextTask = graph.tasks[input.childTaskId];
+  const effectiveDeadline = readChildSessionDeadlineMs(getSessionMetadata(input.childSessionId));
   const eventStatus = mapTaskStatusToUpdateStatus(nextTask?.status ?? task.status);
   const nextAssignedAgent = nextTask?.assignedAgent ?? input.assignedAgent;
   const terminalToolOutputStatus = mapTaskStatusToToolOutputStatus(nextTask?.status ?? task.status);
@@ -3309,6 +4142,7 @@ async function finalizeChildTaskRun(input: {
     errorMessage: nextTask?.errorMessage,
     parentSessionId: input.parentSessionId,
     parentToolReference: input.parentToolReference,
+    reason: input.result.reason,
     requestedSkills: input.requestedSkills,
     result: nextTask?.result,
     sessionId: input.childSessionId,
@@ -3326,6 +4160,7 @@ async function finalizeChildTaskRun(input: {
       childSessionId: input.childSessionId,
       errorMessage: nextTask?.errorMessage,
       parentSessionId: input.parentSessionId,
+      reason: input.result.reason,
       result: nextTask?.result,
       status: terminalToolOutputStatus,
       taskId: task.id,
@@ -3357,8 +4192,10 @@ async function finalizeChildTaskRun(input: {
       assignedAgent: nextAssignedAgent,
       category: input.taskCategory,
       childSessionId: input.childSessionId,
+      effectiveDeadline,
       errorMessage: nextTask?.errorMessage,
       parentSessionId: input.parentSessionId,
+      reason: input.result.reason,
       requestedSkills: input.requestedSkills,
       result: nextTask?.result,
       status: eventStatus,
@@ -3463,10 +4300,14 @@ function createPendingPermissionRequest(
   payload?: PermissionRequestPayload,
 ): string {
   const requestId = randomUUID();
+  const expiresAt = (() => {
+    const timeoutMs = getPendingPermissionTimeoutMs();
+    return typeof timeoutMs === 'number' ? Date.now() + timeoutMs : null;
+  })();
   sqliteRun(
     `INSERT INTO permission_requests
-     (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+     (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       requestId,
       sessionId,
@@ -3476,6 +4317,7 @@ function createPendingPermissionRequest(
       context.riskLevel,
       context.previewAction,
       payload ? JSON.stringify(payload) : null,
+      expiresAt,
     ],
   );
   publishSessionRunEvent(
@@ -3524,10 +4366,14 @@ function createPendingQuestionRequest(input: {
 }): string {
   const requestId = randomUUID();
   const toolName = input.toolName ?? 'question';
+  const expiresAt = (() => {
+    const timeoutMs = getPendingQuestionTimeoutMs();
+    return typeof timeoutMs === 'number' ? Date.now() + timeoutMs : null;
+  })();
   sqliteRun(
     `INSERT INTO question_requests
-      (id, session_id, user_id, tool_name, title, questions_json, request_payload_json, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      (id, session_id, user_id, tool_name, title, questions_json, request_payload_json, expires_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       requestId,
       input.sessionId,
@@ -3536,6 +4382,7 @@ function createPendingQuestionRequest(input: {
       input.title,
       input.questionsJson,
       input.payload ? JSON.stringify(input.payload) : null,
+      expiresAt,
     ],
   );
   publishSessionRunEvent(
@@ -3660,7 +4507,16 @@ export class ToolSandbox {
         isError: true,
         durationMs: 0,
       };
-      await this.auditLog(sessionId, request, result);
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
       return result;
     }
 
@@ -3678,7 +4534,16 @@ export class ToolSandbox {
         isError: true,
         durationMs: 0,
       };
-      await this.auditLog(sessionId, request, result);
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
       return result;
     }
 
@@ -3696,7 +4561,16 @@ export class ToolSandbox {
         isError: true,
         durationMs: 0,
       };
-      await this.auditLog(sessionId, request, result);
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
       return result;
     }
 
@@ -3716,7 +4590,16 @@ export class ToolSandbox {
           isError: true,
           durationMs: 0,
         };
-        await this.auditLog(sessionId, request, result);
+        writeAuditLog({
+          sessionId,
+          category: 'tool',
+          sourceName: request.toolName,
+          requestId: request.toolCallId,
+          input: request.rawInput,
+          output: result.output,
+          isError: result.isError ?? false,
+          durationMs: result.durationMs ?? null,
+        });
         return result;
       }
     }
@@ -3738,7 +4621,16 @@ export class ToolSandbox {
         durationMs: 0,
         pendingPermissionRequestId: permissionState.requestId,
       };
-      await this.auditLog(sessionId, request, result);
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: result.output,
+        isError: result.isError ?? false,
+        durationMs: result.durationMs ?? null,
+      });
       return result;
     }
 
@@ -3752,7 +4644,16 @@ export class ToolSandbox {
     );
     if (gatewayManagedResult) {
       gatewayManagedResult.toolName = request.toolName;
-      await this.auditLog(sessionId, request, gatewayManagedResult);
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: gatewayManagedResult.output,
+        isError: gatewayManagedResult.isError ?? false,
+        durationMs: gatewayManagedResult.durationMs ?? null,
+      });
       if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
         consumeOncePermission(permissionState.requestId);
       }
@@ -3807,34 +4708,20 @@ export class ToolSandbox {
       }
     }
 
-    await this.auditLog(sessionId, request, result);
+    writeAuditLog({
+      sessionId,
+      category: 'tool',
+      sourceName: request.toolName,
+      requestId: request.toolCallId,
+      input: request.rawInput,
+      output: result.output,
+      isError: result.isError ?? false,
+      durationMs: result.durationMs ?? null,
+    });
     if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
       consumeOncePermission(permissionState.requestId);
     }
     return result;
-  }
-
-  private async auditLog(
-    sessionId: string,
-    request: ToolCallRequest,
-    result: ToolCallResult,
-  ): Promise<void> {
-    try {
-      sqliteRun(
-        'INSERT INTO audit_logs (session_id, tool_name, request_id, input_json, output_json, is_error, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [
-          sessionId,
-          request.toolName,
-          request.toolCallId,
-          JSON.stringify(request.rawInput),
-          JSON.stringify(result.output),
-          result.isError ? 1 : 0,
-          result.durationMs ?? null,
-        ],
-      );
-    } catch {
-      return;
-    }
   }
 }
 
@@ -3872,6 +4759,10 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
     typeof lspGotoDefinitionToolDefinition.outputSchema
   >(lspGotoDefinitionToolDefinition);
   sandbox.register<
+    typeof lspGotoImplementationToolDefinition.inputSchema,
+    typeof lspGotoImplementationToolDefinition.outputSchema
+  >(lspGotoImplementationToolDefinition);
+  sandbox.register<
     typeof lspFindReferencesToolDefinition.inputSchema,
     typeof lspFindReferencesToolDefinition.outputSchema
   >(lspFindReferencesToolDefinition);
@@ -3887,6 +4778,14 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
     typeof lspRenameToolDefinition.inputSchema,
     typeof lspRenameToolDefinition.outputSchema
   >(lspRenameToolDefinition);
+  sandbox.register<
+    typeof lspHoverToolDefinition.inputSchema,
+    typeof lspHoverToolDefinition.outputSchema
+  >(lspHoverToolDefinition);
+  sandbox.register<
+    typeof lspCallHierarchyToolDefinition.inputSchema,
+    typeof lspCallHierarchyToolDefinition.outputSchema
+  >(lspCallHierarchyToolDefinition);
   sandbox.register<typeof workspaceTreeTool.inputSchema, typeof workspaceTreeTool.outputSchema>(
     workspaceTreeTool,
   );
