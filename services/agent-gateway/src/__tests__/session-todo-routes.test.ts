@@ -38,12 +38,16 @@ vi.mock('../db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: true,
   WORKSPACE_ROOT: '/workspace',
   WORKSPACE_ROOTS: ['/workspace'],
+  db: {
+    exec: vi.fn(),
+  },
   sqliteAll: sqliteAllMock,
   sqliteGet: sqliteGetMock,
   sqliteRun: sqliteRunMock,
 }));
 
 vi.mock('../session-message-store.js', () => ({
+  filterVisibleSessionMessages: vi.fn((messages) => messages),
   listSessionMessages: listSessionMessagesMock,
   truncateSessionMessagesAfter: vi.fn(() => []),
 }));
@@ -83,17 +87,18 @@ describe('session todo routes', () => {
   });
 
   it('returns ordered todos both from session detail and the dedicated todo route', async () => {
+    const sessionRow = {
+      id: 'session-1',
+      messages_json: '[]',
+      state_status: 'idle',
+      metadata_json: '{}',
+      title: null,
+      created_at: '2026-03-26T00:00:00.000Z',
+      updated_at: '2026-03-26T00:00:00.000Z',
+    };
     sqliteGetMock.mockImplementation((query: string) => {
-      if (query.includes('SELECT id, messages_json')) {
-        return {
-          id: 'session-1',
-          messages_json: '[]',
-          state_status: 'idle',
-          metadata_json: '{}',
-          title: null,
-          created_at: '2026-03-26T00:00:00.000Z',
-          updated_at: '2026-03-26T00:00:00.000Z',
-        };
+      if (query.includes('FROM sessions')) {
+        return sessionRow;
       }
       return { id: 'session-1' };
     });
@@ -150,17 +155,18 @@ describe('session todo routes', () => {
   });
 
   it('keeps temp todos hidden from legacy session detail and legacy todo route', async () => {
+    const sessionRow = {
+      id: 'session-1',
+      messages_json: '[]',
+      state_status: 'idle',
+      metadata_json: '{}',
+      title: null,
+      created_at: '2026-03-26T00:00:00.000Z',
+      updated_at: '2026-03-26T00:00:00.000Z',
+    };
     sqliteGetMock.mockImplementation((query: string) => {
-      if (query.includes('SELECT id, messages_json')) {
-        return {
-          id: 'session-1',
-          messages_json: '[]',
-          state_status: 'idle',
-          metadata_json: '{}',
-          title: null,
-          created_at: '2026-03-26T00:00:00.000Z',
-          updated_at: '2026-03-26T00:00:00.000Z',
-        };
+      if (query.includes('FROM sessions')) {
+        return sessionRow;
       }
       return { id: 'session-1' };
     });
