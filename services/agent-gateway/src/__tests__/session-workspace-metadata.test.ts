@@ -92,6 +92,7 @@ describe('session workspace metadata helpers', () => {
 
   it('accepts supported user-facing session metadata patch keys', () => {
     const result = validateSessionMetadataPatch({
+      agentId: 'hephaestus',
       dialogueMode: 'coding',
       planMode: true,
       yoloMode: true,

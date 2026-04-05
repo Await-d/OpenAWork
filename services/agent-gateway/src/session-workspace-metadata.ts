@@ -11,6 +11,7 @@ export type ToolSurfaceProfile = (typeof TOOL_SURFACE_PROFILES)[number];
 
 const sessionMetadataPatchSchema = z
   .object({
+    agentId: z.string().min(1).max(120).optional(),
     dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
     editSourceMessageId: z.string().min(1).max(200).optional(),
     modelId: z.string().min(1).max(200).optional(),
