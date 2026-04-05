@@ -1,6 +1,7 @@
 import type { AIProvider, ActiveSelection, ProviderType } from '@openAwork/agent-core';
 import { ProviderManagerImpl } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { TOOL_SURFACE_PROFILES } from './session-workspace-metadata.js';
 
 const PROVIDER_TYPE_VALUES = [
   'anthropic',
@@ -120,6 +121,7 @@ export const providerSettingsBodySchema = z.object({
   providers: z.array(aiProviderSchema),
   activeSelection: activeSelectionSchema.optional(),
   defaultThinking: defaultThinkingSettingsSchema.optional(),
+  defaultToolSurfaceProfile: z.enum(TOOL_SURFACE_PROFILES).optional(),
 });
 
 export const providerSettingsQuerySchema = z.object({

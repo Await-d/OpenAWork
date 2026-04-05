@@ -1,21 +1,24 @@
-import { buildRequestOverrides } from '@openAwork/agent-core';
+import { buildRequestOverrides, getAllBuiltinPresets } from '@openAwork/agent-core';
 import type { AIModelConfig, AIProvider, RequestOverrides } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { resolveUpstreamProtocol } from './routes/upstream-protocol.js';
 import type { UpstreamProtocol } from './routes/upstream-protocol.js';
 
-export const SUPPORTED_MODELS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'gpt-4-turbo',
-  'claude-3-5-sonnet-20241022',
-  'claude-3-haiku-20240307',
-] as const;
+const BUILTIN_PRESETS = getAllBuiltinPresets();
+
+const DEFAULT_MODEL_SENTINEL = 'default';
+const DEFAULT_FALLBACK_MODEL = 'gpt-4o';
+
+export const SUPPORTED_MODELS = Object.freeze(
+  BUILTIN_PRESETS.flatMap((provider) =>
+    provider.defaultModels.filter((model) => model.enabled !== false).map((model) => model.id),
+  ),
+);
 
 export type SupportedModel = (typeof SUPPORTED_MODELS)[number];
 
 export const modelRequestSchema = z.object({
-  model: z.string().min(1).max(200).optional().default('gpt-4o'),
+  model: z.string().min(1).max(200).optional().default(DEFAULT_MODEL_SENTINEL),
   variant: z.string().min(1).max(80).optional(),
   systemPrompt: z.string().max(4000).optional(),
   maxTokens: z.number().int().min(1).max(16384).optional().default(2048),
@@ -44,15 +47,21 @@ export interface ModelRouteConfig {
 const OPENAI_BASE = globalThis.process?.env['AI_API_BASE_URL'] ?? 'https://api.openai.com/v1';
 const DEFAULT_API_KEY = globalThis.process?.env['AI_API_KEY'] ?? '';
 
-const PROVIDER_DEFAULT_BASE_URL: Partial<Record<AIProvider['type'], string>> = {
-  anthropic: globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1',
-  openai: OPENAI_BASE,
-  deepseek: 'https://api.deepseek.com/v1',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta',
-  openrouter: 'https://openrouter.ai/api/v1',
-  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  moonshot: 'https://api.moonshot.cn/v1',
-};
+const BUILTIN_MODEL_INDEX = new Map<
+  string,
+  {
+    model: AIModelConfig;
+    provider: AIProvider;
+  }
+>(
+  BUILTIN_PRESETS.flatMap((provider) =>
+    provider.defaultModels.map((model) => [model.id, { model, provider }] as const),
+  ),
+);
+
+const BUILTIN_PROVIDER_INDEX = new Map<AIProvider['type'], AIProvider>(
+  BUILTIN_PRESETS.map((provider) => [provider.type, provider] as const),
+);
 
 const normalizeBaseUrl = (value: string | undefined): string => {
   const trimmed = (value ?? '').trim();
@@ -67,13 +76,28 @@ const normalizeBaseUrl = (value: string | undefined): string => {
   return withProtocol.replace(/\/+$/, '');
 };
 
+const resolveProviderDefaultBaseUrl = (providerType: AIProvider['type']): string => {
+  if (providerType === 'openai') {
+    return normalizeBaseUrl(OPENAI_BASE);
+  }
+
+  if (providerType === 'anthropic') {
+    return normalizeBaseUrl(
+      globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ??
+        BUILTIN_PROVIDER_INDEX.get('anthropic')?.baseUrl,
+    );
+  }
+
+  return normalizeBaseUrl(BUILTIN_PROVIDER_INDEX.get(providerType)?.baseUrl);
+};
+
 const isOverriddenProviderBaseUrl = (provider: AIProvider): boolean => {
   const providerBaseUrl = normalizeBaseUrl(provider.baseUrl);
   if (providerBaseUrl.length === 0) {
     return false;
   }
 
-  const defaultBaseUrl = normalizeBaseUrl(PROVIDER_DEFAULT_BASE_URL[provider.type]);
+  const defaultBaseUrl = resolveProviderDefaultBaseUrl(provider.type);
   return providerBaseUrl !== defaultBaseUrl;
 };
 
@@ -93,24 +117,41 @@ const resolveProviderApiKey = (provider: AIProvider): string => {
   return DEFAULT_API_KEY;
 };
 
+const resolveBuiltinFallbackModel = (
+  modelId: string,
+):
+  | {
+      model: AIModelConfig;
+      provider: AIProvider;
+    }
+  | undefined => BUILTIN_MODEL_INDEX.get(modelId);
+
 export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   const model =
-    request.model === 'default'
-      ? (globalThis.process?.env['AI_DEFAULT_MODEL'] ?? SUPPORTED_MODELS[0])
+    request.model === DEFAULT_MODEL_SENTINEL
+      ? (globalThis.process?.env['AI_DEFAULT_MODEL'] ?? DEFAULT_FALLBACK_MODEL)
       : request.model;
+  const builtinFallback = resolveBuiltinFallbackModel(model);
+  const builtinProvider = builtinFallback?.provider;
+  const builtinModel = builtinFallback?.model;
   const requestOverrides = buildRequestOverrides(undefined, undefined, model);
-  const upstreamProtocol = resolveUpstreamProtocol({ model });
+  const providerType =
+    builtinProvider?.type ?? (model.startsWith('claude') ? 'anthropic' : undefined);
+  const upstreamProtocol = resolveUpstreamProtocol({ model, providerType });
 
-  const isAnthropic = model.startsWith('claude');
+  const isAnthropic = providerType === 'anthropic';
   const apiBaseUrl = normalizeBaseUrl(
-    isAnthropic
-      ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
-      : OPENAI_BASE,
+    (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
+      (isAnthropic
+        ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
+        : OPENAI_BASE),
   );
 
-  const apiKey = isAnthropic
-    ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? DEFAULT_API_KEY)
-    : DEFAULT_API_KEY;
+  const apiKey = builtinProvider
+    ? resolveProviderApiKey(builtinProvider)
+    : isAnthropic
+      ? (globalThis.process?.env['ANTHROPIC_API_KEY'] ?? DEFAULT_API_KEY)
+      : DEFAULT_API_KEY;
 
   return {
     model,
@@ -121,8 +162,11 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
     temperature: requestOverrides.temperature ?? request.temperature,
     upstreamProtocol,
     requestOverrides,
-    contextWindow: undefined,
-    supportsThinking: false,
+    contextWindow: builtinModel?.contextWindow,
+    providerType,
+    inputPricePerMillion: builtinModel?.inputPricePerMillion,
+    outputPricePerMillion: builtinModel?.outputPricePerMillion,
+    supportsThinking: builtinModel?.supportsThinking === true,
     systemPrompt: request.systemPrompt,
   };
 }
@@ -147,9 +191,7 @@ export function resolveModelRouteFromProvider(
   return {
     model: modelId,
     variant: request.variant,
-    apiBaseUrl:
-      normalizeBaseUrl(provider.baseUrl) ||
-      normalizeBaseUrl(PROVIDER_DEFAULT_BASE_URL[provider.type]),
+    apiBaseUrl: normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
     apiKey: resolveProviderApiKey(provider),
     maxTokens: requestOverrides.maxTokens ?? request.maxTokens,
     temperature: requestOverrides.temperature ?? request.temperature,
@@ -182,9 +224,7 @@ export function resolveCompactionRoute(
 
   return {
     model: modelId,
-    apiBaseUrl:
-      normalizeBaseUrl(provider.baseUrl) ||
-      normalizeBaseUrl(PROVIDER_DEFAULT_BASE_URL[provider.type]),
+    apiBaseUrl: normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
     apiKey: resolveProviderApiKey(provider),
     maxTokens: requestOverrides.maxTokens ?? 4096,
     temperature: 0,
