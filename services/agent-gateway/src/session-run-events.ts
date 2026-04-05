@@ -1,6 +1,7 @@
 import type { RunEvent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { buildAssistantEventMessageContent } from './assistant-event-message.js';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
+import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessage } from './session-message-store.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
@@ -74,6 +75,15 @@ function persistRunEventRow(sessionId: string, event: RunEvent, meta?: PublishRu
     ],
   );
   mirrorDisplayableRunEventAsMessage({ sessionId, userId, event, meta, occurredAt, seq });
+  if (userId) {
+    const notificationScope = meta?.clientRequestId ?? event.eventId ?? event.runId ?? event.type;
+    buildNotificationFromRunEvent({
+      event,
+      id: `notification:${sessionId}:${event.type}:${notificationScope}:${seq ?? occurredAt}`,
+      sessionId,
+      userId,
+    });
+  }
   markPersisted(event);
 }
 

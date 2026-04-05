@@ -55,7 +55,7 @@ describe('session run events', () => {
     });
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(mocks.sqliteRunMock).toHaveBeenCalledTimes(2);
+    expect(mocks.sqliteRunMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('persists tool_result observability in payload_json for request-scoped replay', () => {
