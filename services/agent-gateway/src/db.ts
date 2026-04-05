@@ -190,6 +190,88 @@ export async function migrate(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_session_messages_created ON session_messages(session_id, created_at_ms)',
   );
   db.exec(
+    `CREATE TABLE IF NOT EXISTS message_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      rating TEXT NOT NULL CHECK(rating IN ('up', 'down')),
+      reason TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      UNIQUE(session_id, user_id, message_id)
+    )`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_message_ratings_session ON message_ratings(session_id, user_id, updated_at DESC)',
+  );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unread' CHECK(status IN ('unread', 'read')),
+      read_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)',
+  );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS notification_preferences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, channel, event_type)
+    )`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_notification_preferences_user ON notification_preferences(user_id, channel, event_type)',
+  );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS agent_profiles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workspace_path TEXT NOT NULL,
+      label TEXT NOT NULL,
+      agent_id TEXT,
+      provider_id TEXT,
+      model_id TEXT,
+      tool_surface_profile TEXT NOT NULL DEFAULT 'openawork',
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, workspace_path)
+    )`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_agent_profiles_user_updated ON agent_profiles(user_id, updated_at DESC)',
+  );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS session_shares (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      member_id TEXT NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+      permission TEXT NOT NULL CHECK(permission IN ('view', 'comment', 'operate')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, session_id, member_id)
+    )`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_shares_user_created ON session_shares(user_id, created_at DESC)',
+  );
+  db.exec(
     "CREATE VIRTUAL TABLE IF NOT EXISTS session_messages_fts USING fts5(message_id UNINDEXED, session_id UNINDEXED, user_id UNINDEXED, role UNINDEXED, content, tokenize='unicode61')",
   );
   rebuildSessionMessageSearchIndex();
@@ -400,6 +482,7 @@ export async function migrate(): Promise<void> {
     )
   `);
   ensureColumn('permission_requests', 'request_payload_json', 'TEXT');
+  ensureColumn('permission_requests', 'expires_at', 'INTEGER');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS question_requests (
@@ -416,6 +499,7 @@ export async function migrate(): Promise<void> {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  ensureColumn('question_requests', 'expires_at', 'INTEGER');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS task_parent_auto_resume_contexts (
@@ -479,6 +563,37 @@ export async function migrate(): Promise<void> {
     )
   `);
   ensureColumn('team_messages', 'type', "TEXT NOT NULL DEFAULT 'update'");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_audit_logs_user_created ON team_audit_logs(user_id, created_at DESC)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shared_session_comments (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      author_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      author_email TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_shared_session_comments_owner_session_created ON shared_session_comments(owner_user_id, session_id, created_at ASC)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS workflow_templates (

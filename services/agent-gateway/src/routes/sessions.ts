@@ -21,6 +21,12 @@ import {
   searchSessionMessages,
 } from '../session-search-store.js';
 import {
+  deleteSessionMessageRating,
+  hasSessionMessage,
+  listSessionMessageRatings,
+  upsertSessionMessageRating,
+} from '../session-message-rating-store.js';
+import {
   collectSessionBackupStoragePaths,
   captureBeforeWriteBackup,
   garbageCollectBackupStoragePaths,
@@ -29,6 +35,7 @@ import {
 } from '../session-file-backup-store.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { buildFileDiff } from '../file-diff-format.js';
+import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import {
   toPublicSessionResponse,
@@ -46,9 +53,12 @@ import {
   validateSessionMetadataPatch,
 } from '../session-workspace-metadata.js';
 import { listSessionTodoLanes, listSessionTodos } from '../todo-tools.js';
-import { terminateChildSession } from '../tool-sandbox.js';
+import { terminateChildSession, terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
-import { listSessionRunEvents } from '../session-run-events.js';
+import {
+  getLatestSessionRunEventSeqByRequest,
+  listSessionRunEvents,
+} from '../session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
   stopAllInFlightStreamRequestsForSession,
@@ -73,8 +83,13 @@ import {
   listSessionSnapshots,
   persistSessionSnapshot,
 } from '../session-snapshot-store.js';
-import { hasFreshSessionRuntimeThread } from '../session-runtime-thread-store.js';
+import {
+  getFreshSessionRuntimeThread,
+  hasFreshSessionRuntimeThread,
+} from '../session-runtime-thread-store.js';
 import { hasPendingSessionInteraction } from '../session-runtime-state.js';
+import { expirePendingPermissionRequests } from './permissions.js';
+import { expirePendingQuestionRequests } from './questions.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
@@ -90,6 +105,29 @@ interface SessionRow {
   title: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface RecoveryPermissionRequestRow {
+  created_at: string;
+  decision: 'once' | 'session' | 'permanent' | 'reject' | null;
+  id: string;
+  preview_action: string | null;
+  reason: string;
+  risk_level: 'low' | 'medium' | 'high';
+  scope: string;
+  session_id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'consumed';
+  tool_name: string;
+}
+
+interface RecoveryQuestionRequestRow {
+  created_at: string;
+  id: string;
+  questions_json: string;
+  session_id: string;
+  status: 'pending' | 'answered' | 'dismissed';
+  title: string;
+  tool_name: string;
 }
 
 const snapshotCompareQuerySchema = z.object({
@@ -134,6 +172,12 @@ const searchSessionsQuerySchema = z.object({
     }, z.number().int().min(1).max(20).optional())
     .default(8),
   q: z.string().trim().min(1),
+});
+
+const sessionMessageRatingSchema = z.object({
+  notes: z.string().trim().max(500).optional(),
+  rating: z.enum(['up', 'down']),
+  reason: z.string().trim().max(120).optional(),
 });
 
 const restorePreviewSchema = z
@@ -882,7 +926,19 @@ async function reconcileSessionRuntimeForResponse(
 ): Promise<SessionRow> {
   const reconciliation = await reconcileSessionRuntime({ sessionId: session.id, userId });
 
-  if (!reconciliation.status || reconciliation.status === session.state_status) {
+  if (!reconciliation.status) {
+    return session;
+  }
+
+  const refreshedSession = sqliteGet<SessionRow>(
+    'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+    [session.id, userId],
+  );
+  if (refreshedSession) {
+    return refreshedSession;
+  }
+
+  if (reconciliation.status === session.state_status) {
     return session;
   }
 
@@ -899,6 +955,179 @@ async function reconcileSessionRuntimeRowsForResponse(
   return Promise.all(
     sessions.map((session) => reconcileSessionRuntimeForResponse(session, userId)),
   );
+}
+
+function mapRecoveryPermissionRequestRow(row: RecoveryPermissionRequestRow) {
+  return {
+    requestId: row.id,
+    sessionId: row.session_id,
+    toolName: row.tool_name,
+    scope: row.scope,
+    reason: row.reason,
+    riskLevel: row.risk_level,
+    previewAction: row.preview_action ?? undefined,
+    status: row.status,
+    decision: row.decision ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+function mapRecoveryQuestionRequestRow(row: RecoveryQuestionRequestRow) {
+  return {
+    requestId: row.id,
+    sessionId: row.session_id,
+    toolName: row.tool_name,
+    title: row.title,
+    questions: JSON.parse(row.questions_json) as unknown,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+function listRecoveryPermissionRequests(sessionIds: string[]) {
+  if (sessionIds.length === 0) {
+    return [];
+  }
+
+  const placeholders = sessionIds.map(() => '?').join(', ');
+  return sqliteAll<RecoveryPermissionRequestRow>(
+    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, created_at
+     FROM permission_requests
+     WHERE session_id IN (${placeholders}) AND status = 'pending'
+     ORDER BY created_at ASC`,
+    sessionIds,
+  ).map(mapRecoveryPermissionRequestRow);
+}
+
+function listRecoveryQuestionRequests(sessionIds: string[]) {
+  if (sessionIds.length === 0) {
+    return [];
+  }
+
+  const placeholders = sessionIds.map(() => '?').join(', ');
+  return sqliteAll<RecoveryQuestionRequestRow>(
+    `SELECT id, session_id, tool_name, title, questions_json, status, created_at
+     FROM question_requests
+     WHERE session_id IN (${placeholders}) AND status = 'pending'
+     ORDER BY created_at ASC`,
+    sessionIds,
+  ).map(mapRecoveryQuestionRequestRow);
+}
+
+async function buildSessionRecoveryReadModel(input: { session: SessionRow; userId: string }) {
+  const reconciledSession = await reconcileSessionRuntimeForResponse(input.session, input.userId);
+  const sessionId = input.session.id;
+  const sessions = sqliteAll<SessionRow>(
+    'SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+    [input.userId],
+  );
+  const descendantSessionIds = [...collectDescendantSessionIds(sessions, sessionId)].filter(
+    (candidateSessionId) => candidateSessionId !== sessionId,
+  );
+  const childRows = await reconcileSessionRuntimeRowsForResponse(
+    descendantSessionIds
+      .map((childSessionId) => sessions.find((session) => session.id === childSessionId) ?? null)
+      .filter((session): session is SessionRow => session !== null),
+    input.userId,
+  );
+  const children = childRows.map((session) =>
+    toPublicSessionResponse(
+      {
+        ...session,
+        metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
+      },
+      filterVisibleSessionMessages(
+        listSessionMessages({
+          sessionId: session.id,
+          userId: input.userId,
+          legacyMessagesJson: session.messages_json,
+        }),
+      ),
+    ),
+  );
+
+  const relevantSessionIds = [sessionId, ...children.map((child) => child.id)];
+  for (const relevantSessionId of relevantSessionIds) {
+    const expiredPermissionCount = expirePendingPermissionRequests({
+      nowMs: Date.now(),
+      sessionId: relevantSessionId,
+    });
+    const expiredQuestionCount = expirePendingQuestionRequests({
+      nowMs: Date.now(),
+      sessionId: relevantSessionId,
+    });
+    if (expiredPermissionCount > 0 || expiredQuestionCount > 0) {
+      await terminateTaskChildSessionAsTimeout({
+        childSessionId: relevantSessionId,
+        userId: input.userId,
+      });
+    }
+  }
+
+  const sessionsById = new Map(sessions.map((candidate) => [candidate.id, candidate] as const));
+  const visibleSessionIds = new Set<string>([
+    ...collectAncestorSessionIds(sessionsById, sessionId),
+    ...collectDescendantSessionIds(sessions, sessionId),
+  ]);
+  const reconciledSessions = await reconcileSessionRuntimeRowsForResponse(
+    sessions.filter((candidate) => visibleSessionIds.has(candidate.id)),
+    input.userId,
+  );
+  const reconciledSessionsById = new Map(
+    reconciledSessions.map((candidate) => [candidate.id, candidate] as const),
+  );
+  const mergedSessions = sessions.map(
+    (candidate) => reconciledSessionsById.get(candidate.id) ?? candidate,
+  );
+  const includedSessionIds = collectDescendantSessionIds(mergedSessions, sessionId);
+  const { tasks } = await buildMergedSessionTaskProjection({
+    includedSessionIds,
+    sessions: mergedSessions,
+    sessionId,
+  });
+
+  const activeThread = getFreshSessionRuntimeThread({ sessionId, userId: input.userId });
+
+  const sessionResponse = toPublicSessionResponse(
+    {
+      ...reconciledSession,
+      metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
+    },
+    filterVisibleSessionMessages(
+      listSessionMessages({
+        sessionId,
+        userId: input.userId,
+        legacyMessagesJson: input.session.messages_json,
+      }),
+    ),
+    listSessionTodos(sessionId),
+    listSessionRunEvents(sessionId),
+  );
+
+  return {
+    activeStream: activeThread
+      ? {
+          clientRequestId: activeThread.clientRequestId,
+          heartbeatAtMs: activeThread.heartbeatAtMs,
+          lastSeq: getLatestSessionRunEventSeqByRequest({
+            sessionId,
+            clientRequestId: activeThread.clientRequestId,
+          }),
+          sessionId,
+          startedAtMs: activeThread.startedAtMs,
+        }
+      : null,
+    children,
+    pendingPermissions: listRecoveryPermissionRequests(relevantSessionIds),
+    pendingQuestions: listRecoveryQuestionRequests(relevantSessionIds),
+    ratings: listSessionMessageRatings({ sessionId, userId: input.userId }),
+    session: {
+      ...sessionResponse,
+      fileChangesSummary: buildSessionFileChangesSummary({ sessionId, userId: input.userId }),
+    },
+    tasks,
+    todoLanes: listSessionTodoLanes(sessionId),
+  };
 }
 
 export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
@@ -1024,6 +1253,76 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ results });
     },
   );
+  await registerSessionSharedReadRoutes(app);
+
+  app.get(
+    '/sessions/:sessionId/message-ratings',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.message-ratings.list', undefined, {
+        sessionId,
+      });
+
+      const ratings = listSessionMessageRatings({ sessionId, userId: user.sub });
+      step.succeed(undefined, { count: ratings.length });
+      return reply.send({ ratings });
+    },
+  );
+
+  app.put(
+    '/sessions/:sessionId/messages/:messageId/rating',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { messageId, sessionId } = request.params as { messageId: string; sessionId: string };
+      const body = sessionMessageRatingSchema.safeParse(request.body);
+      const { step } = startRequestWorkflow(request, 'session.message-ratings.upsert', undefined, {
+        messageId,
+        sessionId,
+      });
+      if (!body.success) {
+        step.fail('invalid rating payload');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid rating payload', issues: body.error.issues });
+      }
+
+      if (!hasSessionMessage({ messageId, sessionId, userId: user.sub })) {
+        step.fail('message not found');
+        return reply.status(404).send({ error: 'Message not found' });
+      }
+
+      const record = upsertSessionMessageRating({
+        messageId,
+        notes: body.data.notes,
+        rating: body.data.rating,
+        reason: body.data.reason,
+        sessionId,
+        userId: user.sub,
+      });
+      step.succeed(undefined, { rating: record.rating });
+      return reply.send({ rating: record });
+    },
+  );
+
+  app.delete(
+    '/sessions/:sessionId/messages/:messageId/rating',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { messageId, sessionId } = request.params as { messageId: string; sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.message-ratings.delete', undefined, {
+        messageId,
+        sessionId,
+      });
+
+      deleteSessionMessageRating({ messageId, sessionId, userId: user.sub });
+      step.succeed();
+      return reply.status(204).send();
+    },
+  );
 
   app.get(
     '/sessions/:sessionId',
@@ -1066,6 +1365,39 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           fileChangesSummary: buildSessionFileChangesSummary({ sessionId, userId: user.sub }),
         },
       });
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/recovery',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.recovery.get', undefined, {
+        sessionId,
+      });
+
+      const session = sqliteGet<SessionRow>(
+        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const recovery = await buildSessionRecoveryReadModel({ session, userId: user.sub });
+      step.succeed(undefined, {
+        childCount: recovery.children.length,
+        pendingPermissionCount: recovery.pendingPermissions.length,
+        pendingQuestionCount: recovery.pendingQuestions.length,
+        sessionId,
+        taskCount: recovery.tasks.length,
+      });
+
+      return reply.send({ recovery });
     },
   );
 
@@ -2019,14 +2351,20 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         ...collectAncestorSessionIds(sessionsById, sessionId),
         ...collectDescendantSessionIds(sessions, sessionId),
       ]);
-      await reconcileSessionRuntimeRowsForResponse(
+      const reconciledSessions = await reconcileSessionRuntimeRowsForResponse(
         sessions.filter((candidate) => visibleSessionIds.has(candidate.id)),
         user.sub,
       );
-      const includedSessionIds = collectDescendantSessionIds(sessions, sessionId);
+      const reconciledSessionsById = new Map(
+        reconciledSessions.map((candidate) => [candidate.id, candidate] as const),
+      );
+      const mergedSessions = sessions.map(
+        (candidate) => reconciledSessionsById.get(candidate.id) ?? candidate,
+      );
+      const includedSessionIds = collectDescendantSessionIds(mergedSessions, sessionId);
       const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
         includedSessionIds,
-        sessions,
+        sessions: mergedSessions,
         sessionId,
       });
       step.succeed(undefined, { count: tasks.length });
