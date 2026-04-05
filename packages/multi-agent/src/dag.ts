@@ -75,7 +75,7 @@ export class DAGRunner {
     dagId: string,
     node: DAGNode,
     mode: WorkflowMode,
-    executor: (node: DAGNode, mode: WorkflowMode) => Promise<unknown>,
+    executor: (node: DAGNode, mode: WorkflowMode, signal: AbortSignal) => Promise<unknown>,
   ): Promise<void> {
     const policy = node.retryPolicy ?? DEFAULT_RETRY_POLICY;
     let attempt = 0;
@@ -91,7 +91,7 @@ export class DAGRunner {
           ...toRuntimeRoleMetadata(node),
         });
 
-        const output = await executor(node, mode);
+        const output = await executeNodeWithTimeout(node, (signal) => executor(node, mode, signal));
         this.updateNodeStatus(dagId, node.id, 'completed', output);
         this.emit(dagId, {
           type: 'node_completed',
@@ -214,6 +214,40 @@ export class DAGRunner {
       return String(output) === label;
     }
     return false;
+  }
+}
+
+async function executeNodeWithTimeout(
+  node: DAGNode,
+  executor: (signal: AbortSignal) => Promise<unknown>,
+): Promise<unknown> {
+  const controller = new AbortController();
+  if (
+    typeof node.executionTimeoutMs !== 'number' ||
+    !Number.isFinite(node.executionTimeoutMs) ||
+    node.executionTimeoutMs <= 0
+  ) {
+    return executor(controller.signal);
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeoutError = new Error(
+      `Node execution timed out after ${Math.floor(node.executionTimeoutMs)}ms`,
+    );
+    return await Promise.race([
+      executor(controller.signal),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          controller.abort(timeoutError);
+          reject(timeoutError);
+        }, node.executionTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
 

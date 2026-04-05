@@ -66,6 +66,8 @@ export interface DAGNode {
   startedAt?: number;
   completedAt?: number;
   durationMs?: number;
+  executionTimeoutMs?: number;
+  approvalTimeoutMs?: number;
   retryPolicy?: RetryPolicy;
   failureEscalationLog?: FailureEscalationRecord[];
 }

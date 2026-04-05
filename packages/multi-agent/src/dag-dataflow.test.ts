@@ -161,4 +161,113 @@ describe('DAGRunner dataFlow semantics', () => {
       },
     ]);
   });
+
+  it('fails a node when executionTimeoutMs is exceeded', async () => {
+    const runner = new DAGRunner();
+    const dag = createDag(
+      [
+        { id: 'source', type: 'orchestrator', label: 'source', status: 'completed' },
+        {
+          id: 'timeout-node',
+          type: 'subagent',
+          label: 'Timeout node',
+          status: 'pending',
+          executionTimeoutMs: 10,
+          retryPolicy: { maxRetries: 0, backoffMs: 1, escalateOnExhaustion: false },
+        },
+      ],
+      [{ id: 'e1', source: 'source', target: 'timeout-node', dataFlow: 'parallel' }],
+    );
+    runner.store(dag);
+
+    const failures: string[] = [];
+    runner.subscribe('dag-1', (event) => {
+      if (event.type === 'node_failed') {
+        failures.push(event.error);
+      }
+    });
+
+    await runner.executeWithRetry('dag-1', dag.nodes[1]!, 'delegated', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { ok: true };
+    });
+
+    expect(dag.nodes[1]?.status).toBe('failed');
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain('timed out after 10ms');
+  });
+
+  it('aborts the executor signal when executionTimeoutMs is exceeded', async () => {
+    const runner = new DAGRunner();
+    const dag = createDag(
+      [
+        { id: 'source', type: 'orchestrator', label: 'source', status: 'completed' },
+        {
+          id: 'abort-node',
+          type: 'subagent',
+          label: 'Abort node',
+          status: 'pending',
+          executionTimeoutMs: 10,
+          retryPolicy: { maxRetries: 0, backoffMs: 1, escalateOnExhaustion: false },
+        },
+      ],
+      [{ id: 'e1', source: 'source', target: 'abort-node', dataFlow: 'parallel' }],
+    );
+    runner.store(dag);
+
+    let aborted = false;
+    await runner.executeWithRetry(
+      'dag-1',
+      dag.nodes[1]!,
+      'delegated',
+      async (_node, _mode, signal) => {
+        await new Promise<unknown>((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted = true;
+              reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+            },
+            { once: true },
+          );
+        });
+        return { ok: true };
+      },
+    );
+
+    expect(aborted).toBe(true);
+    expect(dag.nodes[1]?.status).toBe('failed');
+  });
+
+  it('retries a timed out node and completes on a later successful attempt', async () => {
+    const runner = new DAGRunner();
+    const dag = createDag(
+      [
+        { id: 'source', type: 'orchestrator', label: 'source', status: 'completed' },
+        {
+          id: 'retry-timeout-node',
+          type: 'subagent',
+          label: 'Retry timeout node',
+          status: 'pending',
+          executionTimeoutMs: 10,
+          retryPolicy: { maxRetries: 1, backoffMs: 1, escalateOnExhaustion: false },
+        },
+      ],
+      [{ id: 'e1', source: 'source', target: 'retry-timeout-node', dataFlow: 'parallel' }],
+    );
+    runner.store(dag);
+
+    let attempt = 0;
+    await runner.executeWithRetry('dag-1', dag.nodes[1]!, 'delegated', async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      return { ok: true, attempt };
+    });
+
+    expect(attempt).toBe(2);
+    expect(dag.nodes[1]?.status).toBe('completed');
+    expect(dag.nodes[1]?.output).toEqual({ ok: true, attempt: 2 });
+  });
 });

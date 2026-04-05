@@ -25,9 +25,9 @@ export interface SubagentResult {
   error?: string;
 }
 
-type ApprovalDecision = 'Proceed' | 'Skip' | 'Cancel';
+type ApprovalDecision = 'Proceed' | 'Skip' | 'Cancel' | 'Timeout';
 
-type NodeExecutor = (node: DAGNode, mode: WorkflowMode) => Promise<unknown>;
+type NodeExecutor = (node: DAGNode, mode: WorkflowMode, signal: AbortSignal) => Promise<unknown>;
 
 export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
   private runner = new DAGRunner();
@@ -40,7 +40,11 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
     this.nodeExecutor = nodeExecutor ?? this.defaultExecutor.bind(this);
   }
 
-  private async defaultExecutor(node: DAGNode, mode: WorkflowMode): Promise<unknown> {
+  private async defaultExecutor(
+    node: DAGNode,
+    mode: WorkflowMode,
+    _signal: AbortSignal,
+  ): Promise<unknown> {
     return { nodeId: node.id, status: 'completed', output: node.input ?? null, mode };
   }
 
@@ -119,10 +123,13 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
             nodeId: node.id,
             plan: `Execute: ${node.label}`,
             options: ['Proceed', 'Skip', 'Cancel'],
+            ...(typeof node.approvalTimeoutMs === 'number' && node.approvalTimeoutMs > 0
+              ? { autoResolveMs: node.approvalTimeoutMs }
+              : {}),
           };
           this.runner.emit(dagId, event);
 
-          const decision = await this.waitForApproval(node.id);
+          const decision = await this.waitForApproval(node.id, node.approvalTimeoutMs);
           if (decision === 'Skip') {
             this.runner.updateNodeStatus(dagId, node.id, 'skipped');
             return;
@@ -138,11 +145,21 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
             });
             return;
           }
+          if (decision === 'Timeout') {
+            this.runner.updateNodeStatus(dagId, node.id, 'failed');
+            this.runner.emit(dagId, {
+              type: 'node_failed',
+              nodeId: node.id,
+              error: `Approval timed out after ${node.approvalTimeoutMs}ms`,
+              timestamp: Date.now(),
+            });
+            return;
+          }
         }
 
         this.decorateNodeInput(node);
-        const executor = (n: DAGNode, m: WorkflowMode) => {
-          return this.nodeExecutor(n, m);
+        const executor = (n: DAGNode, m: WorkflowMode, signal: AbortSignal) => {
+          return this.nodeExecutor(n, m, signal);
         };
 
         await this.runner.executeWithRetry(dagId, node, mode, executor);
@@ -181,7 +198,7 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
     this.pausedDags.delete(dagId);
   }
 
-  resolveApproval(nodeId: string, decision: ApprovalDecision): void {
+  resolveApproval(nodeId: string, decision: Exclude<ApprovalDecision, 'Timeout'>): void {
     const resolver = this.pendingApprovals.get(nodeId);
     if (!resolver) {
       return;
@@ -207,7 +224,7 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
           prompt,
         },
       };
-      const output = await this.nodeExecutor(node, 'delegated');
+      const output = await this.nodeExecutor(node, 'delegated', new AbortController().signal);
       return { nodeId, role: request.role.id, output, durationMs: Date.now() - startAt };
     } catch (err) {
       return {
@@ -220,9 +237,27 @@ export class MultiAgentOrchestratorImpl implements MultiAgentOrchestrator {
     }
   }
 
-  private waitForApproval(nodeId: string): Promise<ApprovalDecision> {
+  private waitForApproval(nodeId: string, autoResolveMs?: number): Promise<ApprovalDecision> {
     return new Promise((resolve) => {
-      this.pendingApprovals.set(nodeId, resolve);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const wrappedResolve = (decision: ApprovalDecision) => {
+        if (timer) {
+          clearTimeout(timer);
+        }
+        this.pendingApprovals.delete(nodeId);
+        resolve(decision);
+      };
+
+      this.pendingApprovals.set(nodeId, wrappedResolve);
+      if (
+        typeof autoResolveMs === 'number' &&
+        Number.isFinite(autoResolveMs) &&
+        autoResolveMs > 0
+      ) {
+        timer = setTimeout(() => {
+          wrappedResolve('Timeout');
+        }, autoResolveMs);
+      }
     });
   }
 
