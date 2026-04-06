@@ -96,34 +96,34 @@ test.describe('Chat todo lanes', () => {
         return;
       }
 
-      if (pathname === `/sessions/${SESSION_ID}`) {
+      if (pathname === `/sessions/${SESSION_ID}/recovery`) {
         await route.fulfill({
           contentType: 'application/json',
           body: JSON.stringify({
-            session: {
-              id: SESSION_ID,
-              messages: [
-                {
-                  id: 'assistant-1',
-                  role: 'assistant',
-                  createdAt: 1,
-                  content: [{ type: 'text', text: 'todo lanes e2e' }],
-                },
-              ],
-              metadata_json: '{}',
-              todos: [{ content: '整理 provider 映射', status: 'in_progress', priority: 'high' }],
+            recovery: {
+              activeStream: null,
+              children: [],
+              pendingPermissions: [],
+              pendingQuestions: [],
+              ratings: [],
+              session: {
+                id: SESSION_ID,
+                messages: [
+                  {
+                    id: 'assistant-1',
+                    role: 'assistant',
+                    createdAt: 1,
+                    content: [{ type: 'text', text: 'todo lanes e2e' }],
+                  },
+                ],
+                metadata_json: '{}',
+              },
+              tasks: [],
+              todoLanes: {
+                main: [{ content: '整理 provider 映射', status: 'in_progress', priority: 'high' }],
+                temp: [{ content: '补齐聊天面板展示', status: 'pending', priority: 'medium' }],
+              },
             },
-          }),
-        });
-        return;
-      }
-
-      if (pathname === `/sessions/${SESSION_ID}/todo-lanes`) {
-        await route.fulfill({
-          contentType: 'application/json',
-          body: JSON.stringify({
-            main: [{ content: '整理 provider 映射', status: 'in_progress', priority: 'high' }],
-            temp: [{ content: '补齐聊天面板展示', status: 'pending', priority: 'medium' }],
           }),
         });
         return;
@@ -167,12 +167,13 @@ test.describe('Chat todo lanes', () => {
     await expect(page.getByTestId('chat-todo-bar')).toContainText('补齐聊天面板展示');
     await page.screenshot({ path: 'test-results/chat-todo-inline.png', fullPage: true });
 
-    await page.getByRole('button', { name: '展开面板' }).click();
-    await expect(page.getByTestId('chat-todo-bar')).toBeHidden();
-    await page.getByRole('button', { name: '历史' }).click();
-    await expect(page.getByText('主待办')).toBeVisible();
-    await expect(page.getByText('临时待办')).toBeVisible();
-    await expect(page.getByText('补齐聊天面板展示')).toBeVisible();
+    await page.getByTestId('chat-controls-bar').getByRole('button', { name: '展开面板' }).click();
+    await expect(page.getByTestId('chat-todo-bar')).toBeVisible();
+    await page.getByRole('tab', { name: '历史' }).click();
+    const historyPanel = page.getByTestId('chat-right-panel-body-history');
+    await expect(historyPanel.getByText('主待办')).toBeVisible();
+    await expect(historyPanel.getByText('临时待办')).toBeVisible();
+    await expect(historyPanel.getByText('补齐聊天面板展示')).toBeVisible();
     await page.screenshot({ path: 'test-results/chat-todo-history.png', fullPage: true });
   });
 });

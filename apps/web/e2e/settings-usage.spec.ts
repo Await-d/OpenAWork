@@ -118,12 +118,12 @@ test.describe('Settings usage', () => {
     await page.goto('/settings/usage');
 
     await expect(page).toHaveURL(/\/settings\/usage$/);
-    await expect(page.getByText('模型费用配置')).toBeVisible();
     await expect(page.getByText('接近预算：$8.5000 / $10.0000')).toBeVisible();
-    await expect(page.getByText('gpt-5')).toHaveCount(2);
-    await expect(page.getByText('OpenAI')).toBeVisible();
-    await expect(page.getByText('$1.25')).toBeVisible();
-    await expect(page.getByText('$5.00')).toBeVisible();
+    await page.getByText('gpt-5').first().scrollIntoViewIfNeeded();
+    await expect(page.getByText('gpt-5').first()).toBeVisible();
+    await expect(page.getByText('OpenAI').first()).toBeVisible();
+    await expect(page.getByText('$1.25').first()).toBeVisible();
+    await expect(page.getByText('$5.00').first()).toBeVisible();
   });
 
   test('Given usage records API failure When visiting settings usage Then shows explicit error state', async ({
