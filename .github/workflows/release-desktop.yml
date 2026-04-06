@@ -149,6 +149,8 @@ jobs:
     needs: [resolve-release-notes, build]
     if: ${{ startsWith(github.ref, 'refs/tags/desktop-v') }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: desktop-release-notes
@@ -164,22 +166,26 @@ jobs:
           NOTES_FILE: temp/release-notes/release-notes.md
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > release.json
-          node - <<'NODE'
-          const { readFileSync, writeFileSync } = require('node:fs');
-          const baseBody = readFileSync(process.env.NOTES_FILE, 'utf8').trimEnd();
-          const release = JSON.parse(readFileSync('release.json', 'utf8'));
-          const assets = (release.assets ?? []).filter((asset) => {
-            const name = String(asset.name ?? '');
-            return !name.endsWith('.sig') && !name.endsWith('.json');
-          });
+          CHANNEL=stable
+          if [[ "${GITHUB_REF_NAME}" == *-preview ]]; then
+            CHANNEL=preview
+          fi
+          node scripts/release-result-summary.mjs print \
+            --target desktop \
+            --base-file "$NOTES_FILE" \
+            --input-file release.json \
+            --version "$GITHUB_REF_NAME" \
+            --channel "$CHANNEL" \
+            --output-file release-body-final.md >/dev/null
 
-          const installerSection = assets.length > 0
-            ? assets.map((asset) => `- [${asset.name}](${asset.browser_download_url})`).join('\n')
-            : '- 当前未发现安装包附件。';
+      - name: Append desktop release summary to workflow summary
+        run: cat release-body-final.md >> "$GITHUB_STEP_SUMMARY"
 
-          const finalBody = `${baseBody}\n\n## 平台安装包下载\n\n${installerSection}\n`;
-          writeFileSync('release-body-final.md', finalBody, 'utf8');
-          NODE
+      - name: Upload desktop release summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-summary
+          path: release-body-final.md
 
       - name: Update GitHub release body
         env:

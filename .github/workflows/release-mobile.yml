@@ -202,6 +202,12 @@ jobs:
     needs: [resolve-release-notes, build]
     if: ${{ always() }}
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - uses: actions/download-artifact@v4
         with:
           name: mobile-release-notes
@@ -213,37 +219,25 @@ jobs:
           name: eas-build-results
           path: temp/eas-build-results
 
-      - name: Append Chinese release notes to workflow summary
+      - name: Build unified mobile release summary
         run: |
-          cat "temp/release-notes/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
-          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
-          const { existsSync, readFileSync } = require('node:fs');
+          CHANNEL=preview
+          if [[ "${GITHUB_REF_NAME}" == mobile-v* ]] || [[ "${{ inputs.profile }}" == "production" ]]; then
+            CHANNEL=production
+          fi
+          node scripts/release-result-summary.mjs print \
+            --target mobile \
+            --base-file temp/release-notes/release-notes.md \
+            --input-file temp/eas-build-results/eas-build-results.json \
+            --version "${{ needs.resolve-release-notes.outputs.version }}" \
+            --channel "$CHANNEL" \
+            --output-file mobile-release-summary.md >/dev/null
 
-          const resultPath = 'temp/eas-build-results/eas-build-results.json';
-          if (!existsSync(resultPath)) {
-            process.stdout.write('\n## 移动端安装包 / 构建产物\n\n- 当前未找到 EAS 构建结果文件，可能是构建失败或未生成可下载产物。\n');
-            process.exit(0);
-          }
+      - name: Append unified mobile release summary to workflow summary
+        run: cat mobile-release-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-          const raw = JSON.parse(readFileSync(resultPath, 'utf8'));
-          const builds = Array.isArray(raw) ? raw : [raw];
-          const lines = builds
-            .map((build) => {
-              const platform = String(build.platform ?? 'unknown');
-              const url =
-                build.artifacts?.buildUrl ??
-                build.artifacts?.applicationArchiveUrl ??
-                build.buildDetailsPageUrl ??
-                build.logs?.buildLogsUrl ??
-                '';
-
-              if (!url) {
-                return `- ${platform}: 未返回可公开访问的构建产物链接`;
-              }
-
-              return `- ${platform}: ${url}`;
-            })
-            .join('\n');
-
-          process.stdout.write(`\n## 移动端安装包 / 构建产物\n\n${lines}\n`);
-          NODE
+      - name: Upload mobile release summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-summary
+          path: mobile-release-summary.md
