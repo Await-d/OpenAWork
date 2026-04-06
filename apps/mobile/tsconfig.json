@@ -9,6 +9,7 @@
     "outDir": "./dist",
     "skipLibCheck": true,
     "paths": {
+      "@openAwork/artifacts": ["../../packages/artifacts/src/index.ts"],
       "@openAwork/shared": ["../../packages/shared/src/index.ts"],
       "@openAwork/agent-core": ["../../packages/agent-core/src/index.ts"],
       "@openAwork/web-client": ["../../packages/web-client/src/index.ts"]

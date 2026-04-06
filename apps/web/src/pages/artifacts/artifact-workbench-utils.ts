@@ -76,7 +76,7 @@ function normalizeFileStem(title: string): string {
 }
 
 export function buildArtifactVirtualPath(artifact: Pick<ArtifactRecord, 'title' | 'type'>): string {
-  const extension = ARTIFACT_FILE_EXTENSION[artifact.type];
+  const extension = ARTIFACT_FILE_EXTENSION[artifact.type] ?? 'bin';
   const normalizedTitle = normalizeFileStem(artifact.title);
   if (normalizedTitle.toLowerCase().endsWith(`.${extension.toLowerCase()}`)) {
     return normalizedTitle;
