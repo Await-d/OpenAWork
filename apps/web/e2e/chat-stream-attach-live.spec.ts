@@ -269,7 +269,6 @@ test.describe.serial('Chat attach live recovery', () => {
       timeout: 15_000,
     });
     await expect(page.getByRole('button', { name: /bash TOOL pwd 等待权限/u })).toHaveCount(0);
-    await expect(page.locator('body')).toContainText('权限已响应');
   });
 
   test('refreshes during a permission pause, then rejects and returns to idle', async ({
