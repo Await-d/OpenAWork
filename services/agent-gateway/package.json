@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "build:binary": "bun build src/index.ts --compile --outfile dist/agent-gateway",
     "start": "node dist/index.js",
     "typecheck": "tsc -b tsconfig.typecheck.json --force",
