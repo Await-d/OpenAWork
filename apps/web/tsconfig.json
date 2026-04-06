@@ -9,6 +9,7 @@
     "baseUrl": ".",
     "paths": {
       "@openAwork/artifacts": ["../../packages/artifacts/src/index.ts"],
+      "@openAwork/logger": ["../../packages/logger/src/index.ts"],
       "@openAwork/shared": ["../../packages/shared/src/index.ts"],
       "@openAwork/shared-ui": ["../../packages/shared-ui/src/index.ts"],
       "@openAwork/web-client": ["../../packages/web-client/src/index.ts"]
