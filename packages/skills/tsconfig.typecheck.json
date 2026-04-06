@@ -3,5 +3,8 @@
   "compilerOptions": {
     "tsBuildInfoFile": "/tmp/openawork-skills.typecheck.tsbuildinfo"
   },
-  "references": [{ "path": "../mcp-client" }, { "path": "../skill-types" }]
+  "references": [
+    { "path": "../mcp-client/tsconfig.typecheck.json" },
+    { "path": "../skill-types/tsconfig.typecheck.json" }
+  ]
 }
