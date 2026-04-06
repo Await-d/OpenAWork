@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "tsc --watch",
-    "build": "tsc",
+    "build": "tsc -b --force",
     "typecheck": "tsc -b tsconfig.typecheck.json --emitDeclarationOnly --force",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint .",
