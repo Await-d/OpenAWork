@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "/tmp/openawork-agent-core.typecheck.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../platform-adapter/tsconfig.typecheck.json" },
+    { "path": "../shared/tsconfig.typecheck.json" }
+  ]
+}

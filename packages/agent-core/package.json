@@ -25,8 +25,8 @@
   },
   "scripts": {
     "dev": "tsc --watch",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b --force",
+    "typecheck": "tsc -b tsconfig.typecheck.json --emitDeclarationOnly --force",
     "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf dist"
