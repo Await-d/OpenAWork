@@ -113,7 +113,9 @@
 - `release-desktop.yml` 会把这份发布稿写入 GitHub Release body
 - `release-desktop.yml` 在桌面多平台安装包构建完成后，还会把实际下载链接自动追加到 GitHub Release body
 - `release-mobile.yml` 会读取同一份发布稿，把首行中文总结用作 OTA message，并把完整内容输出到 workflow summary
-- `release-mobile.yml` 还会在构建完成后，把 iOS / Android 的 EAS 构建产物链接（若 CLI 返回）追加到 workflow summary
+- `release-desktop.yml` / `release-mobile.yml` 现在都通过 `scripts/release-result-summary.mjs` 生成统一的“发布结果”摘要模板
+- 桌面端会输出 `desktop-release-summary` artifact，并将安装包链接同时写入 GitHub Release body 和 workflow summary
+- 移动端会输出 `mobile-release-summary` artifact，并将 EAS 构建产物链接追加到 workflow summary
 
 ## 本地命令
 
