@@ -6,8 +6,12 @@
     "jsx": "react-jsx",
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true
+    "composite": true,
+    "paths": {
+      "@openAwork/shared": ["../shared/src/index.ts"]
+    }
   },
+  "references": [{ "path": "../shared" }],
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

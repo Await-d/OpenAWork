@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "/tmp/openawork-shared-ui.typecheck.tsbuildinfo"
+  },
+  "references": [{ "path": "../shared/tsconfig.typecheck.json" }]
+}
