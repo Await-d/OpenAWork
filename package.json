@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "pnpm --parallel -r run dev",
     "build": "pnpm -r run build",
+    "build:desktop": "pnpm --filter @openAwork/desktop build",
+    "package:desktop": "pnpm --filter @openAwork/desktop build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
