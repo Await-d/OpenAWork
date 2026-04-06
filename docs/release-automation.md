@@ -79,6 +79,13 @@
 - `pnpm --filter @openAwork/mobile test`
 - `scripts/release-notes.mjs` dry-run 校验（使用预计版本号生成发布稿草案）
 
+### CI 与发布包的区别
+
+- `CI` workflow 只负责质量检查、测试和常规构建验证，**不会自动发布桌面/移动端安装包**。
+- 桌面安装包由 `release-desktop.yml` 在 tag / 手动触发时生成，并发布到 GitHub Release。
+- `release-desktop.yml` 也会把安装包目录上传为 workflow artifacts，便于在 Actions 页面直接下载。
+- 移动端安装包由 `release-mobile.yml` 触发 EAS 云构建，workflow 中保存的是构建结果 JSON 与产物链接，而不是仓库本地文件。
+
 当前**暂不纳入**发布门禁的项目：
 
 - `pnpm --filter @openAwork/desktop exec vite build`
@@ -114,7 +121,16 @@
 pnpm version:bump -- --bump auto
 pnpm version:bump -- --bump minor
 pnpm version:bump:dry-run
+pnpm build:desktop
+pnpm package:desktop
 ```
+
+### 本地桌面安装包
+
+- `pnpm build:desktop` / `pnpm package:desktop` 会执行桌面端 Tauri 打包。
+- 构建成功后，脚本会直接打印识别到的安装包路径。
+- 默认安装包目录为：`apps/desktop/src-tauri/target/release/bundle/`
+- Linux 本地打包前需先安装：`pkg-config libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`
 
 ## 注意事项
 
