@@ -29,7 +29,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Materialize release notes body
         env:
@@ -71,7 +71,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - uses: actions/download-artifact@v4
@@ -135,6 +135,14 @@ jobs:
           prerelease: ${{ inputs.channel == 'preview' || (github.event_name == 'push' && contains(github.ref_name, '-preview')) }}
           includeUpdaterJson: true
 
+      - name: Upload desktop installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-installers-${{ matrix.platform }}
+          path: apps/desktop/src-tauri/target/release/bundle/
+          if-no-files-found: error
+          retention-days: 14
+
   publish-release-notes:
     name: Append Installer Links to Release Notes
     runs-on: ubuntu-latest
@@ -148,7 +156,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Build final release notes body
         env:
