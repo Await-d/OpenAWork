@@ -1,6 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@openAwork/platform-adapter': fileURLToPath(
+        new URL('../platform-adapter/src/index.ts', import.meta.url),
+      ),
+      '@openAwork/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
