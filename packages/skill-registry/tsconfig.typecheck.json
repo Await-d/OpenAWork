@@ -3,5 +3,5 @@
   "compilerOptions": {
     "tsBuildInfoFile": "/tmp/openawork-skill-registry.typecheck.tsbuildinfo"
   },
-  "references": [{ "path": "../skill-types" }]
+  "references": [{ "path": "../skill-types/tsconfig.typecheck.json" }]
 }
