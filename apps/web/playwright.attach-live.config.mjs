@@ -1,4 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
+
+const WEB_APP_ROOT = fileURLToPath(new URL('.', import.meta.url));
+const GATEWAY_ROOT = fileURLToPath(new URL('../../services/agent-gateway/', import.meta.url));
 
 export default defineConfig({
   testDir: './e2e',
@@ -14,7 +18,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'node e2e/mock-openai-upstream.mjs',
-      cwd: '/home/await/project/OpenAWork/apps/web',
+      cwd: WEB_APP_ROOT,
       reuseExistingServer: true,
       timeout: 120000,
       url: 'http://127.0.0.1:3312/health',
@@ -22,14 +26,14 @@ export default defineConfig({
     {
       command:
         'JWT_SECRET=change-me-in-production-min-32-chars GATEWAY_HOST=127.0.0.1 GATEWAY_PORT=3300 DATABASE_URL=:memory: AI_API_KEY=test-key AI_API_BASE_URL=http://127.0.0.1:3312 AI_DEFAULT_MODEL=gpt-5-live pnpm exec tsx src/index.ts',
-      cwd: '/home/await/project/OpenAWork/services/agent-gateway',
+      cwd: GATEWAY_ROOT,
       reuseExistingServer: true,
       timeout: 120000,
       url: 'http://127.0.0.1:3300/health',
     },
     {
       command: 'pnpm exec vite --host 127.0.0.1 --port 4174',
-      cwd: '/home/await/project/OpenAWork/apps/web',
+      cwd: WEB_APP_ROOT,
       reuseExistingServer: true,
       timeout: 120000,
       url: 'http://127.0.0.1:4174',
