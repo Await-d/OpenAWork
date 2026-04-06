@@ -9,7 +9,7 @@
     "build": "tsc -b",
     "build:binary": "bun build src/index.ts --compile --outfile dist/agent-gateway",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b tsconfig.typecheck.json --force",
     "test": "pnpm run test:unit && pnpm run test:verification",
     "test:chat:fast": "vitest run src/__tests__/stream-attach-route.test.ts src/__tests__/stream-stop-route.test.ts src/__tests__/session-run-events.test.ts && tsx src/verification/verify-stream-attach-recovery.ts",
     "test:unit": "vitest run --passWithNoTests",

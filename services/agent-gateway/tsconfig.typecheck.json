@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "/tmp/openawork-agent-gateway.typecheck.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../packages/agent-core/tsconfig.typecheck.json" },
+    { "path": "../../packages/artifacts/tsconfig.typecheck.json" },
+    { "path": "../../packages/browser-automation/tsconfig.typecheck.json" },
+    { "path": "../../packages/logger/tsconfig.typecheck.json" },
+    { "path": "../../packages/lsp-client" },
+    { "path": "../../packages/mcp-client/tsconfig.typecheck.json" },
+    { "path": "../../packages/pairing" },
+    { "path": "../../packages/platform-adapter/tsconfig.typecheck.json" },
+    { "path": "../../packages/shared/tsconfig.typecheck.json" },
+    { "path": "../../packages/skill-registry/tsconfig.typecheck.json" },
+    { "path": "../../packages/skills/tsconfig.typecheck.json" },
+    { "path": "../../packages/skill-types/tsconfig.typecheck.json" }
+  ]
+}
