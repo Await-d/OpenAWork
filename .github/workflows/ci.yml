@@ -172,10 +172,24 @@ jobs:
       - name: Build web
         run: pnpm --filter "@openAwork/shared" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" build
 
+      - name: Start web preview
+        run: pnpm --filter "@openAwork/web" exec vite preview --host 127.0.0.1 --port 5173 --strictPort > /tmp/openawork-e2e-preview.log 2>&1 &
+
+      - name: Wait for web preview
+        run: |
+          node -e "const http=require('http'); const url='http://127.0.0.1:5173'; let attempts=0; const max=60; const ping=()=>{attempts+=1; http.get(url,(res)=>{if(res.statusCode&&res.statusCode<500){process.exit(0);} retry();}).on('error', retry)}; const retry=()=>{if(attempts>=max){console.error('Timed out waiting for '+url); process.exit(1);} setTimeout(ping,1000)}; ping();"
+
+      - name: Start gateway
+        run: pnpm --filter "@openAwork/agent-gateway" exec tsx src/index.ts > /tmp/openawork-e2e-gateway.log 2>&1 &
+
+      - name: Wait for gateway
+        run: |
+          node -e "const http=require('http'); const url='http://127.0.0.1:3000/health'; let attempts=0; const max=60; const ping=()=>{attempts+=1; http.get(url,(res)=>{if(res.statusCode===200){process.exit(0);} retry();}).on('error', retry)}; const retry=()=>{if(attempts>=max){console.error('Timed out waiting for '+url); process.exit(1);} setTimeout(ping,1000)}; ping();"
+
       - name: Run E2E tests
         run: pnpm --filter "@openAwork/web" test:e2e
         env:
-          BASE_URL: http://localhost:5173
+          BASE_URL: http://127.0.0.1:5173
 
       - uses: actions/upload-artifact@v4
         if: failure()
