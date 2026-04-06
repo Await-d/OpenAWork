@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "/tmp/openawork-skill-registry.typecheck.tsbuildinfo"
+  },
+  "references": [{ "path": "../skill-types" }]
+}

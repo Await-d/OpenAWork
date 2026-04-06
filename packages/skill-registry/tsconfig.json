@@ -5,8 +5,12 @@
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true
+    "composite": true,
+    "paths": {
+      "@openAwork/skill-types": ["../skill-types/src/index.ts"]
+    }
   },
+  "references": [{ "path": "../skill-types" }],
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }
