@@ -11,6 +11,9 @@ export default defineConfig({
       '@openAwork/shared': fileURLToPath(
         new URL('../../packages/shared/src/index.ts', import.meta.url),
       ),
+      '@openAwork/logger': fileURLToPath(
+        new URL('../../packages/logger/src/index.ts', import.meta.url),
+      ),
       '@openAwork/shared-ui': fileURLToPath(
         new URL('../../packages/shared-ui/src/index.ts', import.meta.url),
       ),
