@@ -185,6 +185,7 @@ jobs:
     name: Publish Aggregate Release Summary
     runs-on: ubuntu-latest
     needs: [resolve-release-notes, build]
+    if: ${{ always() && needs.resolve-release-notes.result == 'success' }}
     permissions:
       contents: write
     steps:
@@ -199,12 +200,22 @@ jobs:
         with:
           node-version: 24
 
-      - name: Build desktop release summary
+      - name: Resolve desktop release state
+        id: release_state
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${{ needs.resolve-release-notes.outputs.release_tag }}" > release.json 2>/dev/null; then
+            echo "release_found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_found=false" >> "$GITHUB_OUTPUT"
+            printf '{}\n' > release.json
+          fi
+
+      - name: Build desktop release summary
+        env:
           NOTES_FILE: temp/release-notes/release-notes.md
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${{ needs.resolve-release-notes.outputs.release_tag }}" > release.json
           node scripts/release-result-summary.mjs print \
             --target desktop \
             --base-file "$NOTES_FILE" \
@@ -235,6 +246,7 @@ jobs:
           path: release-aggregate-summary.md
 
       - name: Update GitHub release body
+        if: ${{ steps.release_state.outputs.release_found == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${{ needs.resolve-release-notes.outputs.release_tag }}" --notes-file release-aggregate-summary.md
