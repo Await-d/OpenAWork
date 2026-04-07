@@ -46,6 +46,19 @@ jobs:
             printf '%s' "$RELEASE_NOTES_BODY" > release-notes.md
           fi
 
+      - name: Enrich manual release notes body
+        if: ${{ github.ref_type != 'tag' }}
+        run: |
+          TARGET="desktop-preview"
+          if [[ "${{ inputs.channel }}" == "stable" ]]; then
+            TARGET="desktop-stable"
+          fi
+
+          node scripts/release-notes.mjs enrich \
+            --body-file release-notes.md \
+            --target "$TARGET" \
+            --output-file release-notes.md
+
       - name: Validate release notes body
         run: node scripts/release-notes.mjs inspect --body-file release-notes.md
 
