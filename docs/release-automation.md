@@ -116,6 +116,7 @@
 - 若直接手动触发 `release-desktop.yml`，workflow 会基于当前仓库版本与所选 channel 自动计算 `desktop-vX.Y.Z` / `desktop-vX.Y.Z-preview`，并继续生成发布摘要与 GitHub Release body
 - 若直接手动触发 `release-desktop.yml` / `release-mobile.yml`，workflow 会先基于 `## 更新总结` 自动补全“本次更新”和“自动提取变更”段落，再进入后续发布流程
 - `release-mobile.yml` 会读取同一份发布稿，把首行中文总结用作 OTA message，并把完整内容输出到 workflow summary
+- 若 EAS 构建失败或未生成 `eas-build-results` artifact，`release-mobile.yml` 仍会输出兜底版 `mobile-release-summary`，避免发布说明链路被构建失败一并中断
 - `release-desktop.yml` / `release-mobile.yml` 现在都通过 `scripts/release-result-summary.mjs` 生成统一的“发布结果”摘要模板
 - 桌面端会输出 `desktop-release-summary` artifact，并将安装包链接同时写入 GitHub Release body 和 workflow summary
 - 移动端会输出 `mobile-release-summary` artifact，并将 EAS 构建产物链接追加到 workflow summary
