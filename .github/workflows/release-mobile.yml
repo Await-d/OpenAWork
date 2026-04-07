@@ -52,6 +52,19 @@ jobs:
             printf '%s' "$RELEASE_NOTES_BODY" > release-notes.md
           fi
 
+      - name: Enrich manual release notes body
+        if: ${{ github.ref_type != 'tag' }}
+        run: |
+          TARGET="mobile-preview"
+          if [[ "${{ inputs.profile }}" == "production" ]]; then
+            TARGET="mobile-production"
+          fi
+
+          node scripts/release-notes.mjs enrich \
+            --body-file release-notes.md \
+            --target "$TARGET" \
+            --output-file release-notes.md
+
       - name: Resolve release notes metadata
         id: notes
         shell: bash
