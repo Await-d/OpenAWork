@@ -109,10 +109,12 @@
 发布日志行为：
 
 - `Prepare Release` 会在 workflow 临时文件 `release-notes.md` 中生成发布稿，并自动提取最近一段 git 提交标题，写入“自动提取变更”段落
+- 发布稿会额外生成一段更面向终端用户的“本次更新”摘要，把最近的有效提交整理成简洁变更说明
 - tag 驱动的 desktop/mobile 发布会从 annotated tag 读取完整发布稿；mobile preview dispatch 则通过 `release_notes_body` input 透传完整发布稿
 - `release-desktop.yml` 会把这份发布稿写入 GitHub Release body
 - `release-desktop.yml` 在桌面多平台安装包构建完成后，还会把实际下载链接自动追加到 GitHub Release body
 - 若直接手动触发 `release-desktop.yml`，workflow 会基于当前仓库版本与所选 channel 自动计算 `desktop-vX.Y.Z` / `desktop-vX.Y.Z-preview`，并继续生成发布摘要与 GitHub Release body
+- 若直接手动触发 `release-desktop.yml` / `release-mobile.yml`，workflow 会先基于 `## 更新总结` 自动补全“本次更新”和“自动提取变更”段落，再进入后续发布流程
 - `release-mobile.yml` 会读取同一份发布稿，把首行中文总结用作 OTA message，并把完整内容输出到 workflow summary
 - `release-desktop.yml` / `release-mobile.yml` 现在都通过 `scripts/release-result-summary.mjs` 生成统一的“发布结果”摘要模板
 - 桌面端会输出 `desktop-release-summary` artifact，并将安装包链接同时写入 GitHub Release body 和 workflow summary
