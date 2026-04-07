@@ -80,6 +80,8 @@ jobs:
   build:
     name: Build ${{ matrix.label }}
     needs: resolve-release-notes
+    permissions:
+      contents: write
     env:
       MACOS_CERTIFICATE_PRESENT: ${{ secrets.MACOS_CERTIFICATE != '' }}
     strategy:
