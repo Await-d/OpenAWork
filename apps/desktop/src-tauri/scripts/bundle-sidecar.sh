@@ -13,7 +13,7 @@ pnpm build
 rm -rf "$SIDECARS_DIR"
 mkdir -p "$SIDECARS_DIR"
 cp -r "$GATEWAY_DIR/dist" "$SIDECARS_DIR/dist"
-cp -r "$GATEWAY_DIR/node_modules" "$SIDECARS_DIR/node_modules"
+cp -RL "$GATEWAY_DIR/node_modules" "$SIDECARS_DIR/node_modules"
 
 echo "Gateway assets staged: $SIDECARS_DIR"
 
