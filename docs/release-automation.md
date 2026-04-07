@@ -116,6 +116,8 @@
 - `release-desktop.yml` / `release-mobile.yml` 现在都通过 `scripts/release-result-summary.mjs` 生成统一的“发布结果”摘要模板
 - 桌面端会输出 `desktop-release-summary` artifact，并将安装包链接同时写入 GitHub Release body 和 workflow summary
 - 移动端会输出 `mobile-release-summary` artifact，并将 EAS 构建产物链接追加到 workflow summary
+- `scripts/release-aggregate-summary.mjs` 会把 desktop / mobile 的结果进一步聚合成单一“总发布摘要”页面
+- `release-desktop.yml` 会先生成仅含桌面结果的总发布摘要；若后续 `release-mobile.yml` 检测到同版本 desktop Release 已存在，则会把移动端结果合并回同一桌面 Release body，并输出 `release-aggregate-summary` artifact
 
 ## 本地命令
 
