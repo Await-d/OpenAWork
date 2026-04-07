@@ -124,7 +124,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Import macOS signing cert
-        if: matrix.platform == 'macos-latest'
+        if: matrix.platform == 'macos-latest' && secrets.MACOS_CERTIFICATE != ''
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
@@ -138,6 +138,7 @@ jobs:
           DELIMITER=$(node -e "process.stdout.write('EOF_' + Math.random().toString(16).slice(2))")
           echo "notes<<${DELIMITER}" >> "$GITHUB_OUTPUT"
           cat "$NOTES_FILE" >> "$GITHUB_OUTPUT"
+          printf '\n' >> "$GITHUB_OUTPUT"
           echo "${DELIMITER}" >> "$GITHUB_OUTPUT"
 
       - name: Build Tauri app
