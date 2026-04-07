@@ -111,10 +111,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Skip EAS build when Expo token is missing
+      - name: Validate Expo token for EAS build
         if: ${{ env.EXPO_TOKEN_PRESENT != 'true' }}
         run: |
-          printf 'EXPO_TOKEN 未配置，已跳过本次 EAS Build。\n' >> "$GITHUB_STEP_SUMMARY"
+          printf 'EXPO_TOKEN 未配置，无法执行 EAS Build。\n' >> "$GITHUB_STEP_SUMMARY"
+          echo '::error::EXPO_TOKEN 未配置，无法执行 EAS Build。请在 GitHub Secrets 中配置 EXPO_TOKEN 后重试。'
+          exit 1
 
       - uses: expo/expo-github-action@v8
         if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
@@ -260,7 +262,7 @@ jobs:
           path: temp/release-notes
 
       - uses: actions/download-artifact@v4
-        if: ${{ needs.build.result == 'success' }}
+        if: ${{ needs.build.result == 'success' && env.EXPO_TOKEN_PRESENT == 'true' }}
         with:
           name: eas-build-results
           path: temp/eas-build-results
@@ -273,7 +275,7 @@ jobs:
           FALLBACK_MESSAGE='当前未找到 EAS 构建结果文件，可能是构建失败或未生成可下载产物。'
 
           if [[ "${EXPO_TOKEN_PRESENT}" != "true" ]]; then
-            FALLBACK_MESSAGE='当前未配置 EXPO_TOKEN，已跳过 EAS 构建。'
+            FALLBACK_MESSAGE='当前未配置 EXPO_TOKEN，EAS 构建未执行。'
           elif [[ "$BUILD_RESULT" != "success" ]]; then
             FALLBACK_MESSAGE='EAS 构建失败，当前未生成可下载产物。'
           fi

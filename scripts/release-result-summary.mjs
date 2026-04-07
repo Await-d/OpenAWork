@@ -217,7 +217,7 @@ function helpCommand() {
     [
       'Usage:',
       '  node scripts/release-result-summary.mjs print --target desktop --base-file release-notes.md --input-file release.json --version desktop-v0.2.0-preview --channel preview --output-file release-summary.md',
-      '  node scripts/release-result-summary.mjs print --target mobile --base-file release-notes.md --input-file eas-build-results.json --version 0.2.0 --channel production --fallback-message "当前未配置 EXPO_TOKEN，已跳过 EAS 构建。" --output-file release-summary.md',
+      '  node scripts/release-result-summary.mjs print --target mobile --base-file release-notes.md --input-file eas-build-results.json --version 0.2.0 --channel production --fallback-message "当前未配置 EXPO_TOKEN，EAS 构建未执行。" --output-file release-summary.md',
       '',
     ].join('\n'),
   );
