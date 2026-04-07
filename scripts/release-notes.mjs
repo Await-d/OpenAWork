@@ -257,9 +257,18 @@ function formatAutoExtractedChanges(target) {
   return [`## ${AUTO_EXTRACT_SECTION_TITLE}`, '', sourceLine, ...bullets, ''].join('\n');
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function stripManagedSection(content, title) {
+  const escapedTitle = escapeRegExp(title);
+  const sectionPattern = new RegExp(
+    String.raw`(?:^|\n)## ${escapedTitle}\s*\n[\s\S]*?(?=\n##\s|$)`,
+    'g',
+  );
   return content
-    .replace(new RegExp(`\n?## ${title}\s*\n[\s\S]*?(?=\n##\s|$)`, 'g'), '')
+    .replace(sectionPattern, '')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd();
 }
