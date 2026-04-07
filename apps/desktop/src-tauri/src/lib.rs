@@ -2,6 +2,7 @@ use std::sync::Mutex;
 use tauri::path::BaseDirectory;
 use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_shell::open::Program;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
 
@@ -67,13 +68,13 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .dialog()
         .file()
         .blocking_pick_folder();
-    Ok(folder.map(|p| p.to_string_lossy().into_owned()))
+    Ok(folder.map(|p| p.to_string()))
 }
 
 #[tauri::command]
 async fn open_artifact_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     app.shell()
-        .open(path, None::<String>)
+        .open(path, None::<Program>)
         .map_err(|e| e.to_string())
 }
 
