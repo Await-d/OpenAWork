@@ -14,7 +14,6 @@ rm -rf "$SIDECARS_DIR"
 mkdir -p "$SIDECARS_DIR"
 cp -r "$GATEWAY_DIR/dist" "$SIDECARS_DIR/dist"
 cp -r "$GATEWAY_DIR/node_modules" "$SIDECARS_DIR/node_modules"
-cp "$GATEWAY_DIR/package.json" "$SIDECARS_DIR/package.json"
 
 echo "Gateway assets staged: $SIDECARS_DIR"
 
