@@ -93,14 +93,17 @@ jobs:
             runner: macos-latest
             args: '--target aarch64-apple-darwin'
             rust_targets: 'aarch64-apple-darwin'
+            bundle_path: apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/
           - label: windows
             runner: windows-latest
             args: ''
             rust_targets: ''
+            bundle_path: apps/desktop/src-tauri/target/release/bundle/
           - label: linux
             runner: ubuntu-22.04
             args: ''
             rust_targets: ''
+            bundle_path: apps/desktop/src-tauri/target/release/bundle/
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -216,7 +219,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-installers-${{ matrix.label }}
-          path: apps/desktop/src-tauri/target/release/bundle/
+          path: ${{ matrix.bundle_path }}
           if-no-files-found: error
           retention-days: 14
 
