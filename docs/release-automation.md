@@ -112,6 +112,7 @@
 - tag 驱动的 desktop/mobile 发布会从 annotated tag 读取完整发布稿；mobile preview dispatch 则通过 `release_notes_body` input 透传完整发布稿
 - `release-desktop.yml` 会把这份发布稿写入 GitHub Release body
 - `release-desktop.yml` 在桌面多平台安装包构建完成后，还会把实际下载链接自动追加到 GitHub Release body
+- 若直接手动触发 `release-desktop.yml`，workflow 会基于当前仓库版本与所选 channel 自动计算 `desktop-vX.Y.Z` / `desktop-vX.Y.Z-preview`，并继续生成发布摘要与 GitHub Release body
 - `release-mobile.yml` 会读取同一份发布稿，把首行中文总结用作 OTA message，并把完整内容输出到 workflow summary
 - `release-desktop.yml` / `release-mobile.yml` 现在都通过 `scripts/release-result-summary.mjs` 生成统一的“发布结果”摘要模板
 - 桌面端会输出 `desktop-release-summary` artifact，并将安装包链接同时写入 GitHub Release body 和 workflow summary
