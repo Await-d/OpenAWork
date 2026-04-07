@@ -83,7 +83,8 @@ jobs:
     permissions:
       contents: write
     env:
-      MACOS_CERTIFICATE_PRESENT: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      MACOS_CODESIGN_READY: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+      MACOS_NOTARIZATION_READY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -134,7 +135,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Import macOS signing cert
-        if: matrix.runner == 'macos-latest' && env.MACOS_CERTIFICATE_PRESENT == 'true'
+        if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true'
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
@@ -151,7 +152,45 @@ jobs:
           printf '\n' >> "$GITHUB_OUTPUT"
           echo "${DELIMITER}" >> "$GITHUB_OUTPUT"
 
-      - name: Build Tauri app
+      - name: Build Tauri app (default)
+        if: matrix.runner != 'macos-latest' || env.MACOS_CODESIGN_READY != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.args }}
+          tagName: ${{ needs.resolve-release-notes.outputs.release_tag }}
+          releaseName: ${{ needs.resolve-release-notes.outputs.release_name }}
+          releaseBody: ${{ steps.notes_body.outputs.notes || inputs.channel }}
+          releaseDraft: false
+          prerelease: ${{ needs.resolve-release-notes.outputs.release_channel == 'preview' }}
+          includeUpdaterJson: true
+
+      - name: Build Tauri app (macOS signed)
+        if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true' && env.MACOS_NOTARIZATION_READY != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.args }}
+          tagName: ${{ needs.resolve-release-notes.outputs.release_tag }}
+          releaseName: ${{ needs.resolve-release-notes.outputs.release_name }}
+          releaseBody: ${{ steps.notes_body.outputs.notes || inputs.channel }}
+          releaseDraft: false
+          prerelease: ${{ needs.resolve-release-notes.outputs.release_channel == 'preview' }}
+          includeUpdaterJson: true
+
+      - name: Build Tauri app (macOS signed + notarized)
+        if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true' && env.MACOS_NOTARIZATION_READY == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
