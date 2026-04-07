@@ -1,5 +1,9 @@
 name: Release Mobile
 
+env:
+  EXPO_TOKEN_PRESENT: ${{ secrets.EXPO_TOKEN != '' }}
+  IOS_SUBMIT_READY: ${{ secrets.EXPO_TOKEN != '' && secrets.APPLE_ID != '' && secrets.ASC_APP_ID != '' && secrets.APPLE_TEAM_ID != '' }}
+
 on:
   push:
     tags:
@@ -107,13 +111,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Skip EAS build when Expo token is missing
+        if: ${{ env.EXPO_TOKEN_PRESENT != 'true' }}
+        run: |
+          printf 'EXPO_TOKEN 未配置，已跳过本次 EAS Build。\n' >> "$GITHUB_STEP_SUMMARY"
+
       - uses: expo/expo-github-action@v8
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
         with:
           expo-version: latest
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: EAS Build
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
         working-directory: apps/mobile
         run: |
           PROFILE=${{ inputs.profile || 'preview' }}
@@ -127,6 +138,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload EAS build results
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: eas-build-results
@@ -150,21 +162,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Skip OTA update when Expo token is missing
+        if: ${{ env.EXPO_TOKEN_PRESENT != 'true' }}
+        run: |
+          printf 'EXPO_TOKEN 未配置，已跳过 OTA 推送。\n' >> "$GITHUB_STEP_SUMMARY"
+
       - uses: expo/expo-github-action@v8
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
         with:
           expo-version: latest
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Push OTA to preview channel
-        if: ${{ inputs.profile == 'preview' }}
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' && inputs.profile == 'preview' }}
         working-directory: apps/mobile
         run: eas update --channel preview --message "${{ needs.resolve-release-notes.outputs.summary_line }}" --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Push OTA to production channel
-        if: ${{ inputs.profile == 'production' || startsWith(github.ref, 'refs/tags/mobile-v') }}
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' && (inputs.profile == 'production' || startsWith(github.ref, 'refs/tags/mobile-v')) }}
         working-directory: apps/mobile
         run: eas update --channel production --message "${{ needs.resolve-release-notes.outputs.summary_line }}" --non-interactive
         env:
@@ -188,13 +206,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Skip store submission when Expo token is missing
+        if: ${{ env.EXPO_TOKEN_PRESENT != 'true' }}
+        run: |
+          printf 'EXPO_TOKEN 未配置，已跳过应用商店提交流程。\n' >> "$GITHUB_STEP_SUMMARY"
+
       - uses: expo/expo-github-action@v8
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
         with:
           expo-version: latest
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Skip iOS submit when Apple credentials are missing
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' && env.IOS_SUBMIT_READY != 'true' }}
+        run: |
+          printf 'Apple 提交凭证不完整，已跳过 iOS 提交。\n' >> "$GITHUB_STEP_SUMMARY"
+
       - name: EAS Submit iOS
+        if: ${{ env.IOS_SUBMIT_READY == 'true' }}
         working-directory: apps/mobile
         run: eas submit --platform ios --latest --non-interactive
         env:
@@ -204,6 +234,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: EAS Submit Android
+        if: ${{ env.EXPO_TOKEN_PRESENT == 'true' }}
         working-directory: apps/mobile
         run: eas submit --platform android --latest --non-interactive
         env:
@@ -235,8 +266,18 @@ jobs:
           path: temp/eas-build-results
 
       - name: Build unified mobile release summary
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
         run: |
           CHANNEL=preview
+          FALLBACK_MESSAGE='当前未找到 EAS 构建结果文件，可能是构建失败或未生成可下载产物。'
+
+          if [[ "${EXPO_TOKEN_PRESENT}" != "true" ]]; then
+            FALLBACK_MESSAGE='当前未配置 EXPO_TOKEN，已跳过 EAS 构建。'
+          elif [[ "$BUILD_RESULT" != "success" ]]; then
+            FALLBACK_MESSAGE='EAS 构建失败，当前未生成可下载产物。'
+          fi
+
           if [[ "${GITHUB_REF_NAME}" == mobile-v* ]] || [[ "${{ inputs.profile }}" == "production" ]]; then
             CHANNEL=production
           fi
@@ -246,6 +287,7 @@ jobs:
             --input-file temp/eas-build-results/eas-build-results.json \
             --version "${{ needs.resolve-release-notes.outputs.version }}" \
             --channel "$CHANNEL" \
+            --fallback-message "$FALLBACK_MESSAGE" \
             --output-file mobile-release-summary.md >/dev/null
 
       - name: Build aggregate release summary when desktop release exists

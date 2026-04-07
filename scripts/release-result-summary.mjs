@@ -141,9 +141,11 @@ function resolveMobileBuildUrl(build) {
   );
 }
 
-function buildMobileResultLines(buildResults) {
+function buildMobileResultLines(buildResults, fallbackMessage) {
   if (!buildResults) {
-    return ['- 当前未找到 EAS 构建结果文件，可能是构建失败或未生成可下载产物。'];
+    return [
+      `- ${fallbackMessage || '当前未找到 EAS 构建结果文件，可能是构建失败或未生成可下载产物。'}`,
+    ];
   }
 
   const builds = Array.isArray(buildResults) ? buildResults : [buildResults];
@@ -193,11 +195,14 @@ function printCommand(options) {
   const outputFile = options['output-file']?.trim() ?? '';
   const version = normalizeVersion(options['version']?.trim() ?? '');
   const channel = normalizeChannel(options['channel']?.trim() ?? '');
+  const fallbackMessage = options['fallback-message']?.trim() ?? '';
 
   const baseBody = readTextFile(baseFile).trimEnd();
   const inputJson = readOptionalJson(inputFile);
   const resultLines =
-    target === 'desktop' ? buildDesktopResultLines(inputJson) : buildMobileResultLines(inputJson);
+    target === 'desktop'
+      ? buildDesktopResultLines(inputJson)
+      : buildMobileResultLines(inputJson, fallbackMessage);
   const finalBody = `${baseBody}\n\n${buildResultSection({ target, version, channel, resultLines })}`;
 
   if (outputFile) {
@@ -212,7 +217,7 @@ function helpCommand() {
     [
       'Usage:',
       '  node scripts/release-result-summary.mjs print --target desktop --base-file release-notes.md --input-file release.json --version desktop-v0.2.0-preview --channel preview --output-file release-summary.md',
-      '  node scripts/release-result-summary.mjs print --target mobile --base-file release-notes.md --input-file eas-build-results.json --version 0.2.0 --channel production --output-file release-summary.md',
+      '  node scripts/release-result-summary.mjs print --target mobile --base-file release-notes.md --input-file eas-build-results.json --version 0.2.0 --channel production --fallback-message "当前未配置 EXPO_TOKEN，已跳过 EAS 构建。" --output-file release-summary.md',
       '',
     ].join('\n'),
   );
