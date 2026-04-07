@@ -78,7 +78,7 @@ jobs:
           path: release-notes.md
 
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.label }}
     needs: resolve-release-notes
     env:
       MACOS_CERTIFICATE_PRESENT: ${{ secrets.MACOS_CERTIFICATE != '' }}
@@ -86,13 +86,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: '--target aarch64-apple-darwin,x86_64-apple-darwin'
-          - platform: windows-latest
+          - label: macos-aarch64
+            runner: macos-latest
+            args: '--target aarch64-apple-darwin'
+            rust_targets: 'aarch64-apple-darwin'
+          - label: macos-x64
+            runner: macos-latest
+            args: '--target x86_64-apple-darwin'
+            rust_targets: 'x86_64-apple-darwin'
+          - label: windows
+            runner: windows-latest
             args: ''
-          - platform: ubuntu-22.04
+            rust_targets: ''
+          - label: linux
+            runner: ubuntu-22.04
             args: ''
-    runs-on: ${{ matrix.platform }}
+            rust_targets: ''
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -109,14 +119,14 @@ jobs:
           path: temp/release-notes
 
       - name: Install Linux system deps
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.runner == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust_targets }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -126,7 +136,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Import macOS signing cert
-        if: matrix.platform == 'macos-latest' && env.MACOS_CERTIFICATE_PRESENT == 'true'
+        if: matrix.runner == 'macos-latest' && env.MACOS_CERTIFICATE_PRESENT == 'true'
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
@@ -168,7 +178,7 @@ jobs:
       - name: Upload desktop installers
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-installers-${{ matrix.platform }}
+          name: desktop-installers-${{ matrix.label }}
           path: apps/desktop/src-tauri/target/release/bundle/
           if-no-files-found: error
           retention-days: 14
