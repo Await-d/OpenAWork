@@ -229,8 +229,8 @@ jobs:
           path: temp/release-notes
 
       - uses: actions/download-artifact@v4
+        if: ${{ needs.build.result == 'success' }}
         with:
-          if-no-files-found: ignore
           name: eas-build-results
           path: temp/eas-build-results
 
