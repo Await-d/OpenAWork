@@ -201,6 +201,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [resolve-release-notes, build]
     if: ${{ always() }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -233,11 +235,90 @@ jobs:
             --channel "$CHANNEL" \
             --output-file mobile-release-summary.md >/dev/null
 
-      - name: Append unified mobile release summary to workflow summary
-        run: cat mobile-release-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Build aggregate release summary when desktop release exists
+        id: aggregate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.resolve-release-notes.outputs.version }}
+        run: |
+          CHANNEL=preview
+          if [[ "${GITHUB_REF_NAME}" == mobile-v* ]] || [[ "${{ inputs.profile }}" == "production" ]]; then
+            CHANNEL=production
+          fi
+
+          DESKTOP_TAG="desktop-v${VERSION}"
+          if [[ "$CHANNEL" == "preview" ]]; then
+            DESKTOP_TAG="desktop-v${VERSION}-preview"
+          fi
+
+          DESKTOP_CHANNEL=stable
+          if [[ "$DESKTOP_TAG" == *-preview ]]; then
+            DESKTOP_CHANNEL=preview
+          fi
+
+          DESKTOP_FOUND=false
+          for _ in $(seq 1 12); do
+            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${DESKTOP_TAG}" > desktop-release.json 2>/dev/null; then
+              DESKTOP_FOUND=true
+              break
+            fi
+            sleep 10
+          done
+
+          echo "desktop_tag=${DESKTOP_TAG}" >> "$GITHUB_OUTPUT"
+          echo "desktop_found=${DESKTOP_FOUND}" >> "$GITHUB_OUTPUT"
+          echo "desktop_channel=${DESKTOP_CHANNEL}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$DESKTOP_FOUND" != "true" ]]; then
+            exit 0
+          fi
+
+          node - <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const release = JSON.parse(readFileSync('desktop-release.json', 'utf8'));
+          const body = String(release.body ?? '');
+          const baseBody = body.replace(/\n?## 总发布摘要[\s\S]*$/m, '').trimEnd();
+          writeFileSync('desktop-release-body.md', `${baseBody}\n`, 'utf8');
+          NODE
+
+          node scripts/release-result-summary.mjs print \
+            --target desktop \
+            --base-file desktop-release-body.md \
+            --input-file desktop-release.json \
+            --version "$DESKTOP_TAG" \
+            --channel "$DESKTOP_CHANNEL" \
+            --output-file desktop-release-summary.md >/dev/null
+
+          node scripts/release-aggregate-summary.mjs print \
+            --base-file desktop-release-body.md \
+            --desktop-file desktop-release-summary.md \
+            --mobile-file mobile-release-summary.md \
+            --version "$VERSION" \
+            --output-file release-aggregate-summary.md >/dev/null
+
+      - name: Append final release summary to workflow summary
+        run: |
+          if [[ "${{ steps.aggregate.outputs.desktop_found }}" == "true" ]]; then
+            cat release-aggregate-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat mobile-release-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload mobile release summary artifact
         uses: actions/upload-artifact@v4
         with:
           name: mobile-release-summary
           path: mobile-release-summary.md
+
+      - name: Upload aggregate release summary artifact
+        if: ${{ steps.aggregate.outputs.desktop_found == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aggregate-summary
+          path: release-aggregate-summary.md
+
+      - name: Update matching desktop release body
+        if: ${{ steps.aggregate.outputs.desktop_found == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ steps.aggregate.outputs.desktop_tag }}" --notes-file release-aggregate-summary.md
