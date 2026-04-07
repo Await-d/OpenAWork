@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "tauri dev",
-    "build": "bash src-tauri/scripts/check-build-deps.sh && bash src-tauri/scripts/bundle-sidecar.sh && tauri build && node src-tauri/scripts/print-bundle-artifacts.mjs",
+    "tauri": "bash src-tauri/scripts/check-build-deps.sh && bash src-tauri/scripts/bundle-sidecar.sh && tauri",
+    "build": "pnpm run tauri build && node src-tauri/scripts/print-bundle-artifacts.mjs",
     "package": "pnpm run build",
     "bundle-sidecar": "bash src-tauri/scripts/bundle-sidecar.sh",
     "typecheck": "tsc --noEmit",
