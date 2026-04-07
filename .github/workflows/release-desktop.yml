@@ -80,6 +80,8 @@ jobs:
   build:
     name: Build ${{ matrix.platform }}
     needs: resolve-release-notes
+    env:
+      MACOS_CERTIFICATE_PRESENT: ${{ secrets.MACOS_CERTIFICATE != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -124,7 +126,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Import macOS signing cert
-        if: matrix.platform == 'macos-latest' && secrets.MACOS_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest' && env.MACOS_CERTIFICATE_PRESENT == 'true'
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
