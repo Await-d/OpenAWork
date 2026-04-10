@@ -106,6 +106,10 @@ describe('WorkflowsPage', () => {
     expect(container?.textContent).toContain('工作流工作台');
     expect(container?.textContent).toContain('审批流模板');
     expect(container?.textContent).toContain('节点检查器');
+    const launchLink = Array.from(container?.querySelectorAll('a') ?? []).find((anchor) =>
+      anchor.textContent?.includes('在 Team 中发起'),
+    ) as HTMLAnchorElement | undefined;
+    expect(launchLink?.getAttribute('href')).toContain('/team?workflowTemplateId=workflow-1');
   });
 
   it('saves the current draft as a template', async () => {

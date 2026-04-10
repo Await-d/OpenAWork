@@ -1,4 +1,5 @@
 import { WorkflowCanvas, WorkflowTemplateLibrary } from '@openAwork/shared-ui';
+import { Link } from 'react-router';
 import { useWorkflowStudio } from './workflows/use-workflow-studio.js';
 
 export default function WorkflowsPage() {
@@ -169,9 +170,20 @@ export default function WorkflowsPage() {
                         '当前是可编辑草稿，你可以继续加节点并另存成模板。'}
                     </span>
                   </div>
-                  <button type="button" onClick={addNode} disabled={busy}>
-                    添加节点
-                  </button>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {selectedTemplate ? (
+                      <Link
+                        to={`/team?workflowTemplateId=${encodeURIComponent(selectedTemplate.id)}&workflowTemplateName=${encodeURIComponent(selectedTemplate.name)}&workflowTemplateDescription=${encodeURIComponent(selectedTemplate.description ?? '')}&workflowTemplateNodeCount=${selectedTemplate.nodes.length}`}
+                        className="primary-button"
+                        style={{ textDecoration: 'none' }}
+                      >
+                        在 Team 中发起
+                      </Link>
+                    ) : null}
+                    <button type="button" onClick={addNode} disabled={busy}>
+                      添加节点
+                    </button>
+                  </div>
                 </div>
                 <WorkflowCanvas
                   edges={draftEdges}
