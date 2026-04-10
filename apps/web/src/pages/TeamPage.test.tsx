@@ -746,11 +746,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function renderPage() {
+async function renderPage(initialEntry = '/team') {
   const { default: TeamPage } = await import('./TeamPage.js');
   await act(async () => {
     root?.render(
-      <MemoryRouter initialEntries={['/team']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <TeamPage />
       </MemoryRouter>,
     );
@@ -867,6 +867,40 @@ describe('TeamPage', () => {
     await renderPage();
 
     expect(container?.textContent).toContain('Failed to load team runtime: 500');
+  });
+
+  it('renders the workflow handoff card and can create a team task from template query', async () => {
+    await renderPage(
+      '/team?workflowTemplateId=workflow-1&workflowTemplateName=%E5%AE%A1%E6%89%B9%E6%B5%81%E6%A8%A1%E6%9D%BF&workflowTemplateDescription=%E7%94%A8%E4%BA%8E%E5%A4%9A%E4%BA%BA%E5%8D%8F%E4%BD%9C%E5%AE%A1%E6%89%B9%E3%80%82&workflowTemplateNodeCount=2',
+    );
+
+    expect(container?.textContent).toContain('从模板“审批流模板”发起 Team 任务');
+    const launchButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('在当前 Team 中发起'),
+    );
+    expect(launchButton).toBeTruthy();
+
+    await act(async () => {
+      launchButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      fetchMock.mock.calls.some(([input, init]) => {
+        if (
+          input !== 'http://localhost:3000/team/tasks' ||
+          (init as RequestInit | undefined)?.method !== 'POST'
+        ) {
+          return false;
+        }
+        const payload = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as {
+          title?: string;
+          priority?: string;
+        };
+        return payload.title === '按模板执行：审批流模板' && payload.priority === 'high';
+      }),
+    ).toBe(true);
   });
 
   it('creates a new team task from the composer', async () => {

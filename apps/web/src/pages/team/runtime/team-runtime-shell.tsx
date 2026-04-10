@@ -120,6 +120,13 @@ interface TeamRuntimeShellProps {
   runtimeTasks: SessionTask[];
   runtimeTasksLoading: boolean;
   tasks: TeamTaskRecord[];
+  workflowLaunch: {
+    nodeCount: number;
+    templateDescription: string;
+    templateId: string;
+    templateName: string;
+  } | null;
+  onLaunchWorkflowTemplate: () => Promise<boolean>;
 }
 
 const tabs: Array<{ key: RuntimeTabKey; label: string; summary: string }> = [
@@ -330,6 +337,8 @@ export function TeamRuntimeShell({
   runtimeTasks,
   runtimeTasksLoading,
   tasks,
+  workflowLaunch,
+  onLaunchWorkflowTemplate,
 }: TeamRuntimeShellProps) {
   const [activeTab, setActiveTab] = useState<RuntimeTabKey>('overview');
   const [interactionDraft, setInteractionDraft] = useState('');
@@ -395,6 +404,48 @@ export function TeamRuntimeShell({
                 description="先把工作区视角拉起来，再逐步把共享会话、任务推进和人工介入纳入同一块屏幕。"
               />
               <div style={{ display: 'grid', gap: 10 }}>
+                {workflowLaunch ? (
+                  <section
+                    className="content-card"
+                    style={{ display: 'grid', gap: 10, padding: 14 }}
+                  >
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: '0.14em',
+                          textTransform: 'uppercase',
+                          color: 'var(--accent)',
+                        }}
+                      >
+                        Workflow handoff
+                      </span>
+                      <span style={{ fontSize: 18, fontWeight: 800 }}>
+                        从模板“{workflowLaunch.templateName}”发起 Team 任务
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.7 }}>
+                        {workflowLaunch.templateDescription || '当前模板没有描述。'} · 节点数：
+                        {workflowLaunch.nodeCount}
+                      </span>
+                    </div>
+                    <div
+                      style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}
+                    >
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => void onLaunchWorkflowTemplate()}
+                        disabled={busy}
+                      >
+                        {busy ? '发起中…' : '在当前 Team 中发起'}
+                      </button>
+                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        当前会先创建一条团队任务，作为模板执行的最小入口。
+                      </span>
+                    </div>
+                  </section>
+                ) : null}
                 {workspaceOverviewLines.map((line) => (
                   <div
                     key={line}

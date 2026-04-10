@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router';
 import type {
   CreateTeamMessageInput,
   TeamMemberRecord,
@@ -11,6 +12,7 @@ import { submitInteractionAgentFlow } from './team/runtime/interaction-agent-flo
 import { TeamRuntimeShell } from './team/runtime/team-runtime-shell.js';
 
 export default function TeamPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     auditLogs,
     busy,
@@ -72,6 +74,14 @@ export default function TeamPage() {
     sessionId: string;
   }>({ memberId: '', permission: 'view', sessionId: '' });
   const [sharedCommentDraft, setSharedCommentDraft] = useState('');
+  const workflowLaunch = searchParams.get('workflowTemplateId')
+    ? {
+        templateId: searchParams.get('workflowTemplateId') ?? '',
+        templateName: searchParams.get('workflowTemplateName') ?? '未命名模板',
+        templateDescription: searchParams.get('workflowTemplateDescription') ?? '',
+        nodeCount: Number(searchParams.get('workflowTemplateNodeCount') ?? '0') || 0,
+      }
+    : null;
 
   const handleCreateMember = async () => {
     const succeeded = await createMember({
@@ -145,6 +155,28 @@ export default function TeamPage() {
     }
   };
 
+  const handleLaunchWorkflowTemplate = async () => {
+    if (!workflowLaunch) {
+      return false;
+    }
+
+    const succeeded = await createTask({
+      title: `按模板执行：${workflowLaunch.templateName}`,
+      priority: 'high',
+    });
+    if (!succeeded) {
+      return false;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('workflowTemplateId');
+    nextSearchParams.delete('workflowTemplateName');
+    nextSearchParams.delete('workflowTemplateDescription');
+    nextSearchParams.delete('workflowTemplateNodeCount');
+    setSearchParams(nextSearchParams, { replace: true });
+    return true;
+  };
+
   return (
     <TeamRuntimeShell
       auditLogs={auditLogs}
@@ -214,6 +246,8 @@ export default function TeamPage() {
       runtimeTasks={runtimeTasks}
       runtimeTasksLoading={runtimeTasksLoading}
       tasks={tasks}
+      workflowLaunch={workflowLaunch}
+      onLaunchWorkflowTemplate={handleLaunchWorkflowTemplate}
     />
   );
 }
