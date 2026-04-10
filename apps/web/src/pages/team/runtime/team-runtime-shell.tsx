@@ -241,7 +241,7 @@ export function TeamRuntimeShell({
   const [activeTab, setActiveTab] = useState<RuntimeTabKey>('overview');
   const [interactionDraft, setInteractionDraft] = useState('');
   const {
-    activeAgentCount,
+    buddyProjection,
     changeMetrics,
     contextMetrics,
     effectiveSelectedSharedSession,
@@ -251,6 +251,7 @@ export function TeamRuntimeShell({
     filteredSharedSessions,
     memberNameMap,
     metrics,
+    selectedRunSummary,
     selectedWorkspace,
     selectedWorkspaceKey,
     setSelectedWorkspaceKey,
@@ -989,17 +990,13 @@ export function TeamRuntimeShell({
 
               <aside style={{ display: 'grid', gap: 16, minWidth: 0 }}>
                 <TeamRuntimeBuddy
-                  activeAgentCount={activeAgentCount}
-                  blockedCount={tasks.filter((task) => task.status === 'failed').length}
-                  pendingApprovalCount={
-                    effectiveSelectedSharedSession?.pendingPermissions.length ?? 0
-                  }
-                  pendingQuestionCount={
-                    effectiveSelectedSharedSession?.pendingQuestions.length ?? 0
-                  }
-                  runningCount={selectedWorkspace?.runningCount ?? 0}
-                  sessionTitle={effectiveSelectedSharedSession?.share.title ?? null}
-                  workspaceLabel={formatWorkspaceLabel(selectedWorkspace?.label ?? null)}
+                  activeAgentCount={buddyProjection.activeAgentCount}
+                  blockedCount={buddyProjection.blockedCount}
+                  pendingApprovalCount={buddyProjection.pendingApprovalCount}
+                  pendingQuestionCount={buddyProjection.pendingQuestionCount}
+                  runningCount={buddyProjection.runningCount}
+                  sessionTitle={buddyProjection.sessionTitle}
+                  workspaceLabel={buddyProjection.workspaceLabel}
                 />
 
                 <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
@@ -1026,28 +1023,23 @@ export function TeamRuntimeShell({
                     title="当前共享运行"
                     description="这里聚焦当前选中的共享会话，帮助你在总控页中快速判断下一步。"
                   />
-                  {effectiveSelectedSharedSession ? (
+                  {selectedRunSummary ? (
                     <div style={{ display: 'grid', gap: 10 }}>
                       <div
                         className="content-card"
                         style={{ display: 'grid', gap: 4, padding: 14 }}
                       >
                         <span style={{ fontSize: 16, fontWeight: 800 }}>
-                          {effectiveSelectedSharedSession.share.title ??
-                            effectiveSelectedSharedSession.share.sessionId}
+                          {selectedRunSummary.title}
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          工作区：
-                          {formatWorkspaceLabel(effectiveSelectedSharedSession.share.workspacePath)}
+                          工作区：{selectedRunSummary.workspaceLabel}
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          状态：
-                          {getSharedSessionStateLabel(
-                            effectiveSelectedSharedSession.share.stateStatus,
-                          )}
+                          状态：{selectedRunSummary.stateLabel}
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          共享者：{effectiveSelectedSharedSession.share.sharedByEmail}
+                          共享者：{selectedRunSummary.sharedByEmail}
                         </span>
                       </div>
                       <div
@@ -1058,21 +1050,10 @@ export function TeamRuntimeShell({
                         }}
                       >
                         {[
-                          { label: '评论', value: effectiveSelectedSharedSession.comments.length },
-                          {
-                            label: '在线查看者',
-                            value: effectiveSelectedSharedSession.presence.filter(
-                              (viewer: { active: boolean }) => viewer.active,
-                            ).length,
-                          },
-                          {
-                            label: '待审批',
-                            value: effectiveSelectedSharedSession.pendingPermissions.length,
-                          },
-                          {
-                            label: '待回答',
-                            value: effectiveSelectedSharedSession.pendingQuestions.length,
-                          },
+                          { label: '评论', value: selectedRunSummary.commentCount },
+                          { label: '在线查看者', value: selectedRunSummary.activeViewerCount },
+                          { label: '待审批', value: selectedRunSummary.pendingApprovalCount },
+                          { label: '待回答', value: selectedRunSummary.pendingQuestionCount },
                         ].map((item) => (
                           <div
                             key={item.label}

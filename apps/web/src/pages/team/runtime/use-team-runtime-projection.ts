@@ -17,6 +17,8 @@ import {
   buildWorkspaceOutputCards,
   buildWorkspaceSummaries,
   filterByWorkspace,
+  formatWorkspaceLabel,
+  getSharedSessionStateLabel,
 } from './team-runtime-model.js';
 
 interface TeamRuntimeProjectionInput {
@@ -132,6 +134,12 @@ export function useTeamRuntimeProjection({
 
   const fileChangesSummary = effectiveSelectedSharedSession?.session.fileChangesSummary;
   const activeAgentCount = members.filter((member) => member.status === 'working').length;
+  const blockedCount = tasks.filter((task) => task.status === 'failed').length;
+  const pendingApprovalCount = effectiveSelectedSharedSession?.pendingPermissions.length ?? 0;
+  const pendingQuestionCount = effectiveSelectedSharedSession?.pendingQuestions.length ?? 0;
+  const runningCount = selectedWorkspace?.runningCount ?? 0;
+  const workspaceLabel = formatWorkspaceLabel(selectedWorkspace?.label ?? null);
+  const sessionTitle = effectiveSelectedSharedSession?.share.title ?? null;
 
   const contextMetrics = useMemo(
     () =>
@@ -168,8 +176,49 @@ export function useTeamRuntimeProjection({
     [fileChangesSummary, filteredSessions, filteredSharedSessions],
   );
 
+  const selectedRunSummary = useMemo(() => {
+    if (!effectiveSelectedSharedSession) {
+      return null;
+    }
+
+    return {
+      activeViewerCount: effectiveSelectedSharedSession.presence.filter((viewer) => viewer.active)
+        .length,
+      commentCount: effectiveSelectedSharedSession.comments.length,
+      pendingApprovalCount,
+      pendingQuestionCount,
+      sharedByEmail: effectiveSelectedSharedSession.share.sharedByEmail,
+      stateLabel: getSharedSessionStateLabel(effectiveSelectedSharedSession.share.stateStatus),
+      title:
+        effectiveSelectedSharedSession.share.title ??
+        effectiveSelectedSharedSession.share.sessionId,
+      workspaceLabel: formatWorkspaceLabel(effectiveSelectedSharedSession.share.workspacePath),
+    };
+  }, [effectiveSelectedSharedSession, pendingApprovalCount, pendingQuestionCount]);
+
+  const buddyProjection = useMemo(
+    () => ({
+      activeAgentCount,
+      blockedCount,
+      pendingApprovalCount,
+      pendingQuestionCount,
+      runningCount,
+      sessionTitle,
+      workspaceLabel,
+    }),
+    [
+      activeAgentCount,
+      blockedCount,
+      pendingApprovalCount,
+      pendingQuestionCount,
+      runningCount,
+      sessionTitle,
+      workspaceLabel,
+    ],
+  );
+
   return {
-    activeAgentCount,
+    buddyProjection,
     changeMetrics,
     contextMetrics,
     effectiveSelectedSharedSession,
@@ -180,6 +229,7 @@ export function useTeamRuntimeProjection({
     memberNameMap,
     metrics,
     selectedWorkspace,
+    selectedRunSummary,
     selectedWorkspaceKey,
     setSelectedWorkspaceKey,
     workspaceOutputCards,
