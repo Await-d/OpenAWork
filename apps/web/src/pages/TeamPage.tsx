@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import type {
+  CreateTeamMessageInput,
   TeamMemberRecord,
   TeamMessageRecord,
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
 import { useTeamCollaboration } from './team/use-team-collaboration.js';
+import { submitInteractionAgentFlow } from './team/runtime/interaction-agent-flow.js';
 import { TeamRuntimeShell } from './team/runtime/team-runtime-shell.js';
 
 export default function TeamPage() {
@@ -92,8 +94,8 @@ export default function TeamPage() {
   };
 
   const handleCreateMessage = async () => {
-    const succeeded = await createMessage({
-      content: messageForm.content.trim(),
+    const succeeded = await submitTeamMessage({
+      content: messageForm.content,
       type: messageForm.type,
       ...(messageForm.senderId ? { senderId: messageForm.senderId } : {}),
     });
@@ -102,22 +104,18 @@ export default function TeamPage() {
     }
   };
 
+  const submitTeamMessage = async (input: CreateTeamMessageInput) => {
+    return createMessage({
+      ...input,
+      content: input.content.trim(),
+    });
+  };
+
   const handleCreateInteractionMessage = async (content: string) => {
-    const started = await createMessage({
-      content: `【interaction-agent/发起】${content}`,
-      type: 'question',
+    return submitInteractionAgentFlow({
+      submitMessage: submitTeamMessage,
+      userIntent: content,
     });
-
-    if (!started) {
-      return false;
-    }
-
-    const processing = await createMessage({
-      content: '【interaction-agent/处理中】已接收该请求，正在整理下一步动作。',
-      type: 'update',
-    });
-
-    return processing;
   };
 
   const handleCreateSessionShare = async () => {
