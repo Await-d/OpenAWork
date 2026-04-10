@@ -1,4 +1,4 @@
-import type { SharedSessionSummaryRecord } from './sessions.js';
+import type { SessionTask, SharedSessionSummaryRecord } from './sessions.js';
 
 export interface TeamMemberRecord {
   id: string;
@@ -109,6 +109,12 @@ export interface TeamRuntimeReadModel {
   auditLogs: TeamAuditLogRecord[];
   members: TeamMemberRecord[];
   messages: TeamMessageRecord[];
+  runtimeTaskGroups: Array<{
+    sessionIds: string[];
+    tasks: SessionTask[];
+    updatedAt: number;
+    workspacePath: string | null;
+  }>;
   sessionShares: TeamSessionShareRecord[];
   sessions: TeamRuntimeSessionRecord[];
   sharedSessions: SharedSessionSummaryRecord[];
