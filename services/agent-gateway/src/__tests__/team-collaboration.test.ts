@@ -101,6 +101,19 @@ beforeEach(async () => {
           id: 'session-1',
           title: '设计讨论',
           metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+          updated_at: '2026-03-22T01:00:00.000Z',
+        },
+        {
+          id: 'session-2',
+          title: '子代理检索',
+          metadata_json: JSON.stringify({ parentSessionId: 'session-1' }),
+          updated_at: '2026-03-22T01:10:00.000Z',
+        },
+        {
+          id: 'session-3',
+          title: '孙子代理整理',
+          metadata_json: JSON.stringify({ parentSessionId: 'session-2' }),
+          updated_at: '2026-03-22T01:20:00.000Z',
         },
       ];
     }
@@ -416,7 +429,11 @@ describe('teamRoutes collaboration slice', () => {
       tasks: [expect.objectContaining({ id: 'task-1', title: '实现协同状态流' })],
       messages: [expect.objectContaining({ id: 'msg-1', content: '任务已认领' })],
       sessionShares: [expect.objectContaining({ id: 'share-1', workspacePath: '/repo/apps/web' })],
-      sessions: [expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' })],
+      sessions: [
+        expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' }),
+        expect.objectContaining({ id: 'session-2', workspacePath: '/repo/apps/web' }),
+        expect.objectContaining({ id: 'session-3', workspacePath: '/repo/apps/web' }),
+      ],
       sharedSessions: [
         expect.objectContaining({ sessionId: 'shared-session-1', workspacePath: '/repo/apps/api' }),
       ],
