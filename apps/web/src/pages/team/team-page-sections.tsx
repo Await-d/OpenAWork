@@ -459,7 +459,7 @@ export function TeamMessagesPanel({
                   }}
                 >
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
-                    {memberNameMap.get(message.memberId) ?? message.memberId}
+                    {(memberNameMap.get(message.memberId) ?? message.memberId) || 'system'}
                   </span>
                   <span style={typeMeta.style}>{typeMeta.label}</span>
                 </div>
@@ -719,7 +719,7 @@ export function TeamSharedSessionsPanel({
     }
 
     setQuestionAnswers(pendingQuestion.questions.map(() => []));
-  }, [pendingQuestion?.requestId, selectedSessionId]);
+  }, [pendingQuestion]);
 
   const handleToggleQuestionOption = (
     questionIndex: number,
