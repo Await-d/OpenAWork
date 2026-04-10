@@ -80,6 +80,7 @@ interface TeamRuntimeShellProps {
   onCreateSharedComment: () => void;
   onCreateTask: () => void;
   onDeleteSessionShare: (shareId: string) => void;
+  onCreateInteractionMessage: (content: string) => Promise<boolean>;
   onMemberFormChange: (patch: Partial<MemberFormState>) => void;
   onMessageFormChange: (patch: Partial<MessageFormState>) => void;
   onReplySharedPermission: (
@@ -209,6 +210,7 @@ export function TeamRuntimeShell({
   messageForm,
   messages,
   onCreateMember,
+  onCreateInteractionMessage,
   onCreateMessage,
   onCreateSessionShare,
   onCreateSharedComment,
@@ -788,6 +790,21 @@ export function TeamRuntimeShell({
     }
   };
 
+  const handleSubmitInteractionDraft = async () => {
+    const trimmed = interactionDraft.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const succeeded = await onCreateInteractionMessage(trimmed);
+    if (!succeeded) {
+      return;
+    }
+
+    setInteractionDraft('');
+    setActiveTab('timeline');
+  };
+
   return (
     <div className="page-root">
       <div className="page-header">
@@ -1012,8 +1029,13 @@ export function TeamRuntimeShell({
                     onChange={(event) => setInteractionDraft(event.target.value)}
                     placeholder="先把人类意图写在这里，后续会由 interaction-agent 做需求改写。"
                   />
-                  <button type="button" className="primary-button" disabled>
-                    交由 interaction-agent（下一窗口接线）
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => void handleSubmitInteractionDraft()}
+                    disabled={busy || !interactionDraft.trim()}
+                  >
+                    {busy ? '提交中…' : '交由 interaction-agent'}
                   </button>
                 </section>
 

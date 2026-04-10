@@ -102,6 +102,13 @@ export default function TeamPage() {
     }
   };
 
+  const handleCreateInteractionMessage = async (content: string) => {
+    return createMessage({
+      content: `【interaction-agent】${content}`,
+      type: 'question',
+    });
+  };
+
   const handleCreateSessionShare = async () => {
     const succeeded = await createSessionShare({
       memberId: shareForm.memberId,
@@ -138,6 +145,7 @@ export default function TeamPage() {
       messageForm={messageForm}
       messages={messages}
       onCreateMember={() => void handleCreateMember()}
+      onCreateInteractionMessage={handleCreateInteractionMessage}
       onCreateMessage={() => void handleCreateMessage()}
       onCreateSessionShare={() => void handleCreateSessionShare()}
       onCreateSharedComment={() => void handleCreateSharedComment()}

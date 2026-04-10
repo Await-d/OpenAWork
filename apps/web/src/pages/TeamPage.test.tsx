@@ -11,6 +11,13 @@ let container: HTMLDivElement | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
 let failNextShareCreate = false;
 let slowSharedSessionOneDetail = false;
+let teamMessages: Array<{
+  content: string;
+  id: string;
+  memberId: string;
+  timestamp: number;
+  type: 'update' | 'question' | 'result' | 'error';
+}> = [];
 
 beforeEach(() => {
   (
@@ -19,6 +26,15 @@ beforeEach(() => {
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
   failNextShareCreate = false;
   slowSharedSessionOneDetail = false;
+  teamMessages = [
+    {
+      id: 'msg-1',
+      memberId: 'member-1',
+      content: '我先认领协作页面。',
+      type: 'update',
+      timestamp: Date.parse('2026-04-04T00:00:00.000Z'),
+    },
+  ];
 
   fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const rawUrl =
@@ -64,15 +80,7 @@ beforeEach(() => {
     if (url.pathname.endsWith('/team/messages') && method === 'GET') {
       return {
         ok: true,
-        json: async () => [
-          {
-            id: 'msg-1',
-            memberId: 'member-1',
-            content: '我先认领协作页面。',
-            type: 'update',
-            timestamp: Date.parse('2026-04-04T00:00:00.000Z'),
-          },
-        ],
+        json: async () => teamMessages,
       } as Response;
     }
 
@@ -400,15 +408,23 @@ beforeEach(() => {
     }
 
     if (url.pathname.endsWith('/team/messages') && method === 'POST') {
+      const payload = JSON.parse(String(init?.body ?? '{}')) as {
+        content?: string;
+        senderId?: string;
+        type?: 'update' | 'question' | 'result' | 'error';
+      };
+      const nextMessage = {
+        id: `msg-${teamMessages.length + 1}`,
+        memberId: payload.senderId ?? '',
+        content: payload.content ?? '',
+        type: payload.type ?? 'update',
+        timestamp: Date.now(),
+      };
+      teamMessages = [...teamMessages, nextMessage];
+
       return {
         ok: true,
-        json: async () => ({
-          id: 'msg-2',
-          memberId: 'member-1',
-          content: '已同步',
-          type: 'update',
-          timestamp: Date.now(),
-        }),
+        json: async () => nextMessage,
       } as Response;
     }
 
@@ -936,6 +952,60 @@ describe('TeamPage', () => {
       'textarea[name="team-message-content"]',
     ) as HTMLTextAreaElement | null;
     expect(messageTextarea?.value ?? '').toBe('');
+  });
+
+  it('submits the interaction-agent draft into the team timeline', async () => {
+    await renderPage();
+
+    const interactionTextarea = container?.querySelector(
+      'textarea[aria-label="interaction-agent 输入区"]',
+    ) as HTMLTextAreaElement | null;
+    const submitButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('交由 interaction-agent'),
+    ) as HTMLButtonElement | undefined;
+
+    expect(interactionTextarea).toBeTruthy();
+    expect(submitButton).toBeTruthy();
+
+    await act(async () => {
+      if (interactionTextarea) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(interactionTextarea, '请先梳理当前阻塞并给出下一步建议');
+        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container?.textContent).toContain('消息时间线');
+    expect(container?.textContent).toContain(
+      '【interaction-agent】请先梳理当前阻塞并给出下一步建议',
+    );
+    expect(container?.textContent).toContain('question');
+    expect(interactionTextarea?.value ?? '').toBe('');
+    expect(
+      fetchMock.mock.calls.some(([input, init]) => {
+        if (
+          input !== 'http://localhost:3000/team/messages' ||
+          (init as RequestInit | undefined)?.method !== 'POST'
+        ) {
+          return false;
+        }
+        const payload = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as {
+          content?: string;
+          type?: string;
+        };
+        return (
+          payload.content === '【interaction-agent】请先梳理当前阻塞并给出下一步建议' &&
+          payload.type === 'question'
+        );
+      }),
+    ).toBe(true);
   });
 
   it('ignores stale shared-session detail responses after switching sessions', async () => {
