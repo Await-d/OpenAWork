@@ -2,6 +2,7 @@
 
 ## 活跃工作流
 
+- [260410-团队页统一开发主计划](./workflow/260410-团队页统一开发主计划.md) — TeamPage 开发阶段的唯一入口文档：已融合设计、顺序、双人分工、Buddy/Hubby 动画约束与开发启动清单
 - [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
@@ -68,6 +69,14 @@
 
 ## Architecture Decisions
 
+- [2026-04-10] TeamPage 向多 Agent 编排演进时，优先采用 **Team Instance / Mission Run 作为主对象 + 复用 session/task/workflow/run-events 真相源**；执行角色必须与权限成员分开建模，避免再造第二套任务系统。
+- [2026-04-10] 对标 SpectrAI 做团队页演进时，采用 **upstream-native first / merge-first**：OpenAWork 已有上游能力的部分只做并轨、投影和产品化，不做功能整迁或模块级照搬。
+- [2026-04-10] TeamPage 的产品收束方向采用 **强对齐参考 + Web 先行 + 工作区一级总控大盘 + 统一交互代理**：主区按参考库式多 Tab 展开，人工消息默认先进入交互代理做需求改写，再进入团队运行链路。
+- [2026-04-10] TeamPage 合并设计 v1 采用 **工作区卡片 → Team Instance / Mission Run → 参考库式多 Tab 总控视图**：首期 Web 端必须并轨运行事件、任务投影、子会话树、共享会话、审批问答、Workflow 模板、Agent 目录与 Artifacts。
+- [2026-04-10] `interaction-agent` 在 TeamPage v1 中是**统一人工入口**：所有人工消息默认先经过该代理，仅负责需求理解与改写，不在首期承担完整拆解、汇总或审批守门。
+- [2026-04-10] TeamPage 两人并行实施时，优先按 **TeamPage 体验/交互壳层（Dev-A） vs Team Runtime 读模型/事件脊柱（Dev-B）** 拆分，而不是按 Tab 平均分工；热点文件实行 owner 独占，先冻结 DTO，再按 Window A/B/C 固定集成。
+- [2026-04-10] TeamPage 在视觉布局上可强对齐参考库，但**任务动画必须替换为系统内 Buddy/Hubby 动画表现层**；参考库原任务动画不复用，Buddy/Hubby 仅承担任务状态与交互代理的辅助动态表达，不替代 DAG/时间线主视图。
+- [2026-04-10] TeamPage 开发阶段只保留一份 **统一开发主计划** 作为开发者入口：以“背景与冻结结论 → 设计冻结稿 → 开发可执行顺序 → 双人分工与验收”组织，旧的对标/设计/并行文档只作为附录依据，不再并列作为主入口。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
