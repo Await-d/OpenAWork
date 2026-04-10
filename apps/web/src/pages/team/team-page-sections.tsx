@@ -718,13 +718,8 @@ export function TeamSharedSessionsPanel({
       return;
     }
 
-    setQuestionAnswers((current) => {
-      if (current.length === pendingQuestion.questions.length) {
-        return current;
-      }
-      return pendingQuestion.questions.map(() => []);
-    });
-  }, [pendingQuestion]);
+    setQuestionAnswers(pendingQuestion.questions.map(() => []));
+  }, [pendingQuestion?.requestId, selectedSessionId]);
 
   const handleToggleQuestionOption = (
     questionIndex: number,

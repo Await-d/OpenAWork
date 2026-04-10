@@ -10,6 +10,7 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
 let failNextShareCreate = false;
+let slowSharedSessionOneDetail = false;
 
 beforeEach(() => {
   (
@@ -17,6 +18,7 @@ beforeEach(() => {
   ).IS_REACT_ACT_ENVIRONMENT = true;
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
   failNextShareCreate = false;
+  slowSharedSessionOneDetail = false;
 
   fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const rawUrl =
@@ -146,12 +148,28 @@ beforeEach(() => {
               shareCreatedAt: '2026-04-04T04:00:00.000Z',
               shareUpdatedAt: '2026-04-04T04:15:00.000Z',
             },
+            {
+              sessionId: 'shared-session-2',
+              title: '交接验证',
+              stateStatus: 'paused',
+              workspacePath: '/repo/apps/api',
+              sharedByEmail: 'owner@openawork.local',
+              permission: 'operate',
+              createdAt: '2026-04-04T06:00:00.000Z',
+              updatedAt: '2026-04-04T06:30:00.000Z',
+              shareCreatedAt: '2026-04-04T06:35:00.000Z',
+              shareUpdatedAt: '2026-04-04T06:45:00.000Z',
+            },
           ],
         }),
       } as Response;
     }
 
     if (url.pathname.endsWith('/sessions/shared-with-me/shared-session-1') && method === 'GET') {
+      if (slowSharedSessionOneDetail) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 40));
+      }
+
       return {
         ok: true,
         json: async () => ({
@@ -241,6 +259,67 @@ beforeEach(() => {
               totalFileDiffs: 0,
               snapshotCount: 0,
               sourceKinds: [],
+            },
+          },
+        }),
+      } as Response;
+    }
+
+    if (url.pathname.endsWith('/sessions/shared-with-me/shared-session-2') && method === 'GET') {
+      return {
+        ok: true,
+        json: async () => ({
+          share: {
+            sessionId: 'shared-session-2',
+            title: '交接验证',
+            stateStatus: 'paused',
+            workspacePath: '/repo/apps/api',
+            sharedByEmail: 'owner@openawork.local',
+            permission: 'operate',
+            createdAt: '2026-04-04T06:00:00.000Z',
+            updatedAt: '2026-04-04T06:30:00.000Z',
+            shareCreatedAt: '2026-04-04T06:35:00.000Z',
+            shareUpdatedAt: '2026-04-04T06:45:00.000Z',
+          },
+          comments: [],
+          presence: [],
+          pendingPermissions: [],
+          pendingQuestions: [
+            {
+              requestId: 'question-2',
+              sessionId: 'shared-session-2',
+              toolName: 'Question',
+              title: '请选择新的验证路径',
+              questions: [
+                {
+                  header: '验证动作',
+                  question: '你希望我接下来重点验证哪一项？',
+                  options: [{ label: '继续验证', description: '继续跑验收验证' }],
+                },
+              ],
+              status: 'pending',
+              createdAt: '2026-04-04T06:50:00.000Z',
+            },
+          ],
+          session: {
+            id: 'shared-session-2',
+            title: '交接验证',
+            state_status: 'paused',
+            metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/api' }),
+            created_at: '2026-04-04T06:00:00.000Z',
+            updated_at: '2026-04-04T06:30:00.000Z',
+            messages: [
+              { id: 'm-3', role: 'user', content: '请继续做交接验证。' },
+              { id: 'm-4', role: 'assistant', content: '好的，我先收拢剩余验证项。' },
+            ],
+            runEvents: [],
+            todos: [],
+            fileChangesSummary: {
+              totalAdditions: 1,
+              totalDeletions: 0,
+              totalFileDiffs: 1,
+              snapshotCount: 1,
+              sourceKinds: ['session_snapshot'],
             },
           },
         }),
@@ -441,17 +520,55 @@ async function renderPage() {
   });
 }
 
+async function clickTab(label: string) {
+  const button = Array.from(container?.querySelectorAll('[role="tab"]') ?? []).find((candidate) =>
+    candidate.textContent?.includes(label),
+  ) as HTMLButtonElement | undefined;
+
+  expect(button).toBeTruthy();
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
+async function clickWorkspace(label: string) {
+  const button = Array.from(container?.querySelectorAll('button') ?? []).find((candidate) =>
+    candidate.textContent?.includes(label),
+  ) as HTMLButtonElement | undefined;
+
+  expect(button).toBeTruthy();
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 describe('TeamPage', () => {
-  it('renders members, tasks, and messages from the collaboration endpoints', async () => {
+  it('renders the runtime shell, workspace cards, and tabbed collaboration data', async () => {
     await renderPage();
 
-    expect(container?.textContent).toContain('团队协作');
+    expect(container?.textContent).toContain('Team Runtime');
+    expect(container?.textContent).toContain('全部工作区');
+    expect(container?.textContent).toContain('/repo/apps/api');
+    expect(container?.textContent).toContain('Buddy / Hubby runtime');
     expect(container?.textContent).toContain('林雾');
     expect(container?.textContent).toContain('落地团队协作台');
+
+    await clickTab('消息时间线');
+
     expect(container?.textContent).toContain('我先认领协作页面。');
-    expect(container?.textContent).toContain('共享会话');
-    expect(container?.textContent).toContain('设计讨论');
-    expect(container?.textContent).toContain('工作区：/repo/apps/web');
+    expect(container?.textContent).toContain('协作审计流');
+    expect(container?.textContent).toContain(
+      'viewer@openawork.local 处理了“上线回顾”的权限请求（once）',
+    );
+    expect(container?.textContent).toContain('执行人：viewer@openawork.local');
+
+    await clickTab('会话 / Agent');
+    await clickWorkspace('上线回顾');
+
     expect(container?.textContent).toContain('共享给我的会话');
     expect(container?.textContent).toContain('上线回顾');
     expect(container?.textContent).toContain('owner@openawork.local');
@@ -461,11 +578,7 @@ describe('TeamPage', () => {
     expect(container?.textContent).toContain('viewer@openawork.local');
     expect(container?.textContent).toContain('observer@openawork.local');
     expect(container?.textContent).toContain('发送协作评论');
-    expect(container?.textContent).toContain('协作审计流');
-    expect(container?.textContent).toContain(
-      'viewer@openawork.local 处理了“上线回顾”的权限请求（once）',
-    );
-    expect(container?.textContent).toContain('执行人：viewer@openawork.local');
+
     expect(
       fetchMock.mock.calls.some(
         ([input, init]) =>
@@ -477,6 +590,7 @@ describe('TeamPage', () => {
 
   it('creates a new team task from the composer', async () => {
     await renderPage();
+    await clickTab('任务看板');
 
     const titleInput = container?.querySelector(
       'input[name="team-task-title"]',
@@ -506,6 +620,7 @@ describe('TeamPage', () => {
 
   it('creates a new team session share from the collaboration panel', async () => {
     await renderPage();
+    await clickTab('文件上下文');
 
     const selects = Array.from(container?.querySelectorAll('select') ?? []);
     const sessionSelect = selects.at(-3) as HTMLSelectElement | undefined;
@@ -564,6 +679,7 @@ describe('TeamPage', () => {
 
   it('updates a shared session permission from the collaboration panel', async () => {
     await renderPage();
+    await clickTab('文件上下文');
 
     const permissionSelect = container?.querySelector(
       'select[aria-label="共享权限-share-1"]',
@@ -592,6 +708,7 @@ describe('TeamPage', () => {
   it('keeps the share form selections when creating a session share fails', async () => {
     failNextShareCreate = true;
     await renderPage();
+    await clickTab('文件上下文');
 
     const selects = Array.from(container?.querySelectorAll('select') ?? []);
     const sessionSelect = selects.at(-3) as HTMLSelectElement | undefined;
@@ -631,6 +748,8 @@ describe('TeamPage', () => {
 
   it('creates a shared session comment from the shared preview panel', async () => {
     await renderPage();
+    await clickTab('会话 / Agent');
+    await clickWorkspace('上线回顾');
 
     const textarea = container?.querySelector(
       'textarea[aria-label="共享会话评论输入框"]',
@@ -665,6 +784,8 @@ describe('TeamPage', () => {
 
   it('replies to a shared permission request from the operate panel', async () => {
     await renderPage();
+    await clickTab('会话 / Agent');
+    await clickWorkspace('上线回顾');
 
     const approveButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
       button.textContent?.includes('同意本次'),
@@ -690,9 +811,10 @@ describe('TeamPage', () => {
 
   it('answers a shared pending question from the operate panel', async () => {
     await renderPage();
+    await clickTab('会话 / Agent');
 
     const answerOption = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('修复'),
+      button.textContent?.includes('继续验证'),
     );
     const submitAnswerButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.includes('提交回答'),
@@ -716,9 +838,98 @@ describe('TeamPage', () => {
       fetchMock.mock.calls.some(
         ([input, init]) =>
           input ===
-            'http://localhost:3000/sessions/shared-with-me/shared-session-1/questions/reply' &&
+            'http://localhost:3000/sessions/shared-with-me/shared-session-2/questions/reply' &&
           (init as RequestInit | undefined)?.method === 'POST',
       ),
     ).toBe(true);
+  });
+
+  it('resets pending question answers when switching to another shared session', async () => {
+    await renderPage();
+    await clickTab('会话 / Agent');
+    await clickWorkspace('上线回顾');
+
+    const firstAnswerOption = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.includes('修复'),
+    );
+    expect(firstAnswerOption).toBeTruthy();
+
+    await act(async () => {
+      firstAnswerOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    let submitAnswerButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.includes('提交回答'),
+    ) as HTMLButtonElement | undefined;
+    expect(submitAnswerButton?.disabled).toBe(false);
+
+    const switchSessionButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.includes('交接验证'),
+    );
+    expect(switchSessionButton).toBeTruthy();
+
+    await act(async () => {
+      switchSessionButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container?.textContent).toContain('请选择新的验证路径');
+    submitAnswerButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('提交回答'),
+    ) as HTMLButtonElement | undefined;
+    expect(submitAnswerButton?.disabled).toBe(true);
+  });
+
+  it('clears the selected shared run when switching to a workspace without shared sessions', async () => {
+    await renderPage();
+
+    await clickWorkspace('/repo/apps/web');
+
+    expect(container?.textContent).toContain('尚未选中共享运行');
+    expect(container?.textContent).toContain('当前工作区外壳已按工作区过滤共享运行');
+  });
+
+  it('keeps interaction-agent draft isolated from the timeline composer', async () => {
+    await renderPage();
+
+    const interactionTextarea = container?.querySelector(
+      'textarea[aria-label="interaction-agent 输入区"]',
+    ) as HTMLTextAreaElement | null;
+    expect(interactionTextarea).toBeTruthy();
+
+    await act(async () => {
+      if (interactionTextarea) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(interactionTextarea, '让 interaction-agent 先改写这条需求');
+        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+
+    await clickTab('消息时间线');
+
+    const messageTextarea = container?.querySelector(
+      'textarea[name="team-message-content"]',
+    ) as HTMLTextAreaElement | null;
+    expect(messageTextarea?.value ?? '').toBe('');
+  });
+
+  it('ignores stale shared-session detail responses after switching sessions', async () => {
+    slowSharedSessionOneDetail = true;
+    await renderPage();
+    await clickTab('会话 / Agent');
+    await clickWorkspace('上线回顾');
+    await clickWorkspace('交接验证');
+
+    await act(async () => {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 80));
+    });
+
+    expect(container?.textContent).toContain('交接验证');
+    expect(container?.textContent).toContain('请继续做交接验证。');
+    expect(container?.textContent).not.toContain('请帮我复盘今天的上线。');
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createTeamClient,
   type CreateTeamMemberInput,
@@ -111,9 +111,24 @@ export function useTeamCollaboration() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<TeamActionFeedback | null>(null);
+  const selectedSharedSessionIdRef = useRef<string | null>(null);
 
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
   const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
+
+  useEffect(() => {
+    selectedSharedSessionIdRef.current = selectedSharedSessionId;
+  }, [selectedSharedSessionId]);
+
+  const commitSelectedSharedSessionIfCurrent = useCallback(
+    (sessionId: string, detail: SharedSessionDetailRecord | null) => {
+      if (selectedSharedSessionIdRef.current !== sessionId) {
+        return;
+      }
+      setSelectedSharedSession(detail);
+    },
+    [],
+  );
 
   const loadSelectedSharedSessionDetail = useCallback(
     async (sessionId: string) => {
@@ -263,6 +278,7 @@ export function useTeamCollaboration() {
     }
 
     let cancelled = false;
+    setSelectedSharedSession(null);
     setSharedSessionLoading(true);
     loadSelectedSharedSessionDetail(selectedSharedSessionId)
       .then(async (detail) => {
@@ -282,7 +298,7 @@ export function useTeamCollaboration() {
         }
 
         if (!cancelled) {
-          setSelectedSharedSession(nextDetail);
+          commitSelectedSharedSessionIfCurrent(selectedSharedSessionId, nextDetail);
           setSharedOperateError(null);
         }
       })
@@ -290,7 +306,7 @@ export function useTeamCollaboration() {
         if (!cancelled) {
           const message = reason instanceof Error ? reason.message : '加载共享会话失败';
           setError(message);
-          setSelectedSharedSession(null);
+          commitSelectedSharedSessionIfCurrent(selectedSharedSessionId, null);
         }
       })
       .finally(() => {
@@ -302,7 +318,13 @@ export function useTeamCollaboration() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, loadSelectedSharedSessionDetail, selectedSharedSessionId, sessionsClient]);
+  }, [
+    accessToken,
+    commitSelectedSharedSessionIfCurrent,
+    loadSelectedSharedSessionDetail,
+    selectedSharedSessionId,
+    sessionsClient,
+  ]);
 
   useEffect(() => {
     if (!accessToken || !selectedSharedSessionId) {
@@ -351,7 +373,7 @@ export function useTeamCollaboration() {
       try {
         await sessionsClient.createSharedComment(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
-        setSelectedSharedSession(refreshedDetail);
+        commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
         const snapshot = await loadSnapshot();
         setAuditLogs(snapshot.auditLogs);
         setSharedSessions(snapshot.sharedSessions);
@@ -366,7 +388,13 @@ export function useTeamCollaboration() {
         setSharedCommentBusy(false);
       }
     },
-    [accessToken, loadSelectedSharedSessionDetail, loadSnapshot, sessionsClient],
+    [
+      accessToken,
+      commitSelectedSharedSessionIfCurrent,
+      loadSelectedSharedSessionDetail,
+      loadSnapshot,
+      sessionsClient,
+    ],
   );
 
   const replySharedPermission = useCallback(
@@ -384,7 +412,7 @@ export function useTeamCollaboration() {
       try {
         await sessionsClient.replySharedPermission(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
-        setSelectedSharedSession(refreshedDetail);
+        commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
         const snapshot = await loadSnapshot();
         setAuditLogs(snapshot.auditLogs);
         setSharedSessions(snapshot.sharedSessions);
@@ -399,7 +427,13 @@ export function useTeamCollaboration() {
         setSharedOperateBusy(false);
       }
     },
-    [accessToken, loadSelectedSharedSessionDetail, loadSnapshot, sessionsClient],
+    [
+      accessToken,
+      commitSelectedSharedSessionIfCurrent,
+      loadSelectedSharedSessionDetail,
+      loadSnapshot,
+      sessionsClient,
+    ],
   );
 
   const replySharedQuestion = useCallback(
@@ -417,7 +451,7 @@ export function useTeamCollaboration() {
       try {
         await sessionsClient.replySharedQuestion(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
-        setSelectedSharedSession(refreshedDetail);
+        commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
         const snapshot = await loadSnapshot();
         setAuditLogs(snapshot.auditLogs);
         setSharedSessions(snapshot.sharedSessions);
@@ -432,7 +466,13 @@ export function useTeamCollaboration() {
         setSharedOperateBusy(false);
       }
     },
-    [accessToken, loadSelectedSharedSessionDetail, loadSnapshot, sessionsClient],
+    [
+      accessToken,
+      commitSelectedSharedSessionIfCurrent,
+      loadSelectedSharedSessionDetail,
+      loadSnapshot,
+      sessionsClient,
+    ],
   );
 
   const createMember = useCallback(
