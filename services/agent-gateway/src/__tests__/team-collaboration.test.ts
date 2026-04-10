@@ -7,6 +7,10 @@ const { sqliteAllMock, sqliteRunMock, sqliteGetMock } = vi.hoisted(() => ({
   sqliteGetMock: vi.fn(),
 }));
 
+const { listSharedSessionsForRecipientMock } = vi.hoisted(() => ({
+  listSharedSessionsForRecipientMock: vi.fn(),
+}));
+
 vi.mock('../auth.js', () => ({ requireAuth: async () => undefined }));
 
 vi.mock('../request-workflow.js', () => ({
@@ -25,6 +29,10 @@ vi.mock('../db.js', () => ({
   sqliteGet: sqliteGetMock,
 }));
 
+vi.mock('../session-shared-access.js', () => ({
+  listSharedSessionsForRecipient: listSharedSessionsForRecipientMock,
+}));
+
 import { teamRoutes } from '../routes/team.js';
 
 let app: ReturnType<typeof Fastify>;
@@ -33,6 +41,19 @@ beforeEach(async () => {
   vi.clearAllMocks();
   let currentSharePermission: 'view' | 'comment' | 'operate' = 'comment';
   sqliteAllMock.mockImplementation((sql: string) => {
+    if (sql.includes('FROM team_members')) {
+      return [
+        {
+          id: 'member-1',
+          name: '林雾',
+          email: 'linwu@openawork.local',
+          role: 'owner',
+          avatar_url: null,
+          status: 'working',
+          created_at: '2026-03-22T00:00:00.000Z',
+        },
+      ];
+    }
     if (sql.includes('FROM team_tasks')) {
       return [
         {
@@ -71,6 +92,15 @@ beforeEach(async () => {
           member_email: 'linwu@openawork.local',
           label: '设计讨论',
           session_metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+        },
+      ];
+    }
+    if (sql.includes('FROM sessions WHERE user_id')) {
+      return [
+        {
+          id: 'session-1',
+          title: '设计讨论',
+          metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
         },
       ];
     }
@@ -133,6 +163,25 @@ beforeEach(async () => {
       currentSharePermission = params[0] as 'view' | 'comment' | 'operate';
     }
   });
+  listSharedSessionsForRecipientMock.mockReturnValue([
+    {
+      session: {
+        id: 'shared-session-1',
+        title: '上线回顾',
+        stateStatus: 'paused',
+        workspacePath: '/repo/apps/api',
+        createdAt: '2026-04-04T03:00:00.000Z',
+        updatedAt: '2026-04-04T03:30:00.000Z',
+        metadataJson: JSON.stringify({ workingDirectory: '/repo/apps/api' }),
+      },
+      ownerUserId: 'owner-1',
+      permission: 'comment',
+      messagesJson: '[]',
+      shareCreatedAt: '2026-04-04T04:00:00.000Z',
+      shareUpdatedAt: '2026-04-04T04:15:00.000Z',
+      sharedByEmail: 'owner@openawork.local',
+    },
+  ]);
 
   app = Fastify();
   app.decorateRequest('user', {
@@ -351,5 +400,27 @@ describe('teamRoutes collaboration slice', () => {
           params.includes('user-1'),
       ),
     ).toBe(true);
+  });
+
+  it('returns the aggregated team runtime read model', async () => {
+    const response = await app.inject({ method: 'GET', url: '/team/runtime' });
+
+    expect(response.statusCode).toBe(200);
+    expect(listSharedSessionsForRecipientMock).toHaveBeenCalledWith({
+      email: 'owner@openawork.local',
+      limit: 24,
+      offset: 0,
+    });
+    expect(JSON.parse(response.body)).toMatchObject({
+      members: [expect.objectContaining({ id: 'member-1', name: '林雾' })],
+      tasks: [expect.objectContaining({ id: 'task-1', title: '实现协同状态流' })],
+      messages: [expect.objectContaining({ id: 'msg-1', content: '任务已认领' })],
+      sessionShares: [expect.objectContaining({ id: 'share-1', workspacePath: '/repo/apps/web' })],
+      sessions: [expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' })],
+      sharedSessions: [
+        expect.objectContaining({ sessionId: 'shared-session-1', workspacePath: '/repo/apps/api' }),
+      ],
+      auditLogs: [expect.objectContaining({ action: 'share_created', entityId: 'share-1' })],
+    });
   });
 });

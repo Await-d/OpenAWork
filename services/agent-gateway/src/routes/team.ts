@@ -9,6 +9,7 @@ import {
   extractSessionWorkingDirectory,
   parseSessionMetadataJson,
 } from '../session-workspace-metadata.js';
+import { listSharedSessionsForRecipient } from '../session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-audit-store.js';
 
 const createMemberSchema = z.object({
@@ -100,6 +101,12 @@ interface MessageRow {
   created_at: string;
 }
 
+interface SessionListRow {
+  id: string;
+  metadata_json: string;
+  title: string | null;
+}
+
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
   const normalizeMemberStatus = (status: string): 'idle' | 'working' | 'done' | 'error' => {
     if (status === 'working' || status === 'done' || status === 'error') return status;
@@ -142,6 +149,141 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
        LIMIT 1`,
       [shareId, userId],
     );
+
+  app.get(
+    '/team/runtime',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.runtime.get');
+      const user = request.user as JwtPayload;
+
+      const membersStep = child('members');
+      const memberRows = sqliteAll<MemberRow>(
+        `SELECT id, name, email, role, avatar_url, status, created_at FROM team_members WHERE user_id = ? ORDER BY created_at ASC`,
+        [user.sub],
+      );
+      membersStep.succeed(undefined, { count: memberRows.length });
+
+      const tasksStep = child('tasks');
+      const taskRows = sqliteAll<TaskRow>(
+        `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC`,
+        [user.sub],
+      );
+      tasksStep.succeed(undefined, { count: taskRows.length });
+
+      const messagesStep = child('messages');
+      const messageRows = sqliteAll<MessageRow>(
+        `SELECT id, sender_id, content, type, created_at FROM team_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100`,
+        [user.sub],
+      );
+      messagesStep.succeed(undefined, { count: messageRows.length });
+
+      const sharesStep = child('session-shares');
+      const shareRows = sqliteAll<SessionShareRow>(
+        `SELECT
+           ss.id,
+           ss.session_id,
+           ss.member_id,
+           ss.permission,
+           ss.created_at,
+           ss.updated_at,
+           tm.name AS member_name,
+           tm.email AS member_email,
+           sess.title AS label,
+           sess.metadata_json AS session_metadata_json
+         FROM session_shares ss
+         JOIN team_members tm ON tm.id = ss.member_id
+         JOIN sessions sess ON sess.id = ss.session_id
+         WHERE ss.user_id = ?
+         ORDER BY ss.created_at DESC`,
+        [user.sub],
+      );
+      sharesStep.succeed(undefined, { count: shareRows.length });
+
+      const sessionsStep = child('sessions');
+      const sessionRows = sqliteAll<SessionListRow>(
+        `SELECT id, title, metadata_json FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
+        [user.sub],
+      );
+      sessionsStep.succeed(undefined, { count: sessionRows.length });
+
+      const auditStep = child('audit-logs');
+      const auditLogs = listTeamAuditLogs({ userId: user.sub, limit: 24 });
+      auditStep.succeed(undefined, { count: auditLogs.length });
+
+      const sharedSessionsStep = child('shared-with-me');
+      const sharedSessions = listSharedSessionsForRecipient({
+        email: user.email,
+        limit: 24,
+        offset: 0,
+      }).map((sharedSession) => ({
+        sessionId: sharedSession.session.id,
+        title: sharedSession.session.title,
+        stateStatus: sharedSession.session.stateStatus,
+        workspacePath: sharedSession.session.workspacePath,
+        sharedByEmail: sharedSession.sharedByEmail,
+        permission: sharedSession.permission,
+        createdAt: sharedSession.session.createdAt,
+        updatedAt: sharedSession.session.updatedAt,
+        shareCreatedAt: sharedSession.shareCreatedAt,
+        shareUpdatedAt: sharedSession.shareUpdatedAt,
+      }));
+      sharedSessionsStep.succeed(undefined, { count: sharedSessions.length });
+
+      const response = {
+        auditLogs,
+        members: memberRows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          role: row.role,
+          avatarUrl: row.avatar_url,
+          status: normalizeMemberStatus(row.status),
+          createdAt: row.created_at,
+        })),
+        messages: messageRows.map((row) => ({
+          id: row.id,
+          memberId: row.sender_id ?? 'system',
+          content: row.content,
+          type:
+            row.type === 'update' ||
+            row.type === 'question' ||
+            row.type === 'result' ||
+            row.type === 'error'
+              ? row.type
+              : 'update',
+          timestamp: Date.parse(row.created_at) || Date.now(),
+        })),
+        sessionShares: shareRows.map((row) => mapSessionShareRow(row)),
+        sessions: sessionRows.map((row) => ({
+          id: row.id,
+          title: row.title ?? null,
+          workspacePath: getWorkspacePathFromMetadataJson(row.metadata_json),
+        })),
+        sharedSessions,
+        tasks: taskRows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          assigneeId: row.assignee_id,
+          status: row.status === 'done' ? 'completed' : row.status,
+          priority: row.priority,
+          result: row.result,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })),
+      };
+
+      step.succeed(undefined, {
+        auditLogCount: auditLogs.length,
+        memberCount: response.members.length,
+        sessionCount: response.sessions.length,
+        sharedSessionCount: response.sharedSessions.length,
+        taskCount: response.tasks.length,
+      });
+
+      return reply.send(response);
+    },
+  );
 
   app.get(
     '/team/members',
