@@ -65,6 +65,23 @@ function describeMessageContent(content: unknown): string {
   }
 }
 
+function parseInteractionAgentMessage(content: string): {
+  actorLabel: string;
+  body: string;
+  statusLabel: string | null;
+} | null {
+  const match = content.match(/^【interaction-agent(?:\/([^】]+))?】\s*(.+)$/u);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    actorLabel: 'interaction-agent',
+    body: match[2] ?? content,
+    statusLabel: match[1] ?? null,
+  };
+}
+
 export function getTaskStatusMeta(status: TeamTaskRecord['status']) {
   switch (status) {
     case 'in_progress':
@@ -444,6 +461,7 @@ export function TeamMessagesPanel({
         ) : (
           messages.map((message) => {
             const typeMeta = getMessageTypeMeta(message.type);
+            const interactionMessage = parseInteractionAgentMessage(message.content);
             return (
               <div
                 key={message.id}
@@ -459,12 +477,20 @@ export function TeamMessagesPanel({
                   }}
                 >
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
-                    {(memberNameMap.get(message.memberId) ?? message.memberId) || 'system'}
+                    {interactionMessage?.actorLabel ??
+                      ((memberNameMap.get(message.memberId) ?? message.memberId) || 'system')}
                   </span>
-                  <span style={typeMeta.style}>{typeMeta.label}</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {interactionMessage?.statusLabel ? (
+                      <span style={pillStyle('#fef3c7', 'rgba(245, 158, 11, 0.16)')}>
+                        {interactionMessage.statusLabel}
+                      </span>
+                    ) : null}
+                    <span style={typeMeta.style}>{typeMeta.label}</span>
+                  </div>
                 </div>
                 <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text)' }}>
-                  {message.content}
+                  {interactionMessage?.body ?? message.content}
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
                   {new Date(message.timestamp).toLocaleString('zh-CN', {
