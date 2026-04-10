@@ -5,6 +5,7 @@ import type {
   TeamAuditLogRecord,
   TeamMemberRecord,
   TeamMessageRecord,
+  TeamRuntimeSessionRecord,
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
@@ -20,6 +21,7 @@ import {
   formatWorkspaceLabel,
   getSharedSessionStateLabel,
 } from './team-runtime-model.js';
+import { groupSessionTreesByWorkspace } from '../../../utils/session-grouping.js';
 
 interface TeamRuntimeProjectionInput {
   auditLogs: TeamAuditLogRecord[];
@@ -29,7 +31,7 @@ interface TeamRuntimeProjectionInput {
   selectedSharedSession: SharedSessionDetailRecord | null;
   selectedSharedSessionId: string | null;
   sessionShares: TeamSessionShareRecord[];
-  sessions: Array<{ id: string; title: string | null; workspacePath: string | null }>;
+  sessions: TeamRuntimeSessionRecord[];
   sharedSessions: SharedSessionSummaryRecord[];
   tasks: TeamTaskRecord[];
 }
@@ -74,6 +76,18 @@ export function useTeamRuntimeProjection({
   const filteredSessions = useMemo(
     () => filterByWorkspace(sessions, selectedWorkspaceKey),
     [selectedWorkspaceKey, sessions],
+  );
+  const sessionTreeGroups = useMemo(
+    () =>
+      groupSessionTreesByWorkspace(
+        filteredSessions.map((session) => ({
+          id: session.id,
+          metadata_json: session.metadataJson,
+          title: session.title,
+          updated_at: session.updatedAt,
+        })),
+      ),
+    [filteredSessions],
   );
   const filteredSessionShares = useMemo(
     () => filterByWorkspace(sessionShares, selectedWorkspaceKey),
@@ -232,6 +246,7 @@ export function useTeamRuntimeProjection({
     selectedRunSummary,
     selectedWorkspaceKey,
     setSelectedWorkspaceKey,
+    sessionTreeGroups,
     workspaceOutputCards,
     workspaceOverviewLines,
     workspaceSummaries,

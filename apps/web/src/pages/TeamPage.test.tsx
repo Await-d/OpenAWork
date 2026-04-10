@@ -146,7 +146,26 @@ beforeEach(() => {
             : [
                 {
                   id: 'session-1',
+                  metadataJson: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+                  parentSessionId: null,
                   title: '设计讨论',
+                  updatedAt: '2026-04-04T01:00:00.000Z',
+                  workspacePath: '/repo/apps/web',
+                },
+                {
+                  id: 'session-2',
+                  metadataJson: JSON.stringify({ parentSessionId: 'session-1' }),
+                  parentSessionId: 'session-1',
+                  title: '子代理检索',
+                  updatedAt: '2026-04-04T01:10:00.000Z',
+                  workspacePath: '/repo/apps/web',
+                },
+                {
+                  id: 'session-3',
+                  metadataJson: JSON.stringify({ parentSessionId: 'session-2' }),
+                  parentSessionId: 'session-2',
+                  title: '孙子代理整理',
+                  updatedAt: '2026-04-04T01:20:00.000Z',
                   workspacePath: '/repo/apps/web',
                 },
               ],
@@ -734,6 +753,17 @@ describe('TeamPage', () => {
           (init as RequestInit | undefined)?.method === 'POST',
       ),
     ).toBe(true);
+  });
+
+  it('renders parent-child session structure in the sessions tab', async () => {
+    await renderPage();
+    await clickTab('会话 / Agent');
+
+    expect(container?.textContent).toContain('父子会话结构');
+    expect(container?.textContent).toContain('设计讨论');
+    expect(container?.textContent).toContain('子代理检索');
+    expect(container?.textContent).toContain('孙子代理整理');
+    expect(container?.textContent).toContain('1 个子会话');
   });
 
   it('shows a stable empty runtime shell when /team/runtime returns no data', async () => {

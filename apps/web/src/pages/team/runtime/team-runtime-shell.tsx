@@ -5,6 +5,7 @@ import type {
   TeamAuditLogRecord,
   TeamMemberRecord,
   TeamMessageRecord,
+  TeamRuntimeSessionRecord,
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
@@ -29,6 +30,7 @@ import {
 } from './team-runtime-model.js';
 import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
 import { useTeamRuntimeProjection } from './use-team-runtime-projection.js';
+import type { WorkspaceSessionTreeNode } from '../../../utils/session-grouping.js';
 
 type RuntimeTabKey =
   | 'overview'
@@ -104,7 +106,7 @@ interface TeamRuntimeShellProps {
   selectedSharedSession: SharedSessionDetailRecord | null;
   selectedSharedSessionId: string | null;
   sessionShares: TeamSessionShareRecord[];
-  sessions: Array<{ id: string; title: string | null; workspacePath: string | null }>;
+  sessions: TeamRuntimeSessionRecord[];
   shareForm: ShareFormState;
   sharedCommentBusy: boolean;
   sharedCommentDraft: string;
@@ -199,6 +201,88 @@ function RuntimeMetricGrid({ metrics }: { metrics: TeamRuntimeMetric[] }) {
   );
 }
 
+function SessionTreeNodeCard({
+  depth,
+  node,
+  selectedSharedSessionId,
+  sharedSessionById,
+}: {
+  depth: number;
+  node: WorkspaceSessionTreeNode<{
+    id: string;
+    metadata_json?: string;
+    title?: string | null;
+    updated_at: string;
+  }>;
+  selectedSharedSessionId: string | null;
+  sharedSessionById: Map<string, SharedSessionSummaryRecord>;
+}) {
+  const sharedSession = sharedSessionById.get(node.session.id);
+  const isSelected = sharedSession?.sessionId === selectedSharedSessionId;
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div
+        className="content-card"
+        style={{
+          display: 'grid',
+          gap: 6,
+          padding: 12,
+          marginLeft: depth * 14,
+          borderColor: isSelected
+            ? 'color-mix(in srgb, var(--accent) 38%, transparent)'
+            : undefined,
+          background: isSelected
+            ? 'linear-gradient(135deg, rgba(91, 140, 255, 0.12), rgba(91, 140, 255, 0.04))'
+            : undefined,
+        }}
+      >
+        <div
+          style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 700 }}>
+            {node.session.title ?? node.session.id}
+          </span>
+          {sharedSession ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '4px 10px',
+                borderRadius: 999,
+                background: 'rgba(91, 140, 255, 0.12)',
+                color: 'var(--text-2)',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {getSharedSessionStateLabel(sharedSession.stateStatus)}
+            </span>
+          ) : null}
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          {node.children.length > 0 ? `${node.children.length} 个子会话` : '叶子会话'} · 最近更新{' '}
+          {new Date(node.session.updated_at).toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </span>
+      </div>
+      {node.children.map((childNode) => (
+        <SessionTreeNodeCard
+          key={childNode.session.id}
+          depth={depth + 1}
+          node={childNode}
+          selectedSharedSessionId={selectedSharedSessionId}
+          sharedSessionById={sharedSessionById}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function TeamRuntimeShell({
   auditLogs,
   busy,
@@ -257,6 +341,7 @@ export function TeamRuntimeShell({
     selectedWorkspace,
     selectedWorkspaceKey,
     setSelectedWorkspaceKey,
+    sessionTreeGroups,
     workspaceOutputCards,
     workspaceOverviewLines,
     workspaceSummaries,
@@ -272,6 +357,9 @@ export function TeamRuntimeShell({
     sharedSessions,
     tasks,
   });
+  const sharedSessionById = new Map(
+    filteredSharedSessions.map((session) => [session.sessionId, session]),
+  );
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -407,21 +495,75 @@ export function TeamRuntimeShell({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(280px, 340px) minmax(420px, 1fr)',
+              gridTemplateColumns: 'minmax(320px, 420px) minmax(420px, 1fr)',
               gap: 16,
               alignItems: 'start',
             }}
           >
-            <TeamMembersPanel
-              busy={busy}
-              form={memberForm}
-              members={members}
-              onAvatarUrlChange={(value) => onMemberFormChange({ avatarUrl: value })}
-              onEmailChange={(value) => onMemberFormChange({ email: value })}
-              onNameChange={(value) => onMemberFormChange({ name: value })}
-              onRoleChange={(value) => onMemberFormChange({ role: value })}
-              onSubmit={onCreateMember}
-            />
+            <div style={{ display: 'grid', gap: 16 }}>
+              <section className="content-card" style={{ display: 'grid', gap: 12, padding: 18 }}>
+                <TeamSectionHeader
+                  eyebrow="Session tree"
+                  title="父子会话结构"
+                  description="先在 TeamPage 中把当前工作区里的父子 session 和共享运行结构拉起来，再逐步叠加更细的 agent/task 轨迹。"
+                />
+                {sessionTreeGroups.length === 0 ||
+                sessionTreeGroups.every((group) => group.roots.length === 0) ? (
+                  <EmptyState
+                    title="暂无会话树"
+                    description="当前工作区没有可用于组装父子关系的会话记录，后续接入更多运行来源后会在这里扩展。"
+                  />
+                ) : (
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    {sessionTreeGroups.map((group) => (
+                      <div
+                        key={group.workspaceLabel}
+                        className="content-card"
+                        style={{ display: 'grid', gap: 10, padding: 14 }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>
+                            {group.workspaceLabel}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                            {group.sessions.length} 个会话
+                          </span>
+                        </div>
+                        <div style={{ display: 'grid', gap: 10 }}>
+                          {group.roots.map((node) => (
+                            <SessionTreeNodeCard
+                              key={node.session.id}
+                              depth={0}
+                              node={node}
+                              selectedSharedSessionId={selectedSharedSessionId}
+                              sharedSessionById={sharedSessionById}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <TeamMembersPanel
+                busy={busy}
+                form={memberForm}
+                members={members}
+                onAvatarUrlChange={(value) => onMemberFormChange({ avatarUrl: value })}
+                onEmailChange={(value) => onMemberFormChange({ email: value })}
+                onNameChange={(value) => onMemberFormChange({ name: value })}
+                onRoleChange={(value) => onMemberFormChange({ role: value })}
+                onSubmit={onCreateMember}
+              />
+            </div>
             <TeamSharedSessionsPanel
               commentDraft={sharedCommentDraft}
               onCommentDraftChange={onSharedCommentDraftChange}

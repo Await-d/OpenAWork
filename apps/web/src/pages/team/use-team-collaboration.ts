@@ -77,7 +77,14 @@ export function useTeamCollaboration() {
   const [sessionShares, setSessionShares] = useState<TeamSessionShareRecord[]>([]);
   const [sharedSessions, setSharedSessions] = useState<SharedSessionSummaryRecord[]>([]);
   const [sessions, setSessions] = useState<
-    Array<{ id: string; title: string | null; workspacePath: string | null }>
+    Array<{
+      id: string;
+      metadataJson: string;
+      parentSessionId: string | null;
+      title: string | null;
+      updatedAt: string;
+      workspacePath: string | null;
+    }>
   >([]);
   const [selectedSharedSessionId, setSelectedSharedSessionId] = useState<string | null>(null);
   const [selectedSharedSession, setSelectedSharedSession] =
