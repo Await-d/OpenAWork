@@ -7,8 +7,10 @@ import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session-workspace-resolution.js';
+import { mergeRuntimeTaskGroups } from '../team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-audit-store.js';
+import { buildMergedSessionTaskProjection, type SessionRow } from './sessions.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -97,13 +99,6 @@ interface MessageRow {
   content: string;
   type: string;
   created_at: string;
-}
-
-interface SessionListRow {
-  id: string;
-  metadata_json: string;
-  title: string | null;
-  updated_at: string;
 }
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
@@ -212,8 +207,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       sharesStep.succeed(undefined, { count: shareRows.length });
 
       const sessionsStep = child('sessions');
-      const sessionRows = sqliteAll<SessionListRow>(
-        `SELECT id, title, metadata_json, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
+      const sessionRows = sqliteAll<SessionRow>(
+        `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
         [user.sub],
       );
       sessionsStep.succeed(undefined, { count: sessionRows.length });
@@ -223,11 +218,12 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       auditStep.succeed(undefined, { count: auditLogs.length });
 
       const sharedSessionsStep = child('shared-with-me');
-      const sharedSessions = listSharedSessionsForRecipient({
+      const sharedSessionAccessRecords = listSharedSessionsForRecipient({
         email: user.email,
         limit: 24,
         offset: 0,
-      }).map((sharedSession) => ({
+      });
+      const sharedSessions = sharedSessionAccessRecords.map((sharedSession) => ({
         sessionId: sharedSession.session.id,
         title: sharedSession.session.title,
         stateStatus: sharedSession.session.stateStatus,
@@ -240,6 +236,43 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         shareUpdatedAt: sharedSession.shareUpdatedAt,
       }));
       sharedSessionsStep.succeed(undefined, { count: sharedSessions.length });
+
+      const runtimeTaskGroupsStep = child('runtime-task-groups');
+      const runtimeTaskGroups = mergeRuntimeTaskGroups(
+        await Promise.all(
+          sharedSessionAccessRecords.map(async (sharedSession) => {
+            const workspacePath = sharedSession.session.workspacePath ?? null;
+            const relatedSessionRows = sessionRows.filter(
+              (row) =>
+                getWorkspacePathFromMetadataJson({
+                  metadataJson: row.metadata_json,
+                  sessionId: row.id,
+                  userId: user.sub,
+                }) === workspacePath,
+            );
+            const includedSessionIds = new Set(
+              relatedSessionRows.map((sessionRow) => sessionRow.id),
+            );
+            if (!includedSessionIds.has(sharedSession.session.id)) {
+              includedSessionIds.add(sharedSession.session.id);
+            }
+
+            const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
+              includedSessionIds,
+              sessions: sessionRows,
+              sessionId: sharedSession.session.id,
+            });
+
+            return {
+              sessionIds: [sharedSession.session.id],
+              tasks: tasks.filter((task) => task.status !== 'cancelled'),
+              updatedAt,
+              workspacePath,
+            };
+          }),
+        ),
+      );
+      runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
 
       const response = {
         auditLogs,
@@ -282,6 +315,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           }),
         })),
         sharedSessions,
+        runtimeTaskGroups,
         tasks: taskRows.map((row) => ({
           id: row.id,
           title: row.title,

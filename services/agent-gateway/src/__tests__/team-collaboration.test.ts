@@ -22,6 +22,7 @@ vi.mock('../request-workflow.js', () => ({
 }));
 
 vi.mock('../db.js', () => ({
+  WORKSPACE_ROOT: '/repo',
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: ['/repo'],
   sqliteAll: sqliteAllMock,
@@ -428,6 +429,7 @@ describe('teamRoutes collaboration slice', () => {
       members: [expect.objectContaining({ id: 'member-1', name: '林雾' })],
       tasks: [expect.objectContaining({ id: 'task-1', title: '实现协同状态流' })],
       messages: [expect.objectContaining({ id: 'msg-1', content: '任务已认领' })],
+      runtimeTaskGroups: [expect.objectContaining({ workspacePath: '/repo/apps/api' })],
       sessionShares: [expect.objectContaining({ id: 'share-1', workspacePath: '/repo/apps/web' })],
       sessions: [
         expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' }),

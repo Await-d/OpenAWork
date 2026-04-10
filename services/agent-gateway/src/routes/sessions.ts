@@ -96,7 +96,7 @@ const createSessionSchema = z.object({
   workingDirectory: z.string().optional(),
 });
 
-interface SessionRow {
+export interface SessionRow {
   id: string;
   user_id: string;
   messages_json: string;
@@ -805,7 +805,7 @@ function mergeTaskProjections(
   });
 }
 
-async function buildMergedSessionTaskProjection(input: {
+export async function buildMergedSessionTaskProjection(input: {
   includedSessionIds: ReadonlySet<string>;
   sessions: ReadonlyArray<SessionRow>;
   sessionId: string;
