@@ -7,6 +7,7 @@ import {
   type CreateTeamTaskInput,
   type SharedSessionDetailRecord,
   type SharedSessionSummaryRecord,
+  type SessionTask,
   type TeamAuditLogRecord,
   type TeamMemberRecord,
   type TeamMessageRecord,
@@ -49,6 +50,28 @@ function sortTasks(tasks: TeamTaskRecord[]): TeamTaskRecord[] {
   });
 }
 
+function mapRuntimeTasksToTeamTasks(tasks: SessionTask[]): TeamTaskRecord[] {
+  return tasks
+    .filter((task) => task.status !== 'cancelled')
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      assigneeId: null,
+      status:
+        task.status === 'running'
+          ? 'in_progress'
+          : task.status === 'completed'
+            ? 'completed'
+            : task.status === 'failed'
+              ? 'failed'
+              : 'pending',
+      priority: task.priority,
+      result: task.result ?? task.errorMessage ?? null,
+      createdAt: new Date(task.createdAt).toISOString(),
+      updatedAt: new Date(task.updatedAt).toISOString(),
+    }));
+}
+
 function sortMessages(messages: TeamMessageRecord[]): TeamMessageRecord[] {
   return [...messages].sort((left, right) => left.timestamp - right.timestamp);
 }
@@ -89,6 +112,8 @@ export function useTeamCollaboration() {
   const [selectedSharedSessionId, setSelectedSharedSessionId] = useState<string | null>(null);
   const [selectedSharedSession, setSelectedSharedSession] =
     useState<SharedSessionDetailRecord | null>(null);
+  const [runtimeTasks, setRuntimeTasks] = useState<SessionTask[]>([]);
+  const [runtimeTasksLoading, setRuntimeTasksLoading] = useState(false);
   const [sharedCommentBusy, setSharedCommentBusy] = useState(false);
   const [sharedOperateBusy, setSharedOperateBusy] = useState(false);
   const [sharedOperateError, setSharedOperateError] = useState<string | null>(null);
@@ -163,6 +188,7 @@ export function useTeamCollaboration() {
       setSessions([]);
       setSelectedSharedSessionId(null);
       setSelectedSharedSession(null);
+      setRuntimeTasks([]);
       setLoading(false);
       return;
     }
@@ -240,6 +266,8 @@ export function useTeamCollaboration() {
       setSelectedSharedSession(null);
       setSharedSessionLoading(false);
       setSharedOperateError(null);
+      setRuntimeTasks([]);
+      setRuntimeTasksLoading(false);
       return;
     }
 
@@ -291,6 +319,40 @@ export function useTeamCollaboration() {
     selectedSharedSessionId,
     sessionsClient,
   ]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedSharedSessionId) {
+      setRuntimeTasks([]);
+      setRuntimeTasksLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRuntimeTasks([]);
+    setRuntimeTasksLoading(true);
+
+    sessionsClient
+      .getTasks(accessToken, selectedSharedSessionId)
+      .then((tasks) => {
+        if (!cancelled) {
+          setRuntimeTasks(tasks);
+        }
+      })
+      .catch((_reason) => {
+        if (!cancelled) {
+          setRuntimeTasks([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRuntimeTasksLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, selectedSharedSessionId, sessionsClient]);
 
   useEffect(() => {
     if (!accessToken || !selectedSharedSessionId) {
@@ -541,6 +603,9 @@ export function useTeamCollaboration() {
     messages,
     replySharedPermission,
     replySharedQuestion,
+    runtimeTasks,
+    runtimeTaskRecords: sortTasks(mapRuntimeTasksToTeamTasks(runtimeTasks)),
+    runtimeTasksLoading,
     selectedSharedSession,
     selectedSharedSessionId,
     refresh,

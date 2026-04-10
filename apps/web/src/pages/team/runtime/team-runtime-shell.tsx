@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
+  SessionTask,
   TeamAuditLogRecord,
   TeamMemberRecord,
   TeamMessageRecord,
@@ -115,6 +116,9 @@ interface TeamRuntimeShellProps {
   sharedSessionLoading: boolean;
   sharedSessions: SharedSessionSummaryRecord[];
   taskForm: TaskFormState;
+  runtimeTaskRecords: TeamTaskRecord[];
+  runtimeTasks: SessionTask[];
+  runtimeTasksLoading: boolean;
   tasks: TeamTaskRecord[];
 }
 
@@ -322,10 +326,17 @@ export function TeamRuntimeShell({
   sharedSessionLoading,
   sharedSessions,
   taskForm,
+  runtimeTaskRecords,
+  runtimeTasks,
+  runtimeTasksLoading,
   tasks,
 }: TeamRuntimeShellProps) {
   const [activeTab, setActiveTab] = useState<RuntimeTabKey>('overview');
   const [interactionDraft, setInteractionDraft] = useState('');
+  const runtimeTaskById = useMemo(
+    () => new Map(runtimeTasks.map((task) => [task.id, task])),
+    [runtimeTasks],
+  );
   const {
     buddyProjection,
     changeMetrics,
@@ -584,12 +595,69 @@ export function TeamRuntimeShell({
       case 'tasks':
         return (
           <div style={{ display: 'grid', gap: 16 }}>
-            {selectedWorkspaceKey !== ALL_WORKSPACES_KEY ? (
-              <div className="content-card" style={{ padding: 14, color: 'var(--text-3)' }}>
-                当前任务仍按团队维度管理；本切片优先完成工作区级外壳，任务级工作区投影保留到后续
-                read model 聚合中细化。
-              </div>
-            ) : null}
+            <section className="content-card" style={{ display: 'grid', gap: 12, padding: 18 }}>
+              <TeamSectionHeader
+                eyebrow="Runtime tasks"
+                title="当前共享运行任务轨迹"
+                description="优先展示当前共享运行的 task projection；团队级任务区保留在下方，作为协作兜底。"
+              />
+              {runtimeTasksLoading ? (
+                <div className="content-card" style={{ padding: 14, color: 'var(--text-3)' }}>
+                  正在加载当前共享运行的任务投影…
+                </div>
+              ) : selectedSharedSessionId && runtimeTaskRecords.length > 0 ? (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {runtimeTaskRecords.map((task) => {
+                    const runtimeTask = runtimeTaskById.get(task.id);
+                    const statusMeta = getTaskStatusMeta(task.status);
+
+                    return (
+                      <div
+                        key={task.id}
+                        className="content-card"
+                        style={{
+                          display: 'grid',
+                          gap: 8,
+                          padding: 14,
+                          marginLeft: runtimeTask ? runtimeTask.depth * 12 : 0,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontSize: 14, fontWeight: 700 }}>{task.title}</span>
+                          <span style={statusMeta.style}>{statusMeta.label}</span>
+                        </div>
+                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                          {runtimeTask?.assignedAgent
+                            ? `Agent：${runtimeTask.assignedAgent} · `
+                            : ''}
+                          子任务：{runtimeTask?.subtaskCount ?? 0} · 已完成：
+                          {runtimeTask?.completedSubtaskCount ?? 0} · 未满足依赖：
+                          {runtimeTask?.unmetDependencyCount ?? 0}
+                        </span>
+                        {task.result ? (
+                          <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.7 }}>
+                            {task.result}
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  title="暂无运行任务"
+                  description="当前还没有选中的共享运行任务投影；选中共享会话后，这里会优先显示 runtime tasks。"
+                />
+              )}
+            </section>
+
             <TeamTasksPanel
               busy={busy}
               form={taskForm}

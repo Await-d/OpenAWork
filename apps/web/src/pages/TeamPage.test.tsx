@@ -277,6 +277,80 @@ beforeEach(() => {
       } as Response;
     }
 
+    if (url.pathname.endsWith('/sessions/shared-session-1/tasks') && method === 'GET') {
+      return {
+        ok: true,
+        json: async () => ({
+          tasks: [
+            {
+              id: 'runtime-task-1',
+              title: '整理上线回顾',
+              status: 'running',
+              blockedBy: [],
+              completedSubtaskCount: 1,
+              readySubtaskCount: 0,
+              sessionId: 'shared-session-1',
+              assignedAgent: 'reviewer',
+              priority: 'high',
+              tags: ['retro'],
+              createdAt: Date.parse('2026-04-04T04:30:00.000Z'),
+              updatedAt: Date.parse('2026-04-04T04:40:00.000Z'),
+              depth: 0,
+              subtaskCount: 2,
+              unmetDependencyCount: 0,
+              result: '正在整理复盘要点',
+            },
+          ],
+        }),
+      } as Response;
+    }
+
+    if (url.pathname.endsWith('/sessions/shared-session-2/tasks') && method === 'GET') {
+      return {
+        ok: true,
+        json: async () => ({
+          tasks: [
+            {
+              id: 'runtime-task-3',
+              title: '整理失败用例',
+              status: 'failed',
+              blockedBy: ['runtime-task-2'],
+              completedSubtaskCount: 0,
+              readySubtaskCount: 0,
+              sessionId: 'shared-session-2',
+              assignedAgent: 'reviewer',
+              priority: 'high',
+              tags: ['handoff'],
+              createdAt: Date.parse('2026-04-04T06:50:00.000Z'),
+              updatedAt: Date.parse('2026-04-04T06:55:00.000Z'),
+              depth: 1,
+              subtaskCount: 1,
+              unmetDependencyCount: 1,
+              result: '等待上游修复后再继续',
+            },
+            {
+              id: 'runtime-task-2',
+              title: '继续交接验证',
+              status: 'pending',
+              blockedBy: [],
+              completedSubtaskCount: 0,
+              readySubtaskCount: 1,
+              sessionId: 'shared-session-2',
+              assignedAgent: 'executor',
+              priority: 'medium',
+              tags: ['handoff'],
+              createdAt: Date.parse('2026-04-04T06:35:00.000Z'),
+              updatedAt: Date.parse('2026-04-04T06:45:00.000Z'),
+              depth: 0,
+              subtaskCount: 1,
+              unmetDependencyCount: 0,
+              result: '等待继续验证',
+            },
+          ],
+        }),
+      } as Response;
+    }
+
     if (url.pathname.endsWith('/sessions/shared-with-me') && method === 'GET') {
       return {
         ok: true,
@@ -764,6 +838,18 @@ describe('TeamPage', () => {
     expect(container?.textContent).toContain('子代理检索');
     expect(container?.textContent).toContain('孙子代理整理');
     expect(container?.textContent).toContain('1 个子会话');
+  });
+
+  it('prefers runtime tasks in the task board when a shared session is selected', async () => {
+    await renderPage();
+    await clickTab('任务看板');
+
+    expect(container?.textContent).toContain('当前共享运行任务轨迹');
+    expect(container?.textContent).toContain('继续交接验证');
+    expect(container?.textContent).toContain('整理失败用例');
+    expect(container?.textContent).toContain('Agent：executor');
+    expect(container?.textContent).toContain('Agent：reviewer');
+    expect(container?.textContent).toContain('等待上游修复后再继续');
   });
 
   it('shows a stable empty runtime shell when /team/runtime returns no data', async () => {
