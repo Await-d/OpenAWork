@@ -883,6 +883,27 @@ describe('TeamPage', () => {
     expect(submitAnswerButton?.disabled).toBe(true);
   });
 
+  it('renders workspace-scoped change projection in the changes tab', async () => {
+    await renderPage();
+    await clickTab('Git / 变更');
+
+    expect(container?.textContent).toContain('工作区变更投影');
+    expect(container?.textContent).toContain('最近快照');
+    expect(container?.textContent).toContain('来源类型');
+    expect(container?.textContent).toContain('快照');
+    expect(container?.textContent).toContain('工作区共享运行清单');
+    expect(container?.textContent).toContain('交接验证');
+  });
+
+  it('shows empty change projection when workspace has no shared runs', async () => {
+    await renderPage();
+    await clickWorkspace('/repo/apps/web');
+    await clickTab('Git / 变更');
+
+    expect(container?.textContent).toContain('当前工作区没有共享运行可用于变更投影。');
+    expect(container?.textContent).toContain('暂无变更摘要');
+  });
+
   it('clears the selected shared run when switching to a workspace without shared sessions', async () => {
     await renderPage();
 

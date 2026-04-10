@@ -21,12 +21,15 @@ import {
 } from '../team-page-sections.js';
 import {
   ALL_WORKSPACES_KEY,
+  buildWorkspaceChangeMetrics,
   buildRuntimeMetrics,
   buildWorkspaceContextMetrics,
   buildWorkspaceOverviewLines,
   buildWorkspaceOutputCards,
   buildWorkspaceSummaries,
   filterByWorkspace,
+  formatChangeSourceKind,
+  formatSnapshotScopeKind,
   formatWorkspaceLabel,
   getSharedSessionStateLabel,
   type TeamRuntimeMetric,
@@ -352,6 +355,15 @@ export function TeamRuntimeShell({
         sharedSessions: filteredSharedSessions,
       }),
     [effectiveSelectedSharedSession, filteredSharedSessions],
+  );
+  const changeMetrics = useMemo(
+    () =>
+      buildWorkspaceChangeMetrics({
+        fileChangesSummary,
+        sessions: filteredSessions,
+        sharedSessions: filteredSharedSessions,
+      }),
+    [fileChangesSummary, filteredSessions, filteredSharedSessions],
   );
 
   const renderTabContent = () => {
@@ -742,39 +754,127 @@ export function TeamRuntimeShell({
             <section className="content-card" style={{ display: 'grid', gap: 12, padding: 18 }}>
               <TeamSectionHeader
                 eyebrow="Workspace changes"
-                title="工作区变更摘要"
-                description="首个切片先复用共享会话里的文件变更摘要，后续再接独立的 Git / 变更聚合接口。"
+                title="工作区变更投影"
+                description="先把当前工作区的共享运行变更压成可读摘要，再把当前选中运行的快照和来源类型单独展开。"
               />
+              <RuntimeMetricGrid metrics={changeMetrics} />
               {fileChangesSummary ? (
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                    gap: 12,
+                    gridTemplateColumns: 'minmax(300px, 1fr) minmax(240px, 0.9fr)',
+                    gap: 16,
                   }}
                 >
-                  {[
-                    { label: '文件数', value: fileChangesSummary.totalFileDiffs },
-                    { label: '快照数', value: fileChangesSummary.snapshotCount },
-                    { label: '新增', value: fileChangesSummary.totalAdditions },
-                    { label: '删除', value: fileChangesSummary.totalDeletions },
-                  ].map((item) => (
-                    <div
-                      key={item.label}
-                      className="content-card"
-                      style={{ display: 'grid', gap: 4, padding: 14 }}
-                    >
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{item.label}</span>
-                      <span style={{ fontSize: 22, fontWeight: 800 }}>{item.value}</span>
+                  <div className="content-card" style={{ display: 'grid', gap: 12, padding: 14 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>当前共享运行变更摘要</span>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        变更文件：{fileChangesSummary.totalFileDiffs} · 快照：
+                        {fileChangesSummary.snapshotCount}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        新增：{fileChangesSummary.totalAdditions} · 删除：
+                        {fileChangesSummary.totalDeletions}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        最近快照：
+                        {fileChangesSummary.latestSnapshotAt
+                          ? new Date(fileChangesSummary.latestSnapshotAt).toLocaleString('zh-CN')
+                          : '未生成'}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        快照类型：
+                        {formatSnapshotScopeKind(fileChangesSummary.latestSnapshotScopeKind)}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        保障等级：{fileChangesSummary.weakestGuaranteeLevel ?? '未标记'}
+                      </span>
                     </div>
-                  ))}
+                  </div>
+                  <div className="content-card" style={{ display: 'grid', gap: 12, padding: 14 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>来源类型</span>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {fileChangesSummary.sourceKinds.length > 0 ? (
+                        fileChangesSummary.sourceKinds.map((sourceKind) => (
+                          <span
+                            key={sourceKind}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 10px',
+                              borderRadius: 999,
+                              border:
+                                '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+                              fontSize: 11,
+                              color: 'var(--text-2)',
+                            }}
+                          >
+                            {formatChangeSourceKind(sourceKind)}
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                          当前共享运行还没有来源类型摘要。
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <EmptyState
                   title="暂无变更摘要"
-                  description="当前共享会话没有 fileChangesSummary，可先继续推进工作区外壳与共享运行接线。"
+                  description="当前工作区没有已加载的共享运行变更摘要；先在会话 / Agent 中选一条共享运行，或者继续接入更深的变更聚合。"
                 />
               )}
+              <section className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>工作区共享运行清单</span>
+                {filteredSharedSessions.length === 0 ? (
+                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                    当前工作区没有共享运行可用于变更投影。
+                  </span>
+                ) : (
+                  filteredSharedSessions.map((sharedSession) => {
+                    const isSelected =
+                      sharedSession.sessionId === effectiveSelectedSharedSession?.share.sessionId;
+                    return (
+                      <div
+                        key={sharedSession.sessionId}
+                        className="content-card"
+                        style={{
+                          display: 'grid',
+                          gap: 6,
+                          padding: 12,
+                          borderColor: isSelected
+                            ? 'color-mix(in srgb, var(--accent) 38%, transparent)'
+                            : undefined,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>
+                            {sharedSession.title ?? sharedSession.sessionId}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                            {getSharedSessionStateLabel(sharedSession.stateStatus)}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                          {isSelected
+                            ? '当前已接入详细变更摘要，可结合上方快照与来源类型继续排查。'
+                            : '当前只显示运行级概览；切到该共享会话后可查看详细变更摘要。'}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </section>
             </section>
           </div>
         );

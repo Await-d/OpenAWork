@@ -1,4 +1,5 @@
 import type {
+  SessionFileChangesSummary,
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
   TeamAuditLogRecord,
@@ -43,6 +44,12 @@ export interface TeamWorkspaceOutputCard {
   stateLabel: string;
   title: string;
   workspaceLabel: string;
+}
+
+export interface TeamWorkspaceChangeMetric {
+  hint: string;
+  label: string;
+  value: number | string;
 }
 
 export function resolveWorkspaceKey(workspacePath: string | null | undefined): string {
@@ -347,4 +354,82 @@ export function buildWorkspaceOutputCards(input: {
         : '当前只展示工作区级输出摘要；选中该共享会话后可查看更细的运行内容。',
     };
   });
+}
+
+export function formatChangeSourceKind(sourceKind: string): string {
+  if (sourceKind === 'structured_tool_diff') {
+    return '工具';
+  }
+  if (sourceKind === 'session_snapshot') {
+    return '快照';
+  }
+  if (sourceKind === 'restore_replay') {
+    return '恢复回放';
+  }
+  if (sourceKind === 'workspace_reconcile') {
+    return '工作区对账';
+  }
+  if (sourceKind === 'manual_revert') {
+    return '手动回退';
+  }
+  return sourceKind;
+}
+
+export function formatSnapshotScopeKind(scopeKind: string | undefined): string {
+  if (scopeKind === 'request') {
+    return '请求快照';
+  }
+  if (scopeKind === 'backup') {
+    return '备份快照';
+  }
+  if (scopeKind === 'scope') {
+    return '范围快照';
+  }
+  return '未知快照';
+}
+
+export function buildWorkspaceChangeMetrics(input: {
+  fileChangesSummary: SessionFileChangesSummary | undefined;
+  sessions: Array<{ id: string; title: string | null; workspacePath: string | null }>;
+  sharedSessions: SharedSessionSummaryRecord[];
+}): TeamWorkspaceChangeMetric[] {
+  return [
+    {
+      label: '工作区会话',
+      value: input.sessions.length,
+      hint: '当前工作区可追踪的会话数量',
+    },
+    {
+      label: '共享运行',
+      value: input.sharedSessions.length,
+      hint: '当前工作区可映射到 Team Runtime 的共享运行数量',
+    },
+    {
+      label: '变更文件',
+      value: input.fileChangesSummary?.totalFileDiffs ?? 0,
+      hint: '当前选中共享运行的文件变更数',
+    },
+    {
+      label: '快照数',
+      value: input.fileChangesSummary?.snapshotCount ?? 0,
+      hint: '当前选中共享运行已生成的快照数量',
+    },
+    {
+      label: '来源类型',
+      value: input.fileChangesSummary?.sourceKinds.length ?? 0,
+      hint: '当前选中共享运行的变更来源种类数',
+    },
+    {
+      label: '最近快照',
+      value: input.fileChangesSummary?.latestSnapshotAt
+        ? new Date(input.fileChangesSummary.latestSnapshotAt).toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : '未生成',
+      hint: '当前选中共享运行最近一次快照时间',
+    },
+  ];
 }
