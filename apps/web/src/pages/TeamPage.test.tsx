@@ -10,6 +10,7 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
 let failNextShareCreate = false;
+let failNextInteractionProcessing = false;
 let slowSharedSessionOneDetail = false;
 let teamMessages: Array<{
   content: string;
@@ -25,6 +26,7 @@ beforeEach(() => {
   ).IS_REACT_ACT_ENVIRONMENT = true;
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
   failNextShareCreate = false;
+  failNextInteractionProcessing = false;
   slowSharedSessionOneDetail = false;
   teamMessages = [
     {
@@ -413,6 +415,19 @@ beforeEach(() => {
         senderId?: string;
         type?: 'update' | 'question' | 'result' | 'error';
       };
+
+      if (
+        failNextInteractionProcessing &&
+        payload.content === '【interaction-agent/处理中】已接收该请求，正在整理下一步动作。'
+      ) {
+        failNextInteractionProcessing = false;
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'processing write failed' }),
+        } as Response;
+      }
+
       const nextMessage = {
         id: `msg-${teamMessages.length + 1}`,
         memberId: payload.senderId ?? '',
@@ -983,9 +998,11 @@ describe('TeamPage', () => {
     });
 
     expect(container?.textContent).toContain('消息时间线');
-    expect(container?.textContent).toContain(
-      '【interaction-agent】请先梳理当前阻塞并给出下一步建议',
-    );
+    expect(container?.textContent).toContain('interaction-agent');
+    expect(container?.textContent).toContain('发起');
+    expect(container?.textContent).toContain('处理中');
+    expect(container?.textContent).toContain('请先梳理当前阻塞并给出下一步建议');
+    expect(container?.textContent).toContain('已接收该请求，正在整理下一步动作。');
     expect(container?.textContent).toContain('question');
     expect(interactionTextarea?.value ?? '').toBe('');
     expect(
@@ -1001,11 +1018,64 @@ describe('TeamPage', () => {
           type?: string;
         };
         return (
-          payload.content === '【interaction-agent】请先梳理当前阻塞并给出下一步建议' &&
+          payload.content === '【interaction-agent/发起】请先梳理当前阻塞并给出下一步建议' &&
           payload.type === 'question'
         );
       }),
     ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([input, init]) => {
+        if (
+          input !== 'http://localhost:3000/team/messages' ||
+          (init as RequestInit | undefined)?.method !== 'POST'
+        ) {
+          return false;
+        }
+        const payload = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as {
+          content?: string;
+          type?: string;
+        };
+        return (
+          payload.content === '【interaction-agent/处理中】已接收该请求，正在整理下一步动作。' &&
+          payload.type === 'update'
+        );
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps the interaction-agent draft when the processing status write fails', async () => {
+    failNextInteractionProcessing = true;
+    await renderPage();
+
+    const interactionTextarea = container?.querySelector(
+      'textarea[aria-label="interaction-agent 输入区"]',
+    ) as HTMLTextAreaElement | null;
+    const submitButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('交由 interaction-agent'),
+    ) as HTMLButtonElement | undefined;
+
+    expect(interactionTextarea).toBeTruthy();
+    expect(submitButton).toBeTruthy();
+
+    await act(async () => {
+      if (interactionTextarea) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(interactionTextarea, '请帮我继续补充失败路径');
+        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(interactionTextarea?.value ?? '').toBe('请帮我继续补充失败路径');
+    expect(container?.textContent).not.toContain('已接收该请求，正在整理下一步动作。');
+    expect(container?.textContent).toContain('Failed to create team message: 500');
   });
 
   it('ignores stale shared-session detail responses after switching sessions', async () => {

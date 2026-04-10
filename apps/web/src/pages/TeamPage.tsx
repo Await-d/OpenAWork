@@ -103,10 +103,21 @@ export default function TeamPage() {
   };
 
   const handleCreateInteractionMessage = async (content: string) => {
-    return createMessage({
-      content: `【interaction-agent】${content}`,
+    const started = await createMessage({
+      content: `【interaction-agent/发起】${content}`,
       type: 'question',
     });
+
+    if (!started) {
+      return false;
+    }
+
+    const processing = await createMessage({
+      content: '【interaction-agent/处理中】已接收该请求，正在整理下一步动作。',
+      type: 'update',
+    });
+
+    return processing;
   };
 
   const handleCreateSessionShare = async () => {
