@@ -10,6 +10,7 @@ import {
   type TeamAuditLogRecord,
   type TeamMemberRecord,
   type TeamMessageRecord,
+  type TeamRuntimeReadModel,
   type TeamSessionShareRecord,
   type TeamTaskRecord,
   type UpdateTeamTaskInput,
@@ -17,15 +18,7 @@ import {
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth.js';
 
-interface TeamSnapshot {
-  auditLogs: TeamAuditLogRecord[];
-  members: TeamMemberRecord[];
-  messages: TeamMessageRecord[];
-  sessionShares: TeamSessionShareRecord[];
-  sharedSessions: SharedSessionSummaryRecord[];
-  sessions: Array<{ id: string; title: string | null; workspacePath: string | null }>;
-  tasks: TeamTaskRecord[];
-}
+interface TeamSnapshot extends TeamRuntimeReadModel {}
 
 export interface TeamActionFeedback {
   message: string;
@@ -72,20 +65,6 @@ function sortSharedSessions(sessions: SharedSessionSummaryRecord[]): SharedSessi
   return [...sessions].sort((left, right) =>
     right.shareUpdatedAt.localeCompare(left.shareUpdatedAt, 'zh-CN'),
   );
-}
-
-function extractWorkspacePathFromSessionMetadata(metadataJson?: string): string | null {
-  if (!metadataJson) {
-    return null;
-  }
-
-  try {
-    const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
-    const workingDirectory = metadata['workingDirectory'];
-    return typeof workingDirectory === 'string' ? workingDirectory : null;
-  } catch {
-    return null;
-  }
 }
 
 export function useTeamCollaboration() {
@@ -153,38 +132,18 @@ export function useTeamCollaboration() {
       };
     }
 
-    const [
-      nextMembers,
-      nextTasks,
-      nextMessages,
-      nextSessionShares,
-      nextSessions,
-      nextAuditLogs,
-      nextSharedSessions,
-    ] = await Promise.all([
-      client.listMembers(accessToken),
-      client.listTasks(accessToken),
-      client.listMessages(accessToken),
-      client.listSessionShares(accessToken),
-      sessionsClient.list(accessToken),
-      client.listAuditLogs(accessToken, { limit: 24 }),
-      sessionsClient.listSharedWithMe(accessToken, { limit: 24 }),
-    ]);
+    const runtime = await client.getRuntime(accessToken);
 
     return {
-      auditLogs: sortAuditLogs(nextAuditLogs),
-      members: sortMembers(nextMembers),
-      messages: sortMessages(nextMessages),
-      sessionShares: sortSessionShares(nextSessionShares),
-      sharedSessions: sortSharedSessions(nextSharedSessions),
-      sessions: nextSessions.map((session) => ({
-        id: session.id,
-        title: session.title ?? null,
-        workspacePath: extractWorkspacePathFromSessionMetadata(session.metadata_json),
-      })),
-      tasks: sortTasks(nextTasks),
+      auditLogs: sortAuditLogs(runtime.auditLogs),
+      members: sortMembers(runtime.members),
+      messages: sortMessages(runtime.messages),
+      sessionShares: sortSessionShares(runtime.sessionShares),
+      sharedSessions: sortSharedSessions(runtime.sharedSessions),
+      sessions: runtime.sessions,
+      tasks: sortTasks(runtime.tasks),
     };
-  }, [accessToken, client, sessionsClient]);
+  }, [accessToken, client]);
 
   const refresh = useCallback(async () => {
     if (!accessToken) {

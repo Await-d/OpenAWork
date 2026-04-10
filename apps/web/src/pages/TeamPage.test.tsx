@@ -9,8 +9,10 @@ import { useAuthStore } from '../stores/auth.js';
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
+let emptyTeamRuntime = false;
 let failNextShareCreate = false;
 let failNextInteractionProcessing = false;
+let failTeamRuntimeLoad = false;
 let slowSharedSessionOneDetail = false;
 let teamMessages: Array<{
   content: string;
@@ -25,8 +27,10 @@ beforeEach(() => {
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
+  emptyTeamRuntime = false;
   failNextShareCreate = false;
   failNextInteractionProcessing = false;
+  failTeamRuntimeLoad = false;
   slowSharedSessionOneDetail = false;
   teamMessages = [
     {
@@ -76,6 +80,119 @@ beforeEach(() => {
             updatedAt: '2026-04-04T00:00:00.000Z',
           },
         ],
+      } as Response;
+    }
+
+    if (url.pathname.endsWith('/team/runtime') && method === 'GET') {
+      if (failTeamRuntimeLoad) {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'runtime failed' }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          auditLogs: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  id: 'audit-1',
+                  action: 'shared_permission_replied',
+                  actorEmail: 'viewer@openawork.local',
+                  actorUserId: 'viewer-1',
+                  entityType: 'permission_request',
+                  entityId: 'perm-1',
+                  summary: 'viewer@openawork.local 处理了“上线回顾”的权限请求（once）',
+                  detail:
+                    '会话：上线回顾；工作区：/repo/apps/api；工具：read_file；范围：/repo/apps/api；决策：once',
+                  createdAt: '2026-04-04T02:00:00.000Z',
+                },
+              ],
+          members: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  id: 'member-1',
+                  name: '林雾',
+                  email: 'linwu@openawork.local',
+                  role: 'owner',
+                  avatarUrl: null,
+                  status: 'working',
+                  createdAt: '2026-04-04T00:00:00.000Z',
+                },
+              ],
+          messages: emptyTeamRuntime ? [] : teamMessages,
+          sessionShares: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  id: 'share-1',
+                  sessionId: 'session-1',
+                  sessionLabel: '设计讨论',
+                  workspacePath: '/repo/apps/web',
+                  memberId: 'member-1',
+                  memberName: '林雾',
+                  memberEmail: 'linwu@openawork.local',
+                  permission: 'comment',
+                  createdAt: '2026-04-04T00:00:00.000Z',
+                  updatedAt: '2026-04-04T01:00:00.000Z',
+                },
+              ],
+          sessions: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  id: 'session-1',
+                  title: '设计讨论',
+                  workspacePath: '/repo/apps/web',
+                },
+              ],
+          sharedSessions: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  sessionId: 'shared-session-1',
+                  title: '上线回顾',
+                  stateStatus: 'paused',
+                  workspacePath: '/repo/apps/api',
+                  sharedByEmail: 'owner@openawork.local',
+                  permission: 'operate',
+                  createdAt: '2026-04-04T03:00:00.000Z',
+                  updatedAt: '2026-04-04T03:30:00.000Z',
+                  shareCreatedAt: '2026-04-04T04:00:00.000Z',
+                  shareUpdatedAt: '2026-04-04T04:15:00.000Z',
+                },
+                {
+                  sessionId: 'shared-session-2',
+                  title: '交接验证',
+                  stateStatus: 'paused',
+                  workspacePath: '/repo/apps/api',
+                  sharedByEmail: 'owner@openawork.local',
+                  permission: 'operate',
+                  createdAt: '2026-04-04T06:00:00.000Z',
+                  updatedAt: '2026-04-04T06:30:00.000Z',
+                  shareCreatedAt: '2026-04-04T06:35:00.000Z',
+                  shareUpdatedAt: '2026-04-04T06:45:00.000Z',
+                },
+              ],
+          tasks: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  id: 'task-1',
+                  title: '落地团队协作台',
+                  assigneeId: 'member-1',
+                  status: 'in_progress',
+                  priority: 'high',
+                  result: '正在推进',
+                  createdAt: '2026-04-04T00:00:00.000Z',
+                  updatedAt: '2026-04-04T00:00:00.000Z',
+                },
+              ],
+        }),
       } as Response;
     }
 
@@ -617,6 +734,23 @@ describe('TeamPage', () => {
           (init as RequestInit | undefined)?.method === 'POST',
       ),
     ).toBe(true);
+  });
+
+  it('shows a stable empty runtime shell when /team/runtime returns no data', async () => {
+    emptyTeamRuntime = true;
+    await renderPage();
+
+    expect(container?.textContent).toContain('Team Runtime');
+    expect(container?.textContent).toContain('全部工作区');
+    expect(container?.textContent).toContain('0 个会话 · 0 个共享运行 · 0 条共享记录');
+    expect(container?.textContent).toContain('尚未选中共享运行');
+  });
+
+  it('shows a runtime load error when /team/runtime fails', async () => {
+    failTeamRuntimeLoad = true;
+    await renderPage();
+
+    expect(container?.textContent).toContain('Failed to load team runtime: 500');
   });
 
   it('creates a new team task from the composer', async () => {
