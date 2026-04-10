@@ -1,3 +1,5 @@
+import type { SharedSessionSummaryRecord } from './sessions.js';
+
 export interface TeamMemberRecord {
   id: string;
   name: string;
@@ -94,7 +96,24 @@ export interface CreateTeamSessionShareInput {
   permission?: 'view' | 'comment' | 'operate';
 }
 
+export interface TeamRuntimeSessionRecord {
+  id: string;
+  title: string | null;
+  workspacePath: string | null;
+}
+
+export interface TeamRuntimeReadModel {
+  auditLogs: TeamAuditLogRecord[];
+  members: TeamMemberRecord[];
+  messages: TeamMessageRecord[];
+  sessionShares: TeamSessionShareRecord[];
+  sessions: TeamRuntimeSessionRecord[];
+  sharedSessions: SharedSessionSummaryRecord[];
+  tasks: TeamTaskRecord[];
+}
+
 export interface TeamClient {
+  getRuntime(token: string): Promise<TeamRuntimeReadModel>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
   listAuditLogs(token: string, options?: { limit?: number }): Promise<TeamAuditLogRecord[]>;
@@ -122,6 +141,16 @@ function buildAuthHeaders(token: string): HeadersInit {
 
 export function createTeamClient(baseUrl: string): TeamClient {
   return {
+    async getRuntime(token: string): Promise<TeamRuntimeReadModel> {
+      const response = await fetch(`${baseUrl}/team/runtime`, {
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load team runtime: ${response.status}`);
+      }
+      return (await response.json()) as TeamRuntimeReadModel;
+    },
+
     async listAuditLogs(
       token: string,
       options?: { limit?: number },

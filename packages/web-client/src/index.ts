@@ -34,6 +34,8 @@ export type {
   TeamClient,
   TeamMemberRecord,
   TeamMessageRecord,
+  TeamRuntimeReadModel,
+  TeamRuntimeSessionRecord,
   TeamSessionShareRecord,
   TeamTaskRecord,
   UpdateTeamTaskInput,
