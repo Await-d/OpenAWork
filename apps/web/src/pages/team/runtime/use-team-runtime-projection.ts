@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
+  SessionTask,
   TeamAuditLogRecord,
   TeamMemberRecord,
   TeamMessageRecord,
@@ -30,6 +31,12 @@ interface TeamRuntimeProjectionInput {
   onSelectSharedSession: (sessionId: string) => void;
   selectedSharedSession: SharedSessionDetailRecord | null;
   selectedSharedSessionId: string | null;
+  runtimeTaskGroups: Array<{
+    sessionIds: string[];
+    tasks: SessionTask[];
+    updatedAt: number;
+    workspacePath: string | null;
+  }>;
   sessionShares: TeamSessionShareRecord[];
   sessions: TeamRuntimeSessionRecord[];
   sharedSessions: SharedSessionSummaryRecord[];
@@ -43,6 +50,7 @@ export function useTeamRuntimeProjection({
   onSelectSharedSession,
   selectedSharedSession,
   selectedSharedSessionId,
+  runtimeTaskGroups,
   sessionShares,
   sessions,
   sharedSessions,
@@ -92,6 +100,10 @@ export function useTeamRuntimeProjection({
   const filteredSessionShares = useMemo(
     () => filterByWorkspace(sessionShares, selectedWorkspaceKey),
     [selectedWorkspaceKey, sessionShares],
+  );
+  const filteredRuntimeTaskGroups = useMemo(
+    () => filterByWorkspace(runtimeTaskGroups, selectedWorkspaceKey),
+    [runtimeTaskGroups, selectedWorkspaceKey],
   );
   const filteredSharedSessions = useMemo(
     () => filterByWorkspace(sharedSessions, selectedWorkspaceKey),
@@ -210,6 +222,19 @@ export function useTeamRuntimeProjection({
     };
   }, [effectiveSelectedSharedSession, pendingApprovalCount, pendingQuestionCount]);
 
+  const workspaceRuntimeTasks = useMemo(
+    () =>
+      filteredRuntimeTaskGroups.flatMap((group) =>
+        group.tasks
+          .filter((task) => task.status !== 'cancelled')
+          .map((task) => ({
+            ...task,
+            workspacePath: group.workspacePath,
+          })),
+      ),
+    [filteredRuntimeTaskGroups],
+  );
+
   const buddyProjection = useMemo(
     () => ({
       activeAgentCount,
@@ -240,6 +265,7 @@ export function useTeamRuntimeProjection({
     filteredSessions,
     filteredSessionShares,
     filteredSharedSessions,
+    filteredRuntimeTaskGroups,
     memberNameMap,
     metrics,
     selectedWorkspace,
@@ -247,6 +273,7 @@ export function useTeamRuntimeProjection({
     selectedWorkspaceKey,
     setSelectedWorkspaceKey,
     sessionTreeGroups,
+    workspaceRuntimeTasks,
     workspaceOutputCards,
     workspaceOverviewLines,
     workspaceSummaries,

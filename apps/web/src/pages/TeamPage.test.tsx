@@ -197,6 +197,53 @@ beforeEach(() => {
                   shareUpdatedAt: '2026-04-04T06:45:00.000Z',
                 },
               ],
+          runtimeTaskGroups: emptyTeamRuntime
+            ? []
+            : [
+                {
+                  workspacePath: '/repo/apps/api',
+                  updatedAt: Date.parse('2026-04-04T06:45:00.000Z'),
+                  sessionIds: ['shared-session-1', 'shared-session-2'],
+                  tasks: [
+                    {
+                      id: 'workspace-runtime-task-1',
+                      title: '汇总共享运行任务',
+                      status: 'running',
+                      blockedBy: [],
+                      completedSubtaskCount: 1,
+                      readySubtaskCount: 1,
+                      sessionId: 'shared-session-2',
+                      assignedAgent: 'planner',
+                      priority: 'high',
+                      tags: ['workspace'],
+                      createdAt: Date.parse('2026-04-04T06:40:00.000Z'),
+                      updatedAt: Date.parse('2026-04-04T06:50:00.000Z'),
+                      depth: 0,
+                      subtaskCount: 2,
+                      unmetDependencyCount: 0,
+                      result: '已开始汇总当前工作区运行任务',
+                    },
+                    {
+                      id: 'workspace-runtime-task-cancelled',
+                      title: '已取消的工作区任务',
+                      status: 'cancelled',
+                      blockedBy: [],
+                      completedSubtaskCount: 0,
+                      readySubtaskCount: 0,
+                      sessionId: 'shared-session-2',
+                      assignedAgent: 'planner',
+                      priority: 'low',
+                      tags: ['workspace'],
+                      createdAt: Date.parse('2026-04-04T06:41:00.000Z'),
+                      updatedAt: Date.parse('2026-04-04T06:51:00.000Z'),
+                      depth: 0,
+                      subtaskCount: 0,
+                      unmetDependencyCount: 0,
+                      result: '这条任务已经取消',
+                    },
+                  ],
+                },
+              ],
           tasks: emptyTeamRuntime
             ? []
             : [
@@ -845,11 +892,15 @@ describe('TeamPage', () => {
     await clickTab('任务看板');
 
     expect(container?.textContent).toContain('当前共享运行任务轨迹');
+    expect(container?.textContent).toContain('当前工作区其他运行任务');
     expect(container?.textContent).toContain('继续交接验证');
+    expect(container?.textContent).toContain('汇总共享运行任务');
     expect(container?.textContent).toContain('整理失败用例');
     expect(container?.textContent).toContain('Agent：executor');
+    expect(container?.textContent).toContain('Agent：planner');
     expect(container?.textContent).toContain('Agent：reviewer');
     expect(container?.textContent).toContain('等待上游修复后再继续');
+    expect(container?.textContent).not.toContain('已取消的工作区任务');
   });
 
   it('shows a stable empty runtime shell when /team/runtime returns no data', async () => {
@@ -860,6 +911,16 @@ describe('TeamPage', () => {
     expect(container?.textContent).toContain('全部工作区');
     expect(container?.textContent).toContain('0 个会话 · 0 个共享运行 · 0 条共享记录');
     expect(container?.textContent).toContain('尚未选中共享运行');
+  });
+
+  it('clears selected runtime tasks when switching to a workspace without shared runs', async () => {
+    await renderPage();
+    await clickWorkspace('/repo/apps/web');
+    await clickTab('任务看板');
+
+    expect(container?.textContent).toContain('暂无运行任务');
+    expect(container?.textContent).not.toContain('继续交接验证');
+    expect(container?.textContent).not.toContain('整理失败用例');
   });
 
   it('shows a runtime load error when /team/runtime fails', async () => {

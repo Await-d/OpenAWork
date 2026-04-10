@@ -117,6 +117,12 @@ interface TeamRuntimeShellProps {
   sharedSessions: SharedSessionSummaryRecord[];
   taskForm: TaskFormState;
   runtimeTaskRecords: TeamTaskRecord[];
+  runtimeTaskGroups: Array<{
+    sessionIds: string[];
+    tasks: SessionTask[];
+    updatedAt: number;
+    workspacePath: string | null;
+  }>;
   runtimeTasks: SessionTask[];
   runtimeTasksLoading: boolean;
   tasks: TeamTaskRecord[];
@@ -334,6 +340,7 @@ export function TeamRuntimeShell({
   sharedSessions,
   taskForm,
   runtimeTaskRecords,
+  runtimeTaskGroups,
   runtimeTasks,
   runtimeTasksLoading,
   tasks,
@@ -342,10 +349,6 @@ export function TeamRuntimeShell({
 }: TeamRuntimeShellProps) {
   const [activeTab, setActiveTab] = useState<RuntimeTabKey>('overview');
   const [interactionDraft, setInteractionDraft] = useState('');
-  const runtimeTaskById = useMemo(
-    () => new Map(runtimeTasks.map((task) => [task.id, task])),
-    [runtimeTasks],
-  );
   const {
     buddyProjection,
     changeMetrics,
@@ -362,6 +365,7 @@ export function TeamRuntimeShell({
     selectedWorkspaceKey,
     setSelectedWorkspaceKey,
     sessionTreeGroups,
+    workspaceRuntimeTasks,
     workspaceOutputCards,
     workspaceOverviewLines,
     workspaceSummaries,
@@ -372,11 +376,18 @@ export function TeamRuntimeShell({
     onSelectSharedSession,
     selectedSharedSession,
     selectedSharedSessionId,
+    runtimeTaskGroups,
     sessionShares,
     sessions,
     sharedSessions,
     tasks,
   });
+  const effectiveRuntimeTasks = effectiveSelectedSharedSession ? runtimeTasks : [];
+  const effectiveRuntimeTaskRecords = effectiveSelectedSharedSession ? runtimeTaskRecords : [];
+  const runtimeTaskById = useMemo(
+    () => new Map(effectiveRuntimeTasks.map((task) => [task.id, task])),
+    [effectiveRuntimeTasks],
+  );
   const sharedSessionById = new Map(
     filteredSharedSessions.map((session) => [session.sessionId, session]),
   );
@@ -656,9 +667,9 @@ export function TeamRuntimeShell({
                 <div className="content-card" style={{ padding: 14, color: 'var(--text-3)' }}>
                   正在加载当前共享运行的任务投影…
                 </div>
-              ) : selectedSharedSessionId && runtimeTaskRecords.length > 0 ? (
+              ) : effectiveSelectedSharedSession && effectiveRuntimeTaskRecords.length > 0 ? (
                 <div style={{ display: 'grid', gap: 10 }}>
-                  {runtimeTaskRecords.map((task) => {
+                  {effectiveRuntimeTaskRecords.map((task) => {
                     const runtimeTask = runtimeTaskById.get(task.id);
                     const statusMeta = getTaskStatusMeta(task.status);
 
@@ -705,6 +716,64 @@ export function TeamRuntimeShell({
                 <EmptyState
                   title="暂无运行任务"
                   description="当前还没有选中的共享运行任务投影；选中共享会话后，这里会优先显示 runtime tasks。"
+                />
+              )}
+            </section>
+
+            <section className="content-card" style={{ display: 'grid', gap: 12, padding: 18 }}>
+              <TeamSectionHeader
+                eyebrow="Workspace runtime tasks"
+                title="当前工作区其他运行任务"
+                description="在当前共享运行之外，再补齐当前工作区其他可见运行任务，让任务看板更接近真正的工作区总控。"
+              />
+              {workspaceRuntimeTasks.length > 0 ? (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {workspaceRuntimeTasks.map((task) => {
+                    const statusMeta = getTaskStatusMeta(
+                      task.status === 'running'
+                        ? 'in_progress'
+                        : task.status === 'completed'
+                          ? 'completed'
+                          : task.status === 'failed'
+                            ? 'failed'
+                            : 'pending',
+                    );
+                    return (
+                      <div
+                        key={`workspace-${task.id}`}
+                        className="content-card"
+                        style={{
+                          display: 'grid',
+                          gap: 8,
+                          padding: 14,
+                          marginLeft: task.depth * 12,
+                          opacity: runtimeTaskById.has(task.id) ? 0.74 : 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontSize: 14, fontWeight: 700 }}>{task.title}</span>
+                          <span style={statusMeta.style}>{statusMeta.label}</span>
+                        </div>
+                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                          {task.assignedAgent ? `Agent：${task.assignedAgent} · ` : ''}
+                          工作区：{formatWorkspaceLabel(task.workspacePath)} · 子任务：
+                          {task.subtaskCount}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  title="当前工作区暂无其他运行任务"
+                  description="随着更多 shared session 接入 runtime 聚合，这里会逐步覆盖到同工作区下的其他运行任务。"
                 />
               )}
             </section>
