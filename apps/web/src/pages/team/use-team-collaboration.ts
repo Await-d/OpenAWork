@@ -113,6 +113,9 @@ export function useTeamCollaboration() {
   const [selectedSharedSession, setSelectedSharedSession] =
     useState<SharedSessionDetailRecord | null>(null);
   const [runtimeTasks, setRuntimeTasks] = useState<SessionTask[]>([]);
+  const [runtimeTaskGroups, setRuntimeTaskGroups] = useState<
+    TeamRuntimeReadModel['runtimeTaskGroups']
+  >([]);
   const [runtimeTasksLoading, setRuntimeTasksLoading] = useState(false);
   const [sharedCommentBusy, setSharedCommentBusy] = useState(false);
   const [sharedOperateBusy, setSharedOperateBusy] = useState(false);
@@ -157,6 +160,7 @@ export function useTeamCollaboration() {
         auditLogs: [],
         members: [],
         messages: [],
+        runtimeTaskGroups: [],
         sessionShares: [],
         sharedSessions: [],
         sessions: [],
@@ -170,6 +174,7 @@ export function useTeamCollaboration() {
       auditLogs: sortAuditLogs(runtime.auditLogs),
       members: sortMembers(runtime.members),
       messages: sortMessages(runtime.messages),
+      runtimeTaskGroups: runtime.runtimeTaskGroups,
       sessionShares: sortSessionShares(runtime.sessionShares),
       sharedSessions: sortSharedSessions(runtime.sharedSessions),
       sessions: runtime.sessions,
@@ -183,6 +188,7 @@ export function useTeamCollaboration() {
       setMembers([]);
       setTasks([]);
       setMessages([]);
+      setRuntimeTaskGroups([]);
       setSessionShares([]);
       setSharedSessions([]);
       setSessions([]);
@@ -201,6 +207,7 @@ export function useTeamCollaboration() {
       setMembers(snapshot.members);
       setTasks(snapshot.tasks);
       setMessages(snapshot.messages);
+      setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
       setSessionShares(snapshot.sessionShares);
       setSharedSessions(snapshot.sharedSessions);
       setSessions(snapshot.sessions);
@@ -227,6 +234,7 @@ export function useTeamCollaboration() {
         setMembers(snapshot.members);
         setTasks(snapshot.tasks);
         setMessages(snapshot.messages);
+        setRuntimeTaskGroups(snapshot.runtimeTaskGroups);
         setSessionShares(snapshot.sessionShares);
         setSharedSessions(snapshot.sharedSessions);
         setSessions(snapshot.sessions);
@@ -603,6 +611,7 @@ export function useTeamCollaboration() {
     messages,
     replySharedPermission,
     replySharedQuestion,
+    runtimeTaskGroups,
     runtimeTasks,
     runtimeTaskRecords: sortTasks(mapRuntimeTasksToTeamTasks(runtimeTasks)),
     runtimeTasksLoading,

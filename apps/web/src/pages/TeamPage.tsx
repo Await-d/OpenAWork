@@ -29,6 +29,7 @@ export default function TeamPage() {
     messages,
     replySharedPermission,
     replySharedQuestion,
+    runtimeTaskGroups,
     runtimeTaskRecords,
     runtimeTasks,
     runtimeTasksLoading,
@@ -242,6 +243,7 @@ export default function TeamPage() {
       sharedSessionLoading={sharedSessionLoading}
       sharedSessions={sharedSessions}
       taskForm={taskForm}
+      runtimeTaskGroups={runtimeTaskGroups}
       runtimeTaskRecords={runtimeTaskRecords}
       runtimeTasks={runtimeTasks}
       runtimeTasksLoading={runtimeTasksLoading}
