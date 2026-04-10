@@ -441,5 +441,18 @@ describe('teamRoutes collaboration slice', () => {
       ],
       auditLogs: [expect.objectContaining({ action: 'share_created', entityId: 'share-1' })],
     });
+
+    const runtime = JSON.parse(response.body) as {
+      runtimeTaskGroups: Array<{
+        sessionIds: string[];
+        tasks: Array<{ id: string; status: string }>;
+      }>;
+    };
+    expect(runtime.runtimeTaskGroups[0]?.sessionIds).toEqual(
+      expect.arrayContaining(['shared-session-1']),
+    );
+    expect(runtime.runtimeTaskGroups[0]?.tasks.some((task) => task.status === 'cancelled')).toBe(
+      false,
+    );
   });
 });
