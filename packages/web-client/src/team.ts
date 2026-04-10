@@ -98,7 +98,10 @@ export interface CreateTeamSessionShareInput {
 
 export interface TeamRuntimeSessionRecord {
   id: string;
+  metadataJson: string;
+  parentSessionId: string | null;
   title: string | null;
+  updatedAt: string;
   workspacePath: string | null;
 }
 
