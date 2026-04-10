@@ -1,9 +1,6 @@
 import { sqliteAll, sqliteGet } from './db.js';
-import {
-  extractSessionWorkingDirectory,
-  parseSessionMetadataJson,
-  sanitizeSessionMetadataJson,
-} from './session-workspace-metadata.js';
+import { sanitizeSessionMetadataJson } from './session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from './session-workspace-resolution.js';
 
 type SharedSessionPermission = 'view' | 'comment' | 'operate';
 
@@ -71,7 +68,11 @@ function mapSharedSessionRow(row: SharedSessionRow): SharedSessionAccessRecord {
       stateStatus: row.session_state_status,
       title: row.session_title,
       updatedAt: row.session_updated_at,
-      workspacePath: extractSessionWorkingDirectory(parseSessionMetadataJson(metadataJson)),
+      workspacePath: resolveSessionWorkspacePath({
+        metadataJson,
+        sessionId: row.session_id,
+        userId: row.owner_user_id,
+      }),
     },
     shareCreatedAt: row.share_created_at,
     shareUpdatedAt: row.share_updated_at,

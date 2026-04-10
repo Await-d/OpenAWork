@@ -5,10 +5,8 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import {
-  extractSessionWorkingDirectory,
-  parseSessionMetadataJson,
-} from '../session-workspace-metadata.js';
+import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
+import { resolveSessionWorkspacePath } from '../session-workspace-resolution.js';
 import { listSharedSessionsForRecipient } from '../session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-audit-store.js';
 
@@ -105,6 +103,7 @@ interface SessionListRow {
   id: string;
   metadata_json: string;
   title: string | null;
+  updated_at: string;
 }
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
@@ -113,10 +112,18 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     return 'idle';
   };
 
-  const getWorkspacePathFromMetadataJson = (metadataJson: string): string | null =>
-    extractSessionWorkingDirectory(parseSessionMetadataJson(metadataJson));
+  const getWorkspacePathFromMetadataJson = (input: {
+    metadataJson: string;
+    sessionId: string;
+    userId: string;
+  }): string | null =>
+    resolveSessionWorkspacePath({
+      metadataJson: input.metadataJson,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
 
-  const mapSessionShareRow = (row: SessionShareRow) => ({
+  const mapSessionShareRow = (userId: string, row: SessionShareRow) => ({
     id: row.id,
     sessionId: row.session_id,
     memberId: row.member_id,
@@ -124,7 +131,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     memberEmail: row.member_email,
     permission: row.permission,
     sessionLabel: row.label ?? row.session_id,
-    workspacePath: getWorkspacePathFromMetadataJson(row.session_metadata_json),
+    workspacePath: getWorkspacePathFromMetadataJson({
+      metadataJson: row.session_metadata_json,
+      sessionId: row.session_id,
+      userId,
+    }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -202,7 +213,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const sessionsStep = child('sessions');
       const sessionRows = sqliteAll<SessionListRow>(
-        `SELECT id, title, metadata_json FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
+        `SELECT id, title, metadata_json, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
         [user.sub],
       );
       sessionsStep.succeed(undefined, { count: sessionRows.length });
@@ -254,11 +265,21 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               : 'update',
           timestamp: Date.parse(row.created_at) || Date.now(),
         })),
-        sessionShares: shareRows.map((row) => mapSessionShareRow(row)),
+        sessionShares: shareRows.map((row) => mapSessionShareRow(user.sub, row)),
         sessions: sessionRows.map((row) => ({
           id: row.id,
+          metadataJson: row.metadata_json,
+          parentSessionId:
+            typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
+              ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
+              : null,
           title: row.title ?? null,
-          workspacePath: getWorkspacePathFromMetadataJson(row.metadata_json),
+          updatedAt: row.updated_at,
+          workspacePath: getWorkspacePathFromMetadataJson({
+            metadataJson: row.metadata_json,
+            sessionId: row.id,
+            userId: user.sub,
+          }),
         })),
         sharedSessions,
         tasks: taskRows.map((row) => ({
@@ -581,7 +602,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       queryStep.succeed(undefined, { count: rows.length });
       step.succeed(undefined, { count: rows.length });
 
-      return reply.send(rows.map((row) => mapSessionShareRow(row)));
+      return reply.send(rows.map((row) => mapSessionShareRow(user.sub, row)));
     },
   );
 
@@ -647,7 +668,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       insertStep.succeed();
       step.succeed(undefined, { shareId, permission: body.data.permission });
 
-      const sessionWorkspacePath = getWorkspacePathFromMetadataJson(session.metadata_json);
+      const sessionWorkspacePath = getWorkspacePathFromMetadataJson({
+        metadataJson: session.metadata_json,
+        sessionId: body.data.sessionId,
+        userId: user.sub,
+      });
       logTeamAudit({
         action: 'share_created' satisfies TeamAuditAction,
         actorEmail: user.email,
@@ -662,7 +687,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const createdShare = getSessionShareForUser(user.sub, shareId);
 
       return reply.status(201).send({
-        ...(createdShare ? mapSessionShareRow(createdShare) : {}),
+        ...(createdShare ? mapSessionShareRow(user.sub, createdShare) : {}),
         id: createdShare?.id ?? shareId,
         sessionId: createdShare?.session_id ?? body.data.sessionId,
         memberId: createdShare?.member_id ?? body.data.memberId,
@@ -671,7 +696,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         permission: createdShare?.permission ?? body.data.permission,
         sessionLabel: createdShare?.label ?? session.title ?? body.data.sessionId,
         workspacePath: createdShare
-          ? getWorkspacePathFromMetadataJson(createdShare.session_metadata_json)
+          ? getWorkspacePathFromMetadataJson({
+              metadataJson: createdShare.session_metadata_json,
+              sessionId: createdShare.session_id,
+              userId: user.sub,
+            })
           : sessionWorkspacePath,
         createdAt: createdShare?.created_at ?? new Date().toISOString(),
         updatedAt: createdShare?.updated_at ?? new Date().toISOString(),
@@ -728,7 +757,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           action: 'share_permission_updated' satisfies TeamAuditAction,
           actorEmail: user.email,
           actorUserId: user.sub,
-          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson(existing.session_metadata_json) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.data.permission}`,
+          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；旧权限：${existing.permission}；新权限：${body.data.permission}`,
           entityId: shareId,
           entityType: 'session_share',
           summary: `已将 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的权限从 ${existing.permission} 调整为 ${body.data.permission}`,
@@ -744,7 +773,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         changed,
         permission: body.data.permission,
       });
-      return reply.send(mapSessionShareRow({ ...responseShare, permission: body.data.permission }));
+      return reply.send(
+        mapSessionShareRow(user.sub, { ...responseShare, permission: body.data.permission }),
+      );
     },
   );
 
@@ -789,7 +820,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           action: 'share_deleted' satisfies TeamAuditAction,
           actorEmail: user.email,
           actorUserId: user.sub,
-          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson(existing.session_metadata_json) ?? '未绑定工作区'}；成员：${existing.member_name}；删除前权限：${existing.permission}`,
+          detail: `会话：${existing.label ?? existing.session_id}；工作区：${getWorkspacePathFromMetadataJson({ metadataJson: existing.session_metadata_json, sessionId: existing.session_id, userId: user.sub }) ?? '未绑定工作区'}；成员：${existing.member_name}；删除前权限：${existing.permission}`,
           entityId: shareId,
           entityType: 'session_share',
           summary: `已取消 ${existing.member_name} 对“${existing.label ?? existing.session_id}”的共享权限`,
