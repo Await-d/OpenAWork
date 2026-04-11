@@ -224,7 +224,7 @@ function LeftSidebar() {
       </div>
 
       <div style={{ overflow: 'auto', padding: '12px 14px 16px', display: 'grid', gap: 16 }}>
-        <section style={{ display: 'grid', gap: 10 }}>
+        <section style={{ display: 'grid', gap: 8 }}>
           <div
             style={{
               display: 'flex',
@@ -239,7 +239,7 @@ function LeftSidebar() {
           </div>
         </section>
 
-        <section style={{ display: 'grid', gap: 10 }}>
+        <section style={{ display: 'grid', gap: 8 }}>
           <div
             style={{
               display: 'flex',
@@ -277,7 +277,7 @@ function LeftSidebar() {
           />
         </section>
 
-        <section style={{ display: 'grid', gap: 12 }}>
+        <section style={{ display: 'grid', gap: 10 }}>
           <div
             style={{
               display: 'flex',
@@ -296,21 +296,21 @@ function LeftSidebar() {
           </div>
 
           {agentTeamsSidebarSections.map((section) => (
-            <div key={section.id} style={{ display: 'grid', gap: 8 }}>
+            <div key={section.id} style={{ display: 'grid', gap: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: '#d7dbff' }}>
                 {section.title}
               </span>
               {section.items.map((item) => (
-                <div key={item.id} style={{ display: 'grid', gap: 8 }}>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <div key={item.id} style={{ display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                     {item.roleTags.map((tag) => (
                       <span
                         key={tag.label}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          minHeight: 18,
-                          padding: '0 8px',
+                          minHeight: 17,
+                          padding: '0 7px',
                           borderRadius: 999,
                           background: `${tag.color}22`,
                           color: tag.color,
@@ -322,7 +322,7 @@ function LeftSidebar() {
                       </span>
                     ))}
                   </div>
-                  <span style={{ fontSize: 11, color: '#7e86b6', lineHeight: 1.5 }}>
+                  <span style={{ fontSize: 10.5, color: '#7e86b6', lineHeight: 1.45 }}>
                     {item.description}
                   </span>
                 </div>
@@ -355,7 +355,7 @@ function LeftSidebar() {
 
 function RoleChip({ item }: { item: (typeof agentTeamsRoleChips)[number] }) {
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 24 }}>
       <span
         style={{
           width: 20,
@@ -397,7 +397,7 @@ function RoleChip({ item }: { item: (typeof agentTeamsRoleChips)[number] }) {
 
 function TopTeamHeader() {
   return (
-    <header style={{ display: 'grid', gap: 12, padding: '14px 18px 10px' }}>
+    <header style={{ display: 'grid', gap: 10, padding: '12px 18px 9px' }}>
       <div
         style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}
       >
@@ -431,7 +431,7 @@ function TopTeamHeader() {
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <span
             style={{ fontSize: 28, fontWeight: 800, color: '#f3f5ff', letterSpacing: '-0.03em' }}
           >
@@ -453,7 +453,7 @@ function TopTeamHeader() {
           <span style={{ color: '#67e38f', fontSize: 13 }}>{agentTeamsTopSummary.onlineCount}</span>
         </div>
 
-        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           {agentTeamsRoleChips.map((item) => (
             <RoleChip key={item.role} item={item} />
           ))}
@@ -566,9 +566,9 @@ function MetricCard({ item }: { item: (typeof agentTeamsMetricCards)[number] }) 
       style={{
         ...PANEL_STYLE,
         display: 'grid',
-        gap: 8,
-        padding: '14px 18px',
-        minHeight: 72,
+        gap: 7,
+        padding: '12px 16px',
+        minHeight: 66,
       }}
     >
       <div
@@ -579,7 +579,7 @@ function MetricCard({ item }: { item: (typeof agentTeamsMetricCards)[number] }) 
         </span>
         <span>{item.label}</span>
       </div>
-      <span style={{ fontSize: 38, lineHeight: 1, fontWeight: 800, color: '#e6e9ff' }}>
+      <span style={{ fontSize: 34, lineHeight: 1, fontWeight: 800, color: '#e6e9ff' }}>
         {item.value}
       </span>
     </div>
@@ -702,7 +702,7 @@ function PixelCharacter({ item }: { item: AgentTeamsOfficeAgent }) {
 
 function OfficeScene() {
   return (
-    <div style={{ ...PANEL_STYLE, padding: 14, borderRadius: 28 }}>
+    <div style={{ ...PANEL_STYLE, padding: 10, borderRadius: 24 }}>
       <div
         style={{
           display: 'flex',
