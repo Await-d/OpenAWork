@@ -83,6 +83,7 @@
 - [2026-04-11] Team Runtime 当前高保真壳层以 **Activity Rail + RuntimeSidebar + RuntimeMainPanel + RuntimeDetailRail + Footer Status** 为稳定骨架；中等宽度下也优先保持 Detail Rail 偏右固定，而不是退化成主区下方堆叠。
 - [2026-04-11] Team Runtime 的 pane 语义继续对齐参考库：左右 pane 现在支持显式折叠，并可在非单栏模式下拖拽调整宽度；后续若再继续深化，应在此骨架上迭代，而不是退回静态整页网格。
 - [2026-04-11] TeamPage 当前阶段以 **1111111.png 官方 Agent Teams 办公室页 mock 还原优先**：先完成左侧模板栏、顶部团队条、办公室像素画布与底部状态栏的高保真页面，再决定如何把真实 Team Runtime 数据链重新接回。
+- [2026-04-11] 办公室页继续优先吸收官方 `ActivityBar / StatusBar / SessionItem` 的表面语义：激活指示条、选中卡片左边条、底栏视图按钮组等细节应继续参考官方 layout 组件，而不是回到通用工作台样式。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
