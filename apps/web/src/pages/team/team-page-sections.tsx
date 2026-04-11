@@ -649,7 +649,11 @@ export function TeamSessionSharesPanel({
       </div>
       <div className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>共享当前会话</span>
-        <select value={form.sessionId} onChange={(event) => onSessionIdChange(event.target.value)}>
+        <select
+          name="team-share-session"
+          value={form.sessionId}
+          onChange={(event) => onSessionIdChange(event.target.value)}
+        >
           <option value="">选择会话</option>
           {sessions.map((session) => (
             <option key={session.id} value={session.id}>
@@ -657,7 +661,11 @@ export function TeamSessionSharesPanel({
             </option>
           ))}
         </select>
-        <select value={form.memberId} onChange={(event) => onMemberIdChange(event.target.value)}>
+        <select
+          name="team-share-member"
+          value={form.memberId}
+          onChange={(event) => onMemberIdChange(event.target.value)}
+        >
           <option value="">选择成员</option>
           {members.map((member) => (
             <option key={member.id} value={member.id}>
@@ -666,6 +674,7 @@ export function TeamSessionSharesPanel({
           ))}
         </select>
         <select
+          name="team-share-permission"
           value={form.permission}
           onChange={(event) =>
             onPermissionChange(event.target.value as TeamSessionShareRecord['permission'])

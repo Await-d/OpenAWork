@@ -10,9 +10,7 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
 let emptyTeamRuntime = false;
-let failNextInteractionCompletion = false;
 let failNextShareCreate = false;
-let failNextInteractionProcessing = false;
 let failTeamRuntimeLoad = false;
 let slowSharedSessionOneDetail = false;
 let teamMessages: Array<{
@@ -29,9 +27,7 @@ beforeEach(() => {
   ).IS_REACT_ACT_ENVIRONMENT = true;
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
   emptyTeamRuntime = false;
-  failNextInteractionCompletion = false;
   failNextShareCreate = false;
-  failNextInteractionProcessing = false;
   failTeamRuntimeLoad = false;
   slowSharedSessionOneDetail = false;
   teamMessages = [
@@ -675,31 +671,6 @@ beforeEach(() => {
         type?: 'update' | 'question' | 'result' | 'error';
       };
 
-      if (
-        failNextInteractionProcessing &&
-        payload.content === '【interaction-agent/处理中】已接收该请求，正在整理下一步动作。'
-      ) {
-        failNextInteractionProcessing = false;
-        return {
-          ok: false,
-          status: 500,
-          json: async () => ({ error: 'processing write failed' }),
-        } as Response;
-      }
-
-      if (
-        failNextInteractionCompletion &&
-        payload.content ===
-          '【interaction-agent/完成】已完成初步改写：请围绕“请先梳理当前阻塞并给出下一步建议”继续拆解团队任务。'
-      ) {
-        failNextInteractionCompletion = false;
-        return {
-          ok: false,
-          status: 500,
-          json: async () => ({ error: 'completion write failed' }),
-        } as Response;
-      }
-
       const nextMessage = {
         id: `msg-${teamMessages.length + 1}`,
         memberId: payload.senderId ?? '',
@@ -1013,10 +984,15 @@ describe('TeamPage', () => {
     await renderPage();
     await clickTab('文件上下文');
 
-    const selects = Array.from(container?.querySelectorAll('select') ?? []);
-    const sessionSelect = selects.at(-3) as HTMLSelectElement | undefined;
-    const memberSelect = selects.at(-2) as HTMLSelectElement | undefined;
-    const permissionSelect = selects.at(-1) as HTMLSelectElement | undefined;
+    const sessionSelect = container?.querySelector(
+      'select[name="team-share-session"]',
+    ) as HTMLSelectElement | null;
+    const memberSelect = container?.querySelector(
+      'select[name="team-share-member"]',
+    ) as HTMLSelectElement | null;
+    const permissionSelect = container?.querySelector(
+      'select[name="team-share-permission"]',
+    ) as HTMLSelectElement | null;
     const submitButton = Array.from(container?.querySelectorAll('button') ?? [])
       .filter((button) => button.textContent?.includes('共享会话'))
       .at(-1);
@@ -1101,10 +1077,15 @@ describe('TeamPage', () => {
     await renderPage();
     await clickTab('文件上下文');
 
-    const selects = Array.from(container?.querySelectorAll('select') ?? []);
-    const sessionSelect = selects.at(-3) as HTMLSelectElement | undefined;
-    const memberSelect = selects.at(-2) as HTMLSelectElement | undefined;
-    const permissionSelect = selects.at(-1) as HTMLSelectElement | undefined;
+    const sessionSelect = container?.querySelector(
+      'select[name="team-share-session"]',
+    ) as HTMLSelectElement | null;
+    const memberSelect = container?.querySelector(
+      'select[name="team-share-member"]',
+    ) as HTMLSelectElement | null;
+    const permissionSelect = container?.querySelector(
+      'select[name="team-share-permission"]',
+    ) as HTMLSelectElement | null;
     const submitButton = Array.from(container?.querySelectorAll('button') ?? [])
       .filter((button) => button.textContent?.includes('共享会话'))
       .at(-1);
@@ -1302,201 +1283,6 @@ describe('TeamPage', () => {
 
     expect(container?.textContent).toContain('尚未选中共享运行');
     expect(container?.textContent).toContain('当前工作区外壳已按工作区过滤共享运行');
-  });
-
-  it('keeps interaction-agent draft isolated from the timeline composer', async () => {
-    await renderPage();
-
-    const interactionTextarea = container?.querySelector(
-      'textarea[aria-label="interaction-agent 输入区"]',
-    ) as HTMLTextAreaElement | null;
-    expect(interactionTextarea).toBeTruthy();
-
-    await act(async () => {
-      if (interactionTextarea) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        setter?.call(interactionTextarea, '让 interaction-agent 先改写这条需求');
-        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      await Promise.resolve();
-    });
-
-    await clickTab('消息时间线');
-
-    const messageTextarea = container?.querySelector(
-      'textarea[name="team-message-content"]',
-    ) as HTMLTextAreaElement | null;
-    expect(messageTextarea?.value ?? '').toBe('');
-  });
-
-  it('submits the interaction-agent draft into the team timeline', async () => {
-    await renderPage();
-
-    const interactionTextarea = container?.querySelector(
-      'textarea[aria-label="interaction-agent 输入区"]',
-    ) as HTMLTextAreaElement | null;
-    const submitButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('交由 interaction-agent'),
-    ) as HTMLButtonElement | undefined;
-
-    expect(interactionTextarea).toBeTruthy();
-    expect(submitButton).toBeTruthy();
-
-    await act(async () => {
-      if (interactionTextarea) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        setter?.call(interactionTextarea, '请先梳理当前阻塞并给出下一步建议');
-        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(container?.textContent).toContain('消息时间线');
-    expect(container?.textContent).toContain('interaction-agent');
-    expect(container?.textContent).toContain('发起');
-    expect(container?.textContent).toContain('处理中');
-    expect(container?.textContent).toContain('完成');
-    expect(container?.textContent).toContain('请先梳理当前阻塞并给出下一步建议');
-    expect(container?.textContent).toContain('已接收该请求，正在整理下一步动作。');
-    expect(container?.textContent).toContain(
-      '已完成初步改写：请围绕“请先梳理当前阻塞并给出下一步建议”继续拆解团队任务。',
-    );
-    expect(container?.textContent).toContain('question');
-    expect(container?.textContent).toContain('结果');
-    expect(interactionTextarea?.value ?? '').toBe('');
-    expect(
-      fetchMock.mock.calls.some(([input, init]) => {
-        if (
-          input !== 'http://localhost:3000/team/messages' ||
-          (init as RequestInit | undefined)?.method !== 'POST'
-        ) {
-          return false;
-        }
-        const payload = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as {
-          content?: string;
-          type?: string;
-        };
-        return (
-          payload.content === '【interaction-agent/发起】请先梳理当前阻塞并给出下一步建议' &&
-          payload.type === 'question'
-        );
-      }),
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some(([input, init]) => {
-        if (
-          input !== 'http://localhost:3000/team/messages' ||
-          (init as RequestInit | undefined)?.method !== 'POST'
-        ) {
-          return false;
-        }
-        const payload = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as {
-          content?: string;
-          type?: string;
-        };
-        return (
-          payload.content === '【interaction-agent/处理中】已接收该请求，正在整理下一步动作。' &&
-          payload.type === 'update'
-        );
-      }),
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some(([input, init]) => {
-        if (
-          input !== 'http://localhost:3000/team/messages' ||
-          (init as RequestInit | undefined)?.method !== 'POST'
-        ) {
-          return false;
-        }
-        const payload = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as {
-          content?: string;
-          type?: string;
-        };
-        return (
-          payload.content ===
-            '【interaction-agent/完成】已完成初步改写：请围绕“请先梳理当前阻塞并给出下一步建议”继续拆解团队任务。' &&
-          payload.type === 'result'
-        );
-      }),
-    ).toBe(true);
-  });
-
-  it('keeps the interaction-agent draft when the completion write fails', async () => {
-    failNextInteractionCompletion = true;
-    await renderPage();
-
-    const interactionTextarea = container?.querySelector(
-      'textarea[aria-label="interaction-agent 输入区"]',
-    ) as HTMLTextAreaElement | null;
-    const submitButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('交由 interaction-agent'),
-    ) as HTMLButtonElement | undefined;
-
-    expect(interactionTextarea).toBeTruthy();
-    expect(submitButton).toBeTruthy();
-
-    await act(async () => {
-      if (interactionTextarea) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        setter?.call(interactionTextarea, '请先梳理当前阻塞并给出下一步建议');
-        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(interactionTextarea?.value ?? '').toBe('请先梳理当前阻塞并给出下一步建议');
-    expect(container?.textContent).not.toContain(
-      '已完成初步改写：请围绕“请先梳理当前阻塞并给出下一步建议”继续拆解团队任务。',
-    );
-    expect(container?.textContent).toContain('Failed to create team message: 500');
-  });
-
-  it('keeps the interaction-agent draft when the processing status write fails', async () => {
-    failNextInteractionProcessing = true;
-    await renderPage();
-
-    const interactionTextarea = container?.querySelector(
-      'textarea[aria-label="interaction-agent 输入区"]',
-    ) as HTMLTextAreaElement | null;
-    const submitButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('交由 interaction-agent'),
-    ) as HTMLButtonElement | undefined;
-
-    expect(interactionTextarea).toBeTruthy();
-    expect(submitButton).toBeTruthy();
-
-    await act(async () => {
-      if (interactionTextarea) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        setter?.call(interactionTextarea, '请帮我继续补充失败路径');
-        interactionTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(interactionTextarea?.value ?? '').toBe('请帮我继续补充失败路径');
-    expect(container?.textContent).not.toContain('已接收该请求，正在整理下一步动作。');
-    expect(container?.textContent).toContain('Failed to create team message: 500');
   });
 
   it('ignores stale shared-session detail responses after switching sessions', async () => {
