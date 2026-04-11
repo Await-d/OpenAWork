@@ -212,9 +212,22 @@ async function clickTab(label: string) {
   });
 }
 
+async function clickDetailRailTab(label: string) {
+  const button = Array.from(container?.querySelectorAll('button') ?? []).find(
+    (entry) => entry.textContent?.trim() === label,
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe('TeamPage interaction agent flow', () => {
   it('keeps interaction-agent draft isolated from the timeline composer', async () => {
     await renderPage();
+    await clickDetailRailTab('交互代理');
 
     const interactionTextarea = container?.querySelector(
       'textarea[aria-label="interaction-agent 输入区"]',
@@ -238,6 +251,7 @@ describe('TeamPage interaction agent flow', () => {
 
   it('submits the interaction-agent draft into the team timeline', async () => {
     await renderPage();
+    await clickDetailRailTab('交互代理');
 
     const interactionTextarea = container?.querySelector(
       'textarea[aria-label="interaction-agent 输入区"]',
@@ -300,6 +314,7 @@ describe('TeamPage interaction agent flow', () => {
   it('keeps the interaction-agent draft when the processing status write fails', async () => {
     failNextInteractionProcessing = true;
     await renderPage();
+    await clickDetailRailTab('交互代理');
 
     const interactionTextarea = container?.querySelector(
       'textarea[aria-label="interaction-agent 输入区"]',
@@ -332,6 +347,7 @@ describe('TeamPage interaction agent flow', () => {
   it('keeps the interaction-agent draft when the completion write fails', async () => {
     failNextInteractionCompletion = true;
     await renderPage();
+    await clickDetailRailTab('交互代理');
 
     const interactionTextarea = container?.querySelector(
       'textarea[aria-label="interaction-agent 输入区"]',

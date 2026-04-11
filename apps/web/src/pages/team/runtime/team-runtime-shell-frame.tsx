@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { SharedSessionSummaryRecord } from '@openAwork/web-client';
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
 import type { TeamActionFeedback } from '../use-team-collaboration.js';
@@ -7,37 +7,6 @@ import type { TeamRuntimeMetric, TeamWorkspaceCardSummary } from './team-runtime
 import { formatWorkspaceLabel, getSharedSessionStateLabel } from './team-runtime-model.js';
 import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
 import { TeamRuntimeRoleBindingPanel } from './team-runtime-role-binding-panel.js';
-
-const tabListStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 8,
-};
-
-const activeTabStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  width: '100%',
-  padding: '11px 12px',
-  borderRadius: 14,
-  border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 14%, var(--surface))',
-  color: 'var(--text)',
-  textAlign: 'left',
-  cursor: 'pointer',
-};
-
-const inactiveTabStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  width: '100%',
-  padding: '11px 12px',
-  borderRadius: 14,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 76%, var(--bg))',
-  color: 'var(--text-3)',
-  textAlign: 'left',
-  cursor: 'pointer',
-};
 
 const shellPanelStyle: React.CSSProperties = {
   display: 'grid',
@@ -103,6 +72,48 @@ interface TeamRuntimeSelectedRunSummary {
   stateLabel: string;
   title: string;
   workspaceLabel: string;
+}
+
+type DetailRailPanelKey = 'buddy' | 'interaction' | 'role-bindings' | 'selected-run';
+
+function getRuntimeTabGlyph(tabKey: string): string {
+  if (tabKey === 'overview') {
+    return '◎';
+  }
+  if (tabKey === 'sessions') {
+    return '◫';
+  }
+  if (tabKey === 'tasks') {
+    return '✓';
+  }
+  if (tabKey === 'context') {
+    return '≣';
+  }
+  if (tabKey === 'timeline') {
+    return '↯';
+  }
+  if (tabKey === 'artifacts') {
+    return '◇';
+  }
+  if (tabKey === 'changes') {
+    return '∆';
+  }
+
+  return '•';
+}
+
+function getDetailRailPanelLabel(panelKey: DetailRailPanelKey): string {
+  if (panelKey === 'selected-run') {
+    return '当前运行';
+  }
+  if (panelKey === 'interaction') {
+    return '交互代理';
+  }
+  if (panelKey === 'buddy') {
+    return 'Buddy';
+  }
+
+  return '角色绑定';
 }
 
 interface TeamRuntimeShellFrameProps {
@@ -200,6 +211,14 @@ export function TeamRuntimeShellFrame({
   workflowLaunch,
 }: TeamRuntimeShellFrameProps) {
   const layoutModeLabel = isSingleColumn ? '单栏' : isTwoColumn ? '双栏' : '三栏';
+  const [activeDetailPanel, setActiveDetailPanel] = useState<DetailRailPanelKey>('selected-run');
+  const showActivityRail = !isSingleColumn;
+  const detailPanels: DetailRailPanelKey[] = [
+    'selected-run',
+    'interaction',
+    'buddy',
+    'role-bindings',
+  ];
 
   return (
     <div className="page-root">
@@ -334,14 +353,118 @@ export function TeamRuntimeShellFrame({
               gridTemplateColumns: isSingleColumn
                 ? 'minmax(0, 1fr)'
                 : isTwoColumn
-                  ? 'minmax(260px, 300px) minmax(0, 1fr)'
-                  : 'minmax(260px, 300px) minmax(0, 1fr) minmax(300px, 360px)',
+                  ? '56px minmax(0, 1fr) minmax(300px, 340px)'
+                  : '56px minmax(240px, 280px) minmax(0, 1fr) minmax(300px, 360px)',
               gap: 12,
               alignItems: 'start',
               minHeight: 0,
             }}
           >
-            <aside style={{ display: 'grid', gap: 12, minWidth: 0, alignSelf: 'start' }}>
+            {showActivityRail ? (
+              <aside
+                style={{
+                  display: 'grid',
+                  gap: 8,
+                  alignSelf: 'stretch',
+                  minWidth: 0,
+                  position: isSingleColumn ? 'static' : 'sticky',
+                  top: isSingleColumn ? undefined : 16,
+                }}
+              >
+                <div
+                  className="content-card"
+                  style={{
+                    display: 'grid',
+                    gap: 8,
+                    padding: '10px 8px',
+                    borderRadius: 18,
+                    minHeight: '100%',
+                    alignContent: 'start',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      letterSpacing: '0.16em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-3)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    RT
+                  </span>
+                  {tabs.map((tab) => {
+                    const isActive = tab.key === activeTabKey;
+
+                    return (
+                      <button
+                        key={`rail-${tab.key}`}
+                        type="button"
+                        aria-label={`切换到${tab.label}`}
+                        title={tab.label}
+                        onClick={() => onActiveTabChange(tab.key)}
+                        style={{
+                          display: 'grid',
+                          placeItems: 'center',
+                          width: '100%',
+                          minHeight: 40,
+                          borderRadius: 12,
+                          border: isActive
+                            ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
+                            : '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                          background: isActive
+                            ? 'color-mix(in srgb, var(--accent) 16%, var(--surface))'
+                            : 'color-mix(in srgb, var(--surface) 74%, var(--bg))',
+                          color: isActive ? 'var(--accent)' : 'var(--text-3)',
+                          cursor: 'pointer',
+                          fontSize: 16,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <span aria-hidden="true">{getRuntimeTabGlyph(tab.key)}</span>
+                      </button>
+                    );
+                  })}
+                  <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+                    {[
+                      { key: 'running', value: `${selectedWorkspaceRunningCount}` },
+                      { key: 'shared-runs', value: `${filteredSharedSessions.length}` },
+                      { key: 'sessions', value: `${filteredSessionCount}` },
+                    ].map((item) => (
+                      <div
+                        key={item.key}
+                        style={{
+                          display: 'grid',
+                          placeItems: 'center',
+                          minHeight: 28,
+                          borderRadius: 10,
+                          border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                          background: 'color-mix(in srgb, var(--surface) 74%, var(--bg))',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: 'var(--text-3)',
+                        }}
+                      >
+                        {item.value}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+            ) : null}
+
+            <aside
+              style={{
+                display: 'grid',
+                gap: 12,
+                minWidth: 0,
+                alignSelf: 'start',
+                gridColumn: isTwoColumn ? '2 / 3' : undefined,
+                gridRow: isTwoColumn ? '1 / 2' : undefined,
+                position: isSingleColumn ? 'static' : 'sticky',
+                top: isSingleColumn ? undefined : 16,
+              }}
+            >
               <section style={shellPanelStyle}>
                 <div style={{ display: 'grid', gap: 4 }}>
                   <span
@@ -398,44 +521,6 @@ export function TeamRuntimeShellFrame({
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
                           {workspace.description}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section style={shellPanelStyle}>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <span
-                    style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}
-                  >
-                    Console sections
-                  </span>
-                  <span style={{ fontSize: 15, fontWeight: 800 }}>主工作区导航</span>
-                </div>
-                <div style={tabListStyle} role="tablist" aria-label="Team Runtime 视图切换">
-                  {tabs.map((tab) => {
-                    const isActive = tab.key === activeTabKey;
-                    return (
-                      <button
-                        key={tab.key}
-                        id={`team-runtime-tab-${tab.key}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        aria-controls={`team-runtime-panel-${tab.key}`}
-                        onClick={() => onActiveTabChange(tab.key)}
-                        style={isActive ? activeTabStyle : inactiveTabStyle}
-                      >
-                        <span style={{ fontSize: 13, fontWeight: 700 }}>{tab.label}</span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: isActive ? 'var(--text-2)' : 'var(--text-3)',
-                          }}
-                        >
-                          {tab.summary}
                         </span>
                       </button>
                     );
@@ -544,7 +629,15 @@ export function TeamRuntimeShellFrame({
               </section>
             </aside>
 
-            <main style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+            <main
+              style={{
+                display: 'grid',
+                gap: 12,
+                minWidth: 0,
+                gridColumn: isTwoColumn ? '2 / 3' : undefined,
+                gridRow: isTwoColumn ? '2 / 3' : undefined,
+              }}
+            >
               <section
                 className="content-card"
                 style={{
@@ -558,47 +651,106 @@ export function TeamRuntimeShellFrame({
               >
                 <div
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
+                    display: 'grid',
                     gap: 12,
-                    alignItems: 'flex-start',
-                    flexWrap: 'wrap',
                   }}
                 >
-                  <div style={{ display: 'grid', gap: 4 }}>
-                    <span
-                      style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}
-                    >
-                      Main workspace
-                    </span>
-                    <span style={{ fontSize: 18, fontWeight: 800 }}>{activeTabLabel}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                      {activeTabSummary}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {[
-                      `视角：${selectedWorkspaceLabel}`,
-                      `${filteredSessionCount} 会话`,
-                      `${filteredSessionShareCount} 共享记录`,
-                    ].map((tag) => (
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'grid', gap: 4 }}>
                       <span
-                        key={tag}
                         style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          minHeight: 26,
-                          padding: '0 10px',
-                          borderRadius: 999,
-                          border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-                          background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
                           fontSize: 11,
-                          color: 'var(--text-2)',
+                          color: 'var(--text-3)',
+                          textTransform: 'uppercase',
                         }}
                       >
-                        {tag}
+                        Main workspace
                       </span>
-                    ))}
+                      <span style={{ fontSize: 18, fontWeight: 800 }}>{activeTabLabel}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                        {activeTabSummary}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {[
+                        `视角：${selectedWorkspaceLabel}`,
+                        `${filteredSessionCount} 会话`,
+                        `${filteredSessionShareCount} 共享记录`,
+                      ].map((tag) => (
+                        <span
+                          key={tag}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            minHeight: 26,
+                            padding: '0 10px',
+                            borderRadius: 999,
+                            border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                            background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+                            fontSize: 11,
+                            color: 'var(--text-2)',
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      paddingTop: 4,
+                      borderTop: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                    }}
+                    role="tablist"
+                    aria-label="Team Runtime 主工作区切换"
+                  >
+                    {tabs.map((tab) => {
+                      const isActive = tab.key === activeTabKey;
+
+                      return (
+                        <button
+                          key={tab.key}
+                          id={`team-runtime-tab-${tab.key}`}
+                          type="button"
+                          role="tab"
+                          aria-selected={isActive}
+                          aria-controls={`team-runtime-panel-${tab.key}`}
+                          onClick={() => onActiveTabChange(tab.key)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            minHeight: 34,
+                            padding: '0 12px',
+                            borderRadius: 999,
+                            border: isActive
+                              ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
+                              : '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                            background: isActive
+                              ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
+                              : 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+                            color: isActive ? 'var(--text)' : 'var(--text-3)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span aria-hidden="true" style={{ fontSize: 14 }}>
+                            {getRuntimeTabGlyph(tab.key)}
+                          </span>
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>{tab.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <div
@@ -617,103 +769,171 @@ export function TeamRuntimeShellFrame({
                 display: 'grid',
                 gap: 12,
                 minWidth: 0,
-                gridColumn: isTwoColumn ? '1 / -1' : undefined,
+                gridColumn: isTwoColumn ? '3 / 4' : undefined,
+                gridRow: isTwoColumn ? '1 / span 2' : undefined,
+                position: isSingleColumn || isTwoColumn ? 'static' : 'sticky',
+                top: isSingleColumn ? undefined : 16,
               }}
             >
-              <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-                <TeamSectionHeader
-                  eyebrow="Selected run"
-                  title="当前共享运行"
-                  description="右侧细节轨持续盯住当前选中的共享会话，让运行摘要不再淹没在主内容里。"
-                />
-                {selectedRunSummary ? (
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    <div className="content-card" style={{ display: 'grid', gap: 4, padding: 14 }}>
-                      <span style={{ fontSize: 16, fontWeight: 800 }}>
-                        {selectedRunSummary.title}
-                      </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                        工作区：{selectedRunSummary.workspaceLabel}
-                      </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                        状态：{selectedRunSummary.stateLabel}
-                      </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                        共享者：{selectedRunSummary.sharedByEmail}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                        gap: 10,
-                      }}
-                    >
-                      {[
-                        { label: '评论', value: selectedRunSummary.commentCount },
-                        { label: '在线查看者', value: selectedRunSummary.activeViewerCount },
-                        { label: '待审批', value: selectedRunSummary.pendingApprovalCount },
-                        { label: '待回答', value: selectedRunSummary.pendingQuestionCount },
-                      ].map((item) => (
+              <section
+                className="content-card"
+                style={{ display: 'grid', gap: 12, padding: 16, alignSelf: 'start' }}
+              >
+                <div style={{ display: 'grid', gap: 4 }}>
+                  <span
+                    style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}
+                  >
+                    Detail rail
+                  </span>
+                  <span style={{ fontSize: 15, fontWeight: 800 }}>细节轨</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                    右侧保持单一 detail host，通过切换不同面板持续盯住当前运行对象。
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {detailPanels.map((panelKey) => {
+                    const isActive = panelKey === activeDetailPanel;
+                    const label = getDetailRailPanelLabel(panelKey);
+
+                    return (
+                      <button
+                        key={panelKey}
+                        type="button"
+                        onClick={() => setActiveDetailPanel(panelKey)}
+                        aria-pressed={isActive}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          minHeight: 32,
+                          padding: '0 10px',
+                          borderRadius: 999,
+                          border: isActive
+                            ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
+                            : '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                          background: isActive
+                            ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
+                            : 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+                          color: isActive ? 'var(--text)' : 'var(--text-3)',
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {activeDetailPanel === 'selected-run' ? (
+                  <section style={{ display: 'grid', gap: 12 }}>
+                    <TeamSectionHeader
+                      eyebrow="Selected run"
+                      title="当前共享运行"
+                      description="默认聚焦当前选中的共享会话，让运行摘要不再淹没在主内容里。"
+                    />
+                    {selectedRunSummary ? (
+                      <div style={{ display: 'grid', gap: 10 }}>
                         <div
-                          key={item.label}
                           className="content-card"
-                          style={{ display: 'grid', gap: 4, padding: 12 }}
+                          style={{ display: 'grid', gap: 4, padding: 14 }}
                         >
-                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.label}</span>
-                          <span style={{ fontSize: 18, fontWeight: 800 }}>{item.value}</span>
+                          <span style={{ fontSize: 16, fontWeight: 800 }}>
+                            {selectedRunSummary.title}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                            工作区：{selectedRunSummary.workspaceLabel}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                            状态：{selectedRunSummary.stateLabel}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                            共享者：{selectedRunSummary.sharedByEmail}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <RailEmptyState
-                    title="尚未选中共享运行"
-                    description="在左侧共享运行索引或“会话 / Agent”中选一条共享会话，细节轨会立刻同步。"
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                            gap: 10,
+                          }}
+                        >
+                          {[
+                            { label: '评论', value: selectedRunSummary.commentCount },
+                            { label: '在线查看者', value: selectedRunSummary.activeViewerCount },
+                            { label: '待审批', value: selectedRunSummary.pendingApprovalCount },
+                            { label: '待回答', value: selectedRunSummary.pendingQuestionCount },
+                          ].map((item) => (
+                            <div
+                              key={item.label}
+                              className="content-card"
+                              style={{ display: 'grid', gap: 4, padding: 12 }}
+                            >
+                              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                                {item.label}
+                              </span>
+                              <span style={{ fontSize: 18, fontWeight: 800 }}>{item.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <RailEmptyState
+                        title="尚未选中共享运行"
+                        description="在左侧共享运行索引或“会话 / Agent”中选一条共享会话，细节轨会立刻同步。"
+                      />
+                    )}
+                  </section>
+                ) : null}
+
+                {activeDetailPanel === 'interaction' ? (
+                  <section style={{ display: 'grid', gap: 12 }}>
+                    <TeamSectionHeader
+                      eyebrow="Interaction agent"
+                      title="统一交互代理"
+                      description="保持常驻输入入口，让需求改写在 Detail Rail 中持续可达。"
+                    />
+                    <textarea
+                      aria-label="interaction-agent 输入区"
+                      rows={4}
+                      value={interactionDraft}
+                      onChange={(event) => onInteractionDraftChange(event.target.value)}
+                      placeholder="先把人类意图写在这里，后续会由 interaction-agent 做需求改写…"
+                    />
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => void onSubmitInteractionDraft()}
+                      disabled={busy || !interactionDraft.trim()}
+                    >
+                      {busy ? '提交中…' : '交由 interaction-agent'}
+                    </button>
+                  </section>
+                ) : null}
+
+                {activeDetailPanel === 'buddy' ? (
+                  <TeamRuntimeBuddy
+                    activeAgentCount={buddyProjection.activeAgentCount}
+                    blockedCount={buddyProjection.blockedCount}
+                    pendingApprovalCount={buddyProjection.pendingApprovalCount}
+                    pendingQuestionCount={buddyProjection.pendingQuestionCount}
+                    runningCount={buddyProjection.runningCount}
+                    sessionTitle={buddyProjection.sessionTitle}
+                    workspaceLabel={buddyProjection.workspaceLabel}
                   />
-                )}
+                ) : null}
+
+                {activeDetailPanel === 'role-bindings' ? (
+                  <TeamRuntimeRoleBindingPanel
+                    agents={roleBindingAgents}
+                    cards={roleBindingCards}
+                    error={roleBindingError}
+                    loading={roleBindingLoading}
+                    onChange={onRoleBindingChange}
+                  />
+                ) : null}
               </section>
-
-              <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-                <TeamSectionHeader
-                  eyebrow="Interaction agent"
-                  title="统一交互代理"
-                  description="保持常驻输入入口，让需求改写在 Detail Rail 中持续可达，而不是挤占主工作区。"
-                />
-                <textarea
-                  aria-label="interaction-agent 输入区"
-                  rows={4}
-                  value={interactionDraft}
-                  onChange={(event) => onInteractionDraftChange(event.target.value)}
-                  placeholder="先把人类意图写在这里，后续会由 interaction-agent 做需求改写。"
-                />
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => void onSubmitInteractionDraft()}
-                  disabled={busy || !interactionDraft.trim()}
-                >
-                  {busy ? '提交中…' : '交由 interaction-agent'}
-                </button>
-              </section>
-
-              <TeamRuntimeBuddy
-                activeAgentCount={buddyProjection.activeAgentCount}
-                blockedCount={buddyProjection.blockedCount}
-                pendingApprovalCount={buddyProjection.pendingApprovalCount}
-                pendingQuestionCount={buddyProjection.pendingQuestionCount}
-                runningCount={buddyProjection.runningCount}
-                sessionTitle={buddyProjection.sessionTitle}
-                workspaceLabel={buddyProjection.workspaceLabel}
-              />
-
-              <TeamRuntimeRoleBindingPanel
-                agents={roleBindingAgents}
-                cards={roleBindingCards}
-                error={roleBindingError}
-                loading={roleBindingLoading}
-                onChange={onRoleBindingChange}
-              />
             </aside>
           </section>
 

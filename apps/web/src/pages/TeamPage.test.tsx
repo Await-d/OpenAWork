@@ -900,6 +900,19 @@ async function clickWorkspace(label: string) {
   });
 }
 
+async function clickDetailRailTab(label: string) {
+  const button = Array.from(container?.querySelectorAll('button') ?? []).find(
+    (candidate) => candidate.textContent?.trim() === label,
+  ) as HTMLButtonElement | undefined;
+
+  expect(button).toBeTruthy();
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 describe('TeamPage', () => {
   it('renders the runtime shell, workspace cards, and tabbed collaboration data', async () => {
     await renderPage();
@@ -907,9 +920,12 @@ describe('TeamPage', () => {
     expect(container?.textContent).toContain('Team Runtime');
     expect(container?.textContent).toContain('全部工作区');
     expect(container?.textContent).toContain('/repo/apps/api');
-    expect(container?.textContent).toContain('Buddy / Hubby runtime');
     expect(container?.textContent).toContain('林雾');
     expect(container?.textContent).toContain('落地团队协作台');
+
+    await clickDetailRailTab('Buddy');
+
+    expect(container?.textContent).toContain('Buddy / Hubby runtime');
 
     await clickTab('消息时间线');
 
@@ -955,6 +971,7 @@ describe('TeamPage', () => {
 
   it('renders the execution role binding panel with agent and capability options', async () => {
     await renderPage();
+    await clickDetailRailTab('角色绑定');
 
     expect(container?.textContent).toContain('执行角色绑定');
     expect(container?.textContent).toContain('Planner Prime');
