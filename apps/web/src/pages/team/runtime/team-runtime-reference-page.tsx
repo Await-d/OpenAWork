@@ -2,13 +2,18 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import {
   agentTeamsActivityItems,
   agentTeamsCanvasSummary,
+  agentTeamsConversationCards,
   agentTeamsFooterLead,
   agentTeamsFooterStats,
   agentTeamsMetricCards,
+  agentTeamsMessageCards,
   agentTeamsOfficeAgents,
+  agentTeamsOverviewCards,
   agentTeamsRoleChips,
+  agentTeamsReviewCards,
   agentTeamsSidebarSections,
   agentTeamsTabPanels,
+  agentTeamsTaskLanes,
   agentTeamsTabs,
   agentTeamsTeamCard,
   agentTeamsTopSummary,
@@ -1003,18 +1008,142 @@ function OfficeScene() {
 }
 
 function PlaceholderPanel({ activeTab }: { activeTab: Exclude<AgentTeamsTabKey, 'office'> }) {
-  const cards = agentTeamsTabPanels[activeTab];
+  if (activeTab === 'conversation') {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16 }}>
+        <div style={{ display: 'grid', gap: 14 }}>
+          {agentTeamsConversationCards.map((card) => (
+            <div
+              key={card.id}
+              style={{ ...PANEL_STYLE, padding: 18, borderRadius: 18, display: 'grid', gap: 8 }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: '#edf1ff' }}>
+                  {card.title}
+                </span>
+                <span style={{ fontSize: 11, color: '#7e86b6' }}>{card.meta}</span>
+              </div>
+              <span style={{ fontSize: 13, color: '#8f95be', lineHeight: 1.7 }}>{card.body}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...PANEL_STYLE, padding: 18, borderRadius: 18, display: 'grid', gap: 10 }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: '#edf1ff' }}>最近提问</span>
+          {agentTeamsTabPanels.conversation.map((card) => (
+            <div
+              key={card.id}
+              style={{
+                display: 'grid',
+                gap: 6,
+                padding: 12,
+                borderRadius: 14,
+                background: '#181a29',
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 700 }}>{card.title}</span>
+              <span style={{ fontSize: 12, color: '#8f95be', lineHeight: 1.6 }}>
+                {card.description}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === 'tasks') {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+        {agentTeamsTaskLanes.map((lane) => (
+          <section
+            key={lane.id}
+            style={{ ...PANEL_STYLE, padding: 16, borderRadius: 18, display: 'grid', gap: 12 }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ fontSize: 15, fontWeight: 800, color: '#edf1ff' }}>{lane.title}</span>
+              <span style={{ fontSize: 11, color: '#7e86b6' }}>{lane.cards.length}</span>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {lane.cards.map((card) => (
+                <div
+                  key={card.id}
+                  style={{
+                    display: 'grid',
+                    gap: 6,
+                    padding: 12,
+                    borderRadius: 14,
+                    background: '#181a29',
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{card.title}</span>
+                  <span style={{ fontSize: 11, color: '#8f95be' }}>{card.owner}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    );
+  }
+
+  if (activeTab === 'messages') {
+    return (
+      <div style={{ display: 'grid', gap: 14 }}>
+        {agentTeamsMessageCards.map((card) => (
+          <div
+            key={card.id}
+            style={{ ...PANEL_STYLE, padding: 18, borderRadius: 18, display: 'grid', gap: 8 }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: '#edf1ff' }}>
+                {card.from} → {card.to}
+              </span>
+              <span style={{ fontSize: 11, color: '#7e86b6' }}>TeamBus</span>
+            </div>
+            <span style={{ fontSize: 13, color: '#8f95be', lineHeight: 1.7 }}>{card.summary}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (activeTab === 'overview') {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+        {agentTeamsOverviewCards.map((card) => (
+          <div
+            key={card.id}
+            style={{ ...PANEL_STYLE, padding: 18, borderRadius: 18, display: 'grid', gap: 8 }}
+          >
+            <span style={{ fontSize: 12, color: '#7e86b6' }}>{card.label}</span>
+            <span style={{ fontSize: 22, fontWeight: 800, color: '#edf1ff' }}>{card.value}</span>
+            <span style={{ fontSize: 12, color: '#8f95be', lineHeight: 1.6 }}>{card.note}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      {cards.map((card) => (
+    <div style={{ display: 'grid', gap: 14 }}>
+      {agentTeamsReviewCards.map((card) => (
         <div
           key={card.id}
           style={{ ...PANEL_STYLE, padding: 18, borderRadius: 18, display: 'grid', gap: 8 }}
         >
-          <span style={{ fontSize: 16, fontWeight: 800, color: '#edf1ff' }}>{card.title}</span>
-          <span style={{ fontSize: 13, color: '#8f95be', lineHeight: 1.7 }}>
-            {card.description}
-          </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: '#edf1ff' }}>{card.title}</span>
+            <span style={{ fontSize: 11, color: '#ffd458' }}>{card.priority}</span>
+          </div>
+          <span style={{ fontSize: 13, color: '#8f95be', lineHeight: 1.7 }}>{card.summary}</span>
         </div>
       ))}
     </div>

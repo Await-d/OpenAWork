@@ -68,6 +68,40 @@ export interface AgentTeamsPlaceholderCard {
   title: string;
 }
 
+export interface AgentTeamsConversationCard {
+  body: string;
+  id: string;
+  meta: string;
+  title: string;
+}
+
+export interface AgentTeamsTaskLane {
+  cards: Array<{ id: string; owner: string; title: string }>;
+  id: string;
+  title: string;
+}
+
+export interface AgentTeamsMessageCard {
+  from: string;
+  id: string;
+  summary: string;
+  to: string;
+}
+
+export interface AgentTeamsOverviewCard {
+  id: string;
+  label: string;
+  note: string;
+  value: string;
+}
+
+export interface AgentTeamsReviewCard {
+  id: string;
+  priority: string;
+  summary: string;
+  title: string;
+}
+
 export const agentTeamsActivityItems: AgentTeamsActivityItem[] = [
   { id: 'dashboard', label: '统计', icon: '▥' },
   { id: 'teams', label: '团队', icon: '◫' },
@@ -277,6 +311,97 @@ export const agentTeamsTabPanels: Record<
     },
   ],
 };
+
+export const agentTeamsConversationCards: AgentTeamsConversationCard[] = [
+  {
+    id: 'conversation-1',
+    title: '团队对话流',
+    meta: 'Claude Code · 研究团队-2026-03-31',
+    body: '团队负责人刚刚要求批评者复查“办公室页 mock 是否已达官方截图的结构基线”。',
+  },
+  {
+    id: 'conversation-2',
+    title: '最近提问',
+    meta: '研究员A · 等待输入',
+    body: '是否继续把左侧模板块的图标、说明密度和模板节奏继续向官方页面压近？',
+  },
+];
+
+export const agentTeamsTaskLanes: AgentTeamsTaskLane[] = [
+  {
+    id: 'todo',
+    title: '待办',
+    cards: [
+      { id: 'todo-1', title: '补会议桌旁的墙面挂件', owner: '研究员A' },
+      { id: 'todo-2', title: '对齐模板卡的行间距', owner: '研究员B' },
+    ],
+  },
+  {
+    id: 'doing',
+    title: '进行中',
+    cards: [
+      { id: 'doing-1', title: '压办公室页画布层级', owner: '团队负责人' },
+      { id: 'doing-2', title: '收敛顶部角色 chips', owner: '批评者' },
+    ],
+  },
+  {
+    id: 'review',
+    title: '待评审',
+    cards: [{ id: 'review-1', title: '评估截图还原度', owner: '批评者' }],
+  },
+];
+
+export const agentTeamsMessageCards: AgentTeamsMessageCard[] = [
+  {
+    id: 'message-1',
+    from: '团队负责人',
+    to: '研究员A',
+    summary: '请继续补足左侧模板栏的标签密度与换行节奏。',
+  },
+  {
+    id: 'message-2',
+    from: '研究员B',
+    to: '批评者',
+    summary: '请确认“办公室”页底部状态栏是否仍与官方 screenshot 一致。',
+  },
+  {
+    id: 'message-3',
+    from: '批评者',
+    to: '团队负责人',
+    summary: '当前建议继续对齐画布内人物标签层级和右侧窗/门比例。',
+  },
+];
+
+export const agentTeamsOverviewCards: AgentTeamsOverviewCard[] = [
+  {
+    id: 'overview-card-1',
+    label: '活跃角色',
+    value: '4',
+    note: '团队负责人 / 研究员A / 研究员B / 批评者',
+  },
+  { id: 'overview-card-2', label: '办公室任务', value: '3', note: '待办 2 · 评审 1' },
+  {
+    id: 'overview-card-3',
+    label: '页面还原度',
+    value: '持续收敛',
+    note: '当前以 1111111.png 为唯一视觉基线',
+  },
+];
+
+export const agentTeamsReviewCards: AgentTeamsReviewCard[] = [
+  {
+    id: 'review-card-1',
+    title: '顶部团队条对齐度',
+    priority: '高优先级',
+    summary: '继续检查角色 chip 内部的间距、状态文案和 provider 辅助信息层级。',
+  },
+  {
+    id: 'review-card-2',
+    title: '办公室场景微对齐',
+    priority: '中优先级',
+    summary: '会议桌、主屏、门窗、植物和饮水机的位置还可继续像素级收敛。',
+  },
+];
 
 export const agentTeamsTeamCard = {
   title: '研究团队-2026-03-31',
