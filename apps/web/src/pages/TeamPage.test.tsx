@@ -260,6 +260,86 @@ beforeEach(() => {
       } as Response;
     }
 
+    if (url.pathname.endsWith('/agents') && method === 'GET') {
+      return {
+        ok: true,
+        json: async () => ({
+          agents: [
+            {
+              id: 'agent-planner-1',
+              label: 'Planner Prime',
+              description: '负责规划拆解',
+              aliases: [],
+              canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+              model: 'gpt-5.4',
+              variant: null,
+              fallbackModels: [],
+              systemPrompt: null,
+              note: null,
+              origin: 'builtin',
+              source: 'system',
+              enabled: true,
+              removable: false,
+              resettable: true,
+              hasOverrides: false,
+              createdAt: '2026-04-04T00:00:00.000Z',
+              updatedAt: '2026-04-04T00:00:00.000Z',
+            },
+            {
+              id: 'agent-executor-1',
+              label: 'Executor Flux',
+              description: '负责执行实现',
+              aliases: [],
+              canonicalRole: { coreRole: 'executor', preset: 'builder', confidence: 'medium' },
+              model: 'gpt-5.4',
+              variant: null,
+              fallbackModels: [],
+              systemPrompt: null,
+              note: null,
+              origin: 'builtin',
+              source: 'system',
+              enabled: true,
+              removable: false,
+              resettable: true,
+              hasOverrides: false,
+              createdAt: '2026-04-04T00:00:00.000Z',
+              updatedAt: '2026-04-04T00:00:00.000Z',
+            },
+          ],
+        }),
+      } as Response;
+    }
+
+    if (url.pathname.endsWith('/capabilities') && method === 'GET') {
+      return {
+        ok: true,
+        json: async () => ({
+          capabilities: [
+            {
+              id: 'cap-1',
+              kind: 'tool',
+              label: '任务拆解',
+              description: '适合拆解复杂任务',
+              source: 'system',
+              enabled: true,
+              callable: true,
+              canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+            },
+            {
+              id: 'cap-2',
+              kind: 'tool',
+              label: '代码执行',
+              description: '适合执行实现任务',
+              source: 'system',
+              enabled: true,
+              callable: true,
+              canonicalRole: { coreRole: 'executor', preset: 'builder', confidence: 'medium' },
+            },
+          ],
+        }),
+      } as Response;
+    }
+
     if (url.pathname.endsWith('/team/messages') && method === 'GET') {
       return {
         ok: true,
@@ -871,6 +951,19 @@ describe('TeamPage', () => {
     expect(container?.textContent).toContain('子代理检索');
     expect(container?.textContent).toContain('孙子代理整理');
     expect(container?.textContent).toContain('1 个子会话');
+  });
+
+  it('renders the execution role binding panel with agent and capability options', async () => {
+    await renderPage();
+
+    expect(container?.textContent).toContain('执行角色绑定');
+    expect(container?.textContent).toContain('Planner Prime');
+    expect(container?.textContent).toContain('任务拆解');
+
+    const plannerSelect = container?.querySelector(
+      'select[aria-label="执行角色绑定-planner"]',
+    ) as HTMLSelectElement | null;
+    expect(plannerSelect?.value).toBe('agent-planner-1');
   });
 
   it('prefers runtime tasks in the task board when a shared session is selected', async () => {

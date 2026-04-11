@@ -10,6 +10,8 @@ import type {
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
+import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
+import type { InteractionAgentRewriteArtifact } from './interaction-agent-flow.js';
 import type { TeamActionFeedback } from '../use-team-collaboration.js';
 import {
   TeamAuditPanel,
@@ -30,6 +32,7 @@ import {
   type TeamRuntimeMetric,
 } from './team-runtime-model.js';
 import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
+import { TeamRuntimeRoleBindingPanel } from './team-runtime-role-binding-panel.js';
 import { useTeamRuntimeProjection } from './use-team-runtime-projection.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session-grouping.js';
 
@@ -72,6 +75,7 @@ interface TeamRuntimeShellProps {
   busy: boolean;
   error: string | null;
   feedback: TeamActionFeedback | null;
+  interactionRewriteArtifact: InteractionAgentRewriteArtifact | null;
   loading: boolean;
   memberForm: MemberFormState;
   members: TeamMemberRecord[];
@@ -83,7 +87,7 @@ interface TeamRuntimeShellProps {
   onCreateSharedComment: () => void;
   onCreateTask: () => void;
   onDeleteSessionShare: (shareId: string) => void;
-  onCreateInteractionMessage: (content: string) => Promise<boolean>;
+  onCreateInteractionMessage: (content: string) => Promise<InteractionAgentRewriteArtifact | null>;
   onMemberFormChange: (patch: Partial<MemberFormState>) => void;
   onMessageFormChange: (patch: Partial<MessageFormState>) => void;
   onReplySharedPermission: (
@@ -125,6 +129,17 @@ interface TeamRuntimeShellProps {
   }>;
   runtimeTasks: SessionTask[];
   runtimeTasksLoading: boolean;
+  roleBindingAgents: ManagedAgentRecord[];
+  roleBindingCards: Array<{
+    recommendedCapabilities: CapabilityDescriptor[];
+    role: CoreRole;
+    roleLabel: string;
+    selectedAgent: ManagedAgentRecord | null;
+    selectedAgentId: string;
+  }>;
+  roleBindingError: string | null;
+  roleBindingLoading: boolean;
+  onRoleBindingChange: (role: CoreRole, agentId: string) => void;
   tasks: TeamTaskRecord[];
   workflowLaunch: {
     nodeCount: number;
@@ -305,6 +320,7 @@ export function TeamRuntimeShell({
   busy,
   error,
   feedback,
+  interactionRewriteArtifact,
   loading,
   memberForm,
   members,
@@ -343,6 +359,11 @@ export function TeamRuntimeShell({
   runtimeTaskGroups,
   runtimeTasks,
   runtimeTasksLoading,
+  roleBindingAgents,
+  roleBindingCards,
+  roleBindingError,
+  roleBindingLoading,
+  onRoleBindingChange,
   tasks,
   workflowLaunch,
   onLaunchWorkflowTemplate,
@@ -371,6 +392,7 @@ export function TeamRuntimeShell({
     workspaceSummaries,
   } = useTeamRuntimeProjection({
     auditLogs,
+    interactionRewriteArtifact,
     members,
     messages,
     onSelectSharedSession,
@@ -1344,6 +1366,14 @@ export function TeamRuntimeShell({
                   runningCount={buddyProjection.runningCount}
                   sessionTitle={buddyProjection.sessionTitle}
                   workspaceLabel={buddyProjection.workspaceLabel}
+                />
+
+                <TeamRuntimeRoleBindingPanel
+                  agents={roleBindingAgents}
+                  cards={roleBindingCards}
+                  error={roleBindingError}
+                  loading={roleBindingLoading}
+                  onChange={onRoleBindingChange}
                 />
 
                 <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>

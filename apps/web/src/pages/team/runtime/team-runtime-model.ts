@@ -7,6 +7,7 @@ import type {
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
+import type { InteractionAgentRewriteArtifact } from './interaction-agent-flow.js';
 
 export const ALL_WORKSPACES_KEY = '__all_workspaces__';
 const UNBOUND_WORKSPACE_KEY = '__unbound_workspace__';
@@ -241,6 +242,7 @@ export function buildRuntimeMetrics(input: {
 }
 
 export function buildWorkspaceOverviewLines(input: {
+  interactionRewriteArtifact: InteractionAgentRewriteArtifact | null;
   messages: TeamMessageRecord[];
   selectedSharedSession: SharedSessionDetailRecord | null;
   tasks: TeamTaskRecord[];
@@ -250,6 +252,13 @@ export function buildWorkspaceOverviewLines(input: {
     input.workspaceSummary?.description ?? '当前还没有接入任何工作区会话。',
     `团队任务 ${input.tasks.length} 条，消息同步 ${input.messages.length} 条。`,
   ];
+
+  if (input.interactionRewriteArtifact) {
+    lines.push(
+      `interaction-agent 最新改写：${input.interactionRewriteArtifact.rewrittenIntent}。` +
+        '当前已可把这条结果继续落到 Team 任务或共享运行。',
+    );
+  }
 
   if (input.selectedSharedSession) {
     lines.push(
@@ -331,29 +340,51 @@ export function buildWorkspaceContextMetrics(input: {
 }
 
 export function buildWorkspaceOutputCards(input: {
+  interactionRewriteArtifact: InteractionAgentRewriteArtifact | null;
   selectedSharedSession: SharedSessionDetailRecord | null;
   sharedSessions: SharedSessionSummaryRecord[];
 }): TeamWorkspaceOutputCard[] {
   const selectedSessionId = input.selectedSharedSession?.share.sessionId ?? null;
 
-  return input.sharedSessions.map((sharedSession) => {
-    const selected =
-      sharedSession.sessionId === selectedSessionId ? input.selectedSharedSession : null;
+  const rewriteCard = input.interactionRewriteArtifact
+    ? [
+        {
+          id: '__interaction_agent_rewrite__',
+          title: 'interaction-agent 改写结果',
+          stateLabel: '已完成',
+          sharedByEmail: 'interaction-agent',
+          workspaceLabel: '当前 Team Runtime',
+          latestOutput: input.interactionRewriteArtifact.rewrittenIntent,
+          pendingApprovalCount: 0,
+          pendingQuestionCount: 0,
+          helperText:
+            `原始意图：${input.interactionRewriteArtifact.sourceIntent}。` +
+            input.interactionRewriteArtifact.recommendedNextStep,
+        },
+      ]
+    : [];
 
-    return {
-      id: sharedSession.sessionId,
-      title: sharedSession.title ?? sharedSession.sessionId,
-      stateLabel: getSharedSessionStateLabel(sharedSession.stateStatus),
-      sharedByEmail: sharedSession.sharedByEmail,
-      workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
-      latestOutput: selected ? findLatestAssistantMessage(selected) : null,
-      pendingApprovalCount: selected?.pendingPermissions.length ?? 0,
-      pendingQuestionCount: selected?.pendingQuestions.length ?? 0,
-      helperText: selected
-        ? '当前卡片已接入所选共享会话详情，可直接查看最新助手输出与待处理项。'
-        : '当前只展示工作区级输出摘要；选中该共享会话后可查看更细的运行内容。',
-    };
-  });
+  return [
+    ...rewriteCard,
+    ...input.sharedSessions.map((sharedSession) => {
+      const selected =
+        sharedSession.sessionId === selectedSessionId ? input.selectedSharedSession : null;
+
+      return {
+        id: sharedSession.sessionId,
+        title: sharedSession.title ?? sharedSession.sessionId,
+        stateLabel: getSharedSessionStateLabel(sharedSession.stateStatus),
+        sharedByEmail: sharedSession.sharedByEmail,
+        workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
+        latestOutput: selected ? findLatestAssistantMessage(selected) : null,
+        pendingApprovalCount: selected?.pendingPermissions.length ?? 0,
+        pendingQuestionCount: selected?.pendingQuestions.length ?? 0,
+        helperText: selected
+          ? '当前卡片已接入所选共享会话详情，可直接查看最新助手输出与待处理项。'
+          : '当前只展示工作区级输出摘要；选中该共享会话后可查看更细的运行内容。',
+      };
+    }),
+  ];
 }
 
 export function formatChangeSourceKind(sourceKind: string): string {

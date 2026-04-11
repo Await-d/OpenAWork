@@ -10,6 +10,7 @@ import type {
   TeamSessionShareRecord,
   TeamTaskRecord,
 } from '@openAwork/web-client';
+import type { InteractionAgentRewriteArtifact } from './interaction-agent-flow.js';
 import {
   ALL_WORKSPACES_KEY,
   buildRuntimeMetrics,
@@ -26,6 +27,7 @@ import { groupSessionTreesByWorkspace } from '../../../utils/session-grouping.js
 
 interface TeamRuntimeProjectionInput {
   auditLogs: TeamAuditLogRecord[];
+  interactionRewriteArtifact: InteractionAgentRewriteArtifact | null;
   members: TeamMemberRecord[];
   messages: TeamMessageRecord[];
   onSelectSharedSession: (sessionId: string) => void;
@@ -45,6 +47,7 @@ interface TeamRuntimeProjectionInput {
 
 export function useTeamRuntimeProjection({
   auditLogs,
+  interactionRewriteArtifact,
   members,
   messages,
   onSelectSharedSession,
@@ -150,12 +153,19 @@ export function useTeamRuntimeProjection({
   const workspaceOverviewLines = useMemo(
     () =>
       buildWorkspaceOverviewLines({
+        interactionRewriteArtifact,
         messages,
         selectedSharedSession: effectiveSelectedSharedSession,
         tasks,
         workspaceSummary: selectedWorkspace,
       }),
-    [effectiveSelectedSharedSession, messages, selectedWorkspace, tasks],
+    [
+      effectiveSelectedSharedSession,
+      interactionRewriteArtifact,
+      messages,
+      selectedWorkspace,
+      tasks,
+    ],
   );
 
   const fileChangesSummary = effectiveSelectedSharedSession?.session.fileChangesSummary;
@@ -186,10 +196,11 @@ export function useTeamRuntimeProjection({
   const workspaceOutputCards = useMemo(
     () =>
       buildWorkspaceOutputCards({
+        interactionRewriteArtifact,
         selectedSharedSession: effectiveSelectedSharedSession,
         sharedSessions: filteredSharedSessions,
       }),
-    [effectiveSelectedSharedSession, filteredSharedSessions],
+    [effectiveSelectedSharedSession, filteredSharedSessions, interactionRewriteArtifact],
   );
 
   const changeMetrics = useMemo(

@@ -200,6 +200,18 @@ async function renderPage(initialEntry = '/team') {
   });
 }
 
+async function clickTab(label: string) {
+  const button = Array.from(container?.querySelectorAll('button') ?? []).find((entry) =>
+    entry.textContent?.includes(label),
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe('TeamPage interaction agent flow', () => {
   it('keeps interaction-agent draft isolated from the timeline composer', async () => {
     await renderPage();
@@ -266,6 +278,23 @@ describe('TeamPage interaction agent flow', () => {
     expect(container?.textContent).toContain('question');
     expect(container?.textContent).toContain('结果');
     expect(interactionTextarea?.value ?? '').toBe('');
+
+    await clickTab('产物');
+
+    expect(container?.textContent).toContain('interaction-agent 改写结果');
+    expect(container?.textContent).toContain('共享来源：interaction-agent');
+    expect(container?.textContent).toContain(
+      '请围绕“请先梳理当前阻塞并给出下一步建议”继续拆解团队任务',
+    );
+    expect(container?.textContent).toContain(
+      '原始意图：请先梳理当前阻塞并给出下一步建议。可将这条改写结果继续落到 Team 任务、共享运行跟进项或执行角色分工。',
+    );
+
+    await clickTab('总览');
+
+    expect(container?.textContent).toContain(
+      'interaction-agent 最新改写：请围绕“请先梳理当前阻塞并给出下一步建议”继续拆解团队任务。当前已可把这条结果继续落到 Team 任务或共享运行。',
+    );
   });
 
   it('keeps the interaction-agent draft when the processing status write fails', async () => {

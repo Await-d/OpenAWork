@@ -8,7 +8,11 @@ import type {
   TeamTaskRecord,
 } from '@openAwork/web-client';
 import { useTeamCollaboration } from './team/use-team-collaboration.js';
-import { submitInteractionAgentFlow } from './team/runtime/interaction-agent-flow.js';
+import {
+  submitInteractionAgentFlow,
+  type InteractionAgentRewriteArtifact,
+} from './team/runtime/interaction-agent-flow.js';
+import { useTeamRuntimeRoleBindings } from './team/runtime/use-team-runtime-role-bindings.js';
 import { TeamRuntimeShell } from './team/runtime/team-runtime-shell.js';
 
 export default function TeamPage() {
@@ -75,6 +79,8 @@ export default function TeamPage() {
     sessionId: string;
   }>({ memberId: '', permission: 'view', sessionId: '' });
   const [sharedCommentDraft, setSharedCommentDraft] = useState('');
+  const [interactionRewriteArtifact, setInteractionRewriteArtifact] =
+    useState<InteractionAgentRewriteArtifact | null>(null);
   const workflowLaunch = searchParams.get('workflowTemplateId')
     ? {
         templateId: searchParams.get('workflowTemplateId') ?? '',
@@ -83,6 +89,7 @@ export default function TeamPage() {
         nodeCount: Number(searchParams.get('workflowTemplateNodeCount') ?? '0') || 0,
       }
     : null;
+  const roleBindings = useTeamRuntimeRoleBindings();
 
   const handleCreateMember = async () => {
     const succeeded = await createMember({
@@ -126,10 +133,16 @@ export default function TeamPage() {
   };
 
   const handleCreateInteractionMessage = async (content: string) => {
-    return submitInteractionAgentFlow({
+    const artifact = await submitInteractionAgentFlow({
       submitMessage: submitTeamMessage,
       userIntent: content,
     });
+
+    if (artifact) {
+      setInteractionRewriteArtifact(artifact);
+    }
+
+    return artifact;
   };
 
   const handleCreateSessionShare = async () => {
@@ -184,6 +197,7 @@ export default function TeamPage() {
       busy={busy}
       error={error}
       feedback={feedback}
+      interactionRewriteArtifact={interactionRewriteArtifact}
       loading={loading}
       memberForm={memberForm}
       members={members}
@@ -243,6 +257,11 @@ export default function TeamPage() {
       sharedSessionLoading={sharedSessionLoading}
       sharedSessions={sharedSessions}
       taskForm={taskForm}
+      roleBindingAgents={roleBindings.agents}
+      roleBindingError={roleBindings.error}
+      roleBindingLoading={roleBindings.loading}
+      roleBindingCards={roleBindings.roleCards}
+      onRoleBindingChange={roleBindings.setBinding}
       runtimeTaskGroups={runtimeTaskGroups}
       runtimeTaskRecords={runtimeTaskRecords}
       runtimeTasks={runtimeTasks}
