@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
@@ -31,8 +31,7 @@ import {
   getSharedSessionStateLabel,
   type TeamRuntimeMetric,
 } from './team-runtime-model.js';
-import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
-import { TeamRuntimeRoleBindingPanel } from './team-runtime-role-binding-panel.js';
+import { TeamRuntimeShellFrame } from './team-runtime-shell-frame.js';
 import { useTeamRuntimeProjection } from './use-team-runtime-projection.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session-grouping.js';
 
@@ -152,45 +151,13 @@ interface TeamRuntimeShellProps {
 
 const tabs: Array<{ key: RuntimeTabKey; label: string; summary: string }> = [
   { key: 'overview', label: '总览', summary: '工作区全局状态与任务节奏摘要' },
-  { key: 'sessions', label: '会话 / Agent', summary: '共享会话、活跃主体与运行详情' },
+  { key: 'sessions', label: '会话 / Agent', summary: '共享运行、活跃主体与运行详情' },
   { key: 'tasks', label: '任务看板', summary: '任务推进、阻塞与负责关系' },
   { key: 'context', label: '文件上下文', summary: '共享范围、工作区上下文与会话授权' },
   { key: 'timeline', label: '消息时间线', summary: '团队消息、审计与协作事件流' },
-  { key: 'artifacts', label: '产物', summary: '当前共享会话的输出摘要与产物预留' },
+  { key: 'artifacts', label: '产物', summary: '当前共享运行的输出摘要与产物预留' },
   { key: 'changes', label: 'Git / 变更', summary: '文件改动、快照与变更热区' },
 ];
-
-const tabListStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: 8,
-  flexWrap: 'wrap',
-  padding: 4,
-  borderRadius: 22,
-  border: '1px solid color-mix(in srgb, var(--border) 78%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 92%, rgba(15, 23, 42, 0.2))',
-};
-
-const activeTabStyle: React.CSSProperties = {
-  padding: '10px 14px',
-  borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'linear-gradient(135deg, rgba(91, 140, 255, 0.24), rgba(91, 140, 255, 0.08))',
-  color: 'var(--text)',
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: 'pointer',
-};
-
-const inactiveTabStyle: React.CSSProperties = {
-  padding: '10px 14px',
-  borderRadius: 999,
-  border: '1px solid transparent',
-  background: 'transparent',
-  color: 'var(--text-3)',
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
 
 function EmptyState({ description, title }: { description: string; title: string }) {
   return (
@@ -370,6 +337,9 @@ export function TeamRuntimeShell({
 }: TeamRuntimeShellProps) {
   const [activeTab, setActiveTab] = useState<RuntimeTabKey>('overview');
   const [interactionDraft, setInteractionDraft] = useState('');
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1440,
+  );
   const {
     buddyProjection,
     changeMetrics,
@@ -413,6 +383,21 @@ export function TeamRuntimeShell({
   const sharedSessionById = new Map(
     filteredSharedSessions.map((session) => [session.sessionId, session]),
   );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isSingleColumn = viewportWidth < 1120;
+  const isTwoColumn = viewportWidth >= 1120 && viewportWidth < 1500;
+  const activeTabMeta = tabs.find((tab) => tab.key === activeTab) ?? tabs[0]!;
+  const headerMetrics = metrics.slice(0, 4);
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -1157,311 +1142,56 @@ export function TeamRuntimeShell({
     setActiveTab('timeline');
   };
 
-  return (
+  return loading ? (
     <div className="page-root">
-      <div className="page-header">
-        <span className="page-title">Team Runtime</span>
-        <span className="page-subtitle">
-          以工作区为入口，把共享会话、运行状态、任务推进与人工介入收进同一块控制台
-        </span>
-      </div>
       <div className="page-content">
-        <div
-          style={{
-            maxWidth: 'min(1600px, 100%)',
-            margin: '0 auto',
-            padding: '24px',
-            display: 'grid',
-            gap: 18,
-          }}
-        >
-          <section
+        <div style={{ maxWidth: 'min(1880px, 100%)', margin: '0 auto', padding: '16px' }}>
+          <div
             className="content-card"
-            style={{
-              display: 'grid',
-              gap: 18,
-              padding: 22,
-              borderRadius: 28,
-              background:
-                'radial-gradient(circle at top left, rgba(91, 140, 255, 0.2), transparent 30%), linear-gradient(135deg, color-mix(in srgb, var(--surface) 96%, rgba(15, 23, 42, 0.34)) 0%, var(--surface) 100%)',
-            }}
+            style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}
           >
-            <div style={{ display: 'grid', gap: 6 }}>
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: '0.18em',
-                  textTransform: 'uppercase',
-                  color: 'var(--accent)',
-                }}
-              >
-                Team runtime console
-              </span>
-              <span
-                style={{
-                  fontSize: 'clamp(28px, 4vw, 46px)',
-                  fontWeight: 800,
-                  letterSpacing: '-0.04em',
-                  lineHeight: 1.02,
-                }}
-              >
-                把协作看板改造成工作区一级的运行总控页。
-              </span>
-              <span
-                style={{ maxWidth: 880, fontSize: 14, lineHeight: 1.8, color: 'var(--text-2)' }}
-              >
-                当前切片先复用既有 team / shared-session / task projection 数据链，把工作区入口、7
-                个主 Tab、统一交互代理和 Buddy/Hubby 动画挂点搭起来，为后续 Team Runtime read model
-                深化留出稳定骨架。
-              </span>
-            </div>
-
-            {feedback ? (
-              <div
-                className="content-card"
-                style={{
-                  padding: 12,
-                  borderColor:
-                    feedback.tone === 'success'
-                      ? 'rgba(34, 197, 94, 0.35)'
-                      : 'rgba(244, 63, 94, 0.35)',
-                  color: feedback.tone === 'success' ? '#86efac' : '#fecdd3',
-                }}
-              >
-                {feedback.message}
-              </div>
-            ) : null}
-
-            {error ? (
-              <div
-                className="content-card"
-                style={{ padding: 12, borderColor: 'rgba(244, 63, 94, 0.35)', color: '#fecdd3' }}
-              >
-                {error}
-              </div>
-            ) : null}
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: 12,
-              }}
-            >
-              {workspaceSummaries.map((workspace) => {
-                const isActive = workspace.key === selectedWorkspaceKey;
-                return (
-                  <button
-                    key={workspace.key}
-                    type="button"
-                    onClick={() => setSelectedWorkspaceKey(workspace.key)}
-                    className="content-card"
-                    style={{
-                      display: 'grid',
-                      gap: 8,
-                      padding: 16,
-                      textAlign: 'left',
-                      borderRadius: 20,
-                      cursor: 'pointer',
-                      borderColor: isActive
-                        ? 'color-mix(in srgb, var(--accent) 45%, transparent)'
-                        : undefined,
-                      background: isActive
-                        ? 'linear-gradient(135deg, rgba(91, 140, 255, 0.18), rgba(91, 140, 255, 0.06))'
-                        : undefined,
-                    }}
-                  >
-                    <span style={{ fontSize: 15, fontWeight: 800 }}>{workspace.label}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                      {workspace.description}
-                    </span>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {[
-                        `${workspace.runningCount} 运行中`,
-                        `${workspace.pausedCount} 待处理`,
-                        `${workspace.sharedSessionCount} 共享`,
-                      ].map((tag) => (
-                        <span
-                          key={tag}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '4px 10px',
-                            borderRadius: 999,
-                            background: 'rgba(91, 140, 255, 0.12)',
-                            color: 'var(--text-2)',
-                            fontSize: 11,
-                          }}
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          {loading ? (
-            <div
-              className="content-card"
-              style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}
-            >
-              Team Runtime 面板加载中…
-            </div>
-          ) : (
-            <section
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 360px)',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
-              <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
-                <div style={tabListStyle} role="tablist" aria-label="Team Runtime 视图切换">
-                  {tabs.map((tab) => {
-                    const isActive = tab.key === activeTab;
-                    return (
-                      <button
-                        key={tab.key}
-                        id={`team-runtime-tab-${tab.key}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        aria-controls={`team-runtime-panel-${tab.key}`}
-                        onClick={() => setActiveTab(tab.key)}
-                        style={isActive ? activeTabStyle : inactiveTabStyle}
-                      >
-                        {tab.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="content-card" style={{ display: 'grid', gap: 8, padding: 14 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>
-                    {tabs.find((tab) => tab.key === activeTab)?.label}
-                  </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                    {tabs.find((tab) => tab.key === activeTab)?.summary}
-                  </span>
-                </div>
-                <div
-                  id={`team-runtime-panel-${activeTab}`}
-                  role="tabpanel"
-                  aria-labelledby={`team-runtime-tab-${activeTab}`}
-                >
-                  {renderTabContent()}
-                </div>
-              </div>
-
-              <aside style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-                <TeamRuntimeBuddy
-                  activeAgentCount={buddyProjection.activeAgentCount}
-                  blockedCount={buddyProjection.blockedCount}
-                  pendingApprovalCount={buddyProjection.pendingApprovalCount}
-                  pendingQuestionCount={buddyProjection.pendingQuestionCount}
-                  runningCount={buddyProjection.runningCount}
-                  sessionTitle={buddyProjection.sessionTitle}
-                  workspaceLabel={buddyProjection.workspaceLabel}
-                />
-
-                <TeamRuntimeRoleBindingPanel
-                  agents={roleBindingAgents}
-                  cards={roleBindingCards}
-                  error={roleBindingError}
-                  loading={roleBindingLoading}
-                  onChange={onRoleBindingChange}
-                />
-
-                <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-                  <TeamSectionHeader
-                    eyebrow="Interaction agent"
-                    title="统一交互代理"
-                    description="这一层现在先做输入入口占位，不抢运行主视图，后续再接真实运行链。"
-                  />
-                  <textarea
-                    aria-label="interaction-agent 输入区"
-                    rows={4}
-                    value={interactionDraft}
-                    onChange={(event) => setInteractionDraft(event.target.value)}
-                    placeholder="先把人类意图写在这里，后续会由 interaction-agent 做需求改写。"
-                  />
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => void handleSubmitInteractionDraft()}
-                    disabled={busy || !interactionDraft.trim()}
-                  >
-                    {busy ? '提交中…' : '交由 interaction-agent'}
-                  </button>
-                </section>
-
-                <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-                  <TeamSectionHeader
-                    eyebrow="Selected run"
-                    title="当前共享运行"
-                    description="这里聚焦当前选中的共享会话，帮助你在总控页中快速判断下一步。"
-                  />
-                  {selectedRunSummary ? (
-                    <div style={{ display: 'grid', gap: 10 }}>
-                      <div
-                        className="content-card"
-                        style={{ display: 'grid', gap: 4, padding: 14 }}
-                      >
-                        <span style={{ fontSize: 16, fontWeight: 800 }}>
-                          {selectedRunSummary.title}
-                        </span>
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          工作区：{selectedRunSummary.workspaceLabel}
-                        </span>
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          状态：{selectedRunSummary.stateLabel}
-                        </span>
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          共享者：{selectedRunSummary.sharedByEmail}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                          gap: 10,
-                        }}
-                      >
-                        {[
-                          { label: '评论', value: selectedRunSummary.commentCount },
-                          { label: '在线查看者', value: selectedRunSummary.activeViewerCount },
-                          { label: '待审批', value: selectedRunSummary.pendingApprovalCount },
-                          { label: '待回答', value: selectedRunSummary.pendingQuestionCount },
-                        ].map((item) => (
-                          <div
-                            key={item.label}
-                            className="content-card"
-                            style={{ display: 'grid', gap: 4, padding: 12 }}
-                          >
-                            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                              {item.label}
-                            </span>
-                            <span style={{ fontSize: 18, fontWeight: 800 }}>{item.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyState
-                      title="尚未选中共享运行"
-                      description="在“会话 / Agent”里选一个共享会话，右侧会同步显示它的运行摘要。"
-                    />
-                  )}
-                </section>
-              </aside>
-            </section>
-          )}
+            Team Runtime 面板加载中…
+          </div>
         </div>
       </div>
     </div>
+  ) : (
+    <TeamRuntimeShellFrame
+      activeTabKey={activeTabMeta.key}
+      activeTabLabel={activeTabMeta.label}
+      activeTabSummary={activeTabMeta.summary}
+      buddyProjection={buddyProjection}
+      busy={busy}
+      error={error}
+      feedback={feedback}
+      filteredSessionCount={filteredSessions.length}
+      filteredSessionShareCount={filteredSessionShares.length}
+      filteredSharedSessions={filteredSharedSessions}
+      headerMetrics={headerMetrics}
+      interactionDraft={interactionDraft}
+      isSingleColumn={isSingleColumn}
+      isTwoColumn={isTwoColumn}
+      mainContent={renderTabContent()}
+      onActiveTabChange={(tabKey) => setActiveTab(tabKey as RuntimeTabKey)}
+      onInteractionDraftChange={setInteractionDraft}
+      onLaunchWorkflowTemplate={onLaunchWorkflowTemplate}
+      onRoleBindingChange={onRoleBindingChange}
+      onSelectSharedSession={onSelectSharedSession}
+      onSelectWorkspaceKey={setSelectedWorkspaceKey}
+      onSubmitInteractionDraft={handleSubmitInteractionDraft}
+      roleBindingAgents={roleBindingAgents}
+      roleBindingCards={roleBindingCards}
+      roleBindingError={roleBindingError}
+      roleBindingLoading={roleBindingLoading}
+      selectedRunSummary={selectedRunSummary}
+      selectedSharedSessionId={effectiveSelectedSharedSession?.share.sessionId ?? null}
+      selectedWorkspaceKey={selectedWorkspaceKey}
+      selectedWorkspaceLabel={selectedWorkspace?.label ?? '全部工作区'}
+      selectedWorkspaceRunningCount={selectedWorkspace?.runningCount ?? 0}
+      tabs={tabs}
+      workspaceOverviewLines={workspaceOverviewLines}
+      workspaceSummaries={workspaceSummaries}
+      workflowLaunch={workflowLaunch}
+    />
   );
 }
