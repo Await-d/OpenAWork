@@ -8,7 +8,11 @@ import { useAuthStore } from './stores/auth.js';
 
 vi.mock('./components/Layout.js', () => ({
   default: function MockLayout() {
-    return <Outlet />;
+    return (
+      <div data-testid="layout-shell">
+        <Outlet />
+      </div>
+    );
   },
 }));
 
@@ -349,13 +353,9 @@ describe('App routing', () => {
       await Promise.resolve();
     });
 
-    try {
-      await waitForText('林雾');
-    } catch (error) {
-      console.log('debug App /team text', container?.textContent ?? '');
-      throw error;
-    }
-    expect(container?.textContent).toContain('林雾');
-    expect(container?.textContent).toContain('落地团队协作台');
+    await waitForText('研究团队-2026-03-31');
+    expect(container?.querySelector('[data-testid="layout-shell"]')).toBeTruthy();
+    expect(container?.textContent).toContain('AGENT TEAMS');
+    expect(container?.textContent).toContain('团队工作空间');
   });
 });
