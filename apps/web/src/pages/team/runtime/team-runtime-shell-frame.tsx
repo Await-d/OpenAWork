@@ -7,6 +7,7 @@ import type { TeamRuntimeMetric, TeamWorkspaceCardSummary } from './team-runtime
 import { formatWorkspaceLabel, getSharedSessionStateLabel } from './team-runtime-model.js';
 import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
 import { TeamRuntimeRoleBindingPanel } from './team-runtime-role-binding-panel.js';
+import { useRuntimeWorkbenchPanes } from './use-runtime-workbench-panes.js';
 
 const APP_FRAME_STYLE: CSSProperties = {
   display: 'grid',
@@ -79,6 +80,21 @@ const ACTIVITY_BUTTON_BASE_STYLE: CSSProperties = {
   transition: 'background 150ms ease, color 150ms ease, border-color 150ms ease',
 };
 
+const PANE_CONTROL_BUTTON_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  minHeight: 30,
+  padding: '0 10px',
+  borderRadius: 999,
+  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--text-2)',
+  cursor: 'pointer',
+};
+
 type DetailRailPanelKey = 'buddy' | 'interaction' | 'role-bindings' | 'selected-run';
 
 interface TeamRuntimeSelectedRunSummary {
@@ -138,6 +154,15 @@ interface TeamRuntimeShellFrameProps {
   selectedWorkspaceKey: string;
   selectedWorkspaceLabel: string;
   selectedWorkspaceRunningCount: number;
+  statusBarSummary?: {
+    activeCount: number;
+    errorCount: number;
+    runningCount: number;
+    runtimeLabel: string;
+    todayTokens: string;
+    totalCount: number;
+    waitingCount: number;
+  };
   tabs: Array<{ key: string; label: string; summary: string }>;
   workspaceOverviewLines: string[];
   workspaceSummaries: TeamWorkspaceCardSummary[];
@@ -942,15 +967,21 @@ function RuntimeStatusBar({
   filteredSharedSessions,
   isSingleColumn,
   isTwoColumn,
+  onActiveTabChange,
   selectedRunSummary,
   selectedWorkspaceLabel,
+  statusBarSummary,
+  tabs,
 }: {
   activeTabLabel: string;
   filteredSharedSessions: SharedSessionSummaryRecord[];
   isSingleColumn: boolean;
   isTwoColumn: boolean;
+  onActiveTabChange: (tabKey: string) => void;
   selectedRunSummary: TeamRuntimeSelectedRunSummary | null;
   selectedWorkspaceLabel: string;
+  statusBarSummary?: TeamRuntimeShellFrameProps['statusBarSummary'];
+  tabs: TeamRuntimeShellFrameProps['tabs'];
 }) {
   const layoutModeLabel = isSingleColumn ? '单栏' : isTwoColumn ? '双栏' : '三栏';
 
@@ -970,19 +1001,101 @@ function RuntimeStatusBar({
           'linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, var(--bg)) 0%, color-mix(in srgb, var(--surface) 82%, var(--bg)) 100%)',
       }}
     >
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        {[
-          `工作区 ${selectedWorkspaceLabel}`,
-          `当前区块 ${activeTabLabel}`,
-          `布局 ${layoutModeLabel}`,
-          `${filteredSharedSessions.length} 个共享运行`,
-        ].map((item) => (
-          <ChromeBadge key={item}>{item}</ChromeBadge>
-        ))}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: (statusBarSummary?.activeCount ?? 0) > 0 ? '#22c55e' : 'var(--text-3)',
+              boxShadow:
+                (statusBarSummary?.activeCount ?? 0) > 0 ? '0 0 12px rgba(34,197,94,0.55)' : 'none',
+            }}
+          />
+          <span>
+            活跃 {statusBarSummary?.activeCount ?? filteredSharedSessions.length}
+            <span style={{ margin: '0 4px', color: 'var(--text-3)' }}>/</span>共{' '}
+            {statusBarSummary?.totalCount ?? filteredSharedSessions.length}
+          </span>
+        </span>
       </div>
-      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-        {selectedRunSummary ? `当前焦点：${selectedRunSummary.title}` : '当前尚未选中共享运行'}
-      </span>
+
+      <div
+        style={{
+          display: 'flex',
+          gap: 6,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flex: 1,
+        }}
+      >
+        {tabs.map((tab) => {
+          const active = tab.label === activeTabLabel;
+          return (
+            <button
+              key={`status-${tab.key}`}
+              type="button"
+              onClick={() => onActiveTabChange(tab.key)}
+              title={tab.summary}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 30,
+                height: 26,
+                borderRadius: 8,
+                border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                background: active
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--surface))'
+                  : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--text-3)',
+                cursor: 'pointer',
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: 14, lineHeight: 1 }}>
+                {getRuntimeTabGlyph(tab.key)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', fontSize: 11 }}
+      >
+        {statusBarSummary ? (
+          <>
+            <span style={{ color: 'var(--text-3)' }}>
+              总 <strong style={{ color: 'var(--text)' }}>{statusBarSummary.totalCount}</strong>
+            </span>
+            <span style={{ color: 'var(--text-3)' }}>
+              运行 <strong style={{ color: '#22c55e' }}>{statusBarSummary.runningCount}</strong>
+            </span>
+            <span style={{ color: 'var(--text-3)' }}>
+              等待 <strong style={{ color: '#f59e0b' }}>{statusBarSummary.waitingCount}</strong>
+            </span>
+            <span style={{ color: 'var(--text-3)' }}>
+              异常 <strong style={{ color: '#ef4444' }}>{statusBarSummary.errorCount}</strong>
+            </span>
+            <span style={{ color: 'var(--accent)' }}>{statusBarSummary.todayTokens}</span>
+            <span style={{ color: 'var(--text-3)' }}>{statusBarSummary.runtimeLabel}</span>
+          </>
+        ) : (
+          <>
+            <ChromeBadge>工作区 {selectedWorkspaceLabel}</ChromeBadge>
+            <ChromeBadge>当前区块 {activeTabLabel}</ChromeBadge>
+            <ChromeBadge>布局 {layoutModeLabel}</ChromeBadge>
+            <ChromeBadge>{filteredSharedSessions.length} 个共享运行</ChromeBadge>
+            <span style={{ color: 'var(--text-3)' }}>
+              {selectedRunSummary
+                ? `当前焦点：${selectedRunSummary.title}`
+                : '当前尚未选中共享运行'}
+            </span>
+          </>
+        )}
+      </div>
     </footer>
   );
 }
@@ -1019,6 +1132,7 @@ export function TeamRuntimeShellFrame({
   selectedWorkspaceKey,
   selectedWorkspaceLabel,
   selectedWorkspaceRunningCount,
+  statusBarSummary,
   tabs,
   workspaceOverviewLines,
   workspaceSummaries,
@@ -1032,6 +1146,20 @@ export function TeamRuntimeShellFrame({
     'role-bindings',
   ];
   const countsLine = `${filteredSessionCount} 个会话 · ${filteredSharedSessions.length} 个共享运行 · ${filteredSessionShareCount} 条共享记录`;
+  const {
+    detailCollapsed,
+    frameRef,
+    gridTemplateColumns,
+    resetLayout,
+    sidebarCollapsed,
+    startDetailResize,
+    startSidebarResize,
+    toggleDetail,
+    toggleSidebar,
+  } = useRuntimeWorkbenchPanes({
+    isSingleColumn,
+    isTwoColumn,
+  });
 
   return (
     <div className="page-root">
@@ -1112,6 +1240,34 @@ export function TeamRuntimeShellFrame({
                 <div
                   style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}
                 >
+                  {!isSingleColumn ? (
+                    <>
+                      <button
+                        type="button"
+                        aria-label={sidebarCollapsed ? '展开导航侧栏' : '折叠导航侧栏'}
+                        onClick={toggleSidebar}
+                        style={PANE_CONTROL_BUTTON_STYLE}
+                      >
+                        {sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={detailCollapsed ? '展开细节轨' : '折叠细节轨'}
+                        onClick={toggleDetail}
+                        style={PANE_CONTROL_BUTTON_STYLE}
+                      >
+                        {detailCollapsed ? '展开细节轨' : '收起细节轨'}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="重置工作台布局"
+                        onClick={resetLayout}
+                        style={PANE_CONTROL_BUTTON_STYLE}
+                      >
+                        重置布局
+                      </button>
+                    </>
+                  ) : null}
                   {headerMetrics.map((metric) => (
                     <CompactMetricPill
                       key={metric.label}
@@ -1157,24 +1313,17 @@ export function TeamRuntimeShellFrame({
             </header>
 
             <section
+              ref={frameRef}
               style={{
                 display: 'grid',
                 minHeight: 0,
                 flex: 1,
-                gridTemplateColumns: isSingleColumn
-                  ? 'minmax(0, 1fr)'
-                  : isTwoColumn
-                    ? '56px minmax(260px, 300px) minmax(0, 1fr)'
-                    : '56px minmax(280px, 320px) minmax(0, 1fr) minmax(320px, 360px)',
-                gridAutoRows: isSingleColumn
-                  ? 'auto'
-                  : isTwoColumn
-                    ? 'minmax(0, 1fr) auto'
-                    : 'minmax(0, 1fr)',
+                gridTemplateColumns,
+                gridAutoRows: isSingleColumn ? 'auto' : 'minmax(0, 1fr)',
               }}
             >
               {!isSingleColumn ? (
-                <div style={{ gridRow: isTwoColumn ? '1 / span 2' : undefined }}>
+                <div style={{ gridColumn: '1 / 2' }}>
                   <RuntimeActivityRail
                     activeTabKey={activeTabKey}
                     filteredSessionCount={filteredSessionCount}
@@ -1186,32 +1335,56 @@ export function TeamRuntimeShellFrame({
                 </div>
               ) : null}
 
-              <div
-                style={{
-                  minHeight: 0,
-                  borderRight: isSingleColumn ? undefined : '1px solid transparent',
-                }}
-              >
-                <RuntimeSidebar
-                  busy={busy}
-                  countsLine={countsLine}
-                  filteredSessionShareCount={filteredSessionShareCount}
-                  filteredSharedSessions={filteredSharedSessions}
-                  onLaunchWorkflowTemplate={onLaunchWorkflowTemplate}
-                  onSelectSharedSession={onSelectSharedSession}
-                  onSelectWorkspaceKey={onSelectWorkspaceKey}
-                  onSwitchToSessions={() => onActiveTabChange('sessions')}
-                  selectedSharedSessionId={selectedSharedSessionId}
-                  selectedWorkspaceKey={selectedWorkspaceKey}
-                  selectedWorkspaceLabel={selectedWorkspaceLabel}
-                  selectedWorkspaceRunningCount={selectedWorkspaceRunningCount}
-                  workspaceOverviewLines={workspaceOverviewLines}
-                  workspaceSummaries={workspaceSummaries}
-                  workflowLaunch={workflowLaunch}
-                />
-              </div>
+              {isSingleColumn || !sidebarCollapsed ? (
+                <div
+                  style={{
+                    minHeight: 0,
+                    position: 'relative',
+                    gridColumn: isSingleColumn ? undefined : '2 / 3',
+                  }}
+                >
+                  {!isSingleColumn ? (
+                    <button
+                      type="button"
+                      aria-label="调整导航侧栏宽度"
+                      onPointerDown={startSidebarResize}
+                      style={{
+                        position: 'absolute',
+                        right: -7,
+                        top: 16,
+                        bottom: 16,
+                        width: 14,
+                        borderRadius: 999,
+                        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                        background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                        cursor: 'col-resize',
+                        zIndex: 2,
+                      }}
+                    >
+                      <span aria-hidden="true">⋮</span>
+                    </button>
+                  ) : null}
+                  <RuntimeSidebar
+                    busy={busy}
+                    countsLine={countsLine}
+                    filteredSessionShareCount={filteredSessionShareCount}
+                    filteredSharedSessions={filteredSharedSessions}
+                    onLaunchWorkflowTemplate={onLaunchWorkflowTemplate}
+                    onSelectSharedSession={onSelectSharedSession}
+                    onSelectWorkspaceKey={onSelectWorkspaceKey}
+                    onSwitchToSessions={() => onActiveTabChange('sessions')}
+                    selectedSharedSessionId={selectedSharedSessionId}
+                    selectedWorkspaceKey={selectedWorkspaceKey}
+                    selectedWorkspaceLabel={selectedWorkspaceLabel}
+                    selectedWorkspaceRunningCount={selectedWorkspaceRunningCount}
+                    workspaceOverviewLines={workspaceOverviewLines}
+                    workspaceSummaries={workspaceSummaries}
+                    workflowLaunch={workflowLaunch}
+                  />
+                </div>
+              ) : null}
 
-              <div style={{ minHeight: 0 }}>
+              <div style={{ minHeight: 0, gridColumn: isSingleColumn ? undefined : '3 / 4' }}>
                 <RuntimeMainPanel
                   activeTabKey={activeTabKey}
                   activeTabLabel={activeTabLabel}
@@ -1225,8 +1398,35 @@ export function TeamRuntimeShellFrame({
                 />
               </div>
 
-              {isSingleColumn ? (
-                <div style={{ minHeight: 0 }}>
+              {isSingleColumn || !detailCollapsed ? (
+                <div
+                  style={{
+                    minHeight: 0,
+                    position: 'relative',
+                    gridColumn: isSingleColumn ? undefined : '4 / 5',
+                  }}
+                >
+                  {!isSingleColumn ? (
+                    <button
+                      type="button"
+                      aria-label="调整细节轨宽度"
+                      onPointerDown={startDetailResize}
+                      style={{
+                        position: 'absolute',
+                        left: -7,
+                        top: 16,
+                        bottom: 16,
+                        width: 14,
+                        borderRadius: 999,
+                        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                        background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                        cursor: 'col-resize',
+                        zIndex: 2,
+                      }}
+                    >
+                      <span aria-hidden="true">⋮</span>
+                    </button>
+                  ) : null}
                   <RuntimeDetailRail
                     activeDetailPanel={activeDetailPanel}
                     buddyProjection={buddyProjection}
@@ -1243,43 +1443,7 @@ export function TeamRuntimeShellFrame({
                     setActiveDetailPanel={setActiveDetailPanel}
                   />
                 </div>
-              ) : isTwoColumn ? (
-                <div style={{ gridColumn: '2 / 4', minHeight: 0 }}>
-                  <RuntimeDetailRail
-                    activeDetailPanel={activeDetailPanel}
-                    buddyProjection={buddyProjection}
-                    detailPanels={detailPanels}
-                    interactionDraft={interactionDraft}
-                    onInteractionDraftChange={onInteractionDraftChange}
-                    onRoleBindingChange={onRoleBindingChange}
-                    onSubmitInteractionDraft={onSubmitInteractionDraft}
-                    roleBindingAgents={roleBindingAgents}
-                    roleBindingCards={roleBindingCards}
-                    roleBindingError={roleBindingError}
-                    roleBindingLoading={roleBindingLoading}
-                    selectedRunSummary={selectedRunSummary}
-                    setActiveDetailPanel={setActiveDetailPanel}
-                  />
-                </div>
-              ) : (
-                <div style={{ minHeight: 0 }}>
-                  <RuntimeDetailRail
-                    activeDetailPanel={activeDetailPanel}
-                    buddyProjection={buddyProjection}
-                    detailPanels={detailPanels}
-                    interactionDraft={interactionDraft}
-                    onInteractionDraftChange={onInteractionDraftChange}
-                    onRoleBindingChange={onRoleBindingChange}
-                    onSubmitInteractionDraft={onSubmitInteractionDraft}
-                    roleBindingAgents={roleBindingAgents}
-                    roleBindingCards={roleBindingCards}
-                    roleBindingError={roleBindingError}
-                    roleBindingLoading={roleBindingLoading}
-                    selectedRunSummary={selectedRunSummary}
-                    setActiveDetailPanel={setActiveDetailPanel}
-                  />
-                </div>
-              )}
+              ) : null}
             </section>
 
             <RuntimeStatusBar
@@ -1287,8 +1451,11 @@ export function TeamRuntimeShellFrame({
               filteredSharedSessions={filteredSharedSessions}
               isSingleColumn={isSingleColumn}
               isTwoColumn={isTwoColumn}
+              onActiveTabChange={onActiveTabChange}
               selectedRunSummary={selectedRunSummary}
               selectedWorkspaceLabel={selectedWorkspaceLabel}
+              statusBarSummary={statusBarSummary}
+              tabs={tabs}
             />
           </section>
         </div>
