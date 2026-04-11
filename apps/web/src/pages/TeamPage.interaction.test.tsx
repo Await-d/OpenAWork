@@ -21,24 +21,10 @@ async function renderPage() {
   });
 }
 
-async function clickDetailRailTab(label: string) {
-  const button = Array.from(container?.querySelectorAll('button') ?? []).find(
-    (candidate) => candidate.textContent?.trim() === label,
-  ) as HTMLButtonElement | undefined;
-
-  expect(button).toBeTruthy();
-
-  await act(async () => {
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
-  });
-}
-
 beforeEach(() => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
-  window.innerWidth = 1680;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -53,49 +39,27 @@ afterEach(() => {
   root = null;
 });
 
-describe('TeamPage mock detail rail interactions', () => {
-  it('switches detail rail panels in the mock workbench shell', async () => {
+describe('TeamPage office reference detail', () => {
+  it('renders the left template rail and visible template groups', async () => {
     await renderPage();
 
-    await clickDetailRailTab('Buddy');
-    expect(container?.textContent).toContain('Buddy / Hubby runtime');
-
-    await clickDetailRailTab('角色绑定');
-    expect(container?.textContent).toContain('执行角色绑定');
-    expect(container?.textContent).toContain('Planner Prime');
-
-    await clickDetailRailTab('交互代理');
-    expect(
-      container?.querySelector('textarea[aria-label="interaction-agent 输入区"]'),
-    ).toBeTruthy();
+    expect(container?.textContent).toContain('运行中');
+    expect(container?.textContent).toContain('历史记录');
+    expect(container?.textContent).toContain('模板');
+    expect(container?.textContent).toContain('开发团队');
+    expect(container?.textContent).toContain('研究团队');
+    expect(container?.textContent).toContain('短视频学习助手开...');
+    expect(container?.textContent).toContain('轻量进销存官网搭...');
   });
 
-  it('submits the mock interaction agent draft and shows feedback', async () => {
+  it('renders the top office controls and role chips', async () => {
     await renderPage();
-    await clickDetailRailTab('交互代理');
 
-    const textarea = container?.querySelector(
-      'textarea[aria-label="interaction-agent 输入区"]',
-    ) as HTMLTextAreaElement | null;
-    const submitButton = Array.from(container?.querySelectorAll('button') ?? []).find((candidate) =>
-      candidate.textContent?.includes('交由 interaction-agent'),
-    ) as HTMLButtonElement | undefined;
-
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(textarea, '先完成参考页布局');
-      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      submitButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(container?.textContent).toContain(
-      '已将 mock 指令“先完成参考页布局”投递到交互代理预览。',
-    );
-    expect(textarea?.value ?? '').toBe('');
+    expect(container?.textContent).toContain('← 返回普通模式');
+    expect(container?.textContent).toContain('▶ 恢复');
+    expect(container?.textContent).toContain('团队负责人');
+    expect(container?.textContent).toContain('研究员A');
+    expect(container?.textContent).toContain('研究员B');
+    expect(container?.textContent).toContain('批评者');
   });
 });
