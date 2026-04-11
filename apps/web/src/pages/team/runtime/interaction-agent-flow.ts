@@ -1,6 +1,6 @@
 import type { CreateTeamMessageInput } from '@openAwork/web-client';
 
-type InteractionAgentPhase = 'processing' | 'started';
+type InteractionAgentPhase = 'completed' | 'processing' | 'started';
 
 export function buildInteractionAgentMessage(
   phase: InteractionAgentPhase,
@@ -10,6 +10,13 @@ export function buildInteractionAgentMessage(
     return {
       content: `【interaction-agent/发起】${content.trim()}`,
       type: 'question',
+    };
+  }
+
+  if (phase === 'completed') {
+    return {
+      content: `【interaction-agent/完成】${content.trim()}`,
+      type: 'result',
     };
   }
 
@@ -35,7 +42,17 @@ export async function submitInteractionAgentFlow(input: {
     return false;
   }
 
-  return input.submitMessage(
+  const processing = await input.submitMessage(
     buildInteractionAgentMessage('processing', '已接收该请求，正在整理下一步动作。'),
+  );
+  if (!processing) {
+    return false;
+  }
+
+  return input.submitMessage(
+    buildInteractionAgentMessage(
+      'completed',
+      `已完成初步改写：请围绕“${normalizedIntent}”继续拆解团队任务。`,
+    ),
   );
 }
