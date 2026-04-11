@@ -1,457 +1,268 @@
-import type { SharedSessionSummaryRecord } from '@openAwork/web-client';
-import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
-import type { TeamRuntimeMetric, TeamWorkspaceCardSummary } from './team-runtime-model.js';
+export type AgentTeamsTabKey =
+  | 'conversation'
+  | 'tasks'
+  | 'messages'
+  | 'overview'
+  | 'review'
+  | 'office';
 
-export interface ReferenceWorkbenchMessage {
-  body: string;
+export interface AgentTeamsSidebarTemplate {
+  description: string;
   id: string;
-  meta: string;
-  tone: 'agent' | 'system' | 'user';
+  roleTags: Array<{ color: string; label: string }>;
   title: string;
 }
 
-export interface ReferenceSessionCard {
-  duration: string;
+export interface AgentTeamsSidebarSection {
   id: string;
+  items: AgentTeamsSidebarTemplate[];
+  title: string;
+}
+
+export interface AgentTeamsRoleChip {
+  accent: string;
+  badge: string;
   provider: string;
+  role: string;
   status: string;
-  summary: string;
-  title: string;
-  tokens: string;
 }
 
-export interface ReferenceActivityItem {
-  detail: string;
+export interface AgentTeamsOfficeAgent {
+  accent: string;
   id: string;
-  sessionName: string;
-  timestamp: string;
+  label: string;
+  note: string;
+  x: number;
+  y: number;
 }
 
-export interface ReferenceKanbanColumn {
-  cards: Array<{
-    id: string;
-    owner: string;
-    title: string;
-  }>;
+export interface AgentTeamsActivityItem {
+  icon: string;
+  id: string;
+  label: string;
+}
+
+export interface AgentTeamsTabDefinition {
+  id: AgentTeamsTabKey;
+  label: string;
+}
+
+export interface AgentTeamsMetricCard {
+  label: string;
+  value: string;
+}
+
+export interface AgentTeamsFooterStat {
+  label: string;
+  value: string;
+}
+
+export interface AgentTeamsPlaceholderCard {
+  description: string;
   id: string;
   title: string;
 }
 
-export interface ReferenceFileTreeNode {
-  children?: ReferenceFileTreeNode[];
-  changed?: boolean;
-  name: string;
-}
-
-const agents: ManagedAgentRecord[] = [
-  {
-    id: 'agent-planner-1',
-    label: 'Planner Prime',
-    description: '负责规划拆解',
-    aliases: [],
-    canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
-    model: 'gpt-5.4',
-    variant: undefined,
-    fallbackModels: [],
-    systemPrompt: undefined,
-    note: undefined,
-    origin: 'builtin',
-    source: 'builtin',
-    enabled: true,
-    removable: false,
-    resettable: true,
-    hasOverrides: false,
-    createdAt: '2026-04-04T00:00:00.000Z',
-    updatedAt: '2026-04-04T00:00:00.000Z',
-  },
-  {
-    id: 'agent-executor-1',
-    label: 'Executor Flux',
-    description: '负责执行实现',
-    aliases: [],
-    canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'medium' },
-    model: 'gpt-5.4',
-    variant: undefined,
-    fallbackModels: [],
-    systemPrompt: undefined,
-    note: undefined,
-    origin: 'builtin',
-    source: 'builtin',
-    enabled: true,
-    removable: false,
-    resettable: true,
-    hasOverrides: false,
-    createdAt: '2026-04-04T00:00:00.000Z',
-    updatedAt: '2026-04-04T00:00:00.000Z',
-  },
-  {
-    id: 'agent-reviewer-1',
-    label: 'Reviewer Halo',
-    description: '负责收口复核',
-    aliases: [],
-    canonicalRole: { coreRole: 'reviewer', preset: 'critic', confidence: 'medium' },
-    model: 'gpt-5.4',
-    variant: undefined,
-    fallbackModels: [],
-    systemPrompt: undefined,
-    note: undefined,
-    origin: 'builtin',
-    source: 'builtin',
-    enabled: true,
-    removable: false,
-    resettable: true,
-    hasOverrides: false,
-    createdAt: '2026-04-04T00:00:00.000Z',
-    updatedAt: '2026-04-04T00:00:00.000Z',
-  },
+export const agentTeamsActivityItems: AgentTeamsActivityItem[] = [
+  { id: 'dashboard', label: '统计', icon: '▥' },
+  { id: 'teams', label: '团队', icon: '◫' },
+  { id: 'nodes', label: '节点', icon: '⟟' },
+  { id: 'chat', label: '消息', icon: '◌' },
+  { id: 'paint', label: '画布', icon: '✦' },
+  { id: 'history', label: '历史', icon: '◷' },
 ];
 
-const capabilities: CapabilityDescriptor[] = [
-  {
-    id: 'cap-plan',
-    kind: 'tool',
-    label: '任务拆解',
-    description: '适合拆解复杂任务',
-    source: 'builtin',
-    enabled: true,
-    callable: true,
-    canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
-  },
-  {
-    id: 'cap-code',
-    kind: 'tool',
-    label: '代码执行',
-    description: '适合执行实现任务',
-    source: 'builtin',
-    enabled: true,
-    callable: true,
-    canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'medium' },
-  },
-  {
-    id: 'cap-review',
-    kind: 'tool',
-    label: '质量复核',
-    description: '适合审查和收口',
-    source: 'builtin',
-    enabled: true,
-    callable: true,
-    canonicalRole: { coreRole: 'reviewer', preset: 'critic', confidence: 'medium' },
-  },
+export const agentTeamsTabs: AgentTeamsTabDefinition[] = [
+  { id: 'conversation', label: '对话' },
+  { id: 'tasks', label: '任务' },
+  { id: 'messages', label: '消息' },
+  { id: 'overview', label: '状态总览' },
+  { id: 'review', label: '评审' },
+  { id: 'office', label: '办公室' },
 ];
 
-export const referenceTabs = [
-  { key: 'dashboard', label: '仪表盘', summary: '主控制台、多会话概览与用量统计' },
-  { key: 'sessions', label: '会话', summary: '多标签会话、结构化对话与工具执行流' },
-  { key: 'files', label: '文件', summary: '文件树、改动列表与代码预览' },
-  { key: 'kanban', label: '看板', summary: '团队任务流转、队列和负责人视图' },
-] as const;
-
-export const referenceMetrics: TeamRuntimeMetric[] = [
-  { label: '总会话', value: 209, hint: '历史与当前会话总数' },
-  { label: '运行中', value: 12, hint: '当前活跃会话与 Agent 子任务' },
-  { label: '等待输入', value: 5, hint: '需要人工继续输入的会话' },
-  { label: '今日 Token', value: '4.8M', hint: '最近 24 小时估算消耗' },
+export const agentTeamsRoleChips: AgentTeamsRoleChip[] = [
+  { accent: '#d59b11', badge: '团', role: '团队负责人', provider: 'Claude Code', status: 'Leader' },
+  { accent: '#5b5bd8', badge: '研', role: '研究员A', provider: 'Codex CLI', status: '空闲' },
+  { accent: '#c03d7a', badge: '研', role: '研究员B', provider: 'Codex CLI', status: '空闲' },
+  { accent: '#d04e4e', badge: '批', role: '批评者', provider: 'Claude Code', status: '空闲' },
 ];
 
-export const referenceWorkspaceSummaries: TeamWorkspaceCardSummary[] = [
+export const agentTeamsSidebarSections: AgentTeamsSidebarSection[] = [
   {
-    key: '/repo/claudeops',
-    label: '/repo/claudeops',
-    description: '68 个会话 · 14 个共享运行 · 9 条共享记录 · 12 个运行中',
-    pausedCount: 2,
-    runningCount: 12,
-    sessionCount: 68,
-    sharedSessionCount: 14,
-    shareRecordCount: 9,
-  },
-  {
-    key: '/repo/openawork',
-    label: '/repo/openawork',
-    description: '44 个会话 · 9 个共享运行 · 6 条共享记录 · 6 个运行中',
-    pausedCount: 1,
-    runningCount: 6,
-    sessionCount: 44,
-    sharedSessionCount: 9,
-    shareRecordCount: 6,
-  },
-  {
-    key: '/repo/research-lab',
-    label: '/repo/research-lab',
-    description: '97 个会话 · 18 个共享运行 · 12 条共享记录 · 4 个运行中',
-    pausedCount: 6,
-    runningCount: 4,
-    sessionCount: 97,
-    sharedSessionCount: 18,
-    shareRecordCount: 12,
-  },
-];
-
-export const referenceOverviewLines = [
-  '左侧保持项目树和会话列表，中间持续展示当前主工作区，右侧固定为监控与 Agent 详情。',
-  '本页当前完全使用 mock 数据，用于一比一还原 SpectrAI 风格工作台的页面结构与信息密度。',
-  '顶部 chrome、底部状态栏、右侧 detail rail 与多标签主面板均作为稳定骨架保留。',
-];
-
-export const referenceSharedSessions: SharedSessionSummaryRecord[] = [
-  {
-    sessionId: 'spectrai-session-1',
-    title: 'ClaudeOps Sprint Sync',
-    stateStatus: 'running',
-    workspacePath: '/repo/claudeops',
-    sharedByEmail: 'captain@spectrai.local',
-    permission: 'operate',
-    createdAt: '2026-04-11T08:00:00.000Z',
-    updatedAt: '2026-04-11T08:10:00.000Z',
-    shareCreatedAt: '2026-04-11T08:10:00.000Z',
-    shareUpdatedAt: '2026-04-11T08:10:00.000Z',
-  },
-  {
-    sessionId: 'spectrai-session-2',
-    title: 'Agent Tree Audit',
-    stateStatus: 'paused',
-    workspacePath: '/repo/openawork',
-    sharedByEmail: 'review@spectrai.local',
-    permission: 'operate',
-    createdAt: '2026-04-11T09:00:00.000Z',
-    updatedAt: '2026-04-11T09:12:00.000Z',
-    shareCreatedAt: '2026-04-11T09:12:00.000Z',
-    shareUpdatedAt: '2026-04-11T09:12:00.000Z',
-  },
-  {
-    sessionId: 'spectrai-session-3',
-    title: 'Telegram Bot Rollout',
-    stateStatus: 'running',
-    workspacePath: '/repo/research-lab',
-    sharedByEmail: 'ops@spectrai.local',
-    permission: 'operate',
-    createdAt: '2026-04-11T10:00:00.000Z',
-    updatedAt: '2026-04-11T10:40:00.000Z',
-    shareCreatedAt: '2026-04-11T10:40:00.000Z',
-    shareUpdatedAt: '2026-04-11T10:40:00.000Z',
-  },
-];
-
-export const referenceRoleBindingCards: Array<{
-  recommendedCapabilities: CapabilityDescriptor[];
-  role: CoreRole;
-  roleLabel: string;
-  selectedAgent: ManagedAgentRecord | null;
-  selectedAgentId: string;
-}> = [
-  {
-    role: 'planner',
-    roleLabel: 'Planner',
-    selectedAgent: agents[0] ?? null,
-    selectedAgentId: agents[0]?.id ?? '',
-    recommendedCapabilities: [capabilities[0]!],
-  },
-  {
-    role: 'executor',
-    roleLabel: 'Executor',
-    selectedAgent: agents[1] ?? null,
-    selectedAgentId: agents[1]?.id ?? '',
-    recommendedCapabilities: [capabilities[1]!],
-  },
-  {
-    role: 'reviewer',
-    roleLabel: 'Reviewer',
-    selectedAgent: agents[2] ?? null,
-    selectedAgentId: agents[2]?.id ?? '',
-    recommendedCapabilities: [capabilities[2]!],
-  },
-];
-
-export const referencePaneAgents = agents;
-
-export const referenceBuddyProjection = {
-  activeAgentCount: 14,
-  blockedCount: 1,
-  pendingApprovalCount: 2,
-  pendingQuestionCount: 3,
-  runningCount: 12,
-  sessionTitle: 'ClaudeOps Sprint Sync',
-  workspaceLabel: '/repo/claudeops',
-};
-
-export const referenceSelectedRunSummary = {
-  activeViewerCount: 4,
-  commentCount: 12,
-  pendingApprovalCount: 2,
-  pendingQuestionCount: 1,
-  sharedByEmail: 'captain@spectrai.local',
-  stateLabel: '运行中',
-  title: 'ClaudeOps Sprint Sync',
-  workspaceLabel: '/repo/claudeops',
-};
-
-export const referenceSessionCards: ReferenceSessionCard[] = [
-  {
-    id: 'session-card-1',
-    title: 'ClaudeOps Sprint Sync',
-    status: '运行中',
-    duration: '1h 42m',
-    provider: 'Claude Code',
-    tokens: '124K',
-    summary: '聚焦当前 Sprint 的 Agent 编排与阻塞收敛。',
-  },
-  {
-    id: 'session-card-2',
-    title: 'Agent Tree Audit',
-    status: '等待输入',
-    duration: '28m',
-    provider: 'Codex CLI',
-    tokens: '38K',
-    summary: '检查子任务树和会话恢复链的一致性。',
-  },
-  {
-    id: 'session-card-3',
-    title: 'Telegram Bot Rollout',
-    status: '运行中',
-    duration: '2h 10m',
-    provider: 'Gemini CLI',
-    tokens: '86K',
-    summary: '正在批量梳理远程通知与 Markdown 输出问题。',
-  },
-  {
-    id: 'session-card-4',
-    title: 'UI Pane Semantics',
-    status: '已完成',
-    duration: '43m',
-    provider: 'OpenCode',
-    tokens: '19K',
-    summary: '完成 pane collapse/resize 语义和 detail rail 位置锚定。',
-  },
-];
-
-export const referenceActivities: ReferenceActivityItem[] = [
-  {
-    id: 'activity-1',
-    timestamp: '14:21:06',
-    sessionName: 'ClaudeOps Sprint Sync',
-    detail: 'Planner Prime 将 Sprint 风险项重新归并为 4 个主线任务。',
-  },
-  {
-    id: 'activity-2',
-    timestamp: '14:20:18',
-    sessionName: 'Agent Tree Audit',
-    detail: 'Reviewer Halo 输出子 Agent 生命周期与状态机对照结论。',
-  },
-  {
-    id: 'activity-3',
-    timestamp: '14:18:42',
-    sessionName: 'Telegram Bot Rollout',
-    detail: 'Gemini 子任务写入远程通知 Markdown 模板草案。',
-  },
-  {
-    id: 'activity-4',
-    timestamp: '14:16:10',
-    sessionName: 'UI Pane Semantics',
-    detail: 'Executor Flux 完成 detail rail 固定列位与拖拽宽度调优。',
-  },
-];
-
-export const referenceMessages: ReferenceWorkbenchMessage[] = [
-  {
-    id: 'message-1',
-    title: 'Claude Code · 分析结果',
-    meta: 'D:/desk_code/claudeops · 运行中',
-    tone: 'agent',
-    body: '已完成当前 Sprint 风险扫描，建议优先处理 pane collapse 的 grid 锚定，再统一 detail rail 的面板切换语义。',
-  },
-  {
-    id: 'message-2',
-    title: 'Tool Use · Bash / Grep',
-    meta: '工具执行卡片',
-    tone: 'system',
-    body: '扫描到 4 处 pane 位置错位风险，已将 Sidebar / Main / Detail 固定到独立列位。',
-  },
-  {
-    id: 'message-3',
-    title: 'User',
-    meta: '输入',
-    tone: 'user',
-    body: '现在不看功能，就把页面布局一比一还原回来。',
-  },
-];
-
-export const referenceKanbanColumns: ReferenceKanbanColumn[] = [
-  {
-    id: 'todo',
-    title: '待办',
-    cards: [
-      { id: 'todo-1', title: '同步 SessionSidebar mock 树', owner: 'Planner Prime' },
-      { id: 'todo-2', title: '补足 TitleBar 窗口 chrome 细节', owner: 'Executor Flux' },
-    ],
-  },
-  {
-    id: 'doing',
-    title: '进行中',
-    cards: [
-      { id: 'doing-1', title: '还原 Dashboard 主控制台布局', owner: 'Executor Flux' },
-      { id: 'doing-2', title: '对齐 Detail Rail 监控区信息密度', owner: 'Reviewer Halo' },
-    ],
-  },
-  {
-    id: 'waiting',
-    title: '等待中',
-    cards: [{ id: 'waiting-1', title: '等待用户确认页面观感', owner: 'Owner' }],
-  },
-  {
-    id: 'done',
-    title: '已完成',
-    cards: [{ id: 'done-1', title: '固定 Detail Rail 中宽列位', owner: 'Executor Flux' }],
-  },
-];
-
-export const referenceFileTree: ReferenceFileTreeNode[] = [
-  {
-    name: 'src',
-    children: [
+    id: 'dev-team',
+    title: '开发团队',
+    items: [
       {
-        name: 'renderer',
-        children: [
-          {
-            name: 'components',
-            children: [{ name: 'layout', children: [{ name: 'AppLayout.tsx', changed: true }] }],
-          },
-          { name: 'dashboard', children: [{ name: 'DashboardView.tsx', changed: true }] },
+        id: 'dev-team-template',
+        title: '开发团队',
+        description: '适合处理前后端联动、联调与缺陷收口。',
+        roleTags: [
+          { color: '#d59b11', label: '团队负责人' },
+          { color: '#7c52ff', label: '架构师' },
+          { color: '#378dff', label: '后端工程师' },
+          { color: '#21c58d', label: '前端工程师' },
+          { color: '#00b3ff', label: '测试工程师' },
         ],
       },
+    ],
+  },
+  {
+    id: 'research-team',
+    title: '研究团队',
+    items: [
       {
-        name: 'main',
-        children: [{ name: 'team', children: [{ name: 'SharedTaskList.ts', changed: true }] }],
+        id: 'research-team-template',
+        title: '研究团队',
+        description: '适合做多轮调研、资料汇总与批评性验证。',
+        roleTags: [
+          { color: '#d59b11', label: '团队负责人' },
+          { color: '#5b5bd8', label: '研究员A' },
+          { color: '#c03d7a', label: '研究员B' },
+          { color: '#d04e4e', label: '批评者' },
+        ],
       },
     ],
   },
-  { name: 'docs', children: [{ name: 'screenshots', children: [{ name: 'dashboard.png' }] }] },
+  {
+    id: 'learning-team-a',
+    title: '短视频学习助手开...',
+    items: [
+      {
+        id: 'learning-team-a-template',
+        title: '短视频学习助手开...',
+        description: '围绕短视频脚本、镜头、旁白与配音策划的轻量模板。',
+        roleTags: [
+          { color: '#378dff', label: '体验架构与台词策划' },
+          { color: '#21c58d', label: '小程序前端研发' },
+          { color: '#d59b11', label: '解析后端工程师' },
+          { color: '#c03d7a', label: '质审与合规审查' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'learning-team-b',
+    title: '短视频学习助手-新...',
+    items: [
+      {
+        id: 'learning-team-b-template',
+        title: '短视频学习助手-新...',
+        description: '更偏新素材整合、学习任务拆分与测试链条。',
+        roleTags: [
+          { color: '#378dff', label: '体验实验负责人' },
+          { color: '#21c58d', label: '小程序 UI/交互实现' },
+          { color: '#d59b11', label: '解析后端与安全链路' },
+          { color: '#c03d7a', label: '质审与合规测试' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'commerce-team',
+    title: '轻量进销存官网搭...',
+    items: [
+      {
+        id: 'commerce-team-template',
+        title: '轻量进销存官网搭...',
+        description: '为 10 人内小团队做官网与业务流展示的轻量模板。',
+        roleTags: [
+          { color: '#d59b11', label: '团队负责人' },
+          { color: '#378dff', label: '产品策划' },
+          { color: '#21c58d', label: '文案策划' },
+          { color: '#c03d7a', label: '视觉设计' },
+          { color: '#f59e0b', label: '前端开发' },
+          { color: '#ef4444', label: '质审审查' },
+        ],
+      },
+    ],
+  },
 ];
 
-export const referenceChangedFiles = [
-  'src/renderer/components/layout/AppLayout.tsx',
-  'src/renderer/components/dashboard/DashboardView.tsx',
-  'src/main/team/SharedTaskList.ts',
+export const agentTeamsMetricCards: AgentTeamsMetricCard[] = [
+  { label: '成员', value: '4' },
+  { label: '任务', value: '0/0' },
+  { label: '汇报', value: '0' },
 ];
 
-export const referenceAgents = [
-  {
-    id: 'agent-run-1',
-    title: 'Agent Tree Audit',
-    status: '运行中',
-    provider: 'Claude',
-    path: 'desk_code/claudeops',
-  },
-  {
-    id: 'agent-run-2',
-    title: 'Telegram Bot Rollout',
-    status: '等待输入',
-    provider: 'Gemini',
-    path: 'desk_code/claudeops',
-  },
-  {
-    id: 'agent-run-3',
-    title: 'UI Pane Semantics',
-    status: '已完成',
-    provider: 'Codex',
-    path: 'desk_code/openawork',
-  },
+export const agentTeamsOfficeAgents: AgentTeamsOfficeAgent[] = [
+  { id: 'leader', label: '[L] 团队负责人', note: '等待给出批准', x: 73, y: 59, accent: '#f4a52f' },
+  { id: 'researcher-a', label: '研究员A', note: '等待给出批准', x: 80, y: 63, accent: '#6a6af7' },
+  { id: 'critic', label: '批评者', note: '等待你的决定', x: 85, y: 66, accent: '#ef5a5a' },
 ];
+
+export const agentTeamsFooterStats: AgentTeamsFooterStat[] = [
+  { label: '总', value: '135' },
+  { label: '运行', value: '0' },
+  { label: '等待', value: '3' },
+  { label: '异常', value: '0' },
+];
+
+export const agentTeamsTabPanels: Record<
+  Exclude<AgentTeamsTabKey, 'office'>,
+  AgentTeamsPlaceholderCard[]
+> = {
+  conversation: [
+    {
+      id: 'conv-1',
+      title: '团队对话流',
+      description: '展示角色之间最近的结构化消息、工具使用和上下文引用。',
+    },
+    {
+      id: 'conv-2',
+      title: '最近提问',
+      description: '将等待人工输入的问题和建议动作集中展示在一个静态 mock 面板中。',
+    },
+  ],
+  tasks: [
+    { id: 'task-1', title: '任务队列', description: '当前办公室视图对应的任务列表与负责人映射。' },
+    { id: 'task-2', title: '子任务树', description: '显示每个角色拆出的下一层任务与阻塞关系。' },
+  ],
+  messages: [
+    { id: 'msg-1', title: '团队消息总线', description: '模拟 TeamBus 的广播/单播信息流。' },
+    { id: 'msg-2', title: '跨角色提醒', description: '展示批评者与研究员之间的审阅往返。' },
+  ],
+  overview: [
+    {
+      id: 'overview-1',
+      title: '状态总览',
+      description: '成员、任务、汇报、运行时间与模板状态的聚合摘要。',
+    },
+    {
+      id: 'overview-2',
+      title: '最近活跃',
+      description: '模拟过去 30 分钟内的活跃事件与切换记录。',
+    },
+  ],
+  review: [
+    {
+      id: 'review-1',
+      title: '评审队列',
+      description: '待审材料、待批注事项与当前高风险项的 mock 列表。',
+    },
+    {
+      id: 'review-2',
+      title: '结论草稿',
+      description: '在页面优先阶段先展示 mock 评审卡，而不接入真实业务流。',
+    },
+  ],
+};
+
+export const agentTeamsTeamCard = {
+  title: '研究团队-2026-03-31',
+  status: '已暂停',
+  subtitle: '4人 · 6天前',
+};
+
+export const agentTeamsTopSummary = {
+  title: '研究团队-2026-03-31',
+  status: '已暂停',
+  memberCount: '4 成员',
+  onlineCount: '4 在线',
+  description:
+    '抽象化展示当前激活团队/实例的协作状态。滚轮缩放，左键拖拽平移，节点会随状态自动切换到不同区域。',
+};
+
+export const agentTeamsCanvasSummary = '滚轮缩放 · 拖拽平移 60%';
+
+export const agentTeamsFooterLead = '活跃 3 / 共 135';

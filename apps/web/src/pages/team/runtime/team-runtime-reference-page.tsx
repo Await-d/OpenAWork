@@ -1,745 +1,1033 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { ManagedAgentRecord } from '@openAwork/shared';
-import type { TeamActionFeedback } from '../use-team-collaboration.js';
-import { TeamRuntimeShellFrame } from './team-runtime-shell-frame.js';
+import { useMemo, useState, type CSSProperties } from 'react';
 import {
-  referenceActivities,
-  referenceAgents,
-  referenceBuddyProjection,
-  referenceChangedFiles,
-  referenceFileTree,
-  referenceKanbanColumns,
-  referenceMetrics,
-  referenceMessages,
-  referenceOverviewLines,
-  referencePaneAgents,
-  referenceRoleBindingCards,
-  referenceSelectedRunSummary,
-  referenceSessionCards,
-  referenceSharedSessions,
-  referenceTabs,
-  referenceWorkspaceSummaries,
-  type ReferenceActivityItem,
-  type ReferenceFileTreeNode,
-  type ReferenceWorkbenchMessage,
+  agentTeamsActivityItems,
+  agentTeamsCanvasSummary,
+  agentTeamsFooterLead,
+  agentTeamsFooterStats,
+  agentTeamsMetricCards,
+  agentTeamsOfficeAgents,
+  agentTeamsRoleChips,
+  agentTeamsSidebarSections,
+  agentTeamsTabPanels,
+  agentTeamsTabs,
+  agentTeamsTeamCard,
+  agentTeamsTopSummary,
+  type AgentTeamsOfficeAgent,
+  type AgentTeamsTabKey,
 } from './team-runtime-reference-mock.js';
 
-type ReferenceTabKey = (typeof referenceTabs)[number]['key'];
+const SHELL_BACKGROUND = 'linear-gradient(180deg, #171823 0%, #161720 100%)';
 
-const selectedRunSummaryById: Record<string, typeof referenceSelectedRunSummary> = {
-  'spectrai-session-1': referenceSelectedRunSummary,
-  'spectrai-session-2': {
-    ...referenceSelectedRunSummary,
-    title: 'Agent Tree Audit',
-    workspaceLabel: '/repo/openawork',
-    sharedByEmail: 'review@spectrai.local',
-    stateLabel: '等待输入',
-    pendingApprovalCount: 1,
-    pendingQuestionCount: 3,
-    commentCount: 6,
-    activeViewerCount: 2,
-  },
-  'spectrai-session-3': {
-    ...referenceSelectedRunSummary,
-    title: 'Telegram Bot Rollout',
-    workspaceLabel: '/repo/research-lab',
-    sharedByEmail: 'ops@spectrai.local',
-    stateLabel: '运行中',
-    pendingApprovalCount: 0,
-    pendingQuestionCount: 2,
-    commentCount: 9,
-    activeViewerCount: 3,
-  },
+const TITLE_BAR_STYLE: CSSProperties = {
+  height: 36,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '0 14px 0 10px',
+  borderBottom: '1px solid rgba(124, 102, 255, 0.18)',
+  background: '#171723',
 };
 
-const sessionCountByWorkspace: Record<string, number> = {
-  '/repo/claudeops': 68,
-  '/repo/openawork': 44,
-  '/repo/research-lab': 97,
+const SURFACE_STYLE: CSSProperties = {
+  border: '1px solid rgba(104, 111, 152, 0.22)',
+  background: '#1a1b28',
+  boxShadow: '0 16px 50px rgba(0, 0, 0, 0.35)',
 };
 
-const shareCountByWorkspace: Record<string, number> = {
-  '/repo/claudeops': 9,
-  '/repo/openawork': 6,
-  '/repo/research-lab': 12,
+const PANEL_STYLE: CSSProperties = {
+  ...SURFACE_STYLE,
+  borderRadius: 18,
 };
 
-function tileStyle(color: string): React.CSSProperties {
-  return {
-    display: 'grid',
-    gap: 8,
-    padding: 16,
-    borderRadius: 16,
-    border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-    background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
-    boxShadow: 'var(--shadow-sm)',
-    minHeight: 110,
-    alignContent: 'start',
-    color,
-  };
-}
+const CHIP_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  minHeight: 24,
+  padding: '0 10px',
+  borderRadius: 999,
+  background: '#23243a',
+  color: '#c8ccf5',
+  fontSize: 11,
+  whiteSpace: 'nowrap',
+};
 
-function DashboardStatCard({
-  color,
-  label,
-  value,
-}: {
-  color: string;
-  label: string;
-  value: string;
-}) {
+function MacDots() {
   return (
-    <div style={tileStyle(color)}>
-      <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
-        {label}
-      </span>
-      <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1 }}>{value}</span>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>实时刷新 mock 看板指标</span>
-    </div>
-  );
-}
-
-function SessionOverviewCard({ item }: { item: (typeof referenceSessionCards)[number] }) {
-  return (
-    <div
-      className="content-card"
-      style={{ display: 'grid', gap: 10, padding: 14, borderRadius: 18, textAlign: 'left' }}
-    >
-      <div
-        style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
-      >
-        <span style={{ fontSize: 14, fontWeight: 700 }}>{item.title}</span>
+    <div aria-hidden="true" style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+      {['#f87171', '#fbbf24', '#4ade80'].map((color) => (
         <span
-          style={{
-            fontSize: 10,
-            padding: '2px 8px',
-            borderRadius: 999,
-            border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-            color: 'var(--text-2)',
-          }}
-        >
-          {item.status}
-        </span>
-      </div>
-      <div
-        style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-3)' }}
-      >
-        <span>{item.provider}</span>
-        <span>{item.duration}</span>
-        <span>{item.tokens}</span>
-      </div>
-      <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>{item.summary}</span>
-    </div>
-  );
-}
-
-function ActivityRow({ item }: { item: ReferenceActivityItem }) {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '72px 132px minmax(0, 1fr)',
-        gap: 10,
-        padding: '10px 12px',
-        borderRadius: 12,
-        background: 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
-      }}
-    >
-      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.timestamp}</span>
-      <span style={{ fontSize: 11, color: 'var(--accent)' }}>{item.sessionName}</span>
-      <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>{item.detail}</span>
-    </div>
-  );
-}
-
-function UsageBlock() {
-  return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-        {[
-          ['今日 Token', '4.8M'],
-          ['运行时长', '177h'],
-          ['Agent', '31'],
-          ['Provider', '5'],
-        ].map(([label, value]) => (
-          <div
-            key={label}
-            className="content-card"
-            style={{ display: 'grid', gap: 4, padding: 14 }}
-          >
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{label}</span>
-            <span style={{ fontSize: 22, fontWeight: 800 }}>{value}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="content-card" style={{ display: 'grid', gap: 10, padding: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>30 天 Token 趋势</span>
-        <div style={{ display: 'flex', alignItems: 'end', gap: 8, minHeight: 180 }}>
-          {[
-            { day: '1', height: 32 },
-            { day: '2', height: 48 },
-            { day: '3', height: 58 },
-            { day: '4', height: 34 },
-            { day: '5', height: 66 },
-            { day: '6', height: 72 },
-            { day: '7', height: 54 },
-            { day: '8', height: 80 },
-            { day: '9', height: 62 },
-            { day: '10', height: 88 },
-            { day: '11', height: 74 },
-            { day: '12', height: 96 },
-          ].map((item) => (
-            <div
-              key={item.day}
-              style={{ flex: 1, display: 'grid', gap: 6, justifyItems: 'center' }}
-            >
-              <div
-                style={{
-                  width: '100%',
-                  height: `${item.height}px`,
-                  borderRadius: '10px 10px 4px 4px',
-                  background:
-                    'linear-gradient(180deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 55%, var(--bg)) 100%)',
-                }}
-              />
-              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{item.day}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="content-card" style={{ display: 'grid', gap: 10, padding: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>会话 Token 分布</span>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '180px minmax(0, 1fr)',
-            gap: 16,
-            alignItems: 'center',
-          }}
-        >
-          <div
-            aria-hidden="true"
-            style={{
-              width: 180,
-              height: 180,
-              borderRadius: '50%',
-              background:
-                'conic-gradient(var(--accent) 0 36%, #22c55e 36% 58%, #f59e0b 58% 78%, #a855f7 78% 100%)',
-            }}
-          />
-          <div style={{ display: 'grid', gap: 10 }}>
-            {[
-              ['ClaudeOps Sprint Sync', '36%'],
-              ['Telegram Bot Rollout', '22%'],
-              ['Agent Tree Audit', '20%'],
-              ['其他会话', '22%'],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}
-              >
-                <span>{label}</span>
-                <span style={{ color: 'var(--text-3)' }}>{value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MessageBubble({ item }: { item: ReferenceWorkbenchMessage }) {
-  const toneStyles: Record<ReferenceWorkbenchMessage['tone'], React.CSSProperties> = {
-    agent: {
-      background: 'color-mix(in srgb, var(--surface) 86%, var(--bg))',
-      border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-    },
-    system: {
-      background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
-      border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-    },
-    user: {
-      background: 'color-mix(in srgb, var(--bg-2) 88%, var(--bg))',
-      border: '1px solid color-mix(in srgb, var(--border) 68%, transparent)',
-    },
-  };
-
-  return (
-    <div
-      style={{ ...toneStyles[item.tone], display: 'grid', gap: 8, padding: 14, borderRadius: 16 }}
-    >
-      <div
-        style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 700 }}>{item.title}</span>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.meta}</span>
-      </div>
-      <span style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.7 }}>{item.body}</span>
-    </div>
-  );
-}
-
-function FileTree({ nodes }: { nodes: ReferenceFileTreeNode[] }) {
-  return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      {nodes.map((node) => (
-        <div key={node.name} style={{ display: 'grid', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: 'var(--text-3)' }}>{node.children ? '▾' : '•'}</span>
-            <span>{node.name}</span>
-            {node.changed ? (
-              <span
-                style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }}
-              />
-            ) : null}
-          </div>
-          {node.children?.length ? (
-            <div style={{ display: 'grid', gap: 8, paddingLeft: 18 }}>
-              <FileTree nodes={node.children} />
-            </div>
-          ) : null}
-        </div>
+          key={color}
+          style={{ width: 10, height: 10, borderRadius: '50%', background: color }}
+        />
       ))}
     </div>
   );
 }
 
-function TeamRuntimeDashboardTab() {
+function ActivityRail() {
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
-        <DashboardStatCard color="var(--accent)" label="总会话" value="209" />
-        <DashboardStatCard color="#22c55e" label="运行中" value="12" />
-        <DashboardStatCard color="#f59e0b" label="等待中" value="5" />
-        <DashboardStatCard color="#ef4444" label="异常" value="0" />
-        <DashboardStatCard color="var(--text)" label="已完成" value="177" />
+    <aside
+      style={{
+        width: 56,
+        background: '#171821',
+        borderRight: '1px solid rgba(104, 111, 152, 0.16)',
+        display: 'grid',
+        gridTemplateRows: '56px 1fr 56px',
+      }}
+    >
+      <div style={{ display: 'grid', placeItems: 'center', color: '#8ba2ff', fontWeight: 800 }}>
+        ▮
       </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.75fr) minmax(320px, 1fr)',
-          gap: 16,
-        }}
-      >
-        <div style={{ display: 'grid', gap: 16 }}>
-          <section style={{ display: 'grid', gap: 12 }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 8,
-                alignItems: 'center',
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 700 }}>活跃会话</span>
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>4 个高优先级会话</span>
-            </div>
-            <div
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}
-            >
-              {referenceSessionCards.map((item) => (
-                <SessionOverviewCard key={item.id} item={item} />
-              ))}
-            </div>
-          </section>
-
-          <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 8,
-                alignItems: 'center',
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 700 }}>最近活动</span>
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>跨会话活动流</span>
-            </div>
-            <div style={{ display: 'grid', gap: 8, maxHeight: 310, overflow: 'auto' }}>
-              {referenceActivities.map((item) => (
-                <ActivityRow key={item.id} item={item} />
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <UsageBlock />
-      </div>
-    </div>
-  );
-}
-
-function TeamRuntimeSessionsTab({ selectedRunTitle }: { selectedRunTitle: string }) {
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <div className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
-          {referenceSessionCards.map((item) => (
+      <div style={{ display: 'grid', gap: 10, alignContent: 'start', padding: '6px 0' }}>
+        {agentTeamsActivityItems.map((item) => {
+          const active = item.id === 'teams';
+          return (
             <button
               key={item.id}
               type="button"
+              title={item.label}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                minHeight: 34,
-                padding: '0 12px',
-                borderRadius: 999,
-                border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-                background:
-                  item.title === selectedRunTitle
-                    ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
-                    : 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-                color: 'var(--text)',
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background:
-                    item.status === '运行中'
-                      ? '#22c55e'
-                      : item.status === '等待输入'
-                        ? '#f59e0b'
-                        : 'var(--text-3)',
-                }}
-              />
-              <span style={{ fontSize: 12, fontWeight: 700 }}>{item.title}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.status}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16 }}>
-        <section className="content-card" style={{ display: 'grid', gap: 14, padding: 16 }}>
-          <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>当前会话</span>
-            <span style={{ fontSize: 18, fontWeight: 800 }}>{selectedRunTitle}</span>
-            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-              Claude Code · desk_code/claudeops · 多标签结构化会话视图
-            </span>
-          </div>
-
-          {referenceMessages.map((item) => (
-            <MessageBubble key={item.id} item={item} />
-          ))}
-
-          <div className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>输入区</span>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <input
-                readOnly
-                value="输入需求、粘贴图片或通过 / 命令唤起工具…"
-                style={{ flex: 1, minHeight: 42, borderRadius: 12, padding: '0 12px' }}
-              />
-              <button type="button" className="primary-button">
-                发送
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>子任务追踪</span>
-          {referenceAgents.map((item) => (
-            <div
-              key={item.id}
-              style={{
-                display: 'grid',
-                gap: 4,
-                padding: 12,
+                width: 42,
+                height: 42,
+                margin: '0 auto',
                 borderRadius: 14,
-                background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+                display: 'grid',
+                placeItems: 'center',
+                color: active ? '#f5f7ff' : '#7d82af',
+                border: active ? '1px solid rgba(158, 170, 255, 0.6)' : '1px solid transparent',
+                background: active ? '#23253d' : 'transparent',
+                boxShadow: active ? '0 0 0 1px rgba(138, 156, 255, 0.15)' : 'none',
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 700 }}>{item.title}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.path}</span>
-              <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--text-2)' }}>
-                <span>{item.provider}</span>
-                <span>{item.status}</span>
-              </div>
-            </div>
-          ))}
-        </section>
+              <span style={{ fontSize: 17 }}>{item.icon}</span>
+            </button>
+          );
+        })}
       </div>
-    </div>
+      <div style={{ display: 'grid', placeItems: 'center', color: '#7d82af' }}>
+        <span style={{ fontSize: 17 }}>⚙</span>
+      </div>
+    </aside>
   );
 }
 
-function TeamRuntimeFilesTab() {
+function SidebarTemplateCard({
+  active,
+  subtitle,
+  title,
+}: {
+  active?: boolean;
+  subtitle?: string;
+  title: string;
+}) {
   return (
-    <div
+    <button
+      type="button"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(260px, 320px) minmax(0, 1fr)',
-        gap: 16,
+        gap: 8,
+        width: '100%',
+        padding: 12,
+        borderRadius: 14,
+        textAlign: 'left',
+        color: '#eef1ff',
+        background: active ? 'rgba(92, 98, 181, 0.28)' : 'transparent',
+        border: active
+          ? '1px solid rgba(138, 156, 255, 0.46)'
+          : '1px solid rgba(104, 111, 152, 0.12)',
       }}
     >
-      <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-        <div style={{ display: 'grid', gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>文件资源管理器</span>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-            左侧资源树 + 变更蓝点 + 工作目录层级
-          </span>
-        </div>
-        <FileTree nodes={referenceFileTree} />
-      </section>
-
-      <section style={{ display: 'grid', gap: 16 }}>
-        <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>会话改动列表</span>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {referenceChangedFiles.map((file) => (
-              <div
-                key={file}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-                }}
-              >
-                <span style={{ fontSize: 12 }}>{file}</span>
-                <span style={{ fontSize: 11, color: 'var(--accent)' }}>修改</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>代码预览</span>
-          <pre
+      <div
+        style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{title}</span>
+        {active ? (
+          <span
             style={{
-              margin: 0,
-              minHeight: 320,
-              overflow: 'auto',
-              padding: 16,
-              borderRadius: 16,
-              background: '#0b1220',
-              color: '#dbeafe',
-              fontSize: 12,
-              lineHeight: 1.7,
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: '#3e3412',
+              color: '#ffd458',
+              fontSize: 10,
+              fontWeight: 700,
             }}
           >
-            {`export default function AppLayout() {
-  return (
-    <div className="flex flex-col h-screen bg-bg-primary">
-      <TitleBar />
-      <div className="flex-1 overflow-hidden flex">
-        <ActivityBar />
-        <Allotment>
-          <Sidebar />
-          <MainPanel />
-          <DetailPanel />
-        </Allotment>
+            已暂停
+          </span>
+        ) : null}
       </div>
-      <StatusBar />
-    </div>
-  );
-}`}
-          </pre>
-        </section>
-      </section>
-    </div>
+      {subtitle ? <span style={{ fontSize: 11, color: '#8f95be' }}>{subtitle}</span> : null}
+    </button>
   );
 }
 
-function TeamRuntimeKanbanTab() {
+function LeftSidebar() {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14 }}>
-      {referenceKanbanColumns.map((column) => (
-        <section
-          key={column.id}
-          className="content-card"
-          style={{ display: 'grid', gap: 12, padding: 14 }}
-        >
+    <aside
+      style={{
+        width: 248,
+        background: '#171821',
+        borderRight: '1px solid rgba(104, 111, 152, 0.16)',
+        display: 'grid',
+        gridTemplateRows: '46px minmax(0, 1fr) 74px',
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '0 16px',
+          borderBottom: '1px solid rgba(104, 111, 152, 0.16)',
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 800, color: '#e6e9ff', letterSpacing: '0.04em' }}>
+          AGENT TEAMS
+        </span>
+        <button type="button" style={{ fontSize: 20, color: '#9aa2d9' }}>
+          +
+        </button>
+      </div>
+
+      <div style={{ overflow: 'auto', padding: '12px 14px 16px', display: 'grid', gap: 16 }}>
+        <section style={{ display: 'grid', gap: 10 }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              alignItems: 'center',
+              color: '#9ea5d7',
+              fontSize: 12,
+            }}
+          >
+            <span>▾</span>
+            <span>运行中</span>
+          </div>
+        </section>
+
+        <section style={{ display: 'grid', gap: 10 }}>
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               gap: 8,
               alignItems: 'center',
+              color: '#9ea5d7',
+              fontSize: 12,
             }}
           >
-            <span style={{ fontSize: 14, fontWeight: 700 }}>{column.title}</span>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{column.cards.length}</span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span>▾</span>
+              <span>历史记录</span>
+            </div>
+            <span
+              style={{
+                minWidth: 18,
+                height: 18,
+                borderRadius: 6,
+                display: 'grid',
+                placeItems: 'center',
+                background: '#31345a',
+                color: '#d5daff',
+                fontSize: 10,
+              }}
+            >
+              1
+            </span>
           </div>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {column.cards.map((card) => (
-              <div
-                key={card.id}
-                style={{
-                  display: 'grid',
-                  gap: 6,
-                  padding: 12,
-                  borderRadius: 14,
-                  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-                }}
-              >
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{card.title}</span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{card.owner}</span>
-              </div>
-            ))}
-          </div>
+
+          <SidebarTemplateCard
+            active
+            subtitle={agentTeamsTeamCard.subtitle}
+            title={agentTeamsTeamCard.title}
+          />
         </section>
+
+        <section style={{ display: 'grid', gap: 12 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              color: '#9ea5d7',
+              fontSize: 12,
+            }}
+          >
+            <span style={{ flex: 1, height: 1, background: 'rgba(104, 111, 152, 0.28)' }} />
+            <span>模板</span>
+            <span style={{ flex: 1, height: 1, background: 'rgba(104, 111, 152, 0.28)' }} />
+          </div>
+
+          {agentTeamsSidebarSections.map((section) => (
+            <div key={section.id} style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#d7dbff' }}>
+                {section.title}
+              </span>
+              {section.items.map((item) => (
+                <div key={item.id} style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {item.roleTags.map((tag) => (
+                      <span
+                        key={tag.label}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          minHeight: 18,
+                          padding: '0 8px',
+                          borderRadius: 999,
+                          background: `${tag.color}22`,
+                          color: tag.color,
+                          fontSize: 10,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {tag.label}
+                      </span>
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 11, color: '#7e86b6', lineHeight: 1.5 }}>
+                    {item.description}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </section>
+      </div>
+
+      <div style={{ padding: 14, borderTop: '1px solid rgba(104, 111, 152, 0.16)' }}>
+        <button
+          type="button"
+          style={{
+            width: '100%',
+            minHeight: 34,
+            borderRadius: 12,
+            border: '1px dashed rgba(120, 126, 196, 0.5)',
+            color: '#bfc7ff',
+            background: '#1b1d30',
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          ＋ 新建团队模板
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function RoleChip({ item }: { item: (typeof agentTeamsRoleChips)[number] }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
+      <span
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: '50%',
+          display: 'grid',
+          placeItems: 'center',
+          background: item.accent,
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 800,
+        }}
+      >
+        {item.badge}
+      </span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: '#e6e9ff' }}>{item.role}</span>
+      <span style={{ color: '#22c55e', fontSize: 11 }}>{item.status}</span>
+      <span style={{ color: '#7e86b6', fontSize: 11 }}>{item.provider}</span>
+    </div>
+  );
+}
+
+function TopTeamHeader() {
+  return (
+    <header style={{ display: 'grid', gap: 12, padding: '14px 18px 10px' }}>
+      <div
+        style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}
+      >
+        <div
+          style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0, flexWrap: 'wrap' }}
+        >
+          <span style={{ color: '#8ba2ff', fontSize: 13 }}>◌</span>
+          <span style={{ color: '#cfd5ff', fontSize: 12 }}>
+            Agent Teams · {agentTeamsTopSummary.title}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <span style={{ color: '#7e86b6', fontSize: 12 }}>← 返回普通模式</span>
+          <button
+            type="button"
+            style={{
+              minHeight: 30,
+              padding: '0 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(145, 200, 84, 0.48)',
+              background: '#1d2617',
+              color: '#b4e65d',
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            ▶ 恢复
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span
+            style={{ fontSize: 28, fontWeight: 800, color: '#f3f5ff', letterSpacing: '-0.03em' }}
+          >
+            {agentTeamsTopSummary.title}
+          </span>
+          <span
+            style={{
+              padding: '4px 10px',
+              borderRadius: 10,
+              background: '#3e3412',
+              color: '#ffd458',
+              fontSize: 12,
+              fontWeight: 800,
+            }}
+          >
+            {agentTeamsTopSummary.status}
+          </span>
+          <span style={{ color: '#8f95be', fontSize: 13 }}>{agentTeamsTopSummary.memberCount}</span>
+          <span style={{ color: '#67e38f', fontSize: 13 }}>{agentTeamsTopSummary.onlineCount}</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+          {agentTeamsRoleChips.map((item) => (
+            <RoleChip key={item.role} item={item} />
+          ))}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function TabRow({
+  activeTab,
+  onSelect,
+}: {
+  activeTab: AgentTeamsTabKey;
+  onSelect: (tab: AgentTeamsTabKey) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 20,
+        alignItems: 'center',
+        minHeight: 42,
+        padding: '0 18px',
+        borderTop: '1px solid rgba(104, 111, 152, 0.12)',
+        borderBottom: '1px solid rgba(104, 111, 152, 0.18)',
+      }}
+    >
+      {agentTeamsTabs.map((tab) => {
+        const active = tab.id === activeTab;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onSelect(tab.id)}
+            style={{
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              minHeight: 42,
+              color: active ? '#dfe3ff' : '#7e86b6',
+              fontSize: 13,
+              fontWeight: active ? 700 : 500,
+            }}
+          >
+            {tab.label}
+            {active ? (
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: -1,
+                  height: 3,
+                  borderRadius: '999px 999px 0 0',
+                  background: '#7d74ff',
+                }}
+              />
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MetricCard({ item }: { item: (typeof agentTeamsMetricCards)[number] }) {
+  return (
+    <div
+      style={{
+        ...PANEL_STYLE,
+        display: 'grid',
+        gap: 8,
+        padding: 16,
+        minHeight: 70,
+      }}
+    >
+      <span style={{ color: '#8f95be', fontSize: 12 }}>{item.label}</span>
+      <span style={{ fontSize: 38, lineHeight: 1, fontWeight: 800, color: '#e6e9ff' }}>
+        {item.value}
+      </span>
+    </div>
+  );
+}
+
+function PixelCharacter({ item }: { item: AgentTeamsOfficeAgent }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: `${item.x}%`,
+        top: `${item.y}%`,
+        transform: 'translate(-50%, -50%)',
+        display: 'grid',
+        justifyItems: 'center',
+        gap: 4,
+      }}
+    >
+      <div
+        style={{
+          position: 'relative',
+          width: 44,
+          height: 90,
+          display: 'grid',
+          justifyItems: 'center',
+        }}
+      >
+        <div style={{ width: 6, height: 6, background: '#facc15', marginBottom: -2, zIndex: 1 }} />
+        <div
+          style={{ width: 28, height: 26, background: '#ffd29f', border: '3px solid #2b1f1f' }}
+        />
+        <div
+          style={{
+            width: 30,
+            height: 28,
+            background: item.accent,
+            border: '3px solid #2b1f1f',
+            marginTop: -3,
+          }}
+        />
+        <div style={{ display: 'flex', gap: 6, marginTop: -3 }}>
+          <div style={{ width: 8, height: 22, background: '#2b1f1f' }} />
+          <div style={{ width: 8, height: 22, background: '#2b1f1f' }} />
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            left: -4,
+            top: 42,
+            width: 8,
+            height: 18,
+            background: '#ffd29f',
+            border: '2px solid #2b1f1f',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            right: -4,
+            top: 42,
+            width: 8,
+            height: 18,
+            background: '#ffd29f',
+            border: '2px solid #2b1f1f',
+          }}
+        />
+      </div>
+      <div style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
+        <span
+          style={{
+            padding: '4px 8px',
+            borderRadius: 8,
+            background: '#111111',
+            color: '#f5f7ff',
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          {item.label}
+        </span>
+        <span
+          style={{
+            padding: '4px 8px',
+            borderRadius: 8,
+            background: '#0e0e0e',
+            color: '#e3e6ff',
+            fontSize: 10,
+          }}
+        >
+          {item.note}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function OfficeScene() {
+  return (
+    <div style={{ ...PANEL_STYLE, padding: 14, borderRadius: 28 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          alignItems: 'center',
+          marginBottom: 12,
+        }}
+      >
+        <span style={{ color: '#cfd5ff', fontSize: 13 }}>{agentTeamsCanvasSummary}</span>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {['⌕', '↻', '⊕'].map((action) => (
+            <button
+              key={action}
+              type="button"
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: '50%',
+                border: '1px solid rgba(104, 111, 152, 0.24)',
+                background: '#1d1f2d',
+                color: '#cfd5ff',
+                display: 'grid',
+                placeItems: 'center',
+              }}
+            >
+              {action}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div
+        style={{
+          position: 'relative',
+          minHeight: 610,
+          overflow: 'hidden',
+          borderRadius: 24,
+          border: '1px solid rgba(104, 111, 152, 0.18)',
+          background: '#171723',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            inset: '0 0 64% 0',
+            background:
+              'repeating-linear-gradient(90deg, #6c4e42 0 1px, #7a584b 1px 96px), linear-gradient(180deg, #795b4d 0%, #6f5245 100%)',
+            borderBottom: '4px solid #1c140f',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: '36% 0 0 0',
+            background:
+              'linear-gradient(180deg, rgba(232, 222, 206, 0.98) 0%, rgba(223, 214, 199, 0.98) 100%), repeating-linear-gradient(90deg, rgba(148, 140, 127, 0.16) 0 1px, transparent 1px 48px), repeating-linear-gradient(0deg, rgba(148, 140, 127, 0.16) 0 1px, transparent 1px 48px)',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: 14,
+            padding: '8px 10px',
+            background: '#111111',
+            border: '2px solid #433226',
+            color: '#dbeafe',
+            fontSize: 10,
+            lineHeight: 1.45,
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.24)',
+          }}
+        >
+          ▶ 研究团队 / 4名成员，状态联动
+          <br />← 小地图与提醒，会实时刷新画布。
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            left: '18%',
+            top: 94,
+            width: 110,
+            height: 16,
+            background: '#e8ecef',
+            border: '2px solid #9fa9af',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
+            left: '18%',
+            top: 164,
+            width: 140,
+            height: 42,
+            background: '#b98976',
+            border: '4px solid #8a6254',
+          }}
+        />
+        <div style={{ position: 'absolute', left: '18%', top: 152, display: 'flex', gap: 12 }}>
+          {[1, 2, 3].map((item) => (
+            <span
+              key={`chair-top-${item}`}
+              style={{ width: 12, height: 12, background: '#5b7280', border: '2px solid #18242c' }}
+            />
+          ))}
+        </div>
+        <div style={{ position: 'absolute', left: '18%', top: 208, display: 'flex', gap: 12 }}>
+          {[1, 2, 3].map((item) => (
+            <span
+              key={`chair-bottom-${item}`}
+              style={{ width: 12, height: 12, background: '#5b7280', border: '2px solid #18242c' }}
+            />
+          ))}
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            left: '41%',
+            top: 110,
+            width: 230,
+            height: 130,
+            background: '#0d0d0f',
+            border: '6px solid #291c18',
+            boxShadow: '0 10px 24px rgba(0, 0, 0, 0.35)',
+            color: '#7de5ff',
+            padding: 12,
+            display: 'grid',
+            alignContent: 'start',
+            gap: 8,
+            fontSize: 11,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#69d8ff' }}>
+            <span>■ 研究团队-2026-03-31 进度</span>
+            <span>STATE: ACTIVE</span>
+          </div>
+          <div style={{ display: 'grid', gap: 6, color: '#efeef8' }}>
+            <span>任务总数　　　　　　　　　　　 0%</span>
+            <span>研究任务　　　　　　　　　　　 0%</span>
+            <span>已完成　　　　　　　　　　　　 0%</span>
+          </div>
+          <div
+            style={{
+              height: 18,
+              background: 'linear-gradient(90deg, #0b1323 0%, #0f1f36 100%)',
+              border: '1px solid #214a6a',
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            right: 198,
+            top: 126,
+            width: 44,
+            height: 72,
+            border: '3px solid #496070',
+            background: 'linear-gradient(180deg, #c7eefc 0%, #a7d2ea 100%)',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            right: 140,
+            top: 116,
+            width: 50,
+            height: 32,
+            border: '3px solid #8d4c17',
+            background: '#fff4df',
+            color: '#ff7a00',
+            fontSize: 9,
+            display: 'grid',
+            placeItems: 'center',
+            textAlign: 'center',
+            lineHeight: 1.2,
+          }}
+        >
+          办公室
+          <br />
+          安全提示
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            right: 60,
+            top: 112,
+            width: 56,
+            height: 54,
+            border: '3px solid #252836',
+            background: 'linear-gradient(180deg, #d8f3ff 0%, #bdddec 100%)',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
+            left: '12%',
+            top: '40%',
+            width: '52%',
+            height: '50%',
+            borderRadius: 10,
+            background: 'rgba(180, 184, 206, 0.22)',
+            boxShadow: 'inset 0 0 0 1px rgba(149, 155, 191, 0.18)',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              right: '18%',
+              bottom: 24,
+              padding: '6px 18px',
+              borderRadius: 999,
+              border: '1px dashed rgba(90, 97, 124, 0.55)',
+              color: '#9096b7',
+              fontSize: 10,
+            }}
+          >
+            export zone
+          </div>
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            left: 44,
+            top: '63%',
+            width: 18,
+            height: 50,
+            background: '#6a8391',
+            border: '3px solid #4d6774',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            left: 50,
+            top: '61%',
+            width: 10,
+            height: 4,
+            background: '#d9e6ef',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            left: 50,
+            top: '65%',
+            width: 10,
+            height: 4,
+            background: '#d9e6ef',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
+            left: 42,
+            top: '44%',
+            display: 'grid',
+            gap: 2,
+            justifyItems: 'center',
+          }}
+        >
+          <div
+            style={{
+              width: 14,
+              height: 12,
+              background: '#3fad4f',
+              borderRadius: '50% 50% 20% 20%',
+            }}
+          />
+          <div style={{ width: 16, height: 8, background: '#8b5a3c' }} />
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            right: 80,
+            top: '42%',
+            display: 'grid',
+            gap: 2,
+            justifyItems: 'center',
+          }}
+        >
+          <div style={{ width: 10, height: 22, background: '#3fad4f', borderRadius: 8 }} />
+          <div style={{ width: 14, height: 8, background: '#8b5a3c' }} />
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            right: 110,
+            bottom: 90,
+            width: 16,
+            height: 36,
+            background: '#c9d8e5',
+            border: '3px solid #7da1b7',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            right: 114,
+            bottom: 104,
+            width: 8,
+            height: 5,
+            background: '#f87171',
+          }}
+        />
+
+        {agentTeamsOfficeAgents.map((item) => (
+          <PixelCharacter key={item.id} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlaceholderPanel({ activeTab }: { activeTab: Exclude<AgentTeamsTabKey, 'office'> }) {
+  const cards = agentTeamsTabPanels[activeTab];
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {cards.map((card) => (
+        <div
+          key={card.id}
+          style={{ ...PANEL_STYLE, padding: 18, borderRadius: 18, display: 'grid', gap: 8 }}
+        >
+          <span style={{ fontSize: 16, fontWeight: 800, color: '#edf1ff' }}>{card.title}</span>
+          <span style={{ fontSize: 13, color: '#8f95be', lineHeight: 1.7 }}>
+            {card.description}
+          </span>
+        </div>
       ))}
     </div>
   );
 }
 
+function MainWorkspace({ activeTab }: { activeTab: AgentTeamsTabKey }) {
+  return (
+    <section style={{ display: 'grid', gap: 18, padding: '18px 18px 0' }}>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <span style={{ fontSize: 28, fontWeight: 800, color: '#f3f5ff' }}>团队工作空间</span>
+        <span style={{ fontSize: 13, color: '#7e86b6' }}>{agentTeamsTopSummary.description}</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+        {agentTeamsMetricCards.map((item) => (
+          <MetricCard key={item.label} item={item} />
+        ))}
+      </div>
+
+      {activeTab === 'office' ? <OfficeScene /> : <PlaceholderPanel activeTab={activeTab} />}
+    </section>
+  );
+}
+
+function FooterBar() {
+  return (
+    <footer
+      style={{
+        height: 34,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '0 16px 0 6px',
+        borderTop: '1px solid rgba(104, 111, 152, 0.18)',
+        background: '#171821',
+        color: '#8f95be',
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#7ad45a' }} />
+        <span>{agentTeamsFooterLead}</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        {agentTeamsFooterStats.map((item) => (
+          <span key={item.label}>
+            {item.label} <strong style={{ color: '#dfe3ff' }}>{item.value}</strong>
+          </span>
+        ))}
+        <span>运行 16m 41s</span>
+      </div>
+    </footer>
+  );
+}
+
 export function TeamRuntimeReferencePage() {
-  const [activeTabKey, setActiveTabKey] = useState<ReferenceTabKey>('dashboard');
-  const [interactionDraft, setInteractionDraft] = useState('');
-  const [feedback, setFeedback] = useState<TeamActionFeedback | null>(null);
-  const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState(
-    referenceWorkspaceSummaries[0]?.key ?? '',
-  );
-  const [selectedSharedSessionId, setSelectedSharedSessionId] = useState(
-    referenceSharedSessions[0]?.sessionId ?? null,
-  );
-  const [roleBindingCards, setRoleBindingCards] = useState(referenceRoleBindingCards);
-  const [viewportWidth, setViewportWidth] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1440,
-  );
+  const [activeTab, setActiveTab] = useState<AgentTeamsTabKey>('office');
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined;
-    }
-
-    const handleResize = () => setViewportWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const isSingleColumn = viewportWidth < 1120;
-  const isTwoColumn = viewportWidth >= 1120 && viewportWidth < 1500;
-
-  const selectedWorkspace =
-    referenceWorkspaceSummaries.find((workspace) => workspace.key === selectedWorkspaceKey) ??
-    referenceWorkspaceSummaries[0]!;
-
-  const filteredSharedSessions = referenceSharedSessions.filter(
-    (session) => session.workspacePath === selectedWorkspace.key,
-  );
-
-  const selectedRunSummary =
-    (selectedSharedSessionId ? selectedRunSummaryById[selectedSharedSessionId] : null) ??
-    selectedRunSummaryById[filteredSharedSessions[0]?.sessionId ?? 'spectrai-session-1'] ??
-    referenceSelectedRunSummary;
-
-  const activeTab = referenceTabs.find((tab) => tab.key === activeTabKey) ?? referenceTabs[0];
-
-  const mainContent = useMemo(() => {
-    if (activeTabKey === 'sessions') {
-      return <TeamRuntimeSessionsTab selectedRunTitle={selectedRunSummary.title} />;
-    }
-    if (activeTabKey === 'files') {
-      return <TeamRuntimeFilesTab />;
-    }
-    if (activeTabKey === 'kanban') {
-      return <TeamRuntimeKanbanTab />;
-    }
-    return <TeamRuntimeDashboardTab />;
-  }, [activeTabKey, selectedRunSummary.title]);
+  const mainContent = useMemo(() => <MainWorkspace activeTab={activeTab} />, [activeTab]);
 
   return (
-    <TeamRuntimeShellFrame
-      activeTabKey={activeTab.key}
-      activeTabLabel={activeTab.label}
-      activeTabSummary={activeTab.summary}
-      buddyProjection={referenceBuddyProjection}
-      busy={false}
-      error={null}
-      feedback={feedback}
-      filteredSessionCount={sessionCountByWorkspace[selectedWorkspace.key] ?? 0}
-      filteredSessionShareCount={shareCountByWorkspace[selectedWorkspace.key] ?? 0}
-      filteredSharedSessions={filteredSharedSessions}
-      headerMetrics={referenceMetrics}
-      interactionDraft={interactionDraft}
-      isSingleColumn={isSingleColumn}
-      isTwoColumn={isTwoColumn}
-      mainContent={mainContent}
-      onActiveTabChange={(tabKey) => setActiveTabKey(tabKey as ReferenceTabKey)}
-      onInteractionDraftChange={setInteractionDraft}
-      onLaunchWorkflowTemplate={async () => {
-        setFeedback({
-          message: '已从 mock workflow handoff 发起当前参考页任务。',
-          tone: 'success',
-        });
-        return true;
-      }}
-      onRoleBindingChange={(role, agentId) => {
-        setRoleBindingCards((current) =>
-          current.map((card) =>
-            card.role === role
-              ? {
-                  ...card,
-                  selectedAgentId: agentId,
-                  selectedAgent:
-                    referencePaneAgents.find((agent) => agent.id === agentId) ?? card.selectedAgent,
-                }
-              : card,
-          ),
-        );
-      }}
-      onSelectSharedSession={(sessionId) => {
-        setSelectedSharedSessionId(sessionId);
-        setActiveTabKey('sessions');
-      }}
-      onSelectWorkspaceKey={(workspaceKey) => {
-        setSelectedWorkspaceKey(workspaceKey);
-        const nextSession = referenceSharedSessions.find(
-          (session) => session.workspacePath === workspaceKey,
-        );
-        setSelectedSharedSessionId(nextSession?.sessionId ?? null);
-      }}
-      onSubmitInteractionDraft={() => {
-        if (!interactionDraft.trim()) {
-          return;
-        }
-        setFeedback({
-          message: `已将 mock 指令“${interactionDraft.trim()}”投递到交互代理预览。`,
-          tone: 'success',
-        });
-        setInteractionDraft('');
-      }}
-      roleBindingAgents={referencePaneAgents as ManagedAgentRecord[]}
-      roleBindingCards={roleBindingCards}
-      roleBindingError={null}
-      roleBindingLoading={false}
-      selectedRunSummary={selectedRunSummary}
-      selectedSharedSessionId={selectedSharedSessionId}
-      selectedWorkspaceKey={selectedWorkspace.key}
-      selectedWorkspaceLabel={selectedWorkspace.label}
-      selectedWorkspaceRunningCount={selectedWorkspace.runningCount}
-      statusBarSummary={{
-        activeCount: 12,
-        totalCount: 209,
-        runningCount: 12,
-        waitingCount: 5,
-        errorCount: 0,
-        todayTokens: '4.8M tok',
-        runtimeLabel: '运行 177h',
-      }}
-      tabs={[...referenceTabs]}
-      workspaceOverviewLines={referenceOverviewLines}
-      workspaceSummaries={referenceWorkspaceSummaries}
-      workflowLaunch={{
-        nodeCount: 6,
-        templateId: 'spectrai-template-1',
-        templateName: 'Agent Sprint Orchestration',
-        templateDescription: '参考 SpectrAI 的多会话调度流程模板，用于静态页面还原。',
-      }}
-    />
+    <div className="page-root" style={{ background: SHELL_BACKGROUND, minHeight: '100dvh' }}>
+      <div
+        style={{
+          minWidth: 1600,
+          minHeight: '100dvh',
+          display: 'grid',
+          gridTemplateRows: '36px minmax(0, 1fr) 34px',
+          overflow: 'auto',
+        }}
+      >
+        <header style={TITLE_BAR_STYLE}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ color: '#7c8cff', fontSize: 18 }}>⚡</span>
+            <span style={{ color: '#e6e9ff', fontWeight: 700, fontSize: 14 }}>SpectrAI</span>
+          </div>
+          <div style={{ display: 'flex', gap: 18, color: '#cfd5ff' }}>
+            <span>─</span>
+            <span>□</span>
+            <span>✕</span>
+          </div>
+        </header>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '56px 248px minmax(0, 1fr)',
+            minHeight: 0,
+          }}
+        >
+          <ActivityRail />
+          <LeftSidebar />
+
+          <main
+            style={{
+              minHeight: 0,
+              display: 'grid',
+              gridTemplateRows: 'auto auto 1fr',
+              background: '#181926',
+            }}
+          >
+            <TopTeamHeader />
+            <TabRow activeTab={activeTab} onSelect={setActiveTab} />
+            <div style={{ minHeight: 0, overflow: 'auto' }}>{mainContent}</div>
+          </main>
+        </div>
+
+        <FooterBar />
+      </div>
+    </div>
   );
 }
