@@ -606,6 +606,9 @@ function PixelCharacter({ item }: { item: AgentTeamsOfficeAgent }) {
           height: 90,
           display: 'grid',
           justifyItems: 'center',
+          padding: item.selected ? 4 : 0,
+          borderRadius: 10,
+          boxShadow: item.selected ? '0 0 0 2px rgba(103, 164, 255, 0.75)' : 'none',
         }}
       >
         {item.crown ? (
@@ -794,6 +797,18 @@ function OfficeScene() {
         <div
           style={{
             position: 'absolute',
+            left: '39.5%',
+            top: 84,
+            width: 78,
+            height: 18,
+            border: '2px solid #a5afb5',
+            background: '#eff4f6',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
             left: '18%',
             top: 94,
             width: 110,
@@ -877,7 +892,41 @@ function OfficeScene() {
             border: '3px solid #496070',
             background: 'linear-gradient(180deg, #c7eefc 0%, #a7d2ea 100%)',
           }}
-        />
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: 0,
+              bottom: 0,
+              width: 3,
+              background: '#6f8796',
+              transform: 'translateX(-50%)',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: 6,
+              top: '48%',
+              width: 4,
+              height: 4,
+              borderRadius: '50%',
+              background: '#6f8796',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              right: 6,
+              top: '48%',
+              width: 4,
+              height: 4,
+              borderRadius: '50%',
+              background: '#6f8796',
+            }}
+          />
+        </div>
         <div
           style={{
             position: 'absolute',
@@ -909,7 +958,30 @@ function OfficeScene() {
             border: '3px solid #252836',
             background: 'linear-gradient(180deg, #d8f3ff 0%, #bdddec 100%)',
           }}
-        />
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: 0,
+              bottom: 0,
+              width: 3,
+              background: '#252836',
+              transform: 'translateX(-50%)',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: '50%',
+              height: 3,
+              background: '#252836',
+              transform: 'translateY(-50%)',
+            }}
+          />
+        </div>
 
         <div
           style={{
@@ -949,7 +1021,38 @@ function OfficeScene() {
             background: '#6a8391',
             border: '3px solid #4d6774',
           }}
-        />
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: 2,
+              right: 2,
+              top: 12,
+              height: 3,
+              background: '#d9e6ef',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: 2,
+              right: 2,
+              top: 24,
+              height: 3,
+              background: '#d9e6ef',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: 2,
+              right: 2,
+              top: 36,
+              height: 3,
+              background: '#d9e6ef',
+            }}
+          />
+        </div>
         <div
           style={{
             position: 'absolute',
@@ -1014,7 +1117,32 @@ function OfficeScene() {
             background: '#c9d8e5',
             border: '3px solid #7da1b7',
           }}
-        />
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: 8,
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#f87171',
+              transform: 'translateX(-50%)',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: 18,
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#60a5fa',
+              transform: 'translateX(-50%)',
+            }}
+          />
+        </div>
         <div
           style={{
             position: 'absolute',
@@ -1023,6 +1151,18 @@ function OfficeScene() {
             width: 8,
             height: 5,
             background: '#f87171',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
+            left: '77%',
+            top: '67%',
+            width: 16,
+            height: 14,
+            border: '2px solid #2b1f1f',
+            background: '#8d7760',
           }}
         />
 
@@ -1269,51 +1409,59 @@ export function TeamRuntimeReferencePage() {
     <div className="page-root" style={{ background: SHELL_BACKGROUND, minHeight: '100dvh' }}>
       <div
         style={{
-          minWidth: 1600,
           minHeight: '100dvh',
-          display: 'grid',
-          gridTemplateRows: '36px minmax(0, 1fr) 34px',
-          overflow: 'auto',
+          fontFamily:
+            'Inter, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif',
         }}
       >
-        <header style={TITLE_BAR_STYLE}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <MacDots />
-            <span style={{ color: '#7c8cff', fontSize: 18 }}>⚡</span>
-            <span style={{ color: '#e6e9ff', fontWeight: 700, fontSize: 14 }}>SpectrAI</span>
-          </div>
-          <div style={{ display: 'flex', gap: 18, color: '#cfd5ff' }}>
-            <span>─</span>
-            <span>□</span>
-            <span>✕</span>
-          </div>
-        </header>
-
         <div
           style={{
+            minWidth: 1600,
+            minHeight: '100dvh',
             display: 'grid',
-            gridTemplateColumns: '56px 248px minmax(0, 1fr)',
-            minHeight: 0,
+            gridTemplateRows: '36px minmax(0, 1fr) 34px',
+            overflow: 'auto',
           }}
         >
-          <ActivityRail />
-          <LeftSidebar />
+          <header style={TITLE_BAR_STYLE}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <MacDots />
+              <span style={{ color: '#7c8cff', fontSize: 18 }}>⚡</span>
+              <span style={{ color: '#e6e9ff', fontWeight: 700, fontSize: 14 }}>SpectrAI</span>
+            </div>
+            <div style={{ display: 'flex', gap: 18, color: '#cfd5ff' }}>
+              <span>─</span>
+              <span>□</span>
+              <span>✕</span>
+            </div>
+          </header>
 
-          <main
+          <div
             style={{
-              minHeight: 0,
               display: 'grid',
-              gridTemplateRows: 'auto auto 1fr',
-              background: '#181926',
+              gridTemplateColumns: '56px 248px minmax(0, 1fr)',
+              minHeight: 0,
             }}
           >
-            <TopTeamHeader />
-            <TabRow activeTab={activeTab} onSelect={setActiveTab} />
-            <div style={{ minHeight: 0, overflow: 'auto' }}>{mainContent}</div>
-          </main>
-        </div>
+            <ActivityRail />
+            <LeftSidebar />
 
-        <FooterBar />
+            <main
+              style={{
+                minHeight: 0,
+                display: 'grid',
+                gridTemplateRows: 'auto auto 1fr',
+                background: '#181926',
+              }}
+            >
+              <TopTeamHeader />
+              <TabRow activeTab={activeTab} onSelect={setActiveTab} />
+              <div style={{ minHeight: 0, overflow: 'auto' }}>{mainContent}</div>
+            </main>
+          </div>
+
+          <FooterBar />
+        </div>
       </div>
     </div>
   );
