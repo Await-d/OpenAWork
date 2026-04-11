@@ -39,19 +39,6 @@ const PANEL_STYLE: CSSProperties = {
   borderRadius: 18,
 };
 
-const CHIP_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  minHeight: 24,
-  padding: '0 10px',
-  borderRadius: 999,
-  background: '#23243a',
-  color: '#c8ccf5',
-  fontSize: 11,
-  whiteSpace: 'nowrap',
-};
-
 function MacDots() {
   return (
     <div aria-hidden="true" style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -88,6 +75,7 @@ function ActivityRail() {
               type="button"
               title={item.label}
               style={{
+                position: 'relative',
                 width: 42,
                 height: 42,
                 margin: '0 auto',
@@ -100,6 +88,20 @@ function ActivityRail() {
                 boxShadow: active ? '0 0 0 1px rgba(138, 156, 255, 0.15)' : 'none',
               }}
             >
+              {active ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: -7,
+                    top: 8,
+                    bottom: 8,
+                    width: 3,
+                    borderRadius: '0 999px 999px 0',
+                    background: '#7d74ff',
+                  }}
+                />
+              ) : null}
               <span style={{ fontSize: 17 }}>{item.icon}</span>
             </button>
           );
@@ -125,6 +127,7 @@ function SidebarTemplateCard({
     <button
       type="button"
       style={{
+        position: 'relative',
         display: 'grid',
         gap: 8,
         width: '100%',
@@ -138,6 +141,20 @@ function SidebarTemplateCard({
           : '1px solid rgba(104, 111, 152, 0.12)',
       }}
     >
+      {active ? (
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            borderRadius: '14px 0 0 14px',
+            background: '#7d74ff',
+          }}
+        />
+      ) : null}
       <div
         style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
       >
@@ -157,6 +174,16 @@ function SidebarTemplateCard({
           </span>
         ) : null}
       </div>
+      {active ? (
+        <div
+          style={{ display: 'flex', gap: 6, alignItems: 'center', color: '#7e86b6', fontSize: 10 }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ffd458' }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6a6af7' }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef5a5a' }} />
+          <span>4人 · 6天前</span>
+        </div>
+      ) : null}
       {subtitle ? <span style={{ fontSize: 11, color: '#8f95be' }}>{subtitle}</span> : null}
     </button>
   );
@@ -962,6 +989,38 @@ function FooterBar() {
         <span>{agentTeamsFooterLead}</span>
       </div>
 
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+          padding: '2px 6px',
+          borderRadius: 8,
+          background: '#1f2030',
+        }}
+      >
+        {['▥', '◫', '◔', '▤'].map((icon, index) => {
+          const active = index === 1;
+          return (
+            <button
+              key={icon}
+              type="button"
+              style={{
+                width: 24,
+                height: 20,
+                borderRadius: 6,
+                display: 'grid',
+                placeItems: 'center',
+                color: active ? '#f5f7ff' : '#8f95be',
+                background: active ? '#2e3150' : 'transparent',
+              }}
+            >
+              {icon}
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
         {agentTeamsFooterStats.map((item) => (
           <span key={item.label}>
@@ -992,6 +1051,7 @@ export function TeamRuntimeReferencePage() {
       >
         <header style={TITLE_BAR_STYLE}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <MacDots />
             <span style={{ color: '#7c8cff', fontSize: 18 }}>⚡</span>
             <span style={{ color: '#e6e9ff', fontWeight: 700, fontSize: 14 }}>SpectrAI</span>
           </div>
