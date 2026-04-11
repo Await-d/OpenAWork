@@ -77,6 +77,7 @@
 - [2026-04-10] TeamPage 两人并行实施时，优先按 **TeamPage 体验/交互壳层（Dev-A） vs Team Runtime 读模型/事件脊柱（Dev-B）** 拆分，而不是按 Tab 平均分工；热点文件实行 owner 独占，先冻结 DTO，再按 Window A/B/C 固定集成。
 - [2026-04-10] TeamPage 在视觉布局上可强对齐参考库，但**任务动画必须替换为系统内 Buddy/Hubby 动画表现层**；参考库原任务动画不复用，Buddy/Hubby 仅承担任务状态与交互代理的辅助动态表达，不替代 DAG/时间线主视图。
 - [2026-04-10] TeamPage 开发阶段只保留一份 **统一开发主计划** 作为开发者入口：以“背景与冻结结论 → 设计冻结稿 → 开发可执行顺序 → 双人分工与验收”组织，旧的对标/设计/并行文档只作为附录依据，不再并列作为主入口。
+- [2026-04-11] `interaction-agent` 的结构化改写结果在 MVP 阶段优先采用 **Web 本地 artifact + Team Runtime 读模型注入**：继续保留时间线三段消息作为审计流，但结构化 rewrite 结果先进入 `总览/产物` 投影，不为此提前扩 backend 持久化协议。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
