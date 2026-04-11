@@ -287,6 +287,9 @@ function LeftSidebar() {
               fontSize: 12,
             }}
           >
+            <span aria-hidden="true" style={{ fontSize: 12, color: '#8ba2ff' }}>
+              ▦
+            </span>
             <span style={{ flex: 1, height: 1, background: 'rgba(104, 111, 152, 0.28)' }} />
             <span>模板 (5)</span>
             <span style={{ flex: 1, height: 1, background: 'rgba(104, 111, 152, 0.28)' }} />
@@ -369,7 +372,24 @@ function RoleChip({ item }: { item: (typeof agentTeamsRoleChips)[number] }) {
         {item.badge}
       </span>
       <span style={{ fontSize: 13, fontWeight: 700, color: '#e6e9ff' }}>{item.role}</span>
-      <span style={{ color: '#22c55e', fontSize: 11 }}>{item.status}</span>
+      {item.leader ? (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            minHeight: 18,
+            padding: '0 7px',
+            borderRadius: 999,
+            background: '#3b2d16',
+            color: '#ffd458',
+            fontSize: 10,
+            fontWeight: 700,
+          }}
+        >
+          Leader
+        </span>
+      ) : null}
+      <span style={{ color: '#67e38f', fontSize: 11 }}>✓ {item.status}</span>
       <span style={{ color: '#7e86b6', fontSize: 11 }}>{item.provider}</span>
     </div>
   );
@@ -547,11 +567,18 @@ function MetricCard({ item }: { item: (typeof agentTeamsMetricCards)[number] }) 
         ...PANEL_STYLE,
         display: 'grid',
         gap: 8,
-        padding: 16,
-        minHeight: 70,
+        padding: '14px 18px',
+        minHeight: 72,
       }}
     >
-      <span style={{ color: '#8f95be', fontSize: 12 }}>{item.label}</span>
+      <div
+        style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#8f95be', fontSize: 12 }}
+      >
+        <span aria-hidden="true" style={{ color: '#a9b2ff', fontSize: 12 }}>
+          {item.icon}
+        </span>
+        <span>{item.label}</span>
+      </div>
       <span style={{ fontSize: 38, lineHeight: 1, fontWeight: 800, color: '#e6e9ff' }}>
         {item.value}
       </span>

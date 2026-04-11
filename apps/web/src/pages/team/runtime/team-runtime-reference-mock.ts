@@ -22,6 +22,7 @@ export interface AgentTeamsSidebarSection {
 export interface AgentTeamsRoleChip {
   accent: string;
   badge: string;
+  leader?: boolean;
   provider: string;
   role: string;
   status: string;
@@ -53,6 +54,7 @@ export interface AgentTeamsTabDefinition {
 }
 
 export interface AgentTeamsMetricCard {
+  icon: string;
   label: string;
   value: string;
 }
@@ -121,7 +123,14 @@ export const agentTeamsTabs: AgentTeamsTabDefinition[] = [
 ];
 
 export const agentTeamsRoleChips: AgentTeamsRoleChip[] = [
-  { accent: '#d59b11', badge: '团', role: '团队负责人', provider: 'Claude Code', status: 'Leader' },
+  {
+    accent: '#d59b11',
+    badge: '团',
+    role: '团队负责人',
+    provider: 'Claude Code',
+    status: '空闲',
+    leader: true,
+  },
   { accent: '#5b5bd8', badge: '研', role: '研究员A', provider: 'Codex CLI', status: '空闲' },
   { accent: '#c03d7a', badge: '研', role: '研究员B', provider: 'Codex CLI', status: '空闲' },
   { accent: '#d04e4e', badge: '批', role: '批评者', provider: 'Claude Code', status: '空闲' },
@@ -220,9 +229,9 @@ export const agentTeamsSidebarSections: AgentTeamsSidebarSection[] = [
 ];
 
 export const agentTeamsMetricCards: AgentTeamsMetricCard[] = [
-  { label: '成员', value: '4' },
-  { label: '任务', value: '0/0' },
-  { label: '汇报', value: '0' },
+  { icon: '◌', label: '成员', value: '4' },
+  { icon: '◫', label: '任务', value: '0/0' },
+  { icon: '▣', label: '汇报', value: '0' },
 ];
 
 export const agentTeamsOfficeAgents: AgentTeamsOfficeAgent[] = [
