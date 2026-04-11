@@ -283,7 +283,7 @@ function LeftSidebar() {
             }}
           >
             <span style={{ flex: 1, height: 1, background: 'rgba(104, 111, 152, 0.28)' }} />
-            <span>模板</span>
+            <span>模板 (5)</span>
             <span style={{ flex: 1, height: 1, background: 'rgba(104, 111, 152, 0.28)' }} />
           </div>
 
@@ -449,6 +449,7 @@ function TabRow({
     <div
       style={{
         display: 'flex',
+        justifyContent: 'space-between',
         gap: 20,
         alignItems: 'center',
         minHeight: 42,
@@ -457,42 +458,79 @@ function TabRow({
         borderBottom: '1px solid rgba(104, 111, 152, 0.18)',
       }}
     >
-      {agentTeamsTabs.map((tab) => {
-        const active = tab.id === activeTab;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onSelect(tab.id)}
-            style={{
-              position: 'relative',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              minHeight: 42,
-              color: active ? '#dfe3ff' : '#7e86b6',
-              fontSize: 13,
-              fontWeight: active ? 700 : 500,
-            }}
-          >
-            {tab.label}
-            {active ? (
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  bottom: -1,
-                  height: 3,
-                  borderRadius: '999px 999px 0 0',
-                  background: '#7d74ff',
-                }}
-              />
-            ) : null}
-          </button>
-        );
-      })}
+      <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+        {agentTeamsTabs.map((tab) => {
+          const active = tab.id === activeTab;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onSelect(tab.id)}
+              style={{
+                position: 'relative',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                minHeight: 42,
+                color: active ? '#dfe3ff' : '#7e86b6',
+                fontSize: 13,
+                fontWeight: active ? 700 : 500,
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: 12, opacity: active ? 1 : 0.75 }}>
+                {tab.icon}
+              </span>
+              <span>{tab.label}</span>
+              {tab.badge ? (
+                <span
+                  style={{
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 5px',
+                    borderRadius: 999,
+                    background: active ? '#40447c' : '#2a2d48',
+                    color: '#dfe3ff',
+                    fontSize: 10,
+                    fontWeight: 800,
+                    display: 'grid',
+                    placeItems: 'center',
+                  }}
+                >
+                  {tab.badge}
+                </span>
+              ) : null}
+              {active ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: -1,
+                    height: 3,
+                    borderRadius: '999px 999px 0 0',
+                    background: '#7d74ff',
+                  }}
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: '#7e86b6',
+          fontSize: 12,
+        }}
+      >
+        <span aria-hidden="true">⇱</span>
+        <span>弹出窗口</span>
+      </button>
     </div>
   );
 }

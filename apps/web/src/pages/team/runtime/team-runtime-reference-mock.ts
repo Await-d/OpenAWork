@@ -43,7 +43,9 @@ export interface AgentTeamsActivityItem {
 }
 
 export interface AgentTeamsTabDefinition {
+  badge?: string;
   id: AgentTeamsTabKey;
+  icon: string;
   label: string;
 }
 
@@ -73,12 +75,12 @@ export const agentTeamsActivityItems: AgentTeamsActivityItem[] = [
 ];
 
 export const agentTeamsTabs: AgentTeamsTabDefinition[] = [
-  { id: 'conversation', label: '对话' },
-  { id: 'tasks', label: '任务' },
-  { id: 'messages', label: '消息' },
-  { id: 'overview', label: '状态总览' },
-  { id: 'review', label: '评审' },
-  { id: 'office', label: '办公室' },
+  { id: 'conversation', label: '对话', icon: '▣' },
+  { id: 'tasks', label: '任务', icon: '◫', badge: '1' },
+  { id: 'messages', label: '消息', icon: '◌' },
+  { id: 'overview', label: '状态总览', icon: '⋈' },
+  { id: 'review', label: '评审', icon: '◔' },
+  { id: 'office', label: '办公室', icon: '▥' },
 ];
 
 export const agentTeamsRoleChips: AgentTeamsRoleChip[] = [
