@@ -83,17 +83,20 @@ describe('TeamPage office reference layout', () => {
 
     await clickTab('对话');
     expect(container?.textContent).toContain('团队对话流');
+    expect(container?.textContent).toContain('最近提问');
 
     await clickTab('任务');
-    expect(container?.textContent).toContain('任务队列');
+    expect(container?.textContent).toContain('待办');
+    expect(container?.textContent).toContain('进行中');
 
     await clickTab('消息');
-    expect(container?.textContent).toContain('团队消息总线');
+    expect(container?.textContent).toContain('TeamBus');
 
     await clickTab('状态总览');
     expect(container?.textContent).toContain('状态总览');
+    expect(container?.textContent).toContain('页面还原度');
 
     await clickTab('评审');
-    expect(container?.textContent).toContain('评审队列');
+    expect(container?.textContent).toContain('顶部团队条对齐度');
   });
 });
