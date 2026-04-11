@@ -22,8 +22,8 @@ async function renderPage() {
 }
 
 async function clickTab(label: string) {
-  const button = Array.from(container?.querySelectorAll('button') ?? []).find(
-    (candidate) => candidate.textContent?.trim() === label,
+  const button = Array.from(container?.querySelectorAll('button') ?? []).find((candidate) =>
+    candidate.textContent?.includes(label),
   ) as HTMLButtonElement | undefined;
 
   expect(button).toBeTruthy();
