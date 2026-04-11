@@ -85,6 +85,7 @@
 - [2026-04-11] TeamPage 当前阶段以 **1111111.png 官方 Agent Teams 办公室页 mock 还原优先**：先完成左侧模板栏、顶部团队条、办公室像素画布与底部状态栏的高保真页面，再决定如何把真实 Team Runtime 数据链重新接回。
 - [2026-04-11] 办公室页继续优先吸收官方 `ActivityBar / StatusBar / SessionItem` 的表面语义：激活指示条、选中卡片左边条、底栏视图按钮组等细节应继续参考官方 layout 组件，而不是回到通用工作台样式。
 - [2026-04-11] Agent Teams 办公室页的其它顶部 tab 也已进入 mock 迁移阶段：`对话 / 任务 / 消息 / 状态总览 / 评审` 不再是统一占位卡，而是带页面结构的 mock 面板，后续功能回接应在这些面板骨架上进行。
+- [2026-04-11] Agent Teams 办公室页继续优先对齐可见细节：`Leader` 徽标、绿色状态勾、模板区标题图标、`POWER_BAR` 小标注、以及角色主/次/三级标签层级都应按官方截图继续压近。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
