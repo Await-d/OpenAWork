@@ -29,9 +29,12 @@ export interface AgentTeamsRoleChip {
 
 export interface AgentTeamsOfficeAgent {
   accent: string;
+  crown?: boolean;
+  extraNote?: string;
   id: string;
   label: string;
   note: string;
+  selected?: boolean;
   x: number;
   y: number;
 }
@@ -135,10 +138,10 @@ export const agentTeamsSidebarSections: AgentTeamsSidebarSection[] = [
         title: '短视频学习助手开...',
         description: '围绕短视频脚本、镜头、旁白与配音策划的轻量模板。',
         roleTags: [
-          { color: '#378dff', label: '体验架构与台词策划' },
+          { color: '#378dff', label: '体验架构与合规策划' },
           { color: '#21c58d', label: '小程序前端研发' },
           { color: '#d59b11', label: '解析后端工程师' },
-          { color: '#c03d7a', label: '质审与合规审查' },
+          { color: '#c03d7a', label: '项目与合规审查' },
         ],
       },
     ],
@@ -152,21 +155,22 @@ export const agentTeamsSidebarSections: AgentTeamsSidebarSection[] = [
         title: '短视频学习助手-新...',
         description: '更偏新素材整合、学习任务拆分与测试链条。',
         roleTags: [
-          { color: '#378dff', label: '体验实验负责人' },
+          { color: '#378dff', label: '体验策略负责人' },
           { color: '#21c58d', label: '小程序 UI/交互实现' },
-          { color: '#d59b11', label: '解析后端与安全链路' },
-          { color: '#c03d7a', label: '质审与合规测试' },
+          { color: '#d59b11', label: '解析与内容编排' },
+          { color: '#c03d7a', label: '项目与合规测试' },
+          { color: '#7c52ff', label: '交付协调与汇总' },
         ],
       },
     ],
   },
   {
     id: 'commerce-team',
-    title: '轻量进销存官网搭...',
+    title: '轻量讲解有官网搭...',
     items: [
       {
         id: 'commerce-team-template',
-        title: '轻量进销存官网搭...',
+        title: '轻量讲解有官网搭...',
         description: '为 10 人内小团队做官网与业务流展示的轻量模板。',
         roleTags: [
           { color: '#d59b11', label: '团队负责人' },
@@ -188,9 +192,33 @@ export const agentTeamsMetricCards: AgentTeamsMetricCard[] = [
 ];
 
 export const agentTeamsOfficeAgents: AgentTeamsOfficeAgent[] = [
-  { id: 'leader', label: '[L] 团队负责人', note: '等待给出批准', x: 73, y: 59, accent: '#f4a52f' },
-  { id: 'researcher-a', label: '研究员A', note: '等待给出批准', x: 80, y: 63, accent: '#6a6af7' },
-  { id: 'critic', label: '批评者', note: '等待你的决定', x: 85, y: 66, accent: '#ef5a5a' },
+  {
+    id: 'leader',
+    label: '[L] 团队负责人',
+    note: '等待他的批准',
+    x: 73,
+    y: 59,
+    accent: '#f4a52f',
+    crown: true,
+    selected: true,
+  },
+  {
+    id: 'researcher-a',
+    label: '研究员A',
+    note: '等待他的批准',
+    x: 80,
+    y: 63,
+    accent: '#6a6af7',
+  },
+  {
+    id: 'critic',
+    label: '批评者',
+    note: '等待你的批准',
+    extraNote: '等待你的决定',
+    x: 85,
+    y: 66,
+    accent: '#ef5a5a',
+  },
 ];
 
 export const agentTeamsFooterStats: AgentTeamsFooterStat[] = [

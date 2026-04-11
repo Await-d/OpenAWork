@@ -576,7 +576,13 @@ function PixelCharacter({ item }: { item: AgentTeamsOfficeAgent }) {
           justifyItems: 'center',
         }}
       >
-        <div style={{ width: 6, height: 6, background: '#facc15', marginBottom: -2, zIndex: 1 }} />
+        {item.crown ? (
+          <div
+            style={{ width: 6, height: 6, background: '#facc15', marginBottom: -2, zIndex: 1 }}
+          />
+        ) : (
+          <div style={{ width: 6, height: 6, marginBottom: -2, zIndex: 1 }} />
+        )}
         <div
           style={{ width: 28, height: 26, background: '#ffd29f', border: '3px solid #2b1f1f' }}
         />
@@ -621,10 +627,11 @@ function PixelCharacter({ item }: { item: AgentTeamsOfficeAgent }) {
           style={{
             padding: '4px 8px',
             borderRadius: 8,
-            background: '#111111',
+            background: item.selected ? '#111111' : '#161616',
             color: '#f5f7ff',
             fontSize: 11,
             fontWeight: 700,
+            boxShadow: item.selected ? '0 0 0 2px rgba(111, 164, 255, 0.55)' : 'none',
           }}
         >
           {item.label}
@@ -640,6 +647,19 @@ function PixelCharacter({ item }: { item: AgentTeamsOfficeAgent }) {
         >
           {item.note}
         </span>
+        {item.extraNote ? (
+          <span
+            style={{
+              padding: '4px 8px',
+              borderRadius: 8,
+              background: '#0a0a0a',
+              color: '#d2d7ff',
+              fontSize: 10,
+            }}
+          >
+            {item.extraNote}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -724,6 +744,19 @@ function OfficeScene() {
         >
           ▶ 研究团队 / 4名成员，状态联动
           <br />← 小地图与提醒，会实时刷新画布。
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            left: '69.5%',
+            top: '63.2%',
+            fontSize: 8,
+            color: '#2b1f1f',
+            letterSpacing: '0.08em',
+          }}
+        >
+          POWER_BAR
         </div>
 
         <div
