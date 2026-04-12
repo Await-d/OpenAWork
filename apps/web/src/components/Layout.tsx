@@ -34,6 +34,7 @@ import {
 } from '../utils/session-list-events.js';
 import { subscribeNotificationPreferenceRefresh } from '../utils/notification-preference-events.js';
 import { toast } from './ToastNotification.js';
+import { getRecoveryPendingInteractions } from '../pages/chat-page/recovery-read-model.js';
 
 type NotificationPreferenceMap = Record<NotificationPreferenceEventType, boolean>;
 
@@ -459,12 +460,11 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         sessionId,
         options,
       );
-      const nextPermission =
-        recovery.pendingPermissions.find((request) => request.status === 'pending') ?? null;
-      const nextQuestion =
-        recovery.pendingQuestions.find((request) => request.status === 'pending') ?? null;
-      updatePendingPermission(toPendingPermissionPromptState(nextPermission));
-      applyPendingQuestion(nextQuestion, {
+      const pendingInteractions = getRecoveryPendingInteractions(recovery);
+      updatePendingPermission(
+        toPendingPermissionPromptState(pendingInteractions.pendingPermission),
+      );
+      applyPendingQuestion(pendingInteractions.pendingQuestion, {
         preserveAnswersForSameRequest: options?.preserveQuestionAnswersForSameRequest === true,
       });
     },
@@ -835,8 +835,11 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           },
         );
         updatePendingPermission(null);
-        requestCurrentSessionRefresh(currentChatSessionId);
-        requestSessionListRefresh();
+        // Delay to give the backend time to start the resume runtime thread
+        window.setTimeout(() => {
+          requestCurrentSessionRefresh(currentChatSessionId);
+          requestSessionListRefresh();
+        }, 500);
       } catch (error) {
         const resolved = resolvePermissionReplyError(error);
         if (resolved.dismissPrompt) {

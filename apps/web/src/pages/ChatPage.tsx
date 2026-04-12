@@ -96,6 +96,10 @@ import {
   filterTranscriptMessages,
   shouldShowRunEventInTranscript,
 } from './chat-page/transcript-visibility.js';
+import {
+  getRecoveryPendingInteractions,
+  getRecoveryTranscriptMessages,
+} from './chat-page/recovery-read-model.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './chat-page/right-panel-sections.js';
 import { executeServerCommand } from './chat-page/server-command-item.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
@@ -194,6 +198,8 @@ interface PreparedSessionRecoveryState {
   messageRatings: Record<string, SessionMessageRatingRecord>;
   metadata: ReturnType<typeof parseSessionModeMetadata>;
   normalizedMessages: ChatMessage[];
+  pendingPermissions: PendingPermissionRequest[];
+  pendingQuestions: PendingQuestionRequest[];
   session: Session;
   sessionStateStatus: SessionStateStatus | null;
   sessionTodos: SessionTodoItem[];
@@ -204,13 +210,16 @@ function prepareSessionRecoveryState(
 ): PreparedSessionRecoveryState {
   const session = recovery.session;
   const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
+  const pendingInteractions = getRecoveryPendingInteractions(recovery);
 
   return {
     messageRatings: Object.fromEntries(
       recovery.ratings.map((rating) => [rating.messageId, rating]),
     ),
     metadata: parseSessionModeMetadata(session.metadata_json),
-    normalizedMessages: filterTranscriptMessages(normalizeChatMessages(session.messages)),
+    normalizedMessages: getRecoveryTranscriptMessages(recovery),
+    pendingPermissions: pendingInteractions.pendingPermissions,
+    pendingQuestions: pendingInteractions.pendingQuestions,
     session,
     sessionStateStatus: sessionWithRuntime.state_status ?? null,
     sessionTodos: flattenSessionTodoLanes(recovery.todoLanes),
@@ -1297,11 +1306,13 @@ export default function ChatPage() {
         return;
       }
 
+      const pendingInteractions = getRecoveryPendingInteractions(recovery);
+
       setSessionTodos(flattenSessionTodoLanes(recovery.todoLanes));
       setChildSessions((previous) => mergeChildSessions(previous, recovery.children));
       setSessionTasks((previous) => mergeSessionTasks(previous, recovery.tasks));
-      setPendingPermissions(recovery.pendingPermissions);
-      setPendingQuestions(recovery.pendingQuestions);
+      setPendingPermissions(pendingInteractions.pendingPermissions);
+      setPendingQuestions(pendingInteractions.pendingQuestions);
     },
     [gatewayUrl, isCurrentSessionView, token],
   );
@@ -1356,8 +1367,8 @@ export default function ChatPage() {
       setSessionTodos(prepared.sessionTodos);
       setChildSessions(recovery.children);
       setSessionTasks(recovery.tasks);
-      setPendingPermissions(recovery.pendingPermissions);
-      setPendingQuestions(recovery.pendingQuestions);
+      setPendingPermissions(prepared.pendingPermissions);
+      setPendingQuestions(prepared.pendingQuestions);
       setSessionStateStatus(prepared.sessionStateStatus);
       syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
       setIsSessionSnapshotReady(true);
@@ -1463,6 +1474,7 @@ export default function ChatPage() {
         currentSessionId &&
         token &&
         isPageActive &&
+        isSessionSnapshotReady &&
         !isSessionLoading &&
         remoteSessionBusyState === null &&
         sessionModesHydrated &&
@@ -1477,6 +1489,7 @@ export default function ChatPage() {
       currentSessionId,
       isPageActive,
       isSessionLoading,
+      isSessionSnapshotReady,
       pendingPermissions,
       remoteSessionBusyState,
       sessionModesHydrated,
@@ -1716,8 +1729,8 @@ export default function ChatPage() {
             setSessionTodos(prepared.sessionTodos);
             setChildSessions(recovery.children);
             setSessionTasks(recovery.tasks);
-            setPendingPermissions(recovery.pendingPermissions);
-            setPendingQuestions(recovery.pendingQuestions);
+            setPendingPermissions(prepared.pendingPermissions);
+            setPendingQuestions(prepared.pendingQuestions);
             setSessionStateStatus(prepared.sessionStateStatus);
             syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
             setIsSessionSnapshotReady(true);
@@ -1785,8 +1798,8 @@ export default function ChatPage() {
             setSessionTodos(prepared.sessionTodos);
             setChildSessions(recovery.children);
             setSessionTasks(recovery.tasks);
-            setPendingPermissions(recovery.pendingPermissions);
-            setPendingQuestions(recovery.pendingQuestions);
+            setPendingPermissions(prepared.pendingPermissions);
+            setPendingQuestions(prepared.pendingQuestions);
             setSessionStateStatus(prepared.sessionStateStatus);
             syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
             setIsSessionSnapshotReady(true);
@@ -1977,6 +1990,7 @@ export default function ChatPage() {
       !token ||
       !remoteSessionBusyState ||
       !isPageActive ||
+      !isSessionSnapshotReady ||
       !sessionModesHydrated
     ) {
       return;
@@ -2001,6 +2015,7 @@ export default function ChatPage() {
   }, [
     currentSessionId,
     isPageActive,
+    isSessionSnapshotReady,
     loadCurrentSessionSnapshot,
     remoteSessionBusyState,
     sessionModesHydrated,
@@ -3420,11 +3435,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     const shouldAttemptAttach =
-      Boolean(currentSessionId) &&
-      sessionStateStatus === 'running' &&
-      isPageActive &&
-      !streaming &&
-      (recoveredStreamSnapshot !== null || activeGatewayStreamSessionId === currentSessionId);
+      Boolean(currentSessionId) && sessionStateStatus === 'running' && isPageActive && !streaming;
 
     if (!shouldAttemptAttach || !currentSessionId) {
       if (!currentSessionId || sessionStateStatus !== 'running' || !isPageActive) {
@@ -3788,6 +3799,12 @@ export default function ChatPage() {
           return;
         }
 
+        // Allow retry if session is still running (e.g. permission-approved resume hasn't started yet)
+        // Delay the retry to give the backend time to start the resume runtime thread
+        window.setTimeout(() => {
+          attachAttemptedSessionRef.current = null;
+        }, 1500);
+
         resetStreamState();
         void loadCurrentSessionSnapshot(sid, {
           expectedSessionViewEpoch: attachSessionViewEpoch,
@@ -3796,7 +3813,6 @@ export default function ChatPage() {
   }, [
     activeModelId,
     activeProviderId,
-    activeGatewayStreamSessionId,
     client,
     currentSessionId,
     isCurrentSessionRequest,
