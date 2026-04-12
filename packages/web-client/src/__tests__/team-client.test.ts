@@ -59,4 +59,85 @@ describe('team client runtime APIs', () => {
 
     await expect(client.getRuntime('token-2')).rejects.toThrow('Failed to load team runtime: 500');
   });
+
+  it('lists and reads team workspace roots', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        createJsonResponse(200, [
+          {
+            id: 'workspace-1',
+            name: 'Web 工作区',
+            description: '负责 Web Team Runtime',
+            visibility: 'private',
+            defaultWorkingRoot: '/repo/apps/web',
+            createdByUserId: 'user-1',
+            createdAt: '2026-03-22T00:00:00.000Z',
+            updatedAt: '2026-03-22T01:00:00.000Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse(200, {
+          id: 'workspace-1',
+          name: 'Web 工作区',
+          description: '负责 Web Team Runtime',
+          visibility: 'private',
+          defaultWorkingRoot: '/repo/apps/web',
+          createdByUserId: 'user-1',
+          createdAt: '2026-03-22T00:00:00.000Z',
+          updatedAt: '2026-03-22T01:00:00.000Z',
+        }),
+      );
+
+    const client = createTeamClient('http://gateway.test');
+    const list = await client.listWorkspaces('token-1');
+    const detail = await client.getWorkspace('token-1', 'workspace-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gateway.test/team/workspaces');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('http://gateway.test/team/workspaces/workspace-1');
+    expect(list[0]?.id).toBe('workspace-1');
+    expect(detail.defaultWorkingRoot).toBe('/repo/apps/web');
+  });
+
+  it('creates and updates a team workspace root', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        createJsonResponse(201, {
+          id: 'workspace-1',
+          name: 'Web 工作区',
+          description: null,
+          visibility: 'private',
+          defaultWorkingRoot: '/repo/apps/web',
+          createdByUserId: 'user-1',
+          createdAt: '2026-03-22T00:00:00.000Z',
+          updatedAt: '2026-03-22T01:00:00.000Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        createJsonResponse(200, {
+          id: 'workspace-1',
+          name: 'Web 工作区（更新）',
+          description: null,
+          visibility: 'private',
+          defaultWorkingRoot: '/repo/apps/web',
+          createdByUserId: 'user-1',
+          createdAt: '2026-03-22T00:00:00.000Z',
+          updatedAt: '2026-03-22T02:00:00.000Z',
+        }),
+      );
+
+    const client = createTeamClient('http://gateway.test');
+    const created = await client.createWorkspace('token-1', {
+      name: 'Web 工作区',
+      defaultWorkingRoot: '/repo/apps/web',
+    });
+    const updated = await client.updateWorkspace('token-1', 'workspace-1', {
+      name: 'Web 工作区（更新）',
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gateway.test/team/workspaces');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('http://gateway.test/team/workspaces/workspace-1');
+    expect(created.id).toBe('workspace-1');
+    expect(updated.name).toBe('Web 工作区（更新）');
+  });
 });

@@ -1,5 +1,34 @@
 import type { SessionTask, SharedSessionSummaryRecord } from './sessions.js';
 
+export type TeamWorkspaceVisibility = 'open' | 'closed' | 'private';
+
+export interface TeamWorkspaceSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  visibility: TeamWorkspaceVisibility;
+  defaultWorkingRoot: string | null;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TeamWorkspaceDetail = TeamWorkspaceSummary;
+
+export interface CreateTeamWorkspaceInput {
+  name: string;
+  description?: string | null;
+  visibility?: TeamWorkspaceVisibility;
+  defaultWorkingRoot?: string | null;
+}
+
+export interface UpdateTeamWorkspaceInput {
+  name?: string;
+  description?: string | null;
+  visibility?: TeamWorkspaceVisibility;
+  defaultWorkingRoot?: string | null;
+}
+
 export interface TeamMemberRecord {
   id: string;
   name: string;
@@ -122,6 +151,14 @@ export interface TeamRuntimeReadModel {
 }
 
 export interface TeamClient {
+  listWorkspaces(token: string): Promise<TeamWorkspaceSummary[]>;
+  getWorkspace(token: string, teamWorkspaceId: string): Promise<TeamWorkspaceDetail>;
+  createWorkspace(token: string, input: CreateTeamWorkspaceInput): Promise<TeamWorkspaceDetail>;
+  updateWorkspace(
+    token: string,
+    teamWorkspaceId: string,
+    input: UpdateTeamWorkspaceInput,
+  ): Promise<TeamWorkspaceDetail>;
   getRuntime(token: string): Promise<TeamRuntimeReadModel>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
@@ -150,6 +187,69 @@ function buildAuthHeaders(token: string): HeadersInit {
 
 export function createTeamClient(baseUrl: string): TeamClient {
   return {
+    async listWorkspaces(token: string): Promise<TeamWorkspaceSummary[]> {
+      const response = await fetch(`${baseUrl}/team/workspaces`, {
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load team workspaces: ${response.status}`);
+      }
+      return (await response.json()) as TeamWorkspaceSummary[];
+    },
+
+    async getWorkspace(token: string, teamWorkspaceId: string): Promise<TeamWorkspaceDetail> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}`,
+        {
+          headers: buildAuthHeaders(token),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load team workspace: ${response.status}`);
+      }
+      return (await response.json()) as TeamWorkspaceDetail;
+    },
+
+    async createWorkspace(
+      token: string,
+      input: CreateTeamWorkspaceInput,
+    ): Promise<TeamWorkspaceDetail> {
+      const response = await fetch(`${baseUrl}/team/workspaces`, {
+        method: 'POST',
+        headers: {
+          ...buildAuthHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to create team workspace: ${response.status}`);
+      }
+      return (await response.json()) as TeamWorkspaceDetail;
+    },
+
+    async updateWorkspace(
+      token: string,
+      teamWorkspaceId: string,
+      input: UpdateTeamWorkspaceInput,
+    ): Promise<TeamWorkspaceDetail> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to update team workspace: ${response.status}`);
+      }
+      return (await response.json()) as TeamWorkspaceDetail;
+    },
+
     async getRuntime(token: string): Promise<TeamRuntimeReadModel> {
       const response = await fetch(`${baseUrl}/team/runtime`, {
         headers: buildAuthHeaders(token),

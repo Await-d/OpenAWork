@@ -26,6 +26,7 @@ export { createAgentProfilesClient } from './agent-profiles.js';
 export type { AgentProfileRecord, AgentProfilesClient } from './agent-profiles.js';
 export { createTeamClient } from './team.js';
 export type {
+  CreateTeamWorkspaceInput,
   CreateTeamMemberInput,
   CreateTeamMessageInput,
   CreateTeamSessionShareInput,
@@ -38,6 +39,10 @@ export type {
   TeamRuntimeSessionRecord,
   TeamSessionShareRecord,
   TeamTaskRecord,
+  TeamWorkspaceDetail,
+  TeamWorkspaceSummary,
+  TeamWorkspaceVisibility,
+  UpdateTeamWorkspaceInput,
   UpdateTeamTaskInput,
 } from './team.js';
 export { createWorkflowsClient } from './workflows.js';
