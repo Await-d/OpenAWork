@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { FileDiffContent, RunEvent } from '@openAwork/shared';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
-import { appendSessionMessage, truncateSessionMessagesAfter } from '../session-message-store.js';
+import {
+  appendSessionMessageV2 as appendSessionMessage,
+  truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
+  approveToolPermission,
+  rejectToolPermission,
+} from '../message-v2-adapter.js';
 import {
   persistSessionRunEventForRequest,
   subscribeSessionRunEvents,
@@ -202,7 +207,6 @@ async function continueFromApprovedToolResult(input: {
           observability,
         }),
       ],
-      legacyMessagesJson: sessionContext.legacyMessagesJson,
       clientRequestId: createToolResultRequestId(
         input.payload.clientRequestId,
         input.initialToolResult.toolCallId,
@@ -435,6 +439,14 @@ export async function resumeApprovedPermissionRequest(input: {
 }): Promise<void> {
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
+    // V2: Transition ToolPart from pending → running before executing
+    approveToolPermission({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      callID: input.payload.toolCallId,
+      title: input.payload.toolName,
+    });
+
     const sandbox = createDefaultSandbox();
     const toolResult = await sandbox.execute(
       {
@@ -470,6 +482,13 @@ export async function resumeApprovedPermissionRequest(input: {
       userId: input.userId,
     });
   } catch (error) {
+    // V2: Transition ToolPart to error state on failure
+    rejectToolPermission({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      callID: input.payload.toolCallId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     await reconcileResumedTaskChildSession({
       childSessionId: input.sessionId,
       pendingInteraction: false,
