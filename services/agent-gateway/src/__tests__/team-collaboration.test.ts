@@ -106,16 +106,22 @@ beforeEach(async () => {
           member_name: '林雾',
           member_email: 'linwu@openawork.local',
           label: '设计讨论',
-          session_metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+          session_metadata_json: JSON.stringify({
+            teamWorkspaceId: 'workspace-1',
+            workingDirectory: '/repo/apps/web',
+          }),
         },
       ];
     }
-    if (sql.includes('FROM sessions WHERE user_id')) {
+    if (sql.includes('FROM sessions') && sql.includes('WHERE user_id')) {
       return [
         {
           id: 'session-1',
           title: '设计讨论',
-          metadata_json: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
+          metadata_json: JSON.stringify({
+            teamWorkspaceId: 'workspace-1',
+            workingDirectory: '/repo/apps/web',
+          }),
           updated_at: '2026-03-22T01:00:00.000Z',
         },
         {
@@ -209,10 +215,10 @@ beforeEach(async () => {
         id: 'shared-session-1',
         title: '上线回顾',
         stateStatus: 'paused',
-        workspacePath: '/repo/apps/api',
+        workspacePath: '/repo/apps/web',
         createdAt: '2026-04-04T03:00:00.000Z',
         updatedAt: '2026-04-04T03:30:00.000Z',
-        metadataJson: JSON.stringify({ workingDirectory: '/repo/apps/api' }),
+        metadataJson: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
       },
       ownerUserId: 'owner-1',
       permission: 'comment',
@@ -291,6 +297,37 @@ describe('teamRoutes collaboration slice', () => {
     expect(res.json()).toMatchObject({
       state_status: 'idle',
       title: 'Web 工作区',
+    });
+  });
+
+  it('loads a workspace-scoped team snapshot', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/team/workspaces/workspace-1/runtime',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      workspace: {
+        id: 'workspace-1',
+        defaultWorkingRoot: '/repo/apps/web',
+      },
+      sessions: [
+        expect.objectContaining({
+          id: 'session-1',
+          workspacePath: '/repo/apps/web',
+        }),
+      ],
+      sharedSessions: [
+        expect.objectContaining({
+          sessionId: 'shared-session-1',
+        }),
+      ],
+      sessionShares: [
+        expect.objectContaining({
+          sessionId: 'session-1',
+        }),
+      ],
     });
   });
 
@@ -515,7 +552,7 @@ describe('teamRoutes collaboration slice', () => {
       members: [expect.objectContaining({ id: 'member-1', name: '林雾' })],
       tasks: [expect.objectContaining({ id: 'task-1', title: '实现协同状态流' })],
       messages: [expect.objectContaining({ id: 'msg-1', content: '任务已认领' })],
-      runtimeTaskGroups: [expect.objectContaining({ workspacePath: '/repo/apps/api' })],
+      runtimeTaskGroups: [expect.objectContaining({ workspacePath: '/repo/apps/web' })],
       sessionShares: [expect.objectContaining({ id: 'share-1', workspacePath: '/repo/apps/web' })],
       sessions: [
         expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' }),
@@ -523,7 +560,7 @@ describe('teamRoutes collaboration slice', () => {
         expect.objectContaining({ id: 'session-3', workspacePath: '/repo/apps/web' }),
       ],
       sharedSessions: [
-        expect.objectContaining({ sessionId: 'shared-session-1', workspacePath: '/repo/apps/api' }),
+        expect.objectContaining({ sessionId: 'shared-session-1', workspacePath: '/repo/apps/web' }),
       ],
       auditLogs: [expect.objectContaining({ action: 'share_created', entityId: 'share-1' })],
     });

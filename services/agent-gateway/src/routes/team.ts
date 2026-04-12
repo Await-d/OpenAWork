@@ -151,6 +151,13 @@ interface MessageRow {
   created_at: string;
 }
 
+interface TeamRuntimeTaskGroupRecord {
+  sessionIds: string[];
+  tasks: Awaited<ReturnType<typeof buildMergedSessionTaskProjection>>['tasks'];
+  updatedAt: number;
+  workspacePath: string | null;
+}
+
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
   const normalizeMemberStatus = (status: string): 'idle' | 'working' | 'done' | 'error' => {
     if (status === 'working' || status === 'done' || status === 'error') return status;
@@ -216,6 +223,59 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+
+  const mapRuntimeSessionRow = (userId: string, row: SessionRow) => ({
+    id: row.id,
+    metadataJson: row.metadata_json,
+    parentSessionId:
+      typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
+        ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
+        : null,
+    title: row.title ?? null,
+    updatedAt: row.updated_at,
+    workspacePath: getWorkspacePathFromMetadataJson({
+      metadataJson: row.metadata_json,
+      sessionId: row.id,
+      userId,
+    }),
+  });
+
+  const buildWorkspaceRuntimeTaskGroups = async (input: {
+    sessionRows: SessionRow[];
+    teamWorkspaceId: string;
+    userId: string;
+  }): Promise<TeamRuntimeTaskGroupRecord[]> => {
+    const scopedSessionRows = input.sessionRows.filter((row) => {
+      const metadata = parseSessionMetadataJson(row.metadata_json);
+      return metadata['teamWorkspaceId'] === input.teamWorkspaceId;
+    });
+
+    return mergeRuntimeTaskGroups(
+      await Promise.all(
+        scopedSessionRows.map(async (row) => {
+          const workspacePath = getWorkspacePathFromMetadataJson({
+            metadataJson: row.metadata_json,
+            sessionId: row.id,
+            userId: input.userId,
+          });
+          const includedSessionIds = new Set(scopedSessionRows.map((sessionRow) => sessionRow.id));
+
+          const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
+            includedSessionIds,
+            sessions: input.sessionRows,
+            sessionId: row.id,
+          });
+
+          return {
+            sessionIds: [row.id],
+            tasks: tasks.filter((task) => task.status !== 'cancelled'),
+            updatedAt,
+            workspacePath,
+          };
+        }),
+      ),
+    );
+  };
 
   app.get(
     '/team/workspaces',
@@ -486,6 +546,117 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get(
+    '/team/workspaces/:teamWorkspaceId/runtime',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step, child } = startRequestWorkflow(
+        request,
+        'team.workspace-runtime.get',
+        undefined,
+        {
+          teamWorkspaceId,
+        },
+      );
+      const user = request.user as JwtPayload;
+
+      const workspaceStep = child('workspace');
+      const workspace = sqliteGet<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ? AND id = ?
+         LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      if (!workspace) {
+        workspaceStep.fail('workspace not found');
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+      workspaceStep.succeed();
+
+      const sessionsStep = child('sessions');
+      const allSessionRows = sqliteAll<SessionRow>(
+        `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+         FROM sessions
+         WHERE user_id = ?
+         ORDER BY updated_at DESC`,
+        [user.sub],
+      );
+      const scopedSessionRows = allSessionRows.filter((row) => {
+        const metadata = parseSessionMetadataJson(row.metadata_json);
+        return metadata['teamWorkspaceId'] === teamWorkspaceId;
+      });
+      sessionsStep.succeed(undefined, { count: scopedSessionRows.length });
+
+      const sharesStep = child('session-shares');
+      const scopedSessionIds = new Set(scopedSessionRows.map((row) => row.id));
+      const shareRows = sqliteAll<SessionShareRow>(
+        `SELECT
+           ss.id,
+           ss.session_id,
+           ss.member_id,
+           ss.permission,
+           ss.created_at,
+           ss.updated_at,
+           tm.name AS member_name,
+           tm.email AS member_email,
+           sess.title AS label,
+           sess.metadata_json AS session_metadata_json
+         FROM session_shares ss
+         JOIN team_members tm ON tm.id = ss.member_id
+         JOIN sessions sess ON sess.id = ss.session_id
+         WHERE ss.user_id = ?
+         ORDER BY ss.created_at DESC`,
+        [user.sub],
+      ).filter((row) => scopedSessionIds.has(row.session_id));
+      sharesStep.succeed(undefined, { count: shareRows.length });
+
+      const sharedSessionsStep = child('shared-with-me');
+      const sharedSessionAccessRecords = listSharedSessionsForRecipient({
+        email: user.email,
+        limit: 24,
+        offset: 0,
+      }).filter((record) => record.session.workspacePath === workspace.default_working_root);
+      const sharedSessions = sharedSessionAccessRecords.map((sharedSession) => ({
+        sessionId: sharedSession.session.id,
+        title: sharedSession.session.title,
+        stateStatus: sharedSession.session.stateStatus,
+        workspacePath: sharedSession.session.workspacePath,
+        sharedByEmail: sharedSession.sharedByEmail,
+        permission: sharedSession.permission,
+        createdAt: sharedSession.session.createdAt,
+        updatedAt: sharedSession.session.updatedAt,
+        shareCreatedAt: sharedSession.shareCreatedAt,
+        shareUpdatedAt: sharedSession.shareUpdatedAt,
+      }));
+      sharedSessionsStep.succeed(undefined, { count: sharedSessions.length });
+
+      const runtimeTaskGroupsStep = child('runtime-task-groups');
+      const runtimeTaskGroups = await buildWorkspaceRuntimeTaskGroups({
+        sessionRows: allSessionRows,
+        teamWorkspaceId,
+        userId: user.sub,
+      });
+      runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
+
+      step.succeed(undefined, {
+        sessionCount: scopedSessionRows.length,
+        sharedSessionCount: sharedSessions.length,
+        teamWorkspaceId,
+      });
+
+      return reply.send({
+        runtimeTaskGroups,
+        sessionShares: shareRows.map((row) => mapSessionShareRow(user.sub, row)),
+        sessions: scopedSessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
+        sharedSessions,
+        workspace: mapWorkspaceRow(workspace),
+      });
+    },
+  );
+
+  app.get(
     '/team/runtime',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -628,21 +799,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           timestamp: Date.parse(row.created_at) || Date.now(),
         })),
         sessionShares: shareRows.map((row) => mapSessionShareRow(user.sub, row)),
-        sessions: sessionRows.map((row) => ({
-          id: row.id,
-          metadataJson: row.metadata_json,
-          parentSessionId:
-            typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
-              ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
-              : null,
-          title: row.title ?? null,
-          updatedAt: row.updated_at,
-          workspacePath: getWorkspacePathFromMetadataJson({
-            metadataJson: row.metadata_json,
-            sessionId: row.id,
-            userId: user.sub,
-          }),
-        })),
+        sessions: sessionRows.map((row) => mapRuntimeSessionRow(user.sub, row)),
         sharedSessions,
         runtimeTaskGroups,
         tasks: taskRows.map((row) => ({
