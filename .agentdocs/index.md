@@ -2,8 +2,6 @@
 
 ## 活跃工作流
 
-- [260410-团队页统一开发主计划](./workflow/260410-团队页统一开发主计划.md) — TeamPage 当前唯一入口文档：2026-04-12 起主线已调整为先冻结 Team / Personal / Shared 三域边界，再恢复页面与网关实现
-- [260412-Team详细任务实施方案](./workflow/260412-Team详细任务实施方案.md) — 把 Team 重整进一步细化为实施阶段、模块批次、第一批受影响文件、前端状态替换顺序、风险点与验证策略
 - [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
@@ -15,6 +13,8 @@
 
 ## 归档工作流（已完成）
 
+- [260410-团队页统一开发主计划](./workflow/done/260410-团队页统一开发主计划.md) — 已完成 TeamPage 主线冻结：A-E 全部收口为 Team / Personal / Shared 三域边界、迁移顺序、桥接模型与实现恢复 gate
+- [260412-Team详细任务实施方案](./workflow/done/260412-Team详细任务实施方案.md) — 已完成与主计划配套的实施颗粒度收口：热点文件、阶段任务、风险与验证口径已全部对齐并归档
 - [260405-仓库级稳定性收口](./workflow/done/260405-仓库级稳定性收口.md) — 已完成从 Buddy 链路扩展到仓库级验证闭环：根级 `pnpm typecheck` 与 `pnpm test` 全通过
 - [260405-chat-pr触发与恢复read-model实施](./workflow/done/260405-chat-pr触发与恢复read-model实施.md) — 已完成 chat 恢复链的下一轮收口：高风险 PR 自动触发 live gate，且 Web 主恢复链正式切到 `GET /sessions/:id/recovery` 聚合读取
 - [260405-buddy-语音参数与默认回退](./workflow/done/260405-buddy-语音参数与默认回退.md) — 已完成 Buddy-Agent 绑定的最后一层补全：绑定级语音参数生效，未绑定 Agent 统一回退到同一个默认 Buddy 人格
