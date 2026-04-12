@@ -139,16 +139,26 @@ export interface TeamRuntimeSessionRecord {
   workspacePath: string | null;
 }
 
+export interface TeamRuntimeTaskGroupRecord {
+  sessionIds: string[];
+  tasks: SessionTask[];
+  updatedAt: number;
+  workspacePath: string | null;
+}
+
+export interface TeamWorkspaceSnapshot {
+  workspace: TeamWorkspaceDetail;
+  sessions: TeamRuntimeSessionRecord[];
+  sharedSessions: SharedSessionSummaryRecord[];
+  sessionShares: TeamSessionShareRecord[];
+  runtimeTaskGroups: TeamRuntimeTaskGroupRecord[];
+}
+
 export interface TeamRuntimeReadModel {
   auditLogs: TeamAuditLogRecord[];
   members: TeamMemberRecord[];
   messages: TeamMessageRecord[];
-  runtimeTaskGroups: Array<{
-    sessionIds: string[];
-    tasks: SessionTask[];
-    updatedAt: number;
-    workspacePath: string | null;
-  }>;
+  runtimeTaskGroups: TeamRuntimeTaskGroupRecord[];
   sessionShares: TeamSessionShareRecord[];
   sessions: TeamRuntimeSessionRecord[];
   sharedSessions: SharedSessionSummaryRecord[];
@@ -169,6 +179,7 @@ export interface TeamClient {
     teamWorkspaceId: string,
     input?: CreateTeamThreadInput,
   ): Promise<Session>;
+  getWorkspaceSnapshot(token: string, teamWorkspaceId: string): Promise<TeamWorkspaceSnapshot>;
   getRuntime(token: string): Promise<TeamRuntimeReadModel>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
@@ -280,6 +291,22 @@ export function createTeamClient(baseUrl: string): TeamClient {
         throw new Error(`Failed to create team thread: ${response.status}`);
       }
       return (await response.json()) as Session;
+    },
+
+    async getWorkspaceSnapshot(
+      token: string,
+      teamWorkspaceId: string,
+    ): Promise<TeamWorkspaceSnapshot> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/runtime`,
+        {
+          headers: buildAuthHeaders(token),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load team workspace snapshot: ${response.status}`);
+      }
+      return (await response.json()) as TeamWorkspaceSnapshot;
     },
 
     async getRuntime(token: string): Promise<TeamRuntimeReadModel> {

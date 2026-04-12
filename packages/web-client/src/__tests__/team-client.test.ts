@@ -162,4 +162,33 @@ describe('team client runtime APIs', () => {
     );
     expect(thread.id).toBe('session-1');
   });
+
+  it('loads a workspace-scoped team snapshot', async () => {
+    fetchMock.mockResolvedValue(
+      createJsonResponse(200, {
+        workspace: {
+          id: 'workspace-1',
+          name: 'Web 工作区',
+          description: '负责 Web Team Runtime',
+          visibility: 'private',
+          defaultWorkingRoot: '/repo/apps/web',
+          createdByUserId: 'user-1',
+          createdAt: '2026-03-22T00:00:00.000Z',
+          updatedAt: '2026-03-22T01:00:00.000Z',
+        },
+        sessions: [],
+        sharedSessions: [],
+        sessionShares: [],
+        runtimeTaskGroups: [],
+      }),
+    );
+
+    const client = createTeamClient('http://gateway.test');
+    const snapshot = await client.getWorkspaceSnapshot('token-1', 'workspace-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://gateway.test/team/workspaces/workspace-1/runtime',
+    );
+    expect(snapshot.workspace.id).toBe('workspace-1');
+  });
 });
