@@ -5,6 +5,7 @@ import type {
   TeamTaskRecord,
   TeamWorkspaceDetail,
 } from '@openAwork/web-client';
+import { createTeamClient } from '@openAwork/web-client';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useNavigate } from 'react-router';
 import { useAuthStore } from '../../../stores/auth.js';
@@ -405,6 +406,7 @@ export function useResolvedTeamRuntimeReferenceData(
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const navigate = useNavigate();
+  const teamClient = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
   const collaboration = useTeamCollaboration();
   const roleBindings = useTeamRuntimeRoleBindings();
   const workflowTemplates = useTeamWorkflowTemplates();
@@ -455,12 +457,23 @@ export function useResolvedTeamRuntimeReferenceData(
 
   const createSession = useCallback(
     async (workspacePath?: string | null) => {
-      if (!accessToken || activeWorkspace) {
+      if (!accessToken) {
         return false;
       }
 
       setSessionActionBusy(true);
       try {
+        if (activeWorkspace) {
+          const session = await teamClient.createThread(accessToken, activeWorkspace.id, {
+            metadata: workspacePath ? { workingDirectory: workspacePath } : undefined,
+          });
+          if (!session.id) {
+            return false;
+          }
+          await collaboration.refresh();
+          return true;
+        }
+
         const session = await createSessionsClient(gatewayUrl).create(accessToken, {
           metadata: workspacePath ? { workingDirectory: workspacePath } : {},
         });
@@ -475,7 +488,7 @@ export function useResolvedTeamRuntimeReferenceData(
         setSessionActionBusy(false);
       }
     },
-    [accessToken, activeWorkspace, gatewayUrl, navigate],
+    [accessToken, activeWorkspace, collaboration, gatewayUrl, navigate, teamClient],
   );
 
   const createTask = useCallback(
@@ -1089,7 +1102,7 @@ export function useResolvedTeamRuntimeReferenceData(
       activeMode: 'live',
       activityStats,
       busy: collaboration.busy || sessionActionBusy,
-      canCreateSession: activeWorkspace == null,
+      canCreateSession: true,
       canCreateTemplate: workflowTemplates.canCreateTemplate,
       canManageRuntime: false,
       canManageSessionEntries: false,

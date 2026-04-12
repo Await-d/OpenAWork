@@ -269,6 +269,21 @@ beforeEach(() => {
         } as Response;
       }
 
+      if (url.pathname.endsWith('/team/workspaces/workspace-1/threads')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'team-thread-1',
+            title: 'OpenAWork',
+            state_status: 'idle',
+            metadata_json: JSON.stringify({
+              teamWorkspaceId: 'workspace-1',
+              workingDirectory: '/home/await/project/OpenAWork',
+            }),
+          }),
+        } as Response;
+      }
+
       if (url.pathname.endsWith('/sessions/shared-with-me/team-session-1')) {
         return {
           ok: true,
@@ -695,5 +710,44 @@ describe('App routing', () => {
 
     expect(createTemplateCalls).toBe(1);
     expect(workflowTemplates.some((template) => template.name === '研究协作剧本')).toBe(true);
+  });
+
+  it('creates a team-owned thread from the workspace route', async () => {
+    const { default: App } = await import('./App.js');
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team/workspace-1']}>
+          <App />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const createSessionButton = container?.querySelector(
+      'button[title="新建团队会话"]',
+    ) as HTMLButtonElement | null;
+    expect(createSessionButton).toBeTruthy();
+
+    await act(async () => {
+      createSessionButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const fetchMock = globalThis.fetch as unknown as {
+      mock: { calls: Array<[string | URL | Request, RequestInit | undefined]> };
+    };
+    expect(
+      fetchMock.mock.calls.some(([input, init]) => {
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl, 'http://localhost:3000');
+        const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
+        return method === 'POST' && url.pathname === '/team/workspaces/workspace-1/threads';
+      }),
+    ).toBe(true);
   });
 });
