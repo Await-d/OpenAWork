@@ -6,7 +6,7 @@ import type { RequestOverrides } from '@openAwork/agent-core';
 import { PDFParse } from 'pdf-parse';
 import { z } from 'zod';
 import { sqliteGet, sqliteRun } from './db.js';
-import { appendSessionMessage } from './session-message-store.js';
+import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-adapter.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 import { getProviderConfigForSelection } from './provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from './model-router.js';
