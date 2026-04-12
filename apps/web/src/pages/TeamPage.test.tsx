@@ -3,7 +3,17 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('./team/runtime/OfficeThreeCanvas.js', () => ({
+  OfficeThreeCanvas: () => (
+    <div data-testid="office-three-canvas">
+      <span>场景控制</span>
+      <span>当前缩放100%</span>
+      <span>POWER_BAR</span>
+    </div>
+  ),
+}));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -23,7 +33,7 @@ async function renderPage() {
 
 async function clickTab(label: string) {
   const button = Array.from(container?.querySelectorAll('button') ?? []).find((candidate) =>
-    candidate.textContent?.includes(label),
+    candidate.textContent?.trim().startsWith(label),
   ) as HTMLButtonElement | undefined;
 
   expect(button).toBeTruthy();
@@ -76,22 +86,22 @@ describe('TeamPage office reference layout', () => {
     expect(container?.textContent).toContain('[L] 团队负责人');
     expect(container?.textContent).toContain('研究员A');
     expect(container?.textContent).toContain('批评者');
-    expect(container?.textContent).toContain('办公室安全提示');
+    expect(container?.textContent).toContain('场景信息');
   });
 
   it('switches top tabs to the other placeholder panels', async () => {
     await renderPage();
 
     await clickTab('对话');
-    expect(container?.textContent).toContain('团队对话流');
-    expect(container?.textContent).toContain('最近提问');
+    expect(container?.textContent).toContain('团队对话');
+    expect(container?.textContent).toContain('提问');
 
     await clickTab('任务');
     expect(container?.textContent).toContain('待办');
     expect(container?.textContent).toContain('进行中');
 
     await clickTab('消息');
-    expect(container?.textContent).toContain('TeamBus');
+    expect(container?.textContent).toContain('消息总线');
 
     await clickTab('状态总览');
     expect(container?.textContent).toContain('状态总览');

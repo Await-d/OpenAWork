@@ -32,6 +32,16 @@ vi.mock('./components/SplashScreen.js', () => ({
   default: () => null,
 }));
 
+vi.mock('./pages/team/runtime/OfficeThreeCanvas.js', () => ({
+  OfficeThreeCanvas: () => (
+    <div data-testid="office-three-canvas">
+      <span>场景控制</span>
+      <span>当前缩放100%</span>
+      <span>POWER_BAR</span>
+    </div>
+  ),
+}));
+
 vi.mock('@openAwork/shared-ui', async () => {
   const actual =
     await vi.importActual<typeof import('@openAwork/shared-ui')>('@openAwork/shared-ui');
@@ -221,6 +231,40 @@ beforeEach(() => {
                 updatedAt: '2026-04-04T00:00:00.000Z',
               },
             ],
+          }),
+        } as Response;
+      }
+
+      if (url.pathname.endsWith('/team/workspaces')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 'workspace-1',
+              name: 'OpenAWork',
+              description: '默认 TeamWorkspace',
+              visibility: 'private',
+              defaultWorkingRoot: '/home/await/project/OpenAWork',
+              createdByUserId: 'user-1',
+              createdAt: '2026-04-04T00:00:00.000Z',
+              updatedAt: '2026-04-04T00:00:00.000Z',
+            },
+          ],
+        } as Response;
+      }
+
+      if (url.pathname.endsWith('/team/workspaces/workspace-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'workspace-1',
+            name: 'OpenAWork',
+            description: '默认 TeamWorkspace',
+            visibility: 'private',
+            defaultWorkingRoot: '/home/await/project/OpenAWork',
+            createdByUserId: 'user-1',
+            createdAt: '2026-04-04T00:00:00.000Z',
+            updatedAt: '2026-04-04T00:00:00.000Z',
           }),
         } as Response;
       }
@@ -555,6 +599,25 @@ describe('App routing', () => {
     expect(container?.textContent).toContain('林雾');
   });
 
+  it('renders the team page on /team/:teamWorkspaceId', async () => {
+    const { default: App } = await import('./App.js');
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team/workspace-1']}>
+          <App />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForText('研究团队-2026-03-31');
+    expect(container?.querySelector('[data-testid="layout-shell"]')).toBeTruthy();
+    expect(container?.textContent).toContain('AGENT TEAMS');
+  });
+
   it('creates a team template through the Team page modal', async () => {
     const { default: App } = await import('./App.js');
 
@@ -571,9 +634,19 @@ describe('App routing', () => {
 
     await waitForText('AGENT TEAMS');
 
-    const openTemplateButton = container?.querySelector(
-      'button[title="选择模板后新建团队"]',
+    const openTeamsTab = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.trim().startsWith('团队'),
     ) as HTMLButtonElement | null;
+    expect(openTeamsTab).toBeTruthy();
+
+    await act(async () => {
+      openTeamsTab?.click();
+      await Promise.resolve();
+    });
+
+    const openTemplateButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.includes('新建团队模板'),
+    ) as HTMLButtonElement | undefined;
     expect(openTemplateButton).toBeTruthy();
 
     await act(async () => {

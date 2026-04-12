@@ -1,5 +1,10 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import type { TeamTaskRecord, TeamMessageRecord, TeamAuditLogRecord } from '@openAwork/web-client';
+import type {
+  TeamAuditLogRecord,
+  TeamMessageRecord,
+  TeamTaskRecord,
+  TeamWorkspaceDetail,
+} from '@openAwork/web-client';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useNavigate } from 'react-router';
 import { useAuthStore } from '../../../stores/auth.js';
@@ -99,6 +104,12 @@ export interface TeamRuntimeReferenceViewData {
   submitReviewComment: (cardId: string, content: string) => Promise<boolean>;
   selectTeam: (teamId: string) => void;
   sendMessage: (input: { content: string; type?: TeamMessageRecord['type'] }) => Promise<boolean>;
+}
+
+interface TeamRuntimeReferenceDataOptions {
+  activeWorkspace?: TeamWorkspaceDetail | null;
+  workspaceError?: string | null;
+  workspaceLoading?: boolean;
 }
 
 const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewData | null>(null);
@@ -385,7 +396,12 @@ export function useTeamRuntimeReferenceViewData(): TeamRuntimeReferenceViewData 
   return useContext(TeamRuntimeReferenceDataContext) ?? MOCK_VIEW_DATA;
 }
 
-export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewData {
+export function useResolvedTeamRuntimeReferenceData(
+  options: TeamRuntimeReferenceDataOptions = {},
+): TeamRuntimeReferenceViewData {
+  const activeWorkspace = options.activeWorkspace ?? null;
+  const workspaceError = options.workspaceError ?? null;
+  const workspaceLoading = options.workspaceLoading ?? false;
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const navigate = useNavigate();
@@ -439,7 +455,7 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
 
   const createSession = useCallback(
     async (workspacePath?: string | null) => {
-      if (!accessToken) {
+      if (!accessToken || activeWorkspace) {
         return false;
       }
 
@@ -459,7 +475,7 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
         setSessionActionBusy(false);
       }
     },
-    [accessToken, gatewayUrl, navigate],
+    [accessToken, activeWorkspace, gatewayUrl, navigate],
   );
 
   const createTask = useCallback(
@@ -643,10 +659,32 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
       }));
     })();
 
-    const allSidebarTeams = workspaceGroups.flatMap((group) => group.sessions);
+    const effectiveWorkspaceGroups = (() => {
+      if (!activeWorkspace?.defaultWorkingRoot) {
+        return workspaceGroups;
+      }
+
+      const filteredGroups = workspaceGroups.filter(
+        (group) => group.workspacePath === activeWorkspace.defaultWorkingRoot,
+      );
+
+      return filteredGroups.length > 0 ? filteredGroups : workspaceGroups;
+    })();
+
+    const allSidebarTeams = effectiveWorkspaceGroups.flatMap((group) => group.sessions);
     const runningTeams = allSidebarTeams.filter((team) => team.status === 'running');
     const historyTeams = allSidebarTeams.filter((team) => team.status !== 'running');
+    const preferredWorkspacePath = activeWorkspace?.defaultWorkingRoot ?? null;
     const defaultSelectedTeamId =
+      collaboration.sharedSessions.find(
+        (session) =>
+          session.sessionId === collaboration.selectedSharedSessionId &&
+          (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
+      )?.sessionId ??
+      collaboration.sharedSessions.find(
+        (session) =>
+          preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
+      )?.sessionId ??
       collaboration.selectedSharedSessionId ??
       runningTeams[0]?.id ??
       historyTeams[0]?.id ??
@@ -1051,7 +1089,7 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
       activeMode: 'live',
       activityStats,
       busy: collaboration.busy || sessionActionBusy,
-      canCreateSession: true,
+      canCreateSession: activeWorkspace == null,
       canCreateTemplate: workflowTemplates.canCreateTemplate,
       canManageRuntime: false,
       canManageSessionEntries: false,
@@ -1061,7 +1099,7 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
       createTask,
       defaultSelectedAgentId: roleChips[0]?.id ?? MOCK_VIEW_DATA.defaultSelectedAgentId,
       defaultSelectedTeamId,
-      error: collaboration.error,
+      error: workspaceError ?? collaboration.error,
       feedback: collaboration.feedback,
       footerLead: `活跃 ${projection.buddyProjection.activeAgentCount} / 共 ${collaboration.members.length}`,
       footerStats: [
@@ -1071,7 +1109,7 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
         { label: '异常', value: String(failedTaskCount) },
       ],
       historyTeams,
-      loading: collaboration.loading || roleBindings.loading,
+      loading: collaboration.loading || roleBindings.loading || workspaceLoading,
       messageCards,
       metricCards,
       moveTask,
@@ -1093,17 +1131,20 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
       timelineEvents,
       topSummary: {
         description:
-          selectedSharedSummary != null
-            ? `${formatWorkspaceLabel(selectedSharedSummary.workspacePath)} · ${projection.workspaceOverviewLines[0] ?? '已接入真实 Team Runtime 视图。'}`
-            : '当前已切换到真实 Team Runtime 数据源，等待第一条共享运行进入。',
+          activeWorkspace != null
+            ? `${activeWorkspace.name} · ${activeWorkspace.defaultWorkingRoot ?? '未绑定默认工作区'}`
+            : selectedSharedSummary != null
+              ? `${formatWorkspaceLabel(selectedSharedSummary.workspacePath)} · ${projection.workspaceOverviewLines[0] ?? '已接入真实 Team Runtime 视图。'}`
+              : '当前已切换到真实 Team Runtime 数据源，等待第一条共享运行进入。',
         memberCount: `${collaboration.members.length} 成员`,
         onlineCount: `${onlineCount} 在线`,
         status: selectedSharedSummary?.stateStatus === 'paused' ? '已暂停' : '运行中',
-        title: selectedSharedSummary?.title ?? '团队工作空间',
+        title: activeWorkspace?.name ?? selectedSharedSummary?.title ?? '团队工作空间',
       },
-      workspaceGroups,
+      workspaceGroups: effectiveWorkspaceGroups,
     } satisfies TeamRuntimeReferenceViewData;
   }, [
+    activeWorkspace,
     collaboration.auditLogs,
     collaboration.busy,
     createSession,
@@ -1139,6 +1180,8 @@ export function useResolvedTeamRuntimeReferenceData(): TeamRuntimeReferenceViewD
     selectTeam,
     sendMessage,
     submitReviewComment,
+    workspaceError,
+    workspaceLoading,
   ]);
 
   return liveValue;

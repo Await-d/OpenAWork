@@ -1,11 +1,19 @@
+import { useParams } from 'react-router';
 import { TeamRuntimeReferencePage } from './team/runtime/team-runtime-reference-page.js';
 import {
   TeamRuntimeReferenceDataProvider,
   useResolvedTeamRuntimeReferenceData,
 } from './team/runtime/team-runtime-reference-data.js';
+import { useTeamWorkspaceState } from './team/use-team-workspace-state.js';
 
 export default function TeamPage() {
-  const data = useResolvedTeamRuntimeReferenceData();
+  const { teamWorkspaceId } = useParams<{ teamWorkspaceId?: string }>();
+  const workspaceState = useTeamWorkspaceState(teamWorkspaceId);
+  const data = useResolvedTeamRuntimeReferenceData({
+    activeWorkspace: workspaceState.activeWorkspace,
+    workspaceError: workspaceState.error,
+    workspaceLoading: workspaceState.loading,
+  });
 
   return (
     <TeamRuntimeReferenceDataProvider value={data}>

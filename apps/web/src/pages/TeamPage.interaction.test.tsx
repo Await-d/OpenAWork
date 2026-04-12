@@ -3,7 +3,17 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('./team/runtime/OfficeThreeCanvas.js', () => ({
+  OfficeThreeCanvas: () => (
+    <div data-testid="office-three-canvas">
+      <span>场景控制</span>
+      <span>当前缩放100%</span>
+      <span>POWER_BAR</span>
+    </div>
+  ),
+}));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
