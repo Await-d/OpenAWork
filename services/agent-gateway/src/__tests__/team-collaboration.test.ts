@@ -42,6 +42,20 @@ beforeEach(async () => {
   vi.clearAllMocks();
   let currentSharePermission: 'view' | 'comment' | 'operate' = 'comment';
   sqliteAllMock.mockImplementation((sql: string) => {
+    if (sql.includes('FROM team_workspaces')) {
+      return [
+        {
+          id: 'workspace-1',
+          user_id: 'user-1',
+          name: 'Web 工作区',
+          description: '负责 Web Team Runtime',
+          visibility: 'private',
+          default_working_root: '/repo/apps/web',
+          created_at: '2026-03-22T00:00:00.000Z',
+          updated_at: '2026-03-22T01:00:00.000Z',
+        },
+      ];
+    }
     if (sql.includes('FROM team_members')) {
       return [
         {
@@ -136,6 +150,18 @@ beforeEach(async () => {
     return [];
   });
   sqliteGetMock.mockImplementation((sql: string) => {
+    if (sql.includes('FROM team_workspaces')) {
+      return {
+        id: 'workspace-1',
+        user_id: 'user-1',
+        name: 'Web 工作区',
+        description: '负责 Web Team Runtime',
+        visibility: 'private',
+        default_working_root: '/repo/apps/web',
+        created_at: '2026-03-22T00:00:00.000Z',
+        updated_at: '2026-03-22T01:00:00.000Z',
+      };
+    }
     if (sql.includes('FROM team_tasks')) {
       return { id: 'task-1' };
     }
@@ -208,6 +234,51 @@ beforeEach(async () => {
 });
 
 describe('teamRoutes collaboration slice', () => {
+  it('lists team workspaces for the current user', async () => {
+    const res = await app.inject({ method: 'GET', url: '/team/workspaces' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      {
+        id: 'workspace-1',
+        name: 'Web 工作区',
+        description: '负责 Web Team Runtime',
+        visibility: 'private',
+        defaultWorkingRoot: '/repo/apps/web',
+        createdByUserId: 'user-1',
+        createdAt: '2026-03-22T00:00:00.000Z',
+        updatedAt: '2026-03-22T01:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('creates a team workspace root record', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/team/workspaces',
+      payload: {
+        name: 'API 工作区',
+        description: '负责 API Team Runtime',
+        visibility: 'closed',
+        defaultWorkingRoot: '/repo/apps/api',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(sqliteRunMock).toHaveBeenCalled();
+  });
+
+  it('updates a team workspace root record', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/team/workspaces/workspace-1',
+      payload: { description: '更新后的说明' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(sqliteRunMock).toHaveBeenCalled();
+  });
+
   it('updates a team task with assignee/status/result', async () => {
     const res = await app.inject({
       method: 'PATCH',

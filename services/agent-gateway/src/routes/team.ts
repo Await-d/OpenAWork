@@ -19,6 +19,31 @@ const createMemberSchema = z.object({
   avatarUrl: z.string().url().optional(),
 });
 
+const createWorkspaceSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().nullable().optional(),
+  visibility: z.enum(['open', 'closed', 'private']).default('private'),
+  defaultWorkingRoot: z.string().min(1).nullable().optional(),
+});
+
+const updateWorkspaceSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    visibility: z.enum(['open', 'closed', 'private']).optional(),
+    defaultWorkingRoot: z.string().min(1).nullable().optional(),
+  })
+  .refine(
+    (input) =>
+      input.name !== undefined ||
+      input.description !== undefined ||
+      input.visibility !== undefined ||
+      input.defaultWorkingRoot !== undefined,
+    {
+      message: 'At least one field is required',
+    },
+  );
+
 const createTaskSchema = z.object({
   title: z.string().min(1),
   assigneeId: z.string().optional(),
@@ -80,6 +105,17 @@ interface MemberRow {
   avatar_url: string | null;
   status: string;
   created_at: string;
+}
+
+interface TeamWorkspaceRow {
+  created_at: string;
+  default_working_root: string | null;
+  description: string | null;
+  id: string;
+  name: string;
+  updated_at: string;
+  user_id: string;
+  visibility: 'open' | 'closed' | 'private';
 }
 
 interface TaskRow {
@@ -155,6 +191,198 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
        LIMIT 1`,
       [shareId, userId],
     );
+
+  const mapWorkspaceRow = (row: TeamWorkspaceRow) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    visibility: row.visibility,
+    defaultWorkingRoot: row.default_working_root,
+    createdByUserId: row.user_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+
+  app.get(
+    '/team/workspaces',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.workspace.list');
+      const user = request.user as JwtPayload;
+
+      const rowsStep = child('query');
+      const rows = sqliteAll<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ?
+         ORDER BY updated_at DESC, created_at DESC`,
+        [user.sub],
+      );
+      rowsStep.succeed(undefined, { count: rows.length });
+      step.succeed(undefined, { count: rows.length });
+
+      return reply.send(rows.map(mapWorkspaceRow));
+    },
+  );
+
+  app.get(
+    '/team/workspaces/:teamWorkspaceId',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step, child } = startRequestWorkflow(request, 'team.workspace.get', undefined, {
+        teamWorkspaceId,
+      });
+      const user = request.user as JwtPayload;
+
+      const queryStep = child('query');
+      const row = sqliteGet<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ? AND id = ?
+         LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      if (!row) {
+        queryStep.fail('workspace not found');
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+      queryStep.succeed();
+      step.succeed(undefined, { teamWorkspaceId });
+
+      return reply.send(mapWorkspaceRow(row));
+    },
+  );
+
+  app.post(
+    '/team/workspaces',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.workspace.create');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = createWorkspaceSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const teamWorkspaceId = randomUUID();
+      sqliteRun(
+        `INSERT INTO team_workspaces (
+          id,
+          user_id,
+          name,
+          description,
+          visibility,
+          default_working_root
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          teamWorkspaceId,
+          user.sub,
+          body.data.name,
+          body.data.description ?? null,
+          body.data.visibility,
+          body.data.defaultWorkingRoot ?? null,
+        ],
+      );
+
+      const created = sqliteGet<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ? AND id = ?
+         LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      step.succeed(undefined, { teamWorkspaceId });
+
+      return reply.status(201).send(
+        created
+          ? mapWorkspaceRow(created)
+          : {
+              id: teamWorkspaceId,
+              name: body.data.name,
+              description: body.data.description ?? null,
+              visibility: body.data.visibility,
+              defaultWorkingRoot: body.data.defaultWorkingRoot ?? null,
+              createdByUserId: user.sub,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+      );
+    },
+  );
+
+  app.patch(
+    '/team/workspaces/:teamWorkspaceId',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step, child } = startRequestWorkflow(request, 'team.workspace.update', undefined, {
+        teamWorkspaceId,
+      });
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = updateWorkspaceSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const existing = sqliteGet<{ id: string }>(
+        `SELECT id FROM team_workspaces WHERE user_id = ? AND id = ? LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      if (!existing) {
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+
+      const updates: string[] = [];
+      const params: Array<string | null> = [];
+      if (body.data.name !== undefined) {
+        updates.push('name = ?');
+        params.push(body.data.name);
+      }
+      if (body.data.description !== undefined) {
+        updates.push('description = ?');
+        params.push(body.data.description ?? null);
+      }
+      if (body.data.visibility !== undefined) {
+        updates.push('visibility = ?');
+        params.push(body.data.visibility);
+      }
+      if (body.data.defaultWorkingRoot !== undefined) {
+        updates.push('default_working_root = ?');
+        params.push(body.data.defaultWorkingRoot ?? null);
+      }
+      updates.push("updated_at = datetime('now')");
+
+      sqliteRun(`UPDATE team_workspaces SET ${updates.join(', ')} WHERE user_id = ? AND id = ?`, [
+        ...params,
+        user.sub,
+        teamWorkspaceId,
+      ]);
+
+      const updated = sqliteGet<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ? AND id = ?
+         LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      step.succeed(undefined, { teamWorkspaceId });
+
+      return reply.send(updated ? mapWorkspaceRow(updated) : { error: 'Workspace not found' });
+    },
+  );
 
   app.get(
     '/team/runtime',

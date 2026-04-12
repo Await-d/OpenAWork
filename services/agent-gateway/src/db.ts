@@ -527,6 +527,22 @@ export async function migrate(): Promise<void> {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS team_workspaces (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      visibility TEXT NOT NULL DEFAULT 'private',
+      default_working_root TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_workspaces_user_updated ON team_workspaces(user_id, updated_at DESC)',
+  );
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS team_members (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
