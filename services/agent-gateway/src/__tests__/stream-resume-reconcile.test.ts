@@ -63,6 +63,7 @@ vi.mock('../db.js', () => {
     sqliteAll: vi.fn(() => []),
     sqliteGet: () => undefined,
     sqliteRun: () => undefined,
+    sqliteTransaction: (fn: () => unknown) => fn(),
   };
 });
 

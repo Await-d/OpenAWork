@@ -14,8 +14,9 @@ import {
   updateSessionMessagesStatusByRequestScope,
 } from '../session-message-store.js';
 import { buildModifiedFilesSummaryContent } from '../modified-files-summary.js';
-import { persistSessionSnapshot } from '../session-snapshot-store.js';
-import { createRequestSnapshotRef } from '../session-snapshot-store.js';
+import { persistSessionSnapshot, createRequestSnapshotRef } from '../session-snapshot-store.js';
+import { appendSnapshotPart, appendPatchPart } from '../message-v2-adapter.js';
+import type { MessageID } from '../message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
 import { resolveEofRoundDecision } from './stream-completion.js';
 import { isUpstreamContextOverflowError, readUpstreamError } from './upstream-error.js';
@@ -356,7 +357,7 @@ export async function runModelRound(input: {
       reason === 'tool_use' ? undefined : input.turnFileDiffs,
     );
 
-    appendSessionMessage({
+    const assistantMessage = appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',
@@ -382,6 +383,24 @@ export async function runModelRound(input: {
         snapshotRef: createRequestSnapshotRef(input.clientRequestId),
         fileDiffs: Array.from(input.turnFileDiffs.values()),
       });
+
+      // V2 step-level snapshot/patch (opencode pattern)
+      // Each round = one step; create SnapshotPart + PatchPart in V2 message store
+      const snapshotRef = createRequestSnapshotRef(input.clientRequestId);
+      const diffFiles = Array.from(input.turnFileDiffs.values());
+      if (assistantMessage.id) {
+        appendSnapshotPart({
+          sessionId: input.sessionId,
+          messageId: assistantMessage.id as MessageID,
+          snapshotRef,
+        });
+        appendPatchPart({
+          sessionId: input.sessionId,
+          messageId: assistantMessage.id as MessageID,
+          hash: snapshotRef,
+          files: diffFiles.map((d) => d.file),
+        });
+      }
     }
   };
   const markFailedRequestScopeMessages = () => {

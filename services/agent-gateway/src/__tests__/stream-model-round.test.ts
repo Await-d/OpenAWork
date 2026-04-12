@@ -108,6 +108,11 @@ vi.mock('../session-snapshot-store.js', () => ({
   createRequestSnapshotRef: mocks.createRequestSnapshotRefMock,
 }));
 
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSnapshotPart: vi.fn(),
+  appendPatchPart: vi.fn(),
+}));
+
 vi.mock('../routes/stream-completion.js', () => ({
   resolveEofRoundDecision: mocks.resolveEofRoundDecisionMock,
 }));

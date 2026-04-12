@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifyUpstream429Error,
   isUpstreamContextOverflowError,
   readUpstreamError,
   readUpstreamErrorDetail,
 } from '../routes/upstream-error.js';
+
+describe('classifyUpstream429Error', () => {
+  it('detects quota-exceeded 429 details', () => {
+    expect(
+      classifyUpstream429Error(
+        'Upstream request failed (429): You exceeded your current quota, please check your plan and billing details.',
+      ),
+    ).toBe('quota_exceeded');
+  });
+
+  it('detects rate-limit 429 details', () => {
+    expect(classifyUpstream429Error('Upstream request failed (429): rate limit reached')).toBe(
+      'rate_limit',
+    );
+  });
+
+  it('returns unknown when 429 detail matches neither quota nor rate limit patterns', () => {
+    expect(classifyUpstream429Error('Upstream request failed (429): provider overloaded')).toBe(
+      'unknown',
+    );
+  });
+});
 
 describe('readUpstreamErrorDetail', () => {
   it('extracts OpenAI-style nested error messages', async () => {
