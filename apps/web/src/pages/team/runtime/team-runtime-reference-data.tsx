@@ -4,6 +4,7 @@ import type {
   TeamMessageRecord,
   TeamTaskRecord,
   TeamWorkspaceDetail,
+  TeamWorkspaceSnapshot,
 } from '@openAwork/web-client';
 import { createTeamClient } from '@openAwork/web-client';
 import { createSessionsClient } from '@openAwork/web-client';
@@ -109,6 +110,9 @@ export interface TeamRuntimeReferenceViewData {
 
 interface TeamRuntimeReferenceDataOptions {
   activeWorkspace?: TeamWorkspaceDetail | null;
+  activeWorkspaceSnapshot?: TeamWorkspaceSnapshot | null;
+  workspaceSnapshotError?: string | null;
+  workspaceSnapshotLoading?: boolean;
   workspaceError?: string | null;
   workspaceLoading?: boolean;
 }
@@ -401,6 +405,9 @@ export function useResolvedTeamRuntimeReferenceData(
   options: TeamRuntimeReferenceDataOptions = {},
 ): TeamRuntimeReferenceViewData {
   const activeWorkspace = options.activeWorkspace ?? null;
+  const activeWorkspaceSnapshot = options.activeWorkspaceSnapshot ?? null;
+  const workspaceSnapshotError = options.workspaceSnapshotError ?? null;
+  const workspaceSnapshotLoading = options.workspaceSnapshotLoading ?? false;
   const workspaceError = options.workspaceError ?? null;
   const workspaceLoading = options.workspaceLoading ?? false;
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -616,21 +623,77 @@ export function useResolvedTeamRuntimeReferenceData(
     const onlineCount =
       activeViewerCount ||
       collaboration.members.filter((member) => member.status === 'working').length;
+    const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
+    const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
     const selectedSharedSummary =
       collaboration.selectedSharedSession?.share ??
+      snapshotSharedSessions.find(
+        (session) => session.sessionId === collaboration.selectedSharedSessionId,
+      ) ??
       collaboration.sharedSessions.find(
         (session) => session.sessionId === collaboration.selectedSharedSessionId,
       ) ??
+      snapshotSharedSessions[0] ??
       collaboration.sharedSessions[0] ??
       null;
 
     const workspaceGroups = (() => {
-      if (collaboration.sharedSessions.length === 0 && collaboration.sessions.length === 0) {
-        return agentTeamsWorkspaceGroups;
+      if (snapshotSharedSessions.length === 0 && snapshotSessions.length === 0) {
+        if (collaboration.sharedSessions.length === 0 && collaboration.sessions.length === 0) {
+          return agentTeamsWorkspaceGroups;
+        }
+      }
+
+      if (snapshotSharedSessions.length === 0 && snapshotSessions.length === 0) {
+        if (collaboration.sharedSessions.length === 0 && collaboration.sessions.length === 0) {
+          return agentTeamsWorkspaceGroups;
+        }
+
+        const groups = new Map<string, AgentTeamsWorkspaceGroup>();
+        for (const sharedSession of collaboration.sharedSessions) {
+          const key = sharedSession.workspacePath ?? '__unbound__';
+          const current = groups.get(key) ?? {
+            workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
+            workspacePath: sharedSession.workspacePath,
+            sessions: [],
+          };
+          current.sessions.push({
+            id: sharedSession.sessionId,
+            status: mapSidebarStatus(sharedSession.stateStatus),
+            subtitle: `${getSharedSessionStateLabel(sharedSession.stateStatus)} · ${formatRelativeTime(sharedSession.shareUpdatedAt)}`,
+            title: sharedSession.title ?? sharedSession.sessionId,
+          });
+          groups.set(key, current);
+        }
+
+        if (groups.size === 0) {
+          for (const session of collaboration.sessions) {
+            const key = session.workspacePath ?? '__unbound__';
+            const current = groups.get(key) ?? {
+              workspaceLabel: formatWorkspaceLabel(session.workspacePath),
+              workspacePath: session.workspacePath,
+              sessions: [],
+            };
+            current.sessions.push({
+              id: session.id,
+              status: 'completed',
+              subtitle: `最近更新 · ${formatRelativeTime(session.updatedAt)}`,
+              title: session.title ?? session.id,
+            });
+            groups.set(key, current);
+          }
+        }
+
+        return Array.from(groups.values()).map((group) => ({
+          ...group,
+          sessions: [...group.sessions].sort((left, right) =>
+            left.title.localeCompare(right.title, 'zh-CN'),
+          ),
+        }));
       }
 
       const groups = new Map<string, AgentTeamsWorkspaceGroup>();
-      for (const sharedSession of collaboration.sharedSessions) {
+      for (const sharedSession of snapshotSharedSessions) {
         const key = sharedSession.workspacePath ?? '__unbound__';
         const current = groups.get(key) ?? {
           workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
@@ -647,7 +710,7 @@ export function useResolvedTeamRuntimeReferenceData(
       }
 
       if (groups.size === 0) {
-        for (const session of collaboration.sessions) {
+        for (const session of snapshotSessions) {
           const key = session.workspacePath ?? '__unbound__';
           const current = groups.get(key) ?? {
             workspaceLabel: formatWorkspaceLabel(session.workspacePath),
@@ -689,6 +752,19 @@ export function useResolvedTeamRuntimeReferenceData(
     const historyTeams = allSidebarTeams.filter((team) => team.status !== 'running');
     const preferredWorkspacePath = activeWorkspace?.defaultWorkingRoot ?? null;
     const defaultSelectedTeamId =
+      snapshotSharedSessions.find(
+        (session) =>
+          session.sessionId === collaboration.selectedSharedSessionId &&
+          (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
+      )?.sessionId ??
+      snapshotSharedSessions.find(
+        (session) =>
+          preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
+      )?.sessionId ??
+      snapshotSessions.find(
+        (session) =>
+          preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
+      )?.id ??
       collaboration.sharedSessions.find(
         (session) =>
           session.sessionId === collaboration.selectedSharedSessionId &&
@@ -1116,7 +1192,10 @@ export function useResolvedTeamRuntimeReferenceData(
       feedback: collaboration.feedback,
       footerLead: `活跃 ${projection.buddyProjection.activeAgentCount} / 共 ${collaboration.members.length}`,
       footerStats: [
-        { label: '总', value: String(collaboration.sharedSessions.length) },
+        {
+          label: '总',
+          value: String(snapshotSharedSessions.length || collaboration.sharedSessions.length),
+        },
         { label: '运行', value: String(runningTaskCount) },
         { label: '等待', value: String(pendingTaskCount + pendingReviewCount) },
         { label: '异常', value: String(failedTaskCount) },
@@ -1145,7 +1224,7 @@ export function useResolvedTeamRuntimeReferenceData(
       topSummary: {
         description:
           activeWorkspace != null
-            ? `${activeWorkspace.name} · ${activeWorkspace.defaultWorkingRoot ?? '未绑定默认工作区'}`
+            ? `${activeWorkspace.name} · ${activeWorkspace.defaultWorkingRoot ?? '未绑定默认工作区'} · 已切换到 TeamWorkspaceSnapshot 主读链`
             : selectedSharedSummary != null
               ? `${formatWorkspaceLabel(selectedSharedSummary.workspacePath)} · ${projection.workspaceOverviewLines[0] ?? '已接入真实 Team Runtime 视图。'}`
               : '当前已切换到真实 Team Runtime 数据源，等待第一条共享运行进入。',
@@ -1158,6 +1237,7 @@ export function useResolvedTeamRuntimeReferenceData(
     } satisfies TeamRuntimeReferenceViewData;
   }, [
     activeWorkspace,
+    activeWorkspaceSnapshot,
     collaboration.auditLogs,
     collaboration.busy,
     createSession,

@@ -284,6 +284,50 @@ beforeEach(() => {
         } as Response;
       }
 
+      if (url.pathname.endsWith('/team/workspaces/workspace-1/runtime')) {
+        return {
+          ok: true,
+          json: async () => ({
+            workspace: {
+              id: 'workspace-1',
+              name: 'OpenAWork',
+              description: '默认 TeamWorkspace',
+              visibility: 'private',
+              defaultWorkingRoot: '/home/await/project/OpenAWork',
+              createdByUserId: 'user-1',
+              createdAt: '2026-04-04T00:00:00.000Z',
+              updatedAt: '2026-04-04T00:00:00.000Z',
+            },
+            sessions: [
+              {
+                id: 'team-session-1',
+                metadataJson: JSON.stringify({ teamWorkspaceId: 'workspace-1' }),
+                parentSessionId: null,
+                title: '研究团队-2026-03-31',
+                updatedAt: '2026-04-04T00:00:00.000Z',
+                workspacePath: '/home/await/project/OpenAWork',
+              },
+            ],
+            sharedSessions: [
+              {
+                sessionId: 'team-session-1',
+                title: '研究团队-2026-03-31',
+                stateStatus: 'running',
+                workspacePath: '/home/await/project/OpenAWork',
+                sharedByEmail: 'linwu@openawork.local',
+                permission: 'operate',
+                createdAt: '2026-04-04T00:00:00.000Z',
+                updatedAt: '2026-04-04T00:00:00.000Z',
+                shareCreatedAt: '2026-04-04T00:00:00.000Z',
+                shareUpdatedAt: '2026-04-04T00:00:00.000Z',
+              },
+            ],
+            sessionShares: [],
+            runtimeTaskGroups: [],
+          }),
+        } as Response;
+      }
+
       if (url.pathname.endsWith('/sessions/shared-with-me/team-session-1')) {
         return {
           ok: true,
@@ -747,6 +791,33 @@ describe('App routing', () => {
         const url = new URL(rawUrl, 'http://localhost:3000');
         const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
         return method === 'POST' && url.pathname === '/team/workspaces/workspace-1/threads';
+      }),
+    ).toBe(true);
+  });
+
+  it('loads workspace snapshot on /team/:teamWorkspaceId', async () => {
+    const { default: App } = await import('./App.js');
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team/workspace-1']}>
+          <App />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const fetchMock = globalThis.fetch as unknown as {
+      mock: { calls: Array<[string | URL | Request, RequestInit | undefined]> };
+    };
+    expect(
+      fetchMock.mock.calls.some(([input]) => {
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl, 'http://localhost:3000');
+        return url.pathname === '/team/workspaces/workspace-1/runtime';
       }),
     ).toBe(true);
   });
