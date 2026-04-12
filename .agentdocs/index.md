@@ -2,6 +2,7 @@
 
 ## 活跃工作流
 
+- [260412-Team阶段1根边界实施](./workflow/260412-Team阶段1根边界实施.md) — Team 方案冻结后的第一阶段真实实施：先落 TeamWorkspace 根边界、workspace-first 路由锚点与最小 contract，再逐步切换后续读写链
 - [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
