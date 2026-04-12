@@ -90,6 +90,8 @@ import {
 import { hasPendingSessionInteraction } from '../session-runtime-state.js';
 import { expirePendingPermissionRequests } from './permissions.js';
 import { expirePendingQuestionRequests } from './questions.js';
+import { listRuntimeSafeSessionMessagesV2 } from '../message-v2-adapter.js';
+import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
@@ -1037,10 +1039,16 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
         metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
       },
       filterVisibleSessionMessages(
-        listSessionMessages({
-          sessionId: session.id,
-          userId: input.userId,
-          legacyMessagesJson: session.messages_json,
+        mergeRuntimeSafeSessionMessages({
+          legacyMessages: listSessionMessages({
+            sessionId: session.id,
+            userId: input.userId,
+            legacyMessagesJson: session.messages_json,
+          }),
+          runtimeMessages: listRuntimeSafeSessionMessagesV2({
+            sessionId: session.id,
+            userId: input.userId,
+          }),
         }),
       ),
     ),
@@ -1094,10 +1102,16 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
       metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
     },
     filterVisibleSessionMessages(
-      listSessionMessages({
-        sessionId,
-        userId: input.userId,
-        legacyMessagesJson: input.session.messages_json,
+      mergeRuntimeSafeSessionMessages({
+        legacyMessages: listSessionMessages({
+          sessionId,
+          userId: input.userId,
+          legacyMessagesJson: input.session.messages_json,
+        }),
+        runtimeMessages: listRuntimeSafeSessionMessagesV2({
+          sessionId,
+          userId: input.userId,
+        }),
       }),
     ),
     listSessionTodos(sessionId),
@@ -1350,10 +1364,16 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
         },
         filterVisibleSessionMessages(
-          listSessionMessages({
-            sessionId,
-            userId: user.sub,
-            legacyMessagesJson: session.messages_json,
+          mergeRuntimeSafeSessionMessages({
+            legacyMessages: listSessionMessages({
+              sessionId,
+              userId: user.sub,
+              legacyMessagesJson: session.messages_json,
+            }),
+            runtimeMessages: listRuntimeSafeSessionMessagesV2({
+              sessionId,
+              userId: user.sub,
+            }),
           }),
         ),
         todos,

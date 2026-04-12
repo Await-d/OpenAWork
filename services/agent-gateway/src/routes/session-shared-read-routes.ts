@@ -45,7 +45,9 @@ import {
 import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
 import { logTeamAudit } from '../team-audit-store.js';
 import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
+import { listRuntimeSafeSessionMessagesV2 } from '../message-v2-adapter.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
+import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
 
 interface SessionRow {
   created_at: string;
@@ -437,18 +439,24 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         sessionRow,
         sharedAccess.ownerUserId,
       );
+      const sessionMessages = mergeRuntimeSafeSessionMessages({
+        legacyMessages: listSessionMessages({
+          sessionId,
+          userId: sharedAccess.ownerUserId,
+          legacyMessagesJson: sharedAccess.messagesJson,
+        }),
+        runtimeMessages: listRuntimeSafeSessionMessagesV2({
+          sessionId,
+          userId: sharedAccess.ownerUserId,
+        }),
+      });
+
       const session = toPublicSessionResponse(
         {
           ...reconciledSession,
           metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
         },
-        filterVisibleSessionMessages(
-          listSessionMessages({
-            sessionId,
-            userId: sharedAccess.ownerUserId,
-            legacyMessagesJson: sharedAccess.messagesJson,
-          }),
-        ),
+        filterVisibleSessionMessages(sessionMessages),
         listSessionTodos(sessionId),
         listSessionRunEvents(sessionId),
       );

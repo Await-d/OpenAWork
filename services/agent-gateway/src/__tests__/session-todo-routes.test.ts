@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type * as TodoToolsModule from '../todo-tools.js';
+import type { Message } from '@openAwork/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type TodoItem = {
@@ -9,9 +10,12 @@ type TodoItem = {
 };
 
 const sqliteGetMock = vi.hoisted(() => vi.fn());
-const sqliteAllMock = vi.hoisted(() => vi.fn(() => []));
+const sqliteAllMock = vi.hoisted(() =>
+  vi.fn<(query: string, params?: unknown[]) => unknown[]>(() => []),
+);
 const sqliteRunMock = vi.hoisted(() => vi.fn());
-const listSessionMessagesMock = vi.hoisted(() => vi.fn(() => []));
+const listSessionMessagesMock = vi.hoisted(() => vi.fn<() => Message[]>(() => []));
+const listRuntimeSafeSessionMessagesV2Mock = vi.hoisted(() => vi.fn<() => Message[]>(() => []));
 const listSessionTodosMock = vi.hoisted(() => vi.fn<() => TodoItem[]>(() => []));
 const listSessionTodoLanesMock = vi.hoisted(() =>
   vi.fn<() => { main: TodoItem[]; temp: TodoItem[] }>(() => ({ main: [], temp: [] })),
@@ -52,6 +56,10 @@ vi.mock('../session-message-store.js', () => ({
   truncateSessionMessagesAfter: vi.fn(() => []),
 }));
 
+vi.mock('../message-v2-adapter.js', () => ({
+  listRuntimeSafeSessionMessagesV2: listRuntimeSafeSessionMessagesV2Mock,
+}));
+
 vi.mock('../request-workflow.js', () => ({
   startRequestWorkflow: vi.fn(() => {
     const step = createWorkflowStep();
@@ -80,9 +88,11 @@ describe('session todo routes', () => {
     sqliteAllMock.mockReset();
     sqliteRunMock.mockReset();
     listSessionMessagesMock.mockReset();
+    listRuntimeSafeSessionMessagesV2Mock.mockReset();
     listSessionTodosMock.mockReset();
     listSessionTodoLanesMock.mockReset();
     listSessionMessagesMock.mockReturnValue([]);
+    listRuntimeSafeSessionMessagesV2Mock.mockReturnValue([]);
     sqliteAllMock.mockReturnValue([]);
   });
 
@@ -224,6 +234,119 @@ describe('session todo routes', () => {
       main: [{ content: '主待办', status: 'pending', priority: 'high' }],
       temp: [{ content: '临时待办', status: 'pending', priority: 'low' }],
     });
+
+    await app.close();
+  });
+
+  it('supplements session detail and recovery reads with runtime-safe V2 messages without overriding legacy ones', async () => {
+    const sessionRow = {
+      id: 'session-1',
+      messages_json: '[]',
+      state_status: 'running',
+      metadata_json: '{}',
+      title: '主会话',
+      created_at: '2026-03-26T00:00:00.000Z',
+      updated_at: '2026-03-26T00:00:00.000Z',
+    };
+
+    sqliteGetMock.mockImplementation((query: string) => {
+      if (query.includes('FROM sessions')) {
+        return sessionRow;
+      }
+
+      return { id: 'session-1' };
+    });
+    sqliteAllMock.mockImplementation((query: string) => {
+      if (query.includes('FROM sessions WHERE user_id = ?')) {
+        return [sessionRow];
+      }
+
+      return [];
+    });
+    listSessionMessagesMock.mockReturnValue([
+      {
+        id: 'legacy-1',
+        role: 'assistant',
+        createdAt: 1,
+        content: [{ type: 'text', text: 'legacy assistant event' }],
+      },
+    ]);
+    listRuntimeSafeSessionMessagesV2Mock.mockReturnValue([
+      {
+        id: 'legacy-1',
+        role: 'assistant',
+        createdAt: 1,
+        content: [{ type: 'text', text: 'runtime override should stay hidden' }],
+      },
+      {
+        id: 'runtime-1',
+        role: 'assistant',
+        createdAt: 2,
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              source: 'openawork_internal',
+              type: 'assistant_event',
+              payload: {
+                kind: 'task',
+                title: '等待回答 · Question',
+                message: '来自 V2 的 runtime 事件',
+                status: 'paused',
+              },
+            }),
+          },
+        ],
+      },
+    ]);
+
+    const [{ default: Fastify }, { sessionsRoutes }] = await Promise.all([
+      import('fastify'),
+      import('../routes/sessions.js'),
+    ]);
+
+    const app = Fastify();
+    await app.register(sessionsRoutes);
+    await app.ready();
+
+    const getSessionRes = await app.inject({ method: 'GET', url: '/sessions/session-1' });
+    const getRecoveryRes = await app.inject({ method: 'GET', url: '/sessions/session-1/recovery' });
+
+    expect(getSessionRes.statusCode).toBe(200);
+    expect(getRecoveryRes.statusCode).toBe(200);
+    expect(listRuntimeSafeSessionMessagesV2Mock).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      userId: 'user-1',
+    });
+
+    const sessionPayload = JSON.parse(getSessionRes.body) as {
+      session: { messages: Array<{ id: string; content: Array<{ text?: string; type: string }> }> };
+    };
+    const recoveryPayload = JSON.parse(getRecoveryRes.body) as {
+      recovery: {
+        session: {
+          messages: Array<{ id: string; content: Array<{ text?: string; type: string }> }>;
+        };
+      };
+    };
+
+    expect(sessionPayload.session.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'legacy-1' }),
+        expect.objectContaining({ id: 'runtime-1' }),
+      ]),
+    );
+    expect(recoveryPayload.recovery.session.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'legacy-1' }),
+        expect.objectContaining({ id: 'runtime-1' }),
+      ]),
+    );
+
+    const legacyMessage = sessionPayload.session.messages.find(
+      (message) => message.id === 'legacy-1',
+    );
+    expect(legacyMessage?.content[0]?.text).toBe('legacy assistant event');
 
     await app.close();
   });

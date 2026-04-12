@@ -1,3 +1,4 @@
+import type { Message } from '@openAwork/shared';
 import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +16,7 @@ const {
   listSharedSessionPresenceMock,
   listSessionFileDiffsMock,
   listSessionMessagesMock,
+  listRuntimeSafeSessionMessagesV2Mock,
   listSessionRunEventsMock,
   listSessionSnapshotsMock,
   listSessionTodosMock,
@@ -70,6 +72,7 @@ const {
   listSessionMessagesMock: vi.fn<
     () => Array<{ content: string; id: string; role: 'assistant' | 'user' }>
   >(() => []),
+  listRuntimeSafeSessionMessagesV2Mock: vi.fn<() => Message[]>(() => []),
   listSessionRunEventsMock: vi.fn(() => []),
   listSessionSnapshotsMock: vi.fn(() => []),
   listSessionTodosMock: vi.fn(() => []),
@@ -115,6 +118,10 @@ vi.mock('../session-shared-access.js', () => ({
 vi.mock('../session-message-store.js', () => ({
   filterVisibleSessionMessages: filterVisibleSessionMessagesMock,
   listSessionMessages: listSessionMessagesMock,
+}));
+
+vi.mock('../message-v2-adapter.js', () => ({
+  listRuntimeSafeSessionMessagesV2: listRuntimeSafeSessionMessagesV2Mock,
 }));
 
 vi.mock('../session-permission-events.js', () => ({
@@ -265,6 +272,7 @@ describe('session shared read routes', () => {
     listSessionMessagesMock.mockReturnValue([
       { id: 'm-1', role: 'user', content: '请帮我复盘今天的上线。' },
     ]);
+    listRuntimeSafeSessionMessagesV2Mock.mockReturnValue([]);
     listSharedSessionCommentsMock.mockReturnValue([
       {
         id: 'c-1',
@@ -369,6 +377,56 @@ describe('session shared read routes', () => {
         state_status: 'running',
         title: '上线回顾',
         messages: [{ role: 'user', content: '请帮我复盘今天的上线。' }],
+      },
+    });
+
+    await app.close();
+  });
+
+  it('merges runtime-safe V2 messages into shared session detail reads', async () => {
+    listRuntimeSafeSessionMessagesV2Mock.mockReturnValue([
+      {
+        id: 'runtime-1',
+        role: 'assistant',
+        createdAt: 1712200000000,
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              source: 'openawork_internal',
+              type: 'assistant_event',
+              payload: {
+                kind: 'task',
+                title: '等待回答 · Question',
+                message: '补一条 runtime 事件',
+                status: 'paused',
+              },
+            }),
+          },
+        ],
+      },
+    ]);
+
+    const app = Fastify();
+    await registerSessionSharedReadRoutes(app);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/sessions/shared-with-me/shared-session-1',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(listRuntimeSafeSessionMessagesV2Mock).toHaveBeenCalledWith({
+      sessionId: 'shared-session-1',
+      userId: 'owner-1',
+    });
+    expect(JSON.parse(response.body)).toMatchObject({
+      session: {
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: 'm-1', role: 'user' }),
+          expect.objectContaining({ id: 'runtime-1', role: 'assistant' }),
+        ]),
       },
     });
 
