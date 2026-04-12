@@ -344,4 +344,153 @@ describe('session tool visibility', () => {
     expect(shouldAutoApproveToolForSessionMetadata('task', metadata)).toBe(false);
     expect(shouldAutoApproveToolForSessionMetadata('Agent', metadata)).toBe(false);
   });
+
+  describe('clarify mode tool filtering', () => {
+    const clarifyAllowedTools = [
+      'list',
+      'read',
+      'glob',
+      'grep',
+      'read_tool_output',
+      'workspace_review_status',
+      'workspace_review_diff',
+      'lsp_diagnostics',
+      'lsp_touch',
+      'lsp_goto_definition',
+      'lsp_goto_implementation',
+      'lsp_find_references',
+      'lsp_symbols',
+      'lsp_hover',
+      'lsp_call_hierarchy',
+      'codesearch',
+      'websearch',
+      'webfetch',
+      'question',
+      'AskUserQuestion',
+      'EnterPlanMode',
+      'ExitPlanMode',
+      'session_list',
+      'session_read',
+      'session_search',
+      'session_info',
+      'todoReadTool',
+      'subTodoReadTool',
+      'task_list',
+      'task_get',
+      'look_at',
+      'task',
+      'Agent',
+    ];
+
+    const clarifyDisallowedTools = [
+      'write',
+      'edit',
+      'apply_patch',
+      'bash',
+      'interactive_bash',
+      'workspace_create_file',
+      'workspace_create_directory',
+      'workspace_review_revert',
+      'call_omo_agent',
+      'mcp_list_tools',
+      'mcp_call',
+      'skill_mcp',
+      'desktop_automation',
+      'lsp_rename',
+      'lsp_prepare_rename',
+      'Skill',
+      'batch',
+      'todoWriteTool',
+      'subTodoWriteTool',
+      'task_create',
+      'task_update',
+      'ast_grep_replace',
+    ];
+
+    it('allows only read-only and questioning tools in clarify mode', () => {
+      const metadata = { dialogueMode: 'clarify' };
+
+      for (const toolName of clarifyAllowedTools) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be allowed in clarify mode`,
+        ).toBe(true);
+      }
+
+      for (const toolName of clarifyDisallowedTools) {
+        expect(
+          isGatewayToolEnabledForSessionMetadata(toolName, metadata),
+          `${toolName} should be disallowed in clarify mode`,
+        ).toBe(false);
+      }
+    });
+
+    it('does not restrict tools in coding or programmer mode', () => {
+      for (const mode of ['coding', 'programmer'] as const) {
+        const metadata = { dialogueMode: mode };
+
+        expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(true);
+        expect(isGatewayToolEnabledForSessionMetadata('edit', metadata)).toBe(true);
+        expect(isGatewayToolEnabledForSessionMetadata('write', metadata)).toBe(true);
+        expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(true);
+        expect(isGatewayToolEnabledForSessionMetadata('read', metadata)).toBe(true);
+      }
+    });
+
+    it('filterEnabledGatewayToolsForSession filters tools based on clarify mode', () => {
+      const allTools = [
+        ...clarifyAllowedTools.map(createToolDefinition),
+        ...clarifyDisallowedTools.map(createToolDefinition),
+      ];
+
+      const visibleToolNames = filterEnabledGatewayToolsForSession(
+        allTools,
+        JSON.stringify({ dialogueMode: 'clarify' }),
+      ).map((tool) => tool.function.name);
+
+      for (const toolName of clarifyAllowedTools) {
+        expect(visibleToolNames).toContain(toolName);
+      }
+
+      for (const toolName of clarifyDisallowedTools) {
+        expect(visibleToolNames).not.toContain(toolName);
+      }
+    });
+
+    it('clarify mode child sessions inherit dialogueMode and apply same restrictions', () => {
+      const childMetadata = { dialogueMode: 'clarify', createdByTool: 'task' };
+
+      expect(isGatewayToolEnabledForSessionMetadata('read', childMetadata)).toBe(true);
+      expect(isGatewayToolEnabledForSessionMetadata('grep', childMetadata)).toBe(true);
+      expect(isGatewayToolEnabledForSessionMetadata('task', childMetadata)).toBe(false);
+      expect(isGatewayToolEnabledForSessionMetadata('Agent', childMetadata)).toBe(false);
+      expect(isGatewayToolEnabledForSessionMetadata('bash', childMetadata)).toBe(false);
+      expect(isGatewayToolEnabledForSessionMetadata('edit', childMetadata)).toBe(false);
+    });
+
+    it('clarify mode filtering combines with channel policy', () => {
+      const tools = [
+        createToolDefinition('read'),
+        createToolDefinition('websearch'),
+        createToolDefinition('bash'),
+      ];
+      const metadata = {
+        dialogueMode: 'clarify',
+        source: 'channel',
+        channel: {
+          tools: { read: true, web_search: true, bash: true },
+          permissions: { allowShell: true },
+        },
+      };
+
+      const visibleToolNames = filterEnabledGatewayToolsForSession(
+        tools,
+        JSON.stringify(metadata),
+      ).map((tool) => tool.function.name);
+
+      expect(visibleToolNames).toContain('read');
+      expect(visibleToolNames).toContain('websearch');
+      expect(visibleToolNames).not.toContain('bash');
+    });
+  });
 });

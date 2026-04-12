@@ -1,4 +1,13 @@
-import type { Session, SessionTask, SharedSessionSummaryRecord } from './sessions.js';
+import type {
+  Session,
+  SessionImportInput,
+  SessionImportResult,
+  SessionTask,
+  SharedSessionCommentRecord,
+  SharedSessionDetailRecord,
+  SharedSessionPresenceRecord,
+  SharedSessionSummaryRecord,
+} from './sessions.js';
 
 export type TeamWorkspaceVisibility = 'open' | 'closed' | 'private';
 
@@ -33,6 +42,8 @@ export interface CreateTeamThreadInput {
   metadata?: Record<string, unknown>;
   title?: string;
 }
+
+export type ImportTeamWorkspaceSessionInput = SessionImportInput;
 
 export interface TeamMemberRecord {
   id: string;
@@ -179,6 +190,31 @@ export interface TeamClient {
     teamWorkspaceId: string,
     input?: CreateTeamThreadInput,
   ): Promise<Session>;
+  importIntoWorkspace(
+    token: string,
+    teamWorkspaceId: string,
+    input: ImportTeamWorkspaceSessionInput,
+  ): Promise<SessionImportResult>;
+  getSharedSessionDetail(token: string, sessionId: string): Promise<SharedSessionDetailRecord>;
+  createSharedSessionComment(
+    token: string,
+    sessionId: string,
+    input: { content: string },
+  ): Promise<SharedSessionCommentRecord>;
+  touchSharedSessionPresence(
+    token: string,
+    sessionId: string,
+  ): Promise<SharedSessionPresenceRecord[]>;
+  replySharedSessionPermission(
+    token: string,
+    sessionId: string,
+    input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+  ): Promise<void>;
+  replySharedSessionQuestion(
+    token: string,
+    sessionId: string,
+    input: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
+  ): Promise<void>;
   getWorkspaceSnapshot(token: string, teamWorkspaceId: string): Promise<TeamWorkspaceSnapshot>;
   getRuntime(token: string): Promise<TeamRuntimeReadModel>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
@@ -291,6 +327,118 @@ export function createTeamClient(baseUrl: string): TeamClient {
         throw new Error(`Failed to create team thread: ${response.status}`);
       }
       return (await response.json()) as Session;
+    },
+
+    async importIntoWorkspace(
+      token: string,
+      teamWorkspaceId: string,
+      input: ImportTeamWorkspaceSessionInput,
+    ): Promise<SessionImportResult> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/imports`,
+        {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to import session into workspace: ${response.status}`);
+      }
+      return (await response.json()) as SessionImportResult;
+    },
+
+    async getSharedSessionDetail(
+      token: string,
+      sessionId: string,
+    ): Promise<SharedSessionDetailRecord> {
+      const response = await fetch(`${baseUrl}/sessions/shared-with-me/${sessionId}`, {
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load shared session detail: ${response.status}`);
+      }
+      return (await response.json()) as SharedSessionDetailRecord;
+    },
+
+    async createSharedSessionComment(
+      token: string,
+      sessionId: string,
+      input: { content: string },
+    ): Promise<SharedSessionCommentRecord> {
+      const response = await fetch(`${baseUrl}/sessions/shared-with-me/${sessionId}/comments`, {
+        method: 'POST',
+        headers: {
+          ...buildAuthHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to create shared session comment: ${response.status}`);
+      }
+      const data = (await response.json()) as { comment: SharedSessionCommentRecord };
+      return data.comment;
+    },
+
+    async touchSharedSessionPresence(
+      token: string,
+      sessionId: string,
+    ): Promise<SharedSessionPresenceRecord[]> {
+      const response = await fetch(`${baseUrl}/sessions/shared-with-me/${sessionId}/presence`, {
+        method: 'POST',
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to update shared session presence: ${response.status}`);
+      }
+      const data = (await response.json()) as { presence?: SharedSessionPresenceRecord[] };
+      return data.presence ?? [];
+    },
+
+    async replySharedSessionPermission(
+      token: string,
+      sessionId: string,
+      input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+    ): Promise<void> {
+      const response = await fetch(
+        `${baseUrl}/sessions/shared-with-me/${sessionId}/permissions/reply`,
+        {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to reply shared permission: ${response.status}`);
+      }
+    },
+
+    async replySharedSessionQuestion(
+      token: string,
+      sessionId: string,
+      input: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
+    ): Promise<void> {
+      const response = await fetch(
+        `${baseUrl}/sessions/shared-with-me/${sessionId}/questions/reply`,
+        {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to reply shared question: ${response.status}`);
+      }
     },
 
     async getWorkspaceSnapshot(

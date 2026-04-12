@@ -734,7 +734,7 @@ export default function ChatPage() {
   );
   const defaultAgentLabel = useMemo(() => {
     if (!modeDefaultAgentId) {
-      return dialogueMode === 'clarify' ? '不指定（澄清模式）' : '不指定';
+      return dialogueMode === 'clarify' ? '不指定（方案模式）' : '不指定';
     }
 
     return (
@@ -2779,7 +2779,7 @@ export default function ChatPage() {
 
     const buildAssistantTraceMessageContent = (
       textContent: string,
-      finalStatus?: 'completed' | 'error' | 'cancelled',
+      finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
     ): string => {
       const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
         const nextToolState =
@@ -2787,7 +2787,8 @@ export default function ChatPage() {
             ? { ...toolCallState, isError: true, status: 'error' as const }
             : finalStatus === 'completed' && toolCallState.status === 'streaming'
               ? { ...toolCallState, status: 'completed' as const }
-              : finalStatus === 'cancelled' && toolCallState.status === 'streaming'
+              : (finalStatus === 'cancelled' || finalStatus === 'paused') &&
+                  toolCallState.status === 'streaming'
                 ? { ...toolCallState, status: 'paused' as const }
                 : toolCallState;
         const status: 'running' | 'paused' | 'completed' | 'failed' =
@@ -3002,6 +3003,7 @@ export default function ChatPage() {
           setRightPanelState((previous) =>
             clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
           );
+          requestCurrentSessionRefresh(sid);
         }
 
         if (event.type === 'question_asked') {
@@ -3087,12 +3089,15 @@ export default function ChatPage() {
         const finishedAt = Date.now();
         const resolvedStopReason = stopReason ?? 'end_turn';
         const wasCancelled = String(resolvedStopReason) === 'cancelled';
+        const isPausedForPermission = resolvedStopReason === 'tool_permission';
         const finalAccumulatedText = wasCancelled ? streamRevealVisibleRef.current : accumulated;
         const traceFinalStatus = wasCancelled
           ? 'cancelled'
           : resolvedStopReason === 'error'
             ? 'error'
-            : 'completed';
+            : isPausedForPermission
+              ? 'paused'
+              : 'completed';
         const hasRenderableAssistantReply =
           finalAccumulatedText.trim().length > 0 ||
           accumulatedThinking.trim().length > 0 ||
@@ -3146,7 +3151,7 @@ export default function ChatPage() {
             },
           ]);
         }
-        setSessionStateStatus('idle');
+        setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
         resetStreamState();
         requestSessionListRefresh();
       },
@@ -3600,6 +3605,7 @@ export default function ChatPage() {
             setRightPanelState((previous) =>
               clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
             );
+            requestCurrentSessionRefresh(sid);
           }
 
           if (event.type === 'question_asked') {
@@ -3685,6 +3691,7 @@ export default function ChatPage() {
           const finishedAt = Date.now();
           const resolvedStopReason = stopReason ?? 'end_turn';
           const wasCancelled = String(resolvedStopReason) === 'cancelled';
+          const isPausedForPermission = resolvedStopReason === 'tool_permission';
           const finalAccumulatedText = wasCancelled ? streamRevealVisibleRef.current : accumulated;
           const hasRenderableAssistantReply =
             finalAccumulatedText.trim().length > 0 || accumulatedThinking.trim().length > 0;
@@ -3715,7 +3722,7 @@ export default function ChatPage() {
               },
             ]);
           }
-          setSessionStateStatus('idle');
+          setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
           resetStreamState();
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
@@ -5235,7 +5242,7 @@ export default function ChatPage() {
                   <div
                     data-testid={`chat-right-panel-header-${rightTab}`}
                     style={{
-                      padding: '12px 12px 10px',
+                      padding: '10px 12px 8px',
                       borderBottom: '1px solid color-mix(in oklch, var(--border) 86%, transparent)',
                       background:
                         'linear-gradient(180deg, color-mix(in oklch, var(--surface) 96%, var(--bg) 4%), color-mix(in oklch, var(--surface) 98%, var(--bg) 2%))',
@@ -5243,23 +5250,10 @@ export default function ChatPage() {
                   >
                     <div
                       style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: 'var(--text-3)',
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        marginBottom: 4,
-                      }}
-                    >
-                      侧栏内容
-                    </div>
-                    <div
-                      style={{
                         fontSize: 13,
                         fontWeight: 700,
                         color: 'var(--text)',
                         lineHeight: 1.2,
-                        marginBottom: 3,
                       }}
                     >
                       {activeRightTabMeta.title}
@@ -5269,6 +5263,7 @@ export default function ChatPage() {
                         fontSize: 11,
                         color: 'var(--text-3)',
                         lineHeight: 1.45,
+                        marginTop: 2,
                       }}
                     >
                       {activeRightTabMeta.description}
@@ -5281,205 +5276,192 @@ export default function ChatPage() {
                       minHeight: 0,
                       overflowY: 'auto',
                       overflowX: 'hidden',
-                      padding: '10px 10px 12px',
+                      padding: '8px 10px 10px',
                       scrollbarGutter: 'stable',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
                     }}
                   >
-                    <div
-                      style={{
-                        minHeight: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 12,
-                        padding: 12,
-                        borderRadius: 12,
-                        border: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
-                        background: 'color-mix(in oklch, var(--surface) 92%, var(--bg) 8%)',
-                        boxSizing: 'border-box',
-                      }}
-                    >
-                      {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
-                      {rightTab === 'tools' &&
-                        (() => {
-                          const lspPrefixes = ['lsp_', 'ast_grep'];
-                          const filePrefixes = [
-                            'read',
-                            'write',
-                            'edit',
-                            'glob',
-                            'multi_edit',
-                            'workspace_',
-                          ];
-                          const networkPrefixes = [
-                            'webfetch',
-                            'websearch',
-                            'google_search',
-                            'playwright',
-                            'mcp_',
-                          ];
-                          const filtered = toolCallCards.filter((tc) => {
-                            if (toolFilter === 'all') return true;
-                            const n = tc.toolName.toLowerCase();
-                            if (toolFilter === 'lsp')
-                              return lspPrefixes.some((p) => n.startsWith(p));
-                            if (toolFilter === 'file')
-                              return filePrefixes.some((p) => n.startsWith(p));
-                            if (toolFilter === 'network')
-                              return networkPrefixes.some((p) => n.startsWith(p));
-                            return (
-                              !lspPrefixes.some((p) => n.startsWith(p)) &&
-                              !filePrefixes.some((p) => n.startsWith(p)) &&
-                              !networkPrefixes.some((p) => n.startsWith(p))
-                            );
-                          });
+                    {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
+                    {rightTab === 'tools' &&
+                      (() => {
+                        const lspPrefixes = ['lsp_', 'ast_grep'];
+                        const filePrefixes = [
+                          'read',
+                          'write',
+                          'edit',
+                          'glob',
+                          'multi_edit',
+                          'workspace_',
+                        ];
+                        const networkPrefixes = [
+                          'webfetch',
+                          'websearch',
+                          'google_search',
+                          'playwright',
+                          'mcp_',
+                        ];
+                        const filtered = toolCallCards.filter((tc) => {
+                          if (toolFilter === 'all') return true;
+                          const n = tc.toolName.toLowerCase();
+                          if (toolFilter === 'lsp') return lspPrefixes.some((p) => n.startsWith(p));
+                          if (toolFilter === 'file')
+                            return filePrefixes.some((p) => n.startsWith(p));
+                          if (toolFilter === 'network')
+                            return networkPrefixes.some((p) => n.startsWith(p));
                           return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  gap: 5,
-                                  flexWrap: 'wrap',
-                                  paddingBottom: 2,
-                                }}
-                              >
-                                {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
-                                  <button
-                                    key={f}
-                                    type="button"
-                                    onClick={() => setToolFilter(f)}
-                                    style={{
-                                      minHeight: 24,
-                                      padding: '0 8px',
-                                      borderRadius: 999,
-                                      border:
-                                        toolFilter === f
-                                          ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border))'
-                                          : '1px solid var(--border-subtle)',
-                                      fontSize: 11,
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      background:
-                                        toolFilter === f
-                                          ? 'color-mix(in oklch, var(--accent) 14%, var(--surface))'
-                                          : 'color-mix(in oklch, var(--surface) 86%, transparent)',
-                                      color: toolFilter === f ? 'var(--accent)' : 'var(--text-3)',
-                                    }}
-                                  >
-                                    {f === 'all'
-                                      ? '全部'
-                                      : f === 'lsp'
-                                        ? 'LSP'
-                                        : f === 'file'
-                                          ? '文件'
-                                          : f === 'network'
-                                            ? '网络'
-                                            : '其他'}
-                                  </button>
-                                ))}
-                              </div>
-                              {filtered.length > 0 ? (
-                                filtered.map((toolCall, index) =>
-                                  toolCall.toolName.trim().toLowerCase() === 'task' ? (
-                                    <TaskToolInline
-                                      key={`${toolCall.toolName}-${index}`}
-                                      toolCallId={toolCall.toolCallId}
-                                      toolName={toolCall.toolName}
-                                      input={toolCall.input}
-                                      output={toolCall.output}
-                                      isError={toolCall.isError}
-                                      status={toolCall.status}
-                                      onOpenChildSession={openChildSessionInspector}
-                                      runtimeSnapshot={resolveTaskToolRuntimeSnapshot(
-                                        toolCall.input,
-                                        toolCall.output,
-                                        taskToolRuntimeLookup,
-                                      )}
-                                      selectedChildSessionId={selectedChildSessionId}
-                                    />
-                                  ) : (
-                                    <ToolCallCard
-                                      key={`${toolCall.toolName}-${index}`}
-                                      toolCallId={toolCall.toolCallId}
-                                      toolName={toolCall.toolName}
-                                      input={toolCall.input}
-                                      output={toolCall.output}
-                                      isError={toolCall.isError}
-                                      resumedAfterApproval={toolCall.resumedAfterApproval}
-                                      status={toolCall.status}
-                                    />
-                                  ),
-                                )
-                              ) : (
-                                <div
+                            !lspPrefixes.some((p) => n.startsWith(p)) &&
+                            !filePrefixes.some((p) => n.startsWith(p)) &&
+                            !networkPrefixes.some((p) => n.startsWith(p))
+                          );
+                        });
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                gap: 4,
+                                flexWrap: 'wrap',
+                              }}
+                            >
+                              {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
+                                <button
+                                  key={f}
+                                  type="button"
+                                  onClick={() => setToolFilter(f)}
                                   style={{
-                                    fontSize: 11,
-                                    color: 'var(--text-3)',
-                                    padding: '6px 2px',
+                                    minHeight: 22,
+                                    padding: '0 7px',
+                                    borderRadius: 999,
+                                    border:
+                                      toolFilter === f
+                                        ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border))'
+                                        : '1px solid var(--border-subtle)',
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    background:
+                                      toolFilter === f
+                                        ? 'color-mix(in oklch, var(--accent) 14%, var(--surface))'
+                                        : 'color-mix(in oklch, var(--surface) 86%, transparent)',
+                                    color: toolFilter === f ? 'var(--accent)' : 'var(--text-3)',
                                   }}
                                 >
-                                  暂无工具调用记录
-                                </div>
-                              )}
+                                  {f === 'all'
+                                    ? '全部'
+                                    : f === 'lsp'
+                                      ? 'LSP'
+                                      : f === 'file'
+                                        ? '文件'
+                                        : f === 'network'
+                                          ? '网络'
+                                          : '其他'}
+                                </button>
+                              ))}
                             </div>
-                          );
-                        })()}
-                      {rightTab === 'viz' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          <div style={sharedUiThemeVars}>
-                            <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
+                            {filtered.length > 0 ? (
+                              filtered.map((toolCall, index) =>
+                                toolCall.toolName.trim().toLowerCase() === 'task' ? (
+                                  <TaskToolInline
+                                    key={`${toolCall.toolName}-${index}`}
+                                    toolCallId={toolCall.toolCallId}
+                                    toolName={toolCall.toolName}
+                                    input={toolCall.input}
+                                    output={toolCall.output}
+                                    isError={toolCall.isError}
+                                    status={toolCall.status}
+                                    onOpenChildSession={openChildSessionInspector}
+                                    runtimeSnapshot={resolveTaskToolRuntimeSnapshot(
+                                      toolCall.input,
+                                      toolCall.output,
+                                      taskToolRuntimeLookup,
+                                    )}
+                                    selectedChildSessionId={selectedChildSessionId}
+                                  />
+                                ) : (
+                                  <ToolCallCard
+                                    key={`${toolCall.toolName}-${index}`}
+                                    toolCallId={toolCall.toolCallId}
+                                    toolName={toolCall.toolName}
+                                    input={toolCall.input}
+                                    output={toolCall.output}
+                                    isError={toolCall.isError}
+                                    resumedAfterApproval={toolCall.resumedAfterApproval}
+                                    status={toolCall.status}
+                                  />
+                                ),
+                              )
+                            ) : (
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: 'var(--text-3)',
+                                  padding: '6px 2px',
+                                }}
+                              >
+                                暂无工具调用记录
+                              </div>
+                            )}
                           </div>
-                          <div style={sharedUiThemeVars}>
-                            <AgentVizPanel events={agentEvents} />
-                          </div>
-                        </div>
-                      )}
-                      {rightTab === 'history' && (
-                        <ChatHistoryTabContent
-                          childSessions={childSessions}
-                          compactions={compactions}
-                          pendingPermissions={pendingPermissions}
-                          planHistory={planHistory}
-                          sessionTodos={sessionTodos}
-                          sessionTasks={sessionTasks}
-                          onOpenSession={(nextSessionId) => {
-                            void navigate(`/chat/${nextSessionId}`);
-                          }}
-                          sharedUiThemeVars={sharedUiThemeVars}
-                        />
-                      )}
-                      {rightTab === 'overview' && (
-                        <ChatOverviewTabContent
-                          attachmentItems={attachmentItems}
-                          artifactsWorkspaceHref={artifactsWorkspaceHref}
-                          childSessions={childSessions}
-                          compactions={compactions}
-                          contextUsageSnapshot={contextUsageSnapshot}
-                          contentArtifactCount={contentArtifactCount}
-                          contentArtifactCountStatus={contentArtifactCountStatus}
-                          currentSessionId={currentSessionId}
-                          dialogueMode={dialogueMode}
-                          effectiveWorkingDirectory={effectiveWorkingDirectory}
-                          messages={messages}
-                          pendingPermissions={pendingPermissions}
-                          pendingQuestionsCount={pendingQuestions.length}
-                          sessionStateStatus={sessionStateStatus ?? null}
-                          sessionTodos={sessionTodos}
-                          sessionTasks={sessionTasks}
-                          workspaceFileItems={workspaceFileItems}
-                          yoloMode={yoloMode}
-                          onCompactSession={() => void handleCompactCurrentSession()}
-                          onOpenRecoveryStrategy={() => {
-                            setRightOpen(true);
-                            setRightTab('history');
-                          }}
-                        />
-                      )}
-                      {rightTab === 'mcp' && (
+                        );
+                      })()}
+                    {rightTab === 'viz' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         <div style={sharedUiThemeVars}>
-                          <MCPServerList servers={mcpServers} />
+                          <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
                         </div>
-                      )}
-                    </div>
+                        <div style={sharedUiThemeVars}>
+                          <AgentVizPanel events={agentEvents} />
+                        </div>
+                      </div>
+                    )}
+                    {rightTab === 'history' && (
+                      <ChatHistoryTabContent
+                        childSessions={childSessions}
+                        compactions={compactions}
+                        pendingPermissions={pendingPermissions}
+                        planHistory={planHistory}
+                        sessionTodos={sessionTodos}
+                        sessionTasks={sessionTasks}
+                        onOpenSession={(nextSessionId) => {
+                          void navigate(`/chat/${nextSessionId}`);
+                        }}
+                        sharedUiThemeVars={sharedUiThemeVars}
+                      />
+                    )}
+                    {rightTab === 'overview' && (
+                      <ChatOverviewTabContent
+                        attachmentItems={attachmentItems}
+                        artifactsWorkspaceHref={artifactsWorkspaceHref}
+                        childSessions={childSessions}
+                        compactions={compactions}
+                        contextUsageSnapshot={contextUsageSnapshot}
+                        contentArtifactCount={contentArtifactCount}
+                        contentArtifactCountStatus={contentArtifactCountStatus}
+                        currentSessionId={currentSessionId}
+                        dialogueMode={dialogueMode}
+                        effectiveWorkingDirectory={effectiveWorkingDirectory}
+                        messages={messages}
+                        pendingPermissions={pendingPermissions}
+                        pendingQuestionsCount={pendingQuestions.length}
+                        sessionStateStatus={sessionStateStatus ?? null}
+                        sessionTodos={sessionTodos}
+                        sessionTasks={sessionTasks}
+                        workspaceFileItems={workspaceFileItems}
+                        yoloMode={yoloMode}
+                        onCompactSession={() => void handleCompactCurrentSession()}
+                        onOpenRecoveryStrategy={() => {
+                          setRightOpen(true);
+                          setRightTab('history');
+                        }}
+                      />
+                    )}
+                    {rightTab === 'mcp' && (
+                      <div style={sharedUiThemeVars}>
+                        <MCPServerList servers={mcpServers} />
+                      </div>
+                    )}
                   </div>
                 </>
               )}

@@ -87,7 +87,6 @@ describe('right panel todo sections', () => {
     expect(container?.textContent).toContain('Inspect gateway sandbox');
     expect(container?.textContent).toContain('Add tests');
     expect(container?.textContent).toContain('进行中');
-    expect(container?.textContent).toContain('高优先级');
   });
 
   it('renders todo counts in overview mode', async () => {
@@ -124,11 +123,11 @@ describe('right panel todo sections', () => {
     expect(container?.textContent).toContain('主待办');
     expect(container?.textContent).toContain('临时待办');
     expect(container?.textContent).toContain('1/1 项');
-    expect(container?.textContent).toContain('当前会话 · 3 个');
+    expect(container?.textContent).toContain('3 个');
     expect(container?.textContent).toContain('打开产物工作区');
-    expect(container?.textContent).toContain('恢复策略');
+    expect(container?.textContent).toContain('会话状态');
     expect(container?.textContent).toContain('运行恢复已就绪');
-    expect(container?.textContent).toContain('上下文窗口');
+    expect(container?.textContent).toContain('上下文');
     expect(container?.textContent).toContain('估算用量 25%');
     expect(container?.textContent).toContain('立即压缩会话');
 

@@ -27,6 +27,7 @@ export type { AgentProfileRecord, AgentProfilesClient } from './agent-profiles.j
 export { createTeamClient } from './team.js';
 export type {
   CreateTeamThreadInput,
+  ImportTeamWorkspaceSessionInput,
   CreateTeamWorkspaceInput,
   CreateTeamMemberInput,
   CreateTeamMessageInput,
@@ -82,6 +83,8 @@ export type {
   SessionFileChangesQueryOptions,
   SessionFileChangesSummary,
   SessionFileDiffEntry,
+  SessionImportInput,
+  SessionImportResult,
   SessionMessageRatingRecord,
   SessionMessageRatingValue,
   SessionRecoveryReadModel,

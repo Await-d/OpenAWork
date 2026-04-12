@@ -191,4 +191,18 @@ describe('team client runtime APIs', () => {
     );
     expect(snapshot.workspace.id).toBe('workspace-1');
   });
+
+  it('imports a session into a workspace through the team bridge contract', async () => {
+    fetchMock.mockResolvedValue(createJsonResponse(201, { sessionId: 'imported-1' }));
+
+    const client = createTeamClient('http://gateway.test');
+    const result = await client.importIntoWorkspace('token-1', 'workspace-1', {
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://gateway.test/team/workspaces/workspace-1/imports',
+    );
+    expect(result.sessionId).toBe('imported-1');
+  });
 });

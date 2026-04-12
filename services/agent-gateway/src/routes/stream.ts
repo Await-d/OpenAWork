@@ -32,7 +32,13 @@ import {
 import { executeSessionCompaction } from '../session-compaction.js';
 import { persistStreamUserMessage } from '../stream-session-title.js';
 import { buildCapabilityContext } from './capabilities.js';
-import { buildRequestScopedSystemPrompts } from './stream-system-prompts.js';
+import {
+  CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
+  DIALOGUE_MODE_SYSTEM_PROMPTS,
+  LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
+  YOLO_MODE_SYSTEM_PROMPT,
+} from './stream-system-prompts.js';
+import { KeywordDetectorImpl } from '@openAwork/agent-core';
 import {
   deleteSessionRunEventsByRequest,
   hasPersistedRunEvent,
@@ -958,7 +964,15 @@ export async function executeToolCalls(input: {
     );
 
     if (result.pendingPermissionRequestId) {
+      console.log(
+        '[PERMISSION_PAUSE] pending permission detected for tool',
+        toolCall.toolName,
+        'requestId=',
+        result.pendingPermissionRequestId,
+        'breaking tool call loop',
+      );
       hasPendingPermission = true;
+      break;
     }
   }
 
@@ -1040,14 +1054,19 @@ export async function handleStreamRequest(input: {
     loadCompanionSettingsForUser(input.user.sub, input.user.email, requestData.agentId),
     requestData.message,
   );
-  const requestSystemPrompts = buildRequestScopedSystemPrompts(
-    requestData.message,
-    buildCapabilityContext(input.user.sub, input.sessionId),
-    {
-      ...interactionModes,
-      companionPrompt,
-    },
-  );
+  const capabilityContext = buildCapabilityContext(input.user.sub, input.sessionId);
+  const detector = new KeywordDetectorImpl();
+  const detection = detector.detect(requestData.message);
+  const injectedPrompt = detection.injectedPrompt ?? null;
+  const lspGuidance =
+    interactionModes.dialogueMode === 'clarify'
+      ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
+      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT;
+  const dialogueModePrompt =
+    interactionModes.dialogueMode !== undefined
+      ? DIALOGUE_MODE_SYSTEM_PROMPTS[interactionModes.dialogueMode]
+      : null;
+  const yoloModePrompt = interactionModes.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
 
@@ -1235,7 +1254,12 @@ export async function handleStreamRequest(input: {
           compactionAutoEnabled: compactionSettings.auto,
           compactionReservedTokens: compactionSettings.reserved,
           workspaceCtx,
-          requestSystemPrompts,
+          injectedPrompt,
+          capabilityContext,
+          lspGuidance,
+          dialogueModePrompt,
+          yoloModePrompt,
+          companionPrompt,
           syntheticContinuationPrompt,
           memoryBlock,
           writeChunk: emitChunk,
@@ -1461,6 +1485,22 @@ export async function handleStreamRequest(input: {
         });
 
         if (toolCallsResult.hasPendingPermission) {
+          console.log(
+            '[PERMISSION_PAUSE] emitting done with tool_permission, sessionId=',
+            input.sessionId,
+            'runId=',
+            runId,
+          );
+          emitChunk({
+            type: 'done',
+            stopReason: 'tool_permission',
+            ...createRunEventMeta(runId, eventSequence),
+          });
+          setPersistedSessionStateStatus({
+            sessionId: input.sessionId,
+            status: 'paused',
+            userId: input.user.sub,
+          });
           wl.flush(ctx, 200);
           return { statusCode: 200 };
         }

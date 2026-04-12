@@ -304,6 +304,16 @@ export interface SharedSessionDetailRecord {
   session: Session;
 }
 
+export interface SessionImportInput {
+  exportedAt?: string;
+  id?: string;
+  messages?: unknown[];
+}
+
+export interface SessionImportResult {
+  sessionId: string;
+}
+
 export interface SessionSearchResult {
   createdAtMs: number;
   messageId: string;
@@ -519,7 +529,7 @@ export interface SessionsClient {
   ): Promise<{ cancelled: boolean; stopped: boolean }>;
   stopActiveStream(token: string, sessionId: string): Promise<boolean>;
   stopStream(token: string, sessionId: string, clientRequestId: string): Promise<boolean>;
-  importSession(token: string, data: unknown): Promise<{ sessionId: string }>;
+  importSession(token: string, data: SessionImportInput): Promise<SessionImportResult>;
 }
 
 export class HttpError<T = unknown> extends Error {
@@ -1097,7 +1107,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new HttpError(`Failed to import session: ${res.status}`, res.status);
-      return res.json() as Promise<{ sessionId: string }>;
+      return res.json() as Promise<SessionImportResult>;
     },
   };
 }

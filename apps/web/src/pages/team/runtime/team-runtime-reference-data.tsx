@@ -693,38 +693,20 @@ export function useResolvedTeamRuntimeReferenceData(
       }
 
       const groups = new Map<string, AgentTeamsWorkspaceGroup>();
-      for (const sharedSession of snapshotSharedSessions) {
-        const key = sharedSession.workspacePath ?? '__unbound__';
+      for (const session of snapshotSessions) {
+        const key = session.workspacePath ?? '__unbound__';
         const current = groups.get(key) ?? {
-          workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
-          workspacePath: sharedSession.workspacePath,
+          workspaceLabel: formatWorkspaceLabel(session.workspacePath),
+          workspacePath: session.workspacePath,
           sessions: [],
         };
         current.sessions.push({
-          id: sharedSession.sessionId,
-          status: mapSidebarStatus(sharedSession.stateStatus),
-          subtitle: `${getSharedSessionStateLabel(sharedSession.stateStatus)} · ${formatRelativeTime(sharedSession.shareUpdatedAt)}`,
-          title: sharedSession.title ?? sharedSession.sessionId,
+          id: session.id,
+          status: 'completed',
+          subtitle: `最近更新 · ${formatRelativeTime(session.updatedAt)}`,
+          title: session.title ?? session.id,
         });
         groups.set(key, current);
-      }
-
-      if (groups.size === 0) {
-        for (const session of snapshotSessions) {
-          const key = session.workspacePath ?? '__unbound__';
-          const current = groups.get(key) ?? {
-            workspaceLabel: formatWorkspaceLabel(session.workspacePath),
-            workspacePath: session.workspacePath,
-            sessions: [],
-          };
-          current.sessions.push({
-            id: session.id,
-            status: 'completed',
-            subtitle: `最近更新 · ${formatRelativeTime(session.updatedAt)}`,
-            title: session.title ?? session.id,
-          });
-          groups.set(key, current);
-        }
       }
 
       return Array.from(groups.values()).map((group) => ({
@@ -752,15 +734,6 @@ export function useResolvedTeamRuntimeReferenceData(
     const historyTeams = allSidebarTeams.filter((team) => team.status !== 'running');
     const preferredWorkspacePath = activeWorkspace?.defaultWorkingRoot ?? null;
     const defaultSelectedTeamId =
-      snapshotSharedSessions.find(
-        (session) =>
-          session.sessionId === collaboration.selectedSharedSessionId &&
-          (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
-      )?.sessionId ??
-      snapshotSharedSessions.find(
-        (session) =>
-          preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
-      )?.sessionId ??
       snapshotSessions.find(
         (session) =>
           preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
