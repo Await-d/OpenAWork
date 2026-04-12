@@ -842,13 +842,14 @@ export async function executeToolCalls(input: {
   turnFileDiffs?: Map<string, FileDiffContent>;
   userId: string;
   writeChunk: (chunk: RunEvent) => void;
-}): Promise<void> {
+}): Promise<{ hasPendingPermission: boolean }> {
   const sandbox = createDefaultSandbox();
   const sessionMetadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
   const workingDirectory =
     typeof sessionMetadata['workingDirectory'] === 'string'
       ? sessionMetadata['workingDirectory']
       : undefined;
+  let hasPendingPermission = false;
 
   for (const [toolCallId, toolCall] of input.state.toolCalls.entries()) {
     if (input.signal.aborted) {
@@ -955,7 +956,13 @@ export async function executeToolCalls(input: {
         eventMeta: createRunEventMeta(input.runId, input.eventSequence),
       }),
     );
+
+    if (result.pendingPermissionRequestId) {
+      hasPendingPermission = true;
+    }
   }
+
+  return { hasPendingPermission };
 }
 
 export function createStreamExecutionContext(
@@ -1433,7 +1440,7 @@ export async function handleStreamRequest(input: {
           return { statusCode: result.statusCode };
         }
 
-        await executeToolCalls({
+        const toolCallsResult = await executeToolCalls({
           clientRequestId: requestData.clientRequestId,
           executionContext: createStreamExecutionContext(
             requestData.clientRequestId,
@@ -1452,6 +1459,11 @@ export async function handleStreamRequest(input: {
           userId: input.user.sub,
           writeChunk: emitChunk,
         });
+
+        if (toolCallsResult.hasPendingPermission) {
+          wl.flush(ctx, 200);
+          return { statusCode: 200 };
+        }
       }
     } finally {
       clearInterval(runtimeThreadHeartbeat);

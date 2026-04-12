@@ -2,7 +2,8 @@
 
 ## 活跃工作流
 
-- [260410-团队页统一开发主计划](./workflow/260410-团队页统一开发主计划.md) — TeamPage 开发阶段的唯一入口文档：已融合设计、顺序、双人分工、Buddy/Hubby 动画约束与开发启动清单
+- [260410-团队页统一开发主计划](./workflow/260410-团队页统一开发主计划.md) — TeamPage 当前唯一入口文档：2026-04-12 起主线已调整为先冻结 Team / Personal / Shared 三域边界，再恢复页面与网关实现
+- [260412-Team详细任务实施方案](./workflow/260412-Team详细任务实施方案.md) — 把 Team 重整进一步细化为实施阶段、模块批次、第一批受影响文件、前端状态替换顺序、风险点与验证策略
 - [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
@@ -87,6 +88,8 @@
 - [2026-04-11] Agent Teams 办公室页的其它顶部 tab 也已进入 mock 迁移阶段：`对话 / 任务 / 消息 / 状态总览 / 评审` 不再是统一占位卡，而是带页面结构的 mock 面板，后续功能回接应在这些面板骨架上进行。
 - [2026-04-11] Agent Teams 办公室页继续优先对齐可见细节：`Leader` 徽标、绿色状态勾、模板区标题图标、`POWER_BAR` 小标注、以及角色主/次/三级标签层级都应按官方截图继续压近。
 - [2026-04-11] 用户已确认当前阶段**保留 OpenAWork 外层壳**；接下来只继续对齐 TeamPage 内部 Agent Teams 页面，不再单独拆出 `/team` 的独立外框。
+- [2026-04-12] Team 领域边界重新冻结为 **Team / Personal / Shared 三域分离**：`TeamWorkspace` 必须成为一级根对象；`workingDirectory`、`sharedSession`、普通 `session` 只能作为桥接或属性来源，不能继续充当 Team 的真相源；办公室视图只做展示，不承担管理语义。
+- [2026-04-12] 引入 multica 理念时，优先吸收 **agent 作为正式队友、控制面/执行面分离、任务驱动、workspace 硬边界、thread/task 双轨、技能复利** 六条原则；但不照搬其 issue/board 外壳，也不重建一套平行 daemon 主链。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。

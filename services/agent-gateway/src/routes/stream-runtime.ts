@@ -320,7 +320,7 @@ async function continueFromApprovedToolResult(input: {
           return { pendingInteraction: shouldKeepPausedState, statusCode: result.statusCode };
         }
 
-        await executeToolCalls({
+        const toolCallsResult = await executeToolCalls({
           clientRequestId: input.payload.clientRequestId,
           executionContext: createStreamExecutionContext(
             input.payload.clientRequestId,
@@ -339,6 +339,11 @@ async function continueFromApprovedToolResult(input: {
           userId: input.userId,
           writeChunk,
         });
+
+        if (toolCallsResult.hasPendingPermission) {
+          wl.flush(ctx, 200);
+          return { pendingInteraction: true, statusCode: 200 };
+        }
       }
     } finally {
       clearInterval(runtimeThreadHeartbeat);

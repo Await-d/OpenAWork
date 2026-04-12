@@ -2,11 +2,11 @@ import React from 'react';
 
 export const railItems = [
   { to: '/chat', label: 'Chat' },
+  { to: '/team', label: 'Team' },
   { to: '/sessions', label: 'Sessions' },
   { to: '/skills', label: 'Skills' },
   { to: '/agents', label: 'Agents' },
   { to: '/workflows', label: 'Workflows' },
-  { to: '/team', label: 'Team' },
   { to: '/settings/channels', label: 'Channels' },
   { to: '/usage', label: 'Usage' },
   { to: '/schedules', label: 'Schedules' },

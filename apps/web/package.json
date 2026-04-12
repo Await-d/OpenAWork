@@ -25,6 +25,7 @@
     "@openAwork/shared": "workspace:*",
     "@openAwork/shared-ui": "workspace:*",
     "@openAwork/web-client": "workspace:*",
+    "@types/three": "^0.183.1",
     "fuzzysort": "^3.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -32,6 +33,7 @@
     "react-router": "^7.0.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "three": "^0.183.2",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

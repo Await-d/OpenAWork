@@ -133,7 +133,7 @@ vi.mock('../routes/stream.js', () => ({
     repeatedToolSignatureCount: 0,
   })),
   createToolResultRequestId: vi.fn(() => 'tool-result-request-1'),
-  executeToolCalls: vi.fn(),
+  executeToolCalls: vi.fn().mockResolvedValue({ hasPendingPermission: false }),
   getEnabledTools: vi.fn(() => []),
   handleStreamRequest: vi.fn(),
   isWebSearchEnabled: vi.fn(() => false),

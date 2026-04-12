@@ -56,22 +56,23 @@ describe('TeamPage office reference layout', () => {
   it('renders the official Agent Teams office shell', async () => {
     await renderPage();
 
-    expect(container?.textContent).toContain('SpectrAI');
     expect(container?.textContent).toContain('AGENT TEAMS');
     expect(container?.textContent).toContain('研究团队-2026-03-31');
     expect(container?.textContent).toContain('已暂停');
     expect(container?.textContent).toContain('4 成员');
     expect(container?.textContent).toContain('4 在线');
-    expect(container?.textContent).toContain('团队工作空间');
+    expect(container?.textContent).toContain('新建会话');
+    expect(container?.textContent).toContain('OpenAWork');
     expect(container?.textContent).toContain('活跃 3 / 共 135');
     expect(container?.textContent).toContain('运行 16m 41s');
-    expect(container?.textContent).toContain('＋ 新建团队模板');
+    expect(container?.textContent).toContain('模板');
   });
 
   it('renders the office tab by default with the pixel office scene labels', async () => {
     await renderPage();
 
-    expect(container?.textContent).toContain('滚轮缩放 · 拖拽平移 60%');
+    expect(container?.textContent).toContain('场景控制');
+    expect(container?.textContent).toContain('当前缩放100%');
     expect(container?.textContent).toContain('[L] 团队负责人');
     expect(container?.textContent).toContain('研究员A');
     expect(container?.textContent).toContain('批评者');
