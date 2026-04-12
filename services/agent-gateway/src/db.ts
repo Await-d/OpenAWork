@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
 import { dirname, parse, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import {
@@ -746,6 +747,78 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_memory_extraction_logs_user ON memory_extraction_logs(user_id)',
   );
+
+  // ─── V2 Message Store (opencode-style Session → Message → Part) ───
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS message_v2 (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      time_created INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_message_v2_session_time ON message_v2(session_id, time_created, id)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS part_v2 (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES message_v2(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      time_created INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_part_v2_message ON part_v2(message_id, id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_part_v2_session ON part_v2(session_id)');
+
+  // ─── Event Sourcing (SyncEvent) ───
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS event_log (
+      id TEXT PRIMARY KEY,
+      aggregate_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_event_log_aggregate_seq ON event_log(aggregate_id, seq)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS event_sequences (
+      aggregate_id TEXT PRIMARY KEY,
+      seq INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+  // ─── V1 → V2 Data Migration ───
+  migrateV1MessagesToV2();
+
+  // ─── V2 Session Columns (event-sourcing projectors) ───
+  ensureColumn('sessions', 'parent_id', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'workspace_id', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'time_created', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'time_updated', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'time_compacting', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'time_archived', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'summary_additions', 'INTEGER DEFAULT NULL');
+  ensureColumn('sessions', 'summary_deletions', 'INTEGER DEFAULT NULL');
+  ensureColumn('sessions', 'summary_files', 'INTEGER DEFAULT NULL');
+  ensureColumn('sessions', 'summary_diffs', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'revert', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'permission', 'TEXT DEFAULT NULL');
 }
 
 function ensureColumn(table: string, column: string, definition: string): void {
@@ -799,6 +872,150 @@ function createSessionTodosTable(): void {
   );
 }
 
+function migrateV1MessagesToV2(): void {
+  // Check if migration is needed: if message_v2 is empty but session_messages has data
+  const v2Count = db.prepare('SELECT COUNT(*) as cnt FROM message_v2').get() as { cnt: number };
+  if (v2Count.cnt > 0) {
+    return; // Already migrated
+  }
+
+  const v1Count = db.prepare('SELECT COUNT(*) as cnt FROM session_messages').get() as {
+    cnt: number;
+  };
+  if (v1Count.cnt === 0) {
+    return; // Nothing to migrate
+  }
+
+  console.log(`[V2_MIGRATION] Starting V1→V2 migration of ${v1Count.cnt} messages...`);
+
+  const rows = db
+    .prepare(
+      'SELECT id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms FROM session_messages ORDER BY session_id, seq ASC',
+    )
+    .all() as Array<{
+    id: string;
+    session_id: string;
+    user_id: string;
+    seq: number;
+    role: string;
+    content_json: string;
+    status: string;
+    client_request_id: string | null;
+    created_at_ms: number;
+  }>;
+
+  let migratedMessages = 0;
+  let migratedParts = 0;
+
+  for (const row of rows) {
+    // Insert message row
+    const infoData: Record<string, unknown> = {
+      role: row.role,
+      time: { created: row.created_at_ms },
+    };
+    if (row.role === 'assistant') {
+      Object.assign(infoData, {
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      });
+    }
+    db.prepare(
+      'INSERT OR IGNORE INTO message_v2 (id, session_id, user_id, time_created, data) VALUES (?, ?, ?, ?, ?)',
+    ).run(row.id, row.session_id, row.user_id, row.created_at_ms, JSON.stringify(infoData));
+
+    migratedMessages++;
+
+    // Parse content_json and create parts
+    let content: unknown[];
+    try {
+      content = JSON.parse(row.content_json) as unknown[];
+    } catch {
+      continue;
+    }
+
+    for (const item of content) {
+      const part = item as Record<string, unknown>;
+      const partId = randomUUID();
+      let partData: Record<string, unknown>;
+
+      if (part['type'] === 'text') {
+        partData = { type: 'text', text: part['text'] ?? '' };
+      } else if (part['type'] === 'tool_call') {
+        const input = (part['input'] as Record<string, unknown>) ?? {};
+        partData = {
+          type: 'tool',
+          callID: part['toolCallId'] ?? '',
+          tool: part['toolName'] ?? '',
+          state: { status: 'pending', input, raw: part['rawArguments'] ?? JSON.stringify(input) },
+        };
+      } else if (part['type'] === 'tool_result') {
+        // Don't create a separate part for tool_result — find and update the ToolPart
+        const callID = part['toolCallId'] as string;
+        if (callID) {
+          const partRows = db
+            .prepare('SELECT id, data FROM part_v2 WHERE session_id = ? AND message_id = ?')
+            .all(row.session_id, row.id) as Array<{ id: string; data: string }>;
+
+          for (const pr of partRows) {
+            const pd = JSON.parse(pr.data) as Record<string, unknown>;
+            if (pd['type'] === 'tool' && pd['callID'] === callID) {
+              const isError = part['isError'] === true;
+              const output = part['output'];
+              const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
+              if (isError) {
+                pd['state'] = {
+                  status: 'error',
+                  input: (pd['state'] as Record<string, unknown>)?.['input'] ?? {},
+                  error: outputStr,
+                  time: { start: row.created_at_ms, end: row.created_at_ms },
+                };
+              } else {
+                pd['state'] = {
+                  status: 'completed',
+                  input: (pd['state'] as Record<string, unknown>)?.['input'] ?? {},
+                  output: outputStr,
+                  title: (part['toolName'] as string) ?? callID,
+                  metadata: {},
+                  time: { start: row.created_at_ms, end: row.created_at_ms },
+                };
+              }
+              db.prepare('UPDATE part_v2 SET data = ? WHERE id = ?').run(JSON.stringify(pd), pr.id);
+              break;
+            }
+          }
+        }
+        continue;
+      } else if (part['type'] === 'modified_files_summary') {
+        partData = {
+          type: 'modified_files_summary',
+          title: part['title'] ?? '',
+          summary: part['summary'] ?? '',
+          files: part['files'] ?? [],
+        };
+      } else {
+        continue;
+      }
+
+      db.prepare(
+        'INSERT OR IGNORE INTO part_v2 (id, message_id, session_id, user_id, time_created, data) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(
+        partId,
+        row.id,
+        row.session_id,
+        row.user_id,
+        row.created_at_ms,
+        JSON.stringify(partData),
+      );
+
+      migratedParts++;
+    }
+  }
+
+  console.log(
+    `[V2_MIGRATION] Complete: ${migratedMessages} messages, ${migratedParts} parts migrated`,
+  );
+}
+
 type SQLValue = string | number | bigint | Uint8Array | null;
 
 export function sqliteRun(query: string, params: SQLValue[] = []): void {
@@ -814,4 +1031,16 @@ export function sqliteGet<T>(query: string, params: SQLValue[] = []): T | undefi
 export function sqliteAll<T>(query: string, params: SQLValue[] = []): T[] {
   const stmt = db.prepare(query);
   return stmt.all(...params) as T[];
+}
+
+export function sqliteTransaction<T>(fn: () => T): T {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
