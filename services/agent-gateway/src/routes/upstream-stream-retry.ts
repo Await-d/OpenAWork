@@ -1,5 +1,6 @@
 import { RetryExhaustedError, withRetry } from '@openAwork/agent-core';
 import type { RetryOptions } from '@openAwork/agent-core';
+import { readUpstreamError } from './upstream-error.js';
 
 const RETRYABLE_UPSTREAM_STATUSES = new Set([500, 502, 503, 504]);
 
@@ -70,7 +71,11 @@ export async function fetchUpstreamStreamWithRetry(input: {
           signal,
         });
 
-        if (isRetryableUpstreamStatus(response.status) && attempt < retryOptions.maxAttempts) {
+        if (
+          attempt < retryOptions.maxAttempts &&
+          (isRetryableUpstreamStatus(response.status) ||
+            (await isRetryableRateLimitResponse(response)))
+        ) {
           await cancelResponseBody(response);
           throw new RetryableUpstreamStatusError(response);
         }
@@ -113,6 +118,15 @@ export async function fetchUpstreamStreamWithRetry(input: {
 
     throw error;
   }
+}
+
+async function isRetryableRateLimitResponse(response: Response): Promise<boolean> {
+  if (response.status !== 429) {
+    return false;
+  }
+
+  const upstreamError = await readUpstreamError(response.clone());
+  return upstreamError.code === 'RATE_LIMIT';
 }
 
 async function cancelResponseBody(response: Response): Promise<void> {

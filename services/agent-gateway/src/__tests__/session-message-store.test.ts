@@ -623,7 +623,7 @@ describe('session message store', () => {
     expect(conversation.filter((message) => message.role === 'tool')).toHaveLength(6);
   });
 
-  it('keeps modified_files_summary content usable in upstream assistant context', async () => {
+  it('skips modified_files_summary content in upstream assistant context', async () => {
     const { buildUpstreamConversation } = await import('../session-message-store.js');
 
     const conversation = buildUpstreamConversation([
@@ -661,10 +661,6 @@ describe('session message store', () => {
       {
         role: 'user',
         content: '总结这次改动',
-      },
-      {
-        role: 'assistant',
-        content: '已修改文件: 更新了会话持久化逻辑。\n- modified: /repo/session.ts',
       },
     ]);
   });
@@ -1012,12 +1008,12 @@ describe('session message store', () => {
       storage: 'session_message',
       retrievalTool: 'read_tool_output',
       toolCallId: 'call-large-1',
-      valueType: 'string',
     });
-    expect(typeof metadata['sha256']).toBe('string');
-    expect(metadata['sizeBytes']).toBeGreaterThan(8 * 1024);
-    expect(metadata['lineCount']).toBeGreaterThan(1);
-    expect(typeof metadata['hint']).toBe('string');
+    expect(metadata['sha256']).toBeUndefined();
+    expect(metadata['sizeBytes']).toBeUndefined();
+    expect(metadata['lineCount']).toBeUndefined();
+    expect(metadata['valueType']).toBeUndefined();
+    expect(metadata['hint']).toBeUndefined();
     expect(toolMessage?.content).not.toContain('line:payload\nline:payload\nline:payload');
   });
 
@@ -1090,16 +1086,12 @@ describe('session message store', () => {
       },
     });
 
+    expect(prepared.compactionSummary).toContain('test summary');
     expect(prepared.messages[0]).toMatchObject({
-      role: 'system',
-      content: expect.stringContaining('[COMPACT BOUNDARY]'),
-    });
-    expect(prepared.messages[0]?.content).toContain('test summary');
-    expect(prepared.messages[1]).toMatchObject({
       role: 'user',
       content: '用户目标 6',
     });
-    expect(prepared.messages).toHaveLength(7);
+    expect(prepared.messages).toHaveLength(6);
   });
 
   it('keeps full conversation when contextWindow is provided without llm summary', async () => {
@@ -1249,12 +1241,9 @@ describe('session message store', () => {
       normalizedMessageCount: 2,
       historySinceBoundaryCount: 2,
       selectedHistoryCount: 2,
-      upstreamMessageCount: 3,
+      upstreamMessageCount: 2,
     });
-    expect(prepared.messages[0]).toMatchObject({
-      role: 'system',
-      content: expect.stringContaining('压缩总结'),
-    });
+    expect(prepared.compactionSummary).toContain('压缩总结');
   });
 
   it('detects context overflow from token usage and context window', async () => {
@@ -1365,11 +1354,8 @@ describe('session message store', () => {
       },
     });
 
-    expect(prepared.messages).toHaveLength(1);
-    expect(prepared.messages[0]).toMatchObject({
-      role: 'system',
-      content: expect.stringContaining('已压缩总结'),
-    });
+    expect(prepared.messages).toHaveLength(0);
+    expect(prepared.compactionSummary).toContain('已压缩总结');
   });
 
   it('prefers compaction marker records over metadata fallback and hides markers from visible transcript', async () => {
@@ -1470,12 +1456,9 @@ describe('session message store', () => {
 
     expect(stored).toHaveLength(7);
     expect(visible).toHaveLength(6);
-    expect(prepared.messages[0]).toMatchObject({
-      role: 'system',
-      content: expect.stringContaining('marker summary'),
-    });
-    expect(prepared.messages[1]).toMatchObject({ role: 'user', content: '用户目标 3' });
-    expect(prepared.messages[0]?.content).not.toContain('metadata summary');
+    expect(prepared.compactionSummary).toContain('marker summary');
+    expect(prepared.messages[0]).toMatchObject({ role: 'user', content: '用户目标 3' });
+    expect(prepared.compactionSummary).not.toContain('metadata summary');
   });
 
   it('rebuilds compaction memory from omitted history when covered boundary is missing', async () => {
@@ -1564,10 +1547,10 @@ describe('session message store', () => {
     expect(metadata).toMatchObject({
       fullOutputPreserved: true,
       toolCallId: 'call-utf8',
-      valueType: 'string',
     });
-    expect(metadata['sizeBytes']).toBe(Buffer.byteLength(multiByteOutput, 'utf8'));
-    expect(metadata['lineCount']).toBe(1);
+    expect(metadata['sizeBytes']).toBeUndefined();
+    expect(metadata['lineCount']).toBeUndefined();
+    expect(metadata['valueType']).toBeUndefined();
   });
 
   it('detects when upstream conversation contains tool output references', async () => {

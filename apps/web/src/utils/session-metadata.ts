@@ -18,7 +18,7 @@ const SESSION_METADATA_CACHE_MAX_SIZE = 500;
 const sessionMetadataCache = new Map<string, ParsedSessionMetadata>();
 
 const DIALOGUE_MODE_LABELS: Record<SessionDialogueMode, string> = {
-  clarify: '澄清',
+  clarify: '澄清(方案)',
   coding: '编程',
   programmer: '程序员',
 };

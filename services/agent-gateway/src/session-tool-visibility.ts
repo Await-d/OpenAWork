@@ -1,3 +1,4 @@
+import type { DialogueMode } from '@openAwork/shared';
 import type { GatewayToolDefinition } from './tool-definitions.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 
@@ -94,6 +95,58 @@ function resolveChannelToolKey(toolName: string): string | null {
   }
 }
 
+const CLARIFY_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
+  // Read-only file tools
+  'list',
+  'read',
+  'glob',
+  'grep',
+  'read_tool_output',
+  // Read-only workspace tools
+  'workspace_review_status',
+  'workspace_review_diff',
+  // Read-only LSP tools
+  'lsp_diagnostics',
+  'lsp_touch',
+  'lsp_goto_definition',
+  'lsp_goto_implementation',
+  'lsp_find_references',
+  'lsp_symbols',
+  'lsp_hover',
+  'lsp_call_hierarchy',
+  // Code search
+  'codesearch',
+  // Web search/fetch
+  'websearch',
+  'webfetch',
+  // Interactive questioning
+  'question',
+  'AskUserQuestion',
+  // Plan mode
+  'EnterPlanMode',
+  'ExitPlanMode',
+  // Session read-only
+  'session_list',
+  'session_read',
+  'session_search',
+  'session_info',
+  // Todo read-only
+  'todoReadTool',
+  'subTodoReadTool',
+  // Task read-only
+  'task_list',
+  'task_get',
+  // Look at (image/file viewing)
+  'look_at',
+  // Sub-task/agent for analysis (child sessions inherit clarify restrictions)
+  'task',
+  'Agent',
+]);
+
+function isClarifyModeToolAllowed(toolName: string): boolean {
+  return CLARIFY_MODE_ALLOWED_TOOLS.has(toolName);
+}
+
 function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
   return metadata['source'] === 'channel';
 }
@@ -183,6 +236,12 @@ export function isGatewayToolEnabledForSessionMetadata(
   toolName: string,
   metadata: Record<string, unknown>,
 ): boolean {
+  // Clarify mode: only allow read-only + questioning tools
+  const dialogueMode = metadata['dialogueMode'];
+  if (dialogueMode === 'clarify' && !isClarifyModeToolAllowed(toolName)) {
+    return false;
+  }
+
   if (toolName === 'task') {
     return isTaskToolEnabledForSessionMetadata(metadata);
   }
@@ -224,4 +283,15 @@ export function filterEnabledGatewayToolsForSession(
   return tools.filter((tool) =>
     isGatewayToolEnabledForSessionMetadata(tool.function.name, metadata),
   );
+}
+
+export function filterEnabledGatewayToolsForDialogueMode(
+  tools: GatewayToolDefinition[],
+  dialogueMode: DialogueMode,
+): GatewayToolDefinition[] {
+  if (dialogueMode !== 'clarify') {
+    return tools;
+  }
+
+  return tools.filter((tool) => isClarifyModeToolAllowed(tool.function.name));
 }

@@ -4,6 +4,8 @@ export interface UpstreamErrorDescriptor {
   technicalDetail: string;
 }
 
+export type Upstream429ErrorClassification = 'quota_exceeded' | 'rate_limit' | 'unknown';
+
 const QUOTA_EXCEEDED_PATTERNS = [
   /daily_limit_exceeded/i,
   /daily usage limit exceeded/i,
@@ -31,7 +33,9 @@ export async function readUpstreamError(response: Response): Promise<UpstreamErr
   const technicalDetail = await readUpstreamErrorDetail(response);
 
   if (response.status === 429) {
-    if (matchesAnyPattern(technicalDetail, QUOTA_EXCEEDED_PATTERNS)) {
+    const classification = classifyUpstream429Error(technicalDetail);
+
+    if (classification === 'quota_exceeded') {
       return {
         code: 'QUOTA_EXCEEDED',
         message: '当前模型提供方额度已用尽，请切换模型或提供方，或等待额度恢复后再试',
@@ -39,7 +43,7 @@ export async function readUpstreamError(response: Response): Promise<UpstreamErr
       };
     }
 
-    if (matchesAnyPattern(technicalDetail, RATE_LIMIT_PATTERNS)) {
+    if (classification === 'rate_limit') {
       return {
         code: 'RATE_LIMIT',
         message: '模型服务触发速率限制，请稍后重试',
@@ -59,6 +63,18 @@ export async function readUpstreamError(response: Response): Promise<UpstreamErr
     message: technicalDetail,
     technicalDetail,
   };
+}
+
+export function classifyUpstream429Error(technicalDetail: string): Upstream429ErrorClassification {
+  if (matchesAnyPattern(technicalDetail, QUOTA_EXCEEDED_PATTERNS)) {
+    return 'quota_exceeded';
+  }
+
+  if (matchesAnyPattern(technicalDetail, RATE_LIMIT_PATTERNS)) {
+    return 'rate_limit';
+  }
+
+  return 'unknown';
 }
 
 export function isUpstreamContextOverflowError(input: {

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
   FileBackupRef,
   FileDiffContent,
@@ -19,7 +19,6 @@ import {
   deleteSessionMessageSearchDocument,
   upsertSessionMessageSearchDocument,
 } from './session-search-store.js';
-import { buildReadToolOutputHint } from './tool-output-tools.js';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 
 type SessionMessageStatus = 'final' | 'error';
@@ -88,6 +87,7 @@ export interface PreparedUpstreamConversationReport {
 
 export interface PreparedUpstreamConversation {
   messages: UpstreamChatMessage[];
+  compactionSummary: string | null;
   report?: PreparedUpstreamConversationReport;
 }
 
@@ -469,7 +469,8 @@ export function buildPreparedUpstreamConversation(
   options: number | BuildPreparedUpstreamConversationOptions = 12,
 ): PreparedUpstreamConversation {
   const maxMessages = typeof options === 'number' ? options : (options.maxMessages ?? 12);
-  const contextWindow = typeof options === 'number' ? undefined : options.contextWindow;
+  const contextWindow =
+    typeof options === 'number' ? undefined : (options.contextWindow ?? 128_000);
   const llmCompactionSummary =
     typeof options === 'number' ? undefined : options.llmCompactionSummary;
   const persistedMemory = typeof options === 'number' ? null : (options.persistedMemory ?? null);
@@ -497,27 +498,10 @@ export function buildPreparedUpstreamConversation(
     upstreamMessages,
   });
 
-  if (!compactSummaryInjected) {
-    return { messages: upstreamMessages, report };
-  }
-
   return {
-    messages: [
-      {
-        role: 'system',
-        content: [
-          '[COMPACT BOUNDARY]',
-          'Earlier conversation history has been compacted by an LLM summary.',
-          'Use this summary as the authoritative context before the remaining verbatim messages.',
-          effectiveSummary,
-        ].join('\n\n'),
-      },
-      ...upstreamMessages,
-    ],
-    report: {
-      ...report,
-      upstreamMessageCount: upstreamMessages.length + 1,
-    },
+    messages: upstreamMessages,
+    compactionSummary: compactSummaryInjected ? effectiveSummary : null,
+    report,
   };
 }
 
@@ -619,6 +603,7 @@ function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChat
           content: serializeToolOutput({
             isError: content.isError,
             output: content.output,
+            rawOutput: content.rawOutput,
             toolCallId: content.toolCallId,
           }),
         });
@@ -637,16 +622,6 @@ function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChat
       .join('\n')
       .trim();
 
-    const modifiedFilesSummaryText = message.content
-      .flatMap((content) => buildModifiedFilesSummaryContext(content))
-      .join('\n\n')
-      .trim();
-
-    const assistantContextText = [textContent, modifiedFilesSummaryText]
-      .filter((value) => value.length > 0)
-      .join('\n\n')
-      .trim();
-
     if (message.role === 'assistant') {
       const toolCalls = message.content.flatMap((content) => {
         if (content.type !== 'tool_call') return [];
@@ -656,16 +631,16 @@ function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChat
             type: 'function' as const,
             function: {
               name: content.toolName,
-              arguments: JSON.stringify(content.input),
+              arguments: content.rawArguments ?? JSON.stringify(content.input),
             },
           },
         ];
       });
 
-      if (toolCalls.length === 0 && assistantContextText.length === 0) return;
+      if (toolCalls.length === 0 && textContent.length === 0) return;
       upstreamMessages.push({
         role: 'assistant',
-        content: assistantContextText.length > 0 ? assistantContextText : null,
+        content: textContent.length > 0 ? textContent : null,
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       });
       return;
@@ -1050,18 +1025,16 @@ export function getLatestReferencedToolResult(input: {
 function serializeToolOutput(input: {
   isError: boolean;
   output: unknown;
+  rawOutput?: string;
   toolCallId: string;
 }): string {
-  const serialized = stringifyToolOutputValue(input.output);
+  const serialized = input.rawOutput ?? stringifyToolOutputValue(input.output);
   const sizeBytes = Buffer.byteLength(serialized, 'utf8');
   if (!shouldReferenceToolOutput(input.output, serialized, sizeBytes)) {
     return input.isError ? `[tool_error] ${serialized}` : serialized;
   }
 
   const meta = buildLargeToolOutputReference({
-    output: input.output,
-    serialized,
-    sizeBytes,
     toolCallId: input.toolCallId,
     isError: input.isError,
   });
@@ -1090,49 +1063,17 @@ function shouldReferenceToolOutput(
 }
 
 function buildLargeToolOutputReference(input: {
-  output: unknown;
-  serialized: string;
-  sizeBytes: number;
   toolCallId: string;
   isError: boolean;
 }): Record<string, unknown> {
-  const base: Record<string, unknown> = {
+  return {
     kind: 'tool_output_reference',
     fullOutputPreserved: true,
     storage: 'session_message',
     retrievalTool: 'read_tool_output',
     toolCallId: input.toolCallId,
     isError: input.isError,
-    sha256: createHash('sha256').update(input.serialized).digest('hex').slice(0, 16),
-    sizeBytes: input.sizeBytes,
-    valueType: Array.isArray(input.output) ? 'array' : typeof input.output,
-    hint: buildReadToolOutputHint(input.toolCallId),
   };
-
-  if (typeof input.output === 'string') {
-    return {
-      ...base,
-      lineCount: input.output.split(/\r?\n/).length,
-      nonWhitespaceChars: input.output.trim().length,
-    };
-  }
-
-  if (Array.isArray(input.output)) {
-    return {
-      ...base,
-      itemCount: input.output.length,
-    };
-  }
-
-  if (input.output && typeof input.output === 'object') {
-    const record = input.output as Record<string, unknown>;
-    return {
-      ...base,
-      keyCount: Object.keys(record).length,
-    };
-  }
-
-  return base;
 }
 
 export function getSessionMessageByRequestId(input: {
@@ -1346,7 +1287,7 @@ function ensureLatestUserMessage(selected: Message[], allMessages: Message[]): M
   return selected;
 }
 
-function buildModifiedFilesSummaryContext(content: MessageContent): string[] {
+function _buildModifiedFilesSummaryContext(content: MessageContent): string[] {
   if (content.type !== 'modified_files_summary') {
     return [];
   }
@@ -1480,6 +1421,9 @@ function parseMessageContentArray(raw: unknown[]): MessageContent[] {
         toolCallId: record['toolCallId'],
         toolName: record['toolName'],
         input: record['input'] as Record<string, unknown>,
+        ...(typeof record['rawArguments'] === 'string'
+          ? { rawArguments: record['rawArguments'] }
+          : {}),
       });
       return;
     }
@@ -1498,6 +1442,7 @@ function parseMessageContentArray(raw: unknown[]): MessageContent[] {
         toolCallId: record['toolCallId'],
         toolName: typeof record['toolName'] === 'string' ? record['toolName'] : undefined,
         output: record['output'],
+        ...(typeof record['rawOutput'] === 'string' ? { rawOutput: record['rawOutput'] } : {}),
         isError: record['isError'],
         ...(typeof record['clientRequestId'] === 'string'
           ? { clientRequestId: record['clientRequestId'] }

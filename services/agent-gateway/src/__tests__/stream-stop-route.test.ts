@@ -92,7 +92,6 @@ describe('stream stop route', () => {
       appendSessionMessage: vi.fn(),
       buildUpstreamConversation: vi.fn(() => []),
       getSessionMessageByRequestId: vi.fn(() => null),
-      hasToolOutputReference: vi.fn(() => false),
       listSessionMessagesByRequestScope: vi.fn(() => []),
       listSessionMessages: vi.fn(() => []),
       truncateSessionMessagesAfter: vi.fn(),

@@ -196,7 +196,15 @@ export function applyChatRightPanelChunk(
     case 'tool_call_delta':
       return applyToolCallDelta(state, chunk);
     case 'done':
-      return finalizeRun(state, chunk.stopReason === 'error' ? 'failed' : 'completed', undefined);
+      return finalizeRun(
+        state,
+        chunk.stopReason === 'error'
+          ? 'failed'
+          : chunk.stopReason === 'tool_permission'
+            ? 'paused'
+            : 'completed',
+        undefined,
+      );
     case 'error':
       return finalizeRun(state, 'failed', chunk.message);
   }
@@ -534,12 +542,27 @@ ${stringifyToolOutput(event.output)}`
 
 function finalizeRun(
   state: ChatRightPanelState,
-  status: 'completed' | 'failed',
+  status: 'completed' | 'failed' | 'paused',
   error?: string,
 ): ChatRightPanelState {
-  const nextPlanStatus = status === 'completed' ? ('done' as const) : ('failed' as const);
-  const nextToolStatus = status === 'completed' ? ('completed' as const) : ('failed' as const);
-  const nextNodeStatus = status === 'completed' ? ('completed' as const) : ('failed' as const);
+  const nextPlanStatus =
+    status === 'completed'
+      ? ('done' as const)
+      : status === 'paused'
+        ? ('pending' as const)
+        : ('failed' as const);
+  const nextToolStatus =
+    status === 'completed'
+      ? ('completed' as const)
+      : status === 'paused'
+        ? ('paused' as const)
+        : ('failed' as const);
+  const nextNodeStatus =
+    status === 'completed'
+      ? ('completed' as const)
+      : status === 'paused'
+        ? ('paused' as const)
+        : ('failed' as const);
 
   const planTasks = state.planTasks.map((task) => ({
     ...task,
@@ -570,7 +593,9 @@ function finalizeRun(
   const finalEvent =
     status === 'completed'
       ? createEvent('agent_done', '流式响应完成')
-      : createEvent('agent_error', '流式响应失败', error);
+      : status === 'paused'
+        ? createEvent('agent_thinking', '等待权限审批')
+        : createEvent('agent_error', '流式响应失败', error);
 
   const historyEntry = planTasks.length
     ? {

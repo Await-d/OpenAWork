@@ -6,7 +6,7 @@ export interface DAGNodeInfo {
   id: string;
   label: string;
   type: 'orchestrator' | 'subagent' | 'tool' | 'human_input';
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'skipped';
 }
 
 export interface DAGEdgeInfo {
@@ -33,6 +33,7 @@ const NODE_COLOR: Record<DAGNodeInfo['type'], string> = {
 const STATUS_BORDER: Record<DAGNodeInfo['status'], string> = {
   pending: 'var(--color-border, #334155)',
   running: tokens.color.accent,
+  paused: tokens.color.warning,
   completed: tokens.color.success,
   failed: tokens.color.danger,
   skipped: 'var(--color-muted, #94a3b8)',

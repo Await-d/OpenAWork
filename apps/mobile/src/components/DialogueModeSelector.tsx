@@ -23,7 +23,7 @@ const DIALOGUE_MODE_DEFINITIONS = [
     value: 'clarify',
     label: '澄清',
     icon: '◎',
-    desc: '先基于已知事实厘清目标、约束和验收条件',
+    desc: '渐进式需求澄清与方案设计，只读分析、交互式提问',
   },
   {
     value: 'coding',

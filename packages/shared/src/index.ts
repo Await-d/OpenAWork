@@ -476,7 +476,7 @@ export interface StreamToolCallChunk {
 
 export interface StreamDoneChunk {
   type: 'done';
-  stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled';
+  stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -675,6 +675,12 @@ export type RunEventBookend =
       terminal: false;
       replayable: false;
       stopReason: 'tool_use';
+    }
+  | {
+      kind: 'permission_paused';
+      terminal: false;
+      replayable: true;
+      stopReason: 'tool_permission';
     };
 
 export interface EventEnvelope<TPayload = unknown, TAggregateType extends string = string> {

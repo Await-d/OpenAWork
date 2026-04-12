@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type StepStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'skipped';
 
 export interface StepRowProps {
   id: string;
@@ -14,6 +14,7 @@ export interface StepRowProps {
 const STATUS_ICON: Record<StepStatus, string> = {
   pending: '○',
   running: '◐',
+  paused: '◷',
   completed: '●',
   failed: '✗',
   skipped: '—',
@@ -22,6 +23,7 @@ const STATUS_ICON: Record<StepStatus, string> = {
 const STATUS_COLOR: Record<StepStatus, string> = {
   pending: 'var(--color-muted, #94a3b8)',
   running: '#fbbf24',
+  paused: '#fb923c',
   completed: '#34d399',
   failed: '#f87171',
   skipped: 'var(--color-muted, #94a3b8)',
