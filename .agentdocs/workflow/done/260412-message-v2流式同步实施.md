@@ -55,14 +55,13 @@
 - [x] T-04：实现 web 侧最小消费链切换（recovery accessor 收口到 ChatPage / Layout）✅
 
 ### Phase 3：验证与提交
-- [ ] T-05：完成主线验证并创建原子提交
+- [x] T-05：完成主线验证并创建原子提交 ✅
 
 ## Notes
 
-- 本工作流是 Team 主线之后的下一条独立实施链。
-- 当前已确定的实现顺序：**gateway first，web second**。
-- 在 gateway 首刀结果返回前，不应抢先扩大到 `ChatPage` / `Layout` 的 UI 修补。
-- 已完成文件（gateway 第一刀）：
+- 本工作流是 Team 主线之后的下一条独立实施链，现已完成并归档。
+- 已确定并完成的实现顺序：**gateway first，web second**。
+- gateway 第一刀已完成：
   - `services/agent-gateway/src/message-v2-schema.ts`
   - `services/agent-gateway/src/message-store-v2.ts`
   - `services/agent-gateway/src/message-v2-projectors.ts`
@@ -70,14 +69,21 @@
   - `services/agent-gateway/src/message-v2-adapter.ts`
   - `services/agent-gateway/src/routes/session-shared-read-routes.ts`
   - `services/agent-gateway/src/__tests__/session-shared-read-routes.test.ts`
-- 当前第一刀只把 **runtime 已写入 V2 的消息** 接到 `session-shared-read-routes` 这条窄读口上：assistant_event / tool_call / tool_result / modified_files_summary 会优先从 V2 投影回 V1 Message；全局 `listSessionMessagesV2()` 仍保持 V1 authoritative read，不扩大 blast radius。
-- 当前第二刀（web 最小适配）已完成：
+- gateway 收口完成：
+  - 新增 `services/agent-gateway/src/runtime-safe-message-merge.ts`
+  - `services/agent-gateway/src/routes/sessions.ts` 现已把 runtime-safe V2 messages 补入 `/sessions/:id` detail 与 `/sessions/:id/recovery`
+  - `services/agent-gateway/src/routes/session-shared-read-routes.ts` 改为与主读链共用 supplement-only merge 规则：**V1 保持 authoritative，V2 只补 runtime-safe 缺口，不覆盖同 ID 旧消息**
+  - `services/agent-gateway/src/__tests__/session-todo-routes.test.ts` 新增 detail/recovery 对 V2 runtime-safe merge 的回归
+  - `services/agent-gateway/src/__tests__/message-v2-adapter.test.ts`、`message-v2-store.test.ts` 已同步到当前品牌化 ID / tool state / transition 签名
+- web 第二刀已完成：
   - 新增 `apps/web/src/pages/chat-page/recovery-read-model.ts`，统一 recovery transcript 与 pending interaction 的兼容读取
   - `apps/web/src/pages/ChatPage.tsx` 改为通过统一 accessor 读取 `messages / pendingPermissions / pendingQuestions`
   - `apps/web/src/components/Layout.tsx` 改为通过统一 accessor 读取待处理权限与问题，避免继续各自硬解 recovery 返回体
   - 已补 `apps/web/src/pages/chat-page/recovery-read-model.test.ts`
-  - 已验证通过：
-    - `pnpm --filter @openAwork/web exec vitest run src/pages/chat-page/recovery-read-model.test.ts src/pages/chat-page/support.test.ts src/components/Layout.permissions.test.tsx src/components/Layout.questions.test.tsx`
-    - `pnpm --filter @openAwork/web exec vitest run src/pages/ChatPage.test.tsx -t "hydrates shared message payloads returned by the session API|attaches to the active stream after refresh and keeps the recovered snapshot visible|keeps recovery guidance visible after attach completion until the backend snapshot catches up|keeps attach recovery events out of the transcript message list|reconstructs in-progress assistant output from persisted run events after a refresh"`
-    - `pnpm --filter @openAwork/web build`
-- 运行态总表位于 `.agentdocs/runtime/260412-message-v2流式同步实施/master_plan.md`。
+- 已验证通过：
+  - `pnpm --filter @openAwork/web exec vitest run src/pages/chat-page/recovery-read-model.test.ts src/pages/chat-page/support.test.ts src/components/Layout.permissions.test.tsx src/components/Layout.questions.test.tsx`
+  - `pnpm --filter @openAwork/web exec vitest run src/pages/ChatPage.test.tsx -t "hydrates shared message payloads returned by the session API|attaches to the active stream after refresh and keeps the recovered snapshot visible|keeps recovery guidance visible after attach completion until the backend snapshot catches up|keeps attach recovery events out of the transcript message list|reconstructs in-progress assistant output from persisted run events after a refresh"`
+  - `pnpm --filter @openAwork/web build`
+  - `pnpm --filter @openAwork/agent-gateway exec vitest run src/__tests__/message-v2-adapter.test.ts src/__tests__/message-v2-store.test.ts src/__tests__/message-v2-sync-event.test.ts src/__tests__/session-shared-read-routes.test.ts src/__tests__/session-todo-routes.test.ts src/__tests__/session-run-events.test.ts`
+  - `pnpm --filter @openAwork/agent-gateway typecheck`
+- Memory sync: completed
