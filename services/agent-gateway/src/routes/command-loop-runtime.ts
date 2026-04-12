@@ -6,7 +6,10 @@ import { promisify } from 'node:util';
 import type { Message } from '@openAwork/shared';
 import type { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { RalphLoopImpl } from '@openAwork/agent-core';
-import { appendSessionMessage, listSessionMessages } from '../session-message-store.js';
+import {
+  appendSessionMessageV2 as appendSessionMessage,
+  listSessionMessagesV2 as listSessionMessages,
+} from '../message-v2-adapter.js';
 import { sqliteGet, sqliteRun } from '../db.js';
 
 const execFileAsync = promisify(execFile);

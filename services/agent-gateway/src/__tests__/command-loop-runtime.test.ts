@@ -68,6 +68,7 @@ vi.mock('../db.js', () => ({
       sessionRows.set(key, row);
     }
   },
+  sqliteTransaction: (fn: () => unknown) => fn(),
 }));
 
 vi.mock('../session-message-store.js', () => ({
