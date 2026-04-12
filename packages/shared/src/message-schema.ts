@@ -10,7 +10,6 @@ export interface ToolCallContent {
   toolCallId: string;
   toolName: string;
   input: Record<string, unknown>;
-  rawArguments?: string;
 }
 
 export type ToolSurfaceProfile = 'openawork' | 'claude_code_simple' | 'claude_code_default';
@@ -65,7 +64,6 @@ export interface ToolResultContent {
   toolName?: string;
   clientRequestId?: string;
   output: unknown;
-  rawOutput?: string;
   isError: boolean;
   reason?: string;
   fileDiffs?: FileDiffContent[];

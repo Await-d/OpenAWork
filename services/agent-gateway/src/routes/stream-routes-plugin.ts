@@ -406,15 +406,11 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
     wl.succeed(stepSession);
 
-    const requestOrigin = request.headers['origin'] ?? '*';
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': requestOrigin,
-      'Access-Control-Allow-Credentials': 'true',
-      Vary: 'Origin',
     });
     try {
       const streamResult = await handleStreamRequest({
@@ -551,15 +547,11 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         query.data.clientRequestId,
       ) ?? query.data.afterSeq;
 
-    const attachOrigin = request.headers['origin'] ?? '*';
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': attachOrigin,
-      'Access-Control-Allow-Credentials': 'true',
-      Vary: 'Origin',
     });
     reply.raw.write('retry: 1000\n\n');
 

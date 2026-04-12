@@ -24,9 +24,9 @@ interface SessionTodoItem {
 const PANEL_SECTION_STYLE: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 6,
-  padding: '8px 10px',
-  borderRadius: 10,
+  gap: 8,
+  padding: '10px 11px',
+  borderRadius: 12,
   border: '1px solid color-mix(in oklch, var(--border) 84%, transparent)',
   background: 'color-mix(in oklch, var(--surface) 80%, transparent)',
 };
@@ -167,6 +167,106 @@ interface CompactionItem {
   occurredAt: number;
 }
 
+function SessionTodoPanel(props: { sessionTodos: SessionTodoItem[]; title: string }) {
+  const activeCount = props.sessionTodos.filter(
+    (todo) => todo.status === 'pending' || todo.status === 'in_progress',
+  ).length;
+
+  return (
+    <div style={PANEL_SECTION_STYLE}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <div style={PANEL_SECTION_EYEBROW_STYLE}>{props.title}</div>
+        <div
+          style={{
+            fontSize: 10,
+            lineHeight: 1,
+            padding: '2px 6px',
+            borderRadius: 999,
+            border: '1px solid var(--border)',
+            color: 'var(--text-3)',
+            background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
+          }}
+        >
+          {activeCount}/{props.sessionTodos.length}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {props.sessionTodos.map((todo, index) => {
+          const tone = getSessionTodoBadgeTone(todo);
+          return (
+            <div
+              key={`${todo.content}-${index}`}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+                padding: '6px 8px',
+                borderRadius: 9,
+                background: 'color-mix(in oklch, var(--surface) 68%, transparent)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                <span style={{ color: todo.status === 'completed' ? '#34d399' : '#fbbf24' }}>
+                  {todo.status === 'completed' ? '●' : todo.status === 'in_progress' ? '◐' : '○'}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--text)',
+                      fontWeight: 600,
+                      lineHeight: 1.45,
+                      textDecoration:
+                        todo.status === 'completed' || todo.status === 'cancelled'
+                          ? 'line-through'
+                          : 'none',
+                    }}
+                  >
+                    {todo.content}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 20 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    lineHeight: 1.2,
+                    padding: '2px 6px',
+                    borderRadius: 999,
+                    ...tone,
+                  }}
+                >
+                  {formatSessionTodoStatus(todo)}
+                </span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    lineHeight: 1.2,
+                    padding: '2px 6px',
+                    borderRadius: 999,
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-3)',
+                    background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
+                  }}
+                >
+                  {getSessionTodoPriorityLabel(todo)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ChatHistoryTabContent(props: {
   childSessions: Session[];
   compactions: CompactionItem[];
@@ -189,422 +289,199 @@ export function ChatHistoryTabContent(props: {
   } = props;
   const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
 
-  const hasChildSessions = childSessions.length > 0;
-  const hasSessionTasks = sessionTasks.length > 0;
-  const hasCompactions = compactions.length > 0;
-  const hasPendingPermissions = pendingPermissions.length > 0;
-  const hasMainTodos = mainTodos.length > 0;
-  const hasTempTodos = tempTodos.length > 0;
-
   return (
     <div style={{ ...sharedUiThemeVars, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {(hasChildSessions || hasSessionTasks) && (
+      {compactions.length > 0 && (
         <div style={PANEL_SECTION_STYLE}>
-          {hasChildSessions && (
-            <>
-              <div style={PANEL_SECTION_EYEBROW_STYLE}>子会话</div>
-              {childSessions.map((session) => (
-                <button
-                  key={session.id}
-                  type="button"
-                  onClick={() => onOpenSession(session.id)}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    border: 'none',
-                    borderRadius: 8,
-                    background: 'color-mix(in oklch, var(--surface) 70%, transparent)',
-                    color: 'var(--text)',
-                    padding: '7px 9px',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    textDecoration: 'none',
-                    lineHeight: 1.45,
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background =
-                      'color-mix(in oklch, var(--surface) 88%, var(--bg) 12%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background =
-                      'color-mix(in oklch, var(--surface) 70%, transparent)';
-                  }}
-                >
-                  {session.title ?? '未命名'} · {session.id.slice(0, 8)}…
-                </button>
-              ))}
-            </>
-          )}
-          {hasChildSessions && hasSessionTasks && (
-            <div
-              style={{
-                margin: '6px 0',
-                borderTop: '1px solid color-mix(in oklch, var(--border) 60%, transparent)',
-              }}
-            />
-          )}
-          {hasSessionTasks && (
-            <>
-              <div style={PANEL_SECTION_EYEBROW_STYLE}>任务状态</div>
-              {sessionTasks.map((task) => (
-                <div
-                  key={task.id}
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--text)',
-                    marginBottom: 3,
-                    paddingLeft: (task.depth ?? 0) * 14,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                    <span
-                      style={{
-                        width: task.depth && task.depth > 0 ? 8 : 0,
-                        height: 1,
-                        background:
-                          task.depth && task.depth > 0
-                            ? 'color-mix(in srgb, var(--border) 88%, transparent)'
-                            : 'transparent',
-                        flexShrink: 0,
-                      }}
-                    />
-                    <div style={{ fontWeight: 600 }}>{task.title}</div>
-                    {task.assignedAgent && (
-                      <span
-                        style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          lineHeight: 1,
-                          padding: '1px 4px',
-                          borderRadius: 999,
-                          border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))',
-                          color: 'color-mix(in oklch, var(--accent) 80%, var(--text-3))',
-                          background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                        }}
-                        title={task.assignedAgent}
-                      >
-                        ◈ {task.assignedAgent}
-                      </span>
-                    )}
-                    {(task.subtaskCount ?? 0) > 0 && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          lineHeight: 1,
-                          padding: '1px 4px',
-                          borderRadius: 999,
-                          border: '1px solid var(--border)',
-                          color: 'var(--text-3)',
-                          background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
-                        }}
-                      >
-                        {task.completedSubtaskCount ?? 0}/{task.subtaskCount ?? 0} 子项
-                      </span>
-                    )}
-                    {(task.unmetDependencyCount ?? 0) > 0 && task.status === 'pending' && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          lineHeight: 1,
-                          padding: '1px 4px',
-                          borderRadius: 999,
-                          border: '1px solid color-mix(in srgb, #f59e0b 55%, var(--border))',
-                          color: '#fbbf24',
-                          background: 'color-mix(in srgb, #f59e0b 10%, transparent)',
-                        }}
-                      >
-                        等待前置
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      color: 'var(--text-2)',
-                      marginLeft: task.depth && task.depth > 0 ? 16 : 0,
-                    }}
-                  >
-                    {formatSessionTaskStatus(task)}
-                  </div>
-                  {(task.errorMessage ?? task.result ?? task.terminalReason) && (
-                    <div
-                      style={{
-                        marginTop: 2,
-                        marginLeft: task.depth && task.depth > 0 ? 16 : 0,
-                        fontSize: 10,
-                        color:
-                          task.errorMessage || task.terminalReason
-                            ? '#fca5a5'
-                            : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                      title={
-                        task.errorMessage ??
-                        task.result ??
-                        (task.terminalReason === 'timeout'
-                          ? '子任务执行超时。'
-                          : task.terminalReason)
-                      }
-                    >
-                      {task.errorMessage
-                        ? `✗ ${task.errorMessage}`
-                        : task.result
-                          ? `✓ ${task.result}`
-                          : task.terminalReason === 'timeout'
-                            ? '✗ 子任务执行超时。'
-                            : `✗ ${task.terminalReason ?? ''}`}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </>
-          )}
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>会话压缩</div>
+          {compactions.map((item) => (
+            <div key={item.id} style={{ fontSize: 12, color: 'var(--text)' }}>
+              <div style={{ ...PANEL_SECTION_LABEL_STYLE, marginBottom: 4, color: 'var(--text)' }}>
+                {item.trigger === 'manual' ? '手动压缩' : '自动压缩'}
+              </div>
+              <div style={{ color: 'var(--text-2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                {item.summary}
+              </div>
+            </div>
+          ))}
         </div>
       )}
-      {(hasMainTodos || hasTempTodos) && (
+      {childSessions.length > 0 && (
         <div style={PANEL_SECTION_STYLE}>
-          {hasMainTodos && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                }}
-              >
-                <div style={PANEL_SECTION_EYEBROW_STYLE}>主待办</div>
-                <div
-                  style={{
-                    fontSize: 10,
-                    lineHeight: 1,
-                    padding: '2px 6px',
-                    borderRadius: 999,
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-3)',
-                    background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
-                  }}
-                >
-                  {
-                    mainTodos.filter((t) => t.status === 'pending' || t.status === 'in_progress')
-                      .length
-                  }
-                  /{mainTodos.length}
-                </div>
-              </div>
-              {mainTodos.map((todo, index) => {
-                const tone = getSessionTodoBadgeTone(todo);
-                return (
-                  <div
-                    key={`main-${todo.content}-${index}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 6,
-                      padding: '4px 6px',
-                      borderRadius: 7,
-                      background: 'color-mix(in oklch, var(--surface) 68%, transparent)',
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: todo.status === 'completed' ? '#34d399' : '#fbbf24',
-                        lineHeight: '18px',
-                      }}
-                    >
-                      {todo.status === 'completed'
-                        ? '●'
-                        : todo.status === 'in_progress'
-                          ? '◐'
-                          : '○'}
-                    </span>
-                    <div
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        fontSize: 11,
-                        color: 'var(--text)',
-                        fontWeight: 600,
-                        lineHeight: 1.45,
-                        textDecoration:
-                          todo.status === 'completed' || todo.status === 'cancelled'
-                            ? 'line-through'
-                            : 'none',
-                      }}
-                    >
-                      {todo.content}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 9,
-                        lineHeight: 1.2,
-                        padding: '1px 5px',
-                        borderRadius: 999,
-                        ...tone,
-                      }}
-                    >
-                      {formatSessionTodoStatus(todo)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {hasMainTodos && hasTempTodos && (
-            <div
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>子会话</div>
+          {childSessions.map((session) => (
+            <button
+              key={session.id}
+              type="button"
+              onClick={() => onOpenSession(session.id)}
               style={{
-                margin: '6px 0',
-                borderTop: '1px solid color-mix(in oklch, var(--border) 60%, transparent)',
+                width: '100%',
+                textAlign: 'left',
+                border: 'none',
+                borderRadius: 8,
+                background: 'color-mix(in oklch, var(--surface) 70%, transparent)',
+                color: 'var(--text)',
+                padding: '7px 9px',
+                cursor: 'pointer',
+                fontSize: 12,
+                textDecoration: 'none',
+                lineHeight: 1.45,
               }}
-            />
-          )}
-          {hasTempTodos && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                }}
-              >
-                <div style={PANEL_SECTION_EYEBROW_STYLE}>临时待办</div>
-                <div
-                  style={{
-                    fontSize: 10,
-                    lineHeight: 1,
-                    padding: '2px 6px',
-                    borderRadius: 999,
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-3)',
-                    background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
-                  }}
-                >
-                  {
-                    tempTodos.filter((t) => t.status === 'pending' || t.status === 'in_progress')
-                      .length
-                  }
-                  /{tempTodos.length}
-                </div>
-              </div>
-              {tempTodos.map((todo, index) => {
-                const tone = getSessionTodoBadgeTone(todo);
-                return (
-                  <div
-                    key={`temp-${todo.content}-${index}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 6,
-                      padding: '4px 6px',
-                      borderRadius: 7,
-                      background: 'color-mix(in oklch, var(--surface) 68%, transparent)',
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: todo.status === 'completed' ? '#34d399' : '#fbbf24',
-                        lineHeight: '18px',
-                      }}
-                    >
-                      {todo.status === 'completed'
-                        ? '●'
-                        : todo.status === 'in_progress'
-                          ? '◐'
-                          : '○'}
-                    </span>
-                    <div
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        fontSize: 11,
-                        color: 'var(--text)',
-                        fontWeight: 600,
-                        lineHeight: 1.45,
-                        textDecoration:
-                          todo.status === 'completed' || todo.status === 'cancelled'
-                            ? 'line-through'
-                            : 'none',
-                      }}
-                    >
-                      {todo.content}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 9,
-                        lineHeight: 1.2,
-                        padding: '1px 5px',
-                        borderRadius: 999,
-                        ...tone,
-                      }}
-                    >
-                      {formatSessionTodoStatus(todo)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  'color-mix(in oklch, var(--surface) 88%, var(--bg) 12%)';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  'color-mix(in oklch, var(--surface) 70%, transparent)';
+              }}
+            >
+              {session.title ?? '未命名'} · {session.id.slice(0, 8)}…
+            </button>
+          ))}
         </div>
       )}
-      {(hasCompactions || hasPendingPermissions) && (
+      {sessionTasks.length > 0 && (
         <div style={PANEL_SECTION_STYLE}>
-          {hasCompactions && (
-            <>
-              <div style={PANEL_SECTION_EYEBROW_STYLE}>会话压缩</div>
-              {compactions.map((item) => (
-                <div key={item.id} style={{ fontSize: 12, color: 'var(--text)' }}>
-                  <div
-                    style={{ ...PANEL_SECTION_LABEL_STYLE, marginBottom: 4, color: 'var(--text)' }}
-                  >
-                    {item.trigger === 'manual' ? '手动压缩' : '自动压缩'}
-                  </div>
-                  <div style={{ color: 'var(--text-2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                    {item.summary}
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-          {hasCompactions && hasPendingPermissions && (
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>任务状态</div>
+          {sessionTasks.map((task) => (
             <div
+              key={task.id}
               style={{
-                margin: '6px 0',
-                borderTop: '1px solid color-mix(in oklch, var(--border) 60%, transparent)',
+                fontSize: 12,
+                color: 'var(--text)',
+                marginBottom: 3,
+                paddingLeft: (task.depth ?? 0) * 14,
               }}
-            />
-          )}
-          {hasPendingPermissions && (
-            <>
-              <div style={PANEL_SECTION_EYEBROW_STYLE}>待处理审批</div>
-              {pendingPermissions.map((permission, idx) => (
-                <div
-                  key={permission.requestId}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                <span
                   style={{
-                    paddingTop: idx > 0 ? 7 : 0,
-                    marginTop: idx > 0 ? 7 : 0,
-                    borderTop: idx > 0 ? '1px solid var(--border-subtle)' : 'none',
+                    width: task.depth && task.depth > 0 ? 8 : 0,
+                    height: 1,
+                    background:
+                      task.depth && task.depth > 0
+                        ? 'color-mix(in srgb, var(--border) 88%, transparent)'
+                        : 'transparent',
+                    flexShrink: 0,
                   }}
+                />
+                <div style={{ fontWeight: 600 }}>{task.title}</div>
+                {task.assignedAgent && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      padding: '1px 4px',
+                      borderRadius: 999,
+                      border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))',
+                      color: 'color-mix(in oklch, var(--accent) 80%, var(--text-3))',
+                      background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                    }}
+                    title={task.assignedAgent}
+                  >
+                    ◈ {task.assignedAgent}
+                  </span>
+                )}
+                {(task.subtaskCount ?? 0) > 0 && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      lineHeight: 1,
+                      padding: '1px 4px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-3)',
+                      background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
+                    }}
+                  >
+                    {task.completedSubtaskCount ?? 0}/{task.subtaskCount ?? 0} 子项
+                  </span>
+                )}
+                {(task.unmetDependencyCount ?? 0) > 0 && task.status === 'pending' && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      lineHeight: 1,
+                      padding: '1px 4px',
+                      borderRadius: 999,
+                      border: '1px solid color-mix(in srgb, #f59e0b 55%, var(--border))',
+                      color: '#fbbf24',
+                      background: 'color-mix(in srgb, #f59e0b 10%, transparent)',
+                    }}
+                  >
+                    等待前置
+                  </span>
+                )}
+              </div>
+              <div
+                style={{
+                  color: 'var(--text-2)',
+                  marginLeft: task.depth && task.depth > 0 ? 16 : 0,
+                }}
+              >
+                {formatSessionTaskStatus(task)}
+              </div>
+              {(task.errorMessage ?? task.result ?? task.terminalReason) && (
+                <div
+                  style={{
+                    marginTop: 2,
+                    marginLeft: task.depth && task.depth > 0 ? 16 : 0,
+                    fontSize: 10,
+                    color:
+                      task.errorMessage || task.terminalReason
+                        ? '#fca5a5'
+                        : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title={
+                    task.errorMessage ??
+                    task.result ??
+                    (task.terminalReason === 'timeout' ? '子任务执行超时。' : task.terminalReason)
+                  }
                 >
-                  <div
-                    style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}
-                  >
-                    {permission.toolName}
-                  </div>
-                  <div
-                    style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, lineHeight: 1.45 }}
-                  >
-                    {permission.reason}
-                  </div>
-                  <div style={{ color: 'var(--text-3)', fontSize: 10, marginTop: 2 }}>
-                    {permission.scope} · {permission.riskLevel}
-                    {permission.previewAction ? ` · ${permission.previewAction}` : ''}
-                  </div>
+                  {task.errorMessage
+                    ? `✗ ${task.errorMessage}`
+                    : task.result
+                      ? `✓ ${task.result}`
+                      : task.terminalReason === 'timeout'
+                        ? '✗ 子任务执行超时。'
+                        : `✗ ${task.terminalReason ?? ''}`}
                 </div>
-              ))}
-            </>
-          )}
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {mainTodos.length > 0 && <SessionTodoPanel sessionTodos={mainTodos} title="主待办" />}
+      {tempTodos.length > 0 && <SessionTodoPanel sessionTodos={tempTodos} title="临时待办" />}
+      {pendingPermissions.length > 0 && (
+        <div style={PANEL_SECTION_STYLE}>
+          <div style={PANEL_SECTION_EYEBROW_STYLE}>待处理审批</div>
+          {pendingPermissions.map((permission, idx) => (
+            <div
+              key={permission.requestId}
+              style={{
+                paddingTop: idx > 0 ? 7 : 0,
+                marginTop: idx > 0 ? 7 : 0,
+                borderTop: idx > 0 ? '1px solid var(--border-subtle)' : 'none',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+                {permission.toolName}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, lineHeight: 1.45 }}>
+                {permission.reason}
+              </div>
+              <div style={{ color: 'var(--text-3)', fontSize: 10, marginTop: 2 }}>
+                {permission.scope} · {permission.riskLevel}
+                {permission.previewAction ? ` · ${permission.previewAction}` : ''}
+              </div>
+            </div>
+          ))}
         </div>
       )}
       <PlanHistoryPanel plans={planHistory} />
@@ -743,7 +620,7 @@ export function ChatOverviewTabContent(props: {
         style={{
           ...PANEL_SECTION_STYLE,
           display: 'grid',
-          gridTemplateColumns: 'minmax(68px, 88px) 1fr',
+          gridTemplateColumns: 'minmax(74px, 96px) 1fr',
           gap: 1,
           padding: 1,
           overflow: 'hidden',
@@ -760,7 +637,7 @@ export function ChatOverviewTabContent(props: {
               style={{
                 fontSize: 11,
                 color: 'var(--text-3)',
-                padding: '5px 8px',
+                padding: '8px 9px',
                 lineHeight: 1.35,
                 background:
                   idx % 2 === 0
@@ -774,7 +651,7 @@ export function ChatOverviewTabContent(props: {
               style={{
                 fontSize: 11,
                 color: 'var(--text)',
-                padding: '5px 8px',
+                padding: '8px 9px',
                 overflowWrap: 'anywhere',
                 textAlign: 'right',
                 lineHeight: 1.4,
@@ -801,7 +678,7 @@ export function ChatOverviewTabContent(props: {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={PANEL_SECTION_EYEBROW_STYLE}>会话状态</div>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>恢复策略</div>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
               {sessionStateStatus === 'paused' ? '等待处理中的会话' : '运行恢复已就绪'}
             </div>
@@ -813,41 +690,16 @@ export function ChatOverviewTabContent(props: {
         <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
           {recoverySummary}
         </div>
-        <div
-          style={{
-            marginTop: 8,
-            paddingTop: 8,
-            borderTop: '1px solid color-mix(in oklch, var(--border) 60%, transparent)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={PANEL_SECTION_EYEBROW_STYLE}>内容产物</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.4 }}>
-                {artifactCountLabel}
-              </div>
-            </div>
-            {artifactsWorkspaceHref ? (
-              <Link style={PANEL_ACTION_LINK_STYLE} to={artifactsWorkspaceHref}>
-                打开产物工作区
-              </Link>
-            ) : (
-              <span aria-disabled="true" style={PANEL_ACTION_DISABLED_STYLE}>
-                打开产物工作区
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 4 }}>
-            {artifactDescription}
-          </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ ...PANEL_ACTION_DISABLED_STYLE, opacity: 1, cursor: 'default' }}>
+            最近检查点 {compactions.length}
+          </span>
+          <span style={{ ...PANEL_ACTION_DISABLED_STYLE, opacity: 1, cursor: 'default' }}>
+            待审批 {pendingPermissions.length}
+          </span>
+          <span style={{ ...PANEL_ACTION_DISABLED_STYLE, opacity: 1, cursor: 'default' }}>
+            待回答 {pendingQuestionsCount}
+          </span>
         </div>
       </div>
       <div style={PANEL_SECTION_STYLE}>
@@ -861,7 +713,58 @@ export function ChatOverviewTabContent(props: {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文</div>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>内容产物</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+              当前会话 · {artifactCountLabel}
+            </div>
+          </div>
+          {artifactsWorkspaceHref ? (
+            <Link style={PANEL_ACTION_LINK_STYLE} to={artifactsWorkspaceHref}>
+              打开产物工作区
+            </Link>
+          ) : (
+            <span aria-disabled="true" style={PANEL_ACTION_DISABLED_STYLE}>
+              打开产物工作区
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+          {artifactDescription}
+        </div>
+      </div>
+      <div style={PANEL_SECTION_STYLE}>
+        <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文注入</div>
+        {yoloMode && (
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
+            ⚡ YOLO 模式已开启
+          </div>
+        )}
+        {attachmentItems.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
+            📎 引用文件 {attachmentItems.length} 个
+          </div>
+        )}
+        {workspaceFileItems.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
+            📂 已索引 {workspaceFileItems.length} 个工作区文件
+          </div>
+        )}
+        {!yoloMode && attachmentItems.length === 0 && workspaceFileItems.length === 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>无额外上下文</div>
+        )}
+      </div>
+      <div style={PANEL_SECTION_STYLE}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文窗口</div>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
               {contextSummaryText}
             </div>
@@ -870,20 +773,14 @@ export function ChatOverviewTabContent(props: {
             立即压缩会话
           </button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
-          {[
-            yoloMode ? '⚡ YOLO 模式' : '',
-            attachmentItems.length > 0 ? `📎 ${attachmentItems.length} 附件` : '',
-            workspaceFileItems.length > 0 ? `📂 ${workspaceFileItems.length} 索引文件` : '',
-          ]
-            .filter(Boolean)
-            .join('  ·  ') || <span style={{ color: 'var(--text-3)' }}>无额外上下文注入</span>}
-        </div>
         <ContextPanel
           items={contextItems}
           totalTokens={contextUsageSnapshot?.usedTokens}
           tokenLimit={contextUsageSnapshot?.maxTokens}
         />
+        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          先展示当前上下文来源与窗口占用；更细的 Pin/Remove/压缩预览会继续放到后续阶段。
+        </div>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   appendSessionMessage,
   buildPreparedUpstreamConversation,
   hasCompactionMarker,
+  hasToolOutputReference,
   isContextOverflow,
   listSessionMessages,
   type PreparedUpstreamConversationReport,
@@ -35,13 +36,7 @@ import { fetchUpstreamStreamWithRetry } from './upstream-stream-retry.js';
 import { writeAuditLog } from '../audit-log.js';
 
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
-type StreamStopReason =
-  | 'end_turn'
-  | 'tool_use'
-  | 'max_tokens'
-  | 'error'
-  | 'cancelled'
-  | 'tool_permission';
+type StreamStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled';
 
 interface StreamAccumulationState {
   assistantThinking: string;
@@ -58,17 +53,11 @@ function createAccumulationState(): StreamAccumulationState {
 }
 
 function buildUpstreamTransformationReport(input: {
-  compactionSummary?: string | null;
   memoryBlock?: string | null;
   outboundBody: Record<string, unknown>;
   outboundMessageCount: number;
   preparedReport?: PreparedUpstreamConversationReport;
-  injectedPrompt?: string | null;
-  capabilityContext?: string | null;
-  lspGuidance?: string | null;
-  dialogueModePrompt?: string | null;
-  yoloModePrompt?: string | null;
-  companionPrompt?: string | null;
+  requestSystemPrompts: string[];
   requestOverrides: { body?: Record<string, unknown>; omitBodyKeys?: string[] };
   routeSystemPrompt?: string;
   syntheticContinuationPrompt?: string;
@@ -80,17 +69,11 @@ function buildUpstreamTransformationReport(input: {
   return {
     prepared: input.preparedReport ?? null,
     protocol: input.upstreamProtocol,
-    workspaceContextInjected: true,
-    routeSystemPromptInjected: true,
-    injectedPromptActive: !!input.injectedPrompt,
-    capabilityContextActive: !!input.capabilityContext,
-    lspGuidanceActive: !!input.lspGuidance,
-    dialogueModeActive: !!input.dialogueModePrompt,
-    yoloModeActive: !!input.yoloModePrompt,
-    companionPromptActive: !!input.companionPrompt,
-    memoryBlockInjected: true,
-    compactionSummaryInjected: !!input.compactionSummary,
-    toolOutputReadbackGuidanceInjected: true,
+    workspaceContextInjected: !!input.workspaceCtx,
+    routeSystemPromptInjected: !!input.routeSystemPrompt,
+    requestSystemPromptCount: input.requestSystemPrompts.length,
+    memoryBlockInjected: !!input.memoryBlock,
+    toolOutputReadbackGuidanceInjected: input.toolOutputReadbackGuidanceInjected,
     syntheticContinuationInjected: !!input.syntheticContinuationPrompt,
     outboundMessageCount: input.outboundMessageCount,
     requestOverrideBodyKeys: Object.keys(input.requestOverrides.body ?? {}),
@@ -166,13 +149,11 @@ function buildAssistantContent(
   }
 
   state.toolCalls.forEach((toolCall, toolCallId) => {
-    const inputText = toolCall.inputText.trim();
     content.push({
       type: 'tool_call',
       toolCallId,
       toolName: toolCall.toolName,
-      input: parseToolInput(inputText),
-      ...(inputText.length > 0 ? { rawArguments: inputText } : {}),
+      input: parseToolInput(toolCall.inputText),
     });
   });
 
@@ -217,12 +198,7 @@ export async function runModelRound(input: {
   compactionAutoEnabled?: boolean;
   compactionReservedTokens?: number;
   workspaceCtx: string | null;
-  injectedPrompt?: string | null;
-  capabilityContext?: string | null;
-  lspGuidance?: string | null;
-  dialogueModePrompt?: string | null;
-  yoloModePrompt?: string | null;
-  companionPrompt?: string | null;
+  requestSystemPrompts: string[];
   syntheticContinuationPrompt?: string;
   memoryBlock?: string | null;
   writeChunk: (chunk: RunEvent) => void;
@@ -254,18 +230,14 @@ export async function runModelRound(input: {
         }),
   });
   const conversation = preparedConversation.messages;
+  const shouldGuideToolOutputReadback = hasToolOutputReference(conversation);
   const upstreamMessages = [
     ...buildRoundSystemMessages({
       workspaceCtx: input.workspaceCtx,
       routeSystemPrompt: input.route.systemPrompt,
-      injectedPrompt: input.injectedPrompt,
-      capabilityContext: input.capabilityContext,
-      lspGuidance: input.lspGuidance,
-      dialogueModePrompt: input.dialogueModePrompt,
-      yoloModePrompt: input.yoloModePrompt,
-      companionPrompt: input.companionPrompt,
+      requestSystemPrompts: input.requestSystemPrompts,
+      shouldGuideToolOutputReadback,
       memoryBlock: input.memoryBlock,
-      compactionSummary: preparedConversation.compactionSummary,
     }),
     ...conversation,
     ...(input.syntheticContinuationPrompt
@@ -296,22 +268,16 @@ export async function runModelRound(input: {
       : undefined,
   });
   const transformationReport = buildUpstreamTransformationReport({
-    compactionSummary: preparedConversation.compactionSummary,
     memoryBlock: input.memoryBlock,
     outboundBody: upstreamBody,
     outboundMessageCount: upstreamMessages.length,
     preparedReport: preparedConversation.report,
-    injectedPrompt: input.injectedPrompt,
-    capabilityContext: input.capabilityContext,
-    lspGuidance: input.lspGuidance,
-    dialogueModePrompt: input.dialogueModePrompt,
-    yoloModePrompt: input.yoloModePrompt,
-    companionPrompt: input.companionPrompt,
     requestOverrides: input.route.requestOverrides,
+    requestSystemPrompts: input.requestSystemPrompts,
     routeSystemPrompt: input.route.systemPrompt,
     syntheticContinuationPrompt: input.syntheticContinuationPrompt,
     thinkingApplied: shouldApplyThinkingConfig,
-    toolOutputReadbackGuidanceInjected: true,
+    toolOutputReadbackGuidanceInjected: shouldGuideToolOutputReadback,
     upstreamProtocol: input.route.upstreamProtocol,
     workspaceCtx: input.workspaceCtx,
   });

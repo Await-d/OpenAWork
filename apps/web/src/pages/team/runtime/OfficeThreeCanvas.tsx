@@ -322,7 +322,7 @@ function createMonitorTexture(data: {
       ctx.fillStyle = '#0f1f36';
       ctx.fillRect(20, barY + i * 14, 100, 8);
       ctx.fillStyle = barColors[i % barColors.length]!;
-      ctx.fillRect(22, barY + i * 14 + 2, Math.max(2, barW), 4);
+      ctx.fillRect(22, barY + i * 2 + 1, Math.max(2, barW), 4);
       ctx.fillStyle = '#8b949e';
       ctx.font = '9px ui-monospace, Menlo, monospace';
       ctx.fillText(`${fs.label} ${fs.value}`, 128, barY + i * 14 - 2);
@@ -343,7 +343,7 @@ function createMonitorTexture(data: {
       discussing: '#f0883e',
       resting: '#3fb950',
     };
-    const statusLabels: Record<string, string> = { working: '💻', discussing: '💬', resting: '☕' };
+    const statusLabels: Record<string, string> = { working: '💻', discussing: '�', resting: '☕' };
     for (let i = 0; i < officeAgents.length && i < 6; i++) {
       const ag = officeAgents[i]!;
       const ay = 60 + i * 14;
@@ -1990,7 +1990,7 @@ export function OfficeThreeCanvas({
             elapsed,
           });
           mat.map = newTex;
-          mat.needsUpdate = true;
+          newTex.needsUpdate = true;
         }
       }
 

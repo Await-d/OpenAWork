@@ -15,13 +15,7 @@ import {
 } from '../modified-files-summary.js';
 import { createDefaultSandbox, reconcileResumedTaskChildSession } from '../tool-sandbox.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
-import {
-  CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
-  DIALOGUE_MODE_SYSTEM_PROMPTS,
-  LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
-  YOLO_MODE_SYSTEM_PROMPT,
-} from './stream-system-prompts.js';
-import { KeywordDetectorImpl } from '@openAwork/agent-core';
+import { buildRequestScopedSystemPrompts } from './stream-system-prompts.js';
 import { buildCapabilityContext } from './capabilities.js';
 import {
   type ApprovedPermissionResumePayload,
@@ -103,19 +97,15 @@ async function continueFromApprovedToolResult(input: {
         requestData.message,
       )
     : null;
-  const capabilityContext = buildCapabilityContext(input.userId, input.sessionId);
-  const detector = new KeywordDetectorImpl();
-  const detection = detector.detect(requestData.message);
-  const injectedPrompt = detection.injectedPrompt ?? null;
-  const lspGuidance =
-    requestData.dialogueMode === 'clarify'
-      ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
-      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT;
-  const dialogueModePrompt =
-    requestData.dialogueMode !== undefined
-      ? DIALOGUE_MODE_SYSTEM_PROMPTS[requestData.dialogueMode]
-      : null;
-  const yoloModePrompt = requestData.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
+  const requestSystemPrompts = buildRequestScopedSystemPrompts(
+    requestData.message,
+    buildCapabilityContext(input.userId, input.sessionId),
+    {
+      companionPrompt,
+      dialogueMode: requestData.dialogueMode,
+      yoloMode: requestData.yoloMode,
+    },
+  );
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);
   const enabledTools = filterEnabledGatewayToolsForSession(
@@ -284,12 +274,7 @@ async function continueFromApprovedToolResult(input: {
           wl,
           ctx,
           workspaceCtx,
-          injectedPrompt,
-          capabilityContext,
-          lspGuidance,
-          dialogueModePrompt,
-          yoloModePrompt,
-          companionPrompt,
+          requestSystemPrompts,
           memoryBlock,
           writeChunk,
         });
@@ -356,22 +341,6 @@ async function continueFromApprovedToolResult(input: {
         });
 
         if (toolCallsResult.hasPendingPermission) {
-          console.log(
-            '[PERMISSION_PAUSE][RUNTIME] emitting done with tool_permission, sessionId=',
-            input.sessionId,
-            'runId=',
-            runId,
-          );
-          writeChunk({
-            type: 'done',
-            stopReason: 'tool_permission',
-            ...createRunEventMeta(runId, eventSequence),
-          });
-          setPersistedSessionStateStatus({
-            sessionId: input.sessionId,
-            status: 'paused',
-            userId: input.userId,
-          });
           wl.flush(ctx, 200);
           return { pendingInteraction: true, statusCode: 200 };
         }

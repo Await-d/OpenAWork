@@ -253,36 +253,18 @@ export function ChatTopBar({
           title="YOLO 模式：更少确认、直达结果"
           style={{
             height: 26,
-            padding: '0 7px',
+            padding: '0 8px',
             borderRadius: 5,
             border: 'none',
-            background: yoloMode
-              ? 'color-mix(in srgb, #f59e0b 22%, var(--surface))'
-              : 'transparent',
-            color: yoloMode ? '#fbbf24' : 'var(--text-3)',
-            boxShadow: yoloMode
-              ? 'inset 0 0 0 1px color-mix(in srgb, #f59e0b 50%, var(--border))'
-              : 'none',
+            background: yoloMode ? 'var(--accent)' : 'transparent',
+            color: yoloMode ? 'var(--accent-text)' : 'var(--text-3)',
             fontSize: 10,
             fontWeight: 600,
             cursor: 'pointer',
             flexShrink: 0,
             letterSpacing: '0.04em',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 3,
           }}
         >
-          <svg
-            aria-hidden="true"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            stroke="none"
-          >
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-          </svg>
           YOLO
         </button>
         <button

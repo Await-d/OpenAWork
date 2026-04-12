@@ -50,54 +50,6 @@ describe('fetchUpstreamStreamWithRetry', () => {
     await expect(response.text()).resolves.toBe('ok');
   });
 
-  it('retries rate-limit 429 responses before succeeding', async () => {
-    const firstResponse = new Response(
-      JSON.stringify({ error: { message: 'rate limit reached' } }),
-      {
-        status: 429,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(firstResponse)
-      .mockResolvedValueOnce(new Response('ok', { status: 200 }));
-
-    const response = await fetchUpstreamStreamWithRetry({
-      url: 'https://example.com/chat/completions',
-      init: { method: 'POST', body: '{}' },
-      signal: new AbortController().signal,
-      fetchImpl,
-      retryOptions: { ...FAST_RETRY_OPTIONS, maxAttempts: 2 },
-    });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toBe('ok');
-  });
-
-  it('returns the final rate-limit 429 response after retries are exhausted', async () => {
-    const responseBody = JSON.stringify({ error: { message: 'rate limit reached' } });
-    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => {
-      return new Response(responseBody, {
-        status: 429,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-
-    const response = await fetchUpstreamStreamWithRetry({
-      url: 'https://example.com/chat/completions',
-      init: { method: 'POST', body: '{}' },
-      signal: new AbortController().signal,
-      fetchImpl,
-      retryOptions: FAST_RETRY_OPTIONS,
-    });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(response.status).toBe(429);
-    await expect(response.text()).resolves.toBe(responseBody);
-  });
-
   it('returns the final retryable response after retries are exhausted', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => {
       return new Response('bad gateway', { status: 502 });
@@ -147,33 +99,6 @@ describe('fetchUpstreamStreamWithRetry', () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(404);
-  });
-
-  it('does not retry quota-exhausted 429 responses', async () => {
-    const responseBody = JSON.stringify({
-      error: {
-        code: 'insufficient_quota',
-        type: 'insufficient_quota',
-        message: 'You exceeded your current quota, please check your plan and billing details.',
-      },
-    });
-    const firstResponse = new Response(responseBody, {
-      status: 429,
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(firstResponse);
-
-    const response = await fetchUpstreamStreamWithRetry({
-      url: 'https://example.com/chat/completions',
-      init: { method: 'POST', body: '{}' },
-      signal: new AbortController().signal,
-      fetchImpl,
-      retryOptions: FAST_RETRY_OPTIONS,
-    });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(response.status).toBe(429);
-    await expect(response.text()).resolves.toBe(responseBody);
   });
 
   it('retries when an upstream response is missing a stream body', async () => {

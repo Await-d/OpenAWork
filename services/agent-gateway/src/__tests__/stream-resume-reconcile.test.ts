@@ -110,12 +110,6 @@ vi.mock('../routes/capabilities.js', () => ({
 }));
 
 vi.mock('../routes/stream-system-prompts.js', () => ({
-  CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT: 'clarify-lsp',
-  DIALOGUE_MODE_SYSTEM_PROMPTS: { clarify: 'clarify', coding: 'coding', programmer: 'programmer' },
-  LSP_TOOL_GUIDANCE_SYSTEM_PROMPT: 'lsp',
-  YOLO_MODE_SYSTEM_PROMPT: 'yolo',
-  TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT: 'tool-output-ref',
-  buildRoundSystemMessages: vi.fn(() => []),
   buildRequestScopedSystemPrompts: vi.fn(() => []),
 }));
 

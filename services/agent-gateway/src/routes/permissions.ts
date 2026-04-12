@@ -13,7 +13,6 @@ import { startRequestWorkflow } from '../request-workflow.js';
 import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
 import {
   type ApprovedPermissionResumePayload,
-  setPersistedSessionStateStatus,
   streamRequestSchema as permissionResumeRequestSchema,
 } from './stream.js';
 import { resumeApprovedPermissionRequest } from './stream-runtime.js';
@@ -299,11 +298,6 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
-      setPersistedSessionStateStatus({
-        sessionId,
-        status: body.data.decision === 'reject' ? 'idle' : 'running',
-        userId: user.sub,
-      });
       if (resumePayload) {
         void resumeApprovedPermissionRequest({
           payload: {

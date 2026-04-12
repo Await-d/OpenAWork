@@ -7,7 +7,7 @@ export interface HistoricalPlan {
   id: string;
   title: string;
   goal: string;
-  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
   createdAt: number;
   steps: StepRowProps[];
 }
@@ -21,7 +21,6 @@ export interface PlanHistoryPanelProps {
 const STATUS_COLOR: Record<HistoricalPlan['status'], string> = {
   pending: 'var(--color-muted, #94a3b8)',
   running: '#fbbf24',
-  paused: '#fb923c',
   completed: '#34d399',
   failed: '#f87171',
   skipped: 'var(--color-muted, #94a3b8)',

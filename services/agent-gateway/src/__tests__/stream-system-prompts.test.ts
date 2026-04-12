@@ -92,104 +92,20 @@ describe('stream system prompt integration', () => {
     expect(guidance).toContain('查看函数的调用关系（谁调用了它/它调用了谁） → lsp_call_hierarchy');
   });
 
-  it('builds upstream system messages in stable fixed-slot order', () => {
+  it('builds upstream system messages in stable order', () => {
     expect(
       buildRoundSystemMessages({
         workspaceCtx: '<workspace />',
         routeSystemPrompt: 'route prompt',
-        injectedPrompt: '[analyze-mode]',
-        capabilityContext: '## 系统 Agents',
-        lspGuidance: 'LSP 工具使用策略',
-        dialogueModePrompt: 'OpenAWork 对话模式提醒：programmer',
-        yoloModePrompt: 'OpenAWork 执行偏好提醒：yolo',
-        companionPrompt: 'OpenAWork companion 上下文',
+        requestSystemPrompts: ['[analyze-mode]', '## 系统 Agents', 'OpenAWork companion 上下文'],
+        shouldGuideToolOutputReadback: true,
       }),
     ).toEqual([
       { role: 'system', content: '<workspace />' },
       { role: 'system', content: 'route prompt' },
       { role: 'system', content: '[analyze-mode]' },
       { role: 'system', content: '## 系统 Agents' },
-      { role: 'system', content: 'LSP 工具使用策略' },
-      { role: 'system', content: 'OpenAWork 对话模式提醒：programmer' },
-      { role: 'system', content: 'OpenAWork 执行偏好提醒：yolo' },
       { role: 'system', content: 'OpenAWork companion 上下文' },
-      { role: 'system', content: `<user-memory />\n当前会话无持久化记忆。` },
-      {
-        role: 'system',
-        content: `[COMPACT BOUNDARY]\nEarlier conversation history has not been compacted.`,
-      },
-      {
-        role: 'system',
-        content:
-          '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量用 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。',
-      },
-    ]);
-  });
-
-  it('uses clarify-specific LSP guidance in clarify mode', () => {
-    const result = buildRequestScopedSystemPrompts('帮我分析这个需求', '## 系统 Agents\n- oracle', {
-      dialogueMode: 'clarify',
-    });
-    const guidance = result.find((prompt) => prompt.startsWith('LSP 只读工具使用策略（澄清模式）'));
-
-    expect(guidance).toBeDefined();
-    expect(guidance).toContain('lsp_goto_definition');
-    expect(guidance).toContain('lsp_hover');
-    expect(guidance).toContain('lsp_call_hierarchy');
-    expect(guidance).toContain('禁止使用 lsp_rename');
-    expect(guidance).not.toContain('绝不自动执行 rename');
-  });
-
-  it('uses full LSP guidance in coding and programmer modes', () => {
-    for (const mode of ['coding', 'programmer'] as const) {
-      const result = buildRequestScopedSystemPrompts('实现功能', '## 系统 Agents', {
-        dialogueMode: mode,
-      });
-      const guidance = result.find((prompt) => prompt.startsWith('LSP 工具使用策略'));
-
-      expect(guidance).toBeDefined();
-      expect(guidance).toContain('lsp_rename');
-      expect(guidance).toContain('绝不自动执行 rename');
-    }
-  });
-
-  it('clarify mode prompt contains progressive questioning guidance', () => {
-    const result = buildRequestScopedSystemPrompts('创建一个应用', '## 系统 Agents', {
-      dialogueMode: 'clarify',
-    });
-    const clarifyPrompt = result.find((prompt) =>
-      prompt.startsWith('OpenAWork 对话模式提醒：clarify'),
-    );
-
-    expect(clarifyPrompt).toBeDefined();
-    expect(clarifyPrompt).toContain('禁止编写代码');
-    expect(clarifyPrompt).toContain('由浅入深');
-    expect(clarifyPrompt).toContain('渐进式提问');
-    expect(clarifyPrompt).toContain('给出 2-4 个可选方向');
-    expect(clarifyPrompt).toContain('切换到编程模式或程序员模式');
-    expect(clarifyPrompt).toContain('子任务');
-    expect(clarifyPrompt).toContain('仅用于信息获取和问题分析');
-  });
-
-  it('always injects tool output reference guidance even without tool_output_reference in history', () => {
-    const result = buildRoundSystemMessages({
-      workspaceCtx: null,
-      routeSystemPrompt: undefined,
-    });
-    expect(result).toEqual([
-      { role: 'system', content: '<workspace />' },
-      { role: 'system', content: '<route-system-prompt />' },
-      { role: 'system', content: '<injected-prompt />\n当前消息无关键词触发的额外提示。' },
-      { role: 'system', content: '<capability-context />\n当前会话无可用能力目录。' },
-      { role: 'system', content: '<lsp-guidance />\nLSP 工具使用策略未启用。' },
-      { role: 'system', content: '<dialogue-mode />\n当前未指定对话模式。' },
-      { role: 'system', content: '<yolo-mode />\n当前未启用 YOLO 执行偏好。' },
-      { role: 'system', content: '<companion-prompt />\n当前无 companion 上下文。' },
-      { role: 'system', content: `<user-memory />\n当前会话无持久化记忆。` },
-      {
-        role: 'system',
-        content: `[COMPACT BOUNDARY]\nEarlier conversation history has not been compacted.`,
-      },
       {
         role: 'system',
         content:
@@ -203,23 +119,15 @@ describe('stream system prompt integration', () => {
       buildRoundSystemMessages({
         workspaceCtx: '<workspace />',
         routeSystemPrompt: 'route prompt',
-        injectedPrompt: 'prompt-a',
+        requestSystemPrompts: ['prompt-a'],
         memoryBlock: '<user-memory>\n- [fact] stack: openawork\n</user-memory>',
+        shouldGuideToolOutputReadback: true,
       }),
     ).toEqual([
       { role: 'system', content: '<workspace />' },
       { role: 'system', content: 'route prompt' },
       { role: 'system', content: 'prompt-a' },
-      { role: 'system', content: '<capability-context />\n当前会话无可用能力目录。' },
-      { role: 'system', content: '<lsp-guidance />\nLSP 工具使用策略未启用。' },
-      { role: 'system', content: '<dialogue-mode />\n当前未指定对话模式。' },
-      { role: 'system', content: '<yolo-mode />\n当前未启用 YOLO 执行偏好。' },
-      { role: 'system', content: '<companion-prompt />\n当前无 companion 上下文。' },
       { role: 'system', content: '<user-memory>\n- [fact] stack: openawork\n</user-memory>' },
-      {
-        role: 'system',
-        content: `[COMPACT BOUNDARY]\nEarlier conversation history has not been compacted.`,
-      },
       {
         role: 'system',
         content:

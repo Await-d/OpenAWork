@@ -1474,7 +1474,7 @@ describe('ChatPage', () => {
     expect(overviewTab?.style.justifyContent).toBe('center');
     expect(overviewPanel?.getAttribute('role')).toBe('tabpanel');
     expect(overviewHeader?.textContent).toContain('会话概览');
-    expect(overviewBody?.style.padding).toBe('8px 10px 10px');
+    expect(overviewBody?.style.padding).toBe('10px 10px 12px');
   });
 
   it('syncs the sidebar file tree root with the current session workspace', async () => {

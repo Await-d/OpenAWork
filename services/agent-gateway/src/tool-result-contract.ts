@@ -19,14 +19,12 @@ export interface ToolResultPayloadInput {
 }
 
 export function buildToolResultContent(input: ToolResultPayloadInput): ToolResultContent {
-  const rawOutput = typeof input.output === 'string' ? input.output : JSON.stringify(input.output);
   return {
     type: 'tool_result',
     toolCallId: input.toolCallId,
     toolName: input.toolName,
     ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
     output: input.output,
-    rawOutput,
     isError: input.isError,
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.fileDiffs && input.fileDiffs.length > 0 ? { fileDiffs: input.fileDiffs } : {}),

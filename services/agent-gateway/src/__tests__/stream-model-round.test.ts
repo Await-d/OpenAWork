@@ -10,7 +10,6 @@ import type {
 
 interface PreparedConversationMockResult {
   messages: UpstreamChatMessage[];
-  compactionSummary: string | null;
   report?: PreparedUpstreamConversationReport;
 }
 
@@ -28,7 +27,7 @@ const mocks = vi.hoisted(() => ({
             persistedMemory?: unknown;
           },
     ) => PreparedConversationMockResult
-  >(() => ({ messages: [] as UpstreamChatMessage[], compactionSummary: null })),
+  >(() => ({ messages: [] as UpstreamChatMessage[] })),
   buildRoundSystemMessagesMock: vi.fn<() => Array<{ role: 'system'; content: string }>>(() => []),
   buildUpstreamConversationMock: vi.fn<
     (messages: Message[], maxMessages?: number) => UpstreamChatMessage[]
@@ -48,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   })),
   fetchUpstreamStreamWithRetryMock: vi.fn(),
   hasCompactionMarkerMock: vi.fn(() => false),
+  hasToolOutputReferenceMock: vi.fn(() => false),
   isUpstreamContextOverflowErrorMock: vi.fn(() => false),
   listSessionMessagesMock: vi.fn<() => Message[]>(() => []),
   updateSessionMessagesStatusByRequestScopeMock: vi.fn(),
@@ -86,6 +86,7 @@ vi.mock('../session-message-store.js', () => ({
     ),
   buildUpstreamConversation: mocks.buildUpstreamConversationMock,
   hasCompactionMarker: mocks.hasCompactionMarkerMock,
+  hasToolOutputReference: mocks.hasToolOutputReferenceMock,
   listSessionMessages: mocks.listSessionMessagesMock,
   updateSessionMessagesStatusByRequestScope: mocks.updateSessionMessagesStatusByRequestScopeMock,
 }));
@@ -159,12 +160,12 @@ describe('runModelRound', () => {
     mocks.fetchUpstreamStreamWithRetryMock.mockReset();
     mocks.hasCompactionMarkerMock.mockReset();
     mocks.hasCompactionMarkerMock.mockReturnValue(false);
+    mocks.hasToolOutputReferenceMock.mockClear();
     mocks.listSessionMessagesMock.mockReset();
     mocks.updateSessionMessagesStatusByRequestScopeMock.mockReset();
     mocks.buildPreparedUpstreamConversationMock.mockReset();
     mocks.buildPreparedUpstreamConversationMock.mockImplementation((messages: Message[]) => ({
       messages: mocks.buildUpstreamConversationMock(messages),
-      compactionSummary: null,
     }));
     mocks.parseUpstreamFrameMock.mockReset();
     mocks.upsertArtifactsFromAssistantMessageMock.mockReset();
@@ -250,12 +251,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk: vi.fn(),
     });
 
@@ -350,12 +346,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk: vi.fn(),
     });
 
@@ -392,8 +383,7 @@ describe('runModelRound', () => {
       lastCompactionSignature: 'persisted-sig',
     });
     mocks.buildPreparedUpstreamConversationMock.mockReturnValue({
-      messages: [{ role: 'user', content: 'continued' }],
-      compactionSummary: 'durable summary',
+      messages: [{ role: 'system', content: 'durable summary' }],
     });
     mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
       ok: false,
@@ -445,12 +435,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk: vi.fn(),
     });
 
@@ -481,7 +466,6 @@ describe('runModelRound', () => {
     ]);
     mocks.buildPreparedUpstreamConversationMock.mockReturnValue({
       messages: [{ role: 'user', content: '继续执行' }],
-      compactionSummary: null,
       report: {
         inputMessageCount: 1,
         normalizedMessageCount: 1,
@@ -552,12 +536,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: 'workspace ctx',
-      injectedPrompt: 'request ctx',
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: ['request ctx'],
       writeChunk: vi.fn(),
     });
 
@@ -577,12 +556,7 @@ describe('runModelRound', () => {
           transformationReport: expect.objectContaining({
             protocol: 'responses',
             workspaceContextInjected: true,
-            injectedPromptActive: true,
-            capabilityContextActive: false,
-            lspGuidanceActive: false,
-            dialogueModeActive: false,
-            yoloModeActive: false,
-            companionPromptActive: false,
+            requestSystemPromptCount: 1,
             requestOverrideBodyKeys: ['foo'],
             omittedBodyKeys: ['temperature'],
             prepared: expect.objectContaining({
@@ -650,12 +624,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk,
     });
 
@@ -685,8 +654,7 @@ describe('runModelRound', () => {
     ]);
     mocks.hasCompactionMarkerMock.mockReturnValue(true);
     mocks.buildPreparedUpstreamConversationMock.mockReturnValue({
-      messages: [{ role: 'user', content: 'continued' }],
-      compactionSummary: 'marker summary',
+      messages: [{ role: 'system', content: 'marker summary' }],
     });
     mocks.fetchUpstreamStreamWithRetryMock.mockResolvedValue({
       ok: false,
@@ -739,12 +707,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk: vi.fn(),
     });
 
@@ -821,12 +784,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk: vi.fn(),
     });
 
@@ -902,12 +860,7 @@ describe('runModelRound', () => {
       wl,
       ctx,
       workspaceCtx: null,
-      injectedPrompt: null,
-      capabilityContext: null,
-      lspGuidance: null,
-      dialogueModePrompt: null,
-      yoloModePrompt: null,
-      companionPrompt: null,
+      requestSystemPrompts: [],
       writeChunk: vi.fn(),
     });
 

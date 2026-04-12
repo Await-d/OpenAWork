@@ -277,10 +277,6 @@ export function SessionSidebar({
   const selectedWorkspacePath =
     workspaceGroups.find((group) => group.sessions.some((session) => session.id === selectedTeamId))
       ?.workspacePath ?? null;
-  const bridgeSection = useMemo(
-    () => sidebarSections.find((section) => section.id === 'shared-sessions') ?? null,
-    [sidebarSections],
-  );
 
   return (
     <aside
@@ -586,80 +582,6 @@ export function SessionSidebar({
             );
           })}
         </div>
-
-        {bridgeSection && bridgeSection.items.length > 0 && (
-          <div
-            style={{
-              padding: '6px 6px 4px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              borderTop: '1px solid var(--border-subtle)',
-              marginTop: 4,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 4px 2px',
-              }}
-            >
-              <FolderIcon size={10} color="var(--text-3)" />
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: 'var(--text-2)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                }}
-              >
-                桥接会话
-              </span>
-              <span
-                style={{
-                  flex: 1,
-                  height: 1,
-                  background: 'var(--border-subtle)',
-                }}
-              />
-              <span
-                style={{
-                  fontSize: 9,
-                  color: 'var(--text-3)',
-                }}
-              >
-                {bridgeSection.items.length}
-              </span>
-            </div>
-
-            {bridgeSection.items.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  padding: '7px 9px',
-                  borderRadius: 7,
-                  background: 'var(--surface)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <span
-                  style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}
-                >
-                  {item.title}
-                </span>
-                <span style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
-                  {item.description}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* ── Templates section (below sessions) ──────────────────── */}
         <div

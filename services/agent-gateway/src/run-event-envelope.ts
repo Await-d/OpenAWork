@@ -17,15 +17,6 @@ export function deriveRunEventBookend(event: RunEvent): RunEventBookend | undefi
         };
       }
 
-      if (event.stopReason === 'tool_permission') {
-        return {
-          kind: 'permission_paused',
-          terminal: false,
-          replayable: true,
-          stopReason: event.stopReason,
-        };
-      }
-
       if (event.stopReason === 'cancelled') {
         return {
           kind: 'run_cancelled',

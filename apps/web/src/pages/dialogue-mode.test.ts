@@ -19,8 +19,7 @@ describe('dialogue-mode', () => {
       {
         value: 'clarify',
         label: '澄清',
-        description:
-          '渐进式需求澄清与方案设计，只读分析项目、交互式提问，产出方案后交由编程模式实现。',
+        description: '先基于已知事实厘清目标、约束和验收条件，再进入方案或实现。',
       },
       {
         value: 'coding',

@@ -37,7 +37,6 @@ describe('tool-result-contract', () => {
       toolName: 'write',
       clientRequestId: 'req-1',
       output: { ok: true },
-      rawOutput: '{"ok":true}',
       isError: false,
       fileDiffs: [
         {

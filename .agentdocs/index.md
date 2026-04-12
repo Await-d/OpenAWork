@@ -2,7 +2,6 @@
 
 ## 活跃工作流
 
-- [260412-Team阶段4桥接显式化实施](./workflow/260412-Team阶段4桥接显式化实施.md) — Team 阶段4真实实施：把 shared session 彻底降级为 bridge/import/detail 层，补显式 import/share 入口并移出 Team 主导航
 - [260412-Team阶段3读模型实施](./workflow/260412-Team阶段3读模型实施.md) — Team 阶段3真实实施：把 Team 主读链从 shared-session 驱动的旧投影切到 `TeamWorkspaceSnapshot + Team 子域列表` 的 workspace-first 读模型
 - [260412-Team阶段2写入路径实施](./workflow/260412-Team阶段2写入路径实施.md) — Team 阶段2真实实施：把创建线程/任务/模板/消息的写路径逐步切离 `/sessions.create` 与旧 shared-session 包装层
 - [260412-Team阶段1根边界实施](./workflow/260412-Team阶段1根边界实施.md) — Team 方案冻结后的第一阶段真实实施：先落 TeamWorkspace 根边界、workspace-first 路由锚点与最小 contract，再逐步切换后续读写链

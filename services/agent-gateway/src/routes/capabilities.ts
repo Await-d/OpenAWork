@@ -91,7 +91,7 @@ export function listCapabilitiesForUser(
   sessionId?: string,
 ): CapabilityDescriptor[] {
   const installedRow = sqliteGet<{ value: string }>(
-    `SELECT json_group_array(manifest_json) AS value FROM installed_skills WHERE user_id = ? AND enabled = 1 ORDER BY skill_id`,
+    `SELECT json_group_array(manifest_json) AS value FROM installed_skills WHERE user_id = ? AND enabled = 1`,
     [userId],
   );
   const mcpRow = sqliteGet<{ value: string }>(
@@ -198,18 +198,7 @@ export function listCapabilitiesForUser(
     ...configuredMcps,
     ...tools,
     ...commands,
-  ].sort((left, right) => {
-    const kindOrder: Record<CapabilityDescriptor['kind'], number> = {
-      agent: 0,
-      skill: 1,
-      mcp: 2,
-      tool: 3,
-      command: 4,
-    };
-    const kindDelta = (kindOrder[left.kind] ?? 9) - (kindOrder[right.kind] ?? 9);
-    if (kindDelta !== 0) return kindDelta;
-    return left.label.localeCompare(right.label, 'zh-CN');
-  });
+  ];
 }
 
 export function buildCapabilityContext(userId: string, sessionId?: string): string {

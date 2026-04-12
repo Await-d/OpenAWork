@@ -2797,10 +2797,6 @@ async function executeGatewayManagedTool(
       if (typeof inheritedWorkingDirectory === 'string') {
         childSessionMetadata['workingDirectory'] = inheritedWorkingDirectory;
       }
-      const inheritedDialogueMode = parentSessionMetadata['dialogueMode'];
-      if (typeof inheritedDialogueMode === 'string') {
-        childSessionMetadata['dialogueMode'] = inheritedDialogueMode;
-      }
       const inheritedUpstreamRetryMaxRetries =
         normalizeUpstreamRetryMaxRetries(childRequestData?.[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
         normalizeUpstreamRetryMaxRetries(parentSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY]);
@@ -4621,7 +4617,7 @@ export class ToolSandbox {
         output: permissionState.created
           ? `Tool "${request.toolName}" requires approval before it can modify the workspace. Permission request ${permissionState.requestId} has been created. Ask the user to approve it, then retry.`
           : `Tool "${request.toolName}" is waiting for approval. Permission request ${permissionState.requestId} is still pending. Ask the user to approve it, then retry.`,
-        isError: true,
+        isError: false,
         durationMs: 0,
         pendingPermissionRequestId: permissionState.requestId,
       };
