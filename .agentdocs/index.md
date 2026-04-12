@@ -92,6 +92,7 @@
 - [2026-04-12] 引入 multica 理念时，优先吸收 **agent 作为正式队友、控制面/执行面分离、任务驱动、workspace 硬边界、thread/task 双轨、技能复利** 六条原则；但不照搬其 issue/board 外壳，也不重建一套平行 daemon 主链。
 - [2026-04-12] A-01 证据化梳理已确认：当前 Team 实现本质上是 **普通 `sessions` + `shared-with-me` + `metadata_json(workingDirectory / parentSessionId)` 派生图** 的聚合视图；后续迁移必须先切 `teamWorkspaceId` 主锚点，再切 Team-owned 写入/读模型。
 - [2026-04-12] A-02 已冻结 Team 最小对象图：`TeamWorkspace` 是唯一一级根边界，`TeamInstance / MissionRun` 保留为 Team 控制面一等对象；`sessionId / sharedSession / workspacePath / workingDirectory` 均不得再作为 Team 根对象。
+- [2026-04-12] A-03 已冻结能力分层：auth、stream、runtime、telemetry、artifacts、template 底座继续复用；`sharedSession / selectedSharedSessionId / workspacePath / createSessionsClient` 在 Team 页面中仅可作为 bridge 输入，不得再承担 Team 主语义。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
