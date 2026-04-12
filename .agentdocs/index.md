@@ -2,11 +2,6 @@
 
 ## 活跃工作流
 
-- [260412-Team阶段5页面收口实施](./workflow/260412-Team阶段5页面收口实施.md) — Team 阶段5真实实施：收口遗留 runtime reference 壳层与页面热点，使前 4 阶段建立的新数据流在页面结构上稳定下来
-- [260412-Team阶段4桥接显式化实施](./workflow/260412-Team阶段4桥接显式化实施.md) — Team 阶段4真实实施：把 shared session 彻底降级为 bridge/import/detail 层，补显式 import/share 入口并移出 Team 主导航
-- [260412-Team阶段3读模型实施](./workflow/260412-Team阶段3读模型实施.md) — Team 阶段3真实实施：把 Team 主读链从 shared-session 驱动的旧投影切到 `TeamWorkspaceSnapshot + Team 子域列表` 的 workspace-first 读模型
-- [260412-Team阶段2写入路径实施](./workflow/260412-Team阶段2写入路径实施.md) — Team 阶段2真实实施：把创建线程/任务/模板/消息的写路径逐步切离 `/sessions.create` 与旧 shared-session 包装层
-- [260412-Team阶段1根边界实施](./workflow/260412-Team阶段1根边界实施.md) — Team 方案冻结后的第一阶段真实实施：先落 TeamWorkspace 根边界、workspace-first 路由锚点与最小 contract，再逐步切换后续读写链
 - [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
 - [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
@@ -18,6 +13,11 @@
 
 ## 归档工作流（已完成）
 
+- [260412-Team阶段5页面收口实施](./workflow/done/260412-Team阶段5页面收口实施.md) — 已完成 Team 阶段5页面收口：压平 `TeamPage` 与 reference 页面入口壳层，保持前 4 阶段建立的数据流稳定
+- [260412-Team阶段4桥接显式化实施](./workflow/done/260412-Team阶段4桥接显式化实施.md) — 已完成 Team 阶段4 bridge 显式化：共享会话进一步降级为 bridge/import/detail 层，并补 workspace import 入口
+- [260412-Team阶段3读模型实施](./workflow/done/260412-Team阶段3读模型实施.md) — 已完成 Team 阶段3读模型切换：主读链已切到 `TeamWorkspaceSnapshot + Team 子域列表`
+- [260412-Team阶段2写入路径实施](./workflow/done/260412-Team阶段2写入路径实施.md) — 已完成 Team 阶段2写入路径切换：Team UI 已不再通过 `/sessions.create` 创建团队线程
+- [260412-Team阶段1根边界实施](./workflow/done/260412-Team阶段1根边界实施.md) — 已完成 Team 阶段1根边界实施：TeamWorkspace 根接口、workspace-first 路由锚点与最小 contract 已落地
 - [260410-团队页统一开发主计划](./workflow/done/260410-团队页统一开发主计划.md) — 已完成 TeamPage 主线冻结：A-E 全部收口为 Team / Personal / Shared 三域边界、迁移顺序、桥接模型与实现恢复 gate
 - [260412-Team详细任务实施方案](./workflow/done/260412-Team详细任务实施方案.md) — 已完成与主计划配套的实施颗粒度收口：热点文件、阶段任务、风险与验证口径已全部对齐并归档
 - [260405-仓库级稳定性收口](./workflow/done/260405-仓库级稳定性收口.md) — 已完成从 Buddy 链路扩展到仓库级验证闭环：根级 `pnpm typecheck` 与 `pnpm test` 全通过
