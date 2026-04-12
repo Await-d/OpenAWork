@@ -331,6 +331,20 @@ describe('teamRoutes collaboration slice', () => {
     });
   });
 
+  it('imports a session into a workspace through the bridge endpoint', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/team/workspaces/workspace-1/imports',
+      payload: {
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(sqliteRunMock).toHaveBeenCalled();
+    expect(res.json()).toEqual({ sessionId: expect.any(String) });
+  });
+
   it('updates a team task with assignee/status/result', async () => {
     const res = await app.inject({
       method: 'PATCH',

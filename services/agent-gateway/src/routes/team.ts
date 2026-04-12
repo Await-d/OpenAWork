@@ -17,9 +17,11 @@ import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-a
 import {
   buildMergedSessionTaskProjection,
   extractParentSessionIdFromMetadata,
+  normalizeImportedMessages,
   type SessionRow,
   validateParentSessionBinding,
 } from './sessions.js';
+import { validateImportedMessagesPayload } from './session-route-helpers.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -56,6 +58,12 @@ const updateWorkspaceSchema = z
 const createThreadSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
   title: z.string().min(1).max(200).optional(),
+});
+
+const importWorkspaceSessionSchema = z.object({
+  id: z.string().optional(),
+  messages: z.array(z.unknown()).default([]),
+  exportedAt: z.string().optional(),
 });
 
 const createTaskSchema = z.object({
@@ -542,6 +550,68 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         state_status: 'idle',
         title: body.data.title ?? workspace.name,
       });
+    },
+  );
+
+  app.post(
+    '/team/workspaces/:teamWorkspaceId/imports',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step, child } = startRequestWorkflow(request, 'team.workspace.import', undefined, {
+        teamWorkspaceId,
+      });
+      const user = request.user as JwtPayload;
+
+      const workspaceStep = child('workspace');
+      const workspace = sqliteGet<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ? AND id = ?
+         LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      if (!workspace) {
+        workspaceStep.fail('workspace not found');
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+      workspaceStep.succeed();
+
+      const parseStep = child('parse-body');
+      const body = importWorkspaceSessionSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid import data');
+        step.fail('invalid import data');
+        return reply.status(400).send({ error: 'Invalid import data', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const normalizedMessages = normalizeImportedMessages(body.data.messages);
+      const validation = validateImportedMessagesPayload(normalizedMessages);
+      if (!validation.ok) {
+        step.fail('import too large');
+        return reply.status(413).send({ error: validation.error });
+      }
+
+      const sessionId = randomUUID();
+      sqliteRun(
+        'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          sessionId,
+          user.sub,
+          validation.serializedMessages,
+          'idle',
+          JSON.stringify({
+            teamWorkspaceId,
+            workingDirectory: workspace.default_working_root ?? undefined,
+          }),
+          workspace.name,
+        ],
+      );
+      step.succeed(undefined, { sessionId, teamWorkspaceId, messages: normalizedMessages.length });
+
+      return reply.status(201).send({ sessionId });
     },
   );
 

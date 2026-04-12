@@ -2438,7 +2438,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  const importSchema = z.object({
+  const importSessionSchema = z.object({
     id: z.string().optional(),
     messages: z.array(z.unknown()).default([]),
     exportedAt: z.string().optional(),
@@ -2450,7 +2450,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'session.import');
       const user = request.user as JwtPayload;
-      const body = importSchema.safeParse(request.body);
+      const body = importSessionSchema.safeParse(request.body);
       if (!body.success) {
         step.fail('invalid import data');
         return reply.status(400).send({ error: 'Invalid import data', issues: body.error.issues });
@@ -2558,3 +2558,5 @@ function parseParentSessionId(metadataJson: string): string | null {
     return null;
   }
 }
+
+export { normalizeImportedMessages };
