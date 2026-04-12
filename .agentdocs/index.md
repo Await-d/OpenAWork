@@ -95,6 +95,7 @@
 - [2026-04-12] A-03 已冻结能力分层：auth、stream、runtime、telemetry、artifacts、template 底座继续复用；`sharedSession / selectedSharedSessionId / workspacePath / createSessionsClient` 在 Team 页面中仅可作为 bridge 输入，不得再承担 Team 主语义。
 - [2026-04-12] A-04 已冻结办公室视图边界：办公室页只读消费 Team snapshot 与轻量 UI 状态，不承担成员/权限管理、创建入口或 shared-session 主流程；缺失数据时必须扩 Team snapshot/subdomain state，而不是回绑普通 session。
 - [2026-04-12] B-01 已冻结主路由模型：`/team` 只保留 TeamWorkspace 列表/入口壳，`/team/:teamWorkspaceId` 是唯一 Team 主锚点；任何旧 shared-session 入口都只能重定向到 workspace 路由或 bridge 面板。
+- [2026-04-12] B-02 已冻结顶层状态替换规则：`activeTeamWorkspaceId / activeTeamThreadId / teamWorkspaceSnapshotState` 接管 Team 主容器；`selectedSharedSessionId / selectedSharedSession / sharedSessions` 全部降级到 bridge/detail 层，`workspacePath` 不再充当 Team 身份键。
 - [2026-04-05] Chat 刷新恢复链的当前读模型收敛为 **gateway `GET /sessions/:id/recovery` + Web recovery-first hydration**：`session / ratings / activeStream / children / tasks / todoLanes / pendingPermissions / pendingQuestions` 通过单次 read model 提供给 ChatPage/Layout；当 remote recovery poll（running/paused）活跃时，不再叠加 sidebar fan-out 轮询，本地 streaming 期间才保留即时子资源轮询以补 task/tool runtime overlay。
 - [2026-04-05] Timeout 主链采用 **gateway-first + `failed + terminalReason=timeout`**：child session 统一投影 `terminalReason/effectiveDeadline`，并通过 stale reconcile/首次 `/sessions/:id/tasks` 回读保证第一次读就看到最新 timeout metadata。
 - [2026-04-05] DAG 节点超时采用 **`AbortSignal + Promise.race`**：`executionTimeoutMs` 只约束单次 attempt，approval timeout 通过 `human_approval_required.autoResolveMs` 驱动节点失败，保持与 child session timeout 分层而不混用。
