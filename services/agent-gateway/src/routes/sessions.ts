@@ -2488,7 +2488,9 @@ function normalizeImportedMessages(messages: unknown[]): unknown[] {
   });
 }
 
-function extractParentSessionIdFromMetadata(metadata: Record<string, unknown>): string | null {
+export function extractParentSessionIdFromMetadata(
+  metadata: Record<string, unknown>,
+): string | null {
   const parentSessionId = metadata['parentSessionId'];
   return typeof parentSessionId === 'string' ? parentSessionId : null;
 }
@@ -2504,7 +2506,7 @@ function getRequestedWorkingDirectory(
   return validateWorkspacePath(workingDirectory);
 }
 
-function validateParentSessionBinding(input: {
+export function validateParentSessionBinding(input: {
   currentParentSessionId?: string | null;
   parentSessionId?: string | null;
   sessionId?: string;

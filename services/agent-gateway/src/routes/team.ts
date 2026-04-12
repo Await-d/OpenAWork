@@ -5,12 +5,21 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
+import {
+  normalizeIncomingSessionMetadata,
+  parseSessionMetadataJson,
+  validateSessionMetadataPatch,
+} from '../session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session-workspace-resolution.js';
 import { mergeRuntimeTaskGroups } from '../team-runtime-task-groups.js';
 import { listSharedSessionsForRecipient } from '../session-shared-access.js';
 import { listTeamAuditLogs, logTeamAudit, type TeamAuditAction } from '../team-audit-store.js';
-import { buildMergedSessionTaskProjection, type SessionRow } from './sessions.js';
+import {
+  buildMergedSessionTaskProjection,
+  extractParentSessionIdFromMetadata,
+  type SessionRow,
+  validateParentSessionBinding,
+} from './sessions.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -43,6 +52,11 @@ const updateWorkspaceSchema = z
       message: 'At least one field is required',
     },
   );
+
+const createThreadSchema = z.object({
+  metadata: z.record(z.unknown()).optional().default({}),
+  title: z.string().min(1).max(200).optional(),
+});
 
 const createTaskSchema = z.object({
   title: z.string().min(1),
@@ -381,6 +395,93 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { teamWorkspaceId });
 
       return reply.send(updated ? mapWorkspaceRow(updated) : { error: 'Workspace not found' });
+    },
+  );
+
+  app.post(
+    '/team/workspaces/:teamWorkspaceId/threads',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step, child } = startRequestWorkflow(request, 'team.thread.create', undefined, {
+        teamWorkspaceId,
+      });
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = createThreadSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const workspaceStep = child('resolve-workspace');
+      const workspace = sqliteGet<TeamWorkspaceRow>(
+        `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+         FROM team_workspaces
+         WHERE user_id = ? AND id = ?
+         LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      if (!workspace) {
+        workspaceStep.fail('workspace not found');
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+      workspaceStep.succeed();
+
+      const metadataPatch = validateSessionMetadataPatch({
+        ...body.data.metadata,
+        teamWorkspaceId,
+        workingDirectory: workspace.default_working_root ?? undefined,
+      });
+      if (!metadataPatch.success) {
+        step.fail('invalid metadata');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid metadata', issues: metadataPatch.error.issues });
+      }
+
+      const normalizedMetadata = normalizeIncomingSessionMetadata(metadataPatch.data);
+      if (normalizedMetadata.workingDirectory === null) {
+        step.fail('forbidden path');
+        return reply.status(403).send({ error: 'Forbidden' });
+      }
+
+      const requestedParentSessionId = extractParentSessionIdFromMetadata(
+        normalizedMetadata.metadata,
+      );
+      const parentValidation = validateParentSessionBinding({
+        parentSessionId: requestedParentSessionId,
+        userId: user.sub,
+      });
+      if (!parentValidation.ok) {
+        step.fail(parentValidation.reason);
+        return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
+      }
+
+      const sessionId = randomUUID();
+      sqliteRun(
+        'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          sessionId,
+          user.sub,
+          '[]',
+          'idle',
+          JSON.stringify(normalizedMetadata.metadata),
+          body.data.title ?? workspace.name,
+        ],
+      );
+      step.succeed(undefined, { sessionId, teamWorkspaceId });
+
+      return reply.status(201).send({
+        id: sessionId,
+        metadata_json: JSON.stringify(normalizedMetadata.metadata),
+        state_status: 'idle',
+        title: body.data.title ?? workspace.name,
+      });
     },
   );
 

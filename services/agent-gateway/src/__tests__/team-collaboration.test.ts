@@ -279,6 +279,21 @@ describe('teamRoutes collaboration slice', () => {
     expect(sqliteRunMock).toHaveBeenCalled();
   });
 
+  it('creates a team-owned thread under a workspace', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/team/workspaces/workspace-1/threads',
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(sqliteRunMock).toHaveBeenCalled();
+    expect(res.json()).toMatchObject({
+      state_status: 'idle',
+      title: 'Web 工作区',
+    });
+  });
+
   it('updates a team task with assignee/status/result', async () => {
     const res = await app.inject({
       method: 'PATCH',

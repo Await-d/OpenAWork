@@ -19,6 +19,7 @@ const sessionMetadataPatchSchema = z
     planMode: z.boolean().optional(),
     providerId: z.string().min(1).max(200).optional(),
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+    teamWorkspaceId: z.string().min(1).max(200).optional(),
     thinkingEnabled: z.boolean().optional(),
     toolSurfaceProfile: z.enum(TOOL_SURFACE_PROFILES).optional(),
     upstreamRetryMaxRetries: upstreamRetryMaxRetriesSchema.optional(),
