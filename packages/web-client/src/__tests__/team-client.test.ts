@@ -140,4 +140,26 @@ describe('team client runtime APIs', () => {
     expect(created.id).toBe('workspace-1');
     expect(updated.name).toBe('Web 工作区（更新）');
   });
+
+  it('creates a team-owned thread under a workspace', async () => {
+    fetchMock.mockResolvedValue(
+      createJsonResponse(201, {
+        id: 'session-1',
+        title: 'Web 工作区',
+        state_status: 'idle',
+        metadata_json: JSON.stringify({
+          teamWorkspaceId: 'workspace-1',
+          workingDirectory: '/repo/apps/web',
+        }),
+      }),
+    );
+
+    const client = createTeamClient('http://gateway.test');
+    const thread = await client.createThread('token-1', 'workspace-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://gateway.test/team/workspaces/workspace-1/threads',
+    );
+    expect(thread.id).toBe('session-1');
+  });
 });

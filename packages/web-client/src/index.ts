@@ -26,6 +26,7 @@ export { createAgentProfilesClient } from './agent-profiles.js';
 export type { AgentProfileRecord, AgentProfilesClient } from './agent-profiles.js';
 export { createTeamClient } from './team.js';
 export type {
+  CreateTeamThreadInput,
   CreateTeamWorkspaceInput,
   CreateTeamMemberInput,
   CreateTeamMessageInput,

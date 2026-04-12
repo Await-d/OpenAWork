@@ -1,4 +1,4 @@
-import type { SessionTask, SharedSessionSummaryRecord } from './sessions.js';
+import type { Session, SessionTask, SharedSessionSummaryRecord } from './sessions.js';
 
 export type TeamWorkspaceVisibility = 'open' | 'closed' | 'private';
 
@@ -27,6 +27,11 @@ export interface UpdateTeamWorkspaceInput {
   description?: string | null;
   visibility?: TeamWorkspaceVisibility;
   defaultWorkingRoot?: string | null;
+}
+
+export interface CreateTeamThreadInput {
+  metadata?: Record<string, unknown>;
+  title?: string;
 }
 
 export interface TeamMemberRecord {
@@ -159,6 +164,11 @@ export interface TeamClient {
     teamWorkspaceId: string,
     input: UpdateTeamWorkspaceInput,
   ): Promise<TeamWorkspaceDetail>;
+  createThread(
+    token: string,
+    teamWorkspaceId: string,
+    input?: CreateTeamThreadInput,
+  ): Promise<Session>;
   getRuntime(token: string): Promise<TeamRuntimeReadModel>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
@@ -248,6 +258,28 @@ export function createTeamClient(baseUrl: string): TeamClient {
         throw new Error(`Failed to update team workspace: ${response.status}`);
       }
       return (await response.json()) as TeamWorkspaceDetail;
+    },
+
+    async createThread(
+      token: string,
+      teamWorkspaceId: string,
+      input: CreateTeamThreadInput = {},
+    ): Promise<Session> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/threads`,
+        {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to create team thread: ${response.status}`);
+      }
+      return (await response.json()) as Session;
     },
 
     async getRuntime(token: string): Promise<TeamRuntimeReadModel> {
