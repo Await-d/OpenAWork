@@ -13,6 +13,7 @@
 
 ## 归档工作流（已完成）
 
+- [260413-message-v2脚本正规化实施](./workflow/done/260413-message-v2脚本正规化实施.md) — 已完成 message-v2 手工脚本正规化：正式验证迁入 `src/verification`，旧 `scripts/*.mjs` 改为兼容 wrapper，并纳入 `test:verification`
 - [260413-stream-恢复与错误分类收口](./workflow/done/260413-stream-恢复与错误分类收口.md) — 已完成 stream 回合的错误分类与恢复收口：429 区分 quota/rate-limit，round 级 snapshot/patch 元数据同步写入 V2，resume 相关回归与 verification 全通过
 - [260412-message-v2流式同步实施](./workflow/done/260412-message-v2流式同步实施.md) — 已完成 message-v2 / stream-runtime / ChatPage / Layout 主线收口：gateway 主 detail/recovery/shared read 统一补入 runtime-safe V2 消息，web recovery 读取链完成兼容收口
 - [260412-Team阶段5页面收口实施](./workflow/done/260412-Team阶段5页面收口实施.md) — 已完成 Team 阶段5页面收口：压平 `TeamPage` 与 reference 页面入口壳层，保持前 4 阶段建立的数据流稳定
@@ -77,6 +78,7 @@
 
 ## Architecture Decisions
 
+- [2026-04-13] message-v2 的正式验证资产必须落在 **`services/agent-gateway/src/verification/verify-*.ts`**，使用源码导入、临时 DB 与可控环境；`services/agent-gateway/scripts/*.mjs` 若保留，只能作为兼容 wrapper，不能再承载真实验证逻辑。
 - [2026-04-13] stream 恢复链对上游 429 必须显式区分 **quota_exceeded / rate_limit / unknown**：额度耗尽要给用户可切模型的提示，速率限制才提示稍后重试，避免把 provider 配额问题错误包装成短暂抖动。
 - [2026-04-13] `stream-model-round` 在 assistant 回合落定且存在 turn file diffs 时，采用 **legacy snapshot 持久化 + V2 SnapshotPart/PatchPart 同步补写**：每轮 assistant message 都携带对应 step 元数据，便于后续按 V2 part 追踪 round 级文件变化。
 - [2026-04-13] message-v2 当前采用 **V1 authoritative read + V2 runtime-safe gap fill**：`/sessions/:id`、`/sessions/:id/recovery` 与 shared read 在消息 ID 冲突时必须保留 V1 旧消息，只让 V2 补 runtime-safe 缺口，避免用投影态覆盖现有 detail/recovery 语义。
