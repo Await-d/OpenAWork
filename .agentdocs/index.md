@@ -4,7 +4,6 @@
 
 - [260405-opencode-ohmy-openawork分层整合方案](./workflow/260405-opencode-ohmy-openawork分层整合方案.md) — 面向 OpenAWork 的 opencode × oh-my-opencode 组合参考分层方案：明确内核层、增强层、发送链路与分阶段实施顺序
 - [260404-t02-artifact实时预览实施](./workflow/260404-t02-artifact实时预览实施.md) — T-02 正式实施工作流：聚焦 Artifact 实时预览、可编辑产物、版本化与流式提取主链
-- [260404-t01-跨会话记忆系统实施](./workflow/260404-t01-跨会话记忆系统实施.md) — T-01 正式实施工作流：包含 complexity assessment、success criteria、测试计划、依赖 DAG 与运行时 master plan
 - [260401-buddy-伴侣功能集成方案](./workflow/260401-buddy-伴侣功能集成方案.md) — 面向 OpenAWork 的 buddy / companion 能力集成方案，聚焦能力裁剪、跨端挂点、状态模型、实验开关与分阶段 rollout（方案已冻结，全部 19 项待实施）
 - [260331-claude-code-工具环境并行实施](./workflow/260331-claude-code-工具环境并行实施.md) — 按五人并行方案正式启动 Claude Code 风格工具环境接入实施（基础工具已完成，profile/surface/sandbox/stream/observability 层待实施）
 - [260331-claude-code-五人并行开发方案](./workflow/260331-claude-code-五人并行开发方案.md) — 五条主线详细实施计划、依赖 DAG 与阶段验收策略（规划完成，Dev-1~Dev-5 共 47 项开发任务待执行）
@@ -13,6 +12,8 @@
 
 ## 归档工作流（已完成）
 
+- [260405-chat-live触发优化实施](./workflow/done/260405-chat-live触发优化实施.md) — 已完成 chat-recovery-live 触发路径收窄，从全目录 glob 改为 chat-recovery 相关文件精确匹配
+- [260404-t01-跨会话记忆系统实施](./workflow/done/260404-t01-跨会话记忆系统实施.md) — 已完成跨会话记忆系统全链路实施：agent-core 纯逻辑、gateway SQLite store/CRUD/注入/提取、web 记忆管理 tab、workspaceRoot 隔离
 - [260413-message-v2脚本正规化实施](./workflow/done/260413-message-v2脚本正规化实施.md) — 已完成 message-v2 手工脚本正规化：正式验证迁入 `src/verification`，旧 `scripts/*.mjs` 改为兼容 wrapper，并纳入 `test:verification`
 - [260413-stream-恢复与错误分类收口](./workflow/done/260413-stream-恢复与错误分类收口.md) — 已完成 stream 回合的错误分类与恢复收口：429 区分 quota/rate-limit，round 级 snapshot/patch 元数据同步写入 V2，resume 相关回归与 verification 全通过
 - [260412-message-v2流式同步实施](./workflow/done/260412-message-v2流式同步实施.md) — 已完成 message-v2 / stream-runtime / ChatPage / Layout 主线收口：gateway 主 detail/recovery/shared read 统一补入 runtime-safe V2 消息，web recovery 读取链完成兼容收口
