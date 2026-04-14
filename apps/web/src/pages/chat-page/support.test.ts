@@ -862,7 +862,7 @@ describe('normalizeChatMessages', () => {
     );
   });
 
-  it('falls back to the server snapshot when the same-session history diverges midstream', () => {
+  it('preserves local-only messages alongside diverged server snapshot', () => {
     const previousMessages = [
       {
         id: 'assistant-seed',
@@ -903,9 +903,207 @@ describe('normalizeChatMessages', () => {
       },
     ];
 
-    expect(reconcileSnapshotChatMessages(previousMessages, snapshotMessages)).toEqual(
-      snapshotMessages,
-    );
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    // assistant-seed matched by ID, server-user is new from server,
+    // local-user and local-assistant are unmatched local-only messages appended at the end.
+    expect(result).toHaveLength(4);
+    expect(result[0]).toEqual(previousMessages[0]);
+    expect(result[1]).toEqual(snapshotMessages[1]);
+    expect(result[2]).toEqual(previousMessages[1]);
+    expect(result[3]).toEqual(previousMessages[2]);
+  });
+
+  it('prefers snapshot finalized version over local streaming placeholder', () => {
+    const previousMessages = [
+      {
+        id: 'msg-1',
+        role: 'assistant' as const,
+        content: '正在生成...',
+        createdAt: 1,
+        status: 'streaming' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'msg-1',
+        role: 'assistant' as const,
+        content: '完整的回复内容',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.status).toBe('completed');
+    expect(result[0]!.content).toBe('完整的回复内容');
+  });
+
+  it('keeps local streaming placeholder when snapshot is also streaming', () => {
+    const previousMessages = [
+      {
+        id: 'msg-1',
+        role: 'assistant' as const,
+        content: '正在生成...',
+        createdAt: 1,
+        status: 'streaming' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'msg-1',
+        role: 'assistant' as const,
+        content: '正在生成...',
+        createdAt: 1,
+        status: 'streaming' as const,
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    expect(result).toHaveLength(1);
+    // Prefers previous version to preserve local state
+    expect(result[0]).toBe(previousMessages[0]);
+  });
+
+  it('discards unmatched streaming placeholders but keeps completed local messages', () => {
+    const previousMessages = [
+      {
+        id: 'msg-1',
+        role: 'user' as const,
+        content: '你好',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'local-event',
+        role: 'assistant' as const,
+        content: '正在执行工具调用',
+        createdAt: 2,
+        status: 'streaming' as const,
+      },
+      {
+        id: 'local-completed',
+        role: 'assistant' as const,
+        content: '已完成的事件卡片',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'msg-1',
+        role: 'user' as const,
+        content: '你好',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    // msg-1 matched by ID, local-event (streaming) is discarded,
+    // local-completed is preserved as unmatched local-only message.
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual(previousMessages[0]);
+    expect(result[1]).toEqual(previousMessages[2]);
+  });
+
+  it('maintains stable order when server snapshot reorders messages with same IDs', () => {
+    const previousMessages = [
+      {
+        id: 'a',
+        role: 'user' as const,
+        content: '问题1',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'b',
+        role: 'assistant' as const,
+        content: '回答1',
+        createdAt: 2,
+        status: 'completed' as const,
+      },
+      {
+        id: 'c',
+        role: 'user' as const,
+        content: '问题2',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'a',
+        role: 'user' as const,
+        content: '问题1',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'b',
+        role: 'assistant' as const,
+        content: '回答1',
+        createdAt: 2,
+        status: 'completed' as const,
+      },
+      {
+        id: 'c',
+        role: 'user' as const,
+        content: '问题2',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('handles interleaved local event messages without reordering', () => {
+    const previousMessages = [
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        content: '帮我搜索',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'event-tool',
+        role: 'assistant' as const,
+        content: '工具调用中',
+        createdAt: 2,
+        status: 'completed' as const,
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant' as const,
+        content: '搜索结果如下',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+    // Server snapshot doesn't have the event-tool card yet
+    const snapshotMessages = [
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        content: '帮我搜索',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant' as const,
+        content: '搜索结果如下',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+    // user-1 and assistant-1 matched by ID, event-tool is unmatched local-only
+    expect(result.map((m) => m.id)).toEqual(['user-1', 'assistant-1', 'event-tool']);
   });
 });
 

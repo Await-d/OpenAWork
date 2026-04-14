@@ -1093,35 +1093,71 @@ export function reconcileSnapshotChatMessages(
     return snapshotMessages.length === 0 ? previousMessages : snapshotMessages;
   }
 
-  const sharedLength = Math.min(previousMessages.length, snapshotMessages.length);
-  let prefixLength = 0;
+  // Build an index of previous messages by ID for O(1) lookup.
+  const previousById = new Map<string, { message: ChatMessage; index: number }>();
+  for (let index = 0; index < previousMessages.length; index++) {
+    const message = previousMessages[index]!;
+    previousById.set(message.id, { message, index });
+  }
 
-  while (prefixLength < sharedLength) {
-    const previousMessage = previousMessages[prefixLength];
-    const snapshotMessage = snapshotMessages[prefixLength];
-    if (previousMessage === undefined || snapshotMessage === undefined) {
-      break;
+  // Track which previous messages have been matched so we can append unmatched ones.
+  const matchedPreviousIndices = new Set<number>();
+  const reconciled: ChatMessage[] = [];
+
+  // Walk through snapshot messages in server order (canonical order).
+  for (const snapshotMessage of snapshotMessages) {
+    const previousEntry = previousById.get(snapshotMessage.id);
+
+    if (previousEntry) {
+      // Same ID: prefer the previous version to preserve local state
+      // (e.g. pending permission annotations), but update if snapshot is more complete.
+      matchedPreviousIndices.add(previousEntry.index);
+      const previousMessage = previousEntry.message;
+      if (previousMessage.status === 'streaming' && snapshotMessage.status !== 'streaming') {
+        // Snapshot has a finalized version (e.g. completed/error), prefer it.
+        reconciled.push(snapshotMessage);
+      } else {
+        reconciled.push(previousMessage);
+      }
+    } else {
+      // No ID match — check if a previous message at a nearby position is equivalent
+      // (handles cases where server assigns a different ID for the same logical message).
+      let foundEquivalent = false;
+      for (let offset = -1; offset <= 1 && !foundEquivalent; offset++) {
+        const candidateIndex = reconciled.length + offset;
+        if (
+          candidateIndex >= 0 &&
+          candidateIndex < previousMessages.length &&
+          !matchedPreviousIndices.has(candidateIndex) &&
+          areSnapshotMessagesEquivalent(previousMessages[candidateIndex]!, snapshotMessage)
+        ) {
+          matchedPreviousIndices.add(candidateIndex);
+          reconciled.push(previousMessages[candidateIndex]!);
+          foundEquivalent = true;
+        }
+      }
+
+      if (!foundEquivalent) {
+        // Genuinely new message from the server.
+        reconciled.push(snapshotMessage);
+      }
     }
+  }
 
-    if (!areSnapshotMessagesEquivalent(previousMessage, snapshotMessage)) {
-      break;
+  // Append any previous messages that were not matched (local-only, e.g. event cards
+  // appended during streaming that the server snapshot hasn't synced yet).
+  for (let index = 0; index < previousMessages.length; index++) {
+    if (!matchedPreviousIndices.has(index)) {
+      const previousMessage = previousMessages[index]!;
+      // Only preserve completed local messages; skip streaming placeholders
+      // that should have been replaced by the snapshot.
+      if (previousMessage.status !== 'streaming') {
+        reconciled.push(previousMessage);
+      }
     }
-
-    prefixLength += 1;
   }
 
-  if (prefixLength === 0) {
-    return snapshotMessages;
-  }
-
-  if (
-    prefixLength === snapshotMessages.length &&
-    snapshotMessages.length < previousMessages.length
-  ) {
-    return previousMessages;
-  }
-
-  return snapshotMessages;
+  return reconciled;
 }
 
 export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {

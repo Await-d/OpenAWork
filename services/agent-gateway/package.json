@@ -13,7 +13,7 @@
     "test": "pnpm run test:unit && pnpm run test:verification",
     "test:chat:fast": "vitest run src/__tests__/stream-attach-route.test.ts src/__tests__/stream-stop-route.test.ts src/__tests__/session-run-events.test.ts && tsx src/verification/verify-stream-attach-recovery.ts",
     "test:unit": "vitest run --passWithNoTests",
-    "test:verification": "pnpm run test:responses && pnpm run test:permissions && pnpm run test:session-tasks && pnpm run test:task-tool && pnpm run test:file-changes && pnpm run test:restore && pnpm run test:delete-cleanup && pnpm run test:durable && pnpm run test:claude-tools",
+    "test:verification": "pnpm run test:responses && pnpm run test:permissions && pnpm run test:session-tasks && pnpm run test:task-tool && pnpm run test:file-changes && pnpm run test:restore && pnpm run test:delete-cleanup && pnpm run test:durable && pnpm run test:claude-tools && pnpm run test:message-v2",
     "test:responses": "tsx src/verification/verify-openai-responses.ts",
     "test:permissions": "tsx src/verification/verify-permissions-routes.ts",
     "test:session-tasks": "tsx src/verification/verify-session-task-routes.ts && tsx src/verification/verify-session-delete-child-detach.ts",
@@ -22,6 +22,9 @@
     "test:restore": "tsx src/verification/verify-session-file-summary-routes.ts",
     "test:delete-cleanup": "tsx src/verification/verify-session-delete-cleanup-matrix.ts",
     "test:durable": "tsx src/verification/verify-write-tools-durable-closure.ts && tsx src/verification/verify-stream-runtime-durable-continuity.ts && tsx src/verification/verify-stream-attach-recovery.ts",
+    "test:message-v2": "pnpm run test:message-v2:projection && pnpm run test:message-v2:deep",
+    "test:message-v2:projection": "tsx src/verification/verify-message-v2-event-projection.ts",
+    "test:message-v2:deep": "tsx src/verification/verify-message-v2-deep-conversation.ts",
     "test:claude-tools": "tsx src/verification/verify-claude-first-tools.ts",
     "lint": "eslint .",
     "clean": "rm -rf dist"

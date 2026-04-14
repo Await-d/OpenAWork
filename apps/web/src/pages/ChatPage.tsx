@@ -661,6 +661,7 @@ export default function ChatPage() {
   const rightOpenRef = useRef(rightOpen);
   const queueFlushInFlightRef = useRef(false);
   const queueHydratingRef = useRef(false);
+  const streamingRef = useRef(false);
   const stoppingStreamRef = useRef(false);
   const currentAssistantStreamMessageIdRef = useRef<string | null>(null);
   const streamRevealTargetRef = useRef('');
@@ -815,6 +816,7 @@ export default function ChatPage() {
     setStreamBuffer('');
     setStreamThinkingBuffer('');
     setRecoveredStreamSnapshot(null);
+    streamingRef.current = false;
     setStreaming(false);
     setStoppingStream(false);
     setActiveStreamStartedAt(null);
@@ -1355,6 +1357,10 @@ export default function ChatPage() {
       const prepared = prepareSessionRecoveryState(recovery);
       if (options?.replaceMessages === true) {
         setMessages(prepared.normalizedMessages);
+      } else if (streamingRef.current) {
+        // During active streaming, skip message reconciliation to avoid overwriting
+        // locally-appended event messages that the server snapshot hasn't synced yet.
+        // Non-message state (ratings, permissions, etc.) is still updated below.
       } else {
         setMessages((previous) =>
           reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
@@ -1716,9 +1722,11 @@ export default function ChatPage() {
 
           const prepared = prepareSessionRecoveryState(recovery);
           startSessionSwitchTransition(() => {
-            setMessages((previous) =>
-              reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
-            );
+            if (!streamingRef.current) {
+              setMessages((previous) =>
+                reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+              );
+            }
             setMessageRatings(prepared.messageRatings);
             setRightPanelState(
               buildRightPanelStateFromSessionSnapshot(
@@ -2768,6 +2776,7 @@ export default function ChatPage() {
     }
 
     currentAssistantStreamMessageIdRef.current = crypto.randomUUID();
+    streamingRef.current = true;
     setStreaming(true);
     setStoppingStream(false);
     stoppingStreamRef.current = false;
@@ -3481,6 +3490,7 @@ export default function ChatPage() {
       attachStateInitialized = true;
       currentAssistantStreamMessageIdRef.current = crypto.randomUUID();
       stoppingStreamRef.current = false;
+      streamingRef.current = true;
       setStreaming(true);
       setStoppingStream(false);
       setSessionStateStatus('running');

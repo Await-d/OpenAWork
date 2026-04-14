@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ChatUsageDetails } from '../../pages/chat-page/support.js';
+import { parseAssistantTraceContent } from '../../pages/chat-page/support.js';
 import { MessageRow, sharedUiThemeVars } from './ChatPageSections.js';
 
 export interface ChatRenderAction {
@@ -279,6 +280,7 @@ function VirtualizedChatGroupViewport({
                 top: layout.offsets[actualIndex] ?? 0,
                 left: 0,
                 right: 0,
+                overflow: 'hidden',
               }}
             >
               <ChatGroupBlock
@@ -348,9 +350,41 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
 });
 
 function estimateGroupHeight(group: ChatRenderGroup): number {
-  const contentChars = group.entries.reduce((sum, entry) => sum + entry.message.content.length, 0);
-  const estimatedContentHeight = Math.min(540, Math.max(64, Math.ceil(contentChars / 90) * 18));
-  const extraHeaderHeight = group.entries.length > 1 ? 28 : 0;
+  let estimatedContentHeight = 0;
+  let extraHeaderHeight = 0;
+
+  for (let entryIndex = 0; entryIndex < group.entries.length; entryIndex++) {
+    const entry = group.entries[entryIndex]!;
+    const message = entry.message;
+
+    if (entryIndex > 0) {
+      extraHeaderHeight += 28;
+    }
+
+    // Try to parse assistant trace content for a more accurate estimate.
+    const trace = parseAssistantTraceContent(message.content);
+    if (trace) {
+      // Text content
+      const textChars = trace.text.length;
+      estimatedContentHeight += Math.min(360, Math.max(48, Math.ceil(textChars / 90) * 18));
+
+      // Reasoning blocks — each rendered as a collapsible section
+      if (trace.reasoningBlocks) {
+        for (const block of trace.reasoningBlocks) {
+          estimatedContentHeight += Math.min(200, Math.max(40, Math.ceil(block.length / 90) * 18));
+        }
+      }
+
+      // Tool calls — each rendered as a card with header + collapsible body
+      if (trace.toolCalls.length > 0) {
+        estimatedContentHeight += trace.toolCalls.length * 120;
+      }
+    } else {
+      // Plain text content
+      const contentChars = message.content.length;
+      estimatedContentHeight += Math.min(540, Math.max(64, Math.ceil(contentChars / 90) * 18));
+    }
+  }
 
   return DEFAULT_GROUP_HEIGHT + estimatedContentHeight + extraHeaderHeight;
 }
