@@ -203,6 +203,20 @@ describe('injector', () => {
     expect(result).toContain('ws_key');
     expect(result).not.toContain('other_ws_key');
   });
+
+  it('includes all memories when workspaceRoot is null in config', () => {
+    const global = makeMemory({ id: 'g', workspaceRoot: null, key: 'global_key' });
+    const wsA = makeMemory({ id: 'a', workspaceRoot: '/project/a', key: 'ws_a_key' });
+    const wsB = makeMemory({ id: 'b', workspaceRoot: '/project/b', key: 'ws_b_key' });
+
+    const result = buildMemoryInjectionBlock([global, wsA, wsB], {
+      ...defaultConfig,
+      workspaceRoot: null,
+    });
+    expect(result).toContain('global_key');
+    expect(result).toContain('ws_a_key');
+    expect(result).toContain('ws_b_key');
+  });
 });
 
 describe('deduplicator', () => {

@@ -79,6 +79,7 @@ export function buildMemoryExtractionTextForSession(input: {
 
 export function autoExtractMemoriesForRequest(input: {
   clientRequestId: string;
+  metadataJson: string;
   sessionId: string;
   userId: string;
 }): { created: number; duplicates: number; skipped: boolean; updated: number } {
@@ -97,8 +98,9 @@ export function autoExtractMemoriesForRequest(input: {
     return { created: 0, duplicates: 0, skipped: true, updated: 0 };
   }
 
+  const workspaceRoot = readWorkspaceRootFromMetadata(input.metadataJson);
   const candidates = extractMemoriesFromText(text);
-  const result = upsertExtractedMemories(input.userId, candidates);
+  const result = upsertExtractedMemories(input.userId, candidates, workspaceRoot);
   insertExtractionLog(
     input.userId,
     input.sessionId,

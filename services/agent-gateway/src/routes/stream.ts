@@ -1457,6 +1457,7 @@ export async function handleStreamRequest(input: {
               userId: input.user.sub,
               sessionId: input.sessionId,
               clientRequestId: requestData.clientRequestId,
+              metadataJson: input.sessionContext.metadataJson,
             });
           } catch (error: unknown) {
             console.warn('memory auto extraction failed after stream completion', error);

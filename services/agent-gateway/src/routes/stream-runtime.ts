@@ -332,6 +332,7 @@ async function continueFromApprovedToolResult(input: {
               userId: input.userId,
               sessionId: input.sessionId,
               clientRequestId: input.payload.clientRequestId,
+              metadataJson: sessionContext.metadataJson,
             });
           } catch (error: unknown) {
             console.warn('memory auto extraction failed after resume completion', error);

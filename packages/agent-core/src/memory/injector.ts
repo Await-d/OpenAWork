@@ -10,6 +10,9 @@ function sortMemoriesForInjection(memories: MemoryEntry[]): MemoryEntry[] {
 }
 
 function filterByWorkspace(memories: MemoryEntry[], workspaceRoot: string | null): MemoryEntry[] {
+  if (workspaceRoot === null) {
+    return memories;
+  }
   return memories.filter((m) => m.workspaceRoot === null || m.workspaceRoot === workspaceRoot);
 }
 

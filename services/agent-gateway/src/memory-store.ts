@@ -258,6 +258,7 @@ export function insertExtractionLog(
 export function upsertExtractedMemories(
   userId: string,
   candidates: ExtractedMemoryCandidate[],
+  workspaceRoot: string | null = null,
 ): { created: number; updated: number; duplicates: number } {
   const existing = listMemories(userId, { enabled: true, limit: 1000 });
   const result = deduplicateMemories(candidates, existing);
@@ -270,6 +271,7 @@ export function upsertExtractedMemories(
       source: 'auto_extracted',
       confidence: candidate.confidence,
       priority: 30,
+      workspaceRoot,
     });
   }
 

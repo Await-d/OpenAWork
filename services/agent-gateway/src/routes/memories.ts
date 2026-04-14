@@ -27,6 +27,7 @@ import { z } from 'zod';
 interface SessionSelectionRow {
   id: string;
   messages_json: string;
+  metadata_json: string;
 }
 
 export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
@@ -163,15 +164,16 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
 
       let extractionText = parsed.data.text ?? null;
       let extractedFromSessionId: string | null = null;
+      let session: SessionSelectionRow | undefined;
 
       if (!extractionText) {
-        const session = parsed.data.sessionId
+        session = parsed.data.sessionId
           ? sqliteGet<SessionSelectionRow>(
-              'SELECT id, messages_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+              'SELECT id, messages_json, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
               [parsed.data.sessionId, user.sub],
             )
           : sqliteGet<SessionSelectionRow>(
-              'SELECT id, messages_json FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
+              'SELECT id, messages_json, metadata_json FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
               [user.sub],
             );
 
@@ -189,7 +191,12 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const candidates = extractMemoriesFromText(extractionText);
-      const result = upsertExtractedMemories(user.sub, candidates);
+      const workspaceRoot = session?.metadata_json
+        ? ((JSON.parse(session.metadata_json) as Record<string, unknown>)['workingDirectory'] ??
+          null)
+        : null;
+      const workspaceRootStr = typeof workspaceRoot === 'string' ? workspaceRoot : null;
+      const result = upsertExtractedMemories(user.sub, candidates, workspaceRootStr);
       step.succeed(undefined, { ...result, candidates: candidates.length });
       return reply.send({
         candidates: candidates.length,
