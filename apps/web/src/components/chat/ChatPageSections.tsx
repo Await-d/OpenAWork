@@ -2,6 +2,8 @@ import React from 'react';
 import './chat-message.css';
 import { GenerativeUIRenderer, ToolCallCard } from '@openAwork/shared-ui';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
+import type { DialogueMode } from '../../pages/dialogue-mode.js';
+import { DIALOGUE_MODE_OPTIONS } from '../../pages/dialogue-mode.js';
 import { AssistantEventRow } from './assistant-event-row.js';
 import {
   normalizeProviderKey,
@@ -608,14 +610,36 @@ function looksLikeStructuredJsonContent(content: string): boolean {
   return normalized.includes('"type"') || normalized.endsWith('}');
 }
 
+const MODE_ACCENTS: Record<DialogueMode, { bg: string; color: string; icon: string }> = {
+  clarify: {
+    bg: 'rgba(245, 158, 11, 0.10)',
+    color: 'rgb(245, 158, 11)',
+    icon: '🔍',
+  },
+  coding: {
+    bg: 'rgba(139, 92, 246, 0.12)',
+    color: 'rgb(167, 139, 250)',
+    icon: '⚡',
+  },
+  programmer: {
+    bg: 'rgba(16, 185, 129, 0.12)',
+    color: 'rgb(52, 211, 153)',
+    icon: '🛠',
+  },
+};
+
 export function WelcomeScreen({
   hasWorkspace,
+  dialogueMode,
   onNewSession,
   onOpenWorkspace,
+  onSelectMode,
 }: {
   hasWorkspace: boolean;
+  dialogueMode: DialogueMode;
   onNewSession: () => void;
   onOpenWorkspace: () => void;
+  onSelectMode: (mode: DialogueMode) => void;
 }) {
   const actions = [
     {
@@ -669,69 +693,21 @@ export function WelcomeScreen({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '60px 32px 40px',
-        gap: 40,
+        padding: '40px 32px 32px',
+        gap: 28,
         maxWidth: 560,
         width: '100%',
       }}
     >
       <div style={{ textAlign: 'center' }}>
         <div
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 20,
-            background: 'var(--accent)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 20px',
-            boxShadow: '0 0 0 12px var(--accent-muted)',
-          }}
-        >
-          <svg aria-hidden="true" width="40" height="40" viewBox="0 0 32 32" fill="none">
-            <path
-              d="M 16,3 C 26,3 29,12 16,16"
-              stroke="var(--accent-text)"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              fill="none"
-              opacity="0.92"
-              transform="rotate(0, 16, 16)"
-            />
-            <path
-              d="M 16,3 C 26,3 29,12 16,16"
-              stroke="var(--accent-text)"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              fill="none"
-              opacity="0.92"
-              transform="rotate(120, 16, 16)"
-            />
-            <path
-              d="M 16,3 C 26,3 29,12 16,16"
-              stroke="var(--accent-text)"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              fill="none"
-              opacity="0.92"
-              transform="rotate(240, 16, 16)"
-            />
-            <circle cx="16" cy="16" r="2.5" fill="var(--accent-text)" />
-          </svg>
-        </div>
-        <div
-          style={{
-            fontSize: 22,
-            fontWeight: 700,
-            color: 'var(--text)',
-            marginBottom: 8,
-            letterSpacing: '-0.02em',
-          }}
+          style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.02em' }}
         >
           OpenAWork
         </div>
-        <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.6 }}>AI Agent 工作台</div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6, marginTop: 4 }}>
+          AI Agent 工作台
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
@@ -791,6 +767,85 @@ export function WelcomeScreen({
             </span>
           </button>
         ))}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-3)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            marginBottom: 2,
+          }}
+        >
+          对话模式
+        </div>
+        {DIALOGUE_MODE_OPTIONS.map((mode) => {
+          const accent = MODE_ACCENTS[mode.value];
+          const isActive = dialogueMode === mode.value;
+          return (
+            <button
+              key={mode.value}
+              type="button"
+              onClick={() => onSelectMode(mode.value)}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 12,
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: 10,
+                border: isActive ? `1.5px solid ${accent.color}` : '1px solid var(--border)',
+                background: isActive ? accent.bg : 'var(--surface)',
+                color: 'var(--text)',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'border-color 0.15s, background 0.15s',
+              }}
+            >
+              <span
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  background: accent.bg,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 16,
+                  flexShrink: 0,
+                }}
+              >
+                {accent.icon}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  {mode.label}
+                  {isActive && (
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 10,
+                        fontWeight: 500,
+                        color: accent.color,
+                        background: accent.bg,
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                      }}
+                    >
+                      当前
+                    </span>
+                  )}
+                </span>
+                <span style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
+                  {mode.description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>

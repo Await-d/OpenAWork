@@ -4813,13 +4813,10 @@ export default function ChatPage() {
                   ) : messages.length === 0 && !visibleStreaming && !remoteSessionBusyState ? (
                     <WelcomeScreen
                       hasWorkspace={!!effectiveWorkingDirectory}
+                      dialogueMode={dialogueMode}
                       onNewSession={() => void ensureSession()}
                       onOpenWorkspace={() => setShowWorkspaceSelector(true)}
-                    />
-                  ) : messages.length === 0 && remoteSessionBusyState ? (
-                    <SessionRunStatePlaceholder
-                      status={remoteSessionBusyState}
-                      stopCapability={stopCapability}
+                      onSelectMode={handleDialogueModeChange}
                     />
                   ) : null}
                   {!showSessionSwitchSkeleton ? (
