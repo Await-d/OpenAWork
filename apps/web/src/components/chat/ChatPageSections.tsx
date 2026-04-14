@@ -842,6 +842,21 @@ export function WelcomeScreen({
                 <span style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
                   {mode.description}
                 </span>
+                {isActive && (
+                  <ol
+                    style={{
+                      margin: '4px 0 0',
+                      padding: '0 0 0 16px',
+                      fontSize: 11,
+                      color: 'var(--text-3)',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {mode.details.map((detail) => (
+                      <li key={detail}>{detail}</li>
+                    ))}
+                  </ol>
+                )}
               </span>
             </button>
           );
