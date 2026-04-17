@@ -1008,7 +1008,7 @@ describe('App routing', () => {
 
     await act(async () => {
       root?.render(
-        <MemoryRouter initialEntries={['/team']}>
+        <MemoryRouter initialEntries={['/team/templates']}>
           <App />
         </MemoryRouter>,
       );
@@ -1017,30 +1017,23 @@ describe('App routing', () => {
       await Promise.resolve();
     });
 
-    await waitForText('AGENT TEAMS');
-
-    const openTeamsTab = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.trim().startsWith('团队'),
-    ) as HTMLButtonElement | null;
-    expect(openTeamsTab).toBeTruthy();
-
-    await act(async () => {
-      openTeamsTab?.click();
-      await Promise.resolve();
-    });
+    await waitForText('组建新模板');
 
     const openTemplateButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent?.includes('新建团队模板'),
+      (button) => button.textContent?.includes('组建新模板'),
     ) as HTMLButtonElement | undefined;
     expect(openTemplateButton).toBeTruthy();
 
     await act(async () => {
       openTemplateButton?.click();
       await Promise.resolve();
+      await Promise.resolve();
     });
 
+    await waitForText('模板名称');
+
     const templateNameInput = container?.querySelector(
-      '#team-template-name-input',
+      'input[placeholder="例如：代码审查流水线"]',
     ) as HTMLInputElement | null;
     expect(templateNameInput).toBeTruthy();
 
