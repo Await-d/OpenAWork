@@ -6,13 +6,15 @@ export type TeamAuditAction =
   | 'share_permission_updated'
   | 'shared_comment_created'
   | 'shared_permission_replied'
-  | 'shared_question_replied';
+  | 'shared_question_replied'
+  | 'task_created';
 
 export type TeamAuditEntityType =
   | 'session_share'
   | 'shared_session_comment'
   | 'permission_request'
-  | 'question_request';
+  | 'question_request'
+  | 'team_task';
 
 interface TeamAuditLogRow {
   action: TeamAuditAction;

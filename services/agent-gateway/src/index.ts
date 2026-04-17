@@ -5,6 +5,7 @@ import { WorkflowLogger } from '@openAwork/logger';
 import authPlugin from './auth.js';
 import { connectDb, closeDb, migrate, sqliteGet, sqliteRun } from './db.js';
 import { ensureDefaultInstalledSkillsForAllUsers } from './default-skills.js';
+import { ensureDefaultWorkflowTemplatesForAllUsers } from './default-workflow-templates.js';
 import { createHash, randomUUID } from 'crypto';
 import requestWorkflowPlugin, { startRequestWorkflow } from './request-workflow.js';
 
@@ -38,7 +39,7 @@ import { agentProfilesRoutes } from './routes/agent-profiles.js';
 import { settingsRoutes } from './routes/settings.js';
 import { workflowRoutes } from './routes/workflows.js';
 import webStaticPlugin from './web-static.js';
-import { lspRoutes } from './lsp/router.js';
+import { lspRoutes, lspManager } from './lsp/router.js';
 import { autoStartConfiguredChannels, channelRoutes } from './channels/router.js';
 import { cronRoutes } from './cron/router.js';
 import { githubRoutes, restoreGitHubTriggers } from './github/router.js';
@@ -97,6 +98,7 @@ app.get('/health', (request, reply) => {
 });
 
 app.addHook('onClose', async () => {
+  await lspManager.shutdown();
   await closeDb();
 });
 
@@ -123,6 +125,10 @@ try {
 
   step = bootLogger.start('gateway.seed-default-skills');
   ensureDefaultInstalledSkillsForAllUsers();
+  bootLogger.succeed(step);
+
+  step = bootLogger.start('gateway.seed-default-workflow-templates');
+  ensureDefaultWorkflowTemplatesForAllUsers();
   bootLogger.succeed(step);
 
   step = bootLogger.start('gateway.reconcile-session-runtimes');

@@ -250,7 +250,7 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       const userId = admin?.id;
       expect(userId).toBeTruthy();
 
-      persistSessionFileDiffs({
+      await persistSessionFileDiffs({
         sessionId,
         userId: userId!,
         clientRequestId: 'req-route-1',

@@ -55,6 +55,9 @@ JOIN team_members tm ON tm.id = ss.member_id
 JOIN sessions sess ON sess.id = ss.session_id AND sess.user_id = ss.user_id
 JOIN users owner ON owner.id = ss.user_id`;
 
+const SHARED_SESSION_TEAM_WORKSPACE_ID_SQL =
+  "json_extract(CASE WHEN json_valid(sess.metadata_json) THEN sess.metadata_json ELSE '{}' END, '$.teamWorkspaceId')";
+
 function mapSharedSessionRow(row: SharedSessionRow): SharedSessionAccessRecord {
   const metadataJson = sanitizeSessionMetadataJson(row.session_metadata_json);
   return {
@@ -84,13 +87,25 @@ export function listSharedSessionsForRecipient(input: {
   email: string;
   limit: number;
   offset: number;
+  onlyTeamSessions?: boolean;
+  teamWorkspaceId?: string;
 }): SharedSessionAccessRecord[] {
+  const whereClauses = ['lower(tm.email) = lower(?)'];
+  const params: Array<number | string> = [input.email];
+
+  if (typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0) {
+    whereClauses.push(`${SHARED_SESSION_TEAM_WORKSPACE_ID_SQL} = ?`);
+    params.push(input.teamWorkspaceId);
+  } else if (input.onlyTeamSessions) {
+    whereClauses.push(`${SHARED_SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL`);
+  }
+
   const rows = sqliteAll<SharedSessionRow>(
     `${BASE_SHARED_SESSION_SELECT}
-     WHERE lower(tm.email) = lower(?)
+     WHERE ${whereClauses.join(' AND ')}
      ORDER BY ss.updated_at DESC, ss.id DESC
      LIMIT ? OFFSET ?`,
-    [input.email, input.limit, input.offset],
+    [...params, input.limit, input.offset],
   );
 
   return rows.map(mapSharedSessionRow);

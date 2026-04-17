@@ -5,6 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto';
 import { z } from 'zod';
 import { redis, sqliteGet, sqliteRun } from './db.js';
 import { ensureDefaultInstalledSkills } from './default-skills.js';
+import { ensureDefaultWorkflowTemplates } from './default-workflow-templates.js';
 import { startRequestWorkflow } from './request-workflow.js';
 
 const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-production-min-32-chars';
@@ -179,6 +180,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
       passwordHash,
     ]);
     ensureDefaultInstalledSkills(id);
+    ensureDefaultWorkflowTemplates(id);
     createUserStep.succeed();
     step.succeed(undefined, { userId: id });
 
