@@ -10,7 +10,6 @@ vi.mock('../db.js', () => ({
 
 import {
   extractSessionWorkingDirectory,
-  extractToolSurfaceProfile,
   isSessionWorkspaceRebindingAttempt,
   mergeSessionMetadataForUpdate,
   normalizeIncomingSessionMetadata,
@@ -109,6 +108,33 @@ describe('session workspace metadata helpers', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts canonical teamDefinition metadata patches', () => {
+    const result = validateSessionMetadataPatch({
+      teamDefinition: {
+        createdAt: '2026-04-16T00:00:00.000Z',
+        defaultProvider: 'claude-code',
+        optionalMembers: [
+          {
+            agentId: 'atlas',
+            agentLabel: 'Atlas',
+            canonicalRole: 'reviewer',
+          },
+        ],
+        requiredRoleBindings: [
+          { role: 'planner', agentId: 'oracle', agentLabel: 'Oracle' },
+          { role: 'researcher', agentId: 'librarian', agentLabel: 'Librarian' },
+          { role: 'executor', agentId: 'hephaestus', agentLabel: 'Hephaestus' },
+          { role: 'reviewer', agentId: 'momus', agentLabel: 'Momus' },
+        ],
+        source: { kind: 'blank' },
+      },
+      teamWorkspaceId: 'workspace-1',
+      workingDirectory: '/tmp/openawork-workspace-root/apps/web',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it('accepts extended reasoning effort values in session metadata patches', () => {
     const result = validateSessionMetadataPatch({
       thinkingEnabled: true,
@@ -125,42 +151,6 @@ describe('session workspace metadata helpers', () => {
     });
 
     expect(result.success).toBe(false);
-  });
-
-  it('accepts valid toolSurfaceProfile values in session metadata patches', () => {
-    for (const profile of ['openawork', 'claude_code_simple', 'claude_code_default'] as const) {
-      const result = validateSessionMetadataPatch({ toolSurfaceProfile: profile });
-      expect(result.success).toBe(true);
-      if (result.success) expect(result.data.toolSurfaceProfile).toBe(profile);
-    }
-  });
-
-  it('rejects invalid toolSurfaceProfile values', () => {
-    const result = validateSessionMetadataPatch({ toolSurfaceProfile: 'unknown_profile' });
-    expect(result.success).toBe(false);
-  });
-
-  it('defaults missing toolSurfaceProfile to openawork', () => {
-    expect(extractToolSurfaceProfile({})).toBe('openawork');
-    expect(extractToolSurfaceProfile({ toolSurfaceProfile: 'not_valid' })).toBe('openawork');
-  });
-
-  it('extracts known toolSurfaceProfile from metadata', () => {
-    expect(extractToolSurfaceProfile({ toolSurfaceProfile: 'claude_code_simple' })).toBe(
-      'claude_code_simple',
-    );
-    expect(extractToolSurfaceProfile({ toolSurfaceProfile: 'claude_code_default' })).toBe(
-      'claude_code_default',
-    );
-    expect(extractToolSurfaceProfile({ toolSurfaceProfile: 'openawork' })).toBe('openawork');
-  });
-
-  it('preserves toolSurfaceProfile through metadata merge', () => {
-    const result = mergeSessionMetadataForUpdate(
-      { toolSurfaceProfile: 'claude_code_simple', tag: 'old' },
-      { tag: 'new' },
-    );
-    expect(result.metadata['toolSurfaceProfile']).toBe('claude_code_simple');
   });
 
   it('falls back to an empty metadata object when persisted metadata is corrupted', () => {

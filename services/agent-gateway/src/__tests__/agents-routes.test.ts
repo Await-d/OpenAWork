@@ -88,6 +88,7 @@ describe('agentsRoutes', () => {
         description: '用于快速排查问题',
         aliases: ['debug-pro'],
         canonicalRole: { coreRole: 'executor', preset: 'debugger', confidence: 'high' },
+        systemPrompt: '请协助诊断并修复问题。',
       },
     });
 
@@ -110,7 +111,7 @@ describe('agentsRoutes', () => {
     ).toBe(true);
   });
 
-  it('updates a builtin agent override and resets it back to default', async () => {
+  it('updates builtin model settings and resets them back to default', async () => {
     const listBefore = await app.inject({ method: 'GET', url: '/agents' });
     expect(listBefore.statusCode).toBe(200);
     const listBeforeBody = JSON.parse(listBefore.body) as {
@@ -128,15 +129,17 @@ describe('agentsRoutes', () => {
     const updateResponse = await app.inject({
       method: 'PUT',
       url: '/agents/oracle',
-      payload: { label: '架构顾问', enabled: false, note: '仅用于重大评审' },
+      payload: { model: 'openai/gpt-5.4-mini', variant: 'high' },
     });
 
     expect(updateResponse.statusCode).toBe(200);
     expect(JSON.parse(updateResponse.body)).toMatchObject({
       agent: {
         id: 'oracle',
-        label: '架构顾问',
-        enabled: false,
+        label: 'oracle',
+        enabled: true,
+        model: 'openai/gpt-5.4-mini',
+        variant: 'high',
         origin: 'builtin',
         resettable: true,
       },
@@ -198,6 +201,7 @@ describe('agentsRoutes', () => {
         label: '自定义评审员',
         description: '自定义评审 agent',
         note: '初始版本',
+        systemPrompt: '请作为额外评审 agent 提供意见。',
       },
     });
     expect(createResponse.statusCode).toBe(201);
@@ -210,7 +214,7 @@ describe('agentsRoutes', () => {
     await app.inject({
       method: 'PUT',
       url: '/agents/explore',
-      payload: { label: '代码侦察兵', enabled: false },
+      payload: { model: 'openai/gpt-5.4-mini' },
     });
 
     const resetAllResponse = await app.inject({ method: 'POST', url: '/agents/reset-all' });
@@ -244,6 +248,7 @@ describe('agentsRoutes', () => {
       payload: {
         id: 'custom-debugger',
         label: '自定义调试助手',
+        systemPrompt: '请帮助用户调试问题。',
       },
     });
     expect(firstCreate.statusCode).toBe(201);
@@ -254,6 +259,7 @@ describe('agentsRoutes', () => {
       payload: {
         id: 'custom-debugger',
         label: '另一个自定义调试助手',
+        systemPrompt: '另一个调试提示词。',
       },
     });
     expect(duplicateCreate.statusCode).toBe(409);
@@ -264,6 +270,29 @@ describe('agentsRoutes', () => {
       payload: {},
     });
     expect(emptyUpdate.statusCode).toBe(400);
+  });
+
+  it('rejects builtin non-model updates and custom creation without prompt', async () => {
+    const invalidBuiltinUpdate = await app.inject({
+      method: 'PUT',
+      url: '/agents/oracle',
+      payload: { label: '首席架构顾问' },
+    });
+
+    expect(invalidBuiltinUpdate.statusCode).toBe(400);
+    expect(JSON.parse(invalidBuiltinUpdate.body)).toMatchObject({
+      error: 'Builtin agents only allow model configuration updates',
+    });
+
+    const missingPromptCreate = await app.inject({
+      method: 'POST',
+      url: '/agents',
+      payload: {
+        label: '缺少提示词的自定义 Agent',
+      },
+    });
+
+    expect(missingPromptCreate.statusCode).toBe(400);
   });
 
   it('rejects removing builtin agents with 409', async () => {
