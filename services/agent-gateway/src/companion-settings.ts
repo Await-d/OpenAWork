@@ -544,6 +544,13 @@ export function buildCompanionPrompt(
     `注入原因：${injectionReason}`,
     `输出约束：${behaviorInstruction}`,
     '把 companion 视为工作台里的低打扰陪跑层，而不是第二个主助手。',
+    '',
+    `当你需要以 companion（${settings.profile.name}）的身份输出内容时，请使用以下结构化标记：`,
+    '```companion',
+    `${settings.profile.name} 的内容写在这里`,
+    '```',
+    'companion 标记内的内容会在 UI 中以独立的 companion 面板渲染，与主助手回复视觉分离。',
+    '只在确实需要 companion 说话时才使用此标记，不要在每条回复中都使用。',
   ].join('\n');
 }
 

@@ -23,6 +23,7 @@ import { AgentActivityPanel } from '../components/AgentActivityPanel';
 import { MobileVoiceRecorder } from '../components/MobileVoiceRecorder';
 import { MobileAttachmentBar } from '../components/MobileAttachmentBar';
 import type { MobileAttachmentItem } from '../components/MobileAttachmentBar';
+import { MobileCompanionStage } from '../components/MobileCompanionStage';
 import type { DialogueMode } from '@openAwork/shared';
 import { DialogueModeSelector } from '../components/DialogueModeSelector';
 import * as DocumentPicker from 'expo-document-picker';
@@ -517,6 +518,20 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           </TouchableOpacity>
         )}
       </View>
+
+      <MobileCompanionStage
+        input={input}
+        sessionId={sessionId}
+        streaming={sending}
+        pendingPermissionCount={0}
+        attachedCount={attachments.length}
+        todoCount={0}
+        sessionBusyState={sending ? 'running' : null}
+        currentUserEmail={''}
+        showVoice={showVoice}
+        queuedCount={0}
+        rightOpen={false}
+      />
     </KeyboardAvoidingView>
   );
 }

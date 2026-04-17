@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { tokens } from './tokens.js';
 
 export interface VoiceRecorderProps {
   onRecordingComplete?: (audioBlob: Blob) => void;
   onTranscript?: (text: string) => void;
   isTranscribing?: boolean;
+  autoConfirm?: boolean;
   style?: CSSProperties;
 }
 
@@ -57,7 +57,6 @@ export interface VoiceRecognitionResultLike {
 }
 
 const BAR_HEIGHTS = [3, 6, 10, 7, 4, 8, 5, 9, 6, 4] as const;
-const RECORD_BUTTON_SIZE = tokens.spacing.xl + tokens.spacing.lg + tokens.spacing.xs;
 
 export function resolveSpeechRecognitionConstructor(
   host: SpeechRecognitionHost | null | undefined,
@@ -156,6 +155,7 @@ export function VoiceRecorder({
   onRecordingComplete,
   onTranscript,
   isTranscribing,
+  autoConfirm = false,
   style,
 }: VoiceRecorderProps) {
   const [recording, setRecording] = useState(false);
@@ -334,6 +334,8 @@ export function VoiceRecorder({
       const text = (finalTranscriptRef.current.trim() || transcriptRef.current.trim()).trim();
       if (!recognitionErroredRef.current && !text) {
         setMicError('没有识别到有效语音，请重试');
+      } else if (!recognitionErroredRef.current && text && autoConfirm && onTranscript) {
+        onTranscript(text);
       }
     };
 
@@ -350,9 +352,11 @@ export function VoiceRecorder({
       setMicError(resolveMediaAccessErrorMessage(error));
     }
   }, [
+    autoConfirm,
     clearTimer,
     disposeRecognition,
     onRecordingComplete,
+    onTranscript,
     recognitionConstructor,
     recording,
     starting,
@@ -396,7 +400,7 @@ export function VoiceRecorder({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacing.sm,
+        gap: 6,
         ...style,
       }}
     >
@@ -404,7 +408,7 @@ export function VoiceRecorder({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: tokens.spacing.md,
+          gap: 8,
         }}
       >
         <button
@@ -413,31 +417,65 @@ export function VoiceRecorder({
           disabled={!recognitionSupported || starting}
           aria-label={busy ? '停止语音输入' : '开始语音输入'}
           style={{
-            width: RECORD_BUTTON_SIZE,
-            height: RECORD_BUTTON_SIZE,
-            borderRadius: '50%',
-            border: `1px solid ${busy ? tokens.color.danger : tokens.color.border}`,
+            width: 26,
+            height: 26,
+            borderRadius: 8,
+            border: '1px solid var(--border-subtle)',
             cursor: !recognitionSupported || starting ? 'not-allowed' : 'pointer',
-            background: busy ? tokens.color.danger : tokens.color.accent,
-            color: tokens.color.text,
-            fontSize: 15,
+            background: busy
+              ? 'color-mix(in oklch, var(--danger, #ef4444) 12%, transparent)'
+              : 'var(--surface)',
+            color: busy
+              ? 'color-mix(in oklch, var(--danger, #ef4444) 82%, white 18%)'
+              : 'var(--text-3)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            opacity: !recognitionSupported ? 0.55 : 1,
-            transition: 'opacity 0.15s ease, transform 0.15s ease, background 0.15s ease',
+            opacity: !recognitionSupported ? 0.45 : 1,
+            transition: 'opacity 150ms ease, background 150ms ease, color 150ms ease',
           }}
         >
-          {busy ? '■' : '●'}
+          {busy ? (
+            <svg
+              aria-hidden="true"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : (
+            <svg
+              aria-hidden="true"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="9" y="2" width="6" height="12" rx="3" />
+              <path d="M5 10a7 7 0 0 0 14 0" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+              <line x1="8" y1="22" x2="16" y2="22" />
+            </svg>
+          )}
         </button>
         <span
           style={{
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 600,
-            color: tokens.color.text,
+            color: 'var(--text-2)',
             fontVariantNumeric: 'tabular-nums',
-            minWidth: 42,
+            minWidth: 36,
           }}
         >
           {fmt(seconds)}
@@ -447,30 +485,46 @@ export function VoiceRecorder({
           style={{
             display: 'flex',
             alignItems: 'flex-end',
-            gap: tokens.spacing.xxs,
-            height: tokens.spacing.xl,
+            gap: 2,
+            height: 18,
           }}
         >
           {BAR_HEIGHTS.map((height, index) => (
             <div
               key={`bar-${index}-${height}`}
               style={{
-                width: tokens.spacing.xs,
-                height: busy ? height * 2 : tokens.spacing.xs,
-                background: busy ? tokens.color.accent : tokens.color.border,
-                borderRadius: tokens.radius.sm,
+                width: 3,
+                height: busy ? height * 1.8 : 3,
+                background: busy
+                  ? 'color-mix(in oklch, var(--accent) 70%, white 30%)'
+                  : 'var(--border-subtle)',
+                borderRadius: 2,
                 transition: 'height 0.15s ease, background 0.15s ease',
                 animation: busy ? `wave-${index % 3} 0.6s ease-in-out infinite alternate` : 'none',
               }}
             />
           ))}
         </div>
+
+        {busy && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: 'color-mix(in oklch, var(--danger, #ef4444) 70%, white 30%)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            REC
+          </span>
+        )}
       </div>
 
       <div
         style={{
-          fontSize: 12,
-          color: unsupportedMessage ? tokens.color.muted : tokens.color.text,
+          fontSize: 10,
+          color: unsupportedMessage ? 'var(--text-3)' : 'var(--text-3)',
+          lineHeight: 1.4,
         }}
       >
         {hintText}
@@ -479,12 +533,13 @@ export function VoiceRecorder({
       {unsupportedMessage && (
         <div
           style={{
-            fontSize: 12,
-            color: tokens.color.muted,
-            background: tokens.color.surface,
-            border: `1px solid ${tokens.color.border}`,
-            borderRadius: tokens.radius.sm,
-            padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
+            fontSize: 10,
+            color: 'var(--text-3)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 6,
+            padding: '4px 8px',
+            lineHeight: 1.5,
           }}
         >
           浏览器未提供 Speech Recognition API，当前仅支持键盘输入。
@@ -494,12 +549,14 @@ export function VoiceRecorder({
       {micError && (
         <div
           style={{
-            fontSize: 12,
-            color: tokens.color.danger,
-            background: tokens.color.surface,
-            border: `1px solid ${tokens.color.danger}`,
-            borderRadius: tokens.radius.sm,
-            padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
+            fontSize: 10,
+            color: 'color-mix(in oklch, var(--danger, #ef4444) 80%, white 20%)',
+            background: 'color-mix(in oklch, var(--danger, #ef4444) 8%, transparent)',
+            border:
+              '1px solid color-mix(in oklch, var(--danger, #ef4444) 20%, var(--border-subtle))',
+            borderRadius: 6,
+            padding: '4px 8px',
+            lineHeight: 1.5,
           }}
         >
           {micError}
@@ -509,14 +566,14 @@ export function VoiceRecorder({
       {showTranscriptPanel && (
         <div
           style={{
-            fontSize: 12,
+            fontSize: 11,
             lineHeight: 1.6,
-            color: isTranscribing ? tokens.color.muted : tokens.color.text,
-            background: tokens.color.surface,
-            border: `1px solid ${tokens.color.border}`,
-            borderRadius: tokens.radius.sm,
-            padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
-            minHeight: tokens.spacing.xl * 3,
+            color: isTranscribing ? 'var(--text-3)' : 'var(--text)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 8,
+            padding: '6px 8px',
+            minHeight: 36,
           }}
         >
           {isTranscribing
@@ -536,15 +593,16 @@ export function VoiceRecorder({
             setMicError(null);
           }}
           style={{
-            fontSize: 11,
-            padding: `${tokens.spacing.xs - 1}px ${tokens.spacing.md - 2}px`,
-            borderRadius: tokens.radius.sm,
-            border: `1px solid ${tokens.color.border}`,
-            background: tokens.color.bg,
-            color: tokens.color.text,
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '3px 8px',
+            borderRadius: 6,
+            border: '1px solid color-mix(in oklch, var(--accent) 24%, var(--border-subtle))',
+            background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+            color: 'var(--accent)',
             cursor: 'pointer',
             alignSelf: 'flex-start',
-            transition: 'border-color 0.15s ease, color 0.15s ease',
+            transition: 'border-color 150ms ease, color 150ms ease, background 150ms ease',
           }}
         >
           使用转录结果
