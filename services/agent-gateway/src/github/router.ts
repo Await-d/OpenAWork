@@ -7,11 +7,11 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
+import { extractMessageText } from '../session-message-store.js';
 import {
-  appendSessionMessage,
-  extractMessageText,
-  listSessionMessages,
-} from '../session-message-store.js';
+  appendSessionMessageV2 as appendSessionMessage,
+  listSessionMessagesV2 as listSessionMessages,
+} from '../message-v2-adapter.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { GitHubTriggerImpl } from './github-trigger.js';
 import type { GitHubEventType, GitHubTriggerConfig } from './github-trigger.js';

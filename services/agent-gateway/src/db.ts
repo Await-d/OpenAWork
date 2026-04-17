@@ -302,8 +302,8 @@ export async function migrate(): Promise<void> {
       tool_name TEXT NOT NULL,
       tool_call_id TEXT,
       file_path TEXT NOT NULL,
-      before_text TEXT NOT NULL,
-      after_text TEXT NOT NULL,
+      before_backup_id TEXT,
+      after_backup_id TEXT,
       additions INTEGER NOT NULL DEFAULT 0,
       deletions INTEGER NOT NULL DEFAULT 0,
       status TEXT,
@@ -323,6 +323,8 @@ export async function migrate(): Promise<void> {
   ensureColumn('session_file_diffs', 'observability_json', 'TEXT');
   ensureColumn('session_file_diffs', 'backup_before_ref_json', 'TEXT');
   ensureColumn('session_file_diffs', 'backup_after_ref_json', 'TEXT');
+  ensureColumn('session_file_diffs', 'before_backup_id', 'TEXT');
+  ensureColumn('session_file_diffs', 'after_backup_id', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS permission_decision_logs (
@@ -638,12 +640,14 @@ export async function migrate(): Promise<void> {
       name TEXT NOT NULL,
       description TEXT,
       category TEXT NOT NULL DEFAULT 'general',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
       nodes_json TEXT NOT NULL DEFAULT '[]',
       edges_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  ensureColumn('workflow_templates', 'metadata_json', "TEXT NOT NULL DEFAULT '{}' ");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS user_settings (

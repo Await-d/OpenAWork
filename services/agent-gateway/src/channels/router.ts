@@ -5,7 +5,8 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { extractMessageText, listSessionMessages } from '../session-message-store.js';
+import { extractMessageText } from '../session-message-store.js';
+import { listSessionMessagesV2 } from '../message-v2-adapter.js';
 import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { AutoReplyPipeline } from './auto-reply.js';
@@ -197,7 +198,7 @@ const autoReply = new AutoReplyPipeline({
 
     await partialUpdateQueue;
 
-    const latestAssistantMessage = listSessionMessages({
+    const latestAssistantMessage = listSessionMessagesV2({
       sessionId,
       userId: channel.ownerUserId,
     })

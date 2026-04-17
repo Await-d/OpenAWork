@@ -45,9 +45,12 @@ vi.mock('../request-workflow.js', () => ({
   })),
 }));
 
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSessionMessageV2: mocks.appendSessionMessageMock,
+  listSessionMessagesV2: mocks.listSessionMessagesMock,
+}));
+
 vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: mocks.appendSessionMessageMock,
-  listSessionMessages: mocks.listSessionMessagesMock,
   extractMessageText: mocks.extractMessageTextMock,
 }));
 
