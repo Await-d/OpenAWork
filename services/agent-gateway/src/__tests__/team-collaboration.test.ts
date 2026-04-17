@@ -278,7 +278,7 @@ beforeEach(async () => {
     },
   );
   listManagedAgentsForUserMock.mockReturnValue([
-    { id: 'oracle', label: 'Oracle', enabled: true, canonicalRole: { coreRole: 'planner' } },
+    { id: 'oracle', label: 'Oracle', enabled: true, canonicalRole: { coreRole: 'researcher' } },
     {
       id: 'librarian',
       label: 'Librarian',
@@ -397,7 +397,7 @@ describe('teamRoutes collaboration slice', () => {
     expect(metadata.workingDirectory).toBe('/repo/apps/web');
     expect(metadata.teamDefinition.source.kind).toBe('blank');
     expect(metadata.teamDefinition.requiredRoleBindings).toEqual([
-      { role: 'planner', agentId: 'oracle', agentLabel: 'Oracle' },
+      { role: 'planner', agentId: 'prometheus', agentLabel: 'Prometheus' },
       { role: 'researcher', agentId: 'librarian', agentLabel: 'Librarian' },
       { role: 'executor', agentId: 'hephaestus', agentLabel: 'Hephaestus' },
       { role: 'reviewer', agentId: 'momus', agentLabel: 'Momus' },

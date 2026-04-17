@@ -40,7 +40,7 @@ beforeEach(() => {
       { id: 'atlas', label: 'Atlas', enabled: true },
     ],
     roleCards: [
-      { role: 'planner', roleLabel: '规划', selectedAgentId: 'oracle' },
+      { role: 'planner', roleLabel: '规划', selectedAgentId: 'prometheus' },
       { role: 'researcher', roleLabel: '研究', selectedAgentId: 'librarian' },
       { role: 'executor', roleLabel: '执行', selectedAgentId: 'hephaestus' },
       { role: 'reviewer', roleLabel: '审查', selectedAgentId: 'momus' },

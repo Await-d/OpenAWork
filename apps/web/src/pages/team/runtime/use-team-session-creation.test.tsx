@@ -87,7 +87,7 @@ describe('useTeamSessionCreation', () => {
       teamTemplate: {
         defaultBindings: {
           executor: 'hephaestus',
-          planner: 'oracle',
+          planner: 'prometheus',
           researcher: 'librarian',
           reviewer: 'momus',
         },
@@ -108,7 +108,7 @@ describe('useTeamSessionCreation', () => {
     expect(harness.getState().draft.source.kind).toBe('blank');
     expect(harness.getState().draft.optionalAgentIds).toEqual([]);
     expect(harness.getState().draft.requiredRoleBindings).toEqual({
-      planner: 'oracle',
+      planner: 'prometheus',
       researcher: 'librarian',
       executor: 'hephaestus',
       reviewer: 'momus',
@@ -197,7 +197,7 @@ describe('useTeamSessionCreation', () => {
     expect(harness.getState().draft.defaultProvider).toBe('claude-code');
     expect(harness.getState().draft.optionalAgentIds).toEqual(['atlas']);
     expect(harness.getState().draft.requiredRoleBindings.executor).toBe('hephaestus');
-    expect(harness.getState().draft.requiredRoleBindings.planner).toBe('oracle');
+    expect(harness.getState().draft.requiredRoleBindings.planner).toBe('prometheus');
     expect(harness.getState().draft.requiredRoleBindings.researcher).toBe('librarian');
     expect(harness.getState().draft.requiredRoleBindings.reviewer).toBe('momus');
   });

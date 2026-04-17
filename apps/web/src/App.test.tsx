@@ -368,7 +368,7 @@ beforeEach(() => {
                 ? parsedBody.optionalAgentIds.map((agentId: string) => ({ agentId }))
                 : [],
               requiredRoleBindings: [
-                { role: 'planner', agentId: 'oracle' },
+                { role: 'planner', agentId: 'prometheus' },
                 { role: 'researcher', agentId: 'librarian' },
                 { role: 'executor', agentId: 'hephaestus' },
                 { role: 'reviewer', agentId: 'momus' },
@@ -1073,7 +1073,7 @@ describe('App routing', () => {
     expect(workflowTemplates[0]?.metadata).toMatchObject({
       teamTemplate: {
         defaultBindings: {
-          planner: 'oracle',
+          planner: 'prometheus',
           researcher: 'librarian',
           executor: 'hephaestus',
           reviewer: 'momus',
@@ -1182,7 +1182,7 @@ describe('App routing', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'oracle',
+              planner: 'prometheus',
               researcher: 'librarian',
               executor: 'hephaestus',
               reviewer: 'momus',

@@ -226,7 +226,7 @@ async function mockWorkspaceFirstFlow(page: Page): Promise<{
           teamDefinition: {
             source: payload.source,
             requiredRoleBindings: [
-              { role: 'planner', agentId: 'oracle' },
+              { role: 'planner', agentId: 'prometheus' },
               { role: 'researcher', agentId: 'librarian' },
               { role: 'executor', agentId: 'hephaestus' },
               { role: 'reviewer', agentId: 'momus' },

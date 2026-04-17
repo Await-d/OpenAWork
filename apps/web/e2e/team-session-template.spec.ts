@@ -125,7 +125,7 @@ async function mockTeamTemplateSessionFlow(page: Page): Promise<{
     metadata: {
       teamTemplate: {
         defaultBindings: {
-          planner: 'oracle',
+          planner: 'prometheus',
           researcher: 'librarian',
           executor: 'hephaestus',
           reviewer: 'momus',
@@ -245,7 +245,7 @@ async function mockTeamTemplateSessionFlow(page: Page): Promise<{
           teamDefinition: {
             source: sessionPayload['source'],
             requiredRoleBindings: [
-              { role: 'planner', agentId: 'oracle' },
+              { role: 'planner', agentId: 'prometheus' },
               { role: 'researcher', agentId: 'librarian' },
               { role: 'executor', agentId: 'hephaestus' },
               { role: 'reviewer', agentId: 'momus' },

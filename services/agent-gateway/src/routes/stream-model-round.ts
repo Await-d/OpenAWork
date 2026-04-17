@@ -502,6 +502,44 @@ export async function runModelRound(input: {
       ...(input.route.requestOverrides.headers ?? {}),
     };
 
+    const upstreamUrl = `${input.route.apiBaseUrl}${upstreamPath}`;
+    const bodyJson = JSON.stringify(upstreamBody);
+
+    // Debug: log upstream request details for diagnosing format issues
+    const messageSummary = (upstreamBody as Record<string, unknown>).messages
+      ? ((upstreamBody as Record<string, unknown>).messages as Array<{
+          role: string;
+          content?: unknown;
+          tool_calls?: unknown[];
+        }>)
+      : undefined;
+    const inputSummary = (upstreamBody as Record<string, unknown>).input
+      ? `${((upstreamBody as Record<string, unknown>).input as unknown[]).length} items`
+      : undefined;
+
+    const debugStep = input.wl.startChild(stepUpstream, 'upstream.request.debug', undefined, {
+      url: upstreamUrl,
+      protocol: input.route.upstreamProtocol,
+      model: input.route.model,
+      providerType: input.route.providerType ?? 'unknown',
+      messageCount: messageSummary?.length ?? 0,
+      messageRoles: messageSummary?.map((m) => m.role).join(',') ?? 'n/a',
+      inputItemCount: inputSummary ?? 'n/a',
+      toolsCount: (upstreamBody as Record<string, unknown>).tools
+        ? ((upstreamBody as Record<string, unknown>).tools as unknown[]).length
+        : 0,
+      bodyKeys: Object.keys(upstreamBody).join(','),
+      bodySizeBytes: bodyJson.length,
+      maxTokens: input.route.maxTokens,
+      temperature: input.route.temperature,
+      thinkingEnabled: input.requestData.thinkingEnabled ?? false,
+      reasoningEffort: input.requestData.reasoningEffort ?? 'n/a',
+      hasApiKey: !!input.route.apiKey,
+    });
+    input.wl.succeed(debugStep, undefined, {
+      bodyPreview: bodyJson.slice(0, 500),
+    });
+
     const response = await fetchUpstreamStreamWithRetry({
       url: `${input.route.apiBaseUrl}${upstreamPath}`,
       init: {
@@ -518,7 +556,12 @@ export async function runModelRound(input: {
 
     if (!response.ok || !response.body) {
       const upstreamError = await readUpstreamError(response);
-      input.wl.fail(stepUpstream, undefined, { status: response.status });
+      input.wl.fail(stepUpstream, undefined, {
+        status: response.status,
+        errorCode: upstreamError.code,
+        errorMessage: upstreamError.message?.slice(0, 200),
+        errorDetail: upstreamError.technicalDetail?.slice(0, 500),
+      });
       const contextOverflow = isUpstreamContextOverflowError({
         response,
         error: upstreamError,

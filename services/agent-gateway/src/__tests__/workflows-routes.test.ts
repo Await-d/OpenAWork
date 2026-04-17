@@ -93,7 +93,7 @@ describe('workflowRoutes metadata support', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'oracle',
+              planner: 'prometheus',
               researcher: 'librarian',
               executor: 'hephaestus',
               reviewer: 'momus',
@@ -114,7 +114,7 @@ describe('workflowRoutes metadata support', () => {
       JSON.stringify({
         teamTemplate: {
           defaultBindings: {
-            planner: 'oracle',
+            planner: 'prometheus',
             researcher: 'librarian',
             executor: 'hephaestus',
             reviewer: 'momus',
@@ -130,7 +130,7 @@ describe('workflowRoutes metadata support', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'oracle',
+              planner: 'prometheus',
               researcher: 'librarian',
               executor: 'hephaestus',
               reviewer: 'momus',
@@ -154,7 +154,7 @@ describe('workflowRoutes metadata support', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'oracle',
+              planner: 'prometheus',
               researcher: 'librarian',
               executor: 'hephaestus',
             },
@@ -174,7 +174,7 @@ describe('workflowRoutes metadata support', () => {
       expect.objectContaining({
         teamTemplate: expect.objectContaining({
           defaultBindings: {
-            planner: 'oracle',
+            planner: 'prometheus',
             researcher: 'librarian',
             executor: 'hephaestus',
             reviewer: 'momus',

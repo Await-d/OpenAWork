@@ -31,7 +31,7 @@ export type TeamCoreRole = Extract<
 
 export const FIXED_TEAM_CORE_ROLE_BINDINGS: Record<TeamCoreRole, string> = {
   leader: 'zeus',
-  planner: 'oracle',
+  planner: 'prometheus',
   researcher: 'librarian',
   executor: 'hephaestus',
   reviewer: 'momus',
@@ -122,7 +122,7 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
     aliases: ['planner'],
   },
   oracle: {
-    canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+    canonicalRole: { coreRole: 'researcher', preset: 'architect', confidence: 'high' },
     aliases: ['architect', 'debugger', 'code-reviewer', 'init-architect'],
   },
   librarian: {

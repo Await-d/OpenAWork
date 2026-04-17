@@ -121,7 +121,7 @@ describe('session workspace metadata helpers', () => {
           },
         ],
         requiredRoleBindings: [
-          { role: 'planner', agentId: 'oracle', agentLabel: 'Oracle' },
+          { role: 'planner', agentId: 'prometheus', agentLabel: 'Prometheus' },
           { role: 'researcher', agentId: 'librarian', agentLabel: 'Librarian' },
           { role: 'executor', agentId: 'hephaestus', agentLabel: 'Hephaestus' },
           { role: 'reviewer', agentId: 'momus', agentLabel: 'Momus' },

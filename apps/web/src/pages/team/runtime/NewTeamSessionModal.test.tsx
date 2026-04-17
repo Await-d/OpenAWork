@@ -38,7 +38,7 @@ beforeEach(() => {
       {
         role: 'planner',
         roleLabel: '规划',
-        selectedAgentId: 'oracle',
+        selectedAgentId: 'prometheus',
         selectedAgent: null,
         recommendedCapabilities: [],
       },
@@ -85,7 +85,7 @@ beforeEach(() => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'oracle',
+              planner: 'prometheus',
               researcher: 'librarian',
             },
             defaultProvider: 'claude-code',
