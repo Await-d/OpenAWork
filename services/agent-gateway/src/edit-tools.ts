@@ -9,6 +9,12 @@ import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.
 import { captureBeforeWriteBackup } from './session-file-backup-store.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 
+// Edit error recovery suffix (oh-my-opencode editErrorRecovery pattern)
+// Injected into edit tool error messages to guide the LLM to read the file
+// before retrying, preventing repeated edit failures.
+const EDIT_ERROR_RECOVERY_SUFFIX =
+  'STOP: Read the file immediately to see its actual current state before retrying the edit. Your assumption about the file content was wrong.';
+
 const editInputSchema = z.object({
   filePath: z.string().min(1),
   oldString: z.string(),
@@ -115,7 +121,9 @@ export function createEditTool(
     execute: async (input) => {
       const safePath = assertEditableWorkspaceFilePath(input.filePath);
       if (input.oldString === input.newString) {
-        throw new Error('newString must be different from oldString');
+        throw new Error(
+          'newString must be different from oldString. ' + EDIT_ERROR_RECOVERY_SUFFIX,
+        );
       }
 
       let exists = true;
@@ -175,11 +183,12 @@ export function createEditTool(
 
       const occurrences = countOccurrences(currentContent, input.oldString);
       if (occurrences === 0) {
-        throw new Error('oldString not found in file');
+        throw new Error('oldString not found in file. ' + EDIT_ERROR_RECOVERY_SUFFIX);
       }
       if (occurrences > 1 && input.replaceAll !== true) {
         throw new Error(
-          'oldString appears multiple times in the file; provide more context or set replaceAll to true',
+          'oldString appears multiple times in the file; provide more context or set replaceAll to true. ' +
+            EDIT_ERROR_RECOVERY_SUFFIX,
         );
       }
 

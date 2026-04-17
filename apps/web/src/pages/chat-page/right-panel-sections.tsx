@@ -171,6 +171,22 @@ export function ChatHistoryTabContent(props: {
   childSessions: Session[];
   compactions: CompactionItem[];
   pendingPermissions: PendingPermissionRequest[];
+  resolveInlinePermissionActions?: (requestId: string) =>
+    | {
+        errorMessage?: string;
+        helperMessage?: string;
+        items: Array<{
+          danger?: boolean;
+          disabled?: boolean;
+          hint?: string;
+          id: string;
+          label: string;
+          onClick: () => void;
+          primary?: boolean;
+        }>;
+        pendingLabel?: string;
+      }
+    | undefined;
   planHistory: HistoricalPlan[];
   sessionTodos: SessionTodoItem[];
   sessionTasks: HierarchicalSessionTask[];
@@ -181,6 +197,7 @@ export function ChatHistoryTabContent(props: {
     childSessions,
     compactions,
     pendingPermissions,
+    resolveInlinePermissionActions,
     planHistory,
     sessionTodos,
     sessionTasks,
@@ -601,6 +618,98 @@ export function ChatHistoryTabContent(props: {
                     {permission.scope} · {permission.riskLevel}
                     {permission.previewAction ? ` · ${permission.previewAction}` : ''}
                   </div>
+                  {resolveInlinePermissionActions &&
+                    (() => {
+                      const approvalActions = resolveInlinePermissionActions(permission.requestId);
+                      if (!approvalActions || approvalActions.items.length === 0) {
+                        return null;
+                      }
+
+                      return (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                            marginTop: 8,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: 6,
+                            }}
+                          >
+                            {approvalActions.items.map((action) => (
+                              <button
+                                key={action.id}
+                                type="button"
+                                disabled={action.disabled}
+                                onClick={action.onClick}
+                                title={action.hint}
+                                style={{
+                                  appearance: 'none',
+                                  minHeight: 28,
+                                  padding: action.primary ? '0 12px' : '0 10px',
+                                  borderRadius: 999,
+                                  border: `1px solid ${
+                                    action.primary
+                                      ? 'color-mix(in srgb, var(--accent) 50%, var(--border))'
+                                      : action.danger
+                                        ? 'color-mix(in srgb, var(--danger) 42%, var(--border))'
+                                        : 'color-mix(in srgb, var(--accent) 34%, var(--border))'
+                                  }`,
+                                  background: action.disabled
+                                    ? 'color-mix(in srgb, var(--surface) 82%, transparent)'
+                                    : action.primary
+                                      ? 'linear-gradient(180deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 12%, transparent))'
+                                      : action.danger
+                                        ? 'color-mix(in srgb, var(--danger) 12%, transparent)'
+                                        : 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                                  color: action.danger ? 'var(--danger)' : 'var(--text)',
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  lineHeight: 1,
+                                  cursor: action.disabled ? 'not-allowed' : 'pointer',
+                                  opacity: action.disabled ? 0.62 : 1,
+                                }}
+                              >
+                                {action.label}
+                              </button>
+                            ))}
+                          </div>
+                          {(approvalActions.pendingLabel ||
+                            approvalActions.helperMessage ||
+                            approvalActions.errorMessage) && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              {approvalActions.pendingLabel && (
+                                <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                                  {approvalActions.pendingLabel}
+                                </div>
+                              )}
+                              {approvalActions.helperMessage && (
+                                <div
+                                  style={{
+                                    fontSize: 10,
+                                    color: 'var(--text-3)',
+                                    opacity: 0.92,
+                                    lineHeight: 1.45,
+                                  }}
+                                >
+                                  {approvalActions.helperMessage}
+                                </div>
+                              )}
+                              {approvalActions.errorMessage && (
+                                <div style={{ fontSize: 10, color: 'var(--danger)' }}>
+                                  {approvalActions.errorMessage}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                 </div>
               ))}
             </>

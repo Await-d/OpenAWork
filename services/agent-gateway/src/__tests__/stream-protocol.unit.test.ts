@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyRequestOverridesToBody,
   buildUpstreamRequestBody,
+  sanitizeUpstreamConversation,
+  type UpstreamChatMessage,
 } from '../routes/upstream-request.js';
 
 vi.mock('../tool-definitions.js', () => ({
@@ -188,7 +190,7 @@ describe('buildUpstreamRequestBody', () => {
       messages: [{ role: 'user', content: '需要深度推理' }],
     });
 
-    expect(body['reasoning']).toEqual({ effort: 'high' });
+    expect(body['reasoning']).toEqual({ effort: 'high', summary: 'auto' });
   });
 
   it('maps DeepSeek thinking settings for non-reasoner chat models', () => {
@@ -841,5 +843,186 @@ describe('parseUpstreamFrame', () => {
         state,
       ),
     ).toThrowError(ResponsesUpstreamEventError);
+  });
+});
+
+describe('sanitizeUpstreamConversation', () => {
+  it('removes orphaned tool_result with no matching tool_call', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      { role: 'tool', content: 'orphan result', tool_call_id: 'call_missing' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+    ]);
+  });
+
+  it('keeps tool_result that matches a preceding tool_call', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', content: 'search result', tool_call_id: 'call_1' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual(messages);
+  });
+
+  it('removes tool_result appearing before its tool_call', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'tool', content: 'early result', tool_call_id: 'call_1' },
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+    ]);
+  });
+
+  it('removes empty assistant messages with no content and no tool_calls', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: '' },
+      { role: 'user', content: 'continue' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      { role: 'user', content: 'continue' },
+    ]);
+  });
+
+  it('removes tool messages with empty content', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', content: '', tool_call_id: 'call_1' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+    ]);
+  });
+
+  it('removes tool_result without tool_call_id', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      { role: 'tool', content: 'no id result' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+    ]);
+  });
+
+  it('preserves valid conversation with multiple tool calls and results', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'search and read' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"q":"test"}' },
+          },
+          {
+            id: 'call_2',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"/tmp/f"}' },
+          },
+        ],
+      },
+      { role: 'tool', content: 'search results', tool_call_id: 'call_1' },
+      { role: 'tool', content: 'file contents', tool_call_id: 'call_2' },
+      { role: 'assistant', content: 'Here is what I found.' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual(messages);
+  });
+
+  it('handles mixed orphaned and valid tool results', () => {
+    const messages: UpstreamChatMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'search' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', content: 'valid result', tool_call_id: 'call_1' },
+      { role: 'tool', content: 'orphan result', tool_call_id: 'call_orphan' },
+      { role: 'assistant', content: 'Done.' },
+    ];
+
+    const result = sanitizeUpstreamConversation(messages);
+    expect(result).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'search' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', content: 'valid result', tool_call_id: 'call_1' },
+      { role: 'assistant', content: 'Done.' },
+    ]);
   });
 });

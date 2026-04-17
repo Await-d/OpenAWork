@@ -119,7 +119,7 @@ export function CompanionTerminalSprite({
       style={{
         display: 'flex',
         alignItems: 'flex-end',
-        gap: 6,
+        gap: 4,
         flexWrap: 'wrap',
         minWidth: 0,
       }}
@@ -134,10 +134,10 @@ export function CompanionTerminalSprite({
             flexDirection: 'column',
             gap: 5,
             minWidth: 0,
-            flex: '1 1 220px',
-            maxWidth: 300,
-            padding: '6px 8px',
-            borderRadius: 11,
+            flex: '1 1 180px',
+            maxWidth: 240,
+            padding: '4px 6px',
+            borderRadius: 9,
             border: '1px solid color-mix(in oklch, var(--border) 68%, transparent)',
             background: resolveBubbleBackground(liveOutput.tone),
             opacity: fading ? 0.52 : 1,
@@ -145,7 +145,7 @@ export function CompanionTerminalSprite({
               ? 'opacity 160ms ease'
               : 'opacity 240ms ease, transform 240ms ease',
             transform: prefersReducedMotion || fading ? 'none' : 'translateY(-1px)',
-            boxShadow: fading ? 'none' : '0 6px 14px -20px rgba(0,0,0,0.34)',
+            boxShadow: fading ? 'none' : '0 4px 10px -16px rgba(0,0,0,0.28)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
@@ -197,7 +197,7 @@ export function CompanionTerminalSprite({
       <div
         data-testid="companion-terminal-sprite"
         style={{
-          minWidth: 84,
+          minWidth: 68,
           flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
@@ -212,7 +212,7 @@ export function CompanionTerminalSprite({
             style={{
               whiteSpace: 'pre',
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: 9,
+              fontSize: 7.5,
               lineHeight: 1.02,
               color:
                 petting && index === 0
@@ -234,7 +234,7 @@ export function CompanionTerminalSprite({
             gap: 4,
             marginTop: 1,
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-            fontSize: 8.5,
+            fontSize: 7.5,
             color: liveOutput ? spriteColor : 'var(--text-2)',
           }}
         >
@@ -244,7 +244,7 @@ export function CompanionTerminalSprite({
         <div
           style={{
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-            fontSize: 8,
+            fontSize: 7,
             color: 'var(--text-3)',
           }}
         >

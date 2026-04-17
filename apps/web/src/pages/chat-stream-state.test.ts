@@ -427,6 +427,45 @@ describe('chat-stream-state', () => {
     expect(state.agentEvents.at(-1)?.error).toContain('审批已通过并恢复执行');
   });
 
+  it('does not keep waiting-permission state when a failed tool result still carries a stale request id', () => {
+    const started = startChatRightPanelRun(createInitialChatRightPanelState(), '执行 bash 命令');
+    const running = applyChatRightPanelChunk(started, {
+      type: 'tool_call_delta',
+      toolCallId: 'call-stale-perm-error',
+      toolName: 'bash',
+      inputDelta: '{"command":"pwd && echo HOME=$HOME"}',
+    });
+
+    const state = applyChatRightPanelEvent(running, {
+      type: 'tool_result',
+      toolCallId: 'call-stale-perm-error',
+      toolName: 'bash',
+      output: {
+        stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+      },
+      isError: true,
+      pendingPermissionRequestId: 'perm-stale-error-1',
+      eventId: 'evt-tool-stale-perm-error',
+      runId: 'run-tool-stale-perm-error',
+      occurredAt: 900,
+    });
+
+    expect(getToolCallCards(state)).toEqual([
+      {
+        toolCallId: 'call-stale-perm-error',
+        toolName: 'bash',
+        input: { command: 'pwd && echo HOME=$HOME' },
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        status: 'failed',
+      },
+    ]);
+    expect(state.agentEvents.at(-1)?.label).toContain('工具失败：bash');
+    expect(state.agentEvents.at(-1)?.label).not.toContain('等待权限');
+  });
+
   it('records permission and child-session events instead of discarding them', () => {
     const withPermission = applyChatRightPanelEvent(createInitialChatRightPanelState(), {
       type: 'permission_asked',

@@ -147,13 +147,6 @@ function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnota
   if (typeof record['canonicalToolName'] === 'string') {
     parsed.canonicalToolName = record['canonicalToolName'];
   }
-  if (
-    record['toolSurfaceProfile'] === 'openawork' ||
-    record['toolSurfaceProfile'] === 'claude_code_simple' ||
-    record['toolSurfaceProfile'] === 'claude_code_default'
-  ) {
-    parsed.toolSurfaceProfile = record['toolSurfaceProfile'];
-  }
   if (typeof record['adapterVersion'] === 'string') {
     parsed.adapterVersion = record['adapterVersion'];
   }

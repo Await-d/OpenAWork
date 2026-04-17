@@ -90,6 +90,11 @@ function ComposerHarness() {
       onToggleVoice={noop}
       onToggleWebSearch={noop}
       onVoiceTranscript={noop}
+      agentOptions={[]}
+      manualAgentId=""
+      defaultAgentLabel="默认"
+      onChangeManualAgentId={noop}
+      onClearManualAgentId={noop}
       queuedMessages={[]}
       sessionBusyState={null}
       showModelPicker={false}

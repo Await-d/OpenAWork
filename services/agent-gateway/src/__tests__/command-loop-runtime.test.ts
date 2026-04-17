@@ -71,8 +71,8 @@ vi.mock('../db.js', () => ({
   sqliteTransaction: (fn: () => unknown) => fn(),
 }));
 
-vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: (input: {
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSessionMessageV2: (input: {
     sessionId: string;
     userId: string;
     role: Message['role'];
@@ -99,7 +99,11 @@ vi.mock('../session-message-store.js', () => ({
     sessionRows.set(key, row);
     return message;
   },
-  listSessionMessages: (input: { sessionId: string }) => sessionMessages.get(input.sessionId) ?? [],
+  listSessionMessagesV2: (input: { sessionId: string }) =>
+    sessionMessages.get(input.sessionId) ?? [],
+}));
+
+vi.mock('../session-message-store.js', () => ({
   extractMessageText: messageToText,
 }));
 

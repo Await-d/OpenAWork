@@ -17,6 +17,22 @@ const QUOTA_EXCEEDED_PATTERNS = [
 ];
 
 const RATE_LIMIT_PATTERNS = [/rate limit/i, /too many requests/i, /request limit/i];
+
+const UPSTREAM_SERVER_ERROR_MESSAGES: Record<number, string> = {
+  500: '模型服务内部错误，请稍后重试',
+  502: '模型服务暂时不可用（网关错误），请稍后重试',
+  503: '模型服务暂时过载，请稍后重试',
+  504: '模型服务响应超时，请稍后重试',
+};
+
+const TAUTOLOGICAL_UPSTREAM_MESSAGES = new Set([
+  'upstream request failed',
+  'bad gateway',
+  'service unavailable',
+  'gateway timeout',
+  'internal server error',
+]);
+
 const CONTEXT_OVERFLOW_PATTERNS = [
   /context length/i,
   /context window/i,
@@ -54,6 +70,23 @@ export async function readUpstreamError(response: Response): Promise<UpstreamErr
     return {
       code: 'RATE_LIMIT',
       message: '模型服务暂时达到请求上限，请稍后重试',
+      technicalDetail,
+    };
+  }
+
+  // Server errors (500/502/503/504) get user-friendly messages
+  const serverMessage = UPSTREAM_SERVER_ERROR_MESSAGES[response.status];
+  if (serverMessage) {
+    // Check if the upstream body is tautological (just repeats the status description)
+    const isTautological = TAUTOLOGICAL_UPSTREAM_MESSAGES.has(
+      technicalDetail
+        .replace(/^Upstream request failed \(\d+\):\s*/i, '')
+        .toLowerCase()
+        .trim(),
+    );
+    return {
+      code: 'MODEL_ERROR',
+      message: isTautological ? serverMessage : `${serverMessage}（${technicalDetail}）`,
       technicalDetail,
     };
   }

@@ -89,12 +89,10 @@ describe.skipIf(process.version.startsWith('v22.') || process.version.startsWith
       if (!userId) {
         throw new Error('Expected seeded admin user to exist');
       }
-      const ensuredUserId: string = userId;
       const sessionId = randomUUID();
       sqliteRun(
         `INSERT INTO sessions (id, user_id, messages_json, metadata_json)
          VALUES (?, ?, '[]', ?)`,
-        [sessionId, ensuredUserId, JSON.stringify({ toolSurfaceProfile: 'claude_code_default' })],
       );
 
       const res = await app!.inject({

@@ -599,6 +599,16 @@ textarea {
     var(--shadow-sm),
     0 16px 36px -24px oklch(0 0 0 / 0.9);
 }
+.composer-shell.agent-override {
+  border-color: color-mix(in oklch, var(--warning) 50%, var(--accent) 50%);
+}
+.composer-shell.agent-override:focus-within {
+  border-color: color-mix(in oklch, var(--warning) 60%, var(--accent) 40%);
+  box-shadow:
+    0 0 0 2px color-mix(in oklch, var(--warning) 18%, transparent),
+    var(--shadow-sm),
+    0 16px 36px -24px oklch(0 0 0 / 0.9);
+}
 :root.light .nav-rail-btn:hover {
   background: oklch(0.89 0.014 58) !important;
 }

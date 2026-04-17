@@ -12,6 +12,7 @@ import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import { logger } from '../utils/logger.js';
 import { requestCurrentSessionRefresh } from '../utils/session-list-events.js';
+import { createAssistantEventContent, createAssistantTraceContent } from './chat-page/support.js';
 
 const jsonResponse = (body: unknown) =>
   ({
@@ -251,9 +252,6 @@ const createAgentProfileMock = vi.fn(async (_token: string, input: Record<string
   agentId: (input['agentId'] as string | undefined) ?? null,
   providerId: (input['providerId'] as string | undefined) ?? null,
   modelId: (input['modelId'] as string | undefined) ?? null,
-  toolSurfaceProfile:
-    (input['toolSurfaceProfile'] as 'openawork' | 'claude_code_default' | 'claude_code_simple') ??
-    'openawork',
   note: null,
   createdAt: '2026-04-05T00:00:00.000Z',
   updatedAt: '2026-04-05T00:00:00.000Z',
@@ -266,9 +264,6 @@ const updateAgentProfileMock = vi.fn(
     agentId: (input['agentId'] as string | undefined) ?? null,
     providerId: (input['providerId'] as string | undefined) ?? null,
     modelId: (input['modelId'] as string | undefined) ?? null,
-    toolSurfaceProfile:
-      (input['toolSurfaceProfile'] as 'openawork' | 'claude_code_default' | 'claude_code_simple') ??
-      'openawork',
     note: null,
     createdAt: '2026-04-05T00:00:00.000Z',
     updatedAt: '2026-04-05T00:00:00.000Z',
@@ -278,6 +273,7 @@ const updateMetadataMock = vi.fn(async () => undefined);
 const listPendingPermissionsMock = vi.fn<
   (_token: string, _sessionId: string) => Promise<PendingPermissionRequest[]>
 >(async () => []);
+const replyPermissionMock = vi.fn(async () => undefined);
 const listMessageRatingsMock = vi.fn(async () => []);
 const setMessageRatingMock = vi.fn<
   (
@@ -417,6 +413,7 @@ vi.mock('@openAwork/web-client', () => ({
   })),
   createPermissionsClient: vi.fn(() => ({
     listPending: listPendingPermissionsMock,
+    reply: replyPermissionMock,
   })),
   createCommandsClient: vi.fn(() => ({
     list: listCommandsMock,
@@ -690,14 +687,35 @@ vi.mock('@openAwork/shared-ui', async () => {
     ImagePreview: ({ alt }: { alt?: string }) =>
       React.createElement('div', { 'data-testid': 'image-preview' }, alt ?? 'image'),
     ToolCallCard: ({
+      approvalActions,
       toolName,
       input,
       output,
     }: {
+      approvalActions?: {
+        items: Array<{ id: string; label: string; onClick: () => void; disabled?: boolean }>;
+      };
       input?: Record<string, unknown>;
       output?: unknown;
       toolName: string;
-    }) => React.createElement(MockToolCallRenderer, { toolName, input, output }),
+    }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': `mock-tool-call-card-${toolName}` },
+        React.createElement(MockToolCallRenderer, { toolName, input, output }),
+        approvalActions?.items.map((action) =>
+          React.createElement(
+            'button',
+            {
+              key: action.id,
+              disabled: action.disabled,
+              onClick: action.onClick,
+              type: 'button',
+            },
+            action.label,
+          ),
+        ) ?? null,
+      ),
     ToolDiffCollection: ({
       files,
       activePath,
@@ -861,6 +879,8 @@ beforeEach(() => {
   listSessionsMock.mockClear();
   listPendingPermissionsMock.mockReset();
   listPendingPermissionsMock.mockImplementation(async () => []);
+  replyPermissionMock.mockReset();
+  replyPermissionMock.mockImplementation(async () => undefined);
   listMessageRatingsMock.mockReset();
   listMessageRatingsMock.mockImplementation(async () => []);
   setMessageRatingMock.mockClear();
@@ -1023,6 +1043,103 @@ async function renderChatPageWithNavigator(initialEntry = '/chat/session-a') {
   });
   await flushEffects();
   return container!;
+}
+
+function createWaitingPermissionEventContent(options: {
+  occurredAt?: number;
+  previewAction: string;
+  requestId: string;
+}) {
+  return (
+    createAssistantEventContent({
+      type: 'permission_asked',
+      requestId: options.requestId,
+      toolName: 'bash',
+      scope: 'workspace-write',
+      riskLevel: 'medium',
+      reason: '需要执行工作区命令',
+      previewAction: options.previewAction,
+      occurredAt: options.occurredAt ?? 10,
+    }) ?? ''
+  );
+}
+
+async function renderAttachPermissionLifecycleScenario(options: {
+  previewAction: string;
+  requestId: string;
+  userContent: string;
+}) {
+  let attachCallbacks: MockAttachStreamCallbacks | undefined;
+
+  getSessionMock.mockImplementation(async () => ({
+    messages: [
+      {
+        id: `${options.requestId}-user`,
+        role: 'user',
+        content: options.userContent,
+        createdAt: 1,
+        status: 'completed',
+      },
+      {
+        id: `${options.requestId}-assistant`,
+        role: 'assistant',
+        content: createWaitingPermissionEventContent({
+          previewAction: options.previewAction,
+          requestId: options.requestId,
+        }),
+        createdAt: 2,
+        status: 'completed',
+      },
+    ],
+    state_status: 'running',
+  }));
+  attachToActiveStreamMock.mockImplementationOnce(
+    async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+      attachCallbacks = callbacks;
+      return true;
+    },
+  );
+
+  const rendered = await renderChatPage('/chat/session-1');
+  await flushEffects();
+
+  return {
+    emitPermissionReply: async (
+      decision: 'once' | 'session' | 'permanent' | 'reject',
+      occurredAt = 20,
+    ) => {
+      await act(async () => {
+        attachCallbacks?.onEvent?.({
+          type: 'permission_replied',
+          requestId: options.requestId,
+          decision,
+          occurredAt,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await flushEffects();
+    },
+    rendered,
+  };
+}
+
+function readPermissionLifecycleRows(rendered: HTMLDivElement) {
+  const assistantRows = Array.from(rendered.querySelectorAll('.chat-message-row')).filter(
+    (row) => row.getAttribute('data-role') === 'assistant',
+  );
+  const assistantText = assistantRows.map((row) => row.textContent ?? '').join('\n');
+  const permissionRows = assistantRows.filter((row) => {
+    const text = row.textContent ?? '';
+    return text.includes('权限已响应') || text.includes('等待权限');
+  });
+
+  return {
+    assistantRows,
+    assistantText,
+    permissionRows,
+  };
 }
 
 describe('ChatPage', () => {
@@ -2409,6 +2526,102 @@ describe('ChatPage', () => {
     expect(rendered.textContent).not.toContain('audit-attach-1');
   });
 
+  it('keeps permission approval events ordered before a stale attach snapshot catches up', async () => {
+    let attachCallbacks: MockAttachStreamCallbacks | undefined;
+    const waitingPermissionContent =
+      createAssistantEventContent({
+        type: 'permission_asked',
+        requestId: 'perm-1',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        riskLevel: 'high',
+        reason: '需要执行工作区命令',
+        previewAction: '执行命令: pwd',
+        occurredAt: 10,
+      }) ?? '';
+
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '测试bash工具',
+          createdAt: 1,
+          status: 'completed',
+        },
+        {
+          id: 'assistant-permission-asked',
+          role: 'assistant',
+          content: waitingPermissionContent,
+          createdAt: 2,
+          status: 'completed',
+        },
+      ],
+      state_status: 'running',
+    }));
+    attachToActiveStreamMock.mockImplementationOnce(
+      async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        attachCallbacks = callbacks;
+        return true;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await flushEffects();
+
+    await act(async () => {
+      attachCallbacks?.onEvent?.({
+        type: 'permission_replied',
+        requestId: 'perm-1',
+        decision: 'session',
+        occurredAt: 20,
+      });
+      attachCallbacks?.onEvent?.({
+        type: 'tool_call_delta',
+        toolCallId: 'call-perm',
+        toolName: 'bash',
+        inputDelta: '{"command":"pwd"}',
+        occurredAt: 21,
+      });
+      attachCallbacks?.onEvent?.({
+        type: 'tool_result',
+        toolCallId: 'call-perm',
+        toolName: 'bash',
+        output: {
+          command: 'pwd',
+          cwd: '/tmp/demo',
+          diffs: [],
+          exitCode: 0,
+          stdout: '/tmp/demo\n',
+          stderr: '',
+        },
+        isError: false,
+        resumedAfterApproval: true,
+        occurredAt: 22,
+      });
+      attachCallbacks?.onDelta('bash 工具可用');
+      attachCallbacks?.onDone('end_turn');
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await flushEffects();
+
+    const assistantRows = Array.from(rendered.querySelectorAll('.chat-message-row')).filter(
+      (row) => row.getAttribute('data-role') === 'assistant',
+    );
+    expect(assistantRows.length).toBeGreaterThan(0);
+    const assistantText = assistantRows.map((row) => row.textContent ?? '').join('\n');
+    expect(assistantText).toContain('权限已响应');
+    expect(assistantText).toContain('本会话允许');
+    expect(assistantText).toContain('bash 工具可用');
+    expect(assistantText.indexOf('权限已响应')).toBeLessThan(
+      assistantText.indexOf('bash 工具可用'),
+    );
+    expect(assistantText.match(/权限已响应/g)?.length ?? 0).toBe(1);
+  });
+
   it('keeps queued messages visible when the refreshed session snapshot cannot be loaded', async () => {
     getSessionMock.mockRejectedValueOnce(new Error('network unavailable'));
     useChatQueueStore.setState({
@@ -3125,13 +3338,9 @@ describe('ChatPage', () => {
     );
     const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
     const sendButton = rendered.querySelector('button.btn-accent') as HTMLButtonElement | null;
-    const agentSelect = rendered.querySelector(
-      'select[aria-label="聊天代理"]',
-    ) as HTMLSelectElement | null;
 
     expect(programmerMode).toBeDefined();
     expect(textarea).not.toBeNull();
-    expect(agentSelect).not.toBeNull();
 
     const textareaValueSetter = Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
@@ -3159,9 +3368,12 @@ describe('ChatPage', () => {
       expect.objectContaining({ agentId: 'hephaestus' }),
     );
 
+    // Tab twice to cycle from hephaestus -> sisyphus-junior
     act(() => {
-      agentSelect!.value = 'sisyphus-junior';
-      agentSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    act(() => {
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     });
 
     act(() => {
@@ -3181,13 +3393,11 @@ describe('ChatPage', () => {
       expect.objectContaining({ agentId: 'sisyphus-junior' }),
     );
 
-    const clearButton = Array.from(rendered.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '恢复默认',
-    );
-    expect(clearButton).toBeDefined();
-
+    // Shift+Tab to cycle back to default
     act(() => {
-      clearButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }),
+      );
     });
 
     act(() => {
@@ -3208,14 +3418,13 @@ describe('ChatPage', () => {
     );
   });
 
-  it('restores dialogueMode, yoloMode, toolSurfaceProfile, and manual agent from session metadata on opened sessions', async () => {
+  it('restores dialogueMode, yoloMode, and manual agent from session metadata on opened sessions', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
       messages: [],
       metadata_json: JSON.stringify({
         agentId: 'sisyphus-junior',
         dialogueMode: 'coding',
         yoloMode: true,
-        toolSurfaceProfile: 'claude_code_default',
       }),
     }));
 
@@ -3224,17 +3433,9 @@ describe('ChatPage', () => {
     const activeButtons = Array.from(rendered.querySelectorAll('button')).filter(
       (button) => button.getAttribute('aria-pressed') === 'true',
     );
-    const toolSurfaceSelect = rendered.querySelector(
-      'select[aria-label="工具配置档"]',
-    ) as HTMLSelectElement | null;
-    const agentSelect = rendered.querySelector(
-      'select[aria-label="聊天代理"]',
-    ) as HTMLSelectElement | null;
 
     expect(activeButtons.some((button) => button.textContent?.trim() === '编程')).toBe(true);
     expect(activeButtons.some((button) => button.textContent?.trim() === 'YOLO')).toBe(true);
-    expect(toolSurfaceSelect?.value).toBe('claude_code_default');
-    expect(agentSelect?.value).toBe('sisyphus-junior');
   });
 
   it('hydrates shared message payloads returned by the session API', async () => {
@@ -4027,7 +4228,7 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('再补第二部分。');
   });
 
-  it('groups consecutive assistant cards even when they are status or compaction payloads', async () => {
+  it('hides status and compaction payloads from the main transcript', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
       messages: [
         {
@@ -4066,20 +4267,11 @@ describe('ChatPage', () => {
     }));
 
     const rendered = await renderChatPage('/chat/session-1');
-    const assistantAvatarFrames = Array.from(
-      rendered.querySelectorAll('.chat-message-avatar-frame[data-role="assistant"]'),
-    );
-    const visibleAssistantAvatars = assistantAvatarFrames.filter(
-      (element) => element.getAttribute('data-grouped') === 'false',
-    );
-
-    expect(assistantAvatarFrames).toHaveLength(2);
-    expect(visibleAssistantAvatars).toHaveLength(1);
-    expect(rendered.textContent).toContain('子代理执行中');
-    expect(rendered.textContent).toContain('上下文压缩完成');
+    expect(rendered.textContent).not.toContain('子代理执行中');
+    expect(rendered.textContent).not.toContain('上下文压缩完成');
   });
 
-  it('mirrors permission, task and child-session events into the assistant chat group while keeping compaction out of the transcript', async () => {
+  it('keeps operational run events out of the main transcript', async () => {
     let pendingCallbacks: Record<string, unknown> | null = null;
     streamMock.mockImplementationOnce(
       (_sessionId: string, _message: string, callbacks: Record<string, unknown>) => {
@@ -4154,17 +4346,9 @@ describe('ChatPage', () => {
 
     await flushEffects();
 
-    expect(rendered.textContent).toContain('等待权限 · bash');
-    expect(rendered.textContent).toContain('任务进行中 · 调用子代理整理上下文');
-    expect(rendered.textContent).toContain('已创建子会话');
-    expect(rendered.textContent).toContain('MCP 文档检索');
-    expect(rendered.textContent).toContain('PERMIT');
-    expect(rendered.textContent).toContain('AGENT');
-    expect(rendered.textContent).toContain('MCP');
-    expect(rendered.textContent).toContain('暂停');
-    expect(rendered.textContent).toContain('运行中');
-    expect(rendered.textContent).toContain('成功');
-    expect(rendered.textContent).toContain('全部调用已进入聊天列表');
+    expect(rendered.textContent).not.toContain('等待权限 · bash');
+    expect(rendered.textContent).not.toContain('任务进行中 · 调用子代理整理上下文');
+    expect(rendered.textContent).not.toContain('已创建子会话');
     expect(rendered.textContent).not.toContain('会话已压缩');
     expect(rendered.textContent).not.toContain('已保留工具调用与 MCP 结果摘要');
   });
@@ -5428,6 +5612,249 @@ describe('ChatPage', () => {
     );
   });
 
+  it('reuses a single permission lifecycle message in attach recovery mode', async () => {
+    const { rendered, emitPermissionReply } = await renderAttachPermissionLifecycleScenario({
+      previewAction: '执行命令: pwd',
+      requestId: 'perm-single',
+      userContent: '测试单条权限消息',
+    });
+
+    await emitPermissionReply('session');
+
+    const { assistantText, permissionRows } = readPermissionLifecycleRows(rendered);
+
+    expect(assistantText).not.toContain('权限已响应');
+    expect(assistantText).not.toContain('本会话允许');
+    expect(assistantText).not.toContain('等待权限 · bash');
+    expect(permissionRows).toHaveLength(0);
+  });
+
+  it('reuses the same permission lifecycle message when the request is rejected', async () => {
+    const { rendered, emitPermissionReply } = await renderAttachPermissionLifecycleScenario({
+      previewAction: '执行命令: rm -rf tmp',
+      requestId: 'perm-reject',
+      userContent: '测试拒绝权限消息',
+    });
+
+    await emitPermissionReply('reject');
+
+    const { assistantText, permissionRows } = readPermissionLifecycleRows(rendered);
+
+    expect(assistantText).not.toContain('权限已响应');
+    expect(assistantText).not.toContain('已拒绝');
+    expect(assistantText).not.toContain('等待权限 · bash');
+    expect(permissionRows).toHaveLength(0);
+  });
+
+  it('allows approving a pending permission directly from the inline tool card actions', async () => {
+    listPendingPermissionsMock.mockImplementation(async () => [
+      {
+        requestId: 'perm-inline',
+        sessionId: 'session-1',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        reason: '需要执行工作区命令',
+        riskLevel: 'high',
+        previewAction: '执行命令: pwd',
+        status: 'pending',
+        createdAt: '2026-04-16T12:00:00.000Z',
+      },
+    ]);
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'assistant-inline-permission',
+          role: 'assistant',
+          createdAt: 1,
+          status: 'completed',
+          content: createAssistantTraceContent({
+            text: '',
+            toolCalls: [
+              {
+                toolCallId: 'call-inline-permission',
+                toolName: 'bash',
+                input: { command: 'pwd' },
+                output: 'waiting for approval',
+                isError: false,
+                pendingPermissionRequestId: 'perm-inline',
+                status: 'paused',
+              },
+            ],
+          }),
+        },
+      ],
+    }));
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await waitForChatText('本会话允许');
+
+    const approveButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '本会话允许',
+    ) as HTMLButtonElement | undefined;
+
+    expect(approveButton).toBeDefined();
+
+    act(() => {
+      approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    expect(replyPermissionMock).toHaveBeenCalledWith('token-123', 'session-1', {
+      requestId: 'perm-inline',
+      decision: 'session',
+    });
+    expect(rendered.textContent).not.toContain('本会话允许');
+  });
+
+  it('removes stale waiting-permission UI when a later tool result is already an error', async () => {
+    let attachCallbacks: MockAttachStreamCallbacks | undefined;
+    const waitingPermissionContent =
+      createAssistantEventContent({
+        type: 'permission_asked',
+        requestId: 'perm-stale-ui',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        riskLevel: 'high',
+        reason: '需要执行工作区命令',
+        previewAction: '执行命令: pwd && echo HOME=$HOME',
+        occurredAt: 10,
+      }) ?? '';
+
+    getSessionMock.mockImplementation(async () => ({
+      messages: [
+        {
+          id: 'user-stale-ui',
+          role: 'user',
+          content: '运行一个 bash 命令',
+          createdAt: 1,
+          status: 'completed',
+        },
+        {
+          id: 'assistant-stale-ui-waiting',
+          role: 'assistant',
+          content: waitingPermissionContent,
+          createdAt: 2,
+          status: 'completed',
+        },
+        {
+          id: 'assistant-stale-ui-trace',
+          role: 'assistant',
+          content: createAssistantTraceContent({
+            text: '',
+            toolCalls: [
+              {
+                toolCallId: 'call-stale-ui',
+                toolName: 'bash',
+                input: { command: 'pwd && echo HOME=$HOME', timeout: 120000 },
+                output: 'waiting for approval',
+                isError: false,
+                pendingPermissionRequestId: 'perm-stale-ui',
+                status: 'paused',
+              },
+            ],
+          }),
+          createdAt: 3,
+          status: 'completed',
+        },
+      ],
+      state_status: 'running',
+    }));
+    attachToActiveStreamMock.mockImplementationOnce(
+      async (_sid: string, callbacks: MockAttachStreamCallbacks) => {
+        attachCallbacks = callbacks;
+        return true;
+      },
+    );
+
+    const rendered = await renderChatPage('/chat/session-1');
+    await flushEffects();
+
+    await act(async () => {
+      attachCallbacks?.onEvent?.({
+        type: 'tool_result',
+        toolCallId: 'call-stale-ui',
+        toolName: 'bash',
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        pendingPermissionRequestId: 'perm-stale-ui',
+        occurredAt: 20,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await flushEffects();
+
+    const renderedText = rendered.textContent ?? '';
+    expect(renderedText).not.toContain('等待权限 · bash');
+    expect(renderedText).not.toContain('执行命令: pwd && echo HOME=$HOME');
+  });
+
+  it('renders a duplicated pending permission only once in the history list', async () => {
+    listPendingPermissionsMock.mockImplementation(async () => [
+      {
+        requestId: 'perm-dup',
+        sessionId: 'session-1',
+        toolName: 'bash',
+        reason: '重复权限原因',
+        scope: 'workspace-write',
+        riskLevel: 'medium',
+        previewAction: '重复预览操作',
+        status: 'pending',
+        createdAt: '2026-04-16T10:00:00.000Z',
+      },
+      {
+        requestId: 'perm-dup',
+        sessionId: 'session-1',
+        toolName: 'bash',
+        reason: '重复权限原因',
+        scope: 'workspace-write',
+        riskLevel: 'medium',
+        previewAction: '重复预览操作',
+        status: 'pending',
+        createdAt: '2026-04-16T10:00:01.000Z',
+      },
+    ]);
+    getSessionMock.mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'assistant-permission-list',
+          role: 'assistant',
+          content: '等待权限中',
+          createdAt: 1,
+        },
+      ],
+      state_status: 'paused',
+    });
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const openPanelButton = rendered.querySelector('button[title="展开面板"]');
+
+    act(() => {
+      openPanelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    const historyTab = rendered.querySelector(
+      '#chat-right-tab-history',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      historyTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+
+    const renderedText = rendered.textContent ?? '';
+    expect(renderedText).toContain('待处理审批');
+    expect(renderedText.match(/重复权限原因/g)?.length ?? 0).toBe(1);
+    expect(renderedText.match(/重复预览操作/g)?.length ?? 0).toBe(1);
+  });
+
   it('copies a user message with the quick copy action', async () => {
     getSessionMock.mockImplementationOnce(async () => ({
       messages: [
@@ -6005,9 +6432,6 @@ describe('ChatPage', () => {
     );
 
     const rendered = await renderChatPage('/chat/session-1');
-    const toolSurfaceSelect = rendered.querySelector(
-      'select[aria-label="工具配置档"]',
-    ) as HTMLSelectElement | null;
     const saveProfileButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('保存为项目配置'),
     );
@@ -6015,14 +6439,6 @@ describe('ChatPage', () => {
     expect(saveProfileButton).toBeTruthy();
 
     act(() => {
-      if (toolSurfaceSelect) {
-        const valueSetter = Object.getOwnPropertyDescriptor(
-          HTMLSelectElement.prototype,
-          'value',
-        )?.set;
-        valueSetter?.call(toolSurfaceSelect, 'claude_code_simple');
-        toolSurfaceSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      }
       saveProfileButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
@@ -6032,7 +6448,6 @@ describe('ChatPage', () => {
       'token-123',
       expect.objectContaining({
         workspacePath: '/repo/alpha',
-        toolSurfaceProfile: 'claude_code_simple',
       }),
     );
   });
@@ -6074,6 +6489,68 @@ describe('ChatPage', () => {
     expect(rendered.textContent).toContain('待处理审批');
     expect(rendered.textContent).toContain('需要运行命令');
     expect(rendered.textContent).toContain('workspace · medium · pnpm test');
+  });
+
+  it('allows approving a pending permission directly from the right panel list', async () => {
+    listPendingPermissionsMock.mockImplementation(async () => [
+      {
+        requestId: 'perm-right-panel',
+        sessionId: 'session-1',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        reason: '需要运行工作区命令',
+        riskLevel: 'high',
+        previewAction: '执行命令: pwd',
+        status: 'pending',
+        createdAt: '2026-04-16T13:00:00.000Z',
+      },
+    ]);
+    replyPermissionMock.mockImplementationOnce(async () => {
+      listPendingPermissionsMock.mockImplementation(async () => []);
+    });
+
+    const rendered = await renderChatPage('/chat/session-1');
+    const openPanelButton = rendered.querySelector('button[title="展开面板"]');
+
+    act(() => {
+      openPanelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const historyButton = rendered.querySelector(
+      '#chat-right-tab-history',
+    ) as HTMLButtonElement | null;
+
+    act(() => {
+      historyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await flushEffects();
+    await flushEffects();
+
+    const approveButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '本会话允许',
+    ) as HTMLButtonElement | undefined;
+
+    expect(approveButton).toBeDefined();
+
+    await act(async () => {
+      approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await flushEffects();
+    await flushEffects();
+
+    expect(replyPermissionMock).toHaveBeenCalledWith('token-123', 'session-1', {
+      requestId: 'perm-right-panel',
+      decision: 'session',
+    });
+    const remainingApproveButton = Array.from(rendered.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '本会话允许',
+    );
+    expect(remainingApproveButton).toBeUndefined();
   });
 
   it('only loads runtime endpoints once for idle sessions', async () => {
@@ -6925,7 +7402,7 @@ describe('ChatPage', () => {
     expect(assistantRows[0]?.textContent).toContain('检查完成');
   });
 
-  it('persists dialogueMode, yoloMode, toolSurfaceProfile, and manual agent changes to the current session metadata', async () => {
+  it('persists dialogueMode, yoloMode, and manual agent changes to the current session metadata', async () => {
     getSessionMock.mockImplementationOnce(async () => ({ messages: [] }));
     listCapabilitiesMock.mockImplementationOnce(
       async () =>
@@ -6956,41 +7433,19 @@ describe('ChatPage', () => {
     const yoloButton = Array.from(rendered.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'YOLO',
     );
-    const toolSurfaceSelect = rendered.querySelector(
-      'select[aria-label="工具配置档"]',
-    ) as HTMLSelectElement | null;
-    const agentSelect = rendered.querySelector(
-      'select[aria-label="聊天代理"]',
-    ) as HTMLSelectElement | null;
-    expect(toolSurfaceSelect).toBeTruthy();
-    expect(agentSelect).toBeTruthy();
-
-    await flushEffects();
-    expect(
-      Array.from(agentSelect?.querySelectorAll('option') ?? []).some(
-        (option) => option.getAttribute('value') === 'sisyphus-junior',
-      ),
-    ).toBe(true);
+    const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement | null;
 
     act(() => {
       codingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       yoloButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      if (toolSurfaceSelect) {
-        const valueSetter = Object.getOwnPropertyDescriptor(
-          HTMLSelectElement.prototype,
-          'value',
-        )?.set;
-        valueSetter?.call(toolSurfaceSelect, 'claude_code_simple');
-        toolSurfaceSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      if (agentSelect) {
-        const agentValueSetter = Object.getOwnPropertyDescriptor(
-          HTMLSelectElement.prototype,
-          'value',
-        )?.set;
-        agentValueSetter?.call(agentSelect, 'sisyphus-junior');
-        agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+    });
+
+    // Tab twice to cycle from hephaestus -> sisyphus-junior
+    act(() => {
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    act(() => {
+      textarea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     });
 
     await act(async () => {
@@ -7005,7 +7460,6 @@ describe('ChatPage', () => {
         agentId: 'sisyphus-junior',
         dialogueMode: 'coding',
         yoloMode: true,
-        toolSurfaceProfile: 'claude_code_simple',
       }),
     );
   });

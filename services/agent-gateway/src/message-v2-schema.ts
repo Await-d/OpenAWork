@@ -8,17 +8,19 @@
  * - Event sourcing via SyncEvent + Projector for all state mutations
  */
 
+import { makeOrderedMessageId, makeOrderedPartId } from './ordered-id.js';
+
 // ─── IDs ───
 
 export type MessageID = string & { __brand: 'MessageID' };
 export type PartID = string & { __brand: 'PartID' };
 
 export function makeMessageId(): MessageID {
-  return crypto.randomUUID() as MessageID;
+  return makeOrderedMessageId() as MessageID;
 }
 
 export function makePartId(): PartID {
-  return crypto.randomUUID() as PartID;
+  return makeOrderedPartId() as PartID;
 }
 
 // ─── Tool State Machine ───
@@ -201,6 +203,8 @@ export type MessagePart =
 interface MessageBase {
   id: MessageID;
   sessionID: string;
+  clientRequestId?: string;
+  status?: 'final' | 'error' | 'streaming';
 }
 
 export interface UserMessage extends MessageBase {

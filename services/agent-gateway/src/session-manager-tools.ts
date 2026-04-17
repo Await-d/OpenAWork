@@ -2,7 +2,8 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import type { Message, MessageContent } from '@openAwork/shared';
 import { z } from 'zod';
 import { sqliteAll, sqliteGet } from './db.js';
-import { extractMessageText, listSessionMessages } from './session-message-store.js';
+import { extractMessageText } from './session-message-store.js';
+import { listSessionMessagesV2 } from './message-v2-adapter.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { listSessionTodoLanes } from './todo-tools.js';
 import { listSessionFileDiffs } from './session-file-diff-store.js';
@@ -229,7 +230,7 @@ export async function runSessionListTool(
 
   const rows = await Promise.all(
     limited.map(async (session) => {
-      const messageCount = listSessionMessages({ sessionId: session.id, userId }).length;
+      const messageCount = listSessionMessagesV2({ sessionId: session.id, userId }).length;
       const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
       return `| ${session.id} | ${messageCount} | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${runtime.status ?? session.state_status} | ${truncateText(session.title ?? '')} |`;
     }),
@@ -251,7 +252,7 @@ export function runSessionReadTool(
     return `Session not found: ${input.session_id}`;
   }
 
-  const allMessages = listSessionMessages({ sessionId: session.id, userId });
+  const allMessages = listSessionMessagesV2({ sessionId: session.id, userId });
   const messages = input.limit ? allMessages.slice(0, input.limit) : allMessages;
   const lines = [
     `Session: ${session.id}`,
@@ -333,7 +334,7 @@ export function runSessionSearchTool(
     if (!session) {
       continue;
     }
-    const messages = listSessionMessages({ sessionId: session.id, userId });
+    const messages = listSessionMessagesV2({ sessionId: session.id, userId });
     for (const message of messages) {
       const text = extractMessageText(message);
       const haystack = input.case_sensitive ? text : text.toLowerCase();
@@ -368,7 +369,7 @@ export async function runSessionInfoTool(
     return `Session not found: ${input.session_id}`;
   }
 
-  const messages = listSessionMessages({ sessionId: session.id, userId });
+  const messages = listSessionMessagesV2({ sessionId: session.id, userId });
   const lanes = listSessionTodoLanes(session.id);
   const metadata = parseSessionMetadataJson(session.metadata_json);
   const fileDiffs = listSessionFileDiffs({ sessionId: session.id, userId });

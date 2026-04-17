@@ -66,7 +66,7 @@ async function main(): Promise<void> {
             sqliteRun(
               `INSERT INTO sessions (id, user_id, messages_json, metadata_json, state_status)
                VALUES (?, ?, '[]', ?, 'idle')`,
-              [sessionId, userId, JSON.stringify({ toolSurfaceProfile: 'claude_code_default' })],
+              [sessionId, userId, JSON.stringify({})],
             );
 
             const sandbox = createDefaultSandbox();
@@ -156,8 +156,8 @@ async function verifyAskUserQuestion(input: {
     'AskUserQuestion pending payload should preserve canonicalToolName',
   );
   assert(
-    payload.observability?.['toolSurfaceProfile'] === 'claude_code_default',
-    'AskUserQuestion pending payload should preserve toolSurfaceProfile',
+    payload.observability?.['canonicalToolName'] !== undefined,
+    'AskUserQuestion pending payload should preserve canonicalToolName',
   );
 }
 

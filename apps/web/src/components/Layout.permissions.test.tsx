@@ -6,8 +6,35 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Layout from './Layout.js';
 import { useAuthStore } from '../stores/auth.js';
+import * as sessionEvents from '../utils/session-list-events.js';
 
 const replyMock = vi.fn(async () => undefined);
+function createPendingPermission(
+  overrides: Partial<{
+    createdAt: string;
+    previewAction: string;
+    reason: string;
+    requestId: string;
+    riskLevel: 'medium';
+    scope: string;
+    sessionId: string;
+    status: 'pending';
+    toolName: string;
+  }> = {},
+) {
+  return {
+    requestId: 'perm-1',
+    sessionId: 'session-1',
+    toolName: 'file_write',
+    scope: '/tmp/demo.txt',
+    reason: '需要写入测试文件',
+    riskLevel: 'medium' as const,
+    previewAction: 'write demo',
+    status: 'pending' as const,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
 const listPendingMock = vi.fn<
   (
     _token?: string,
@@ -26,19 +53,7 @@ const listPendingMock = vi.fn<
       createdAt: string;
     }>
   >
->(async () => [
-  {
-    requestId: 'perm-1',
-    sessionId: 'session-1',
-    toolName: 'file_write',
-    scope: '/tmp/demo.txt',
-    reason: '需要写入测试文件',
-    riskLevel: 'medium',
-    previewAction: 'write demo',
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  },
-]);
+>(async () => [createPendingPermission()]);
 const getRecoveryMock = vi.fn(
   async (token: string, sessionId: string, options?: { signal?: AbortSignal }) => ({
     activeStream: null,
@@ -51,6 +66,7 @@ const getRecoveryMock = vi.fn(
     todoLanes: { main: [], temp: [] },
   }),
 );
+const requestCurrentSessionRefreshSpy = vi.spyOn(sessionEvents, 'requestCurrentSessionRefresh');
 
 vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: vi.fn(() => ({
@@ -95,8 +111,10 @@ beforeEach(() => {
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
   listPendingMock.mockClear();
+  listPendingMock.mockImplementation(async () => [createPendingPermission()]);
   getRecoveryMock.mockClear();
   replyMock.mockClear();
+  requestCurrentSessionRefreshSpy.mockClear();
   useAuthStore.setState({
     accessToken: 'token-123',
     refreshToken: null,
@@ -201,6 +219,96 @@ describe('Layout permission prompt integration', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+  });
+
+  it('refreshes the current session immediately and with a delayed follow-up after approving', async () => {
+    vi.useFakeTimers();
+    try {
+      const rendered = await renderLayout();
+      listPendingMock.mockResolvedValue([]);
+      const approveButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('本次会话同意'),
+      );
+
+      act(() => {
+        approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(requestCurrentSessionRefreshSpy).toHaveBeenCalledWith('session-1');
+      expect(
+        getRecoveryMock.mock.calls.filter((call) => call[1] === 'session-1').length,
+      ).toBeGreaterThanOrEqual(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const currentSessionRefreshCalls = requestCurrentSessionRefreshSpy.mock.calls.filter(
+        (call) => call[0] === 'session-1',
+      );
+      expect(currentSessionRefreshCalls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes both current and target sessions after approving a child-session permission', async () => {
+    vi.useFakeTimers();
+    try {
+      listPendingMock.mockImplementationOnce(async () => [
+        createPendingPermission({
+          requestId: 'perm-child-1',
+          sessionId: 'child-session-1',
+          toolName: 'bash',
+          reason: '需要写入子会话工作区',
+        }),
+      ]);
+
+      const rendered = await renderLayout();
+      listPendingMock.mockResolvedValue([]);
+      const approveButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('本次会话同意'),
+      );
+
+      act(() => {
+        approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(replyMock).toHaveBeenCalledWith('token-123', 'child-session-1', {
+        requestId: 'perm-child-1',
+        decision: 'session',
+      });
+      expect(requestCurrentSessionRefreshSpy).toHaveBeenCalledWith('session-1');
+      expect(requestCurrentSessionRefreshSpy).toHaveBeenCalledWith('child-session-1');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+        await Promise.resolve();
+      });
+
+      const currentSessionRefreshCalls = requestCurrentSessionRefreshSpy.mock.calls.filter(
+        (call) => call[0] === 'session-1',
+      );
+      const childSessionRefreshCalls = requestCurrentSessionRefreshSpy.mock.calls.filter(
+        (call) => call[0] === 'child-session-1',
+      );
+      expect(currentSessionRefreshCalls.length).toBeGreaterThanOrEqual(2);
+      expect(childSessionRefreshCalls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the prompt visible and shows an inline error when reply fails', async () => {

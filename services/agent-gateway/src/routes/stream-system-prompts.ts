@@ -224,29 +224,30 @@ export function buildRequestScopedSystemPrompts(
   ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 }
 
-const MEMORY_BLOCK_PLACEHOLDER = `<user-memory />
-当前会话无持久化记忆。`;
+// ---------------------------------------------------------------------------
+// Prompt cache optimization: 2-part system prompt
+//
+// Part 1 (stable prefix) — rarely changes within a session, high cache hit rate:
+//   workspaceCtx + routeSystemPrompt + lspGuidance + dialogueMode + yoloMode
+//   + toolOutputReference + thinkingLanguage
+//
+// Part 2 (dynamic suffix) — changes per round:
+//   memoryBlock
+//
+// Compaction summary is injected into the conversation flow as user+assistant
+// message pair (opencode pattern), not as a system message.
+//
+// Per-request dynamic content (injectedPrompt, capabilityContext, companionPrompt)
+// is injected into the last user message as a synthetic part via
+// injectSyntheticRequestContext(), similar to oh-my-opencode's
+// experimental.chat.messages.transform hook pattern.
+// ---------------------------------------------------------------------------
 
-const COMPACTION_PLACEHOLDER = `[COMPACT BOUNDARY]
-Earlier conversation history has not been compacted.`;
-
-function buildCompactionSystemContent(summary: string | null | undefined): string {
-  if (summary && summary.trim().length > 0) {
-    return [
-      '[COMPACT BOUNDARY]',
-      'Earlier conversation history has been compacted by an LLM summary.',
-      'Use this summary as the authoritative context before the remaining verbatim messages.',
-      summary,
-    ].join('\n\n');
-  }
-  return COMPACTION_PLACEHOLDER;
-}
+const MEMORY_BLOCK_PLACEHOLDER = `<user-memory />\n当前会话无持久化记忆。`;
 
 const WORKSPACE_CTX_PLACEHOLDER = '<workspace />';
 
 const ROUTE_SYSTEM_PROMPT_PLACEHOLDER = '<route-system-prompt />';
-
-const CAPABILITY_CONTEXT_PLACEHOLDER = '<capability-context />\n当前会话无可用能力目录。';
 
 const LSP_GUIDANCE_PLACEHOLDER = '<lsp-guidance />\nLSP 工具使用策略未启用。';
 
@@ -254,36 +255,97 @@ const DIALOGUE_MODE_PLACEHOLDER = '<dialogue-mode />\n当前未指定对话模�
 
 const YOLO_MODE_PLACEHOLDER = '<yolo-mode />\n当前未启用 YOLO 执行偏好。';
 
-const INJECTED_PROMPT_PLACEHOLDER = '<injected-prompt />\n当前消息无关键词触发的额外提示。';
+const THINKING_LANGUAGE_PLACEHOLDER = '<thinking-language />\n当前未启用思考模式。';
 
-const COMPANION_PROMPT_PLACEHOLDER = '<companion-prompt />\n当前无 companion 上下文。';
-
-export function buildRoundSystemMessages(input: {
-  workspaceCtx: string | null;
-  routeSystemPrompt?: string;
+export interface SyntheticRequestContext {
   injectedPrompt?: string | null;
   capabilityContext?: string | null;
+  companionPrompt?: string | null;
+}
+
+/**
+ * Build per-request synthetic content block to inject into the last user message.
+ * Modeled after oh-my-opencode's experimental.chat.messages.transform hook
+ * which inserts synthetic parts into user messages for dynamic per-turn context.
+ */
+function buildSyntheticRequestContextBlock(input: SyntheticRequestContext): string | null {
+  const parts: string[] = [];
+  if (input.injectedPrompt && input.injectedPrompt.trim().length > 0) {
+    parts.push(input.injectedPrompt);
+  }
+  if (input.capabilityContext && input.capabilityContext.trim().length > 0) {
+    parts.push(input.capabilityContext);
+  }
+  if (input.companionPrompt && input.companionPrompt.trim().length > 0) {
+    parts.push(input.companionPrompt);
+  }
+  return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
+}
+
+export interface RoundSystemMessagesInput {
+  workspaceCtx: string | null;
+  routeSystemPrompt?: string;
   lspGuidance?: string | null;
   dialogueModePrompt?: string | null;
   yoloModePrompt?: string | null;
-  companionPrompt?: string | null;
   memoryBlock?: string | null;
-  compactionSummary?: string | null;
-}) {
-  return [
-    { role: 'system' as const, content: input.workspaceCtx ?? WORKSPACE_CTX_PLACEHOLDER },
-    {
-      role: 'system' as const,
-      content: input.routeSystemPrompt ?? ROUTE_SYSTEM_PROMPT_PLACEHOLDER,
-    },
-    { role: 'system' as const, content: input.injectedPrompt ?? INJECTED_PROMPT_PLACEHOLDER },
-    { role: 'system' as const, content: input.capabilityContext ?? CAPABILITY_CONTEXT_PLACEHOLDER },
-    { role: 'system' as const, content: input.lspGuidance ?? LSP_GUIDANCE_PLACEHOLDER },
-    { role: 'system' as const, content: input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER },
-    { role: 'system' as const, content: input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER },
-    { role: 'system' as const, content: input.companionPrompt ?? COMPANION_PROMPT_PLACEHOLDER },
-    { role: 'system' as const, content: input.memoryBlock ?? MEMORY_BLOCK_PLACEHOLDER },
-    { role: 'system' as const, content: buildCompactionSystemContent(input.compactionSummary) },
-    { role: 'system' as const, content: TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT },
+  thinkingLanguagePrompt?: string | null;
+}
+
+/**
+ * Build 2-part system messages optimized for prompt caching.
+ *
+ * Part 1 (stable prefix): content that rarely changes within a session.
+ * Part 2 (dynamic suffix): content that changes per round (memory block).
+ *
+ * Compaction summary is now injected into the conversation flow as
+ * user+assistant message pair (opencode pattern), not as a system message.
+ * Per-request dynamic content (injectedPrompt, capabilityContext, companionPrompt)
+ * is injected via injectSyntheticRequestContext() instead.
+ */
+export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
+  // Part 1: Stable prefix — high cache hit rate
+  const stableParts = [
+    input.workspaceCtx ?? WORKSPACE_CTX_PLACEHOLDER,
+    input.routeSystemPrompt ?? ROUTE_SYSTEM_PROMPT_PLACEHOLDER,
+    input.lspGuidance ?? LSP_GUIDANCE_PLACEHOLDER,
+    input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
+    input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
+    TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
   ];
+
+  // Part 2: Dynamic suffix — changes per round
+  const dynamicContent = input.memoryBlock ?? MEMORY_BLOCK_PLACEHOLDER;
+
+  return [
+    { role: 'system' as const, content: stableParts.join('\n\n') },
+    { role: 'system' as const, content: dynamicContent },
+  ];
+}
+
+/**
+ * Inject per-request dynamic context into the last user message in the conversation.
+ * This follows the oh-my-opencode pattern of using synthetic parts in user messages
+ * for content that changes every turn, keeping the system prompt stable for caching.
+ *
+ * Content is wrapped in <system-reminder> tags to distinguish it from user input,
+ * similar to Claude Code's prependUserContext pattern.
+ */
+export function injectSyntheticRequestContext<T extends { role: string; content: string | null }>(
+  messages: T[],
+  context: SyntheticRequestContext,
+): T[] {
+  const block = buildSyntheticRequestContextBlock(context);
+  if (!block) return messages;
+
+  const result = messages.map((msg) => ({ ...msg }));
+  for (let i = result.length - 1; i >= 0; i--) {
+    const msg = result[i]!;
+    if (msg.role === 'user' && msg.content && !('tool_call_id' in msg)) {
+      msg.content = `<system-reminder>\n${block}\n</system-reminder>\n\n${msg.content}`;
+      break;
+    }
+  }
+  return result;
 }

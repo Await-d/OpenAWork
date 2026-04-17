@@ -4,8 +4,10 @@ import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import type { TaskToolRuntimeSnapshot } from '../../pages/chat-page/task-tool-runtime.js';
 
 interface TaskToolInlineProps {
+  approvalActions?: ToolCallCardProps['approvalActions'];
   kind?: ToolCallCardProps['kind'];
   onOpenChildSession?: (sessionId: string) => void;
+  pendingPermissionRequestId?: string;
   runtimeSnapshot?: TaskToolRuntimeSnapshot;
   selectedChildSessionId?: string | null;
   toolCallId?: string;

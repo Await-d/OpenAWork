@@ -1,8 +1,5 @@
 import type { StreamChunk, StreamDoneChunk } from '@openAwork/shared';
-import {
-  buildGatewayToolDefinitions as buildDefaultGatewayToolDefinitions,
-  buildGatewayToolDefinitionsForProfile,
-} from '../tool-definitions.js';
+import { buildGatewayToolDefinitions as buildDefaultGatewayToolDefinitions } from '../tool-definitions.js';
 import type { UpstreamProtocol } from './upstream-protocol.js';
 
 type StopReason = StreamDoneChunk['stopReason'];
@@ -119,11 +116,7 @@ export function createStreamParseState(runId = 'run-local'): StreamParseState {
   };
 }
 
-export function buildGatewayToolDefinitions(profile?: string) {
-  if (profile) {
-    return buildGatewayToolDefinitionsForProfile(profile);
-  }
-
+export function buildGatewayToolDefinitions() {
   return buildDefaultGatewayToolDefinitions();
 }
 

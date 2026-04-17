@@ -13,7 +13,8 @@ import {
   listSharedSessionPresence,
   touchSharedSessionPresence,
 } from '../session-shared-presence-store.js';
-import { filterVisibleSessionMessages, listSessionMessages } from '../session-message-store.js';
+import { filterVisibleSessionMessages } from '../session-message-store.js';
+import { listSessionMessagesV2, listRuntimeSafeSessionMessagesV2 } from '../message-v2-adapter.js';
 import {
   getSharedSessionForRecipient,
   listSharedSessionsForRecipient,
@@ -45,7 +46,6 @@ import {
 import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
 import { logTeamAudit } from '../team-audit-store.js';
 import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
-import { listRuntimeSafeSessionMessagesV2 } from '../message-v2-adapter.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
 
@@ -198,11 +198,6 @@ function parseApprovedPermissionResumePayload(
                 typeof observabilityCandidate['canonicalToolName'] === 'string'
                   ? observabilityCandidate['canonicalToolName']
                   : 'unknown',
-              toolSurfaceProfile:
-                observabilityCandidate['toolSurfaceProfile'] === 'claude_code_simple' ||
-                observabilityCandidate['toolSurfaceProfile'] === 'claude_code_default'
-                  ? observabilityCandidate['toolSurfaceProfile']
-                  : 'openawork',
               adapterVersion:
                 typeof observabilityCandidate['adapterVersion'] === 'string'
                   ? observabilityCandidate['adapterVersion']
@@ -271,15 +266,6 @@ function parseQuestionResumePayload(
                       'canonicalToolName'
                     ] as string)
                   : 'unknown',
-              toolSurfaceProfile:
-                (parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] ===
-                  'claude_code_simple' ||
-                (parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] ===
-                  'claude_code_default'
-                  ? ((parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] as
-                      | 'claude_code_default'
-                      | 'claude_code_simple')
-                  : 'openawork',
               adapterVersion:
                 typeof (parsed['observability'] as Record<string, unknown>)['adapterVersion'] ===
                 'string'
@@ -440,10 +426,9 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         sharedAccess.ownerUserId,
       );
       const sessionMessages = mergeRuntimeSafeSessionMessages({
-        legacyMessages: listSessionMessages({
+        legacyMessages: listSessionMessagesV2({
           sessionId,
           userId: sharedAccess.ownerUserId,
-          legacyMessagesJson: sharedAccess.messagesJson,
         }),
         runtimeMessages: listRuntimeSafeSessionMessagesV2({
           sessionId,

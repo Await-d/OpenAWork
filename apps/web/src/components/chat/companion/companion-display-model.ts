@@ -43,7 +43,7 @@ export interface CompanionReaction {
 export interface CompanionUtteranceSeed {
   badge: string;
   text: string;
-  tone: 'intro' | CompanionReaction['importance'];
+  tone: 'intro' | CompanionReaction['importance'] | 'chat';
 }
 
 export interface CompanionOutputPolicy {
@@ -92,6 +92,42 @@ const IDLE_REACTIONS = [
   '今天我负责看节奏，你继续把注意力放在主对话。',
   '如果你开始引用文件或排队消息，我会先一步提醒。',
   '我会贴着工作台边缘待命，不抢镜。',
+];
+
+const HUBBY_NAMES = ['暖石', '锚点', '壁炉', '护城', '基石', '织网', '归港', '承托'];
+const HUBBY_ARCHETYPES = [
+  '团队守护者',
+  '任务锚定员',
+  '协作稳定器',
+  '运行链护航员',
+  '工作台守夜人',
+  '团队粘合剂',
+];
+const HUBBY_NOTES = [
+  '关注团队整体节奏，确保没有任务掉队。',
+  '更偏向任务流和协作链的守护，而非单点提醒。',
+  '在团队运行中提供稳定感，像锚一样托住节奏。',
+  '擅长感知阻塞和卡点，比 Buddy 更主动地提醒风险。',
+];
+const HUBBY_TRAIT_SETS = [
+  ['看任务', '看阻塞', '守护节奏'],
+  ['看协作链', '看角色分工', '稳定输出'],
+  ['看运行态', '看审批流', '主动提醒'],
+  ['看团队健康', '看任务完成率', '风险预警'],
+];
+const HUBBY_PALETTES = [
+  {
+    accentColor: 'color-mix(in oklch, var(--warning) 82%, white 18%)',
+    accentTint: 'color-mix(in oklch, var(--warning) 14%, transparent)',
+  },
+  {
+    accentColor: 'color-mix(in oklch, var(--danger) 72%, white 28%)',
+    accentTint: 'color-mix(in oklch, var(--danger) 12%, transparent)',
+  },
+  {
+    accentColor: 'color-mix(in oklch, var(--accent) 72%, var(--warning) 28%)',
+    accentTint: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+  },
 ];
 
 function hashString(value: string): number {
@@ -145,6 +181,25 @@ export function createCompanionPreviewProfile(
     species: spriteDisplayLabel(sprite.species),
     sprite,
     traits: [...pickBySeed(COMPANION_TRAIT_SETS, seed, 3)],
+  };
+}
+
+export function createHubbyProfile(seedInput: string): CompanionProfile {
+  const normalizedSeed = `hubby:${seedInput.trim().toLowerCase() || 'default'}`;
+  const seed = hashString(normalizedSeed);
+  const palette = pickBySeed(HUBBY_PALETTES, seed, 1);
+  const sprite = createCompanionSpriteBones(normalizedSeed);
+  return {
+    accentColor: palette.accentColor,
+    accentTint: palette.accentTint,
+    archetype: pickBySeed(HUBBY_ARCHETYPES, seed, 2),
+    glyph: pickBySeed(COMPANION_GLYPHS, seed, 6),
+    name: pickBySeed(HUBBY_NAMES, seed),
+    note: pickBySeed(HUBBY_NOTES, seed, 3),
+    rarityStars: spriteRarityStars(sprite.rarity),
+    species: spriteDisplayLabel(sprite.species),
+    sprite,
+    traits: [...pickBySeed(HUBBY_TRAIT_SETS, seed, 2)],
   };
 }
 

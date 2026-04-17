@@ -1,6 +1,6 @@
 import React from 'react';
 import './chat-message.css';
-import { GenerativeUIRenderer, ToolCallCard } from '@openAwork/shared-ui';
+import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
 import { DIALOGUE_MODE_OPTIONS } from '../../pages/dialogue-mode.js';
@@ -12,6 +12,7 @@ import {
   UserAvatar,
 } from './chat-provider-display.js';
 import { TaskToolInline } from './task-tool-inline.js';
+import { ToolCallDisplay } from './tool-call-inline.js';
 import {
   resolveTaskToolRuntimeSnapshot,
   type TaskToolRuntimeLookup,
@@ -291,6 +292,22 @@ export function renderStreamingChatMessageContent(content: string) {
 export interface ChatToolRenderOptions {
   messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
+  resolveInlinePermissionActions?: (requestId: string) =>
+    | {
+        errorMessage?: string;
+        helperMessage?: string;
+        items: Array<{
+          danger?: boolean;
+          disabled?: boolean;
+          hint?: string;
+          id: string;
+          label: string;
+          onClick: () => void;
+          primary?: boolean;
+        }>;
+        pendingLabel?: string;
+      }
+    | undefined;
   selectedChildSessionId?: string | null;
   streaming?: boolean;
   taskRuntimeLookup?: TaskToolRuntimeLookup;
@@ -312,10 +329,26 @@ export function renderStreamingChatMessageContentWithOptions(
 }
 
 function renderToolCallContent(input: {
+  approvalActions?: {
+    errorMessage?: string;
+    helperMessage?: string;
+    items: Array<{
+      danger?: boolean;
+      disabled?: boolean;
+      hint?: string;
+      id: string;
+      label: string;
+      onClick: () => void;
+      primary?: boolean;
+    }>;
+    pendingLabel?: string;
+  };
+  durationMs?: number;
   isError?: boolean;
   kind?: 'agent' | 'mcp' | 'skill' | 'tool';
   onOpenChildSession?: (sessionId: string) => void;
   output?: unknown;
+  pendingPermissionRequestId?: string;
   reactKey?: React.Key;
   resumedAfterApproval?: boolean;
   selectedChildSessionId?: string | null;
@@ -342,7 +375,20 @@ function renderToolCallContent(input: {
     );
   }
 
-  return <ToolCallCard key={input.reactKey} {...input} input={input.toolInput} />;
+  return (
+    <ToolCallDisplay
+      key={input.reactKey}
+      input={input.toolInput}
+      isError={input.isError}
+      kind={input.kind}
+      output={input.output}
+      resumedAfterApproval={input.resumedAfterApproval}
+      status={input.status}
+      durationMs={input.durationMs}
+      toolCallId={input.toolCallId}
+      toolName={input.toolName}
+    />
+  );
 }
 
 function renderAssistantMessageContentValue(content: string, options?: ChatToolRenderOptions) {
@@ -355,6 +401,12 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
       output: copiedToolCard.output,
       isError: copiedToolCard.isError,
       onOpenChildSession: options?.onOpenChildSession,
+      pendingPermissionRequestId: copiedToolCard.pendingPermissionRequestId,
+      approvalActions:
+        copiedToolCard.pendingPermissionRequestId && options?.resolveInlinePermissionActions
+          ? options.resolveInlinePermissionActions(copiedToolCard.pendingPermissionRequestId)
+          : undefined,
+      durationMs: copiedToolCard.durationMs,
       resumedAfterApproval: copiedToolCard.resumedAfterApproval,
       selectedChildSessionId: options?.selectedChildSessionId,
       status: copiedToolCard.status,
@@ -363,6 +415,22 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
   }
 
   if (!looksLikeStructuredJsonContent(content)) {
+    const companionBlocks = extractCompanionBlocks(content);
+    if (companionBlocks) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {companionBlocks.mainContent && (
+            <AssistantRichContent
+              content={companionBlocks.mainContent}
+              streaming={options?.streaming}
+            />
+          )}
+          {companionBlocks.companionContent && (
+            <CompanionInlineBlock content={companionBlocks.companionContent} />
+          )}
+        </div>
+      );
+    }
     return <AssistantRichContent content={content} streaming={options?.streaming} />;
   }
 
@@ -372,6 +440,7 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
       <AssistantTraceContent
         messageId={options?.messageId}
         payload={assistantTrace}
+        resolveInlinePermissionActions={options?.resolveInlinePermissionActions}
         streaming={options?.streaming}
         onOpenChildSession={options?.onOpenChildSession}
         selectedChildSessionId={options?.selectedChildSessionId}
@@ -410,6 +479,19 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
             : {},
         output: payload['output'],
         isError: payload['isError'] === true,
+        pendingPermissionRequestId:
+          typeof payload['pendingPermissionRequestId'] === 'string'
+            ? payload['pendingPermissionRequestId']
+            : undefined,
+        approvalActions:
+          typeof payload['pendingPermissionRequestId'] === 'string' &&
+          options?.resolveInlinePermissionActions
+            ? options.resolveInlinePermissionActions(payload['pendingPermissionRequestId'])
+            : undefined,
+        durationMs:
+          typeof payload['durationMs'] === 'number' && Number.isFinite(payload['durationMs'])
+            ? payload['durationMs']
+            : undefined,
         resumedAfterApproval: payload['resumedAfterApproval'] === true,
         taskRuntimeLookup: options?.taskRuntimeLookup,
         status:
@@ -447,6 +529,7 @@ function AssistantTraceContent({
   messageId,
   onOpenChildSession,
   payload,
+  resolveInlinePermissionActions,
   selectedChildSessionId,
   streaming = false,
   taskRuntimeLookup,
@@ -454,6 +537,7 @@ function AssistantTraceContent({
   messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
   payload: AssistantTracePayload;
+  resolveInlinePermissionActions?: ChatToolRenderOptions['resolveInlinePermissionActions'];
   selectedChildSessionId?: string | null;
   streaming?: boolean;
   taskRuntimeLookup?: TaskToolRuntimeLookup;
@@ -470,7 +554,6 @@ function AssistantTraceContent({
           renderBody={(reasoningContent, isStreaming) => (
             <AssistantRichContentBody content={reasoningContent} streaming={isStreaming} />
           )}
-          stateKey={messageId ? `${messageId}:${index}` : undefined}
           streaming={streaming}
           total={payload.reasoningBlocks?.length ?? 0}
         />
@@ -485,6 +568,12 @@ function AssistantTraceContent({
           output: toolCall.output,
           isError: toolCall.isError,
           onOpenChildSession,
+          pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
+          approvalActions:
+            toolCall.pendingPermissionRequestId && resolveInlinePermissionActions
+              ? resolveInlinePermissionActions(toolCall.pendingPermissionRequestId)
+              : undefined,
+          durationMs: toolCall.durationMs,
           resumedAfterApproval: toolCall.resumedAfterApproval,
           selectedChildSessionId,
           status: toolCall.status,
@@ -897,6 +986,48 @@ export function WelcomeScreen({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+const COMPANION_FENCE_PATTERN = /```companion\n([\s\S]*?)```/;
+
+function extractCompanionBlocks(
+  content: string,
+): { mainContent: string; companionContent: string } | null {
+  const match = COMPANION_FENCE_PATTERN.exec(content);
+  if (!match) {
+    return null;
+  }
+
+  const companionContent = match[1]?.trim() ?? '';
+  const mainContent = content.replace(match[0], '').trim();
+
+  if (!companionContent) {
+    return null;
+  }
+
+  return { mainContent, companionContent };
+}
+
+function CompanionInlineBlock({ content }: { content: string }) {
+  return (
+    <div
+      style={{
+        padding: '8px 12px',
+        borderRadius: 10,
+        border: '1px solid color-mix(in oklch, var(--accent) 20%, transparent)',
+        background: 'color-mix(in oklch, var(--accent) 6%, var(--surface))',
+        fontSize: 12,
+        lineHeight: 1.5,
+        color: 'color-mix(in oklch, var(--accent) 82%, white 18%)',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 8,
+      }}
+    >
+      <span style={{ fontSize: 14, flexShrink: 0, marginTop: -1 }}>◈</span>
+      <span>{content}</span>
     </div>
   );
 }

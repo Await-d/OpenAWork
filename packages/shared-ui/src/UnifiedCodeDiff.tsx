@@ -253,16 +253,16 @@ export function parseUnifiedDiffRows(diffText: string): DiffRow[] {
 }
 
 function sideBackground(kind: DiffSideKind): string {
-  if (kind === 'added') return 'rgba(16, 185, 129, 0.12)';
-  if (kind === 'removed') return 'rgba(239, 68, 68, 0.12)';
-  if (kind === 'empty') return 'rgba(15, 23, 42, 0.12)';
-  return 'rgba(15, 23, 42, 0.22)';
+  if (kind === 'added') return `color-mix(in srgb, ${tokens.color.success} 12%, transparent)`;
+  if (kind === 'removed') return `color-mix(in srgb, ${tokens.color.danger} 12%, transparent)`;
+  if (kind === 'empty') return `color-mix(in srgb, ${tokens.color.surface} 12%, transparent)`;
+  return `color-mix(in srgb, ${tokens.color.surface} 22%, transparent)`;
 }
 
 function sideBorder(kind: DiffSideKind): string {
-  if (kind === 'added') return 'rgba(16, 185, 129, 0.35)';
-  if (kind === 'removed') return 'rgba(239, 68, 68, 0.35)';
-  return 'rgba(148, 163, 184, 0.12)';
+  if (kind === 'added') return `color-mix(in srgb, ${tokens.color.success} 35%, transparent)`;
+  if (kind === 'removed') return `color-mix(in srgb, ${tokens.color.danger} 35%, transparent)`;
+  return `color-mix(in srgb, ${tokens.color.muted} 12%, transparent)`;
 }
 
 function markerFor(kind: DiffSideKind): string {
@@ -348,9 +348,9 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
         style={{
           padding: '6px 10px',
           fontSize: 11,
-          color: '#93c5fd',
-          background: 'rgba(59, 130, 246, 0.1)',
-          borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+          color: tokens.color.info,
+          background: `color-mix(in srgb, ${tokens.color.info} 10%, transparent)`,
+          borderBottom: `1px solid ${tokens.color.borderSubtle}`,
           fontVariantNumeric: 'tabular-nums',
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
@@ -369,7 +369,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
         alignItems: 'stretch',
         minWidth: 0,
         background: sideBackground(row.kind),
-        borderTop: '1px solid rgba(148, 163, 184, 0.06)',
+        borderTop: `1px solid ${tokens.color.borderSubtle}`,
       }}
     >
       <div
@@ -377,8 +377,8 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           padding: '4px 6px',
           textAlign: 'right',
           fontSize: 11,
-          color: 'var(--color-muted, #94a3b8)',
-          borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+          color: tokens.color.muted,
+          borderRight: `1px solid ${tokens.color.borderSubtle}`,
           fontVariantNumeric: 'tabular-nums',
           userSelect: 'none',
         }}
@@ -390,8 +390,8 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           padding: '4px 6px',
           textAlign: 'right',
           fontSize: 11,
-          color: 'var(--color-muted, #94a3b8)',
-          borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+          color: tokens.color.muted,
+          borderRight: `1px solid ${tokens.color.borderSubtle}`,
           fontVariantNumeric: 'tabular-nums',
           userSelect: 'none',
         }}
@@ -404,8 +404,12 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           textAlign: 'center',
           fontSize: 11,
           color:
-            row.kind === 'added' ? '#34d399' : row.kind === 'removed' ? '#f87171' : 'transparent',
-          borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+            row.kind === 'added'
+              ? tokens.color.success
+              : row.kind === 'removed'
+                ? tokens.color.danger
+                : 'transparent',
+          borderRight: `1px solid ${tokens.color.borderSubtle}`,
           userSelect: 'none',
         }}
       >
@@ -419,7 +423,7 @@ function UnifiedRowCell({ row }: { row: UnifiedDisplayRow }) {
           fontSize: 12,
           lineHeight: 1.5,
           whiteSpace: 'pre',
-          color: row.kind === 'empty' ? 'transparent' : 'var(--color-text, #f8fafc)',
+          color: row.kind === 'empty' ? 'transparent' : tokens.color.text,
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
         }}
@@ -447,8 +451,8 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
           padding: '4px 6px',
           textAlign: 'right',
           fontSize: 11,
-          color: 'var(--color-muted, #94a3b8)',
-          borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+          color: tokens.color.muted,
+          borderRight: `1px solid ${tokens.color.borderSubtle}`,
           fontVariantNumeric: 'tabular-nums',
           userSelect: 'none',
         }}
@@ -461,8 +465,12 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
           textAlign: 'center',
           fontSize: 11,
           color:
-            side.kind === 'added' ? '#34d399' : side.kind === 'removed' ? '#f87171' : 'transparent',
-          borderRight: '1px solid rgba(148, 163, 184, 0.08)',
+            side.kind === 'added'
+              ? tokens.color.success
+              : side.kind === 'removed'
+                ? tokens.color.danger
+                : 'transparent',
+          borderRight: `1px solid ${tokens.color.borderSubtle}`,
           userSelect: 'none',
         }}
       >
@@ -476,7 +484,7 @@ function DiffSideCell({ showRightBorder, side }: { showRightBorder: boolean; sid
           fontSize: 12,
           lineHeight: 1.5,
           whiteSpace: 'pre',
-          color: side.kind === 'empty' ? 'transparent' : 'var(--color-text, #f8fafc)',
+          color: side.kind === 'empty' ? 'transparent' : tokens.color.text,
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
         }}
@@ -511,14 +519,14 @@ export function UnifiedCodeDiff({
     return (
       <div
         style={{
-          border: isMinimalChrome ? 'none' : '1px solid var(--color-border, #334155)',
+          border: isMinimalChrome ? 'none' : `1px solid ${tokens.color.border}`,
           borderRadius: isMinimalChrome ? 0 : tokens.radius.lg,
           background: isMinimalChrome
             ? 'transparent'
-            : 'color-mix(in srgb, var(--color-surface, #111827) 86%, transparent)',
+            : `color-mix(in srgb, ${tokens.color.surface} 86%, transparent)`,
           padding: isMinimalChrome ? '6px 0' : '10px 12px',
           fontSize: 12,
-          color: 'var(--color-muted, #94a3b8)',
+          color: tokens.color.muted,
         }}
       >
         暂无可展示的 diff。
@@ -534,11 +542,11 @@ export function UnifiedCodeDiff({
         overflow: 'hidden',
         border: isMinimalChrome
           ? 'none'
-          : '1px solid color-mix(in srgb, var(--color-border, #334155) 88%, transparent)',
+          : `1px solid color-mix(in srgb, ${tokens.color.border} 88%, transparent)`,
         borderRadius: isMinimalChrome ? 0 : tokens.radius.md,
         background: isMinimalChrome
           ? 'transparent'
-          : 'color-mix(in srgb, var(--color-surface, #111827) 96%, transparent)',
+          : `color-mix(in srgb, ${tokens.color.surface} 96%, transparent)`,
       }}
     >
       {(filePath || summary.added > 0 || summary.removed > 0) && (
@@ -549,15 +557,17 @@ export function UnifiedCodeDiff({
             justifyContent: 'space-between',
             gap: 12,
             padding: isMinimalChrome ? '4px 0 8px' : '8px 12px',
-            borderBottom: '1px solid rgba(148, 163, 184, 0.12)',
-            background: isMinimalChrome ? 'transparent' : 'rgba(15, 23, 42, 0.12)',
+            borderBottom: `1px solid ${tokens.color.borderSubtle}`,
+            background: isMinimalChrome
+              ? 'transparent'
+              : `color-mix(in srgb, ${tokens.color.surface} 12%, transparent)`,
           }}
         >
           <div
             style={{
               minWidth: 0,
               fontSize: 11,
-              color: 'var(--color-text, #f8fafc)',
+              color: tokens.color.text,
               fontFamily:
                 'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
               whiteSpace: 'nowrap',
@@ -572,7 +582,7 @@ export function UnifiedCodeDiff({
             style={{
               flexShrink: 0,
               fontSize: 11,
-              color: 'var(--color-muted, #94a3b8)',
+              color: tokens.color.muted,
               fontVariantNumeric: 'tabular-nums',
             }}
           >
@@ -587,13 +597,17 @@ export function UnifiedCodeDiff({
             display: 'grid',
             gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
             fontSize: 11,
-            color: 'var(--color-muted, #94a3b8)',
+            color: tokens.color.muted,
             fontWeight: 700,
-            borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
-            background: isMinimalChrome ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+            borderBottom: `1px solid ${tokens.color.borderSubtle}`,
+            background: isMinimalChrome
+              ? 'transparent'
+              : `color-mix(in srgb, ${tokens.color.surface} 8%, transparent)`,
           }}
         >
-          <div style={{ padding: '6px 10px', borderRight: '1px solid rgba(148, 163, 184, 0.08)' }}>
+          <div
+            style={{ padding: '6px 10px', borderRight: `1px solid ${tokens.color.borderSubtle}` }}
+          >
             修改前
           </div>
           <div style={{ padding: '6px 10px' }}>修改后</div>
@@ -605,11 +619,13 @@ export function UnifiedCodeDiff({
             gridTemplateColumns: '44px 44px 18px minmax(0, 1fr)',
             gap: 0,
             fontSize: 11,
-            color: 'var(--color-muted, #94a3b8)',
+            color: tokens.color.muted,
             fontWeight: 700,
             padding: isMinimalChrome ? 0 : '0 0 0 1px',
-            borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
-            background: isMinimalChrome ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+            borderBottom: `1px solid ${tokens.color.borderSubtle}`,
+            background: isMinimalChrome
+              ? 'transparent'
+              : `color-mix(in srgb, ${tokens.color.surface} 8%, transparent)`,
           }}
         >
           <div style={{ padding: '6px', textAlign: 'right' }}>旧</div>
@@ -635,10 +651,10 @@ export function UnifiedCodeDiff({
                       style={{
                         padding: '6px 10px',
                         fontSize: 11,
-                        color: '#93c5fd',
-                        background: 'rgba(59, 130, 246, 0.1)',
-                        borderTop: index === 0 ? 'none' : '1px solid rgba(148, 163, 184, 0.08)',
-                        borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+                        color: tokens.color.info,
+                        background: `color-mix(in srgb, ${tokens.color.info} 10%, transparent)`,
+                        borderTop: index === 0 ? 'none' : `1px solid ${tokens.color.borderSubtle}`,
+                        borderBottom: `1px solid ${tokens.color.borderSubtle}`,
                         fontFamily:
                           'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
                       }}
@@ -654,7 +670,7 @@ export function UnifiedCodeDiff({
                     style={{
                       display: 'grid',
                       gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                      borderTop: index === 0 ? 'none' : '1px solid rgba(148, 163, 184, 0.06)',
+                      borderTop: index === 0 ? 'none' : `1px solid ${tokens.color.borderSubtle}`,
                     }}
                   >
                     <DiffSideCell side={row.left} showRightBorder />

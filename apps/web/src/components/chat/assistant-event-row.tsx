@@ -10,13 +10,15 @@ export function AssistantEventRow({ payload }: { payload: AssistantEventPayload 
           ? 'AGENT'
           : payload.kind === 'permission'
             ? 'PERMIT'
-            : payload.kind === 'task'
-              ? 'TASK'
-              : payload.kind === 'compaction'
-                ? 'COMPACT'
-                : payload.kind === 'audit'
-                  ? 'AUDIT'
-                  : 'TOOL';
+            : payload.kind === 'question'
+              ? 'QUESTION'
+              : payload.kind === 'task'
+                ? 'TASK'
+                : payload.kind === 'compaction'
+                  ? 'COMPACT'
+                  : payload.kind === 'audit'
+                    ? 'AUDIT'
+                    : 'TOOL';
   const statusLabel =
     payload.status === 'running'
       ? '运行中'
@@ -169,6 +171,16 @@ function AssistantEventKindIcon({ kind }: { kind: AssistantEventPayload['kind'] 
       <svg {...common} aria-hidden="true">
         <path d="M12 3 6 6v5c0 4 2.6 7.4 6 8 3.4-.6 6-4 6-8V6Z" />
         <path d="M10 11.5 11.5 13 14.5 10" />
+      </svg>
+    );
+  }
+
+  if (kind === 'question') {
+    return (
+      <svg {...common} aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9 9a3 3 0 1 1 3 3v1" />
+        <path d="M12 17h.01" />
       </svg>
     );
   }

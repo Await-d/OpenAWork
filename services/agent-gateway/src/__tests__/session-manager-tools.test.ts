@@ -16,8 +16,11 @@ vi.mock('../db.js', () => ({
   sqliteGet: mocked.sqliteGetMock,
 }));
 
+vi.mock('../message-v2-adapter.js', () => ({
+  listSessionMessagesV2: mocked.listSessionMessagesMock,
+}));
+
 vi.mock('../session-message-store.js', () => ({
-  listSessionMessages: mocked.listSessionMessagesMock,
   extractMessageText: mocked.extractMessageTextMock,
 }));
 

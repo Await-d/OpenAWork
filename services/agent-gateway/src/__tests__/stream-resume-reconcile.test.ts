@@ -74,10 +74,13 @@ vi.mock('../tool-sandbox.js', () => ({
   reconcileResumedTaskChildSession: reconcileMock,
 }));
 
-vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: appendSessionMessageMock,
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSessionMessageV2: appendSessionMessageMock,
   listSessionMessagesByRequestScope: vi.fn(() => []),
-  truncateSessionMessagesAfter: vi.fn(),
+  truncateSessionMessagesAfterV2: vi.fn(),
+  approveToolPermission: vi.fn(),
+  rejectToolPermission: vi.fn(),
+  listSessionMessagesV2: vi.fn(() => []),
 }));
 
 vi.mock('../session-run-events.js', () => ({
@@ -118,6 +121,7 @@ vi.mock('../routes/stream-system-prompts.js', () => ({
   TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT: 'tool-output-ref',
   buildRoundSystemMessages: vi.fn(() => []),
   buildRequestScopedSystemPrompts: vi.fn(() => []),
+  injectSyntheticRequestContext: vi.fn((msgs: unknown[]) => msgs),
 }));
 
 vi.mock('../routes/stream.js', () => ({
@@ -125,7 +129,6 @@ vi.mock('../routes/stream.js', () => ({
   buildStreamToolObservability: vi.fn((input: { presentedToolName: string }) => ({
     presentedToolName: input.presentedToolName,
     canonicalToolName: input.presentedToolName === 'Agent' ? 'call_omo_agent' : 'bash',
-    toolSurfaceProfile: 'openawork',
     adapterVersion: '1.0.0',
   })),
   createRunEventMeta: vi.fn(() => ({ eventId: 'evt-1', runId: 'run-1', occurredAt: 1 })),
@@ -244,7 +247,6 @@ describe('resume reconcile fallback', () => {
         observability: {
           presentedToolName: 'Agent',
           canonicalToolName: 'call_omo_agent',
-          toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
       },
@@ -262,7 +264,6 @@ describe('resume reconcile fallback', () => {
             observability: {
               presentedToolName: 'Agent',
               canonicalToolName: 'call_omo_agent',
-              toolSurfaceProfile: 'claude_code_default',
               adapterVersion: '1.0.0',
             },
           }),
@@ -278,7 +279,6 @@ describe('resume reconcile fallback', () => {
         observability: {
           presentedToolName: 'Agent',
           canonicalToolName: 'call_omo_agent',
-          toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
       }),
@@ -436,7 +436,6 @@ describe('resume reconcile fallback', () => {
             observability: {
               presentedToolName: 'Agent',
               canonicalToolName: 'call_omo_agent',
-              toolSurfaceProfile: 'openawork',
               adapterVersion: '1.0.0',
             },
             fileDiffs: [
@@ -451,7 +450,6 @@ describe('resume reconcile fallback', () => {
                 observability: {
                   presentedToolName: 'Agent',
                   canonicalToolName: 'call_omo_agent',
-                  toolSurfaceProfile: 'openawork',
                   adapterVersion: '1.0.0',
                 },
               }),
@@ -468,7 +466,6 @@ describe('resume reconcile fallback', () => {
         observability: {
           presentedToolName: 'Agent',
           canonicalToolName: 'call_omo_agent',
-          toolSurfaceProfile: 'openawork',
           adapterVersion: '1.0.0',
         },
         fileDiffs: [

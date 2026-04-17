@@ -5,29 +5,43 @@ import {
   readPersistedCompactionMemory,
 } from '../compaction-metadata.js';
 import {
-  appendSessionMessage,
   buildPreparedUpstreamConversation,
   hasCompactionMarker,
   isContextOverflow,
-  listSessionMessages,
   type PreparedUpstreamConversationReport,
-  updateSessionMessagesStatusByRequestScope,
 } from '../session-message-store.js';
+import {
+  appendSessionMessageV2,
+  listSessionMessagesV2,
+  updateSessionMessagesStatusByRequestScope,
+} from '../message-v2-adapter.js';
 import { buildModifiedFilesSummaryContent } from '../modified-files-summary.js';
 import { persistSessionSnapshot, createRequestSnapshotRef } from '../session-snapshot-store.js';
 import { appendSnapshotPart, appendPatchPart } from '../message-v2-adapter.js';
 import type { MessageID } from '../message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
 import { resolveEofRoundDecision } from './stream-completion.js';
-import { isUpstreamContextOverflowError, readUpstreamError } from './upstream-error.js';
-import { buildUpstreamRequestBody } from './upstream-request.js';
+import {
+  isUpstreamContextOverflowError,
+  readUpstreamError,
+  type UpstreamErrorDescriptor,
+} from './upstream-error.js';
+import {
+  buildUpstreamRequestBody,
+  sanitizeUpstreamConversation,
+  type UpstreamChatMessage,
+} from './upstream-request.js';
 import {
   createStreamParseState,
   parseUpstreamFrame,
   ResponsesUpstreamEventError,
   type StreamUsageSummary,
 } from './stream-protocol.js';
-import { buildRoundSystemMessages } from './stream-system-prompts.js';
+import {
+  buildRoundSystemMessages,
+  injectSyntheticRequestContext,
+  type SyntheticRequestContext,
+} from './stream-system-prompts.js';
 import type { resolveModelRoute } from '../model-router.js';
 import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
@@ -48,6 +62,50 @@ interface StreamAccumulationState {
   assistantThinking: string;
   assistantText: string;
   toolCalls: Map<string, { toolName: string; inputText: string }>;
+}
+
+const CJK_RANGE = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/;
+
+function detectUserLanguageHint(
+  messages: Array<{ role: string; content: string | null }>,
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!;
+    if (msg.role !== 'user' || !msg.content) continue;
+    const text = msg.content;
+    if (CJK_RANGE.test(text)) {
+      const jaRatio = (text.match(/[\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
+      const krRatio = (text.match(/[\uac00-\ud7af]/g) || []).length;
+      const zhRatio = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+      if (krRatio > zhRatio && krRatio > jaRatio)
+        return '한국어로 생각하세요. 한국어로만 사고하세요.';
+      if (jaRatio > zhRatio) return '日本語で思考してください。必ず日本語のみで思考してください。';
+      return '请用中文进行思考。你必须全程使用中文思考，绝对不要切换到英文。';
+    }
+  }
+  return null;
+}
+
+function buildThinkingLanguageHint(
+  messages: Array<{ role: string; content: string | null }>,
+): string | null {
+  return detectUserLanguageHint(messages);
+}
+
+function applyThinkingLanguageHintToConversation(
+  messages: UpstreamChatMessage[],
+  hint: string | null,
+): UpstreamChatMessage[] {
+  if (!hint) return messages;
+  const result: UpstreamChatMessage[] = messages.map((msg) => ({ ...msg }));
+  for (let i = result.length - 1; i >= 0; i--) {
+    const msg = result[i]!;
+    if (msg.role === 'user' && msg.content && !msg.tool_calls) {
+      msg.content = `${msg.content}\n\n[${hint}]`;
+      break;
+    }
+  }
+  return result;
 }
 
 function createAccumulationState(): StreamAccumulationState {
@@ -234,14 +292,14 @@ export async function runModelRound(input: {
   stopReason: StreamStopReason;
   statusCode: number;
   state: StreamAccumulationState;
+  upstreamError?: UpstreamErrorDescriptor;
   usage?: StreamUsageSummary;
   usageOccurredAt?: number;
 }> {
   const compactionAutoEnabled = input.compactionAutoEnabled ?? true;
-  const finalMessages = listSessionMessages({
+  const finalMessages = listSessionMessagesV2({
     sessionId: input.sessionId,
     userId: input.userId,
-    legacyMessagesJson: input.sessionContext.legacyMessagesJson,
     statuses: ['final'],
   });
   const markerPresent = hasCompactionMarker(finalMessages);
@@ -255,29 +313,44 @@ export async function runModelRound(input: {
         }),
   });
   const conversation = preparedConversation.messages;
-  const upstreamMessages = [
+  const shouldApplyThinkingConfig =
+    input.requestData.thinkingEnabled !== undefined ||
+    input.requestData.reasoningEffort !== undefined;
+  const thinkingLanguagePrompt =
+    shouldApplyThinkingConfig && input.requestData.thinkingEnabled
+      ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
+      : null;
+  const thinkingUserHint =
+    shouldApplyThinkingConfig && input.requestData.thinkingEnabled
+      ? buildThinkingLanguageHint(conversation)
+      : null;
+  const syntheticContext: SyntheticRequestContext = {
+    injectedPrompt: input.injectedPrompt,
+    capabilityContext: input.capabilityContext,
+    companionPrompt: input.companionPrompt,
+  };
+  const conversationWithSynthetic = injectSyntheticRequestContext(
+    applyThinkingLanguageHintToConversation(conversation, thinkingUserHint),
+    syntheticContext,
+  );
+  const rawUpstreamMessages = [
     ...buildRoundSystemMessages({
       workspaceCtx: input.workspaceCtx,
       routeSystemPrompt: input.route.systemPrompt,
-      injectedPrompt: input.injectedPrompt,
-      capabilityContext: input.capabilityContext,
       lspGuidance: input.lspGuidance,
       dialogueModePrompt: input.dialogueModePrompt,
       yoloModePrompt: input.yoloModePrompt,
-      companionPrompt: input.companionPrompt,
       memoryBlock: input.memoryBlock,
-      compactionSummary: preparedConversation.compactionSummary,
+      thinkingLanguagePrompt,
     }),
-    ...conversation,
+    ...conversationWithSynthetic,
     ...(input.syntheticContinuationPrompt
       ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt }]
       : []),
   ];
+  const upstreamMessages = sanitizeUpstreamConversation(rawUpstreamMessages);
   const upstreamPath =
     input.route.upstreamProtocol === 'responses' ? '/responses' : '/chat/completions';
-  const shouldApplyThinkingConfig =
-    input.requestData.thinkingEnabled !== undefined ||
-    input.requestData.reasoningEffort !== undefined;
   const upstreamBody = buildUpstreamRequestBody({
     protocol: input.route.upstreamProtocol,
     model: input.route.model,
@@ -357,7 +430,7 @@ export async function runModelRound(input: {
       reason === 'tool_use' ? undefined : input.turnFileDiffs,
     );
 
-    const assistantMessage = appendSessionMessage({
+    const assistantMessage = appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',
@@ -376,17 +449,26 @@ export async function runModelRound(input: {
         userId: input.userId,
       });
     }
-    if (reason !== 'tool_use' && input.turnFileDiffs && input.turnFileDiffs.size > 0) {
-      persistSessionSnapshot({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        snapshotRef: createRequestSnapshotRef(input.clientRequestId),
-        fileDiffs: Array.from(input.turnFileDiffs.values()),
-      });
+    if (input.turnFileDiffs && input.turnFileDiffs.size > 0) {
+      const snapshotRef = createRequestSnapshotRef(
+        reason === 'tool_use'
+          ? createIntermediateAssistantRequestId(input.clientRequestId, input.round)
+          : input.clientRequestId,
+      );
+
+      // Persist snapshot summary to DB (end_turn only, for backward compat)
+      if (reason !== 'tool_use') {
+        persistSessionSnapshot({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          snapshotRef,
+          fileDiffs: Array.from(input.turnFileDiffs.values()),
+        });
+      }
 
       // V2 step-level snapshot/patch (opencode pattern)
-      // Each round = one step; create SnapshotPart + PatchPart in V2 message store
-      const snapshotRef = createRequestSnapshotRef(input.clientRequestId);
+      // Every round with file diffs gets SnapshotPart + PatchPart,
+      // enabling per-step revert instead of only per-turn.
       const diffFiles = Array.from(input.turnFileDiffs.values());
       if (assistantMessage.id) {
         appendSnapshotPart({
@@ -465,12 +547,13 @@ export async function runModelRound(input: {
           stopReason: 'error',
           statusCode: response.status,
           state,
+          upstreamError,
           usage: undefined,
           usageOccurredAt: undefined,
         };
       }
       markFailedRequestScopeMessages();
-      appendSessionMessage({
+      appendSessionMessageV2({
         sessionId: input.sessionId,
         userId: input.userId,
         role: 'assistant',
@@ -491,6 +574,7 @@ export async function runModelRound(input: {
         stopReason: 'error',
         statusCode: response.status,
         state,
+        upstreamError,
         usage: undefined,
         usageOccurredAt: undefined,
       };
@@ -614,7 +698,7 @@ export async function runModelRound(input: {
           output: { message: errorMessage, code: errorCode },
         });
         markFailedRequestScopeMessages();
-        appendSessionMessage({
+        appendSessionMessageV2({
           sessionId: input.sessionId,
           userId: input.userId,
           role: 'assistant',
@@ -670,7 +754,7 @@ export async function runModelRound(input: {
         output: { message: errorMessage, code: errorCode },
       });
       markFailedRequestScopeMessages();
-      appendSessionMessage({
+      appendSessionMessageV2({
         sessionId: input.sessionId,
         userId: input.userId,
         role: 'assistant',
@@ -734,7 +818,7 @@ export async function runModelRound(input: {
       output: { message, code: 'STREAM_ERROR' },
     });
     markFailedRequestScopeMessages();
-    appendSessionMessage({
+    appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'assistant',

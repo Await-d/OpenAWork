@@ -803,14 +803,12 @@ describe('session message store', () => {
               observability: {
                 presentedToolName: 'Write',
                 canonicalToolName: 'write',
-                toolSurfaceProfile: 'openawork',
               },
             },
           ],
           observability: {
             presentedToolName: 'Write',
             canonicalToolName: 'write',
-            toolSurfaceProfile: 'openawork',
           },
         },
       ],
@@ -847,14 +845,12 @@ describe('session message store', () => {
           observability: {
             presentedToolName: 'Write',
             canonicalToolName: 'write',
-            toolSurfaceProfile: 'openawork',
           },
         },
       ],
       observability: {
         presentedToolName: 'Write',
         canonicalToolName: 'write',
-        toolSurfaceProfile: 'openawork',
       },
     });
   });
@@ -892,7 +888,6 @@ describe('session message store', () => {
                 observability: {
                   presentedToolName: 'Write',
                   canonicalToolName: 'write',
-                  toolSurfaceProfile: 'openawork',
                 },
               },
               {
@@ -940,7 +935,6 @@ describe('session message store', () => {
                 observability: {
                   presentedToolName: 'Write',
                   canonicalToolName: 'write',
-                  toolSurfaceProfile: 'openawork',
                 },
               },
               {
@@ -1086,12 +1080,23 @@ describe('session message store', () => {
       },
     });
 
-    expect(prepared.compactionSummary).toContain('test summary');
+    // Compaction summary is now injected as user+assistant pair in conversation flow
+    expect(prepared.compactionSummary).toBeNull();
+    // Summary pair is prepended before the remaining messages
     expect(prepared.messages[0]).toMatchObject({
+      role: 'user',
+      content: 'What did we do so far?',
+    });
+    expect(prepared.messages[1]).toMatchObject({
+      role: 'assistant',
+      content: 'test summary',
+    });
+    // Remaining messages start after the summary pair (user-6 through user-8 = 6 messages)
+    expect(prepared.messages[2]).toMatchObject({
       role: 'user',
       content: '用户目标 6',
     });
-    expect(prepared.messages).toHaveLength(6);
+    expect(prepared.messages).toHaveLength(8);
   });
 
   it('keeps full conversation when contextWindow is provided without llm summary', async () => {
@@ -1241,9 +1246,13 @@ describe('session message store', () => {
       normalizedMessageCount: 2,
       historySinceBoundaryCount: 2,
       selectedHistoryCount: 2,
-      upstreamMessageCount: 2,
+      // +2 for the user+assistant compaction summary pair injected at the beginning
+      upstreamMessageCount: 4,
     });
-    expect(prepared.compactionSummary).toContain('压缩总结');
+    // Compaction summary is now in conversation flow, not system message
+    expect(prepared.compactionSummary).toBeNull();
+    expect(prepared.messages[0]).toMatchObject({ role: 'user', content: 'What did we do so far?' });
+    expect(prepared.messages[1]).toMatchObject({ role: 'assistant', content: '压缩总结' });
   });
 
   it('detects context overflow from token usage and context window', async () => {
@@ -1354,8 +1363,10 @@ describe('session message store', () => {
       },
     });
 
-    expect(prepared.messages).toHaveLength(0);
-    expect(prepared.compactionSummary).toContain('已压缩总结');
+    // Compaction summary is now injected as user+assistant pair in conversation flow
+    expect(prepared.compactionSummary).toBeNull();
+    expect(prepared.messages[0]).toMatchObject({ role: 'user', content: 'What did we do so far?' });
+    expect(prepared.messages[1]).toMatchObject({ role: 'assistant', content: '已压缩总结' });
   });
 
   it('prefers compaction marker records over metadata fallback and hides markers from visible transcript', async () => {
@@ -1456,9 +1467,11 @@ describe('session message store', () => {
 
     expect(stored).toHaveLength(7);
     expect(visible).toHaveLength(6);
-    expect(prepared.compactionSummary).toContain('marker summary');
-    expect(prepared.messages[0]).toMatchObject({ role: 'user', content: '用户目标 3' });
-    expect(prepared.compactionSummary).not.toContain('metadata summary');
+    // Compaction summary is now injected as user+assistant pair in conversation flow
+    expect(prepared.compactionSummary).toBeNull();
+    // The compaction marker is converted to user+assistant pair
+    expect(prepared.messages[0]).toMatchObject({ role: 'user', content: 'What did we do so far?' });
+    expect(prepared.messages[1]).toMatchObject({ role: 'assistant', content: 'marker summary' });
   });
 
   it('rebuilds compaction memory from omitted history when covered boundary is missing', async () => {

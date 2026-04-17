@@ -5,8 +5,8 @@ const mocks = vi.hoisted(() => ({
   maybeAutoTitle: vi.fn(),
 }));
 
-vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: mocks.appendSessionMessage,
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSessionMessageV2: mocks.appendSessionMessage,
 }));
 
 vi.mock('../session-title.js', () => ({

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyToolResultToLocalAssistantMessages,
   clearResolvedPendingPermissionFromMessage,
   createAssistantEventContent,
+  dismissPermissionEventMessage,
+  hasActivePendingPermissionRequest,
   normalizeChatMessages,
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
@@ -83,6 +86,112 @@ describe('normalizeChatMessages', () => {
     expect(messages[0]?.content).toContain('pnpm install');
     expect(messages[0]?.content).toContain('pnpm dev');
     expect(messages[0]?.content).not.toContain('[object Object]');
+  });
+
+  it('treats errored tool results with a stale pending request id as non-pending', () => {
+    expect(
+      hasActivePendingPermissionRequest({
+        isError: true,
+        pendingPermissionRequestId: 'perm-stale-1',
+      }),
+    ).toBe(false);
+
+    expect(
+      hasActivePendingPermissionRequest({
+        isError: false,
+        pendingPermissionRequestId: 'perm-real-1',
+      }),
+    ).toBe(true);
+  });
+
+  it('updates local assistant trace tool cards when a later errored tool result arrives', () => {
+    const updatedMessages = applyToolResultToLocalAssistantMessages(
+      [
+        {
+          id: 'assistant-local-tool-result',
+          role: 'assistant',
+          content: JSON.stringify({
+            type: 'assistant_trace',
+            payload: {
+              text: '',
+              toolCalls: [
+                {
+                  toolCallId: 'call-local-tool-result',
+                  toolName: 'bash',
+                  input: { command: 'pwd && echo HOME=$HOME' },
+                  output: 'waiting for approval',
+                  isError: false,
+                  pendingPermissionRequestId: 'perm-local-tool-result',
+                  status: 'paused',
+                },
+              ],
+            },
+          }),
+          createdAt: 1,
+          status: 'completed',
+        },
+      ],
+      {
+        type: 'tool_result',
+        toolCallId: 'call-local-tool-result',
+        toolName: 'bash',
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        pendingPermissionRequestId: 'perm-local-tool-result',
+      },
+    );
+
+    const assistantTrace = parseAssistantTraceContent(updatedMessages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-local-tool-result',
+        toolName: 'bash',
+        input: { command: 'pwd && echo HOME=$HOME' },
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        status: 'failed',
+      },
+    ]);
+  });
+
+  it('dismisses stale permission lifecycle messages by request id', () => {
+    const waitingPermissionMessage =
+      createAssistantEventContent({
+        type: 'permission_asked',
+        requestId: 'perm-dismiss-1',
+        toolName: 'bash',
+        scope: 'workspace-write',
+        reason: '需要执行工作区命令',
+        riskLevel: 'medium',
+        previewAction: '执行命令: pwd',
+      }) ?? '';
+
+    const nextMessages = dismissPermissionEventMessage(
+      [
+        {
+          id: 'assistant-permission-dismiss',
+          role: 'assistant',
+          content: waitingPermissionMessage,
+          createdAt: 1,
+          status: 'completed',
+        },
+        {
+          id: 'assistant-keep',
+          role: 'assistant',
+          content: '保留的消息',
+          createdAt: 2,
+          status: 'completed',
+        },
+      ],
+      'perm-dismiss-1',
+    );
+
+    expect(nextMessages).toHaveLength(1);
+    expect(nextMessages[0]?.content).toBe('保留的消息');
   });
 
   it('keeps pending-permission tool results paused after message normalization', () => {
@@ -177,6 +286,56 @@ describe('normalizeChatMessages', () => {
         },
         isError: true,
         resumedAfterApproval: true,
+        status: 'failed',
+      },
+    ]);
+  });
+
+  it('does not keep pending permission state on failed tool results that still carry a stale request id', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-stale-perm-error',
+        role: 'assistant',
+        createdAt: 1,
+        content: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-stale-perm-error',
+            toolName: 'bash',
+            input: { command: 'pwd && echo HOME=$HOME' },
+          },
+        ],
+      },
+      {
+        id: 'tool-stale-perm-error',
+        role: 'tool',
+        createdAt: 2,
+        content: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-stale-perm-error',
+            toolName: 'bash',
+            output: {
+              stderr:
+                'bash command cannot contain shell chaining, piping, or redirection operators',
+            },
+            isError: true,
+            pendingPermissionRequestId: 'perm-stale-error-1',
+          },
+        ],
+      },
+    ]);
+
+    const assistantTrace = parseAssistantTraceContent(messages[0]?.content ?? '');
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-stale-perm-error',
+        toolName: 'bash',
+        input: { command: 'pwd && echo HOME=$HOME' },
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
         status: 'failed',
       },
     ]);
@@ -295,6 +454,44 @@ describe('normalizeChatMessages', () => {
         isError: false,
         resumedAfterApproval: true,
         status: 'completed',
+      },
+    ]);
+  });
+
+  it('sanitizes stale pending permission state from persisted assistant_trace payloads', () => {
+    const assistantTrace = parseAssistantTraceContent(
+      JSON.stringify({
+        type: 'assistant_trace',
+        payload: {
+          text: '',
+          toolCalls: [
+            {
+              toolCallId: 'call-assistant-trace-stale',
+              toolName: 'bash',
+              input: { command: 'pwd && echo HOME=$HOME' },
+              output: {
+                stderr:
+                  'bash command cannot contain shell chaining, piping, or redirection operators',
+              },
+              isError: true,
+              pendingPermissionRequestId: 'perm-assistant-trace-stale',
+              status: 'paused',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(assistantTrace?.toolCalls).toEqual([
+      {
+        toolCallId: 'call-assistant-trace-stale',
+        toolName: 'bash',
+        input: { command: 'pwd && echo HOME=$HOME' },
+        output: {
+          stderr: 'bash command cannot contain shell chaining, piping, or redirection operators',
+        },
+        isError: true,
+        status: 'failed',
       },
     ]);
   });
@@ -751,6 +948,29 @@ describe('normalizeChatMessages', () => {
     });
   });
 
+  it('downgrades stale waiting-permission copied tool cards to failed when output is already an error', () => {
+    const copiedText = `工具：bash
+类型：TOOL
+状态：等待权限
+摘要：执行命令: pwd && echo HOME=$HOME
+
+输入
+{
+  "command": "pwd && echo HOME=$HOME",
+  "timeout": 120000
+}
+
+输出
+"bash command cannot contain shell chaining, piping, or redirection operators"`;
+
+    expect(parseCopiedToolCardContent(copiedText)).toMatchObject({
+      toolName: 'bash',
+      status: 'failed',
+      isError: false,
+      output: 'bash command cannot contain shell chaining, piping, or redirection operators',
+    });
+  });
+
   it('preserves approval-resume semantics from legacy tool_call payloads', () => {
     const messages = normalizeChatMessages([
       {
@@ -1102,8 +1322,70 @@ describe('normalizeChatMessages', () => {
     ];
 
     const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
-    // user-1 and assistant-1 matched by ID, event-tool is unmatched local-only
+    // user-1 and assistant-1 matched by ID, event-tool is a plain local-only
+    // assistant message and still falls back to tail preservation.
     expect(result.map((m) => m.id)).toEqual(['user-1', 'assistant-1', 'event-tool']);
+  });
+
+  it('keeps permission event cards anchored near their surrounding transcript after refresh', () => {
+    const previousMessages = [
+      {
+        id: 'user-permission',
+        role: 'user' as const,
+        content: '请帮我运行需要授权的操作',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'local-permission-event',
+        role: 'assistant' as const,
+        content:
+          createAssistantEventContent({
+            type: 'permission_asked',
+            eventId: 'permission:perm-1:asked',
+            requestId: 'perm-1',
+            toolName: 'bash',
+            scope: 'workspace-write',
+            reason: '需要写入配置文件',
+            riskLevel: 'medium',
+            previewAction: '创建配置文件',
+            occurredAt: 2,
+          }) ?? '',
+        createdAt: 2,
+        status: 'completed' as const,
+      },
+      {
+        id: 'assistant-result',
+        role: 'assistant' as const,
+        content: '我已经拿到权限结果，继续执行。',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+    const snapshotMessages = [
+      {
+        id: 'user-permission',
+        role: 'user' as const,
+        content: '请帮我运行需要授权的操作',
+        createdAt: 1,
+        status: 'completed' as const,
+      },
+      {
+        id: 'assistant-result',
+        role: 'assistant' as const,
+        content: '我已经拿到权限结果，继续执行。',
+        createdAt: 3,
+        status: 'completed' as const,
+      },
+    ];
+
+    const result = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+
+    expect(result.map((message) => message.id)).toEqual([
+      'user-permission',
+      'local-permission-event',
+      'assistant-result',
+    ]);
   });
 });
 

@@ -285,6 +285,12 @@ async function renderChatPage(initialEntry = '/chat') {
   return container!;
 }
 
+function getTranscriptText(rendered: HTMLDivElement): string {
+  return Array.from(rendered.querySelectorAll('.chat-message-row'))
+    .map((row) => row.textContent ?? '')
+    .join('\n');
+}
+
 describe('ChatPage service-backed commands', () => {
   it('shows slash suggestions from the server-backed command registry', async () => {
     const rendered = await renderChatPage();
@@ -387,7 +393,7 @@ describe('ChatPage service-backed commands', () => {
     expect(rendered.textContent).toContain('文档检索 MCP server');
   });
 
-  it('executes server-backed commands and appends the returned status card', async () => {
+  it('executes server-backed commands without appending status cards into the main transcript', async () => {
     const rendered = await renderChatPage('/chat/session-1');
     const textarea = rendered.querySelector('textarea') as HTMLTextAreaElement;
 
@@ -411,15 +417,16 @@ describe('ChatPage service-backed commands', () => {
       await Promise.resolve();
     });
 
+    const transcriptText = getTranscriptText(rendered);
+
     expect(executeCommandMock).toHaveBeenCalled();
     expect(executeCommandMock.mock.calls[0]?.[3]).toEqual({ rawInput: '/compact' });
-    expect(rendered.textContent).toContain('会话已压缩');
-    expect(rendered.textContent).toContain('COMPACT');
-    expect(rendered.textContent).toContain('成功');
-    expect(rendered.textContent).toContain('来自服务端压缩命令的摘要');
+    expect(transcriptText).not.toContain('会话已压缩');
+    expect(transcriptText).not.toContain('COMPACT');
+    expect(transcriptText).not.toContain('来自服务端压缩命令的摘要');
   });
 
-  it('mirrors server command run events into the assistant chat list', async () => {
+  it('keeps server command run events out of the assistant chat list', async () => {
     const events: RunEvent[] = [
       {
         type: 'task_update',
@@ -470,22 +477,12 @@ describe('ChatPage service-backed commands', () => {
       await Promise.resolve();
     });
 
-    const assistantAvatarFrames = Array.from(
-      rendered.querySelectorAll('.chat-message-avatar-frame[data-role="assistant"]'),
-    );
-    const visibleAssistantAvatars = assistantAvatarFrames.filter(
-      (element) => element.getAttribute('data-grouped') === 'false',
-    );
+    const transcriptText = getTranscriptText(rendered);
 
-    expect(visibleAssistantAvatars).toHaveLength(1);
-    expect(rendered.textContent).toContain('任务进行中 · 检索 MCP 文档');
-    expect(rendered.textContent).toContain('已创建子会话');
-    expect(rendered.textContent).toContain('context7 子代理');
-    expect(rendered.textContent).toContain('MCP');
-    expect(rendered.textContent).toContain('运行中');
-    expect(rendered.textContent).toContain('成功');
-    expect(rendered.textContent).toContain('命令执行完成');
-    expect(rendered.textContent).toContain('已整理 MCP 检索结果');
+    expect(transcriptText).not.toContain('任务进行中 · 检索 MCP 文档');
+    expect(transcriptText).not.toContain('已创建子会话');
+    expect(transcriptText).not.toContain('命令执行完成');
+    expect(transcriptText).not.toContain('已整理 MCP 检索结果');
   });
 
   it('executes /summarize as a real alias of /compact', async () => {
@@ -512,12 +509,13 @@ describe('ChatPage service-backed commands', () => {
       await Promise.resolve();
     });
 
+    const transcriptText = getTranscriptText(rendered);
+
     expect(executeCommandMock).toHaveBeenCalledWith('token-123', 'session-1', 'remote-summarize', {
       rawInput: '/summarize',
     });
-    expect(rendered.textContent).toContain('会话已压缩');
-    expect(rendered.textContent).toContain('COMPACT');
-    expect(rendered.textContent).toContain('成功');
+    expect(transcriptText).not.toContain('会话已压缩');
+    expect(transcriptText).not.toContain('COMPACT');
   });
 
   it('uses the selected alias name in the missing-session warning', async () => {
@@ -544,8 +542,10 @@ describe('ChatPage service-backed commands', () => {
       await Promise.resolve();
     });
 
+    const transcriptText = getTranscriptText(rendered);
+
     expect(executeCommandMock).not.toHaveBeenCalled();
-    expect(rendered.textContent).toContain('需要先进入一个已有会话后再执行 /summarize。');
+    expect(transcriptText).not.toContain('需要先进入一个已有会话后再执行 /summarize。');
   });
 
   it('treats /buddy as a client-side companion action instead of a server command', async () => {

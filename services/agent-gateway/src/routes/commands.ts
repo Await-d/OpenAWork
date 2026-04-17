@@ -18,7 +18,10 @@ import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction-p
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
 import { resolveCompactionRoute, type ModelRouteConfig } from '../model-router.js';
 import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
-import { appendSessionMessage, listSessionMessages } from '../session-message-store.js';
+import {
+  appendSessionMessageV2 as appendSessionMessage,
+  listSessionMessagesV2,
+} from '../message-v2-adapter.js';
 import { executeSessionCompaction } from '../session-compaction.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
@@ -165,10 +168,9 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Unsupported command' });
       }
 
-      const storedMessages = listSessionMessages({
+      const storedMessages = listSessionMessagesV2({
         sessionId,
         userId: user.sub,
-        legacyMessagesJson: session.messages_json,
       });
       const messages =
         storedMessages.length > 0
@@ -265,6 +267,7 @@ async function executeCompactCommand(params: {
     metadataJson: params.metadataJson,
     messages: params.messages,
     prune: compactionSettings.prune,
+    recentMessagesKept: compactionSettings.recentMessagesKept,
     route: compactionRoute,
     sessionId: params.sessionId,
     trigger: 'manual',

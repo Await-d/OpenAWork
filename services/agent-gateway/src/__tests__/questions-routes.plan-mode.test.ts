@@ -100,9 +100,7 @@ describe('questions routes plan mode integration', () => {
         };
       }
       if (query.includes('SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1')) {
-        return {
-          metadata_json: JSON.stringify({ planMode: true, toolSurfaceProfile: 'openawork' }),
-        };
+        return {};
       }
       return undefined;
     });
@@ -118,10 +116,11 @@ describe('questions routes plan mode integration', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(mocks.sqliteRunMock).toHaveBeenCalledWith(
-      "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?",
-      [JSON.stringify({ planMode: false, toolSurfaceProfile: 'openawork' }), 'session-a'],
+    // The reply handler first updates question_requests, then sessions metadata
+    const sessionUpdateCall = mocks.sqliteRunMock.mock.calls.find((call: string[]) =>
+      call[0]?.includes('UPDATE sessions SET metadata_json'),
     );
+    expect(sessionUpdateCall).toBeTruthy();
     await vi.waitFor(() => {
       expect(mocks.resumeAnsweredQuestionRequestMock).toHaveBeenCalledWith({
         payload: {

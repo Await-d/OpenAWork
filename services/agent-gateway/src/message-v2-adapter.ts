@@ -1,21 +1,23 @@
 /**
- * V2 Message Adapter — bridges V1 API surface to V2 storage.
+ * V2 Message Adapter — V2 storage is the authoritative source.
  *
  * Purpose:
- * - Provides V1-compatible functions (appendSessionMessage, listSessionMessages, etc.)
- *   that internally use the V2 Session→Message→Part model
- * - Allows gradual migration: existing code calls V1 API, V2 storage handles the data
+ * - Provides V1-compatible functions that internally use the V2 Session→Message→Part model
+ * - V1 dual-write has been removed; all reads/writes go through V2 tables
+ * - All request-scope operations are now V2-native
  * - Key benefit: ToolState machine (pending→running→completed/error) replaces
  *   the pendingPermissionRequestId hack
  */
 
-import type { Message, MessageContent, MessageRole } from '@openAwork/shared';
+import type {
+  FileDiffContent,
+  Message,
+  MessageContent,
+  MessageRole,
+  ToolCallObservabilityAnnotation,
+} from '@openAwork/shared';
+import { randomUUID } from 'node:crypto';
 import { sqliteAll, sqliteRun } from './db.js';
-import {
-  appendSessionMessage as v1AppendSessionMessage,
-  listSessionMessages as v1ListSessionMessages,
-  truncateSessionMessagesAfter as v1TruncateSessionMessagesAfter,
-} from './session-message-store.js';
 import {
   type MessageID,
   type PartID,
@@ -132,6 +134,7 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
     role: info.role,
     createdAt: info.time.created,
     content,
+    ...(info.clientRequestId ? { clientRequestId: info.clientRequestId } : {}),
   };
 }
 
@@ -152,41 +155,27 @@ export function appendSessionMessageV2(input: {
   const msgId = (input.messageId ?? makeMessageId()) as MessageID;
   const timeCreated = input.createdAt ?? Date.now();
 
-  // ── Dual-write: V1 (session_messages) for backward compatibility ──
-  const v1Result = v1AppendSessionMessage({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    role: input.role,
-    content: input.content,
-    legacyMessagesJson: input.legacyMessagesJson,
-    clientRequestId: input.clientRequestId,
-    createdAt: input.createdAt,
-    messageId: msgId,
-    replaceExisting: input.replaceExisting,
-    status: input.status as 'final' | 'error' | undefined,
-  });
-
   // ── V2 write: message_v2 + part_v2 via SyncEvent ──
+  const baseInfo = {
+    id: msgId,
+    sessionID: input.sessionId,
+    ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
+    ...(input.status ? { status: input.status as MessageInfo['status'] } : {}),
+  };
   const info: MessageInfo =
     input.role === 'user'
-      ? { id: msgId, sessionID: input.sessionId, role: 'user', time: { created: timeCreated } }
+      ? { ...baseInfo, role: 'user', time: { created: timeCreated } }
       : input.role === 'assistant'
         ? {
-            id: msgId,
-            sessionID: input.sessionId,
+            ...baseInfo,
             role: 'assistant',
             time: { created: timeCreated },
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           }
         : input.role === 'tool'
-          ? { id: msgId, sessionID: input.sessionId, role: 'tool', time: { created: timeCreated } }
-          : {
-              id: msgId,
-              sessionID: input.sessionId,
-              role: 'system',
-              time: { created: timeCreated },
-            };
+          ? { ...baseInfo, role: 'tool', time: { created: timeCreated } }
+          : { ...baseInfo, role: 'system', time: { created: timeCreated } };
 
   // Emit event → projector writes to V2 DB
   emitEvent({
@@ -287,8 +276,52 @@ export function appendSessionMessageV2(input: {
     }
   }
 
-  // Return the V1 result (authoritative for backward compat)
-  return v1Result;
+  // Return a V1-compatible Message object
+  return {
+    id: msgId,
+    role: input.role,
+    createdAt: timeCreated,
+    content: input.content,
+  };
+}
+
+const COMPACTION_MARKER_TYPE = 'compaction_marker';
+const INTERNAL_ASSISTANT_EVENT_SOURCE = 'openAwork';
+
+export function appendCompactionMarkerMessageV2(input: {
+  legacyMessagesJson?: string;
+  omittedMessages?: number;
+  persistedMemory?: unknown;
+  sessionId: string;
+  signature?: string;
+  summary: string;
+  trigger: string;
+  userId: string;
+}): Message {
+  const payload = {
+    source: INTERNAL_ASSISTANT_EVENT_SOURCE,
+    type: COMPACTION_MARKER_TYPE,
+    payload: {
+      summary: input.summary,
+      trigger: input.trigger,
+      ...(input.persistedMemory ? { persistedMemory: input.persistedMemory } : {}),
+      ...(typeof input.signature === 'string' && input.signature.length > 0
+        ? { signature: input.signature }
+        : {}),
+      ...(typeof input.omittedMessages === 'number'
+        ? { omittedMessages: input.omittedMessages }
+        : {}),
+    },
+  };
+
+  return appendSessionMessageV2({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    role: 'assistant',
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    legacyMessagesJson: input.legacyMessagesJson,
+    clientRequestId: `compaction-marker:${input.signature ?? randomUUID()}`,
+  });
 }
 
 export function listSessionMessagesV2(input: {
@@ -298,13 +331,21 @@ export function listSessionMessagesV2(input: {
   statuses?: string[];
   limit?: number;
 }): Message[] {
-  // During dual-write transition, V1 is the authoritative read source
-  return v1ListSessionMessages({
+  // V2 is now the authoritative read source
+  const statusSet = input.statuses ? new Set(input.statuses) : null;
+  return listMessagesWithParts({
     sessionId: input.sessionId,
     userId: input.userId,
-    legacyMessagesJson: input.legacyMessagesJson,
-    statuses: input.statuses as ('final' | 'error')[] | undefined,
-  });
+    limit: input.limit,
+  })
+    .filter((message) => {
+      if (!statusSet) return true;
+      // message.info.status defaults to 'final' when unset for backward compatibility
+      const status = message.info.status ?? 'final';
+      return statusSet.has(status);
+    })
+    .map((message) => v2ToV1Message(message))
+    .filter((message) => message.content.length > 0);
 }
 
 export function truncateSessionMessagesAfterV2(input: {
@@ -314,15 +355,6 @@ export function truncateSessionMessagesAfterV2(input: {
   legacyMessagesJson?: string;
   inclusive?: boolean;
 }): Message[] {
-  // ── Dual-write: truncate V1 table ──
-  const v1Result = v1TruncateSessionMessagesAfter({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    messageId: input.messageId,
-    legacyMessagesJson: input.legacyMessagesJson,
-    inclusive: input.inclusive,
-  });
-
   // ── V2 truncate: delete messages after the given messageId ──
   const rows = sqliteAll<{ id: string; time_created: number }>(
     'SELECT id, time_created FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
@@ -348,8 +380,8 @@ export function truncateSessionMessagesAfterV2(input: {
     }
   }
 
-  // Return V1 result (authoritative for backward compat)
-  return v1Result;
+  // Return remaining messages from V2
+  return listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
 }
 
 // ─── Tool Permission Flow (V2 native) ───
@@ -803,4 +835,211 @@ export function publishTodoUpdated(input: {
     sessionID: input.sessionID,
     todos: input.todos,
   });
+}
+
+// ─── V2-native request-scope operations ───
+
+export function getSessionMessageByRequestId(input: {
+  clientRequestId: string;
+  role: MessageRole;
+  sessionId: string;
+  userId: string;
+}): { message: Message; status: 'final' | 'error' } | null {
+  const messages = listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
+  const msg = messages.find(
+    (m) => m.role === input.role && m.clientRequestId === input.clientRequestId,
+  );
+  if (!msg) return null;
+  return {
+    message: msg,
+    status: (msg as Message & { status?: string }).status === 'error' ? 'error' : 'final',
+  };
+}
+
+export function listSessionMessagesByRequestScope(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): Message[] {
+  const messages = listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
+  return messages.filter(
+    (m) =>
+      m.clientRequestId === input.clientRequestId ||
+      m.clientRequestId?.startsWith(`${input.clientRequestId}:`) === true,
+  );
+}
+
+export function updateSessionMessagesStatusByRequestScope(input: {
+  clientRequestId: string;
+  roles?: MessageRole[];
+  sessionId: string;
+  status: 'final' | 'error';
+  userId: string;
+}): void {
+  const roleFilter = input.roles ? new Set(input.roles) : null;
+  const rows = sqliteAll<{ id: string; data: string }>(
+    'SELECT id, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
+    [input.sessionId, input.userId],
+  );
+  const targetIds = rows
+    .filter((row) => {
+      const data = JSON.parse(row.data) as MessageInfo;
+      const matchesRequest =
+        data.clientRequestId === input.clientRequestId ||
+        data.clientRequestId?.startsWith(`${input.clientRequestId}:`) === true;
+      const matchesRole = roleFilter ? roleFilter.has(data.role) : true;
+      return matchesRequest && matchesRole;
+    })
+    .map((row) => row.id);
+
+  if (targetIds.length === 0) {
+    return;
+  }
+
+  for (const id of targetIds) {
+    const row = rows.find((r) => r.id === id);
+    if (!row) continue;
+    const data = JSON.parse(row.data) as MessageInfo;
+    const updated = { ...data, status: input.status };
+    sqliteRun("UPDATE message_v2 SET data = ?, updated_at = datetime('now') WHERE id = ?", [
+      JSON.stringify(updated),
+      id,
+    ]);
+  }
+}
+
+export function deleteSessionMessagesByRequestScope(input: {
+  clientRequestId: string;
+  roles?: MessageRole[];
+  sessionId: string;
+  userId: string;
+}): void {
+  const roleFilter = input.roles ? new Set(input.roles) : null;
+  const rows = sqliteAll<{ id: string; data: string }>(
+    'SELECT id, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
+    [input.sessionId, input.userId],
+  );
+  const targetIds = rows
+    .filter((row) => {
+      const data = JSON.parse(row.data) as MessageInfo;
+      const matchesRequest =
+        data.clientRequestId === input.clientRequestId ||
+        data.clientRequestId?.startsWith(`${input.clientRequestId}:`) === true;
+      const matchesRole = roleFilter ? roleFilter.has(data.role) : true;
+      return matchesRequest && matchesRole;
+    })
+    .map((row) => row.id);
+
+  if (targetIds.length === 0) {
+    return;
+  }
+
+  for (const id of targetIds) {
+    sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [id, input.sessionId]);
+  }
+  const placeholders = targetIds.map(() => '?').join(',');
+  sqliteRun(
+    `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`,
+    [input.sessionId, input.userId, ...targetIds],
+  );
+}
+
+// ─── V2-native implementations (no V1 dependency) ───
+
+export interface StoredToolResult {
+  clientRequestId?: string;
+  fileDiffs?: FileDiffContent[];
+  isError: boolean;
+  output: unknown;
+  pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
+  observability?: ToolCallObservabilityAnnotation;
+  toolCallId: string;
+  toolName?: string;
+}
+
+const MAX_INLINE_TOOL_OUTPUT_BYTES = 8 * 1024;
+
+function shouldReferenceToolOutput(
+  output: unknown,
+  serialized = typeof output === 'string' ? output : JSON.stringify(output),
+  sizeBytes = Buffer.byteLength(serialized, 'utf8'),
+): boolean {
+  return sizeBytes > MAX_INLINE_TOOL_OUTPUT_BYTES;
+}
+
+export function getSessionToolResultByCallId(input: {
+  sessionId: string;
+  toolCallId: string;
+  userId: string;
+}): StoredToolResult | null {
+  const messages = listSessionMessagesV2({
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== 'tool') {
+      continue;
+    }
+
+    for (const content of message.content) {
+      if (content.type !== 'tool_result' || content.toolCallId !== input.toolCallId) {
+        continue;
+      }
+
+      return {
+        toolCallId: content.toolCallId,
+        toolName: content.toolName,
+        clientRequestId: content.clientRequestId,
+        output: content.output,
+        isError: content.isError,
+        fileDiffs: content.fileDiffs,
+        pendingPermissionRequestId: content.pendingPermissionRequestId,
+        resumedAfterApproval: content.resumedAfterApproval,
+        observability: content.observability,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function getLatestReferencedToolResult(input: {
+  sessionId: string;
+  userId: string;
+}): StoredToolResult | null {
+  const messages = listSessionMessagesV2({
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== 'tool') {
+      continue;
+    }
+
+    for (let contentIndex = message.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
+      const content = message.content[contentIndex];
+      if (content?.type !== 'tool_result' || !shouldReferenceToolOutput(content.output)) {
+        continue;
+      }
+
+      return {
+        toolCallId: content.toolCallId,
+        toolName: content.toolName,
+        clientRequestId: content.clientRequestId,
+        output: content.output,
+        isError: content.isError,
+        fileDiffs: content.fileDiffs,
+        pendingPermissionRequestId: content.pendingPermissionRequestId,
+        resumedAfterApproval: content.resumedAfterApproval,
+        observability: content.observability,
+      };
+    }
+  }
+
+  return null;
 }

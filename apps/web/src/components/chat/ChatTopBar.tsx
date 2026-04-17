@@ -3,19 +3,10 @@ import type { DialogueMode } from '../../pages/dialogue-mode.js';
 import { ContextUsageMeter } from './context-usage-meter.js';
 
 interface ChatTopBarProps {
-  agentOptions: Array<{ id: string; label: string }>;
   dialogueMode: DialogueMode;
-  defaultAgentLabel: string;
   currentProfileLabel?: string;
   hasWorkspaceProfile: boolean;
-  manualAgentId: string;
-  toolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   onChangeDialogueMode: (mode: DialogueMode) => void;
-  onChangeManualAgentId: (agentId: string) => void;
-  onChangeToolSurfaceProfile: (
-    profile: 'openawork' | 'claude_code_default' | 'claude_code_simple',
-  ) => void;
-  onClearManualAgentId: () => void;
   onSaveWorkspaceProfile: () => void;
   yoloMode: boolean;
   onToggleYolo: () => void;
@@ -29,17 +20,10 @@ interface ChatTopBarProps {
 }
 
 export function ChatTopBar({
-  agentOptions,
   dialogueMode,
-  defaultAgentLabel,
   currentProfileLabel,
   hasWorkspaceProfile,
-  manualAgentId,
-  toolSurfaceProfile,
   onChangeDialogueMode,
-  onChangeManualAgentId,
-  onChangeToolSurfaceProfile,
-  onClearManualAgentId,
   onSaveWorkspaceProfile,
   yoloMode,
   onToggleYolo,
@@ -84,101 +68,6 @@ export function ChatTopBar({
           onChange={onChangeDialogueMode}
           style={{ flexShrink: 0 }}
         />
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 6px',
-            borderRadius: 10,
-            border: '1px solid var(--border-subtle)',
-            background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
-          }}
-        >
-          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>代理</span>
-          <select
-            aria-label="聊天代理"
-            value={manualAgentId || '__mode_default__'}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              onChangeManualAgentId(nextValue === '__mode_default__' ? '' : nextValue);
-            }}
-            style={{
-              minWidth: 190,
-              height: 30,
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--surface)',
-              color: 'var(--text-1)',
-              fontSize: 12,
-              padding: '0 8px',
-            }}
-          >
-            <option value="__mode_default__">默认代理：{defaultAgentLabel}</option>
-            {agentOptions.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.label}
-              </option>
-            ))}
-          </select>
-          {manualAgentId ? (
-            <button
-              type="button"
-              onClick={onClearManualAgentId}
-              aria-label="清除代理覆盖"
-              title="清除手动代理覆盖，恢复模式默认代理"
-              style={{
-                height: 28,
-                padding: '0 8px',
-                borderRadius: 7,
-                border: '1px solid var(--border-subtle)',
-                background: 'transparent',
-                color: 'var(--text-2)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              恢复默认
-            </button>
-          ) : null}
-        </div>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 6px',
-            borderRadius: 10,
-            border: '1px solid var(--border-subtle)',
-            background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
-          }}
-        >
-          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>配置</span>
-          <select
-            aria-label="工具配置档"
-            value={toolSurfaceProfile}
-            onChange={(event) =>
-              onChangeToolSurfaceProfile(
-                event.target.value as 'openawork' | 'claude_code_default' | 'claude_code_simple',
-              )
-            }
-            style={{
-              minWidth: 168,
-              height: 30,
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--surface)',
-              color: 'var(--text-1)',
-              fontSize: 12,
-              padding: '0 8px',
-            }}
-          >
-            <option value="openawork">OpenAWork 全功能</option>
-            <option value="claude_code_default">Claude Code 默认</option>
-            <option value="claude_code_simple">Claude Code 精简</option>
-          </select>
-        </div>
         {currentProfileLabel !== undefined ? (
           <div
             style={{

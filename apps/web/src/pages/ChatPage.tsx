@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo, useTransition } from 'react';
+import { makeOrderedMessageId } from './chat-page/ordered-id.js';
 import { useFileEditor } from '../hooks/useFileEditor.js';
-import { FileEditorPanel } from '../components/FileEditorPanel.js';
 import { usePageActivation } from '../components/CachedRouteOutlet.js';
 import { ChatComposer } from '../components/chat/ChatComposer.js';
-import { TaskToolInline } from '../components/chat/task-tool-inline.js';
 import {
   ChatMessageGroupList,
   type ChatRenderEntry,
@@ -25,15 +24,20 @@ import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useLocation, useParams, useNavigate } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
 import { useGatewayClient } from '../hooks/useGatewayClient.js';
+import { detectThinkKeyword } from './chat-page/think-keyword-detector.js';
 import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../hooks/useComposerWorkspaceCatalog.js';
 import { useWorkspace } from '../hooks/useWorkspace.js';
-import { toast } from '../components/ToastNotification.js';
-import { createAgentProfilesClient, createSessionsClient } from '@openAwork/web-client';
+import {
+  createAgentProfilesClient,
+  createPermissionsClient,
+  createSessionsClient,
+} from '@openAwork/web-client';
 import type {
   AgentProfileRecord,
   PendingPermissionRequest,
   PendingQuestionRequest,
+  PermissionDecision,
   Session,
   SessionMessageRatingRecord,
   SessionMessageRatingValue,
@@ -41,7 +45,6 @@ import type {
   SessionTask,
 } from '@openAwork/web-client';
 import type { CommandResultCard, Message, RunEvent } from '@openAwork/shared';
-import type { GenerativeUIMessage } from '@openAwork/shared-ui';
 import { logger } from '../utils/logger.js';
 import {
   publishSessionPendingPermission,
@@ -51,14 +54,6 @@ import {
   subscribeCurrentSessionRefresh,
 } from '../utils/session-list-events.js';
 import { extractWorkingDirectory } from '../utils/session-metadata.js';
-import {
-  PlanPanel,
-  AgentVizPanel,
-  ToolCallCard,
-  AgentDAGGraph,
-  MCPServerList,
-  canConfigureThinkingForModel,
-} from '@openAwork/shared-ui';
 import type { MCPServerStatus } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import WorkspacePickerModal from '../components/WorkspacePickerModal.js';
@@ -66,41 +61,71 @@ import HistoryEditDialog from './chat-page/history-edit-dialog.js';
 import RetryModeDialog from './chat-page/retry-mode-dialog.js';
 import { getDefaultAgentForDialogueMode, type DialogueMode } from './dialogue-mode.js';
 import {
-  type AssistantEventKind,
-  clearResolvedPendingPermissionFromMessage,
-  createAssistantEventContent,
+  applyPermissionDecisionToLocalAssistantMessages,
+  applyToolResultToLocalAssistantMessages,
   createAssistantTraceContent,
-  createCommandCardContent,
-  type ChatUsageDetails,
+  dismissPermissionEventMessage,
   detectComposerTrigger,
   estimateTokenCount,
-  flattenWorkspaceFiles,
   matchClientSlashCommand,
   matchServerSlashCommand,
   normalizeChatMessages,
-  parseAssistantEventContent,
   parseAssistantTraceContent,
   parseToolCallInputText,
   parseSessionModeMetadata,
   reconcileSnapshotChatMessages,
   sanitizeComposerPlainText,
+  hasActivePendingPermissionRequest,
+  upsertPermissionEventMessage,
   type ReasoningEffort,
   type ChatMessage,
   type ComposerMenuState,
-  type MentionItem,
-  type SlashCommandItem,
   type WorkspaceFileMentionItem,
 } from './chat-page/support.js';
-import { buildComposerSlashItems } from './chat-page/composer-slash-items.js';
 import {
   filterTranscriptMessages,
   shouldShowRunEventInTranscript,
 } from './chat-page/transcript-visibility.js';
+import { ChatRightPanel } from './chat-page/chat-right-panel.js';
 import {
-  getRecoveryPendingInteractions,
-  getRecoveryTranscriptMessages,
-} from './chat-page/recovery-read-model.js';
-import { ChatHistoryTabContent, ChatOverviewTabContent } from './chat-page/right-panel-sections.js';
+  useChatMessageActions,
+  type HistoryEditPrompt,
+  type RetryPrompt,
+} from './chat-page/use-chat-message-actions.js';
+import {
+  type PreparedSessionRecoveryState,
+  type LiveToolCallState,
+  type SessionsClientWithActiveStop,
+  SESSION_SWITCH_DEFER_THRESHOLD,
+  REMOTE_STREAM_RECOVERY_POLL_MS,
+  CHAT_SCROLL_BOTTOM_PADDING,
+  CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
+  normalizeModelLookupKey,
+  buildQueuedComposerScopeKey,
+  createSessionMetadataSnapshot,
+  prepareSessionRecoveryState,
+  deriveLatestUserGoal,
+  buildRightPanelStateFromSessionSnapshot,
+  isImmediatelyRenderableStructuredContent,
+} from './chat-page/chat-page-utils.js';
+import { useSessionViewGuard } from './chat-page/use-session-view-guard.js';
+import { useStreamReveal } from './chat-page/use-stream-reveal.js';
+import { useScrollManager } from './chat-page/use-scroll-manager.js';
+import { useComposerCallbacks } from './chat-page/use-composer-callbacks.js';
+import { useComposerQueue } from './chat-page/use-composer-queue.js';
+import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
+import { useModelPrices } from './chat-page/use-model-prices.js';
+import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
+import { useChatRenderData } from './chat-page/use-chat-render-data.js';
+import { useChatUiActions } from './chat-page/use-chat-ui-actions.js';
+import { useAssistantMessageProcessing } from './chat-page/use-assistant-message-processing.js';
+import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
+import { useComposerMenuItems } from './chat-page/use-composer-menu-items.js';
+import { useChatDataLoaders } from './chat-page/use-chat-data-loaders.js';
+import { ChatScrollBottomButton } from './chat-page/chat-scroll-bottom-button.js';
+import { ChatStreamErrorBar } from './chat-page/chat-stream-error-bar.js';
+import { toast } from '../components/ToastNotification.js';
+import { ChatEditorPane } from './chat-page/chat-editor-pane.js';
 import { executeServerCommand } from './chat-page/server-command-item.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
 import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
@@ -111,8 +136,6 @@ import {
 } from './chat-page/session-run-state-bar.js';
 import {
   flattenSessionTodoLanes,
-  mergeChildSessions,
-  mergeSessionTasks,
   shouldPollSessionRuntime,
   toSessionPendingPermissionState,
   type SessionStateStatus,
@@ -136,13 +159,6 @@ import {
   startChatRightPanelRun,
 } from './chat-stream-state.js';
 import {
-  calculateStreamingRevealDelay,
-  calculateStreamingRevealStep,
-} from './chat-page/streaming-reveal.js';
-import { isScrollTopNearLatest, resolveLatestScrollTop } from './chat-page/scroll-alignment.js';
-import { buildChatContextUsageSnapshot } from './chat-page/context-usage.js';
-import {
-  hasUsableReportedUsageSnapshot,
   mergeChatBackendUsageSnapshot,
   type ChatBackendUsageSnapshot,
 } from './chat-page/stream-usage.js';
@@ -158,7 +174,6 @@ import {
 } from './chat-page/queued-composer-state.js';
 import {
   deleteQueuedComposerFiles,
-  persistQueuedComposerFiles,
   restoreQueuedComposerFiles,
 } from './chat-page/queued-composer-file-store.js';
 import { appendAttachmentSummary, uploadChatAttachments } from './chat-page/attachment-upload.js';
@@ -168,365 +183,6 @@ import {
 } from '../utils/chat-session-defaults.js';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js';
 import { CompanionStage } from '../components/chat/companion/companion-stage.js';
-
-interface ModelPriceEntry {
-  modelName: string;
-  inputPer1m: number;
-  outputPer1m: number;
-  cachedPer1m?: number;
-}
-
-function deriveLatestUserGoal(messages: ChatMessage[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role === 'user' && message.content.trim().length > 0) {
-      return message.content;
-    }
-  }
-
-  return '';
-}
-
-function buildRightPanelStateFromSessionSnapshot(session: Session, messages: ChatMessage[]) {
-  return buildChatRightPanelStateFromRunEvents({
-    events: Array.isArray(session.runEvents) ? session.runEvents : [],
-    goal: deriveLatestUserGoal(messages),
-  });
-}
-
-interface PreparedSessionRecoveryState {
-  messageRatings: Record<string, SessionMessageRatingRecord>;
-  metadata: ReturnType<typeof parseSessionModeMetadata>;
-  normalizedMessages: ChatMessage[];
-  pendingPermissions: PendingPermissionRequest[];
-  pendingQuestions: PendingQuestionRequest[];
-  session: Session;
-  sessionStateStatus: SessionStateStatus | null;
-  sessionTodos: SessionTodoItem[];
-}
-
-function prepareSessionRecoveryState(
-  recovery: SessionRecoveryReadModel,
-): PreparedSessionRecoveryState {
-  const session = recovery.session;
-  const sessionWithRuntime = session as Session & { state_status?: SessionStateStatus };
-  const pendingInteractions = getRecoveryPendingInteractions(recovery);
-
-  return {
-    messageRatings: Object.fromEntries(
-      recovery.ratings.map((rating) => [rating.messageId, rating]),
-    ),
-    metadata: parseSessionModeMetadata(session.metadata_json),
-    normalizedMessages: getRecoveryTranscriptMessages(recovery),
-    pendingPermissions: pendingInteractions.pendingPermissions,
-    pendingQuestions: pendingInteractions.pendingQuestions,
-    session,
-    sessionStateStatus: sessionWithRuntime.state_status ?? null,
-    sessionTodos: flattenSessionTodoLanes(recovery.todoLanes),
-  };
-}
-
-interface LiveToolCallState {
-  createdAt: number;
-  inputText: string;
-  isError?: boolean;
-  output?: unknown;
-  pendingPermissionRequestId?: string;
-  resumedAfterApproval?: boolean;
-  status: 'streaming' | 'paused' | 'completed' | 'error';
-  toolCallId: string;
-  toolName: string;
-}
-
-const SESSION_SWITCH_DEFER_THRESHOLD = 32;
-const REMOTE_STREAM_RECOVERY_POLL_MS = 1000;
-const CHAT_SCROLL_BOTTOM_PADDING = '0.95rem';
-const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
-const CHAT_LATEST_FOCUS_THRESHOLD_PX = 32;
-const CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX = 40;
-const CHAT_LATEST_REGION_FALLBACK_PX = 420;
-const CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS = 420;
-
-const RIGHT_PANEL_TABS = [
-  { id: 'overview', label: '概览' },
-  { id: 'plan', label: '计划' },
-  { id: 'tools', label: '工具' },
-  { id: 'history', label: '历史' },
-  { id: 'viz', label: '可视化' },
-  { id: 'mcp', label: 'MCP' },
-  { id: 'agent', label: '代理' },
-] as const;
-
-type RightPanelTabId = (typeof RIGHT_PANEL_TABS)[number]['id'];
-
-const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string; title: string }> = {
-  overview: {
-    title: '会话概览',
-    description: '查看当前会话、上下文注入与运行摘要。',
-  },
-  plan: {
-    title: '计划面板',
-    description: '聚焦当前任务拆解、优先级与执行进度。',
-  },
-  tools: {
-    title: '工具记录',
-    description: '浏览工具调用、筛选分类，并快速定位输出。',
-  },
-  history: {
-    title: '会话历史',
-    description: '查看子会话、审批、计划记录与历史待办。',
-  },
-  viz: {
-    title: '执行可视化',
-    description: '从图谱与事件时间线理解当前执行路径。',
-  },
-  mcp: {
-    title: 'MCP 状态',
-    description: '检查 MCP 服务连接状态与可用能力。',
-  },
-  agent: {
-    title: '代理详情',
-    description: '查看子代理会话、日志与运行细节。',
-  },
-};
-
-function renderRightPanelTabIcon(tabId: RightPanelTabId): React.ReactNode {
-  const iconProps = {
-    fill: 'none',
-    height: 16,
-    stroke: 'currentColor',
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    strokeWidth: 1.8,
-    viewBox: '0 0 24 24',
-    width: 16,
-  };
-
-  if (tabId === 'overview') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <rect x="4" y="4" width="6" height="6" rx="1.5" />
-        <rect x="14" y="4" width="6" height="6" rx="1.5" />
-        <rect x="4" y="14" width="6" height="6" rx="1.5" />
-        <rect x="14" y="14" width="6" height="6" rx="1.5" />
-      </svg>
-    );
-  }
-
-  if (tabId === 'plan') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <path d="M9 6h9" />
-        <path d="M9 12h9" />
-        <path d="M9 18h9" />
-        <path d="M5 6.5l1.2 1.2L8.5 5.5" />
-        <path d="M5 12.5l1.2 1.2 2.3-2.2" />
-        <path d="M5 18.5l1.2 1.2 2.3-2.2" />
-      </svg>
-    );
-  }
-
-  if (tabId === 'tools') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <path d="M14.5 6.5a4 4 0 0 0 4.9 4.9l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l8.2-8.2a4 4 0 0 0-2.4-6.8" />
-      </svg>
-    );
-  }
-
-  if (tabId === 'history') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <path d="M3 12a9 9 0 1 0 3-6.7" />
-        <path d="M3 4v4h4" />
-        <path d="M12 7.5v5l3 2" />
-      </svg>
-    );
-  }
-
-  if (tabId === 'viz') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <circle cx="6" cy="18" r="2.5" />
-        <circle cx="12" cy="6" r="2.5" />
-        <circle cx="18" cy="14" r="2.5" />
-        <path d="M8 16.7l2.5-7" />
-        <path d="M13.8 7.5l2.4 4.8" />
-      </svg>
-    );
-  }
-
-  if (tabId === 'mcp') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <rect x="5" y="5" width="5" height="5" rx="1.2" />
-        <rect x="14" y="5" width="5" height="5" rx="1.2" />
-        <rect x="9.5" y="14" width="5" height="5" rx="1.2" />
-        <path d="M10 7.5h4" />
-        <path d="M12 10v4" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-      <rect x="6" y="7" width="12" height="9" rx="2.5" />
-      <circle cx="10" cy="11.5" r="1" fill="currentColor" stroke="none" />
-      <circle cx="14" cy="11.5" r="1" fill="currentColor" stroke="none" />
-      <path d="M9 17v2" />
-      <path d="M15 17v2" />
-      <path d="M9 5.5l-1-1.5" />
-      <path d="M15 5.5l1-1.5" />
-    </svg>
-  );
-}
-
-function normalizeModelLookupKey(value: string | undefined): string {
-  return (value ?? '').trim().toLowerCase();
-}
-
-function buildQueuedComposerScopeKey(email: string, sessionId: string): string {
-  const normalizedEmail = email.trim().toLowerCase() || 'anonymous';
-  return `${normalizedEmail}:${sessionId}`;
-}
-
-type SessionsClientWithActiveStop = ReturnType<typeof createSessionsClient> & {
-  stopActiveStream: (token: string, sessionId: string) => Promise<boolean>;
-};
-
-function createSessionMetadataSnapshot(metadata: {
-  agentId?: string;
-  dialogueMode?: DialogueMode;
-  modelId?: string;
-  providerId?: string;
-  reasoningEffort?: ReasoningEffort;
-  thinkingEnabled?: boolean;
-  toolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
-  webSearchEnabled?: boolean;
-  workingDirectory?: string | null;
-  yoloMode?: boolean;
-}): string {
-  const snapshot: Record<string, unknown> = {
-    dialogueMode: metadata.dialogueMode ?? 'clarify',
-    toolSurfaceProfile: metadata.toolSurfaceProfile ?? 'openawork',
-    yoloMode: metadata.yoloMode === true,
-    webSearchEnabled: metadata.webSearchEnabled === true,
-    thinkingEnabled: metadata.thinkingEnabled === true,
-    reasoningEffort: metadata.reasoningEffort ?? 'medium',
-  };
-
-  const providerId = metadata.providerId?.trim();
-  if (providerId) {
-    snapshot['providerId'] = providerId;
-  }
-
-  const modelId = metadata.modelId?.trim();
-  if (modelId) {
-    snapshot['modelId'] = modelId;
-  }
-
-  const workingDirectory = metadata.workingDirectory?.trim();
-  if (workingDirectory) {
-    snapshot['workingDirectory'] = workingDirectory;
-  }
-
-  if (metadata.toolSurfaceProfile && metadata.toolSurfaceProfile !== 'openawork') {
-    snapshot['toolSurfaceProfile'] = metadata.toolSurfaceProfile;
-  }
-
-  const agentId = metadata.agentId?.trim();
-  if (agentId) {
-    snapshot['agentId'] = agentId;
-  }
-
-  return JSON.stringify(snapshot);
-}
-
-function resolveModelPriceEntry(
-  prices: ModelPriceEntry[],
-  candidates: Array<string | undefined>,
-): ModelPriceEntry | undefined {
-  const normalizedCandidates = candidates
-    .map((candidate) => normalizeModelLookupKey(candidate))
-    .filter((candidate) => candidate.length > 0);
-
-  if (normalizedCandidates.length === 0) {
-    return undefined;
-  }
-
-  return prices.find((entry) => {
-    const normalizedModelName = normalizeModelLookupKey(entry.modelName);
-    return normalizedCandidates.some(
-      (candidate) =>
-        candidate === normalizedModelName ||
-        candidate.includes(normalizedModelName) ||
-        normalizedModelName.includes(candidate),
-    );
-  });
-}
-
-function groupChatRenderEntries(entries: ChatRenderEntry[]): ChatRenderGroup[] {
-  const groups: ChatRenderGroup[] = [];
-
-  for (const entry of entries) {
-    const lastGroup = groups[groups.length - 1];
-    const lastEntry = lastGroup?.entries[lastGroup.entries.length - 1];
-
-    if (lastEntry && lastEntry.message.role === entry.message.role) {
-      lastGroup.entries.push(entry);
-      continue;
-    }
-
-    groups.push({
-      entries: [entry],
-      key: entry.message.id,
-      role: entry.message.role,
-    });
-  }
-
-  return groups;
-}
-
-function decorateAssistantGroupActions(
-  group: ChatRenderGroup,
-  handleCopyMessageGroup: (messages: ChatMessage[]) => void,
-): ChatRenderGroup {
-  const firstEntry = group.entries[0];
-  if (!firstEntry) {
-    return group;
-  }
-
-  if (group.role !== 'assistant' || group.entries.length <= 1) {
-    return group;
-  }
-
-  return {
-    ...group,
-    actions: (firstEntry.actions ?? []).map((action) =>
-      action.id === 'copy'
-        ? {
-            ...action,
-            onClick: () => handleCopyMessageGroup(group.entries.map((entry) => entry.message)),
-            title: '复制这次回答的完整内容',
-          }
-        : action,
-    ),
-  };
-}
-
-function isImmediatelyRenderableStructuredContent(content: string): boolean {
-  const normalized = content.trim();
-  if (!normalized.startsWith('{') || !normalized.includes('"type"')) {
-    return false;
-  }
-
-  try {
-    JSON.parse(normalized);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -570,7 +226,6 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
-  const pendingStreamRevealFrameRef = useRef<number | null>(null);
   const pendingSessionNormalizeTimeoutRef = useRef<number | null>(null);
   const activeSessionRef = useRef<string | null>(sessionId ?? null);
   const currentLoadedSessionIdRef = useRef<string | null>(currentSessionId);
@@ -598,12 +253,9 @@ export default function ChatPage() {
   const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('clarify');
   const [manualAgentId, setManualAgentId] = useState('');
-  const [toolSurfaceProfile, setToolSurfaceProfile] = useState<
-    'openawork' | 'claude_code_default' | 'claude_code_simple'
-  >('openawork');
   const [currentAgentProfile, setCurrentAgentProfile] = useState<AgentProfileRecord | null>(null);
   const [yoloMode, setYoloMode] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
   const [attachmentItems, setAttachmentItems] = useState<AttachmentItem[]>([]);
@@ -614,7 +266,7 @@ export default function ChatPage() {
   const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [modelPrices, setModelPrices] = useState<ModelPriceEntry[]>([]);
+  const modelPrices = useModelPrices(gatewayUrl, token);
   const [rightPanelState, setRightPanelState] = useState(() => createInitialChatRightPanelState());
   const [childSessions, setChildSessions] = useState<Session[]>([]);
   const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
@@ -622,19 +274,17 @@ export default function ChatPage() {
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionRequest[]>([]);
+  const [inlinePermissionPendingDecision, setInlinePermissionPendingDecision] = useState<{
+    decision: PermissionDecision;
+    requestId: string;
+  } | null>(null);
+  const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
-  const [historyEditPrompt, setHistoryEditPrompt] = useState<{
-    hasCodeMarkers: boolean;
-    messageId: string;
-    text: string;
-  } | null>(null);
+  const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPrompt | null>(null);
   const [, startSessionSwitchTransition] = useTransition();
-  const [retryPrompt, setRetryPrompt] = useState<{
-    sourceMessageId: string;
-    text: string;
-  } | null>(null);
+  const [retryPrompt, setRetryPrompt] = useState<RetryPrompt | null>(null);
   const [sessionModesHydrated, setSessionModesHydrated] = useState(false);
   const [sessionMetadataDirty, setSessionMetadataDirty] = useState(false);
   const [workspaceFileItems, setWorkspaceFileItems] = useState<WorkspaceFileMentionItem[]>([]);
@@ -644,57 +294,51 @@ export default function ChatPage() {
   const lastPersistedSessionMetadataSnapshotRef = useRef<string | null>(null);
   const composerCommandDescriptors = useCommandRegistry('composer');
   const prefersReducedMotion = usePrefersReducedMotion();
-  const uiState = useUIStateStore();
-  const editorMode = uiState.editorMode;
-  const setEditorMode = uiState.setEditorMode;
-  const splitPos = uiState.splitPos;
-  const setSplitPos = uiState.setSplitPos;
-  const navigateToHome = uiState.navigateToHome;
-  const navigateToSession = uiState.navigateToSession;
-  const workspaceTreeVersion = uiState.workspaceTreeVersion;
-  const selectedWorkspacePath = uiState.selectedWorkspacePath;
-  const setSelectedWorkspacePath = uiState.setSelectedWorkspacePath;
-  const addSavedWorkspacePath = uiState.addSavedWorkspacePath;
-  const setFileTreeRootPath = uiState.setFileTreeRootPath;
-  const setLastChatPath = uiState.setLastChatPath;
+  const editorMode = useUIStateStore((s) => s.editorMode);
+  const setEditorMode = useUIStateStore((s) => s.setEditorMode);
+  const splitPos = useUIStateStore((s) => s.splitPos);
+  const setSplitPos = useUIStateStore((s) => s.setSplitPos);
+  const navigateToHome = useUIStateStore((s) => s.navigateToHome);
+  const navigateToSession = useUIStateStore((s) => s.navigateToSession);
+  const chatView = useUIStateStore((s) => s.chatView);
+  const workspaceTreeVersion = useUIStateStore((s) => s.workspaceTreeVersion);
+  const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
+  const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
+  const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
+  const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
+  const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
   const splitDragging = useRef(false);
   const rightOpenRef = useRef(rightOpen);
   const queueFlushInFlightRef = useRef(false);
   const queueHydratingRef = useRef(false);
-  const streamingRef = useRef(false);
-  const stoppingStreamRef = useRef(false);
-  const currentAssistantStreamMessageIdRef = useRef<string | null>(null);
-  const streamRevealTargetRef = useRef('');
-  const streamRevealVisibleRef = useRef('');
-  const streamRevealTargetCodePointsRef = useRef<string[]>([]);
-  const streamRevealVisibleCodePointCountRef = useRef(0);
-  const streamRevealNextAllowedAtRef = useRef(0);
+  const {
+    streamRevealTargetRef,
+    streamRevealVisibleRef,
+    streamRevealTargetCodePointsRef,
+    streamRevealVisibleCodePointCountRef,
+    streamRevealNextAllowedAtRef,
+    pendingStreamRevealFrameRef,
+    streamingRef,
+    stoppingStreamRef,
+    currentAssistantStreamMessageIdRef,
+    resetStreamState,
+    scheduleStreamReveal,
+  } = useStreamReveal(prefersReducedMotion, {
+    setStreamBuffer,
+    setStreamThinkingBuffer,
+    setRecoveredStreamSnapshot,
+    setStreaming,
+    setStoppingStream,
+    setActiveStreamStartedAt,
+    setActiveStreamFirstTokenLatencyMs,
+  });
   const attachAttemptedSessionRef = useRef<string | null>(null);
-  const activateSessionView = useCallback(
-    (nextSessionId: string | null, options?: { incrementEpoch?: boolean }) => {
-      if (options?.incrementEpoch !== false) {
-        sessionViewEpochRef.current += 1;
-      }
-
-      currentSessionViewRef.current = {
-        epoch: sessionViewEpochRef.current,
-        sessionId: nextSessionId,
-      };
-      activeSessionRef.current = nextSessionId;
-      return sessionViewEpochRef.current;
-    },
-    [],
-  );
-  const isCurrentSessionView = useCallback((targetSessionId: string, expectedEpoch: number) => {
-    const current = currentSessionViewRef.current;
-    return current.sessionId === targetSessionId && current.epoch === expectedEpoch;
-  }, []);
-  const isCurrentSessionRequest = useCallback(
-    (targetSessionId: string, expectedEpoch: number) =>
-      activeSessionRef.current === targetSessionId &&
-      isCurrentSessionView(targetSessionId, expectedEpoch),
-    [isCurrentSessionView],
-  );
+  const { activateSessionView, isCurrentSessionView, isCurrentSessionRequest } =
+    useSessionViewGuard({
+      activeSessionRef,
+      sessionViewEpochRef,
+      currentSessionViewRef,
+    });
   const sendMessageRef = useRef<
     (
       overrideText?: string,
@@ -726,12 +370,15 @@ export default function ChatPage() {
       token,
     });
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog(Boolean(token));
+  const TAB_CYCLE_ALLOWED_AGENT_IDS = new Set(['hephaestus', 'sisyphus', 'prometheus']);
   const agentOptions = useMemo(
     () =>
-      composerWorkspaceCatalog.agents.map((agent) => ({
-        id: agent.id,
-        label: agent.label,
-      })),
+      composerWorkspaceCatalog.agents
+        .filter((agent) => TAB_CYCLE_ALLOWED_AGENT_IDS.has(agent.id))
+        .map((agent) => ({
+          id: agent.id,
+          label: agent.label,
+        })),
     [composerWorkspaceCatalog.agents],
   );
   const modeDefaultAgentId = useMemo(
@@ -759,242 +406,46 @@ export default function ChatPage() {
     return buildQueuedComposerScopeKey(currentUserEmail, currentSessionId);
   }, [currentSessionId, currentUserEmail]);
 
-  const buildSessionMetadata = useCallback(
-    (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
-      const metadata: Record<string, unknown> = {
-        dialogueMode,
-        toolSurfaceProfile,
-        yoloMode,
-        webSearchEnabled,
-        thinkingEnabled,
-        reasoningEffort,
-      };
-
-      if (activeProviderId) {
-        metadata['providerId'] = activeProviderId;
-      }
-
-      if (activeModelId) {
-        metadata['modelId'] = activeModelId;
-      }
-
-      if (manualAgentId.trim()) {
-        metadata['agentId'] = manualAgentId.trim();
-      }
-
-      if (effectiveWorkingDirectory) {
-        metadata['workingDirectory'] = effectiveWorkingDirectory;
-      }
-
-      return { ...metadata, ...overrides };
-    },
-    [
-      activeModelId,
-      activeProviderId,
+  const {
+    buildSessionMetadata,
+    markSessionMetadataDirty,
+    clearSessionMetadataDirty,
+    handleDialogueModeChange,
+    handleToggleYolo,
+    handleToggleWebSearch,
+    handleThinkingEnabledChange,
+    handleReasoningEffortChange,
+    handleManualAgentChange,
+    handleClearManualAgentId,
+    handleSaveWorkspaceProfile,
+  } = useSessionSettingsCallbacks(
+    {
       dialogueMode,
-      effectiveWorkingDirectory,
-      manualAgentId,
-      reasoningEffort,
-      thinkingEnabled,
-      toolSurfaceProfile,
-      webSearchEnabled,
       yoloMode,
-    ],
-  );
-
-  const resetStreamState = useCallback(() => {
-    if (pendingStreamRevealFrameRef.current !== null) {
-      cancelAnimationFrame(pendingStreamRevealFrameRef.current);
-      pendingStreamRevealFrameRef.current = null;
-    }
-    stoppingStreamRef.current = false;
-    streamRevealTargetRef.current = '';
-    streamRevealVisibleRef.current = '';
-    streamRevealTargetCodePointsRef.current = [];
-    streamRevealVisibleCodePointCountRef.current = 0;
-    streamRevealNextAllowedAtRef.current = 0;
-    setStreamBuffer('');
-    setStreamThinkingBuffer('');
-    setRecoveredStreamSnapshot(null);
-    streamingRef.current = false;
-    setStreaming(false);
-    setStoppingStream(false);
-    setActiveStreamStartedAt(null);
-    setActiveStreamFirstTokenLatencyMs(null);
-    currentAssistantStreamMessageIdRef.current = null;
-  }, []);
-
-  const scheduleStreamReveal = useCallback(() => {
-    if (pendingStreamRevealFrameRef.current !== null) {
-      return;
-    }
-
-    const advance = (timestamp: number) => {
-      pendingStreamRevealFrameRef.current = null;
-      const shouldApplyCadence = timestamp > 0;
-
-      if (prefersReducedMotion) {
-        const immediateVisible = streamRevealTargetRef.current;
-        streamRevealVisibleCodePointCountRef.current =
-          streamRevealTargetCodePointsRef.current.length;
-        streamRevealVisibleRef.current = immediateVisible;
-        setStreamBuffer(immediateVisible);
-        return;
-      }
-
-      if (shouldApplyCadence && timestamp < streamRevealNextAllowedAtRef.current) {
-        pendingStreamRevealFrameRef.current = requestAnimationFrame(advance);
-        return;
-      }
-
-      const currentVisibleCount = streamRevealVisibleCodePointCountRef.current;
-      const targetCodePoints = streamRevealTargetCodePointsRef.current;
-      const pendingCharacters = targetCodePoints.length - currentVisibleCount;
-
-      if (pendingCharacters <= 0) {
-        return;
-      }
-
-      const nextVisibleCount = Math.min(
-        targetCodePoints.length,
-        currentVisibleCount + calculateStreamingRevealStep(pendingCharacters),
-      );
-      const appendedChunk = targetCodePoints.slice(currentVisibleCount, nextVisibleCount).join('');
-      const nextVisible = streamRevealVisibleRef.current + appendedChunk;
-      const lastRevealedCharacter = targetCodePoints[nextVisibleCount - 1];
-
-      if (nextVisible !== streamRevealVisibleRef.current) {
-        streamRevealVisibleCodePointCountRef.current = nextVisibleCount;
-        streamRevealVisibleRef.current = nextVisible;
-        setStreamBuffer(nextVisible);
-      }
-
-      streamRevealNextAllowedAtRef.current = shouldApplyCadence
-        ? timestamp +
-          calculateStreamingRevealDelay(
-            lastRevealedCharacter,
-            targetCodePoints.length - nextVisibleCount,
-          )
-        : 0;
-
-      if (nextVisibleCount < targetCodePoints.length) {
-        pendingStreamRevealFrameRef.current = requestAnimationFrame(advance);
-      }
-    };
-
-    pendingStreamRevealFrameRef.current = requestAnimationFrame(advance);
-  }, [prefersReducedMotion]);
-
-  useEffect(() => {
-    return () => {
-      if (pendingStreamRevealFrameRef.current !== null) {
-        cancelAnimationFrame(pendingStreamRevealFrameRef.current);
-      }
-    };
-  }, []);
-
-  const markSessionMetadataDirty = useCallback(() => {
-    sessionMetadataDirtyRef.current = true;
-    setSessionMetadataDirty(true);
-  }, []);
-
-  const clearSessionMetadataDirty = useCallback(() => {
-    sessionMetadataDirtyRef.current = false;
-    setSessionMetadataDirty(false);
-  }, []);
-
-  const handleDialogueModeChange = useCallback(
-    (mode: DialogueMode) => {
-      setDialogueMode(mode);
-      markSessionMetadataDirty();
+      webSearchEnabled,
+      thinkingEnabled,
+      reasoningEffort,
+      activeProviderId,
+      activeModelId,
+      manualAgentId,
+      effectiveWorkingDirectory,
+      currentAgentProfile,
+      sessionMetadataDirty,
+      sessionMetadataDirtyRef,
     },
-    [markSessionMetadataDirty],
-  );
-
-  const handleToggleYolo = useCallback(() => {
-    setYoloMode((prev) => !prev);
-    markSessionMetadataDirty();
-  }, [markSessionMetadataDirty]);
-
-  const handleToggleWebSearch = useCallback(() => {
-    setWebSearchEnabled((prev) => !prev);
-    markSessionMetadataDirty();
-  }, [markSessionMetadataDirty]);
-
-  const handleThinkingEnabledChange = useCallback(
-    (enabled: boolean) => {
-      setThinkingEnabled(enabled);
-      markSessionMetadataDirty();
+    {
+      setDialogueMode,
+      setYoloMode,
+      setWebSearchEnabled,
+      setThinkingEnabled,
+      setReasoningEffort,
+      setManualAgentId,
+      setCurrentAgentProfile,
+      setSessionMetadataDirty,
     },
-    [markSessionMetadataDirty],
-  );
-
-  const handleReasoningEffortChange = useCallback(
-    (effort: ReasoningEffort) => {
-      setReasoningEffort(effort);
-      markSessionMetadataDirty();
-    },
-    [markSessionMetadataDirty],
-  );
-
-  const handleManualAgentChange = useCallback(
-    (agentId: string) => {
-      setManualAgentId(agentId.trim());
-      markSessionMetadataDirty();
-    },
-    [markSessionMetadataDirty],
-  );
-
-  const handleToolSurfaceProfileChange = useCallback(
-    (profile: 'openawork' | 'claude_code_default' | 'claude_code_simple') => {
-      setToolSurfaceProfile(profile);
-      markSessionMetadataDirty();
-    },
-    [markSessionMetadataDirty],
-  );
-
-  const handleClearManualAgentId = useCallback(() => {
-    setManualAgentId('');
-    markSessionMetadataDirty();
-  }, [markSessionMetadataDirty]);
-
-  const handleSaveWorkspaceProfile = useCallback(async () => {
-    if (!token || !effectiveWorkingDirectory) {
-      return;
-    }
-
-    const client = createAgentProfilesClient(gatewayUrl);
-    const payload = {
-      workspacePath: effectiveWorkingDirectory,
-      label:
-        currentAgentProfile?.label ??
-        effectiveWorkingDirectory.split('/').filter(Boolean).at(-1) ??
-        '项目配置',
-      ...(manualAgentId.trim() ? { agentId: manualAgentId.trim() } : {}),
-      ...(activeProviderId ? { providerId: activeProviderId } : {}),
-      ...(activeModelId ? { modelId: activeModelId } : {}),
-      toolSurfaceProfile,
-    };
-
-    try {
-      const nextProfile = currentAgentProfile
-        ? await client.update(token, currentAgentProfile.id, payload)
-        : await client.create(token, payload);
-      setCurrentAgentProfile(nextProfile);
-      toast(currentAgentProfile ? '已更新项目配置' : '已保存为项目配置', 'success');
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '保存项目配置失败', 'error');
-    }
-  }, [
-    activeModelId,
-    activeProviderId,
-    currentAgentProfile,
-    effectiveWorkingDirectory,
     gatewayUrl,
-    manualAgentId,
     token,
-    toolSurfaceProfile,
-  ]);
+  );
 
   useEffect(() => {
     if (
@@ -1158,16 +609,6 @@ export default function ChatPage() {
     };
   }, [effectiveWorkingDirectory, gatewayUrl, token]);
 
-  useEffect(() => {
-    openFileRef.current = (path: string) => {
-      setEditorMode(true);
-      void fileEditor.openFile(path);
-    };
-    return () => {
-      openFileRef.current = null;
-    };
-  }, [openFileRef, fileEditor, setEditorMode]);
-
   const { planTasks, agentEvents, planHistory, dagNodes, dagEdges, compactions } = rightPanelState;
   const toolCallCards = useMemo(() => getToolCallCards(rightPanelState), [rightPanelState]);
   const client = useGatewayClient(token);
@@ -1200,7 +641,9 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (subAgentRunItems.length === 0) {
-      setSelectedChildSessionId(null);
+      if (selectedChildSessionId !== null) {
+        setSelectedChildSessionId(null);
+      }
       if (rightTab === 'agent') {
         setRightTab('overview');
       }
@@ -1217,7 +660,10 @@ export default function ChatPage() {
     const runningCandidate =
       subAgentRunItems.find((item) => item.status === 'running' || item.status === 'pending') ??
       subAgentRunItems[0];
-    setSelectedChildSessionId(runningCandidate?.sessionId ?? null);
+    const nextId = runningCandidate?.sessionId ?? null;
+    if (nextId !== selectedChildSessionId) {
+      setSelectedChildSessionId(nextId);
+    }
   }, [rightTab, selectedChildSessionId, subAgentRunItems]);
 
   useEffect(() => {
@@ -1286,137 +732,31 @@ export default function ChatPage() {
         if (!sessionId) {
           setThinkingEnabled(defaults.thinkingEnabled);
           setReasoningEffort(defaults.reasoningEffort);
-          setToolSurfaceProfile(defaults.toolSurfaceProfile);
         }
       })
       .catch(() => null);
   }, [loadSavedChatDefaults, sessionId, token]);
 
-  const loadSessionRuntimeSnapshot = useCallback(
-    async (targetSessionId: string, signal?: AbortSignal, expectedSessionViewEpoch?: number) => {
-      if (!token) {
-        return;
-      }
-
-      const sessionViewEpoch = expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
-
-      const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
-        signal,
-      });
-
-      if (signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) {
-        return;
-      }
-
-      const pendingInteractions = getRecoveryPendingInteractions(recovery);
-
-      setSessionTodos(flattenSessionTodoLanes(recovery.todoLanes));
-      setChildSessions((previous) => mergeChildSessions(previous, recovery.children));
-      setSessionTasks((previous) => mergeSessionTasks(previous, recovery.tasks));
-      setPendingPermissions(pendingInteractions.pendingPermissions);
-      setPendingQuestions(pendingInteractions.pendingQuestions);
-    },
-    [gatewayUrl, isCurrentSessionView, token],
-  );
-
-  const syncRecoveredStreamSnapshot = useCallback(
-    (session: Session, nextSessionStateStatus: SessionStateStatus | null) => {
-      setRecoveredStreamSnapshot(
-        recoverActiveAssistantStream({
-          runEvents: Array.isArray(session.runEvents) ? session.runEvents : [],
-          sessionStateStatus: nextSessionStateStatus,
-        }),
-      );
-    },
-    [],
-  );
-
-  const loadCurrentSessionSnapshot = useCallback(
-    async (
-      targetSessionId: string,
-      options?: {
-        expectedSessionViewEpoch?: number;
-        replaceMessages?: boolean;
-        signal?: AbortSignal;
+  const { loadSessionRuntimeSnapshot, syncRecoveredStreamSnapshot, loadCurrentSessionSnapshot } =
+    useSessionSnapshotLoader(
+      gatewayUrl,
+      token,
+      isCurrentSessionView,
+      { currentSessionViewRef, streamingRef },
+      {
+        setMessages,
+        setMessageRatings,
+        setRightPanelState,
+        setSessionTodos,
+        setChildSessions,
+        setSessionTasks,
+        setPendingPermissions,
+        setPendingQuestions,
+        setSessionStateStatus,
+        setRecoveredStreamSnapshot,
+        setIsSessionSnapshotReady,
       },
-    ) => {
-      if (!token) {
-        return;
-      }
-
-      const sessionViewEpoch =
-        options?.expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
-
-      const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
-        signal: options?.signal,
-      });
-      if (options?.signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) {
-        return;
-      }
-
-      const prepared = prepareSessionRecoveryState(recovery);
-      if (options?.replaceMessages === true) {
-        setMessages(prepared.normalizedMessages);
-      } else if (streamingRef.current) {
-        // During active streaming, skip message reconciliation to avoid overwriting
-        // locally-appended event messages that the server snapshot hasn't synced yet.
-        // Non-message state (ratings, permissions, etc.) is still updated below.
-      } else {
-        setMessages((previous) =>
-          reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
-        );
-      }
-      setMessageRatings(prepared.messageRatings);
-      setRightPanelState(
-        buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
-      );
-      setSessionTodos(prepared.sessionTodos);
-      setChildSessions(recovery.children);
-      setSessionTasks(recovery.tasks);
-      setPendingPermissions(prepared.pendingPermissions);
-      setPendingQuestions(prepared.pendingQuestions);
-      setSessionStateStatus(prepared.sessionStateStatus);
-      syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
-      setIsSessionSnapshotReady(true);
-    },
-    [gatewayUrl, isCurrentSessionView, syncRecoveredStreamSnapshot, token],
-  );
-
-  const handleToggleMessageRating = useCallback(
-    async (message: ChatMessage, rating: SessionMessageRatingValue) => {
-      if (!token || !currentSessionId || message.role !== 'assistant' || !message.rawContent) {
-        return;
-      }
-
-      const existingRating = messageRatings[message.id]?.rating;
-      const sessionsClient = createSessionsClient(gatewayUrl);
-
-      try {
-        if (existingRating === rating) {
-          await sessionsClient.deleteMessageRating(token, currentSessionId, message.id);
-          setMessageRatings((previous) => {
-            const next = { ...previous };
-            delete next[message.id];
-            return next;
-          });
-          return;
-        }
-
-        const nextRating = await sessionsClient.setMessageRating(
-          token,
-          currentSessionId,
-          message.id,
-          {
-            rating,
-          },
-        );
-        setMessageRatings((previous) => ({ ...previous, [message.id]: nextRating }));
-      } catch (error) {
-        logger.error('message rating failed', error);
-      }
-    },
-    [currentSessionId, gatewayUrl, messageRatings, token],
-  );
+    );
 
   const remoteSessionBusyState = useMemo<Extract<
     SessionStateStatus,
@@ -1549,10 +889,14 @@ export default function ChatPage() {
         setSessionTodos(prepared.sessionTodos);
         setChildSessions(session.children);
         setSessionTasks(session.tasks);
-        setPendingPermissions(session.pendingPermissions);
-        setPendingQuestions(session.pendingQuestions);
+        setPendingPermissions(prepared.pendingPermissions);
+        setPendingQuestions(prepared.pendingQuestions);
         setSessionStateStatus(prepared.sessionStateStatus);
-        syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
+        syncRecoveredStreamSnapshot(
+          prepared.session,
+          prepared.sessionStateStatus,
+          session.activeStream,
+        );
       })
       .catch(() => undefined);
 
@@ -1600,65 +944,6 @@ export default function ChatPage() {
   });
 
   useEffect(() => {
-    if (!token) {
-      setModelPrices([]);
-      return;
-    }
-
-    let cancelled = false;
-    void fetch(`${gatewayUrl}/settings/model-prices`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('fail'))))
-      .then((data: { models?: ModelPriceEntry[] }) => {
-        if (!cancelled) {
-          setModelPrices(data.models ?? []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setModelPrices([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [gatewayUrl, token]);
-
-  const handleSaveFile = useCallback(
-    async (path: string) => {
-      setSaving(true);
-      await fileEditor.saveFile(path);
-      setSaving(false);
-    },
-    [fileEditor],
-  );
-
-  const handleSplitMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      splitDragging.current = true;
-      const container = splitContainerRef.current;
-      if (!container) return;
-      const onMove = (ev: MouseEvent) => {
-        if (!splitDragging.current) return;
-        const rect = container.getBoundingClientRect();
-        const pct = Math.min(80, Math.max(20, ((ev.clientX - rect.left) / rect.width) * 100));
-        setSplitPos(pct);
-      };
-      const onUp = () => {
-        splitDragging.current = false;
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-      };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-    },
-    [setSplitPos],
-  );
-
-  useEffect(() => {
     const requestedSessionId = sessionId ?? null;
     const shouldPreserveBootstrapState = pendingBootstrapSessionRef.current === requestedSessionId;
     const shouldSoftReloadCurrentSession =
@@ -1673,24 +958,29 @@ export default function ChatPage() {
         : activateSessionView(requestedSessionId);
 
     if (!requestedSessionId || !token) {
-      navigateToHome();
-      setCurrentSessionId(null);
-      setSelectedChildSessionId(null);
-      setIsSessionLoading(false);
-      setMessages([]);
-      setRightPanelState(createInitialChatRightPanelState());
-      setSessionTodos([]);
-      setChildSessions([]);
-      setSessionTasks([]);
-      setPendingPermissions([]);
-      setPendingQuestions([]);
-      setSessionStateStatus(null);
-      setIsSessionSnapshotReady(true);
-      setSessionModesHydrated(false);
-      clearSessionMetadataDirty();
-      lastPersistedSessionMetadataSnapshotRef.current = null;
-      resetStreamState();
-      setStreamError(null);
+      if (currentLoadedSessionIdRef.current !== null) {
+        if (chatView !== 'home') {
+          navigateToHome();
+        }
+        setCurrentSessionId(null);
+        setSelectedChildSessionId(null);
+        setIsSessionLoading(false);
+        setMessages([]);
+        setRightPanelState(createInitialChatRightPanelState());
+        setSessionTodos([]);
+        setChildSessions([]);
+        setSessionTasks([]);
+        setPendingPermissions([]);
+        setPendingQuestions([]);
+        setSessionStateStatus(null);
+        setIsSessionSnapshotReady(true);
+        setSessionModesHydrated(false);
+        clearSessionMetadataDirty();
+        lastPersistedSessionMetadataSnapshotRef.current = null;
+        resetStreamState();
+        setStreamError(null);
+        currentLoadedSessionIdRef.current = null;
+      }
       return;
     }
 
@@ -1740,7 +1030,11 @@ export default function ChatPage() {
             setPendingPermissions(prepared.pendingPermissions);
             setPendingQuestions(prepared.pendingQuestions);
             setSessionStateStatus(prepared.sessionStateStatus);
-            syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
+            syncRecoveredStreamSnapshot(
+              prepared.session,
+              prepared.sessionStateStatus,
+              recovery.activeStream,
+            );
             setIsSessionSnapshotReady(true);
           });
         })
@@ -1772,10 +1066,9 @@ export default function ChatPage() {
     resetStreamState();
     setStreamError(null);
     setDialogueMode('clarify');
-    setToolSurfaceProfile('openawork');
     setManualAgentId('');
     setYoloMode(false);
-    setWebSearchEnabled(false);
+    setWebSearchEnabled(true);
     setThinkingEnabled(false);
     setReasoningEffort('medium');
     setActiveProviderId('');
@@ -1809,11 +1102,14 @@ export default function ChatPage() {
             setPendingPermissions(prepared.pendingPermissions);
             setPendingQuestions(prepared.pendingQuestions);
             setSessionStateStatus(prepared.sessionStateStatus);
-            syncRecoveredStreamSnapshot(prepared.session, prepared.sessionStateStatus);
+            syncRecoveredStreamSnapshot(
+              prepared.session,
+              prepared.sessionStateStatus,
+              recovery.activeStream,
+            );
             setIsSessionSnapshotReady(true);
             if (!sessionMetadataDirtyRef.current) {
               setDialogueMode(metadata.dialogueMode);
-              setToolSurfaceProfile(metadata.toolSurfaceProfile);
               setManualAgentId(metadata.agentId ?? '');
               setYoloMode(metadata.yoloMode);
               setWebSearchEnabled(metadata.webSearchEnabled);
@@ -1825,7 +1121,6 @@ export default function ChatPage() {
             lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
               dialogueMode: metadata.dialogueMode,
               agentId: metadata.agentId,
-              toolSurfaceProfile: metadata.toolSurfaceProfile,
               yoloMode: metadata.yoloMode,
               webSearchEnabled: metadata.webSearchEnabled,
               thinkingEnabled: metadata.thinkingEnabled,
@@ -1879,6 +1174,7 @@ export default function ChatPage() {
     };
   }, [
     activateSessionView,
+    chatView,
     clearSessionMetadataDirty,
     gatewayUrl,
     isCurrentSessionView,
@@ -1891,79 +1187,17 @@ export default function ChatPage() {
     token,
   ]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void workspaceTreeVersion;
-
-    if (!effectiveWorkingDirectory) {
-      setWorkspaceFileItems([]);
-      return;
-    }
-
-    void (async () => {
-      try {
-        const nodes = await workspace.fetchTree(effectiveWorkingDirectory, 2);
-        const files = flattenWorkspaceFiles(nodes, effectiveWorkingDirectory);
-
-        if (!cancelled) {
-          setWorkspaceFileItems(files);
-        }
-      } catch {
-        if (!cancelled) {
-          setWorkspaceFileItems([]);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveWorkingDirectory, workspace.fetchTree, workspaceTreeVersion]);
-
-  useEffect(() => {
-    if (!token || !rightOpen || rightTab !== 'mcp') return;
-    let cancelled = false;
-    void fetch(`${gatewayUrl}/settings/mcp-status`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fail'))))
-      .then(
-        (data: {
-          servers?: Array<{
-            id: string;
-            name: string;
-            type?: string;
-            status?: string;
-            enabled?: boolean;
-          }>;
-        }) => {
-          if (!cancelled) {
-            setMcpServers(
-              (data.servers ?? []).map((server) => ({
-                id: server.id,
-                name: server.name,
-                status:
-                  server.status === 'connected' ||
-                  server.status === 'connecting' ||
-                  server.status === 'error'
-                    ? server.status
-                    : server.enabled === false
-                      ? 'disconnected'
-                      : 'connecting',
-                toolCount: 0,
-                authType: server.type,
-              })),
-            );
-          }
-        },
-      )
-      .catch(() => {
-        if (!cancelled) setMcpServers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [rightOpen, rightTab, token, gatewayUrl]);
+  useChatDataLoaders({
+    effectiveWorkingDirectory,
+    workspace,
+    workspaceTreeVersion,
+    setWorkspaceFileItems,
+    token,
+    gatewayUrl,
+    rightOpen,
+    rightTab,
+    setMcpServers,
+  });
 
   useEffect(() => {
     if (!currentSessionId || !token || !shouldPollSessionSubresources) {
@@ -2062,160 +1296,24 @@ export default function ChatPage() {
     token,
   ]);
 
-  const isNearBottomRef = useRef(true);
-  const ignoreScrollEventsUntilRef = useRef(0);
-
-  const getLatestAssistantAnchor = useCallback((): HTMLElement | null => {
-    const scrollRegion = scrollRegionRef.current;
-    if (!scrollRegion) {
-      return bottomRef.current;
-    }
-
-    const groups = scrollRegion.querySelectorAll<HTMLElement>(
-      '[data-chat-group-root="true"][data-role="assistant"]',
+  const { isNearBottomRef, ignoreScrollEventsUntilRef, handleScroll, scrollToBottom } =
+    useScrollManager(
+      {
+        scrollRegionRef,
+        bottomRef,
+        pendingScrollFrameRef,
+        contentColumnRef,
+        editorPaneRef,
+        textareaRef,
+      },
+      { setShowScrollToBottom, setHasPendingFollowContent },
+      {
+        messagesLength: messages.length,
+        visibleStreaming,
+        visibleStreamBufferLength: visibleStreamBuffer.length,
+        editorMode,
+      },
     );
-
-    return groups[groups.length - 1] ?? bottomRef.current;
-  }, []);
-
-  const getLatestAnchorMetrics = useCallback(
-    (
-      scrollRegion: HTMLDivElement | null,
-    ): {
-      anchorHeight: number;
-      anchorTop: number;
-      clientHeight: number;
-      maxScrollTop: number;
-    } | null => {
-      if (!scrollRegion || scrollRegion.clientHeight <= 0) {
-        return null;
-      }
-
-      const latestAnchor = getLatestAssistantAnchor();
-      if (
-        !latestAnchor ||
-        latestAnchor === bottomRef.current ||
-        !scrollRegion.contains(latestAnchor)
-      ) {
-        return null;
-      }
-
-      const scrollRegionRect = scrollRegion.getBoundingClientRect();
-      const latestAnchorRect = latestAnchor.getBoundingClientRect();
-      if (scrollRegionRect.height === 0 || latestAnchorRect.height === 0) {
-        return null;
-      }
-
-      return {
-        anchorHeight: latestAnchorRect.height,
-        anchorTop: scrollRegion.scrollTop + (latestAnchorRect.top - scrollRegionRect.top),
-        clientHeight: scrollRegion.clientHeight,
-        maxScrollTop: Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight),
-      };
-    },
-    [getLatestAssistantAnchor],
-  );
-
-  const isScrollRegionNearLatest = useCallback(
-    (scrollRegion: HTMLDivElement | null): boolean => {
-      if (!scrollRegion) {
-        return true;
-      }
-
-      const distanceToBottom =
-        scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight;
-      if (distanceToBottom <= CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX) {
-        return true;
-      }
-
-      const latestAnchorMetrics = getLatestAnchorMetrics(scrollRegion);
-      if (!latestAnchorMetrics) {
-        return (
-          scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight <
-          CHAT_LATEST_REGION_FALLBACK_PX
-        );
-      }
-
-      const followTolerance = Math.min(
-        160,
-        Math.max(CHAT_LATEST_FOCUS_THRESHOLD_PX * 2, scrollRegion.clientHeight * 0.18),
-      );
-
-      return isScrollTopNearLatest({
-        ...latestAnchorMetrics,
-        align: visibleStreaming ? 'center' : 'latest-edge',
-        centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
-        scrollTop: scrollRegion.scrollTop,
-        tolerancePx: followTolerance,
-      });
-    },
-    [getLatestAnchorMetrics, visibleStreaming],
-  );
-
-  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
-    const el = e.currentTarget;
-    if (performance.now() < ignoreScrollEventsUntilRef.current) {
-      return;
-    }
-
-    const isNearLatest = isScrollRegionNearLatest(el);
-    isNearBottomRef.current = isNearLatest;
-    setShowScrollToBottom(!isNearLatest);
-    if (isNearLatest) {
-      setHasPendingFollowContent(false);
-    }
-  }
-
-  const scrollToBottom = useCallback(
-    (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'center') => {
-      const scrollRegion = scrollRegionRef.current;
-      const latestAnchor = getLatestAssistantAnchor();
-
-      isNearBottomRef.current = true;
-      setShowScrollToBottom(false);
-      setHasPendingFollowContent(false);
-      if (pendingScrollFrameRef.current !== null) {
-        cancelAnimationFrame(pendingScrollFrameRef.current);
-      }
-
-      ignoreScrollEventsUntilRef.current =
-        behavior === 'smooth' ? performance.now() + CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS : 0;
-
-      pendingScrollFrameRef.current = requestAnimationFrame(() => {
-        if (scrollRegion) {
-          const maxScrollTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
-          const latestAnchorMetrics =
-            latestAnchor &&
-            latestAnchor !== bottomRef.current &&
-            scrollRegion.contains(latestAnchor)
-              ? getLatestAnchorMetrics(scrollRegion)
-              : null;
-          const nextTop = latestAnchorMetrics
-            ? resolveLatestScrollTop({
-                ...latestAnchorMetrics,
-                align,
-                centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
-              })
-            : maxScrollTop;
-          const shouldForceScroll = scrollRegion.clientHeight === 0;
-
-          if (
-            shouldForceScroll ||
-            Math.abs(scrollRegion.scrollTop - nextTop) > CHAT_LATEST_FOCUS_THRESHOLD_PX
-          ) {
-            scrollRegion.scrollTo({ top: nextTop, behavior });
-          }
-        } else {
-          bottomRef.current?.scrollIntoView({
-            behavior,
-            block: align === 'center' ? 'center' : 'end',
-          });
-        }
-        pendingScrollFrameRef.current = null;
-      });
-    },
-    [getLatestAnchorMetrics, getLatestAssistantAnchor],
-  );
 
   const focusComposerWithText = useCallback((text: string) => {
     setInput(text);
@@ -2228,91 +1326,58 @@ export default function ChatPage() {
     });
   }, []);
 
-  const getCopyableMessageText = useCallback((message: ChatMessage): string => {
-    if (message.role === 'user') return message.content;
-    const assistantEvent = parseAssistantEventContent(message.content);
-    if (assistantEvent) {
-      return [assistantEvent.title, assistantEvent.message, `状态：${assistantEvent.status}`]
-        .filter((item) => item && item.trim().length > 0)
-        .join('\n');
-    }
-    const assistantTrace = parseAssistantTraceContent(message.content);
-    if (assistantTrace) {
-      const lines = [
-        ...(assistantTrace.reasoningBlocks ?? []).map((item) => `_Thinking:_\n\n${item}`),
-        assistantTrace.text,
-      ];
-      for (const toolCall of assistantTrace.toolCalls) {
-        lines.push(`工具：${toolCall.toolName}`);
-        lines.push(`输入：${JSON.stringify(toolCall.input, null, 2)}`);
-        if (toolCall.output !== undefined) {
-          lines.push(`输出：${JSON.stringify(toolCall.output, null, 2)}`);
-        }
+  const handleToggleMessageRating = useCallback(
+    async (message: ChatMessage, rating: SessionMessageRatingValue) => {
+      if (!token || !currentSessionId || message.role !== 'assistant' || !message.rawContent) {
+        return;
       }
-      return lines.filter((item) => item && item.trim().length > 0).join('\n\n');
-    }
 
-    try {
-      const parsed = JSON.parse(message.content) as GenerativeUIMessage;
-      if (parsed.type === 'status') {
-        const payload = parsed.payload as Record<string, unknown>;
-        return [payload['title'], payload['message']]
-          .filter((item) => typeof item === 'string')
-          .join('\n');
-      }
-      if (parsed.type === 'compaction') {
-        const payload = parsed.payload as Record<string, unknown>;
-        return [payload['title'], payload['summary']]
-          .filter((item) => typeof item === 'string')
-          .join('\n');
-      }
-      if (parsed.type === 'tool_call') {
-        const payload = parsed.payload as Record<string, unknown>;
-        const lines = [
-          typeof payload['toolName'] === 'string' ? `工具：${payload['toolName']}` : undefined,
-          payload['input'] !== undefined
-            ? `输入：${JSON.stringify(payload['input'], null, 2)}`
-            : undefined,
-          payload['output'] !== undefined
-            ? `输出：${JSON.stringify(payload['output'], null, 2)}`
-            : undefined,
-        ].filter((item): item is string => Boolean(item));
-        return lines.join('\n');
-      }
-    } catch {
-      return message.content;
-    }
-    return message.content;
-  }, []);
+      const existingRating = messageRatings[message.id]?.rating;
+      const sessionsClient = createSessionsClient(gatewayUrl);
 
-  const findRetrySource = useCallback(
-    (messageId: string): { id: string; text: string } | null => {
-      const index = messages.findIndex((item) => item.id === messageId);
-      if (index === -1) return null;
-      for (let cursor = index; cursor >= 0; cursor -= 1) {
-        const candidate = messages[cursor];
-        if (candidate?.role === 'user') {
-          return { id: candidate.id, text: candidate.content };
+      try {
+        if (existingRating === rating) {
+          await sessionsClient.deleteMessageRating(token, currentSessionId, message.id);
+          setMessageRatings((previous) => {
+            const next = { ...previous };
+            delete next[message.id];
+            return next;
+          });
+          return;
         }
+
+        const nextRating = await sessionsClient.setMessageRating(
+          token,
+          currentSessionId,
+          message.id,
+          { rating },
+        );
+        setMessageRatings((previous) => ({ ...previous, [message.id]: nextRating }));
+      } catch (error) {
+        logger.error('message rating failed', error);
       }
-      return null;
     },
-    [messages],
+    [currentSessionId, gatewayUrl, messageRatings, token],
   );
 
-  const isHistoricalUserMessage = useCallback(
-    (messageId: string): boolean => {
-      const index = messages.findIndex((item) => item.id === messageId && item.role === 'user');
-      return index !== -1 && index < messages.length - 1;
-    },
-    [messages],
-  );
-
-  const containsCodeMarkers = useCallback((text: string): boolean => {
-    return /```|<file\s+name=|diff --git|^\s*(import|export|function|const|let|class)\s+/m.test(
-      text,
-    );
-  }, []);
+  const {
+    getCopyableMessageText,
+    handleCopyMessage,
+    handleCopyMessageGroup,
+    handleEditRetryMessage,
+    handleRetryMessage,
+    findRetrySource,
+    isHistoricalUserMessage,
+    containsCodeMarkers,
+    buildMessageActions,
+  } = useChatMessageActions({
+    messages,
+    messageRatings,
+    onToggleMessageRating: handleToggleMessageRating,
+    focusComposerWithText,
+    setHistoryEditPrompt,
+    setRetryPrompt,
+  });
 
   const createBranchSessionFromMessage = useCallback(
     async (text: string, sourceMessageId: string) => {
@@ -2328,7 +1393,7 @@ export default function ChatPage() {
       const truncatedMessages = (sourceIndex >= 0 ? baseMessages.slice(0, sourceIndex) : []).map(
         (message) => ({
           ...message,
-          id: crypto.randomUUID(),
+          id: makeOrderedMessageId(),
         }),
       );
 
@@ -2407,79 +1472,6 @@ export default function ChatPage() {
     [],
   );
 
-  useEffect(() => {
-    return () => {
-      if (pendingScrollFrameRef.current !== null) {
-        cancelAnimationFrame(pendingScrollFrameRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (messages.length === 0 && !visibleStreaming && visibleStreamBuffer.length === 0) {
-      setShowScrollToBottom(false);
-      setHasPendingFollowContent(false);
-    }
-  }, [messages.length, visibleStreamBuffer.length, visibleStreaming]);
-
-  useEffect(() => {
-    if (visibleStreaming && isNearBottomRef.current) {
-      scrollToBottom('auto');
-    }
-  }, [scrollToBottom, visibleStreaming]);
-
-  useEffect(() => {
-    if (visibleStreaming && isNearBottomRef.current && visibleStreamBuffer.length > 0) {
-      scrollToBottom('auto');
-    }
-  }, [scrollToBottom, visibleStreamBuffer.length, visibleStreaming]);
-
-  useEffect(() => {
-    if (editorMode) {
-      return;
-    }
-
-    const activeElement = document.activeElement;
-    if (activeElement instanceof HTMLElement && editorPaneRef.current?.contains(activeElement)) {
-      textareaRef.current?.focus();
-    }
-  }, [editorMode]);
-
-  useEffect(() => {
-    if (isNearBottomRef.current && messages.length > 0) {
-      scrollToBottom('auto', 'latest-edge');
-    }
-  }, [messages.length, scrollToBottom]);
-
-  useEffect(() => {
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const contentColumn = contentColumnRef.current;
-    if (!contentColumn) {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      if (!isNearBottomRef.current) {
-        return;
-      }
-
-      if (messages.length === 0 && !visibleStreaming) {
-        return;
-      }
-
-      scrollToBottom('auto', visibleStreaming ? 'center' : 'latest-edge');
-    });
-
-    observer.observe(contentColumn);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [messages.length, scrollToBottom, visibleStreaming]);
-
   async function ensureSession(): Promise<string> {
     if (currentSessionId) {
       activeSessionRef.current = currentSessionId;
@@ -2557,121 +1549,30 @@ export default function ChatPage() {
     return session.id;
   }
 
-  const appendFiles = useCallback((files: File[]) => {
-    if (files.length === 0) return;
-    setAttachedFiles((prev) => [...prev, ...files]);
-    const newItems: AttachmentItem[] = files.map((file) => ({
-      id: `${file.name}-${Date.now()}-${Math.random()}`,
-      name: file.name,
-      type: file.type.startsWith('image/')
-        ? 'image'
-        : file.type.startsWith('audio/')
-          ? 'audio'
-          : 'file',
-      sizeBytes: file.size,
-    }));
-    setAttachmentItems((prev) => [...prev, ...newItems]);
-  }, []);
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    appendFiles(files);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }
-
-  function removeFile(index: number) {
-    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function removeAttachment(id: string) {
-    const idx = attachmentItems.findIndex((a) => a.id === id);
-    if (idx !== -1) removeFile(idx);
-    setAttachmentItems((prev) => prev.filter((a) => a.id !== id));
-  }
-
-  const clearComposerDraft = useCallback(() => {
-    setInput('');
-    setAttachedFiles([]);
-    setAttachmentItems([]);
-    setComposerMenu(null);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-    });
-  }, []);
-
-  const enqueueComposerMessage = useCallback(async () => {
-    const nextText = sanitizeComposerPlainText(input).trim();
-    if (nextText.length === 0 && attachedFiles.length === 0) {
-      return false;
-    }
-
-    const queueItem: QueuedComposerMessage = {
-      attachmentItems: attachmentItems.map((item) => ({ ...item })),
-      files: [...attachedFiles],
-      id: crypto.randomUUID(),
-      requiresAttachmentRebind: attachedFiles.length > 0 && !queuedComposerScope,
-      text: nextText,
-    };
-    setQueuedComposerMessages((previous) => [...previous, queueItem]);
-    clearComposerDraft();
-
-    if (attachedFiles.length > 0 && queuedComposerScope) {
-      const persisted = await persistQueuedComposerFiles({
-        attachmentItems: queueItem.attachmentItems,
-        files: queueItem.files,
-        queueId: queueItem.id,
-        scope: queuedComposerScope,
-      });
-      if (!persisted) {
-        setQueuedComposerMessages((previous) =>
-          previous.map((item) =>
-            item.id === queueItem.id ? { ...item, requiresAttachmentRebind: true } : item,
-          ),
-        );
-      }
-    }
-
-    return true;
-  }, [attachedFiles, attachmentItems, clearComposerDraft, input, queuedComposerScope]);
-
-  const removeQueuedComposerMessage = useCallback(
-    (messageId: string) => {
-      if (queuedComposerScope) {
-        void deleteQueuedComposerFiles({ queueId: messageId, scope: queuedComposerScope });
-      }
-      setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
-    },
-    [queuedComposerScope],
-  );
-
-  const restoreQueuedComposerMessage = useCallback(
-    (messageId: string) => {
-      const queueItem = queuedComposerMessages.find((item) => item.id === messageId);
-      if (!queueItem) {
-        return;
-      }
-
-      if (queuedComposerScope) {
-        void deleteQueuedComposerFiles({ queueId: messageId, scope: queuedComposerScope });
-      }
-      setQueuedComposerMessages((previous) => previous.filter((item) => item.id !== messageId));
-      setInput((previous) =>
-        previous.trim().length > 0 ? `${queueItem.text}\n\n${previous}` : queueItem.text,
-      );
-      setAttachedFiles(queueItem.files);
-      setAttachmentItems(queueItem.files.length > 0 ? queueItem.attachmentItems : []);
-      setComposerMenu(null);
-      setStreamError(
-        queueItem.requiresAttachmentRebind && queueItem.attachmentItems.length > 0
-          ? `已恢复待发文本，原有 ${queueItem.attachmentItems.length} 个附件需要重新选择后再发送。`
-          : null,
-      );
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-      });
-    },
-    [queuedComposerMessages, queuedComposerScope],
-  );
+  const {
+    appendFiles,
+    handleFileChange,
+    removeFile,
+    removeAttachment,
+    clearComposerDraft,
+    enqueueComposerMessage,
+    removeQueuedComposerMessage,
+    restoreQueuedComposerMessage,
+  } = useComposerQueue({
+    input,
+    setInput,
+    attachedFiles,
+    setAttachedFiles,
+    attachmentItems,
+    setAttachmentItems,
+    queuedComposerMessages,
+    setQueuedComposerMessages,
+    queuedComposerScope,
+    setComposerMenu,
+    setStreamError,
+    textareaRef,
+    fileInputRef,
+  });
 
   async function sendMessage(
     overrideText?: string,
@@ -2735,7 +1636,7 @@ export default function ChatPage() {
           );
           appendAssistantEventMessages(events, { excludeCompaction: true });
         },
-        onOpenRightPanel: () => setRightOpen(true),
+        onOpenRightPanel: () => {},
       });
       requestSessionListRefresh();
       return true;
@@ -2775,7 +1676,7 @@ export default function ChatPage() {
       }
     }
 
-    currentAssistantStreamMessageIdRef.current = crypto.randomUUID();
+    currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
     streamingRef.current = true;
     setStreaming(true);
     setStoppingStream(false);
@@ -2815,6 +1716,12 @@ export default function ChatPage() {
                   toolCallState.status === 'streaming'
                 ? { ...toolCallState, status: 'paused' as const }
                 : toolCallState;
+        const hasPendingPermission = hasActivePendingPermissionRequest({
+          isError: nextToolState.isError,
+          pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
+          resumedAfterApproval: nextToolState.resumedAfterApproval,
+          status: nextToolState.status,
+        });
         const status: 'running' | 'paused' | 'completed' | 'failed' =
           nextToolState.status === 'error'
             ? 'failed'
@@ -2824,6 +1731,11 @@ export default function ChatPage() {
                 ? 'completed'
                 : 'running';
 
+        const durationMs =
+          nextToolState.completedAt && nextToolState.createdAt
+            ? nextToolState.completedAt - nextToolState.createdAt
+            : undefined;
+
         return {
           kind: resolveAssistantCapabilityKind(nextToolState.toolName),
           toolCallId: nextToolState.toolCallId,
@@ -2831,9 +1743,12 @@ export default function ChatPage() {
           input: parseToolCallInputText(nextToolState.inputText),
           output: nextToolState.output,
           isError: nextToolState.isError,
-          pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
+          ...(hasPendingPermission
+            ? { pendingPermissionRequestId: nextToolState.pendingPermissionRequestId }
+            : {}),
           resumedAfterApproval: nextToolState.resumedAfterApproval,
           status,
+          ...(durationMs !== undefined ? { durationMs } : {}),
         };
       });
 
@@ -2850,7 +1765,7 @@ export default function ChatPage() {
     };
 
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: makeOrderedMessageId(),
       role: 'user',
       content: text,
       createdAt: requestStartedAt,
@@ -2907,21 +1822,41 @@ export default function ChatPage() {
         if (event.type === 'tool_result') {
           toolCallIds.add(event.toolCallId);
           const previous = liveToolCalls.get(event.toolCallId);
+          const rawPendingPermissionRequestId = event.pendingPermissionRequestId;
+          const hasPendingPermission = hasActivePendingPermissionRequest(event);
           liveToolCalls.set(event.toolCallId, {
             createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
+            completedAt: event.occurredAt ?? Date.now(),
             inputText: previous?.inputText ?? '',
             output: event.output,
-            isError: event.pendingPermissionRequestId ? false : event.isError,
-            pendingPermissionRequestId: event.pendingPermissionRequestId,
+            isError: hasPendingPermission ? false : event.isError,
+            pendingPermissionRequestId: hasPendingPermission
+              ? event.pendingPermissionRequestId
+              : undefined,
             resumedAfterApproval: event.resumedAfterApproval,
             toolCallId: event.toolCallId,
-            status: event.pendingPermissionRequestId
-              ? 'paused'
-              : event.isError
-                ? 'error'
-                : 'completed',
+            status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
             toolName: event.toolName,
           });
+          setMessages((previousMessages) => {
+            const nextMessages = applyToolResultToLocalAssistantMessages(previousMessages, event);
+            return typeof rawPendingPermissionRequestId === 'string' &&
+              rawPendingPermissionRequestId.length > 0 &&
+              !hasPendingPermission
+              ? dismissPermissionEventMessage(nextMessages, rawPendingPermissionRequestId)
+              : nextMessages;
+          });
+          if (
+            typeof rawPendingPermissionRequestId === 'string' &&
+            rawPendingPermissionRequestId.length > 0 &&
+            !hasPendingPermission
+          ) {
+            setPendingPermissions((previousPermissions) =>
+              previousPermissions.filter(
+                (permission) => permission.requestId !== rawPendingPermissionRequestId,
+              ),
+            );
+          }
         }
 
         if (event.type === 'session_child') {
@@ -2987,6 +1922,7 @@ export default function ChatPage() {
         if (event.type === 'permission_asked') {
           pausedForPermission = true;
           setSessionStateStatus('paused');
+          setMessages((previous) => upsertPermissionEventMessage(previous, event));
           setPendingPermissions((previous) => {
             const nextPermission: PendingPermissionRequest = {
               createdAt: new Date(event.occurredAt ?? Date.now()).toISOString(),
@@ -3020,10 +1956,19 @@ export default function ChatPage() {
           if (event.decision !== 'reject') {
             setSessionStateStatus('running');
           }
+          setMessages((previous) =>
+            dismissPermissionEventMessage(
+              applyPermissionDecisionToLocalAssistantMessages(
+                previous,
+                event.requestId,
+                event.decision,
+              ),
+              event.requestId,
+            ),
+          );
           setPendingPermissions((previous) =>
             previous.filter((permission) => permission.requestId !== event.requestId),
           );
-          pruneResolvedPendingPermissionMessages(event.requestId);
           setRightPanelState((previous) =>
             clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
           );
@@ -3101,7 +2046,6 @@ export default function ChatPage() {
           toolPanelRevealed = true;
           if (!rightOpenRef.current) {
             setRightTab('tools');
-            setRightOpen(true);
           }
         }
       },
@@ -3131,7 +2075,7 @@ export default function ChatPage() {
           setMessages((prev) => [
             ...prev,
             {
-              id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
+              id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
               role: 'assistant',
               content,
               createdAt: finishedAt,
@@ -3155,7 +2099,7 @@ export default function ChatPage() {
           setMessages((prev) => [
             ...prev,
             {
-              id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
+              id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
               role: 'assistant',
               content,
               createdAt: finishedAt,
@@ -3195,7 +2139,7 @@ export default function ChatPage() {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: makeOrderedMessageId(),
             role: 'assistant',
             content,
             createdAt: finishedAt,
@@ -3222,7 +2166,11 @@ export default function ChatPage() {
       model: activeModelId || 'default',
       providerId: activeProviderId || undefined,
       thinkingEnabled: requestModelSupportsThinking ? thinkingEnabled : false,
-      reasoningEffort: requestModelSupportsThinking ? reasoningEffort : undefined,
+      reasoningEffort: requestModelSupportsThinking
+        ? thinkingEnabled && detectThinkKeyword(requestText)
+          ? 'high'
+          : reasoningEffort
+        : undefined,
       webSearchEnabled,
       yoloMode,
     });
@@ -3231,216 +2179,200 @@ export default function ChatPage() {
 
   sendMessageRef.current = sendMessage;
 
-  const handleCopyMessage = useCallback(
-    (message: ChatMessage) => {
-      const copyRequest = navigator.clipboard?.writeText(getCopyableMessageText(message));
-      void copyRequest?.catch(() => undefined);
-    },
-    [getCopyableMessageText],
-  );
+  const {
+    resolveAssistantCapabilityKind,
+    appendAssistantDerivedMessages,
+    appendAssistantEventMessages,
+  } = useAssistantMessageProcessing({
+    composerWorkspaceCatalog,
+    setMessages,
+  });
 
-  const handleCopyMessageGroup = useCallback(
-    (groupMessages: ChatMessage[]) => {
-      const combinedText = groupMessages
-        .map((message) => getCopyableMessageText(message))
-        .filter((text) => text.trim().length > 0)
-        .join('\n\n');
+  const { appendCommandCard, handleCompactCurrentSession, handleSaveFile, handleSplitMouseDown } =
+    useChatUiActions({
+      token,
+      gatewayUrl,
+      currentSessionId,
+      composerCommandDescriptors,
+      appendAssistantDerivedMessages,
+      appendAssistantEventMessages,
+      resolveAssistantCapabilityKind,
+      setRightPanelState,
+      setRightOpen,
+      setRightTab,
+      fileEditor,
+      openFileRef,
+      setEditorMode,
+      setSaving,
+      splitDragging,
+      splitContainerRef,
+      setSplitPos,
+    });
 
-      if (combinedText.length === 0) {
-        return;
+  const refreshSessionsAfterInlinePermissionReply = useCallback(
+    (targetSessionId: string) => {
+      const refreshTargets = new Set<string>();
+      if (currentSessionId) {
+        refreshTargets.add(currentSessionId);
       }
+      refreshTargets.add(targetSessionId);
 
-      const copyRequest = navigator.clipboard?.writeText(combinedText);
-      void copyRequest?.catch(() => undefined);
-    },
-    [getCopyableMessageText],
-  );
-
-  const handleEditRetryMessage = useCallback(
-    (message: ChatMessage) => {
-      if (isHistoricalUserMessage(message.id)) {
-        setHistoryEditPrompt({
-          messageId: message.id,
-          text: message.content,
-          hasCodeMarkers: containsCodeMarkers(message.content),
+      const flushRefresh = () => {
+        refreshTargets.forEach((sessionId) => {
+          requestCurrentSessionRefresh(sessionId);
         });
+        requestSessionListRefresh();
+      };
+
+      flushRefresh();
+      window.setTimeout(() => {
+        flushRefresh();
+      }, 2000);
+    },
+    [currentSessionId],
+  );
+
+  const handleInlinePermissionDecision = useCallback(
+    async (request: PendingPermissionRequest, decision: PermissionDecision) => {
+      if (!token) {
+        setStreamError('当前未登录，无法处理权限审批。');
         return;
       }
-      focusComposerWithText(message.content);
-    },
-    [containsCodeMarkers, focusComposerWithText, isHistoricalUserMessage],
-  );
 
-  const handleRetryMessage = useCallback(
-    (messageId: string) => {
-      const retrySource = findRetrySource(messageId);
-      if (!retrySource) return;
-      setRetryPrompt({ sourceMessageId: retrySource.id, text: retrySource.text });
-    },
-    [findRetrySource],
-  );
+      setInlinePermissionPendingDecision({ decision, requestId: request.requestId });
+      setInlinePermissionErrors((previous) => {
+        const next = { ...previous };
+        delete next[request.requestId];
+        return next;
+      });
 
-  const buildMessageActions = useCallback(
-    (message: ChatMessage) => [
-      {
-        id: 'copy',
-        label: '复制',
-        onClick: () => handleCopyMessage(message),
-      },
-      ...(message.role === 'assistant' && message.rawContent
-        ? [
-            {
-              id: 'rate-up',
-              label: messageRatings[message.id]?.rating === 'up' ? '👍 已赞' : '👍',
-              onClick: () => void handleToggleMessageRating(message, 'up'),
-            },
-            {
-              id: 'rate-down',
-              label: messageRatings[message.id]?.rating === 'down' ? '👎 已踩' : '👎',
-              onClick: () => void handleToggleMessageRating(message, 'down'),
-            },
-          ]
-        : []),
-      ...(message.role === 'user'
-        ? [
-            {
-              id: 'edit-retry',
-              label: '编辑重试',
-              onClick: () => handleEditRetryMessage(message),
-            },
-          ]
-        : [
-            {
-              id: 'retry',
-              label: '重试',
-              onClick: () => handleRetryMessage(message.id),
-            },
-          ]),
-    ],
+      try {
+        await createPermissionsClient(gatewayUrl).reply(token, request.sessionId, {
+          requestId: request.requestId,
+          decision,
+        });
+        const successMessage =
+          decision === 'once'
+            ? '已提交：本次允许'
+            : decision === 'session'
+              ? '已提交：本会话允许'
+              : decision === 'permanent'
+                ? '已提交：永久允许'
+                : '已提交：已拒绝';
+        setMessages((previous) =>
+          dismissPermissionEventMessage(
+            applyPermissionDecisionToLocalAssistantMessages(previous, request.requestId, decision),
+            request.requestId,
+          ),
+        );
+        setPendingPermissions((previous) =>
+          previous.filter((permission) => permission.requestId !== request.requestId),
+        );
+        setRightPanelState((previous) =>
+          clearResolvedPendingPermissionToolCalls(previous, request.requestId, decision),
+        );
+        toast(successMessage, decision === 'reject' ? 'warning' : 'success', 2200);
+        refreshSessionsAfterInlinePermissionReply(request.sessionId);
+      } catch (error) {
+        const status =
+          typeof error === 'object' &&
+          error !== null &&
+          typeof Reflect.get(error, 'status') === 'number'
+            ? (Reflect.get(error, 'status') as number)
+            : null;
+        const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
+
+        if (status === 404 || status === 409) {
+          setPendingPermissions((previous) =>
+            previous.filter((permission) => permission.requestId !== request.requestId),
+          );
+          refreshSessionsAfterInlinePermissionReply(request.sessionId);
+        } else {
+          setInlinePermissionErrors((previous) => ({
+            ...previous,
+            [request.requestId]: errorMessage,
+          }));
+        }
+      } finally {
+        setInlinePermissionPendingDecision((current) =>
+          current?.requestId === request.requestId ? null : current,
+        );
+      }
+    },
     [
-      handleCopyMessage,
-      handleEditRetryMessage,
-      handleRetryMessage,
-      handleToggleMessageRating,
-      messageRatings,
+      gatewayUrl,
+      refreshSessionsAfterInlinePermissionReply,
+      setRightPanelState,
+      token,
+      setStreamError,
     ],
   );
 
-  const capabilityKindHints = useMemo(
-    () =>
-      [
-        ...composerWorkspaceCatalog.agents.flatMap((item) => [
-          { kind: 'agent' as const, value: item.label.trim().toLowerCase() },
-          { kind: 'agent' as const, value: item.id.trim().toLowerCase() },
-        ]),
-        ...composerWorkspaceCatalog.installedSkills.flatMap((item) => [
-          { kind: 'skill' as const, value: item.label.trim().toLowerCase() },
-          { kind: 'skill' as const, value: item.id.trim().toLowerCase() },
-        ]),
-        ...composerWorkspaceCatalog.mcpServers.flatMap((item) => [
-          { kind: 'mcp' as const, value: item.label.trim().toLowerCase() },
-          { kind: 'mcp' as const, value: item.id.trim().toLowerCase() },
-        ]),
-        ...composerWorkspaceCatalog.agentTools.map((item) => ({
-          kind: 'tool' as const,
-          value: item.name.trim().toLowerCase(),
-        })),
-      ].filter((item) => item.value.length > 0),
-    [composerWorkspaceCatalog],
+  const pendingPermissionsById = useMemo(
+    () => new Map(pendingPermissions.map((permission) => [permission.requestId, permission])),
+    [pendingPermissions],
   );
 
-  const resolveAssistantCapabilityKind = useCallback(
-    (text: string | undefined): 'agent' | 'mcp' | 'skill' | 'tool' | undefined => {
-      const normalized = (text ?? '').trim().toLowerCase();
-      if (normalized.length === 0) {
+  const resolveInlinePermissionActions = useCallback(
+    (requestId: string) => {
+      const request = pendingPermissionsById.get(requestId);
+      if (!request) {
         return undefined;
       }
 
-      const matched = capabilityKindHints.find(
-        (item) => normalized === item.value || normalized.includes(item.value),
-      );
-      return matched?.kind;
-    },
-    [capabilityKindHints],
-  );
+      const pendingDecision =
+        inlinePermissionPendingDecision?.requestId === requestId
+          ? inlinePermissionPendingDecision.decision
+          : null;
+      const disabled = pendingDecision !== null;
 
-  const resolveAssistantEventKind = useCallback(
-    (event: RunEvent): AssistantEventKind | undefined => {
-      if (event.type === 'compaction') {
-        return 'compaction';
-      }
-      if (event.type === 'permission_asked' || event.type === 'permission_replied') {
-        return 'permission';
-      }
-      if (event.type === 'audit_ref') {
-        return resolveAssistantCapabilityKind(event.toolName) ?? 'audit';
-      }
-      if (event.type === 'task_update') {
-        return resolveAssistantCapabilityKind(event.label);
-      }
-      if (event.type === 'session_child') {
-        return resolveAssistantCapabilityKind(event.title ?? event.sessionId);
-      }
-      return undefined;
+      return {
+        items: [
+          {
+            id: 'session',
+            label: pendingDecision === 'session' ? '处理中…' : '本会话允许',
+            disabled,
+            hint: '仅在当前会话内记住这次授权选择，适合继续当前任务。',
+            primary: true,
+            onClick: () => void handleInlinePermissionDecision(request, 'session'),
+          },
+          {
+            id: 'once',
+            label: pendingDecision === 'once' ? '处理中…' : '允许一次',
+            disabled,
+            hint: '只批准当前这一次工具调用，不保留后续授权。',
+            onClick: () => void handleInlinePermissionDecision(request, 'once'),
+          },
+          {
+            id: 'permanent',
+            label: pendingDecision === 'permanent' ? '处理中…' : '永久允许',
+            disabled,
+            hint: '会记住后续同类请求，请在充分确认风险后再使用。',
+            onClick: () => void handleInlinePermissionDecision(request, 'permanent'),
+          },
+          {
+            id: 'reject',
+            label: pendingDecision === 'reject' ? '处理中…' : '拒绝',
+            danger: true,
+            disabled,
+            hint: '阻止本次调用，工具不会继续执行。',
+            onClick: () => void handleInlinePermissionDecision(request, 'reject'),
+          },
+        ],
+        pendingLabel: pendingDecision
+          ? '正在提交审批结果…'
+          : '推荐：本会话允许 · 临时：允许一次 · 持久：永久允许',
+        helperMessage: pendingDecision ? undefined : '永久允许会记住后续同类请求，请谨慎选择。',
+        errorMessage: inlinePermissionErrors[requestId],
+      };
     },
-    [resolveAssistantCapabilityKind],
+    [
+      handleInlinePermissionDecision,
+      inlinePermissionErrors,
+      inlinePermissionPendingDecision,
+      pendingPermissionsById,
+    ],
   );
-
-  const appendAssistantDerivedMessages = useCallback(
-    (
-      contents: Array<{
-        content: string;
-        createdAt?: number;
-      }>,
-    ) => {
-      if (contents.length === 0) {
-        return;
-      }
-      setMessages((prev) => [
-        ...prev,
-        ...contents.map((item) => ({
-          id: crypto.randomUUID(),
-          role: 'assistant' as const,
-          content: item.content,
-          createdAt: item.createdAt ?? Date.now(),
-          status: 'completed' as const,
-        })),
-      ]);
-    },
-    [],
-  );
-
-  const appendAssistantEventMessages = useCallback(
-    (events: RunEvent[], options?: { excludeCompaction?: boolean }) => {
-      const contents = events.flatMap((event) => {
-        if (options?.excludeCompaction === true && event.type === 'compaction') {
-          return [];
-        }
-        const content = createAssistantEventContent(event, {
-          kindOverride: resolveAssistantEventKind(event),
-        });
-        return content
-          ? [
-              {
-                content,
-                createdAt: event.occurredAt,
-              },
-            ]
-          : [];
-      });
-      appendAssistantDerivedMessages(contents);
-    },
-    [appendAssistantDerivedMessages, resolveAssistantEventKind],
-  );
-
-  const pruneResolvedPendingPermissionMessages = useCallback((requestId: string) => {
-    setMessages((previous) =>
-      previous.flatMap((message) => {
-        const nextMessage = clearResolvedPendingPermissionFromMessage(message, requestId);
-        return nextMessage ? [nextMessage] : [];
-      }),
-    );
-  }, []);
 
   useEffect(() => {
     const shouldAttemptAttach =
@@ -3474,13 +2406,66 @@ export default function ChatPage() {
     let pausedForPermission = false;
     let pausedForQuestion = false;
     const toolCallIds = new Set<string>();
+    const liveToolCalls = new Map<string, LiveToolCallState>();
+    const buildAttachTraceContent = (
+      textContent: string,
+      finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
+    ): string => {
+      const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
+        const nextToolState =
+          finalStatus === 'error' && toolCallState.status === 'streaming'
+            ? { ...toolCallState, isError: true, status: 'error' as const }
+            : finalStatus === 'completed' && toolCallState.status === 'streaming'
+              ? { ...toolCallState, status: 'completed' as const }
+              : (finalStatus === 'cancelled' || finalStatus === 'paused') &&
+                  toolCallState.status === 'streaming'
+                ? { ...toolCallState, status: 'paused' as const }
+                : toolCallState;
+        const hasPendingPermission = hasActivePendingPermissionRequest({
+          isError: nextToolState.isError,
+          pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
+          resumedAfterApproval: nextToolState.resumedAfterApproval,
+          status: nextToolState.status,
+        });
+        const status: 'running' | 'paused' | 'completed' | 'failed' =
+          nextToolState.status === 'error'
+            ? 'failed'
+            : nextToolState.status === 'paused'
+              ? 'paused'
+              : nextToolState.status === 'completed'
+                ? 'completed'
+                : 'running';
 
-    const buildAttachTraceContent = (textContent: string): string => {
+        const durationMs =
+          nextToolState.completedAt && nextToolState.createdAt
+            ? nextToolState.completedAt - nextToolState.createdAt
+            : undefined;
+
+        return {
+          kind: resolveAssistantCapabilityKind(nextToolState.toolName),
+          toolCallId: nextToolState.toolCallId,
+          toolName: nextToolState.toolName,
+          input: parseToolCallInputText(nextToolState.inputText),
+          output: nextToolState.output,
+          isError: nextToolState.isError,
+          ...(hasPendingPermission
+            ? { pendingPermissionRequestId: nextToolState.pendingPermissionRequestId }
+            : {}),
+          resumedAfterApproval: nextToolState.resumedAfterApproval,
+          status,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        };
+      });
+
       const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
-      if (reasoningBlocks.length === 0) {
+      if (reasoningBlocks.length === 0 && toolCalls.length === 0) {
         return textContent;
       }
-      return createAssistantTraceContent({ reasoningBlocks, text: textContent, toolCalls: [] });
+      return createAssistantTraceContent({
+        ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
+        text: textContent,
+        toolCalls,
+      });
     };
 
     const ensureAttachStateInitialized = () => {
@@ -3488,7 +2473,7 @@ export default function ChatPage() {
         return;
       }
       attachStateInitialized = true;
-      currentAssistantStreamMessageIdRef.current = crypto.randomUUID();
+      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
       stoppingStreamRef.current = false;
       streamingRef.current = true;
       setStreaming(true);
@@ -3517,6 +2502,59 @@ export default function ChatPage() {
 
           if (event.type === 'tool_call_delta' || event.type === 'tool_result') {
             toolCallIds.add(event.toolCallId);
+          }
+
+          if (event.type === 'tool_call_delta') {
+            const previous = liveToolCalls.get(event.toolCallId);
+            liveToolCalls.set(event.toolCallId, {
+              createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
+              inputText: `${previous?.inputText ?? ''}${event.inputDelta}`,
+              output: previous?.output,
+              isError: previous?.isError,
+              resumedAfterApproval: previous?.resumedAfterApproval,
+              toolCallId: event.toolCallId,
+              status: 'streaming',
+              toolName: event.toolName,
+            });
+          }
+
+          if (event.type === 'tool_result') {
+            const previous = liveToolCalls.get(event.toolCallId);
+            const rawPendingPermissionRequestId = event.pendingPermissionRequestId;
+            const hasPendingPermission = hasActivePendingPermissionRequest(event);
+            liveToolCalls.set(event.toolCallId, {
+              createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
+              completedAt: event.occurredAt ?? Date.now(),
+              inputText: previous?.inputText ?? '',
+              output: event.output,
+              isError: hasPendingPermission ? false : event.isError,
+              pendingPermissionRequestId: hasPendingPermission
+                ? event.pendingPermissionRequestId
+                : undefined,
+              resumedAfterApproval: event.resumedAfterApproval,
+              toolCallId: event.toolCallId,
+              status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
+              toolName: event.toolName,
+            });
+            setMessages((previousMessages) => {
+              const nextMessages = applyToolResultToLocalAssistantMessages(previousMessages, event);
+              return typeof rawPendingPermissionRequestId === 'string' &&
+                rawPendingPermissionRequestId.length > 0 &&
+                !hasPendingPermission
+                ? dismissPermissionEventMessage(nextMessages, rawPendingPermissionRequestId)
+                : nextMessages;
+            });
+            if (
+              typeof rawPendingPermissionRequestId === 'string' &&
+              rawPendingPermissionRequestId.length > 0 &&
+              !hasPendingPermission
+            ) {
+              setPendingPermissions((previousPermissions) =>
+                previousPermissions.filter(
+                  (permission) => permission.requestId !== rawPendingPermissionRequestId,
+                ),
+              );
+            }
           }
 
           if (event.type === 'usage') {
@@ -3586,6 +2624,7 @@ export default function ChatPage() {
           if (event.type === 'permission_asked') {
             pausedForPermission = true;
             setSessionStateStatus('paused');
+            setMessages((previous) => upsertPermissionEventMessage(previous, event));
             setPendingPermissions((previous) => {
               const nextPermission: PendingPermissionRequest = {
                 createdAt: new Date(event.occurredAt ?? Date.now()).toISOString(),
@@ -3619,14 +2658,22 @@ export default function ChatPage() {
             if (event.decision !== 'reject') {
               setSessionStateStatus('running');
             }
+            setMessages((previous) =>
+              dismissPermissionEventMessage(
+                applyPermissionDecisionToLocalAssistantMessages(
+                  previous,
+                  event.requestId,
+                  event.decision,
+                ),
+                event.requestId,
+              ),
+            );
             setPendingPermissions((previous) =>
               previous.filter((permission) => permission.requestId !== event.requestId),
             );
-            pruneResolvedPendingPermissionMessages(event.requestId);
             setRightPanelState((previous) =>
               clearResolvedPendingPermissionToolCalls(previous, event.requestId, event.decision),
             );
-            requestCurrentSessionRefresh(sid);
           }
 
           if (event.type === 'question_asked') {
@@ -3639,7 +2686,6 @@ export default function ChatPage() {
 
           if (event.type === 'question_replied') {
             setSessionStateStatus(event.status === 'answered' ? 'running' : 'idle');
-            requestCurrentSessionRefresh(sid);
           }
 
           setRightPanelState((prev) => {
@@ -3655,6 +2701,15 @@ export default function ChatPage() {
 
           if (!isNearBottomRef.current) {
             setHasPendingFollowContent((previous) => previous || true);
+          }
+
+          if (
+            shouldShowRunEventInTranscript(event) &&
+            event.type !== 'audit_ref' &&
+            event.type !== 'permission_replied' &&
+            event.type !== 'question_replied'
+          ) {
+            appendAssistantEventMessages([event]);
           }
         },
         onDelta: (delta) => {
@@ -3700,7 +2755,6 @@ export default function ChatPage() {
           toolCallIds.add(chunk.toolCallId);
           if (!rightOpenRef.current) {
             setRightTab('tools');
-            setRightOpen(true);
           }
         },
         onDone: (stopReason) => {
@@ -3714,14 +2768,23 @@ export default function ChatPage() {
           const wasCancelled = String(resolvedStopReason) === 'cancelled';
           const isPausedForPermission = resolvedStopReason === 'tool_permission';
           const finalAccumulatedText = wasCancelled ? streamRevealVisibleRef.current : accumulated;
+          const traceFinalStatus = wasCancelled
+            ? 'cancelled'
+            : resolvedStopReason === 'error'
+              ? 'error'
+              : isPausedForPermission
+                ? 'paused'
+                : 'completed';
           const hasRenderableAssistantReply =
-            finalAccumulatedText.trim().length > 0 || accumulatedThinking.trim().length > 0;
+            finalAccumulatedText.trim().length > 0 ||
+            accumulatedThinking.trim().length > 0 ||
+            toolCallIds.size > 0;
           if (hasRenderableAssistantReply || !wasCancelled) {
-            const content = buildAttachTraceContent(finalAccumulatedText);
+            const content = buildAttachTraceContent(finalAccumulatedText, traceFinalStatus);
             setMessages((prev) => [
               ...prev,
               {
-                id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
+                id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
                 role: 'assistant',
                 content,
                 createdAt: finishedAt,
@@ -3748,7 +2811,7 @@ export default function ChatPage() {
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
-              replaceMessages: true,
+              // Preserve the richer local ordering until the backend snapshot catches up.
             }).catch(() => undefined);
           }, 0);
           requestSessionListRefresh();
@@ -3766,11 +2829,11 @@ export default function ChatPage() {
           const finishedAt = Date.now();
           const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
           logger.error('attach stream error', message ? `${code}: ${message}` : code);
-          const content = buildAttachTraceContent(errorContent);
+          const content = buildAttachTraceContent(errorContent, 'error');
           setMessages((prev) => [
             ...prev,
             {
-              id: currentAssistantStreamMessageIdRef.current ?? crypto.randomUUID(),
+              id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
               role: 'assistant',
               content,
               createdAt: finishedAt,
@@ -3829,9 +2892,10 @@ export default function ChatPage() {
     isPageActive,
     loadCurrentSessionSnapshot,
     prefersReducedMotion,
-    pruneResolvedPendingPermissionMessages,
+    appendAssistantEventMessages,
     recoveredStreamSnapshot,
     resetStreamState,
+    resolveAssistantCapabilityKind,
     scheduleStreamReveal,
     sessionStateStatus,
     streaming,
@@ -4000,271 +3064,38 @@ export default function ChatPage() {
     streaming,
   ]);
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (composerMenu) {
-      const currentItems = composerMenu.type === 'slash' ? slashCommandItems : mentionItems;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setComposerMenu((prev) =>
-          prev
-            ? {
-                ...prev,
-                selectedIndex:
-                  currentItems.length === 0 ? 0 : (prev.selectedIndex + 1) % currentItems.length,
-              }
-            : prev,
-        );
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setComposerMenu((prev) =>
-          prev
-            ? {
-                ...prev,
-                selectedIndex:
-                  currentItems.length === 0
-                    ? 0
-                    : (prev.selectedIndex - 1 + currentItems.length) % currentItems.length,
-              }
-            : prev,
-        );
-        return;
-      }
-      if ((e.key === 'Enter' || e.key === 'Tab') && currentItems.length > 0) {
-        e.preventDefault();
-        const selectedItem = currentItems[composerMenu.selectedIndex] ?? currentItems[0];
-        if (selectedItem) {
-          void applyComposerSelection(selectedItem);
-        }
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setComposerMenu(null);
-        return;
-      }
-    }
-    if ((stopCapability === 'precise' || stopCapability === 'best_effort') && e.key === 'Escape') {
-      e.preventDefault();
-      void stopActiveMessage();
-      return;
-    }
-    if (
-      (streaming || canStopCurrentSessionStream || remoteSessionBusyState !== null) &&
-      e.key === 'Enter' &&
-      !e.shiftKey
-    ) {
-      e.preventDefault();
-      enqueueComposerMessage();
-      return;
-    }
-    if (canStopCurrentSessionStream && e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      return;
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      void sendMessage();
-    }
-  }
-
-  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const nextValue = e.target.value;
-    setInput(nextValue);
-    updateComposerMenu(nextValue, e.target.selectionStart ?? nextValue.length);
-  }
-
-  function handleInputSelect(e: React.SyntheticEvent<HTMLTextAreaElement>) {
-    const target = e.currentTarget;
-    updateComposerMenu(target.value, target.selectionStart ?? target.value.length);
-  }
-
-  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const imageFiles = Array.from(e.clipboardData.items)
-      .filter((item) => item.type.startsWith('image/'))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => Boolean(file))
-      .map((file, index) => {
-        if (file.name) return file;
-        const extension = file.type.split('/')[1] || 'png';
-        return new File([file], `pasted-image-${Date.now()}-${index}.${extension}`, {
-          type: file.type,
-        });
-      });
-
-    const pastedText = e.clipboardData.getData('text/plain');
-    const sanitizedPastedText = sanitizeComposerPlainText(pastedText);
-    const shouldInterceptTextPaste = sanitizedPastedText !== pastedText;
-
-    if (imageFiles.length > 0 || shouldInterceptTextPaste) {
-      e.preventDefault();
-
-      if (sanitizedPastedText.length > 0) {
-        const target = e.currentTarget;
-        const selectionStart = target.selectionStart ?? target.value.length;
-        const selectionEnd = target.selectionEnd ?? selectionStart;
-        const nextValue =
-          target.value.slice(0, selectionStart) +
-          sanitizedPastedText +
-          target.value.slice(selectionEnd);
-        const nextCaret = selectionStart + sanitizedPastedText.length;
-
-        setInput(nextValue);
-        updateComposerMenu(nextValue, nextCaret);
-        requestAnimationFrame(() => {
-          textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
-        });
-      }
-
-      if (imageFiles.length > 0) {
-        appendFiles(imageFiles);
-      }
-      return;
-    }
-  }
-
-  function replaceComposerToken(start: number, end: number, replacement: string) {
-    const before = input.slice(0, start);
-    const after = input.slice(end);
-    const nextValue = `${before}${replacement}${after}`;
-    setInput(nextValue);
-    setComposerMenu(null);
-    requestAnimationFrame(() => {
-      if (!textareaRef.current) return;
-      const nextCaret = before.length + replacement.length;
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(nextCaret, nextCaret);
-    });
-  }
-
-  async function applyComposerSelection(item: SlashCommandItem | MentionItem) {
-    if (!composerMenu) return;
-
-    if (item.kind === 'slash') {
-      if (item.type === 'insert') {
-        replaceComposerToken(composerMenu.start, composerMenu.end, item.insertText ?? '');
-        return;
-      }
-      setComposerMenu(null);
-      await item.onSelect();
-      return;
-    }
-
-    replaceComposerToken(composerMenu.start, composerMenu.end, item.insertText);
-  }
-
-  const appendCommandCard = useCallback(
-    (card: CommandResultCard) => {
-      appendAssistantDerivedMessages([
-        {
-          content: createCommandCardContent(card, {
-            kindOverride:
-              card.type === 'compaction'
-                ? 'compaction'
-                : resolveAssistantCapabilityKind(`${card.title}\n${card.message}`),
-          }),
-        },
-      ]);
-    },
-    [appendAssistantDerivedMessages, resolveAssistantCapabilityKind],
-  );
-
-  const handleCompactCurrentSession = useCallback(async () => {
-    const matchedCompactCommand = matchServerSlashCommand('/compact', composerCommandDescriptors);
-    if (!matchedCompactCommand) {
-      appendCommandCard({
-        type: 'status',
-        title: '压缩暂不可用',
-        message: '当前命令注册表里没有可执行的压缩命令。',
-        tone: 'warning',
-      });
-      setRightOpen(true);
-      setRightTab('overview');
-      return;
-    }
-
-    await executeServerCommand({
-      command: matchedCompactCommand,
-      currentSessionId,
-      gatewayUrl,
-      rawInput: matchedCompactCommand.label,
-      token,
-      unavailableTitle: '压缩暂不可用',
-      unavailableMessage: `需要先进入一个已有会话后再执行 ${matchedCompactCommand.label}。`,
-      onCard: (card) => appendCommandCard(card),
-      onEvents: (events) => {
-        setRightPanelState((prev) =>
-          events.reduce((next, event) => applyChatRightPanelEvent(next, event), prev),
-        );
-        appendAssistantEventMessages(events, { excludeCompaction: true });
-      },
-      onOpenRightPanel: () => setRightOpen(true),
-    });
-    setRightTab('overview');
-    requestSessionListRefresh();
-  }, [
-    appendAssistantEventMessages,
-    appendCommandCard,
+  const { slashCommandItems, mentionItems } = useComposerMenuItems({
+    composerMenu,
     composerCommandDescriptors,
-    currentSessionId,
-    gatewayUrl,
-    token,
-  ]);
+    composerWorkspaceCatalog,
+    workspaceFileItems,
+  });
 
-  function updateComposerMenu(value: string, caret: number) {
-    const trigger = detectComposerTrigger(value, caret);
-    if (!trigger) {
-      setComposerMenu(null);
-      return;
-    }
-    setComposerMenu((prev) => {
-      if (
-        !prev ||
-        prev.type !== trigger.type ||
-        prev.start !== trigger.start ||
-        prev.end !== trigger.end
-      ) {
-        return { ...trigger, selectedIndex: 0 };
-      }
-      return { ...trigger, selectedIndex: prev.selectedIndex };
-    });
-  }
-
-  const slashCommandItems = useMemo<SlashCommandItem[]>(() => {
-    const allItems = buildComposerSlashItems({
-      agents: composerWorkspaceCatalog.agents,
-      commandDescriptors: composerCommandDescriptors,
-      installedSkills: composerWorkspaceCatalog.installedSkills,
-      agentTools: composerWorkspaceCatalog.agentTools,
-      mcpServers: composerWorkspaceCatalog.mcpServers,
-    });
-
-    if (!composerMenu || composerMenu.type !== 'slash') {
-      return [];
-    }
-    const query = composerMenu.query.toLowerCase();
-    return allItems.filter((item) =>
-      `${item.label} ${item.description} ${item.badgeLabel ?? ''}`.toLowerCase().includes(query),
-    );
-  }, [composerMenu, composerCommandDescriptors, composerWorkspaceCatalog]);
-
-  const mentionItems = useMemo<MentionItem[]>(() => {
-    if (!composerMenu || composerMenu.type !== 'mention') {
-      return [];
-    }
-    const query = composerMenu.query.toLowerCase();
-    return workspaceFileItems
-      .filter((file) => `${file.label} ${file.relativePath}`.toLowerCase().includes(query))
-      .slice(0, 8)
-      .map((file) => ({
-        id: file.path,
-        kind: 'mention',
-        label: file.label,
-        description: file.relativePath,
-        insertText: `@${file.relativePath} `,
-      }));
-  }, [composerMenu, workspaceFileItems]);
+  const {
+    handleKeyDown,
+    handleInputChange,
+    handleInputSelect,
+    handlePaste,
+    replaceComposerToken,
+    applyComposerSelection,
+    updateComposerMenu,
+  } = useComposerCallbacks({
+    composerMenu,
+    setComposerMenu,
+    input,
+    setInput,
+    textareaRef,
+    slashCommandItems,
+    mentionItems,
+    stopCapability,
+    streaming,
+    canStopCurrentSessionStream,
+    remoteSessionBusyState,
+    stopActiveMessage,
+    enqueueComposerMessage,
+    sendMessage,
+    appendFiles,
+  });
 
   const composerVariant =
     messages.length === 0 &&
@@ -4273,346 +3104,57 @@ export default function ChatPage() {
     !remoteSessionBusyState
       ? 'home'
       : 'session';
-  const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  const providerCatalog = useMemo(
-    () =>
-      new Map(
-        providers.map((provider) => [
-          provider.id,
-          { id: provider.id, name: provider.name, type: provider.type },
-        ]),
-      ),
-    [providers],
-  );
-  const activeModelOption = activeProvider?.defaultModels.find(
-    (model) => model.id === activeModelId,
-  );
-  const activeModelCanConfigureThinking = canConfigureThinkingForModel(
-    activeProvider?.type,
-    activeModelOption?.id ?? activeModelId,
-  );
-  const activeModelTooltip = activeModelOption?.label
-    ? `当前使用模型：${activeProvider?.name ? `${activeProvider.name} / ` : ''}${activeModelOption.label}`
-    : activeProvider?.name
-      ? `当前使用提供商：${activeProvider.name}`
-      : '当前使用模型';
-  const assistantUsageDetails = useMemo(() => {
-    const usageByMessageId = new Map<string, ChatUsageDetails>();
-    let contextTokens = 0;
-    let requestIndex = 0;
-
-    for (const message of messages) {
-      const messageTokens = message.tokenEstimate ?? estimateTokenCount(message.content);
-
-      if (message.role === 'assistant') {
-        requestIndex += 1;
-        const matchedPrice = resolveModelPriceEntry(modelPrices, [
-          message.model,
-          activeModelId,
-          activeModelOption?.label,
-        ]);
-        const estimatedCostUsd = matchedPrice
-          ? (contextTokens * matchedPrice.inputPer1m + messageTokens * matchedPrice.outputPer1m) /
-            1_000_000
-          : undefined;
-
-        usageByMessageId.set(message.id, {
-          requestIndex,
-          inputTokens: contextTokens,
-          outputTokens: messageTokens,
-          totalTokens: contextTokens + messageTokens,
-          estimatedCostUsd,
-          durationMs: message.durationMs,
-          firstTokenLatencyMs: message.firstTokenLatencyMs,
-          tokensPerSecond:
-            message.durationMs && message.durationMs > 0
-              ? messageTokens / (message.durationMs / 1000)
-              : undefined,
-        });
-      }
-
-      contextTokens += messageTokens;
-    }
-
-    return usageByMessageId;
-  }, [activeModelId, activeModelOption?.label, messages, modelPrices]);
-
-  const messageInputTokens = useMemo(() => {
-    return messages.reduce((sum, message) => {
-      return sum + (message.tokenEstimate ?? estimateTokenCount(message.content));
-    }, 0);
-  }, [messages]);
-
-  const streamingOutputTokens = useMemo(() => {
-    return visibleStreamBuffer.length > 0 ? estimateTokenCount(visibleStreamBuffer) : 0;
-  }, [visibleStreamBuffer]);
-
-  const effectiveReportedStreamUsage = useMemo(
-    () =>
-      hasUsableReportedUsageSnapshot(visibleReportedStreamUsage)
-        ? visibleReportedStreamUsage
-        : undefined,
-    [visibleReportedStreamUsage],
-  );
-
-  const streamingUsageDetails = useMemo<ChatUsageDetails | undefined>(() => {
-    if (!visibleStreaming || (visibleStreamBuffer.length === 0 && !effectiveReportedStreamUsage)) {
-      return undefined;
-    }
-
-    const inputTokens = effectiveReportedStreamUsage?.inputTokens ?? messageInputTokens;
-    const outputTokens = effectiveReportedStreamUsage?.outputTokens ?? streamingOutputTokens;
-    const totalTokens = effectiveReportedStreamUsage?.totalTokens ?? inputTokens + outputTokens;
-    const matchedPrice = resolveModelPriceEntry(modelPrices, [
-      activeModelId,
-      activeModelOption?.label,
-    ]);
-    const estimatedCostUsd = matchedPrice
-      ? (inputTokens * matchedPrice.inputPer1m + outputTokens * matchedPrice.outputPer1m) /
-        1_000_000
-      : undefined;
-    const activeDurationMs = visibleStreamStartedAt
-      ? Date.now() - visibleStreamStartedAt
-      : undefined;
-
-    return {
-      requestIndex: assistantUsageDetails.size + 1,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      estimatedCostUsd,
-      durationMs: activeDurationMs,
-      firstTokenLatencyMs: activeStreamFirstTokenLatencyMs ?? undefined,
-      tokensPerSecond:
-        activeDurationMs && activeDurationMs > 0
-          ? outputTokens / (activeDurationMs / 1000)
-          : undefined,
-    };
-  }, [
-    activeModelId,
-    activeModelOption?.label,
-    activeStreamFirstTokenLatencyMs,
-    assistantUsageDetails.size,
-    effectiveReportedStreamUsage,
-    messageInputTokens,
-    modelPrices,
-    streamingOutputTokens,
-    visibleStreamBuffer.length,
-    visibleStreamStartedAt,
-    visibleStreaming,
-  ]);
-
-  const contextUsageSnapshot = useMemo(
-    () =>
-      buildChatContextUsageSnapshot({
-        contextWindow: activeModelOption?.contextWindow,
-        historicalTokens: messageInputTokens,
-        reportedTotalTokens: effectiveReportedStreamUsage?.totalTokens,
-        streamingTotalTokens: streamingUsageDetails?.totalTokens,
-      }),
-    [
-      activeModelOption?.contextWindow,
-      effectiveReportedStreamUsage?.totalTokens,
-      messageInputTokens,
-      streamingUsageDetails?.totalTokens,
-    ],
-  );
-
-  const sanitizedHistoricalMessages = useMemo(() => {
-    const activePendingPermissionIds = new Set(
-      pendingPermissions
-        .filter((permission) => permission.status === 'pending')
-        .map((permission) => permission.requestId),
-    );
-
-    return messages.flatMap((message) => {
-      if (message.role !== 'assistant') {
-        return [message];
-      }
-
-      let nextMessage: ChatMessage | null = message;
-      const assistantTrace = parseAssistantTraceContent(message.content);
-      if (!assistantTrace) {
-        return [message];
-      }
-
-      const stalePendingPermissionIds = assistantTrace.toolCalls.flatMap((toolCall) =>
-        toolCall.pendingPermissionRequestId &&
-        !activePendingPermissionIds.has(toolCall.pendingPermissionRequestId)
-          ? [toolCall.pendingPermissionRequestId]
-          : [],
-      );
-
-      for (const requestId of stalePendingPermissionIds) {
-        if (!nextMessage) {
-          break;
-        }
-        nextMessage = clearResolvedPendingPermissionFromMessage(nextMessage, requestId);
-      }
-
-      return nextMessage ? [nextMessage] : [];
-    });
-  }, [messages, pendingPermissions]);
-
-  const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(() => {
-    return sanitizedHistoricalMessages.map((message) => ({
-      message,
-      actions: buildMessageActions(message),
-      renderContent: (currentMessage) =>
-        renderChatMessageContentWithOptions(currentMessage, {
-          onOpenChildSession: openChildSessionInspector,
-          selectedChildSessionId,
-          taskRuntimeLookup: taskToolRuntimeLookup,
-        }),
-      usageDetails: assistantUsageDetails.get(message.id),
-    }));
-  }, [
-    assistantUsageDetails,
-    buildMessageActions,
-    openChildSessionInspector,
-    selectedChildSessionId,
-    sanitizedHistoricalMessages,
-    taskToolRuntimeLookup,
-  ]);
-
-  const streamingRenderedMessageEntry = useMemo<ChatRenderEntry | null>(() => {
-    if (!visibleStreaming) {
-      return null;
-    }
-
-    return {
-      message: {
-        id: currentAssistantStreamMessageIdRef.current ?? '__streaming__',
-        role: 'assistant',
-        content:
-          toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
-            ? createAssistantTraceContent({
-                ...(visibleStreamThinkingBuffer.trim().length > 0
-                  ? { reasoningBlocks: [visibleStreamThinkingBuffer] }
-                  : {}),
-                text: visibleStreamBuffer,
-                toolCalls: toolCallCards.map((toolCall) => ({
-                  kind: resolveAssistantCapabilityKind(toolCall.toolName),
-                  toolCallId: toolCall.toolCallId,
-                  toolName: toolCall.toolName,
-                  input: toolCall.input,
-                  output: toolCall.output,
-                  isError: toolCall.isError,
-                  resumedAfterApproval: toolCall.resumedAfterApproval,
-                  status: toolCall.status,
-                })),
-              })
-            : visibleStreamBuffer,
-        model: (activeModelOption?.label ?? activeModelId) || undefined,
-        providerId: activeProviderId || undefined,
-        createdAt: visibleStreamStartedAt ?? Date.now(),
-        tokenEstimate: estimateTokenCount(
-          [visibleStreamThinkingBuffer, visibleStreamBuffer]
-            .filter((item) => item.trim().length > 0)
-            .join('\n\n'),
-        ),
-        toolCallCount: toolCallCards.length > 0 ? toolCallCards.length : undefined,
-        status: 'streaming',
-      },
-      renderContent: (message) =>
-        renderStreamingChatMessageContentWithOptions(message.content, {
-          onOpenChildSession: openChildSessionInspector,
-          selectedChildSessionId,
-          taskRuntimeLookup: taskToolRuntimeLookup,
-        }),
-      usageDetails: streamingUsageDetails,
-    };
-  }, [
-    activeModelId,
-    activeModelOption?.label,
+  const {
+    activeProvider,
+    providerCatalog,
+    activeModelOption,
+    activeModelCanConfigureThinking,
+    activeModelTooltip,
+  } = useProviderModelInfo({
+    providers,
     activeProviderId,
-    openChildSessionInspector,
-    resolveAssistantCapabilityKind,
-    selectedChildSessionId,
+    activeModelId,
+    setActiveProviderId,
+    setActiveModelId,
+  });
+
+  const {
+    assistantUsageDetails,
+    messageInputTokens,
+    streamingOutputTokens,
+    effectiveReportedStreamUsage,
     streamingUsageDetails,
-    taskToolRuntimeLookup,
-    toolCallCards,
-    visibleStreamBuffer,
-    visibleStreamStartedAt,
-    visibleStreamThinkingBuffer,
+    contextUsageSnapshot,
+    sanitizedHistoricalMessages,
+    historicalRenderedMessageEntries,
+    streamingRenderedMessageEntry,
+    historicalGroupedMessageEntries,
+    groupedMessageEntries,
+  } = useChatRenderData({
+    messages,
+    pendingPermissions,
+    modelPrices,
+    activeProviderId,
+    activeModelId,
+    activeModelOption,
     visibleStreaming,
-  ]);
-
-  const historicalGroupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    return groupChatRenderEntries(historicalRenderedMessageEntries).map((group) =>
-      decorateAssistantGroupActions(group, handleCopyMessageGroup),
-    );
-  }, [handleCopyMessageGroup, historicalRenderedMessageEntries]);
-
-  const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    if (!streamingRenderedMessageEntry) {
-      return historicalGroupedMessageEntries;
-    }
-
-    const lastHistoricalGroup =
-      historicalGroupedMessageEntries[historicalGroupedMessageEntries.length - 1];
-
-    if (
-      lastHistoricalGroup &&
-      lastHistoricalGroup.role === streamingRenderedMessageEntry.message.role
-    ) {
-      const mergedGroup = decorateAssistantGroupActions(
-        {
-          ...lastHistoricalGroup,
-          entries: [...lastHistoricalGroup.entries, streamingRenderedMessageEntry],
-        },
-        handleCopyMessageGroup,
-      );
-
-      return [...historicalGroupedMessageEntries.slice(0, -1), mergedGroup];
-    }
-
-    return [
-      ...historicalGroupedMessageEntries,
-      decorateAssistantGroupActions(
-        {
-          entries: [streamingRenderedMessageEntry],
-          key: streamingRenderedMessageEntry.message.id,
-          role: streamingRenderedMessageEntry.message.role,
-        },
-        handleCopyMessageGroup,
-      ),
-    ];
-  }, [handleCopyMessageGroup, historicalGroupedMessageEntries, streamingRenderedMessageEntry]);
+    visibleStreamBuffer,
+    visibleStreamThinkingBuffer,
+    visibleStreamStartedAt,
+    visibleReportedStreamUsage,
+    activeStreamFirstTokenLatencyMs,
+    currentAssistantStreamMessageIdRef,
+    toolCallCards,
+    resolveAssistantCapabilityKind,
+    resolveInlinePermissionActions,
+    buildMessageActions,
+    handleCopyMessageGroup,
+    openChildSessionInspector,
+    selectedChildSessionId,
+    taskToolRuntimeLookup,
+  });
 
   const showSessionSwitchSkeleton = currentSessionId !== null && isSessionLoading && !streaming;
-
-  useEffect(() => {
-    if (providers.length === 0) {
-      return;
-    }
-
-    const fallbackProvider = providers.find((provider) => provider.defaultModels.length > 0);
-    const nextProvider =
-      providers.find(
-        (provider) => provider.id === activeProviderId && provider.defaultModels.length > 0,
-      ) ?? fallbackProvider;
-    const nextModel = nextProvider?.defaultModels.find((model) => model.id === activeModelId);
-    const fallbackModel = nextProvider?.defaultModels[0];
-    const nextProviderId = nextProvider?.id ?? '';
-    const nextModelId = nextModel?.id ?? fallbackModel?.id ?? '';
-
-    if (activeProviderId !== nextProviderId) {
-      setActiveProviderId(nextProviderId);
-    }
-
-    if (activeModelId !== nextModelId) {
-      setActiveModelId(nextModelId);
-    }
-  }, [providers, activeProviderId, activeModelId]);
-
-  const rightPanelWidth = rightOpen
-    ? rightTab === 'agent'
-      ? 'clamp(360px, 40vw, 520px)'
-      : 'clamp(320px, 32vw, 400px)'
-    : 0;
-  const rightPanelMaxWidth = rightOpen ? 'calc(100vw - 88px)' : 0;
-  const activeRightTabMeta = RIGHT_PANEL_TAB_META[(rightTab as RightPanelTabId) ?? 'overview'];
 
   return (
     <div className="page-root page-root-row">
@@ -4639,8 +3181,6 @@ export default function ChatPage() {
           }}
         >
           <ChatTopBar
-            agentOptions={agentOptions}
-            defaultAgentLabel={defaultAgentLabel}
             dialogueMode={dialogueMode}
             currentProfileLabel={
               effectiveWorkingDirectory
@@ -4648,12 +3188,7 @@ export default function ChatPage() {
                 : undefined
             }
             onChangeDialogueMode={handleDialogueModeChange}
-            manualAgentId={manualAgentId}
             hasWorkspaceProfile={Boolean(currentAgentProfile)}
-            toolSurfaceProfile={toolSurfaceProfile}
-            onChangeManualAgentId={handleManualAgentChange}
-            onChangeToolSurfaceProfile={handleToolSurfaceProfileChange}
-            onClearManualAgentId={handleClearManualAgentId}
             onSaveWorkspaceProfile={() => void handleSaveWorkspaceProfile()}
             yoloMode={yoloMode}
             onToggleYolo={handleToggleYolo}
@@ -4840,141 +3375,16 @@ export default function ChatPage() {
               </div>
 
               {showScrollToBottom && (
-                <button
-                  type="button"
-                  data-testid="chat-scroll-bottom"
-                  onClick={() => scrollToBottom('smooth', 'latest-edge')}
-                  aria-label={
-                    visibleStreaming
-                      ? hasPendingFollowContent
-                        ? '有新内容，恢复最新对话聚焦'
-                        : '恢复最新对话聚焦'
-                      : '定位最新对话'
-                  }
-                  style={{
-                    position: 'absolute',
-                    left: '50%',
-                    bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
-                    transform: 'translateX(-50%)',
-                    zIndex: 18,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    minHeight: 36,
-                    padding: '0 14px',
-                    maxWidth: 'calc(100% - 28px)',
-                    borderRadius: 999,
-                    border: hasPendingFollowContent
-                      ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border))'
-                      : '1px solid var(--border)',
-                    background: hasPendingFollowContent
-                      ? 'color-mix(in oklch, var(--surface) 82%, var(--accent) 18%)'
-                      : 'color-mix(in oklch, var(--surface) 90%, transparent)',
-                    color: hasPendingFollowContent ? 'var(--text)' : 'var(--text-2)',
-                    boxShadow: 'var(--shadow-md)',
-                    backdropFilter: 'blur(10px)',
-                    cursor: 'pointer',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    touchAction: 'manipulation',
-                  }}
-                >
-                  <svg
-                    aria-hidden="true"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 5v14" />
-                    <path d="m19 12-7 7-7-7" />
-                  </svg>
-                  {streaming
-                    ? hasPendingFollowContent
-                      ? '有新内容 · 恢复聚焦'
-                      : '恢复最新对话'
-                    : '定位最新对话'}
-                </button>
+                <ChatScrollBottomButton
+                  streaming={streaming}
+                  hasPendingFollowContent={hasPendingFollowContent}
+                  onScrollToBottom={() => scrollToBottom('smooth', 'latest-edge')}
+                />
               )}
             </div>
           </div>
 
-          {streamError && (
-            <div
-              style={{
-                padding: '0 10px 6px',
-                background: 'var(--bg)',
-                flexShrink: 0,
-              }}
-            >
-              <div
-                style={{
-                  maxWidth: 700,
-                  margin: '0 auto',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  border: '1px solid rgba(239, 68, 68, 0.22)',
-                  background: 'rgba(239, 68, 68, 0.08)',
-                  color: 'var(--danger)',
-                  borderRadius: 10,
-                  padding: '7px 10px',
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                  style={{ flexShrink: 0 }}
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                <div
-                  style={{
-                    minWidth: 0,
-                    flex: 1,
-                    fontSize: 11,
-                    lineHeight: 1.45,
-                    color: 'var(--danger)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={streamError}
-                >
-                  {streamError}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setStreamError(null)}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--danger)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    padding: '0 2px',
-                    flexShrink: 0,
-                  }}
-                >
-                  知道了
-                </button>
-              </div>
-            </div>
-          )}
+          <ChatStreamErrorBar streamError={streamError} onDismiss={() => setStreamError(null)} />
 
           {remoteSessionBusyState && (
             <SessionRunStateBar
@@ -5069,429 +3479,73 @@ export default function ChatPage() {
             onToggleModelPicker={() => setShowModelPicker((v) => !v)}
             onToggleModelSettings={() => setShowModelSettings((v) => !v)}
             onToggleWebSearch={handleToggleWebSearch}
+            agentOptions={agentOptions}
+            manualAgentId={manualAgentId}
+            defaultAgentLabel={defaultAgentLabel}
+            onChangeManualAgentId={handleManualAgentChange}
+            onClearManualAgentId={handleClearManualAgentId}
           />
         </div>
-        <>
-          <button
-            type="button"
-            aria-label="拖动调整编辑器宽度"
-            onMouseDown={handleSplitMouseDown}
-            disabled={!editorMode}
-            style={{
-              width: editorMode ? 5 : 0,
-              flexShrink: 0,
-              cursor: editorMode ? 'col-resize' : 'default',
-              background: 'var(--border-subtle)',
-              transition: splitDragging.current
-                ? 'none'
-                : 'width 240ms ease, opacity 180ms ease, background 150ms ease',
-              zIndex: 10,
-              border: 'none',
-              padding: 0,
-              opacity: editorMode ? 1 : 0,
-              pointerEvents: editorMode ? 'auto' : 'none',
-            }}
-          />
-          <div
-            ref={editorPaneRef}
-            aria-hidden={!editorMode}
-            style={{
-              flex: '0 0 auto',
-              width: editorMode ? `calc(${100 - splitPos}% - 2.5px)` : 0,
-              minWidth: 0,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              borderLeft: editorMode ? '1px solid var(--border)' : '1px solid transparent',
-              opacity: editorMode ? 1 : 0,
-              transform: editorMode ? 'translateX(0)' : 'translateX(10px)',
-              pointerEvents: editorMode ? 'auto' : 'none',
-              transition: splitDragging.current
-                ? 'none'
-                : 'width 240ms ease, opacity 180ms ease, transform 240ms ease, border-color 180ms ease',
-            }}
-          >
-            <FileEditorPanel
-              files={fileEditor.openFiles}
-              activeFile={fileEditor.activeFile}
-              activeFilePath={fileEditor.activeFilePath}
-              isDirty={fileEditor.isDirty}
-              saving={saving}
-              saveError={fileEditor.saveError}
-              onActivate={fileEditor.setActiveFilePath}
-              onClose={fileEditor.closeFile}
-              onChange={fileEditor.updateContent}
-              onSave={handleSaveFile}
-            />
-          </div>
-        </>
+        <ChatEditorPane
+          editorMode={editorMode}
+          splitPos={splitPos}
+          splitDragging={splitDragging}
+          editorPaneRef={editorPaneRef}
+          handleSplitMouseDown={handleSplitMouseDown}
+          fileEditor={fileEditor}
+          saving={saving}
+          handleSaveFile={handleSaveFile}
+        />
       </div>
 
-      <div
-        aria-hidden={!rightOpen}
-        style={{
-          width: rightPanelWidth,
-          maxWidth: rightPanelMaxWidth,
-          flexShrink: 0,
-          overflow: 'hidden',
-          borderLeft: rightOpen ? '1px solid var(--border)' : 'none',
-          transition: 'width 200ms ease',
-          display: 'flex',
-          flexDirection: 'column',
-          alignSelf: 'stretch',
+      <ChatRightPanel
+        rightOpen={rightOpen}
+        rightTab={rightTab}
+        setRightTab={setRightTab}
+        selectedChildSessionId={selectedChildSessionId}
+        currentUserEmail={currentUserEmail}
+        gatewayUrl={gatewayUrl}
+        token={token}
+        navigate={(path: string) => void navigate(path)}
+        openChildSessionInspector={openChildSessionInspector}
+        taskToolRuntimeLookup={taskToolRuntimeLookup}
+        toolCallCards={toolCallCards}
+        toolFilter={toolFilter}
+        setToolFilter={setToolFilter}
+        compactions={compactions}
+        pendingPermissions={pendingPermissions}
+        resolveInlinePermissionActions={resolveInlinePermissionActions}
+        planTasks={planTasks}
+        planHistory={planHistory}
+        sessionTodos={sessionTodos}
+        sessionTasks={sessionTasks}
+        childSessions={childSessions}
+        pendingQuestions={pendingQuestions}
+        dagNodes={dagNodes}
+        dagEdges={dagEdges}
+        agentEvents={agentEvents}
+        mcpServers={mcpServers}
+        sharedUiThemeVars={sharedUiThemeVars}
+        resolveTaskToolRuntimeSnapshot={resolveTaskToolRuntimeSnapshot}
+        onCompactSession={() => void handleCompactCurrentSession()}
+        onOpenRecoveryStrategy={() => {
+          setRightOpen(true);
+          setRightTab('history');
         }}
-      >
-        {rightOpen ? (
-          <div
-            style={{
-              width: rightPanelWidth,
-              maxWidth: rightPanelMaxWidth,
-              display: 'flex',
-              flexDirection: 'row',
-              height: '100%',
-              minWidth: 0,
-              minHeight: 0,
-              background: 'color-mix(in oklch, var(--surface) 96%, var(--bg) 4%)',
-            }}
-          >
-            <div
-              data-testid="chat-right-nav-rail"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'stretch',
-                gap: 4,
-                width: 52,
-                minWidth: 52,
-                padding: '8px 4px',
-                borderRight: '1px solid var(--border)',
-                flexShrink: 0,
-                background:
-                  'linear-gradient(180deg, color-mix(in oklch, var(--surface) 92%, var(--bg) 8%), color-mix(in oklch, var(--surface) 88%, var(--bg) 12%))',
-              }}
-            >
-              <div
-                role="tablist"
-                aria-label="右侧面板切换"
-                aria-orientation="vertical"
-                style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
-              >
-                {RIGHT_PANEL_TABS.map((tab) => {
-                  const isActive = rightTab === tab.id;
-
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      aria-label={tab.label}
-                      aria-selected={isActive}
-                      aria-controls={`chat-right-panel-${tab.id}`}
-                      id={`chat-right-tab-${tab.id}`}
-                      tabIndex={isActive ? 0 : -1}
-                      title={tab.label}
-                      onClick={() => setRightTab(tab.id)}
-                      className={`toolbar-btn${isActive ? ' active' : ''}`}
-                      style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        minHeight: 34,
-                        padding: '6px 0',
-                        borderRadius: 8,
-                        border: isActive
-                          ? '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))'
-                          : '1px solid transparent',
-                        background: isActive
-                          ? 'color-mix(in oklch, var(--accent) 16%, var(--surface))'
-                          : 'transparent',
-                        color: isActive ? 'var(--accent)' : 'var(--text-2)',
-                        boxShadow: isActive
-                          ? 'inset 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent)'
-                          : 'none',
-                        fontSize: 0,
-                      }}
-                    >
-                      {renderRightPanelTabIcon(tab.id)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div
-              role="tabpanel"
-              id={`chat-right-panel-${rightTab}`}
-              aria-labelledby={`chat-right-tab-${rightTab}`}
-              style={{
-                flex: 1,
-                minHeight: 0,
-                minWidth: 0,
-                overflow: 'hidden',
-                padding: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                background: 'color-mix(in oklch, var(--surface) 98%, var(--bg) 2%)',
-              }}
-            >
-              {rightTab === 'agent' && (
-                <div
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    minWidth: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                    padding: '10px 10px 12px',
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  <SubSessionDetailPanel
-                    childSessionId={selectedChildSessionId}
-                    currentUserEmail={currentUserEmail}
-                    gatewayUrl={gatewayUrl}
-                    onOpenFullSession={(nextSessionId) => {
-                      void navigate(`/chat/${nextSessionId}`);
-                    }}
-                    parentTaskRuntimeLookup={taskToolRuntimeLookup}
-                    providerCatalog={providerCatalog}
-                    token={token}
-                  />
-                </div>
-              )}
-              {rightTab !== 'agent' && (
-                <>
-                  <div
-                    data-testid={`chat-right-panel-header-${rightTab}`}
-                    style={{
-                      padding: '10px 12px 8px',
-                      borderBottom: '1px solid color-mix(in oklch, var(--border) 86%, transparent)',
-                      background:
-                        'linear-gradient(180deg, color-mix(in oklch, var(--surface) 96%, var(--bg) 4%), color-mix(in oklch, var(--surface) 98%, var(--bg) 2%))',
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: 'var(--text)',
-                        lineHeight: 1.2,
-                      }}
-                    >
-                      {activeRightTabMeta.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: 'var(--text-3)',
-                        lineHeight: 1.45,
-                        marginTop: 2,
-                      }}
-                    >
-                      {activeRightTabMeta.description}
-                    </div>
-                  </div>
-                  <div
-                    data-testid={`chat-right-panel-body-${rightTab}`}
-                    style={{
-                      flex: 1,
-                      minHeight: 0,
-                      overflowY: 'auto',
-                      overflowX: 'hidden',
-                      padding: '8px 10px 10px',
-                      scrollbarGutter: 'stable',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
-                    {rightTab === 'tools' &&
-                      (() => {
-                        const lspPrefixes = ['lsp_', 'ast_grep'];
-                        const filePrefixes = [
-                          'read',
-                          'write',
-                          'edit',
-                          'glob',
-                          'multi_edit',
-                          'workspace_',
-                        ];
-                        const networkPrefixes = [
-                          'webfetch',
-                          'websearch',
-                          'google_search',
-                          'playwright',
-                          'mcp_',
-                        ];
-                        const filtered = toolCallCards.filter((tc) => {
-                          if (toolFilter === 'all') return true;
-                          const n = tc.toolName.toLowerCase();
-                          if (toolFilter === 'lsp') return lspPrefixes.some((p) => n.startsWith(p));
-                          if (toolFilter === 'file')
-                            return filePrefixes.some((p) => n.startsWith(p));
-                          if (toolFilter === 'network')
-                            return networkPrefixes.some((p) => n.startsWith(p));
-                          return (
-                            !lspPrefixes.some((p) => n.startsWith(p)) &&
-                            !filePrefixes.some((p) => n.startsWith(p)) &&
-                            !networkPrefixes.some((p) => n.startsWith(p))
-                          );
-                        });
-                        return (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <div
-                              style={{
-                                display: 'flex',
-                                gap: 4,
-                                flexWrap: 'wrap',
-                              }}
-                            >
-                              {(['all', 'lsp', 'file', 'network', 'other'] as const).map((f) => (
-                                <button
-                                  key={f}
-                                  type="button"
-                                  onClick={() => setToolFilter(f)}
-                                  style={{
-                                    minHeight: 22,
-                                    padding: '0 7px',
-                                    borderRadius: 999,
-                                    border:
-                                      toolFilter === f
-                                        ? '1px solid color-mix(in oklch, var(--accent) 26%, var(--border))'
-                                        : '1px solid var(--border-subtle)',
-                                    fontSize: 10,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    background:
-                                      toolFilter === f
-                                        ? 'color-mix(in oklch, var(--accent) 14%, var(--surface))'
-                                        : 'color-mix(in oklch, var(--surface) 86%, transparent)',
-                                    color: toolFilter === f ? 'var(--accent)' : 'var(--text-3)',
-                                  }}
-                                >
-                                  {f === 'all'
-                                    ? '全部'
-                                    : f === 'lsp'
-                                      ? 'LSP'
-                                      : f === 'file'
-                                        ? '文件'
-                                        : f === 'network'
-                                          ? '网络'
-                                          : '其他'}
-                                </button>
-                              ))}
-                            </div>
-                            {filtered.length > 0 ? (
-                              filtered.map((toolCall, index) =>
-                                toolCall.toolName.trim().toLowerCase() === 'task' ? (
-                                  <TaskToolInline
-                                    key={`${toolCall.toolName}-${index}`}
-                                    toolCallId={toolCall.toolCallId}
-                                    toolName={toolCall.toolName}
-                                    input={toolCall.input}
-                                    output={toolCall.output}
-                                    isError={toolCall.isError}
-                                    status={toolCall.status}
-                                    onOpenChildSession={openChildSessionInspector}
-                                    runtimeSnapshot={resolveTaskToolRuntimeSnapshot(
-                                      toolCall.input,
-                                      toolCall.output,
-                                      taskToolRuntimeLookup,
-                                    )}
-                                    selectedChildSessionId={selectedChildSessionId}
-                                  />
-                                ) : (
-                                  <ToolCallCard
-                                    key={`${toolCall.toolName}-${index}`}
-                                    toolCallId={toolCall.toolCallId}
-                                    toolName={toolCall.toolName}
-                                    input={toolCall.input}
-                                    output={toolCall.output}
-                                    isError={toolCall.isError}
-                                    resumedAfterApproval={toolCall.resumedAfterApproval}
-                                    status={toolCall.status}
-                                  />
-                                ),
-                              )
-                            ) : (
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  color: 'var(--text-3)',
-                                  padding: '6px 2px',
-                                }}
-                              >
-                                暂无工具调用记录
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    {rightTab === 'viz' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        <div style={sharedUiThemeVars}>
-                          <AgentDAGGraph nodes={dagNodes} edges={dagEdges} />
-                        </div>
-                        <div style={sharedUiThemeVars}>
-                          <AgentVizPanel events={agentEvents} />
-                        </div>
-                      </div>
-                    )}
-                    {rightTab === 'history' && (
-                      <ChatHistoryTabContent
-                        childSessions={childSessions}
-                        compactions={compactions}
-                        pendingPermissions={pendingPermissions}
-                        planHistory={planHistory}
-                        sessionTodos={sessionTodos}
-                        sessionTasks={sessionTasks}
-                        onOpenSession={(nextSessionId) => {
-                          void navigate(`/chat/${nextSessionId}`);
-                        }}
-                        sharedUiThemeVars={sharedUiThemeVars}
-                      />
-                    )}
-                    {rightTab === 'overview' && (
-                      <ChatOverviewTabContent
-                        attachmentItems={attachmentItems}
-                        artifactsWorkspaceHref={artifactsWorkspaceHref}
-                        childSessions={childSessions}
-                        compactions={compactions}
-                        contextUsageSnapshot={contextUsageSnapshot}
-                        contentArtifactCount={contentArtifactCount}
-                        contentArtifactCountStatus={contentArtifactCountStatus}
-                        currentSessionId={currentSessionId}
-                        dialogueMode={dialogueMode}
-                        effectiveWorkingDirectory={effectiveWorkingDirectory}
-                        messages={messages}
-                        pendingPermissions={pendingPermissions}
-                        pendingQuestionsCount={pendingQuestions.length}
-                        sessionStateStatus={sessionStateStatus ?? null}
-                        sessionTodos={sessionTodos}
-                        sessionTasks={sessionTasks}
-                        workspaceFileItems={workspaceFileItems}
-                        yoloMode={yoloMode}
-                        onCompactSession={() => void handleCompactCurrentSession()}
-                        onOpenRecoveryStrategy={() => {
-                          setRightOpen(true);
-                          setRightTab('history');
-                        }}
-                      />
-                    )}
-                    {rightTab === 'mcp' && (
-                      <div style={sharedUiThemeVars}>
-                        <MCPServerList servers={mcpServers} />
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        ) : null}
-      </div>
+        providerCatalog={providerCatalog}
+        attachmentItems={attachmentItems}
+        artifactsWorkspaceHref={artifactsWorkspaceHref}
+        contextUsageSnapshot={contextUsageSnapshot}
+        contentArtifactCount={contentArtifactCount}
+        contentArtifactCountStatus={contentArtifactCountStatus}
+        currentSessionId={currentSessionId}
+        dialogueMode={dialogueMode}
+        effectiveWorkingDirectory={effectiveWorkingDirectory}
+        messages={messages}
+        sessionStateStatus={sessionStateStatus}
+        workspaceFileItems={workspaceFileItems}
+        yoloMode={yoloMode}
+      />
     </div>
   );
 }

@@ -88,13 +88,15 @@ describe('stream stop route', () => {
       createRequestContext: vi.fn(() => ({ requestId: 'req-test' })),
     }));
 
-    vi.doMock('../session-message-store.js', () => ({
-      appendSessionMessage: vi.fn(),
-      buildUpstreamConversation: vi.fn(() => []),
+    vi.doMock('../message-v2-adapter.js', () => ({
+      appendSessionMessageV2: vi.fn(),
       getSessionMessageByRequestId: vi.fn(() => null),
       listSessionMessagesByRequestScope: vi.fn(() => []),
-      listSessionMessages: vi.fn(() => []),
-      truncateSessionMessagesAfter: vi.fn(),
+      listSessionMessagesV2: vi.fn(() => []),
+      truncateSessionMessagesAfterV2: vi.fn(),
+    }));
+    vi.doMock('../session-message-store.js', () => ({
+      buildUpstreamConversation: vi.fn(() => []),
     }));
     vi.doMock('../stream-session-title.js', () => ({ persistStreamUserMessage: vi.fn() }));
     vi.doMock('../session-permission-events.js', () => ({

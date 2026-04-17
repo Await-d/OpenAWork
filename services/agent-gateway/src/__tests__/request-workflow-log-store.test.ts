@@ -77,7 +77,6 @@ describe('request-workflow-log-store', () => {
           observability: {
             presentedToolName: 'Write',
             canonicalToolName: 'write',
-            toolSurfaceProfile: 'claude_code_default',
             adapterVersion: '1.0.0',
           },
         },
@@ -99,7 +98,6 @@ describe('request-workflow-log-store', () => {
               observability: {
                 presentedToolName: 'Write',
                 canonicalToolName: 'write',
-                toolSurfaceProfile: 'claude_code_default',
                 adapterVersion: '1.0.0',
               },
             },

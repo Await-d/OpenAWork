@@ -156,6 +156,69 @@ describe('resolveToolCallCardDisplayData', () => {
     expect(displayData.toolKind).toBe('tool');
   });
 
+  it('extracts structured terminal fields for bash outputs', () => {
+    const displayData = resolveToolCallCardDisplayData({
+      toolName: 'bash',
+      input: {
+        command: 'pwd',
+      },
+      output: {
+        command: 'pwd',
+        cwd: '/tmp/demo',
+        exitCode: 0,
+        stdout: '/tmp/demo\n',
+        stderr: '',
+      },
+    });
+
+    expect(displayData.bashView).toMatchObject({
+      command: 'pwd',
+      cwd: '/tmp/demo',
+      exitCode: 0,
+      stdout: '/tmp/demo\n',
+      stderr: '',
+    });
+    expect(displayData.outputPreview).toBe('/tmp/demo');
+  });
+
+  it('extracts OpenCowork-style shell summary fields for bash outputs', () => {
+    const displayData = resolveToolCallCardDisplayData({
+      toolName: 'bash',
+      input: {
+        command: 'pnpm test',
+      },
+      output: {
+        command: 'pnpm test',
+        cwd: '/tmp/demo',
+        exitCode: 0,
+        processId: 'proc-123',
+        stdout: 'PASS suite\n',
+        summary: {
+          live: true,
+          totalLines: 42,
+          totalChars: 2048,
+          errorLikeLines: 1,
+          warningLikeLines: 2,
+        },
+      },
+    });
+
+    expect(displayData.bashView).toMatchObject({
+      command: 'pnpm test',
+      cwd: '/tmp/demo',
+      exitCode: 0,
+      mode: 'live',
+      processId: 'proc-123',
+      summary: {
+        live: true,
+        totalLines: 42,
+        totalChars: 2048,
+        errorLikeLines: 1,
+        warningLikeLines: 2,
+      },
+    });
+  });
+
   it('maps Claude-first skill and agent tools to localized names and summaries', () => {
     const skillDisplay = resolveToolCallCardDisplayData({
       toolName: 'Skill',

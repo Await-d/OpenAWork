@@ -75,10 +75,10 @@ export function ToolDiffCollection({
                 style={{
                   appearance: 'none',
                   border: active
-                    ? '1px solid color-mix(in oklab, var(--color-accent, #60a5fa) 55%, transparent)'
-                    : '1px solid rgba(148, 163, 184, 0.16)',
+                    ? `1px solid color-mix(in oklab, ${tokens.color.accent} 55%, transparent)`
+                    : `1px solid ${tokens.color.borderSubtle}`,
                   background: active
-                    ? 'color-mix(in srgb, var(--color-accent, #60a5fa) 12%, transparent)'
+                    ? `color-mix(in srgb, ${tokens.color.accent} 12%, transparent)`
                     : 'transparent',
                   borderRadius: tokens.radius.md,
                   padding: '6px 10px',
@@ -100,10 +100,10 @@ export function ToolDiffCollection({
                     flexShrink: 0,
                     background:
                       file.status === 'added'
-                        ? '#34d399'
+                        ? tokens.color.success
                         : file.status === 'deleted'
-                          ? '#f87171'
-                          : 'var(--color-muted, #94a3b8)',
+                          ? tokens.color.danger
+                          : tokens.color.muted,
                   }}
                 />
                 <span
@@ -111,7 +111,7 @@ export function ToolDiffCollection({
                     minWidth: 0,
                     fontSize: 11,
                     fontWeight: active ? 700 : 600,
-                    color: active ? 'var(--color-text, #f8fafc)' : 'var(--color-muted, #94a3b8)',
+                    color: active ? tokens.color.text : tokens.color.muted,
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',

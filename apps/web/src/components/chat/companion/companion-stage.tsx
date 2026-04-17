@@ -13,6 +13,8 @@ import { deriveCompanionStats, getCompanionRarityVisual } from './companion-visu
 import { CompanionTerminalSprite } from './companion-terminal-sprite.js';
 import { useBuddyVoicePreferences } from './use-buddy-voice-preferences.js';
 import { useBuddyVoiceOutput } from './use-buddy-voice-output.js';
+import { useBuddyInteractionMemory } from './use-buddy-interaction-memory.js';
+import { useAuthStore } from '../../../stores/auth.js';
 
 export interface CompanionStageProps extends CompanionActivitySnapshot {
   agentId?: string;
@@ -59,13 +61,13 @@ function CompanionModeButton({
       disabled={disabled}
       onClick={onClick}
       style={{
-        height: 22,
-        padding: '0 7px',
+        height: 18,
+        padding: '0 5px',
         borderRadius: 999,
         border: '1px solid var(--border-subtle)',
         background: disabled ? 'transparent' : active ? 'var(--accent-muted)' : 'transparent',
         color: disabled ? 'var(--text-3)' : active ? 'var(--accent)' : 'var(--text-3)',
-        fontSize: 8.5,
+        fontSize: 7.5,
         fontWeight: active ? 700 : 600,
         whiteSpace: 'nowrap',
         opacity: disabled ? 0.52 : 1,
@@ -82,11 +84,11 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
     <div
       style={{
         minWidth: 0,
-        flex: '1 1 172px',
-        borderRadius: 9,
+        flex: '1 1 140px',
+        borderRadius: 7,
         border: '1px solid var(--border-subtle)',
         background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-        padding: '6px 7px',
+        padding: '4px 5px',
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
@@ -96,7 +98,7 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
     >
       <div
         style={{
-          fontSize: 8.5,
+          fontSize: 7.5,
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
           color: 'var(--text-3)',
@@ -108,12 +110,12 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
       </div>
       <div
         style={{
-          fontSize: 10,
+          fontSize: 9,
           lineHeight: 1.32,
           color: 'var(--text-2)',
           wordBreak: 'break-word',
           minWidth: 0,
-          flex: '1 1 110px',
+          flex: '1 1 90px',
           textAlign: 'right',
         }}
       >
@@ -147,23 +149,23 @@ function CompanionSyncBadge({ label, state }: { label: string; state: CompanionS
       aria-live="polite"
       aria-atomic="true"
       style={{
-        height: 18,
+        height: 15,
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 5,
-        padding: '0 6px',
+        gap: 3,
+        padding: '0 4px',
         borderRadius: 999,
         background,
         color,
-        fontSize: 8,
+        fontSize: 7,
         fontWeight: 700,
       }}
     >
       <span
         aria-hidden="true"
         style={{
-          width: 6,
-          height: 6,
+          width: 5,
+          height: 5,
           borderRadius: 999,
           background: 'currentColor',
           boxShadow:
@@ -184,15 +186,15 @@ function RainbowTriggerBadge({ text }: { text: string }) {
   return (
     <span
       style={{
-        height: 17,
+        height: 15,
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '0 5px',
+        padding: '0 4px',
         borderRadius: 999,
         background:
           'linear-gradient(90deg, color-mix(in oklch, var(--accent) 12%, transparent), color-mix(in oklch, var(--success) 10%, transparent), color-mix(in oklch, var(--warning) 12%, transparent))',
         border: '1px solid color-mix(in oklch, var(--accent) 34%, transparent)',
-        fontSize: 8,
+        fontSize: 7,
         fontWeight: 800,
         gap: 1,
       }}
@@ -242,13 +244,13 @@ function CompanionOutputRow({
       style={{
         display: 'flex',
         alignItems: 'flex-start',
-        gap: 6,
-        borderRadius: 10,
+        gap: 4,
+        borderRadius: 8,
         border: '1px solid var(--border-subtle)',
         background: isLatest
           ? 'color-mix(in oklch, var(--surface-hover) 72%, transparent)'
           : 'color-mix(in oklch, var(--surface) 90%, transparent)',
-        padding: '8px 9px',
+        padding: '5px 6px',
       }}
     >
       <span
@@ -256,11 +258,11 @@ function CompanionOutputRow({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 16,
-          height: 16,
+          width: 13,
+          height: 13,
           borderRadius: 999,
           color: isLatest ? 'var(--accent)' : 'var(--text-3)',
-          fontSize: 9,
+          fontSize: 8,
           fontWeight: 800,
           flexShrink: 0,
           marginTop: 1,
@@ -268,31 +270,31 @@ function CompanionOutputRow({
       >
         {isLatest ? '●' : '·'}
       </span>
-      <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+      <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
           <span
             style={{
-              height: 18,
+              height: 15,
               display: 'inline-flex',
               alignItems: 'center',
-              padding: '0 6px',
+              padding: '0 4px',
               borderRadius: 999,
               background: badgeBackground,
               color: badgeColor,
-              fontSize: 9,
+              fontSize: 8,
               fontWeight: 700,
             }}
           >
             {entry.badge}
           </span>
-          <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 8, color: 'var(--text-3)' }}>
             {isLatest ? '刚刚' : '前一条'}
           </span>
         </div>
         <div
           style={{
-            fontSize: 10.5,
-            lineHeight: 1.5,
+            fontSize: 9.5,
+            lineHeight: 1.4,
             color: 'var(--text-2)',
             wordBreak: 'break-word',
           }}
@@ -324,7 +326,20 @@ export function CompanionStage({
   const [panelOpen, setPanelOpen] = useState<boolean>(() => sessionId === null);
   const [liveOutputId, setLiveOutputId] = useState<string | null>(null);
   const [fadingOutputId, setFadingOutputId] = useState<string | null>(null);
-  const [outputHistory, setOutputHistory] = useState<CompanionOutputEntry[]>([]);
+  const [outputHistory, setOutputHistory] = useState<CompanionOutputEntry[]>(() => {
+    if (typeof globalThis.window === 'undefined') {
+      return [];
+    }
+    try {
+      const raw = globalThis.window.localStorage.getItem(
+        `openawork-buddy-output:${sessionId ?? 'home'}`,
+      );
+      if (!raw) return [];
+      return JSON.parse(raw) as CompanionOutputEntry[];
+    } catch {
+      return [];
+    }
+  });
   const [petNonce, setPetNonce] = useState(0);
   const lastIntroKeyRef = useRef<string | null>(null);
   const lastOutputKeyRef = useRef<string | null>(null);
@@ -422,6 +437,10 @@ export function CompanionStage({
     ? 'none'
     : 'transform 220ms ease, opacity 220ms ease, box-shadow 220ms ease, background 220ms ease';
 
+  const { memory: interactionMemory, recordInteraction } = useBuddyInteractionMemory(
+    currentUserEmail || sessionId || 'guest',
+  );
+
   const pushOutput = useCallback((entry: CompanionUtteranceSeed, announce: boolean) => {
     const createdAt = Date.now();
     const nextEntry: CompanionOutputEntry = {
@@ -435,6 +454,20 @@ export function CompanionStage({
       setFadingOutputId(null);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof globalThis.window === 'undefined' || outputHistory.length === 0) {
+      return;
+    }
+    try {
+      globalThis.window.localStorage.setItem(
+        `openawork-buddy-output:${sessionId ?? 'home'}`,
+        JSON.stringify(outputHistory),
+      );
+    } catch {
+      // localStorage may be unavailable
+    }
+  }, [outputHistory, sessionId]);
 
   useEffect(() => {
     const introKey = `${sessionId ?? 'home'}:${profile.name}:${profile.species}`;
@@ -486,6 +519,41 @@ export function CompanionStage({
     sessionId,
   ]);
 
+  const prevStreamingRef = useRef(streaming);
+  const prevPendingRef = useRef(pendingPermissionCount);
+  useEffect(() => {
+    if (muted || quietMode) {
+      prevStreamingRef.current = streaming;
+      prevPendingRef.current = pendingPermissionCount;
+      return;
+    }
+
+    const wasStreaming = prevStreamingRef.current;
+    const wasPending = prevPendingRef.current;
+    prevStreamingRef.current = streaming;
+    prevPendingRef.current = pendingPermissionCount;
+
+    if (wasStreaming && !streaming) {
+      pushOutput(
+        { badge: '生成完成', text: '这轮输出结束了，需要我帮忙看看吗？', tone: 'notice' },
+        true,
+      );
+      recordInteraction('notification', '生成完成');
+    }
+
+    if (pendingPermissionCount > wasPending && pendingPermissionCount > 0) {
+      pushOutput(
+        {
+          badge: '新审批',
+          text: `有 ${pendingPermissionCount} 项新审批等你处理。`,
+          tone: 'notice',
+        },
+        true,
+      );
+      recordInteraction('notification', `新审批:${pendingPermissionCount}`);
+    }
+  }, [muted, quietMode, streaming, pendingPermissionCount, pushOutput, recordInteraction]);
+
   useEffect(() => {
     if (!liveOutputId) {
       return;
@@ -525,14 +593,88 @@ export function CompanionStage({
     voiceInputVisible: showVoice,
   });
 
+  const { accessToken, gatewayUrl } = useAuthStore();
+  const [buddyChatBusy, setBuddyChatBusy] = useState(false);
+
+  const requestBuddyChat = useCallback(
+    async (userMessage: string) => {
+      if (!gatewayUrl || !accessToken || buddyChatBusy) {
+        return;
+      }
+
+      setBuddyChatBusy(true);
+      try {
+        const response = await fetch(`${gatewayUrl}/settings/companion/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            message: userMessage,
+            context: {
+              sessionBusy: sessionBusyState === 'running',
+              pendingApprovals: pendingPermissionCount,
+              pendingQuestions: pendingPermissionCount,
+              runningTasks: attachedCount,
+              todoCount,
+            },
+            agentId,
+          }),
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as {
+          text: string;
+          profileName: string;
+          profileSpecies: string;
+          tone: string;
+        };
+
+        if (data.text) {
+          pushOutput(
+            { badge: data.profileName, text: data.text, tone: 'chat' },
+            !muted && !quietMode,
+          );
+          recordInteraction('chat', data.text);
+        }
+      } catch {
+        // Silently fail - buddy chat is non-critical
+      } finally {
+        setBuddyChatBusy(false);
+      }
+    },
+    [
+      accessToken,
+      agentId,
+      attachedCount,
+      buddyChatBusy,
+      gatewayUrl,
+      muted,
+      pendingPermissionCount,
+      pushOutput,
+      quietMode,
+      recordInteraction,
+      sessionBusyState,
+      todoCount,
+    ],
+  );
+
   useEffect(() => {
     const mentionsBuddy = input.includes('/buddy');
     if (mentionsBuddy && !buddyMentionActiveRef.current) {
       setPetNonce((current) => current + 1);
       setPanelOpen(true);
+      recordInteraction('trigger', input);
+
+      const buddyMessage = input.replace(/\/buddy/g, '').trim() || '嘿';
+      void requestBuddyChat(buddyMessage);
     }
     buddyMentionActiveRef.current = mentionsBuddy;
-  }, [input]);
+  }, [input, recordInteraction, requestBuddyChat]);
 
   useEffect(() => {
     if (panelOpenSignal === lastPanelOpenSignalRef.current) {
@@ -543,7 +685,41 @@ export function CompanionStage({
   }, [panelOpenSignal]);
 
   if (isVoiceOutputFeatureReady && !isCompanionFeatureEnabled) {
-    return null;
+    return (
+      <section
+        data-testid="companion-stage"
+        style={{
+          maxWidth: editorMode ? 680 : rightOpen ? 700 : 740,
+          margin: '0 auto 3px',
+          width: '100%',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setEnabled(true)}
+          aria-label="重新启用 Buddy 伴侣"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '3px 8px',
+            borderRadius: 999,
+            border: '1px solid var(--border-subtle)',
+            background: 'transparent',
+            color: 'var(--text-3)',
+            fontSize: 9,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'color 160ms ease, border-color 160ms ease',
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 10 }}>
+            ◈
+          </span>
+          <span>启用 Buddy</span>
+        </button>
+      </section>
+    );
   }
 
   return (
@@ -551,7 +727,7 @@ export function CompanionStage({
       data-testid="companion-stage"
       style={{
         maxWidth: editorMode ? 680 : rightOpen ? 700 : 740,
-        margin: '0 auto 5px',
+        margin: '0 auto 3px',
         width: '100%',
       }}
     >
@@ -563,9 +739,9 @@ export function CompanionStage({
             'linear-gradient(180deg, color-mix(in oklch, var(--bg-glass) 88%, transparent), color-mix(in oklch, var(--surface) 94%, transparent))',
           backdropFilter: 'blur(12px)',
           boxShadow: panelOpen
-            ? '0 10px 20px -24px rgba(0, 0, 0, 0.48)'
-            : '0 6px 14px -22px rgba(0, 0, 0, 0.38)',
-          padding: panelOpen ? '6px 7px 7px' : '5px 6px 5px',
+            ? '0 6px 14px -20px rgba(0, 0, 0, 0.36)'
+            : '0 3px 8px -16px rgba(0, 0, 0, 0.26)',
+          padding: panelOpen ? '4px 5px 5px' : '3px 5px 3px',
           transition: baseTransition,
         }}
       >
@@ -581,10 +757,10 @@ export function CompanionStage({
           <div
             style={{
               minWidth: 0,
-              flex: '1 1 340px',
+              flex: '1 1 260px',
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
+              gap: 4,
             }}
           >
             <CompanionTerminalSprite
@@ -611,21 +787,21 @@ export function CompanionStage({
                 alignItems: 'flex-start',
               }}
             >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text)' }}>
                   {profile.name}
                 </span>
                 <span
                   style={{
-                    height: 17,
+                    height: 15,
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '0 5px',
+                    padding: '0 4px',
                     borderRadius: 999,
                     border: '1px solid var(--border-subtle)',
                     background: profile.accentTint,
                     color: profile.accentColor,
-                    fontSize: 8.5,
+                    fontSize: 7.5,
                     fontWeight: 700,
                   }}
                 >
@@ -633,15 +809,15 @@ export function CompanionStage({
                 </span>
                 <span
                   style={{
-                    height: 17,
+                    height: 15,
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '0 5px',
+                    padding: '0 4px',
                     borderRadius: 999,
                     background: rarityVisual.background,
                     border: `1px solid ${rarityVisual.borderColor}`,
                     color: rarityVisual.color,
-                    fontSize: 8.5,
+                    fontSize: 7.5,
                     fontWeight: 800,
                   }}
                 >
@@ -650,15 +826,15 @@ export function CompanionStage({
                 {activeBinding?.behaviorTone ? (
                   <span
                     style={{
-                      height: 17,
+                      height: 15,
                       display: 'inline-flex',
                       alignItems: 'center',
-                      padding: '0 5px',
+                      padding: '0 4px',
                       borderRadius: 999,
                       border: '1px solid var(--border-subtle)',
                       background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
                       color: 'var(--text-2)',
-                      fontSize: 8.5,
+                      fontSize: 7.5,
                       fontWeight: 700,
                     }}
                   >
@@ -667,17 +843,17 @@ export function CompanionStage({
                 ) : null}
                 {buddyTriggerActive ? <RainbowTriggerBadge text="/buddy" /> : null}
               </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                 <span
                   style={{
-                    height: 15,
+                    height: 14,
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '0 4px',
+                    padding: '0 3px',
                     borderRadius: 999,
                     background: 'var(--bg-2)',
                     color: 'var(--text-2)',
-                    fontSize: 8,
+                    fontSize: 7.5,
                     fontWeight: 700,
                   }}
                 >
@@ -685,14 +861,14 @@ export function CompanionStage({
                 </span>
                 <span
                   style={{
-                    height: 15,
+                    height: 14,
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '0 4px',
+                    padding: '0 3px',
                     borderRadius: 999,
                     background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
                     color: 'var(--text-2)',
-                    fontSize: 8,
+                    fontSize: 7.5,
                     fontWeight: 700,
                   }}
                 >
@@ -786,10 +962,10 @@ export function CompanionStage({
             id="chat-companion-panel"
             data-testid="companion-panel"
             style={{
-              marginTop: 4,
+              marginTop: 3,
               display: 'flex',
               flexDirection: 'column',
-              gap: 4,
+              gap: 3,
             }}
           >
             <div
@@ -799,14 +975,14 @@ export function CompanionStage({
                 justifyContent: 'space-between',
                 gap: 4,
                 flexWrap: 'wrap',
-                borderRadius: 10,
+                borderRadius: 8,
                 border: '1px solid var(--border-subtle)',
-                padding: '6px 6px 5px',
+                padding: '4px 5px 4px',
                 background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
               }}
             >
               <div style={{ minWidth: 0, flex: '1 1 220px' }}>
-                <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--text)' }}>
+                <div style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--text)' }}>
                   {profile.name} · {profile.species}
                 </div>
                 <div
@@ -824,20 +1000,20 @@ export function CompanionStage({
                 >
                   {profile.note}
                 </div>
-                <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                <div style={{ marginTop: 3, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                   {companionStats.map((stat) => (
                     <span
                       key={stat.key}
                       style={{
-                        height: 17,
+                        height: 15,
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: 4,
-                        padding: '0 5px',
+                        gap: 3,
+                        padding: '0 4px',
                         borderRadius: 999,
                         background: 'color-mix(in oklch, var(--surface-hover) 88%, transparent)',
                         color: 'var(--text-2)',
-                        fontSize: 8,
+                        fontSize: 7.5,
                         fontWeight: 700,
                       }}
                     >
@@ -852,14 +1028,14 @@ export function CompanionStage({
                   <span
                     key={trait}
                     style={{
-                      height: 17,
+                      height: 15,
                       display: 'inline-flex',
                       alignItems: 'center',
-                      padding: '0 4px',
+                      padding: '0 3px',
                       borderRadius: 999,
                       background: 'color-mix(in oklch, var(--surface-hover) 86%, transparent)',
                       color: 'var(--text-2)',
-                      fontSize: 8,
+                      fontSize: 7.5,
                       fontWeight: 700,
                     }}
                   >
@@ -869,7 +1045,7 @@ export function CompanionStage({
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               <CompanionMetaCard label="当前状态" value={statusText} />
               <CompanionMetaCard
                 label="语音播报"
@@ -885,12 +1061,12 @@ export function CompanionStage({
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          height: 17,
-                          padding: '0 4px',
+                          height: 15,
+                          padding: '0 3px',
                           borderRadius: 999,
                           background: 'var(--bg-2)',
                           color: 'var(--text-2)',
-                          fontSize: 8,
+                          fontSize: 7.5,
                           fontWeight: 700,
                         }}
                       >
@@ -902,7 +1078,7 @@ export function CompanionStage({
               />
               <CompanionMetaCard
                 label="当前阶段"
-                value={`终端同款精灵壳层；注入模式：${enabled ? companionFeatureMode : 'off'}。`}
+                value={`注入模式：${enabled ? companionFeatureMode : 'off'}`}
               />
               <CompanionMetaCard
                 label="稀有度"
@@ -911,7 +1087,7 @@ export function CompanionStage({
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: 4,
+                      gap: 3,
                       justifyContent: 'flex-end',
                       flexWrap: 'wrap',
                     }}
@@ -929,10 +1105,10 @@ export function CompanionStage({
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
-                borderRadius: 10,
+                borderRadius: 8,
                 border: '1px solid var(--border-subtle)',
                 background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
-                padding: '6px 6px 5px',
+                padding: '4px 5px 4px',
               }}
             >
               <div

@@ -14,6 +14,8 @@ describe('recoverActiveAssistantStream', () => {
           },
         ],
         sessionStateStatus: 'idle',
+        hasActiveStream: true,
+        activeStreamStartedAt: 1,
       }),
     ).toBeNull();
   });
@@ -63,6 +65,8 @@ describe('recoverActiveAssistantStream', () => {
           },
         ],
         sessionStateStatus: 'running',
+        hasActiveStream: true,
+        activeStreamStartedAt: 10,
       }),
     ).toEqual({
       startedAt: 10,
@@ -91,6 +95,8 @@ describe('recoverActiveAssistantStream', () => {
           },
         ],
         sessionStateStatus: 'paused',
+        hasActiveStream: true,
+        activeStreamStartedAt: 20,
       }),
     ).toEqual({
       startedAt: 20,
@@ -118,7 +124,93 @@ describe('recoverActiveAssistantStream', () => {
           },
         ],
         sessionStateStatus: 'running',
+        hasActiveStream: true,
+        activeStreamStartedAt: 30,
       }),
     ).toBeNull();
+  });
+
+  it('returns null when the session is paused without an active runtime stream', () => {
+    expect(
+      recoverActiveAssistantStream({
+        runEvents: [
+          {
+            type: 'text_delta',
+            delta: '旧回复',
+            runId: 'run-old',
+            occurredAt: 1,
+          },
+        ],
+        sessionStateStatus: 'paused',
+        hasActiveStream: false,
+        activeStreamStartedAt: null,
+      }),
+    ).toBeNull();
+  });
+
+  it('keeps running-session recovery available while the attach runtime is still being rediscovered', () => {
+    expect(
+      recoverActiveAssistantStream({
+        runEvents: [
+          {
+            type: 'thinking_delta',
+            delta: '继续恢复',
+            runId: 'run-refresh',
+            occurredAt: 40,
+          },
+          {
+            type: 'text_delta',
+            delta: '已恢复',
+            runId: 'run-refresh',
+            occurredAt: 41,
+          },
+        ],
+        sessionStateStatus: 'running',
+        hasActiveStream: false,
+        activeStreamStartedAt: null,
+      }),
+    ).toEqual({
+      startedAt: 40,
+      text: '已恢复',
+      thinking: '继续恢复',
+      usage: null,
+    });
+  });
+
+  it('ignores stale run events that happened before the current active stream started', () => {
+    expect(
+      recoverActiveAssistantStream({
+        runEvents: [
+          {
+            type: 'text_delta',
+            delta: '旧内容',
+            runId: 'run-old',
+            occurredAt: 5,
+          },
+          {
+            type: 'tool_call_delta',
+            toolCallId: 'tool-current',
+            toolName: 'bash',
+            inputDelta: '{"command":"ls"}',
+            runId: 'run-current',
+            occurredAt: 100,
+          },
+          {
+            type: 'text_delta',
+            delta: '当前内容',
+            runId: 'run-current',
+            occurredAt: 101,
+          },
+        ],
+        sessionStateStatus: 'running',
+        hasActiveStream: true,
+        activeStreamStartedAt: 100,
+      }),
+    ).toEqual({
+      startedAt: 100,
+      text: '当前内容',
+      thinking: '',
+      usage: null,
+    });
   });
 });

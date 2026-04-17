@@ -8,7 +8,7 @@ import websocket from '@fastify/websocket';
 import authPlugin from '../auth.js';
 import { closeDb, connectDb, migrate, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import requestWorkflowPlugin from '../request-workflow.js';
-import { listSessionMessages } from '../session-message-store.js';
+import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
 import { listSessionRunEvents } from '../session-run-events.js';
 import { listSessionSnapshots } from '../session-snapshot-store.js';
 import { sessionsRoutes } from '../routes/sessions.js';

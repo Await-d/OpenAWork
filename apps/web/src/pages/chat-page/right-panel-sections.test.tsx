@@ -89,6 +89,73 @@ describe('right panel todo sections', () => {
     expect(container?.textContent).toContain('进行中');
   });
 
+  it('renders inline approval buttons for pending permissions in history mode', async () => {
+    const onApproveSession = vi.fn();
+
+    await act(async () => {
+      root!.render(
+        <ChatHistoryTabContent
+          childSessions={[]}
+          compactions={[]}
+          pendingPermissions={[
+            {
+              requestId: 'perm-1',
+              sessionId: 'session-1',
+              toolName: 'bash',
+              scope: 'workspace-write',
+              reason: '需要执行工作区命令',
+              riskLevel: 'high',
+              previewAction: '执行命令: pwd',
+              status: 'pending',
+              createdAt: '2026-04-16T12:00:00.000Z',
+            },
+          ]}
+          resolveInlinePermissionActions={(requestId) =>
+            requestId === 'perm-1'
+              ? {
+                  items: [
+                    {
+                      id: 'session',
+                      label: '本会话允许',
+                      onClick: onApproveSession,
+                    },
+                    {
+                      id: 'reject',
+                      label: '拒绝',
+                      danger: true,
+                      onClick: () => undefined,
+                    },
+                  ],
+                  pendingLabel: '推荐：本会话允许 · 临时：允许一次 · 持久：永久允许',
+                }
+              : undefined
+          }
+          planHistory={[]}
+          sessionTodos={[]}
+          sessionTasks={[]}
+          onOpenSession={() => undefined}
+          sharedUiThemeVars={{}}
+        />,
+      );
+    });
+
+    expect(container?.textContent).toContain('待处理审批');
+    expect(container?.textContent).toContain('本会话允许');
+    expect(container?.textContent).toContain('拒绝');
+    expect(container?.textContent).toContain('推荐：本会话允许 · 临时：允许一次 · 持久：永久允许');
+
+    const approveButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('本会话允许'),
+    );
+    expect(approveButton).toBeTruthy();
+
+    act(() => {
+      approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onApproveSession).toHaveBeenCalledTimes(1);
+  });
+
   it('renders todo counts in overview mode', async () => {
     await act(async () => {
       root!.render(

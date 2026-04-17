@@ -1,4 +1,4 @@
-import { appendSessionMessage } from './session-message-store.js';
+import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-adapter.js';
 import { maybeAutoTitle } from './session-title.js';
 
 export interface PersistStreamUserMessageInput {

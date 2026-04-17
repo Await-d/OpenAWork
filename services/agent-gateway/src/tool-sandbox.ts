@@ -146,10 +146,7 @@ import { createPermissionAskedEvent } from './session-permission-events.js';
 import { createQuestionAskedEvent } from './session-question-events.js';
 import { deleteSessionRunEventsByRequest, publishSessionRunEvent } from './session-run-events.js';
 import { reconcileSessionStateStatus } from './session-runtime-state.js';
-import {
-  extractToolSurfaceProfile,
-  parseSessionMetadataJson,
-} from './session-workspace-metadata.js';
+import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import {
   DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
   normalizeUpstreamRetryMaxRetries,
@@ -161,13 +158,13 @@ import {
   shouldAutoApproveToolForSessionMetadata,
 } from './session-tool-visibility.js';
 import {
-  appendSessionMessage,
+  appendSessionMessageV2 as appendSessionMessage,
   deleteSessionMessagesByRequestScope,
   getLatestReferencedToolResult,
   getSessionToolResultByCallId,
-  listSessionMessages,
   listSessionMessagesByRequestScope,
-} from './session-message-store.js';
+  listSessionMessagesV2 as listSessionMessages,
+} from './message-v2-adapter.js';
 import { deleteRequestFileDiffs } from './session-file-diff-store.js';
 import { deleteRequestSnapshots } from './session-snapshot-store.js';
 import { extractLatestChildSessionSummary } from './task-result-extraction.js';
@@ -330,7 +327,6 @@ interface PermissionRequestPayload {
   observability?: {
     presentedToolName: string;
     canonicalToolName: string;
-    toolSurfaceProfile: 'openawork' | 'claude_code_simple' | 'claude_code_default';
     adapterVersion: string;
   };
 }
@@ -4243,7 +4239,6 @@ function buildToolObservability(input: {
   return {
     presentedToolName: input.presentedToolName,
     canonicalToolName: input.canonicalToolName,
-    toolSurfaceProfile: extractToolSurfaceProfile(input.metadata),
     adapterVersion: '1.0.0',
   };
 }

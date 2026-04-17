@@ -42,6 +42,7 @@ export interface AssistantTraceToolCall {
   toolName: string;
   input: Record<string, unknown>;
   clientRequestId?: string;
+  durationMs?: number;
   fileDiffs?: FileDiffContent[];
   isError?: boolean;
   observability?: ToolCallObservabilityAnnotation;
@@ -56,6 +57,23 @@ export interface AssistantTracePayload {
   reasoningBlocks?: string[];
   text: string;
   toolCalls: AssistantTraceToolCall[];
+}
+
+export function hasActivePendingPermissionRequest(input: {
+  isError?: boolean;
+  pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
+  status?: string;
+}): boolean {
+  return (
+    typeof input.pendingPermissionRequestId === 'string' &&
+    input.pendingPermissionRequestId.trim().length > 0 &&
+    input.isError !== true &&
+    input.resumedAfterApproval !== true &&
+    input.status !== 'completed' &&
+    input.status !== 'failed' &&
+    input.status !== 'error'
+  );
 }
 
 interface CopiedToolCardSections {
@@ -74,6 +92,7 @@ export type AssistantEventKind =
   | 'compaction'
   | 'mcp'
   | 'permission'
+  | 'question'
   | 'skill'
   | 'task'
   | 'tool';
@@ -83,6 +102,7 @@ export type AssistantEventStatus = 'error' | 'paused' | 'running' | 'success';
 export interface AssistantEventPayload {
   kind: AssistantEventKind;
   message: string;
+  requestId?: string;
   status: AssistantEventStatus;
   title: string;
 }
@@ -191,6 +211,7 @@ export function parseAssistantEventContent(content: string): AssistantEventPaylo
     return {
       kind,
       message: payload['message'],
+      requestId: typeof payload['requestId'] === 'string' ? payload['requestId'] : undefined,
       status,
       title: payload['title'],
     };
@@ -255,13 +276,12 @@ export function createAssistantEventContent(
 
   if (event.type === 'permission_asked') {
     return createAssistantEventCardContent({
-      kind:
-        options?.kindOverride ??
-        classifyAssistantEventKind(`${event.toolName} ${event.previewAction ?? ''}`),
+      kind: options?.kindOverride ?? 'permission',
       title: `等待权限 · ${event.toolName}`,
       message: [event.previewAction, event.reason, `${event.scope} · ${event.riskLevel}`]
         .filter((item) => typeof item === 'string' && item.trim().length > 0)
         .join('\n'),
+      requestId: event.requestId,
       status: 'paused',
     });
   }
@@ -271,13 +291,14 @@ export function createAssistantEventContent(
       kind: options?.kindOverride ?? 'permission',
       title: '权限已响应',
       message: formatPermissionDecision(event.decision),
+      requestId: event.requestId,
       status: event.decision === 'reject' ? 'error' : 'success',
     });
   }
 
   if (event.type === 'question_asked') {
     return createAssistantEventCardContent({
-      kind: options?.kindOverride ?? 'task',
+      kind: options?.kindOverride ?? 'question',
       title: `等待回答 · ${event.toolName}`,
       message: event.title,
       status: 'paused',
@@ -286,7 +307,7 @@ export function createAssistantEventContent(
 
   if (event.type === 'question_replied') {
     return createAssistantEventCardContent({
-      kind: options?.kindOverride ?? 'task',
+      kind: options?.kindOverride ?? 'question',
       title: '问题已响应',
       message: event.status === 'answered' ? '已回答，继续执行。' : '已忽略，等待进一步处理。',
       status: event.status === 'answered' ? 'success' : 'paused',
@@ -442,6 +463,37 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
               ? (record['input'] as Record<string, unknown>)
               : {};
 
+          const isError = record['isError'] === true;
+          const pendingPermissionRequestId =
+            typeof record['pendingPermissionRequestId'] === 'string'
+              ? record['pendingPermissionRequestId']
+              : undefined;
+          const resumedAfterApproval = record['resumedAfterApproval'] === true;
+          const parsedStatus =
+            record['status'] === 'running' ||
+            record['status'] === 'paused' ||
+            record['status'] === 'completed' ||
+            record['status'] === 'failed'
+              ? record['status']
+              : undefined;
+          const hasPendingPermission = hasActivePendingPermissionRequest({
+            isError,
+            pendingPermissionRequestId,
+            resumedAfterApproval,
+            status: parsedStatus,
+          });
+          const normalizedStatus = hasPendingPermission
+            ? 'paused'
+            : parsedStatus === 'failed' ||
+                parsedStatus === 'completed' ||
+                parsedStatus === 'running'
+              ? parsedStatus
+              : parsedStatus === 'paused' && isError
+                ? 'failed'
+                : parsedStatus === 'paused' && resumedAfterApproval
+                  ? 'completed'
+                  : parsedStatus;
+
           return [
             {
               ...(record['kind'] === 'agent' ||
@@ -462,21 +514,16 @@ export function parseAssistantTraceContent(content: string): AssistantTracePaylo
               toolName: record['toolName'],
               input,
               output: record['output'],
-              isError: record['isError'] === true,
+              isError,
               ...(parseToolCallObservability(record['observability'])
                 ? { observability: parseToolCallObservability(record['observability']) }
                 : {}),
-              ...(typeof record['pendingPermissionRequestId'] === 'string'
-                ? { pendingPermissionRequestId: record['pendingPermissionRequestId'] }
+              ...(hasPendingPermission ? { pendingPermissionRequestId } : {}),
+              ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+              ...(typeof record['durationMs'] === 'number' && Number.isFinite(record['durationMs'])
+                ? { durationMs: record['durationMs'] }
                 : {}),
-              ...(record['resumedAfterApproval'] === true ? { resumedAfterApproval: true } : {}),
-              status:
-                record['status'] === 'running' ||
-                record['status'] === 'paused' ||
-                record['status'] === 'completed' ||
-                record['status'] === 'failed'
-                  ? record['status']
-                  : undefined,
+              status: normalizedStatus,
             } satisfies AssistantTraceToolCall,
           ];
         })
@@ -550,6 +597,198 @@ export function clearResolvedPendingPermissionFromMessage(
   };
 }
 
+export function applyPermissionDecisionToLocalAssistantMessages(
+  messages: ChatMessage[],
+  requestId: string,
+  decision: Extract<RunEvent, { type: 'permission_replied' }>['decision'],
+): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.role !== 'assistant') {
+      return message;
+    }
+
+    const assistantTrace = parseAssistantTraceContent(message.content);
+    if (!assistantTrace) {
+      return message;
+    }
+
+    let updated = false;
+    const nextToolCalls = assistantTrace.toolCalls.map((toolCall) => {
+      if (toolCall.pendingPermissionRequestId !== requestId) {
+        return toolCall;
+      }
+
+      updated = true;
+      const {
+        pendingPermissionRequestId: _resolvedPendingPermissionRequestId,
+        output: _waitingOutput,
+        ...baseToolCall
+      } = toolCall;
+
+      return {
+        ...baseToolCall,
+        isError: decision === 'reject',
+        ...(decision === 'reject' ? { output: '权限已拒绝，工具未执行。' } : {}),
+        ...(decision !== 'reject' ? { resumedAfterApproval: true } : {}),
+        status: decision === 'reject' ? ('failed' as const) : ('running' as const),
+      } satisfies AssistantTraceToolCall;
+    });
+
+    if (!updated) {
+      return message;
+    }
+
+    return {
+      ...message,
+      content: createAssistantTraceContent({
+        ...(assistantTrace.modifiedFilesSummary
+          ? { modifiedFilesSummary: assistantTrace.modifiedFilesSummary }
+          : {}),
+        ...(assistantTrace.reasoningBlocks && assistantTrace.reasoningBlocks.length > 0
+          ? { reasoningBlocks: assistantTrace.reasoningBlocks }
+          : {}),
+        text: assistantTrace.text,
+        toolCalls: nextToolCalls,
+      }),
+      modifiedFilesSummary: assistantTrace.modifiedFilesSummary ?? undefined,
+      toolCallCount: nextToolCalls.length > 0 ? nextToolCalls.length : undefined,
+    };
+  });
+}
+
+export function dismissPermissionEventMessage(
+  messages: ChatMessage[],
+  requestId: string,
+): ChatMessage[] {
+  return messages.filter((message) => {
+    if (message.role !== 'assistant') {
+      return true;
+    }
+
+    const assistantEvent = parseAssistantEventContent(message.content);
+    return !(assistantEvent?.kind === 'permission' && assistantEvent.requestId === requestId);
+  });
+}
+
+export function applyToolResultToLocalAssistantMessages(
+  messages: ChatMessage[],
+  event: Extract<RunEvent, { type: 'tool_result' }>,
+): ChatMessage[] {
+  const hasPendingPermission = hasActivePendingPermissionRequest(event);
+  let matched = false;
+
+  const nextMessages = messages.map((message) => {
+    if (message.role !== 'assistant') {
+      return message;
+    }
+
+    const assistantTrace = parseAssistantTraceContent(message.content);
+    if (!assistantTrace) {
+      return message;
+    }
+
+    let updatedInMessage = false;
+    const nextToolCalls = assistantTrace.toolCalls.map((toolCall) => {
+      if (toolCall.toolCallId !== event.toolCallId) {
+        return toolCall;
+      }
+
+      updatedInMessage = true;
+      matched = true;
+
+      const {
+        pendingPermissionRequestId: _stalePendingPermissionRequestId,
+        resumedAfterApproval: _staleResumedAfterApproval,
+        ...baseToolCall
+      } = toolCall;
+
+      return {
+        ...baseToolCall,
+        output: event.output,
+        isError: hasPendingPermission ? false : event.isError,
+        ...(hasPendingPermission
+          ? { pendingPermissionRequestId: event.pendingPermissionRequestId }
+          : {}),
+        ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+        status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+      } satisfies AssistantTraceToolCall;
+    });
+
+    if (!updatedInMessage) {
+      return message;
+    }
+
+    return {
+      ...message,
+      content: createAssistantTraceContent({
+        ...(assistantTrace.modifiedFilesSummary
+          ? { modifiedFilesSummary: assistantTrace.modifiedFilesSummary }
+          : {}),
+        ...(assistantTrace.reasoningBlocks && assistantTrace.reasoningBlocks.length > 0
+          ? { reasoningBlocks: assistantTrace.reasoningBlocks }
+          : {}),
+        text: assistantTrace.text,
+        toolCalls: nextToolCalls,
+      }),
+      modifiedFilesSummary: assistantTrace.modifiedFilesSummary ?? undefined,
+      toolCallCount: nextToolCalls.length > 0 ? nextToolCalls.length : undefined,
+    };
+  });
+
+  return matched ? nextMessages : messages;
+}
+
+export function upsertPermissionEventMessage(
+  messages: ChatMessage[],
+  event: Extract<RunEvent, { type: 'permission_asked' | 'permission_replied' }>,
+): ChatMessage[] {
+  const content = createAssistantEventContent(event);
+  if (!content) {
+    return messages;
+  }
+
+  const nextMessages: ChatMessage[] = [];
+  let matched = false;
+
+  for (const message of messages) {
+    if (message.role !== 'assistant') {
+      nextMessages.push(message);
+      continue;
+    }
+
+    const assistantEvent = parseAssistantEventContent(message.content);
+    if (assistantEvent?.kind !== 'permission' || assistantEvent.requestId !== event.requestId) {
+      nextMessages.push(message);
+      continue;
+    }
+
+    if (!matched) {
+      nextMessages.push({
+        ...message,
+        content,
+        createdAt: message.createdAt ?? event.occurredAt ?? Date.now(),
+        status: 'completed',
+      });
+      matched = true;
+    }
+  }
+
+  if (matched) {
+    return nextMessages;
+  }
+
+  return [
+    ...nextMessages,
+    {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content,
+      createdAt: event.occurredAt ?? Date.now(),
+      status: 'completed',
+    },
+  ];
+}
+
 function parseCopiedToolCardJson(value: string): unknown {
   const normalized = value.trim();
   if (normalized.length === 0) {
@@ -575,6 +814,59 @@ function parseCopiedToolCardInput(value: string | undefined): Record<string, unk
 
   const normalized = value.trim();
   return normalized.length > 0 ? { raw: normalized } : {};
+}
+
+function looksLikeWaitingStateOutput(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+
+  const serialized =
+    typeof value === 'string'
+      ? value
+      : (() => {
+          try {
+            return JSON.stringify(value);
+          } catch {
+            return String(value);
+          }
+        })();
+
+  const normalized = serialized.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return true;
+  }
+
+  return (
+    normalized.includes('waiting for approval') ||
+    normalized.includes('requires approval') ||
+    normalized.includes('permission request') ||
+    normalized.includes('waiting for answer') ||
+    normalized.includes('waiting for confirmation') ||
+    normalized.includes('等待权限') ||
+    normalized.includes('等待审批') ||
+    normalized.includes('等待回答') ||
+    normalized.includes('等待确认')
+  );
+}
+
+function shouldPreservePausedToolState(input: {
+  isError?: boolean;
+  output?: unknown;
+  pendingPermissionRequestId?: string;
+  resumedAfterApproval?: boolean;
+  status?: string;
+}): boolean {
+  if (hasActivePendingPermissionRequest(input)) {
+    return true;
+  }
+
+  return (
+    input.status === 'paused' &&
+    input.isError !== true &&
+    input.resumedAfterApproval !== true &&
+    looksLikeWaitingStateOutput(input.output)
+  );
 }
 
 function mapCopiedToolCardKind(value: string | undefined): AssistantTraceToolCall['kind'] {
@@ -724,14 +1016,27 @@ export function parseCopiedToolCardContent(content: string): AssistantTraceToolC
     return null;
   }
 
+  const output = sections.outputText ? parseCopiedToolCardJson(sections.outputText) : undefined;
+  const shouldStayPaused = shouldPreservePausedToolState({
+    isError: sections.isError,
+    output,
+    resumedAfterApproval: sections.resumedAfterApproval,
+    status: sections.status,
+  });
+
   return {
     kind: sections.kind,
     toolName: sections.toolName,
     input: parseCopiedToolCardInput(sections.inputText),
-    output: sections.outputText ? parseCopiedToolCardJson(sections.outputText) : undefined,
+    output,
     isError: sections.isError,
     ...(sections.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-    status: sections.status,
+    status:
+      sections.status === 'paused' && !shouldStayPaused
+        ? sections.isError || sections.outputText
+          ? 'failed'
+          : 'completed'
+        : sections.status,
   };
 }
 
@@ -747,6 +1052,26 @@ function parseLegacyToolCallContent(content: string): AssistantTraceToolCall | n
     }
 
     const payload = parsed.payload ?? {};
+    const isError = payload['isError'] === true;
+    const pendingPermissionRequestId =
+      typeof payload['pendingPermissionRequestId'] === 'string'
+        ? payload['pendingPermissionRequestId']
+        : undefined;
+    const resumedAfterApproval = payload['resumedAfterApproval'] === true;
+    const status =
+      payload['status'] === 'running' ||
+      payload['status'] === 'paused' ||
+      payload['status'] === 'completed' ||
+      payload['status'] === 'failed'
+        ? payload['status']
+        : undefined;
+    const shouldStayPaused = shouldPreservePausedToolState({
+      isError,
+      output: payload['output'],
+      pendingPermissionRequestId,
+      resumedAfterApproval,
+      status,
+    });
     return {
       kind:
         payload['kind'] === 'agent' ||
@@ -762,19 +1087,15 @@ function parseLegacyToolCallContent(content: string): AssistantTraceToolCall | n
           ? (payload['input'] as Record<string, unknown>)
           : {},
       output: payload['output'],
-      isError: payload['isError'] === true,
-      ...(payload['resumedAfterApproval'] === true ? { resumedAfterApproval: true } : {}),
-      pendingPermissionRequestId:
-        typeof payload['pendingPermissionRequestId'] === 'string'
-          ? payload['pendingPermissionRequestId']
-          : undefined,
+      isError,
+      ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+      ...(shouldStayPaused && pendingPermissionRequestId ? { pendingPermissionRequestId } : {}),
       status:
-        payload['status'] === 'running' ||
-        payload['status'] === 'paused' ||
-        payload['status'] === 'completed' ||
-        payload['status'] === 'failed'
-          ? payload['status']
-          : undefined,
+        status === 'paused' && !shouldStayPaused
+          ? isError || payload['output'] !== undefined
+            ? 'failed'
+            : 'completed'
+          : status,
     };
   } catch {
     return parseCopiedToolCardContent(content);
@@ -920,7 +1241,7 @@ export type ComposerMenuState =
     }
   | null;
 
-interface WorkspaceTreeNode {
+export interface WorkspaceTreeNode {
   path: string;
   name: string;
   type: 'file' | 'directory';
@@ -992,7 +1313,6 @@ export function flattenWorkspaceFiles(
 export function parseSessionModeMetadata(metadataJson: string | undefined): {
   agentId?: string;
   dialogueMode: DialogueMode;
-  toolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   yoloMode: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
@@ -1003,9 +1323,8 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
   if (!metadataJson) {
     return {
       dialogueMode: 'clarify',
-      toolSurfaceProfile: 'openawork',
       yoloMode: false,
-      webSearchEnabled: false,
+      webSearchEnabled: true,
       thinkingEnabled: false,
       reasoningEffort: 'medium',
     };
@@ -1021,7 +1340,6 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
       reasoningEffort?: ReasoningEffort;
       providerId?: string;
       modelId?: string;
-      toolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
     };
     return {
       agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
@@ -1031,11 +1349,6 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
         parsed.dialogueMode === 'programmer'
           ? parsed.dialogueMode
           : 'clarify',
-      toolSurfaceProfile:
-        parsed['toolSurfaceProfile'] === 'claude_code_simple' ||
-        parsed['toolSurfaceProfile'] === 'claude_code_default'
-          ? parsed['toolSurfaceProfile']
-          : 'openawork',
       yoloMode: parsed.yoloMode === true,
       webSearchEnabled: parsed.webSearchEnabled === true,
       thinkingEnabled: parsed.thinkingEnabled === true,
@@ -1054,9 +1367,8 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
     return {
       agentId: undefined,
       dialogueMode: 'clarify',
-      toolSurfaceProfile: 'openawork',
       yoloMode: false,
-      webSearchEnabled: false,
+      webSearchEnabled: true,
       thinkingEnabled: false,
       reasoningEffort: 'medium',
     };
@@ -1100,9 +1412,14 @@ export function reconcileSnapshotChatMessages(
     previousById.set(message.id, { message, index });
   }
 
-  // Track which previous messages have been matched so we can append unmatched ones.
+  // Track which previous messages have been matched so we can preserve unmatched
+  // assistant event cards near their original anchors without duplicating them later.
   const matchedPreviousIndices = new Set<number>();
-  const reconciled: ChatMessage[] = [];
+  const preservedPreviousIndices = new Set<number>();
+  const reconciledSnapshotEntries: Array<{
+    matchedPreviousIndex: number | null;
+    message: ChatMessage;
+  }> = [];
 
   // Walk through snapshot messages in server order (canonical order).
   for (const snapshotMessage of snapshotMessages) {
@@ -1115,16 +1432,22 @@ export function reconcileSnapshotChatMessages(
       const previousMessage = previousEntry.message;
       if (previousMessage.status === 'streaming' && snapshotMessage.status !== 'streaming') {
         // Snapshot has a finalized version (e.g. completed/error), prefer it.
-        reconciled.push(snapshotMessage);
+        reconciledSnapshotEntries.push({
+          matchedPreviousIndex: previousEntry.index,
+          message: snapshotMessage,
+        });
       } else {
-        reconciled.push(previousMessage);
+        reconciledSnapshotEntries.push({
+          matchedPreviousIndex: previousEntry.index,
+          message: previousMessage,
+        });
       }
     } else {
       // No ID match — check if a previous message at a nearby position is equivalent
       // (handles cases where server assigns a different ID for the same logical message).
       let foundEquivalent = false;
       for (let offset = -1; offset <= 1 && !foundEquivalent; offset++) {
-        const candidateIndex = reconciled.length + offset;
+        const candidateIndex = reconciledSnapshotEntries.length + offset;
         if (
           candidateIndex >= 0 &&
           candidateIndex < previousMessages.length &&
@@ -1132,22 +1455,55 @@ export function reconcileSnapshotChatMessages(
           areSnapshotMessagesEquivalent(previousMessages[candidateIndex]!, snapshotMessage)
         ) {
           matchedPreviousIndices.add(candidateIndex);
-          reconciled.push(previousMessages[candidateIndex]!);
+          reconciledSnapshotEntries.push({
+            matchedPreviousIndex: candidateIndex,
+            message: previousMessages[candidateIndex]!,
+          });
           foundEquivalent = true;
         }
       }
 
       if (!foundEquivalent) {
         // Genuinely new message from the server.
-        reconciled.push(snapshotMessage);
+        reconciledSnapshotEntries.push({ matchedPreviousIndex: null, message: snapshotMessage });
       }
     }
+  }
+
+  const reconciled: ChatMessage[] = [];
+  let nextPreviousIndex = 0;
+
+  const preserveInterleavedAssistantEventsBefore = (matchedPreviousIndex: number) => {
+    while (nextPreviousIndex < matchedPreviousIndex) {
+      if (!matchedPreviousIndices.has(nextPreviousIndex)) {
+        const previousMessage = previousMessages[nextPreviousIndex]!;
+        if (
+          previousMessage.status !== 'streaming' &&
+          parseAssistantEventContent(previousMessage.content)
+        ) {
+          preservedPreviousIndices.add(nextPreviousIndex);
+          reconciled.push(previousMessage);
+        }
+      }
+      nextPreviousIndex += 1;
+    }
+  };
+
+  for (const entry of reconciledSnapshotEntries) {
+    if (entry.matchedPreviousIndex !== null) {
+      preserveInterleavedAssistantEventsBefore(entry.matchedPreviousIndex);
+      reconciled.push(entry.message);
+      nextPreviousIndex = entry.matchedPreviousIndex + 1;
+      continue;
+    }
+
+    reconciled.push(entry.message);
   }
 
   // Append any previous messages that were not matched (local-only, e.g. event cards
   // appended during streaming that the server snapshot hasn't synced yet).
   for (let index = 0; index < previousMessages.length; index++) {
-    if (!matchedPreviousIndices.has(index)) {
+    if (!matchedPreviousIndices.has(index) && !preservedPreviousIndices.has(index)) {
       const previousMessage = previousMessages[index]!;
       // Only preserve completed local messages; skip streaming placeholders
       // that should have been replaced by the snapshot.
@@ -1352,6 +1708,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
     for (const toolResult of toolResults) {
       const toolCall = toolCallMap.get(toolResult.toolCallId);
       const assistantMessageIndex = assistantMessageIndexByToolCallId.get(toolResult.toolCallId);
+      const hasPendingPermission = hasActivePendingPermissionRequest(toolResult);
 
       if (assistantMessageIndex !== undefined) {
         const targetMessage = normalizedMessages[assistantMessageIndex];
@@ -1392,13 +1749,13 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
                   : {}),
                 ...(toolResult.fileDiffs ? { fileDiffs: toolResult.fileDiffs } : {}),
                 output: toolResult.output,
-                isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
+                isError: hasPendingPermission ? false : toolResult.isError,
                 ...(toolResult.observability ? { observability: toolResult.observability } : {}),
-                ...(toolResult.pendingPermissionRequestId
+                ...(hasPendingPermission
                   ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
                   : {}),
                 ...(toolResult.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-                status: toolResult.pendingPermissionRequestId
+                status: hasPendingPermission
                   ? 'paused'
                   : toolResult.isError
                     ? 'failed'
@@ -1425,17 +1782,13 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
               toolName: toolResult.toolName ?? toolCall?.toolName ?? 'tool',
               input: toolCall?.input ?? {},
               output: toolResult.output,
-              isError: toolResult.pendingPermissionRequestId ? false : toolResult.isError,
+              isError: hasPendingPermission ? false : toolResult.isError,
               ...(toolResult.observability ? { observability: toolResult.observability } : {}),
-              ...(toolResult.pendingPermissionRequestId
+              ...(hasPendingPermission
                 ? { pendingPermissionRequestId: toolResult.pendingPermissionRequestId }
                 : {}),
               ...(toolResult.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-              status: toolResult.pendingPermissionRequestId
-                ? 'paused'
-                : toolResult.isError
-                  ? 'failed'
-                  : 'completed',
+              status: hasPendingPermission ? 'paused' : toolResult.isError ? 'failed' : 'completed',
             },
           ],
         }),
@@ -1448,11 +1801,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
         stopReason,
         tokenEstimate: tokenEstimate ?? 0,
         toolCallCount: 1,
-        status: toolResult.pendingPermissionRequestId
-          ? 'completed'
-          : toolResult.isError
-            ? 'error'
-            : 'completed',
+        status: hasPendingPermission ? 'completed' : toolResult.isError ? 'error' : 'completed',
       });
       assistantMessageIndexByToolCallId.set(toolResult.toolCallId, normalizedMessages.length - 1);
       if (!toolCall) {
@@ -1701,17 +2050,15 @@ function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnota
   const record = value as Record<string, unknown>;
   const presentedToolName = normalizeOptionalString(record['presentedToolName']);
   const canonicalToolName = normalizeOptionalString(record['canonicalToolName']);
-  const toolSurfaceProfile = normalizeOptionalString(record['toolSurfaceProfile']);
   const adapterVersion = normalizeOptionalString(record['adapterVersion']);
 
-  if (!presentedToolName && !canonicalToolName && !toolSurfaceProfile && !adapterVersion) {
+  if (!presentedToolName && !canonicalToolName && !adapterVersion) {
     return undefined;
   }
 
   return {
     presentedToolName,
     canonicalToolName,
-    toolSurfaceProfile: toolSurfaceProfile as ToolCallObservabilityAnnotation['toolSurfaceProfile'],
     adapterVersion,
   };
 }

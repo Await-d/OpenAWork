@@ -68,6 +68,7 @@ describe('settings compaction routes', () => {
     expect(JSON.parse(response.body)).toEqual({
       auto: true,
       prune: true,
+      recentMessagesKept: 6,
     });
 
     await app.close();
@@ -93,6 +94,7 @@ describe('settings compaction routes', () => {
       auto: false,
       prune: false,
       reserved: 12000,
+      recentMessagesKept: 6,
     });
     expect(sqliteRunMock).toHaveBeenCalledTimes(1);
     const [, params] = sqliteRunMock.mock.calls[0] ?? [];
@@ -102,6 +104,7 @@ describe('settings compaction routes', () => {
       auto: false,
       prune: false,
       reserved: 12000,
+      recentMessagesKept: 6,
     });
 
     await app.close();

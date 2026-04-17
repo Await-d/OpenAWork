@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { makeOrderedMessageId } from '../ordered-id.js';
 import { promises as fsp } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -11,11 +12,7 @@ import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import {
-  filterVisibleSessionMessages,
-  listSessionMessages,
-  truncateSessionMessagesAfter,
-} from '../session-message-store.js';
+import { filterVisibleSessionMessages } from '../session-message-store.js';
 import {
   hydrateLegacySessionMessagesForSearch,
   searchSessionMessages,
@@ -71,7 +68,9 @@ import {
 } from '../session-file-changes-projection.js';
 import {
   listRequestFileDiffs,
+  listRequestFileDiffsWithText,
   listSessionFileDiffs,
+  listSessionFileDiffsWithText,
   persistSessionFileDiffs,
 } from '../session-file-diff-store.js';
 import { isSqliteMalformedError } from '../sqlite-error-utils.js';
@@ -90,7 +89,11 @@ import {
 import { hasPendingSessionInteraction } from '../session-runtime-state.js';
 import { expirePendingPermissionRequests } from './permissions.js';
 import { expirePendingQuestionRequests } from './questions.js';
-import { listRuntimeSafeSessionMessagesV2 } from '../message-v2-adapter.js';
+import {
+  listSessionMessagesV2,
+  listRuntimeSafeSessionMessagesV2,
+  truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
+} from '../message-v2-adapter.js';
 import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
 
 const createSessionSchema = z.object({
@@ -602,7 +605,7 @@ async function applyRestoreOperations(input: {
     });
   }
 
-  persistSessionFileDiffs({
+  await persistSessionFileDiffs({
     sessionId: input.sessionId,
     userId: input.userId,
     clientRequestId: input.clientRequestId,
@@ -1040,10 +1043,9 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
       },
       filterVisibleSessionMessages(
         mergeRuntimeSafeSessionMessages({
-          legacyMessages: listSessionMessages({
+          legacyMessages: listSessionMessagesV2({
             sessionId: session.id,
             userId: input.userId,
-            legacyMessagesJson: session.messages_json,
           }),
           runtimeMessages: listRuntimeSafeSessionMessagesV2({
             sessionId: session.id,
@@ -1103,10 +1105,9 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
     },
     filterVisibleSessionMessages(
       mergeRuntimeSafeSessionMessages({
-        legacyMessages: listSessionMessages({
+        legacyMessages: listSessionMessagesV2({
           sessionId,
           userId: input.userId,
-          legacyMessagesJson: input.session.messages_json,
         }),
         runtimeMessages: listRuntimeSafeSessionMessagesV2({
           sessionId,
@@ -1365,10 +1366,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         },
         filterVisibleSessionMessages(
           mergeRuntimeSafeSessionMessages({
-            legacyMessages: listSessionMessages({
+            legacyMessages: listSessionMessagesV2({
               sessionId,
               userId: user.sub,
-              legacyMessagesJson: session.messages_json,
             }),
             runtimeMessages: listRuntimeSafeSessionMessagesV2({
               sessionId,
@@ -1481,8 +1481,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
+      const fileDiffs = query.data.includeText
+        ? await listSessionFileDiffsWithText({ sessionId, userId: user.sub })
+        : listSessionFileDiffs({ sessionId, userId: user.sub });
       const fileChanges = buildSessionFileChangesProjection({
-        fileDiffs: listSessionFileDiffs({ sessionId, userId: user.sub }),
+        fileDiffs,
         snapshots: listSessionSnapshots({ sessionId, userId: user.sub }),
       });
       step.succeed(undefined, {
@@ -1540,8 +1543,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
+      const fileDiffs = query.data.includeText
+        ? await listRequestFileDiffsWithText({ clientRequestId, sessionId, userId: user.sub })
+        : listRequestFileDiffs({ clientRequestId, sessionId, userId: user.sub });
       const fileChanges = buildSessionFileChangesProjection({
-        fileDiffs: listRequestFileDiffs({ clientRequestId, sessionId, userId: user.sub }),
+        fileDiffs,
         snapshots: listRequestSnapshots({ clientRequestId, sessionId, userId: user.sub }),
       });
       step.succeed(undefined, {
@@ -2330,10 +2336,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
             metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
           },
           filterVisibleSessionMessages(
-            listSessionMessages({
+            listSessionMessagesV2({
               sessionId: session.id,
               userId: user.sub,
-              legacyMessagesJson: session.messages_json,
             }),
           ),
         ),
@@ -2503,7 +2508,7 @@ function normalizeImportedMessages(messages: unknown[]): unknown[] {
     }
     return {
       ...(message as Record<string, unknown>),
-      id: randomUUID(),
+      id: makeOrderedMessageId(),
     };
   });
 }

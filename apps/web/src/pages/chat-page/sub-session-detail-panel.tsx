@@ -14,6 +14,7 @@ import {
 import {
   createAssistantTraceContent,
   estimateTokenCount,
+  hasActivePendingPermissionRequest,
   type AssistantTraceToolCall,
   type ChatMessage,
 } from './support.js';
@@ -536,41 +537,50 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
 
         if (event.type === 'tool_result') {
           const previous = liveToolState.get(event.toolCallId);
+          const hasPendingPermission = hasActivePendingPermissionRequest(event);
           liveToolState.set(event.toolCallId, {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             inputText: previous?.inputText ?? '',
             output: event.output,
-            isError: event.pendingPermissionRequestId ? false : event.isError,
-            pendingPermissionRequestId: event.pendingPermissionRequestId,
+            isError: hasPendingPermission ? false : event.isError,
+            pendingPermissionRequestId: hasPendingPermission
+              ? event.pendingPermissionRequestId
+              : undefined,
           });
         }
 
         setLiveToolCalls(
-          Array.from(liveToolState.values()).map((toolCall) => ({
-            toolCallId: toolCall.toolCallId,
-            toolName: toolCall.toolName,
-            input: (() => {
-              try {
-                const parsed = JSON.parse(toolCall.inputText) as unknown;
-                return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                  ? (parsed as Record<string, unknown>)
-                  : { raw: toolCall.inputText };
-              } catch {
-                return toolCall.inputText.trim() ? { raw: toolCall.inputText } : {};
-              }
-            })(),
-            output: toolCall.output,
-            isError: toolCall.isError,
-            pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
-            status: toolCall.pendingPermissionRequestId
-              ? 'paused'
-              : toolCall.output !== undefined
-                ? toolCall.isError
-                  ? 'failed'
-                  : 'completed'
-                : 'running',
-          })),
+          Array.from(liveToolState.values()).map((toolCall) => {
+            const hasPendingPermission = hasActivePendingPermissionRequest(toolCall);
+
+            return {
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              input: (() => {
+                try {
+                  const parsed = JSON.parse(toolCall.inputText) as unknown;
+                  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                    ? (parsed as Record<string, unknown>)
+                    : { raw: toolCall.inputText };
+                } catch {
+                  return toolCall.inputText.trim() ? { raw: toolCall.inputText } : {};
+                }
+              })(),
+              output: toolCall.output,
+              isError: toolCall.isError,
+              ...(hasPendingPermission
+                ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
+                : {}),
+              status: hasPendingPermission
+                ? 'paused'
+                : toolCall.output !== undefined
+                  ? toolCall.isError
+                    ? 'failed'
+                    : 'completed'
+                  : 'running',
+            };
+          }),
         );
       },
     });

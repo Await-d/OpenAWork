@@ -234,7 +234,12 @@ export function buildCapabilityContext(userId: string, sessionId?: string): stri
     const items = capabilities.filter((cap) => {
       if (cap.kind !== kind) return false;
       if (callableOnly && cap.callable !== true) return false;
-      if (kind === 'tool' && cap.label === 'websearch' && !webSearchEnabled) return false;
+      if (
+        kind === 'tool' &&
+        (cap.label === 'websearch' || cap.label === 'webfetch') &&
+        !webSearchEnabled
+      )
+        return false;
       return true;
     });
     if (items.length === 0) return '';

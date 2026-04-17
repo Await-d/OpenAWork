@@ -10,23 +10,12 @@ vi.mock('../db.js', () => ({
   WORKSPACE_ROOTS: [tmpdir()],
 }));
 
+import { buildGatewayToolDefinitions } from '../tool-definitions.js';
 import {
-  buildGatewayToolDefinitions,
-  buildGatewayToolDefinitionsForProfile,
-} from '../tool-definitions.js';
-import {
-  CLAUDE_CODE_PROFILE_NAMES,
   PRESENTED_TO_CANONICAL,
   CANONICAL_TO_PRESENTED,
-  PROFILE_TOOL_SETS,
 } from '../claude-code-tool-surface-profiles.js';
-import {
-  buildToolSurface,
-  filterToolDefinitionsForSurface,
-  isToolAllowed,
-  resolveCanonicalName,
-  isValidProfileName,
-} from '../claude-code-tool-surface.js';
+import { resolveCanonicalName } from '../claude-code-tool-surface.js';
 
 describe('buildGatewayToolDefinitions', () => {
   it('includes the first batch of workspace coding tools', () => {
@@ -311,52 +300,6 @@ describe('buildGatewayToolDefinitions', () => {
     ]);
   });
 
-  it('buildGatewayToolDefinitionsForProfile keeps openawork profile identical to the current default surface', () => {
-    const defaults = buildGatewayToolDefinitions();
-    const forOpenAWork = buildGatewayToolDefinitionsForProfile('openawork');
-    expect(forOpenAWork.map((d) => d.function.name)).toEqual(defaults.map((d) => d.function.name));
-  });
-
-  it('buildGatewayToolDefinitionsForProfile falls back to openawork for unknown profile', () => {
-    const defaults = buildGatewayToolDefinitions();
-    const fallback = buildGatewayToolDefinitionsForProfile('unknown-profile');
-    expect(fallback.map((d) => d.function.name)).toEqual(defaults.map((d) => d.function.name));
-  });
-
-  it('buildGatewayToolDefinitionsForProfile restricts simple profile to Bash/Read/Edit canonical tools', () => {
-    const forSimple = buildGatewayToolDefinitionsForProfile('claude_code_simple');
-    const names = forSimple.map((d) => d.function.name).sort();
-    expect(names).toEqual(['bash', 'edit', 'read']);
-  });
-
-  it('buildGatewayToolDefinitionsForProfile restricts default profile to the planned canonical subset', () => {
-    const forDefault = buildGatewayToolDefinitionsForProfile('claude_code_default');
-    const names = forDefault.map((d) => d.function.name);
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'bash',
-        'read',
-        'edit',
-        'write',
-        'glob',
-        'grep',
-        'webfetch',
-        'websearch',
-        'todowrite',
-        'task_create',
-        'task_get',
-        'task_list',
-        'task_update',
-        'desktop_automation',
-        'Skill',
-        'AskUserQuestion',
-        'task',
-      ]),
-    );
-    expect(names).not.toContain('call_omo_agent');
-    expect(names).not.toContain('look_at');
-  });
-
   it('only exposes the approved MCP wrapper tools and never raw MCP tool ids', () => {
     const definitions = buildGatewayToolDefinitions();
     const toolNames = definitions.map((definition) => definition.function.name);
@@ -374,15 +317,7 @@ describe('buildGatewayToolDefinitions', () => {
   });
 });
 
-describe('ClaudeCodeToolSurface profiles', () => {
-  it('CLAUDE_CODE_PROFILE_NAMES contains the frozen profile names', () => {
-    expect(CLAUDE_CODE_PROFILE_NAMES).toEqual([
-      'openawork',
-      'claude_code_simple',
-      'claude_code_default',
-    ]);
-  });
-
+describe('ClaudeCodeToolSurface name mappings', () => {
   it('PRESENTED_TO_CANONICAL maps local reference tool names to canonical names', () => {
     expect(PRESENTED_TO_CANONICAL['Bash']).toBe('bash');
     expect(PRESENTED_TO_CANONICAL['Read']).toBe('read');
@@ -411,139 +346,9 @@ describe('ClaudeCodeToolSurface profiles', () => {
     expect(CANONICAL_TO_PRESENTED['task_create']).toBe('TaskCreate');
   });
 
-  it('PROFILE_TOOL_SETS keeps openawork as allow-all', () => {
-    expect(PROFILE_TOOL_SETS['openawork']).toBeNull();
-  });
-
-  it('PROFILE_TOOL_SETS simple profile only includes Bash/Read/Edit canonical tools', () => {
-    const simple = PROFILE_TOOL_SETS['claude_code_simple'];
-    expect(simple).not.toBeNull();
-    expect(simple?.has('bash')).toBe(true);
-    expect(simple?.has('read')).toBe(true);
-    expect(simple?.has('edit')).toBe(true);
-    expect(simple?.has('write')).toBe(false);
-    expect(simple?.has('glob')).toBe(false);
-  });
-
-  it('PROFILE_TOOL_SETS default profile includes the planned canonical subset', () => {
-    const defaults = PROFILE_TOOL_SETS['claude_code_default'];
-    expect(defaults).not.toBeNull();
-    expect(defaults?.has('bash')).toBe(true);
-    expect(defaults?.has('write')).toBe(true);
-    expect(defaults?.has('task_create')).toBe(true);
-    expect(defaults?.has('desktop_automation')).toBe(true);
-    expect(defaults?.has('question')).toBe(true);
-    expect(defaults?.has('call_omo_agent')).toBe(true);
-    expect(defaults?.has('EnterPlanMode')).toBe(true);
-    expect(defaults?.has('ExitPlanMode')).toBe(true);
-  });
-
-  it('isValidProfileName returns true for valid profiles', () => {
-    expect(isValidProfileName('openawork')).toBe(true);
-    expect(isValidProfileName('claude_code_simple')).toBe(true);
-    expect(isValidProfileName('claude_code_default')).toBe(true);
-    expect(isValidProfileName('unknown')).toBe(false);
-  });
-
   it('resolveCanonicalName maps presented names and passes through unknown names', () => {
     expect(resolveCanonicalName('Read')).toBe('read');
     expect(resolveCanonicalName('Bash')).toBe('bash');
     expect(resolveCanonicalName('unknown_tool')).toBe('unknown_tool');
-  });
-
-  it('buildToolSurface creates allow-all surface for openawork profile', () => {
-    const surface = buildToolSurface('openawork');
-    expect(surface.profile).toBe('openawork');
-    expect(surface.policy).toBe('allow-all');
-    expect(surface.allowedCanonicalNames).toBeNull();
-  });
-
-  it('buildToolSurface creates allowlist surface for claude_code_simple profile', () => {
-    const surface = buildToolSurface('claude_code_simple');
-    expect(surface.policy).toBe('allowlist');
-    expect(surface.allowedCanonicalNames).not.toBeNull();
-  });
-
-  it('isToolAllowed returns true for allow-all surface regardless of name', () => {
-    const surface = buildToolSurface('openawork');
-    expect(isToolAllowed(surface, 'bash')).toBe(true);
-    expect(isToolAllowed(surface, 'call_omo_agent')).toBe(true);
-    expect(isToolAllowed(surface, 'nonexistent')).toBe(true);
-  });
-
-  it('isToolAllowed correctly filters for simple surface', () => {
-    const surface = buildToolSurface('claude_code_simple');
-    expect(isToolAllowed(surface, 'read')).toBe(true);
-    expect(isToolAllowed(surface, 'bash')).toBe(true);
-    expect(isToolAllowed(surface, 'write')).toBe(false);
-    expect(isToolAllowed(surface, 'glob')).toBe(false);
-  });
-
-  it('filterToolDefinitionsForSurface returns all definitions for allow-all surface', () => {
-    const definitions = buildGatewayToolDefinitions();
-    const surface = buildToolSurface('openawork');
-    const filtered = filterToolDefinitionsForSurface(definitions, surface);
-    expect(filtered).toHaveLength(definitions.length);
-  });
-
-  it('filterToolDefinitionsForSurface subsets definitions for simple surface', () => {
-    const definitions = buildGatewayToolDefinitions();
-    const surface = buildToolSurface('claude_code_simple');
-    const filtered = filterToolDefinitionsForSurface(definitions, surface);
-    expect(filtered.length).toBeLessThan(definitions.length);
-    expect(filtered.every((d) => isToolAllowed(surface, d.function.name))).toBe(true);
-  });
-});
-
-describe('claude-code-tool-surface helpers', () => {
-  it('buildGatewayToolDefinitionsForProfile keeps openawork profile identical to the current default surface', () => {
-    const defaults = buildGatewayToolDefinitions();
-    const forOpenAWork = buildGatewayToolDefinitionsForProfile('openawork');
-    expect(forOpenAWork.map((d) => d.function.name)).toEqual(defaults.map((d) => d.function.name));
-  });
-
-  it('buildGatewayToolDefinitionsForProfile falls back to openawork for unknown profile', () => {
-    const defaults = buildGatewayToolDefinitions();
-    const fallback = buildGatewayToolDefinitionsForProfile('unknown-profile');
-    expect(fallback.map((d) => d.function.name)).toEqual(defaults.map((d) => d.function.name));
-  });
-
-  it('buildGatewayToolDefinitionsForProfile restricts simple profile to Bash/Read/Edit canonical tools', () => {
-    const forSimple = buildGatewayToolDefinitionsForProfile('claude_code_simple');
-    const names = forSimple.map((d) => d.function.name).sort();
-    expect(names).toEqual(['bash', 'edit', 'read']);
-  });
-
-  it('buildGatewayToolDefinitionsForProfile restricts default profile to the planned canonical subset', () => {
-    const all = buildGatewayToolDefinitions();
-    const defaults = buildGatewayToolDefinitionsForProfile('claude_code_default');
-    const names = defaults.map((d) => d.function.name);
-    expect(defaults.length).toBeLessThan(all.length);
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'bash',
-        'read',
-        'edit',
-        'write',
-        'glob',
-        'grep',
-        'webfetch',
-        'websearch',
-        'todowrite',
-        'task_create',
-        'task_get',
-        'task_list',
-        'task_update',
-        'desktop_automation',
-        'Skill',
-        'AskUserQuestion',
-        'EnterPlanMode',
-        'ExitPlanMode',
-        'task',
-        'Agent',
-      ]),
-    );
-    expect(names).not.toContain('call_omo_agent');
-    expect(names).not.toContain('look_at');
   });
 });

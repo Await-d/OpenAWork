@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
+import { join, relative } from 'node:path';
 import type {
   DialogueMode,
   FileDiffContent,
@@ -22,14 +23,17 @@ import {
 } from '../model-router.js';
 import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
+import { isContextNearOverflow, isContextOverflow } from '../session-message-store.js';
 import {
-  appendSessionMessage,
+  appendSessionMessageV2,
   getSessionMessageByRequestId,
-  isContextOverflow,
-  listSessionMessages,
   listSessionMessagesByRequestScope,
-} from '../session-message-store.js';
-import { executeSessionCompaction } from '../session-compaction.js';
+  listSessionMessagesV2,
+} from '../message-v2-adapter.js';
+import {
+  executeSessionCompaction,
+  isAutoCompactCircuitBreakerTripped,
+} from '../session-compaction.js';
 import { persistStreamUserMessage } from '../stream-session-title.js';
 import { buildCapabilityContext } from './capabilities.js';
 import {
@@ -61,7 +65,6 @@ import { buildGatewayToolDefinitions } from './stream-protocol.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
-import { extractToolSurfaceProfile } from '../session-workspace-metadata.js';
 import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace-paths.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
@@ -74,8 +77,17 @@ import {
 } from './stream-cancellation.js';
 import {
   isTaskParentAutoResumeClientRequestId,
+  MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES,
   noteManualSessionInteraction,
 } from '../task-parent-auto-resume.js';
+import { listSessionTodos } from '../todo-tools.js';
+import {
+  detectRecoveryErrorType,
+  recoverToolResultMissing,
+  recoverThinkingDisabledViolation,
+  recoverThinkingBlockOrder,
+  type RecoveryResult,
+} from '../session-recovery.js';
 import { runModelRound } from './stream-model-round.js';
 import {
   clearSessionRuntimeThread,
@@ -131,7 +143,163 @@ export async function buildWorkspaceContext(metadataJson: string): Promise<strin
       if (IGNORED.has(e.name)) continue;
       lines.push((e.isDirectory() ? '📁 ' : '📄 ') + e.name);
     }
-    return `<workspace path="${safeWorkingDirectory}">\n<file_tree>\n${lines.join('\n')}\n</file_tree>\n</workspace>`;
+
+    // Read project rule files, AGENTS.md, and README.md
+    // (integrating oh-my-opencode's rulesInjector, directoryAgentsInjector,
+    //  and directoryReadmeInjector patterns into workspace context)
+    const contextSections: string[] = [];
+
+    // 1. Rule files (.cursor/rules, .github/instructions, .claude/rules, .github/copilot-instructions.md)
+    const ruleFiles = await collectRuleFiles(safeWorkingDirectory);
+    if (ruleFiles.length > 0) {
+      contextSections.push('<project_rules>');
+      for (const rule of ruleFiles) {
+        contextSections.push(`[Rule: ${rule.relativePath}]\n${rule.content}`);
+      }
+      contextSections.push('</project_rules>');
+    }
+
+    // 2. AGENTS.md files (oh-my-opencode directoryAgentsInjector pattern)
+    const agentsFiles = await collectAgentsFiles(safeWorkingDirectory);
+    if (agentsFiles.length > 0) {
+      contextSections.push('<directory_agents>');
+      for (const entry of agentsFiles) {
+        contextSections.push(`[Context: ${entry.relativePath}]\n${entry.content}`);
+      }
+      contextSections.push('</directory_agents>');
+    }
+
+    // 3. Root README.md (oh-my-opencode directoryReadmeInjector pattern)
+    const readmeContent = await readRootReadme(safeWorkingDirectory);
+    if (readmeContent) {
+      contextSections.push(`<project_readme>\n${readmeContent}\n</project_readme>`);
+    }
+
+    const contextBlock = contextSections.length > 0 ? '\n' + contextSections.join('\n\n') : '';
+
+    return `<workspace path="${safeWorkingDirectory}">\n<file_tree>\n${lines.join('\n')}\n</file_tree>${contextBlock}\n</workspace>`;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Project rule file collection (oh-my-opencode rulesInjector pattern)
+// ---------------------------------------------------------------------------
+
+const RULE_EXTENSIONS = ['.md', '.mdc'];
+const PROJECT_RULE_SUBDIRS: [string, string][] = [
+  ['.cursor', 'rules'],
+  ['.github', 'instructions'],
+  ['.claude', 'rules'],
+];
+const PROJECT_RULE_FILES = ['.github/copilot-instructions.md'];
+
+interface RuleFileEntry {
+  relativePath: string;
+  content: string;
+}
+
+async function collectRuleFiles(workspaceRoot: string): Promise<RuleFileEntry[]> {
+  const results: RuleFileEntry[] = [];
+  const seen = new Set<string>();
+
+  // Read rule subdirectories
+  for (const [parent, subdir] of PROJECT_RULE_SUBDIRS) {
+    const ruleDir = join(workspaceRoot, parent, subdir);
+    await collectRuleFilesRecursive(ruleDir, workspaceRoot, seen, results);
+  }
+
+  // Read single-file rules at project root
+  for (const ruleFile of PROJECT_RULE_FILES) {
+    const filePath = join(workspaceRoot, ruleFile);
+    const content = await readFileIfExists(filePath);
+    if (content) {
+      const relativePath = relative(workspaceRoot, filePath);
+      if (!seen.has(relativePath)) {
+        seen.add(relativePath);
+        results.push({ relativePath, content });
+      }
+    }
+  }
+
+  return results;
+}
+
+async function collectRuleFilesRecursive(
+  dir: string,
+  workspaceRoot: string,
+  seen: Set<string>,
+  results: RuleFileEntry[],
+): Promise<void> {
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectRuleFilesRecursive(fullPath, workspaceRoot, seen, results);
+    } else if (entry.isFile() && RULE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
+      const relativePath = relative(workspaceRoot, fullPath);
+      if (seen.has(relativePath)) continue;
+      seen.add(relativePath);
+      const content = await fsp.readFile(fullPath, 'utf-8');
+      // Strip frontmatter (YAML between --- delimiters)
+      const stripped = content.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+      if (stripped.length > 0) {
+        results.push({ relativePath, content: stripped });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AGENTS.md collection (oh-my-opencode directoryAgentsInjector pattern)
+// ---------------------------------------------------------------------------
+
+const AGENTS_FILE_NAMES = ['AGENTS.md', 'CRUSH.md', 'CLAUDE.md', 'GEMINI.md'];
+
+interface AgentsFileEntry {
+  relativePath: string;
+  content: string;
+}
+
+async function collectAgentsFiles(workspaceRoot: string): Promise<AgentsFileEntry[]> {
+  const results: AgentsFileEntry[] = [];
+  for (const fileName of AGENTS_FILE_NAMES) {
+    const filePath = join(workspaceRoot, fileName);
+    const content = await readFileIfExists(filePath);
+    if (content) {
+      results.push({ relativePath: fileName, content });
+    }
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Root README.md (oh-my-opencode directoryReadmeInjector pattern)
+// ---------------------------------------------------------------------------
+
+async function readRootReadme(workspaceRoot: string): Promise<string | null> {
+  for (const name of ['README.md', 'README.MD', 'readme.md']) {
+    const content = await readFileIfExists(join(workspaceRoot, name));
+    if (content) return content;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+async function readFileIfExists(filePath: string): Promise<string | null> {
+  try {
+    const content = await fsp.readFile(filePath, 'utf-8');
+    return content.trim() || null;
   } catch {
     return null;
   }
@@ -256,17 +424,15 @@ export function buildStreamToolObservability(input: {
   metadataJson: string;
   presentedToolName: string;
 }): ToolCallObservabilityAnnotation {
-  let metadata: Record<string, unknown> = {};
   try {
-    metadata = JSON.parse(input.metadataJson) as Record<string, unknown>;
+    JSON.parse(input.metadataJson) as Record<string, unknown>;
   } catch {
-    metadata = {};
+    // Ignore malformed metadata and fall back to canonical observability only.
   }
 
   return {
     presentedToolName: input.presentedToolName,
     canonicalToolName: resolveCanonicalName(input.presentedToolName),
-    toolSurfaceProfile: extractToolSurfaceProfile(metadata),
     adapterVersion: '1.0.0',
   };
 }
@@ -350,8 +516,10 @@ export function recordTaskToolCallOrThrow(
 
 export function getEnabledTools(webSearchEnabled: boolean) {
   return buildGatewayToolDefinitions().filter((tool) => {
-    if (tool.function.name !== 'websearch') return true;
-    return webSearchEnabled;
+    if (tool.function.name === 'websearch' || tool.function.name === 'webfetch') {
+      return webSearchEnabled;
+    }
+    return true;
   });
 }
 
@@ -834,6 +1002,35 @@ export function createToolResultRequestId(clientRequestId: string, toolCallId: s
   return `${clientRequestId}:tool:${toolCallId}`;
 }
 
+// ---------------------------------------------------------------------------
+// Agent usage reminder (oh-my-opencode agentUsageReminder pattern)
+// ---------------------------------------------------------------------------
+
+const SEARCH_READ_TOOLS = new Set([
+  'grep',
+  'glob',
+  'read',
+  'list',
+  'websearch',
+  'web_fetch',
+  'webfetch',
+  'codesearch',
+  'codebase_search',
+  'ast_grep_search',
+  'ast-grep-search',
+]);
+
+const AGENT_DELEGATION_TOOLS = new Set(['task_create', 'task', 'call_omo_agent', 'delegate_task']);
+
+const AGENT_USAGE_REMINDER_SUFFIX = `
+
+[Agent Usage Reminder]
+You called a search/read tool directly. For complex multi-file exploration, consider using the task tool to delegate work:
+- task_create: Create a sub-agent task for parallel exploration
+- Multiple parallel tasks can run simultaneously while you continue working
+- Sub-agents can perform deeper, more thorough searches
+ALWAYS prefer: Multiple parallel task_create calls > Direct search tool calls`;
+
 export async function executeToolCalls(input: {
   clientRequestId: string;
   executionContext?: SandboxExecutionContext;
@@ -856,6 +1053,12 @@ export async function executeToolCalls(input: {
       ? sessionMetadata['workingDirectory']
       : undefined;
   let hasPendingPermission = false;
+
+  // Agent usage reminder state (oh-my-opencode agentUsageReminder pattern)
+  // Track whether task/delegation tools have been used in this session
+  let taskToolUsedInSession = false;
+  let agentUsageReminderCount = 0;
+  const MAX_AGENT_USAGE_REMINDERS = 3;
 
   for (const [toolCallId, toolCall] of input.state.toolCalls.entries()) {
     if (input.signal.aborted) {
@@ -897,6 +1100,33 @@ export async function executeToolCalls(input: {
             durationMs: 0,
           };
 
+    // Agent usage reminder (oh-my-opencode agentUsageReminder pattern):
+    // When search/read tools are called directly without using task delegation,
+    // append a reminder to encourage using task tools for better results.
+    const toolLower = toolCall.toolName.toLowerCase();
+    if (AGENT_DELEGATION_TOOLS.has(toolLower)) {
+      taskToolUsedInSession = true;
+    } else if (
+      !result.isError &&
+      !taskToolUsedInSession &&
+      agentUsageReminderCount < MAX_AGENT_USAGE_REMINDERS &&
+      SEARCH_READ_TOOLS.has(toolLower)
+    ) {
+      if (typeof result.output === 'string') {
+        result.output += AGENT_USAGE_REMINDER_SUFFIX;
+      } else if (result.output && typeof result.output === 'object') {
+        try {
+          const obj = result.output as Record<string, unknown>;
+          if (typeof obj['output'] === 'string') {
+            obj['output'] += AGENT_USAGE_REMINDER_SUFFIX;
+          }
+        } catch {
+          /* non-string output, skip */
+        }
+      }
+      agentUsageReminderCount++;
+    }
+
     const observability = buildStreamToolObservability({
       metadataJson: input.sessionContext.metadataJson,
       presentedToolName: toolCall.toolName,
@@ -913,7 +1143,7 @@ export async function executeToolCalls(input: {
         })
       : [];
 
-    appendSessionMessage({
+    appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'tool',
@@ -936,7 +1166,7 @@ export async function executeToolCalls(input: {
     if (input.turnFileDiffs) {
       mergeFileDiffs(input.turnFileDiffs, tracedFileDiffs);
       if (tracedFileDiffs.length > 0) {
-        persistSessionFileDiffs({
+        await persistSessionFileDiffs({
           sessionId: input.sessionId,
           userId: input.userId,
           clientRequestId: input.clientRequestId,
@@ -1233,8 +1463,117 @@ export async function handleStreamRequest(input: {
         parseStoredJson(compactionSettingsRow?.value),
       );
       let syntheticContinuationPrompt: string | undefined;
+      let lastRoundUsage: { inputTokens: number } | undefined;
 
       for (let round = 1; ; round += 1) {
+        // P0: Proactive compaction — compact before overflow if token usage is near threshold.
+        // This prevents the user-visible error → compact → retry cycle.
+        if (
+          round > 1 &&
+          compactionSettings.auto &&
+          lastRoundUsage &&
+          typeof route.contextWindow === 'number' &&
+          !isAutoCompactCircuitBreakerTripped(input.sessionContext.metadataJson) &&
+          isContextNearOverflow(lastRoundUsage, route.contextWindow, compactionSettings.reserved)
+        ) {
+          try {
+            const providerRow = sqliteGet<{ value: string }>(
+              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+              [input.user.sub],
+            );
+            const selectionRow = sqliteGet<{ value: string }>(
+              `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+              [input.user.sub],
+            );
+            const compactionProviderConfig = await getCompactionProviderConfig(
+              parseStoredJson(providerRow?.value),
+              parseStoredJson(selectionRow?.value),
+            );
+            const compactionRoute = compactionProviderConfig
+              ? resolveCompactionRoute(
+                  compactionProviderConfig.provider,
+                  compactionProviderConfig.modelId,
+                )
+              : route;
+
+            const allMessages = listSessionMessagesV2({
+              sessionId: input.sessionId,
+              userId: input.user.sub,
+              statuses: ['final'],
+            });
+            const startedAt = Date.now();
+            publishSessionRunEvent(
+              input.sessionId,
+              {
+                type: 'compaction',
+                summary: '上下文接近阈值，正在预防性压缩。',
+                trigger: 'automatic',
+                phase: 'started',
+                cause: 'proactive_near_overflow',
+                strategy: 'summary_only',
+                eventId: `${requestData.clientRequestId}:proactive-compact:${round}:started`,
+                runId,
+                occurredAt: startedAt,
+              },
+              { clientRequestId: requestData.clientRequestId },
+            );
+            const compactionResult = await executeSessionCompaction({
+              legacyMessagesJson: input.sessionContext.legacyMessagesJson,
+              metadataJson: input.sessionContext.metadataJson,
+              messages: allMessages,
+              prune: compactionSettings.prune,
+              recentMessagesKept: compactionSettings.recentMessagesKept,
+              route: compactionRoute,
+              sessionId: input.sessionId,
+              signal: abortController.signal,
+              trigger: 'automatic',
+              userId: input.user.sub,
+            });
+            input.sessionContext.metadataJson = compactionResult.metadataJson;
+
+            const signature = compactionResult.durableSummary?.signature ?? String(Date.now());
+            const compactedCount =
+              compactionResult.durableSummary?.newlySummarizedMessages ?? allMessages.length;
+            const representedCount =
+              compactionResult.durableSummary?.totalRepresentedMessages ?? allMessages.length;
+            publishSessionRunEvent(
+              input.sessionId,
+              {
+                type: 'compaction',
+                summary: `已预防性压缩 ${compactedCount} 条较早消息，保留 ${compactionSettings.recentMessagesKept} 条近期消息。`,
+                trigger: 'automatic',
+                phase: 'completed',
+                cause: 'proactive_near_overflow',
+                strategy: 'summary_only',
+                compactedMessages: compactedCount,
+                representedMessages: representedCount,
+                eventId: `${requestData.clientRequestId}:proactive-compact:${round}:${signature}:completed`,
+                runId,
+                occurredAt: Date.now(),
+              },
+              { clientRequestId: requestData.clientRequestId },
+            );
+          } catch (error: unknown) {
+            publishSessionRunEvent(
+              input.sessionId,
+              {
+                type: 'compaction',
+                summary:
+                  error instanceof Error ? error.message : '预防性压缩失败，保留当前上下文状态。',
+                trigger: 'automatic',
+                phase: 'failed',
+                cause: 'proactive_near_overflow',
+                strategy: 'summary_only',
+                eventId: `${requestData.clientRequestId}:proactive-compact:${round}:failed`,
+                runId,
+                occurredAt: Date.now(),
+              },
+              { clientRequestId: requestData.clientRequestId },
+            );
+            console.warn('proactive compaction failed', error);
+          }
+        }
+
         const result = await runModelRound({
           clientRequestId: requestData.clientRequestId,
           enabledTools,
@@ -1267,6 +1606,7 @@ export async function handleStreamRequest(input: {
         syntheticContinuationPrompt = undefined;
 
         if (result.usage) {
+          lastRoundUsage = { inputTokens: result.usage.inputTokens };
           emitChunk(
             buildStreamUsageChunk({
               eventSequence,
@@ -1288,6 +1628,7 @@ export async function handleStreamRequest(input: {
         const shouldAutoCompact =
           compactionSettings.auto &&
           result.overflow === true &&
+          !isAutoCompactCircuitBreakerTripped(input.sessionContext.metadataJson) &&
           ((result.usage &&
             typeof route.contextWindow === 'number' &&
             isContextOverflow(result.usage, route.contextWindow, compactionSettings.reserved)) ||
@@ -1314,10 +1655,9 @@ export async function handleStreamRequest(input: {
                 )
               : route;
 
-            const allMessages = listSessionMessages({
+            const allMessages = listSessionMessagesV2({
               sessionId: input.sessionId,
               userId: input.user.sub,
-              legacyMessagesJson: input.sessionContext.legacyMessagesJson,
               statuses: ['final'],
             });
             const latestFinalMessage = allMessages.at(-1);
@@ -1356,6 +1696,7 @@ export async function handleStreamRequest(input: {
               metadataJson: input.sessionContext.metadataJson,
               messages: messagesForCompaction,
               prune: compactionSettings.prune,
+              recentMessagesKept: compactionSettings.recentMessagesKept,
               route: compactionRoute,
               sessionId: input.sessionId,
               signal: abortController.signal,
@@ -1442,6 +1783,67 @@ export async function handleStreamRequest(input: {
         }
 
         if (result.stopReason === 'error' || result.shouldStop) {
+          // TODO continuation enforcer (oh-my-opencode pattern):
+          // When the assistant stops without tool calls but incomplete TODOs remain,
+          // inject a continuation prompt to keep working instead of stopping.
+          if (result.stopReason !== 'error' && result.shouldStop) {
+            const incompleteTodos = listSessionTodos(input.sessionId).filter(
+              (t) => t.status !== 'completed' && t.status !== 'cancelled',
+            );
+            if (incompleteTodos.length > 0 && round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES) {
+              const total = incompleteTodos.length;
+              syntheticContinuationPrompt = `[SYSTEM DIRECTIVE: OPENAWORK - TODO CONTINUATION]\n\nIncomplete tasks remain in your todo list. Continue working on the next pending task.\n\n- Proceed without asking for permission\n- Mark each task complete when finished\n- Do not stop until all tasks are done\n\n[Status: ${total - incompleteTodos.filter((t) => t.status === 'pending').length}/${total} completed, ${incompleteTodos.filter((t) => t.status === 'pending').length} remaining]`;
+              continue;
+            }
+          }
+
+          // Session recovery (oh-my-opencode sessionRecovery pattern):
+          // When the LLM returns a recoverable error (tool_result_missing,
+          // thinking_block_order, thinking_disabled_violation), attempt to
+          // fix the message structure and retry.
+          if (
+            result.stopReason === 'error' &&
+            !result.overflow &&
+            round < MAX_CONSECUTIVE_TASK_PARENT_AUTO_RESUMES
+          ) {
+            const errorType = detectRecoveryErrorType(result.upstreamError);
+            if (errorType) {
+              let recoveryResult: RecoveryResult | null = null;
+              const messages = listSessionMessagesV2({
+                sessionId: input.sessionId,
+                userId: input.user.sub,
+              });
+              if (errorType === 'tool_result_missing') {
+                recoveryResult = recoverToolResultMissing(
+                  input.sessionId,
+                  input.user.sub,
+                  requestData.clientRequestId,
+                  messages,
+                );
+              } else if (errorType === 'thinking_disabled_violation') {
+                recoveryResult = recoverThinkingDisabledViolation(
+                  input.sessionId,
+                  input.user.sub,
+                  requestData.clientRequestId,
+                );
+              } else if (errorType === 'thinking_block_order') {
+                recoveryResult = recoverThinkingBlockOrder(
+                  input.sessionId,
+                  input.user.sub,
+                  requestData.clientRequestId,
+                );
+              }
+
+              if (recoveryResult?.recovered) {
+                console.log(
+                  `[SESSION_RECOVERY] Recovered from ${errorType}: ${recoveryResult.action}, sessionId=${input.sessionId}`,
+                );
+                syntheticContinuationPrompt = `[Session Recovery] Fixed ${errorType} error. Continuing from where we left off.`;
+                continue;
+              }
+            }
+          }
+
           if (result.stopReason !== 'error') {
             wl.flush(ctx, 200);
           }
@@ -1543,7 +1945,7 @@ export async function handleStreamRequest(input: {
       requestId: requestData.clientRequestId,
       output: { message: String(err), code: 'STREAM_ERROR' },
     });
-    appendSessionMessage({
+    appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.user.sub,
       role: 'assistant',

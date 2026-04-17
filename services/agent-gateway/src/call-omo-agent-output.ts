@@ -61,7 +61,7 @@ function buildFallbackText(input: { fallbackText?: string; isError?: boolean }):
 
 function collectRelevantMessageText(messages: Message[]): string {
   return [...messages]
-    .sort((left, right) => left.createdAt - right.createdAt)
+    .sort((left, right) => left.id.localeCompare(right.id))
     .flatMap((message) => {
       if (message.role === 'assistant') {
         return message.content.flatMap((part) => {

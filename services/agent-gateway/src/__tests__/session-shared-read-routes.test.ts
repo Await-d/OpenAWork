@@ -117,11 +117,11 @@ vi.mock('../session-shared-access.js', () => ({
 
 vi.mock('../session-message-store.js', () => ({
   filterVisibleSessionMessages: filterVisibleSessionMessagesMock,
-  listSessionMessages: listSessionMessagesMock,
 }));
 
 vi.mock('../message-v2-adapter.js', () => ({
   listRuntimeSafeSessionMessagesV2: listRuntimeSafeSessionMessagesV2Mock,
+  listSessionMessagesV2: listSessionMessagesMock,
 }));
 
 vi.mock('../session-permission-events.js', () => ({
@@ -353,7 +353,6 @@ describe('session shared read routes', () => {
     expect(listSessionMessagesMock).toHaveBeenCalledWith({
       sessionId: 'shared-session-1',
       userId: 'owner-1',
-      legacyMessagesJson: '[]',
     });
     expect(JSON.parse(response.body)).toMatchObject({
       share: {

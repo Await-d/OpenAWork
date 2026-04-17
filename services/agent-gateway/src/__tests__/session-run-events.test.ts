@@ -13,8 +13,8 @@ vi.mock('../db.js', () => ({
   sqliteAll: mocks.sqliteAllMock,
 }));
 
-vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: mocks.appendSessionMessageMock,
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSessionMessageV2: mocks.appendSessionMessageMock,
 }));
 
 import {
@@ -86,7 +86,6 @@ describe('session run events', () => {
         observability: {
           presentedToolName: 'Write',
           canonicalToolName: 'write',
-          toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
       },
@@ -114,7 +113,6 @@ describe('session run events', () => {
       observability: {
         presentedToolName: 'Write',
         canonicalToolName: 'write',
-        toolSurfaceProfile: 'claude_code_default',
         adapterVersion: '1.0.0',
       },
     });
@@ -144,7 +142,6 @@ describe('session run events', () => {
           observability: {
             presentedToolName: 'Write',
             canonicalToolName: 'write',
-            toolSurfaceProfile: 'claude_code_default',
             adapterVersion: '1.0.0',
           },
         }),
@@ -177,7 +174,6 @@ describe('session run events', () => {
         observability: {
           presentedToolName: 'Write',
           canonicalToolName: 'write',
-          toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
       },
@@ -190,13 +186,13 @@ describe('session run events', () => {
     publishSessionRunEvent(
       'session-3',
       {
-        type: 'permission_asked',
-        requestId: 'perm-1',
-        toolName: 'bash',
-        scope: 'workspace-write',
-        reason: '需要写入工作区文件',
-        riskLevel: 'medium',
-        previewAction: '创建配置文件',
+        type: 'compaction',
+        summary: '自动压缩完成',
+        trigger: 'automatic',
+        phase: 'completed',
+        strategy: 'summary_only',
+        eventId: 'evt-compact-1',
+        runId: 'run-1',
         occurredAt: 123,
       },
       { clientRequestId: 'req-3' },
@@ -207,7 +203,7 @@ describe('session run events', () => {
         sessionId: 'session-3',
         userId: 'user-a',
         role: 'assistant',
-        clientRequestId: 'assistant_event:req-3:seq:1:permission_asked',
+        clientRequestId: 'assistant_event:evt-compact-1',
         createdAt: 123,
         content: [
           {
@@ -221,8 +217,8 @@ describe('session run events', () => {
     expect(JSON.parse(String(mirroredText))).toMatchObject({
       type: 'assistant_event',
       payload: {
-        title: '等待权限 · bash',
-        status: 'paused',
+        title: '会话已压缩',
+        status: 'success',
       },
     });
   });

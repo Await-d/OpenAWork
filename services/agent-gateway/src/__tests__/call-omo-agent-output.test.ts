@@ -92,9 +92,9 @@ describe('call-omo-agent-output', () => {
         '<task_result>',
         '第一段结论',
         '',
-        '检索命中 3 条记录',
-        '',
         '第二段结论',
+        '',
+        '检索命中 3 条记录',
         '</task_result>',
       ].join('\n'),
     );

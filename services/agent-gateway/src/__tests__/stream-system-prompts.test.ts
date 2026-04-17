@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRequestScopedSystemPrompts,
   buildRoundSystemMessages,
+  injectSyntheticRequestContext,
 } from '../routes/stream-system-prompts.js';
 import { ANALYZE_MODE_MESSAGE } from '@openAwork/agent-core';
 
@@ -92,38 +93,68 @@ describe('stream system prompt integration', () => {
     expect(guidance).toContain('查看函数的调用关系（谁调用了它/它调用了谁） → lsp_call_hierarchy');
   });
 
-  it('builds upstream system messages in stable fixed-slot order', () => {
-    expect(
-      buildRoundSystemMessages({
-        workspaceCtx: '<workspace />',
-        routeSystemPrompt: 'route prompt',
-        injectedPrompt: '[analyze-mode]',
-        capabilityContext: '## 系统 Agents',
-        lspGuidance: 'LSP 工具使用策略',
-        dialogueModePrompt: 'OpenAWork 对话模式提醒：programmer',
-        yoloModePrompt: 'OpenAWork 执行偏好提醒：yolo',
-        companionPrompt: 'OpenAWork companion 上下文',
-      }),
-    ).toEqual([
-      { role: 'system', content: '<workspace />' },
-      { role: 'system', content: 'route prompt' },
-      { role: 'system', content: '[analyze-mode]' },
-      { role: 'system', content: '## 系统 Agents' },
-      { role: 'system', content: 'LSP 工具使用策略' },
-      { role: 'system', content: 'OpenAWork 对话模式提醒：programmer' },
-      { role: 'system', content: 'OpenAWork 执行偏好提醒：yolo' },
-      { role: 'system', content: 'OpenAWork companion 上下文' },
-      { role: 'system', content: `<user-memory />\n当前会话无持久化记忆。` },
-      {
-        role: 'system',
-        content: `[COMPACT BOUNDARY]\nEarlier conversation history has not been compacted.`,
-      },
-      {
-        role: 'system',
-        content:
-          '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量用 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。',
-      },
-    ]);
+  it('builds 2-part system messages with stable prefix and dynamic suffix', () => {
+    const result = buildRoundSystemMessages({
+      workspaceCtx: '<workspace />',
+      routeSystemPrompt: 'route prompt',
+      lspGuidance: 'LSP 工具使用策略',
+      dialogueModePrompt: 'OpenAWork 对话模式提醒：programmer',
+      yoloModePrompt: 'OpenAWork 执行偏好提醒：yolo',
+    });
+    // 2 system messages: stable prefix + dynamic suffix
+    expect(result).toHaveLength(2);
+    expect(result[0]!.role).toBe('system');
+    expect(result[1]!.role).toBe('system');
+    // Stable prefix contains workspace, route, lsp, dialogue, yolo, tool-output-ref
+    expect(result[0]!.content).toContain('<workspace />');
+    expect(result[0]!.content).toContain('route prompt');
+    expect(result[0]!.content).toContain('LSP 工具使用策略');
+    expect(result[0]!.content).toContain('OpenAWork 对话模式提醒：programmer');
+    expect(result[0]!.content).toContain('OpenAWork 执行偏好提醒：yolo');
+    expect(result[0]!.content).toContain('tool_output_reference');
+    // Dynamic suffix contains memory block (compaction summary is now in conversation flow)
+    expect(result[1]!.content).toContain('user-memory');
+  });
+
+  it('injects synthetic context into last user message', () => {
+    const messages = [
+      { role: 'user' as const, content: 'hello' },
+      { role: 'assistant' as const, content: 'hi' },
+      { role: 'user' as const, content: 'do something' },
+    ];
+    const result = injectSyntheticRequestContext(messages, {
+      injectedPrompt: '[analyze-mode]',
+      capabilityContext: '## 系统 Agents',
+      companionPrompt: 'companion context',
+    });
+    // Only last user message should be modified
+    expect(result[0]!.content).toBe('hello');
+    expect(result[2]!.content).toContain('<system-reminder>');
+    expect(result[2]!.content).toContain('[analyze-mode]');
+    expect(result[2]!.content).toContain('## 系统 Agents');
+    expect(result[2]!.content).toContain('companion context');
+    expect(result[2]!.content).toContain('</system-reminder>');
+    expect(result[2]!.content).toContain('do something');
+  });
+
+  it('does not inject synthetic context into tool result messages', () => {
+    const messages = [
+      { role: 'user' as const, content: 'hello' },
+      { role: 'assistant' as const, content: null },
+      { role: 'tool' as const, content: 'result', tool_call_id: 'call_1' },
+    ];
+    const result = injectSyntheticRequestContext(messages, {
+      injectedPrompt: 'extra prompt',
+    });
+    // Tool messages should not be modified; last user message gets injection
+    expect(result[0]!.content).toContain('<system-reminder>');
+    expect(result[2]!.content).toBe('result');
+  });
+
+  it('returns messages unchanged when no synthetic context', () => {
+    const messages = [{ role: 'user' as const, content: 'hello' }];
+    const result = injectSyntheticRequestContext(messages, {});
+    expect(result).toEqual(messages);
   });
 
   it('uses clarify-specific LSP guidance in clarify mode', () => {
@@ -171,60 +202,28 @@ describe('stream system prompt integration', () => {
     expect(clarifyPrompt).toContain('仅用于信息获取和问题分析');
   });
 
-  it('always injects tool output reference guidance even without tool_output_reference in history', () => {
+  it('always injects tool output reference guidance in stable prefix', () => {
     const result = buildRoundSystemMessages({
       workspaceCtx: null,
       routeSystemPrompt: undefined,
     });
-    expect(result).toEqual([
-      { role: 'system', content: '<workspace />' },
-      { role: 'system', content: '<route-system-prompt />' },
-      { role: 'system', content: '<injected-prompt />\n当前消息无关键词触发的额外提示。' },
-      { role: 'system', content: '<capability-context />\n当前会话无可用能力目录。' },
-      { role: 'system', content: '<lsp-guidance />\nLSP 工具使用策略未启用。' },
-      { role: 'system', content: '<dialogue-mode />\n当前未指定对话模式。' },
-      { role: 'system', content: '<yolo-mode />\n当前未启用 YOLO 执行偏好。' },
-      { role: 'system', content: '<companion-prompt />\n当前无 companion 上下文。' },
-      { role: 'system', content: `<user-memory />\n当前会话无持久化记忆。` },
-      {
-        role: 'system',
-        content: `[COMPACT BOUNDARY]\nEarlier conversation history has not been compacted.`,
-      },
-      {
-        role: 'system',
-        content:
-          '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量用 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。',
-      },
-    ]);
+    expect(result).toHaveLength(2);
+    // Stable prefix should contain tool output reference
+    expect(result[0]!.content).toContain('tool_output_reference');
+    // Dynamic suffix should contain memory placeholder (compaction summary is in conversation flow)
+    expect(result[1]!.content).toContain('user-memory');
   });
 
-  it('inserts memory block after request prompts and before tool-output guidance', () => {
-    expect(
-      buildRoundSystemMessages({
-        workspaceCtx: '<workspace />',
-        routeSystemPrompt: 'route prompt',
-        injectedPrompt: 'prompt-a',
-        memoryBlock: '<user-memory>\n- [fact] stack: openawork\n</user-memory>',
-      }),
-    ).toEqual([
-      { role: 'system', content: '<workspace />' },
-      { role: 'system', content: 'route prompt' },
-      { role: 'system', content: 'prompt-a' },
-      { role: 'system', content: '<capability-context />\n当前会话无可用能力目录。' },
-      { role: 'system', content: '<lsp-guidance />\nLSP 工具使用策略未启用。' },
-      { role: 'system', content: '<dialogue-mode />\n当前未指定对话模式。' },
-      { role: 'system', content: '<yolo-mode />\n当前未启用 YOLO 执行偏好。' },
-      { role: 'system', content: '<companion-prompt />\n当前无 companion 上下文。' },
-      { role: 'system', content: '<user-memory>\n- [fact] stack: openawork\n</user-memory>' },
-      {
-        role: 'system',
-        content: `[COMPACT BOUNDARY]\nEarlier conversation history has not been compacted.`,
-      },
-      {
-        role: 'system',
-        content:
-          '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量用 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。',
-      },
-    ]);
+  it('places memory block in dynamic suffix', () => {
+    const result = buildRoundSystemMessages({
+      workspaceCtx: '<workspace />',
+      routeSystemPrompt: 'route prompt',
+      memoryBlock: '<user-memory>\n- [fact] stack: openawork\n</user-memory>',
+    });
+    expect(result).toHaveLength(2);
+    // Dynamic suffix should contain the actual memory block
+    expect(result[1]!.content).toContain('[fact] stack: openawork');
+    // Stable prefix should not contain memory
+    expect(result[0]!.content).not.toContain('[fact] stack: openawork');
   });
 });

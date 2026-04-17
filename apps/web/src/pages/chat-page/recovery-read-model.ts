@@ -63,6 +63,28 @@ function toPendingQuestionRequests(value: unknown): PendingQuestionRequest[] {
   return Array.isArray(value) ? value.filter((item) => isPendingQuestionRequest(item)) : [];
 }
 
+function dedupePendingPermissionRequests(
+  requests: PendingPermissionRequest[],
+): PendingPermissionRequest[] {
+  const mergedByRequestId = new Map<string, PendingPermissionRequest>();
+  const order: string[] = [];
+
+  for (const request of requests) {
+    const existing = mergedByRequestId.get(request.requestId);
+    if (!existing) {
+      order.push(request.requestId);
+      mergedByRequestId.set(request.requestId, request);
+      continue;
+    }
+
+    mergedByRequestId.set(request.requestId, { ...existing, ...request });
+  }
+
+  return order
+    .map((requestId) => mergedByRequestId.get(requestId))
+    .filter((request): request is PendingPermissionRequest => request !== undefined);
+}
+
 function getRecoverySessionRecord(
   source: RecoveryMessageSource | RecoveryPendingInteractionSource,
 ) {
@@ -91,11 +113,12 @@ export function getRecoveryPendingInteractions(source: RecoveryPendingInteractio
     pendingPermissions.length > 0 ? pendingPermissions : fallbackPendingPermissions;
   const resolvedPendingQuestions =
     pendingQuestions.length > 0 ? pendingQuestions : fallbackPendingQuestions;
+  const dedupedPendingPermissions = dedupePendingPermissionRequests(resolvedPendingPermissions);
 
   return {
-    pendingPermissions: resolvedPendingPermissions,
+    pendingPermissions: dedupedPendingPermissions,
     pendingPermission:
-      resolvedPendingPermissions.find((request) => request.status === 'pending') ?? null,
+      dedupedPendingPermissions.find((request) => request.status === 'pending') ?? null,
     pendingQuestions: resolvedPendingQuestions,
     pendingQuestion:
       resolvedPendingQuestions.find((request) => request.status === 'pending') ?? null,

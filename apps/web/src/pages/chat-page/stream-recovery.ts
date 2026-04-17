@@ -9,6 +9,13 @@ export interface RecoveredActiveAssistantStream {
   usage: ChatBackendUsageSnapshot | null;
 }
 
+interface RecoverActiveAssistantStreamInput {
+  activeStreamStartedAt?: number | null;
+  hasActiveStream?: boolean;
+  runEvents: RunEvent[];
+  sessionStateStatus: SessionStateStatus | null;
+}
+
 function isRecoverableSessionStatus(
   status: SessionStateStatus | null,
 ): status is Extract<SessionStateStatus, 'paused' | 'running'> {
@@ -19,22 +26,46 @@ function isTerminalRunEvent(event: RunEvent): boolean {
   return event.type === 'done' || event.type === 'error';
 }
 
-export function recoverActiveAssistantStream(input: {
-  runEvents: RunEvent[];
-  sessionStateStatus: SessionStateStatus | null;
-}): RecoveredActiveAssistantStream | null {
+export function recoverActiveAssistantStream(
+  input: RecoverActiveAssistantStreamInput,
+): RecoveredActiveAssistantStream | null {
   if (!isRecoverableSessionStatus(input.sessionStateStatus) || input.runEvents.length === 0) {
     return null;
   }
 
-  const activeRunId = [...input.runEvents]
-    .reverse()
-    .find((event) => typeof event.runId === 'string' && event.runId.length > 0)?.runId;
+  const hasActiveStream = input.hasActiveStream === true;
+  if (input.sessionStateStatus === 'paused' && !hasActiveStream) {
+    return null;
+  }
+
+  const activeStreamStartedAt = hasActiveStream ? (input.activeStreamStartedAt ?? null) : null;
+
+  const activeRunId = [...input.runEvents].reverse().find((event) => {
+    if (typeof event.runId !== 'string' || event.runId.length === 0) {
+      return false;
+    }
+
+    return (
+      typeof event.occurredAt !== 'number' ||
+      activeStreamStartedAt === null ||
+      event.occurredAt >= activeStreamStartedAt
+    );
+  })?.runId;
   if (!activeRunId) {
     return null;
   }
 
-  const activeRunEvents = input.runEvents.filter((event) => event.runId === activeRunId);
+  const activeRunEvents = input.runEvents.filter((event) => {
+    if (event.runId !== activeRunId) {
+      return false;
+    }
+
+    return (
+      typeof event.occurredAt !== 'number' ||
+      activeStreamStartedAt === null ||
+      event.occurredAt >= activeStreamStartedAt
+    );
+  });
   const latestActiveRunEvent = activeRunEvents.at(-1);
   if (!latestActiveRunEvent || isTerminalRunEvent(latestActiveRunEvent)) {
     return null;

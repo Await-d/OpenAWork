@@ -10,9 +10,20 @@ import {
   TaskSummaryCard,
   ToolField,
 } from './tool-call-card-parts.js';
+import {
+  BashTerminalCard,
+  resolveBashTerminalView,
+  type BashTerminalView,
+} from './tool-call-card-bash-terminal.js';
+import {
+  buildToolCopyText,
+  iconForToolKind,
+  inferToolKind,
+  resolveStatusMeta,
+  ToolKindIcon,
+} from './tool-call-card-meta.js';
 import type {
   PillTone,
-  StatusMeta,
   TaskSummaryData,
   TaskToolMeta,
   ToolCardStatus,
@@ -20,6 +31,20 @@ import type {
 } from './tool-call-card-shared.js';
 
 export interface ToolCallCardProps {
+  approvalActions?: {
+    errorMessage?: string;
+    helperMessage?: string;
+    items: Array<{
+      danger?: boolean;
+      disabled?: boolean;
+      hint?: string;
+      id: string;
+      label: string;
+      onClick: () => void;
+      primary?: boolean;
+    }>;
+    pendingLabel?: string;
+  };
   kind?: ToolKind;
   toolCallId?: string;
   toolName: string;
@@ -34,6 +59,7 @@ export interface ToolCallCardProps {
 export type { ToolKind } from './tool-call-card-shared.js';
 
 export interface ToolCallCardDisplayData {
+  bashView?: BashTerminalView;
   displayToolName: string;
   diffView?: {
     afterText?: string;
@@ -51,59 +77,6 @@ export interface ToolCallCardDisplayData {
   taskMeta?: TaskToolMeta;
   taskSummary?: TaskSummaryData;
   toolKind: ToolKind;
-}
-
-export function ToolKindIcon({ kind }: { kind: ToolKind }) {
-  const common = {
-    width: 12,
-    height: 12,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.9,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-  };
-
-  if (kind === 'mcp') {
-    return (
-      <svg {...common} aria-hidden="true">
-        <path d="M8 8h8v8H8z" />
-        <path d="M4 12h4" />
-        <path d="M16 12h4" />
-        <path d="M12 4v4" />
-        <path d="M12 16v4" />
-      </svg>
-    );
-  }
-
-  if (kind === 'skill') {
-    return (
-      <svg {...common} aria-hidden="true">
-        <path d="m12 3 2.2 4.8L19 10l-4.8 2.2L12 17l-2.2-4.8L5 10l4.8-2.2Z" />
-      </svg>
-    );
-  }
-
-  if (kind === 'agent') {
-    return (
-      <svg {...common} aria-hidden="true">
-        <rect x="7" y="7" width="10" height="10" rx="2" />
-        <path d="M10 11h.01" />
-        <path d="M14 11h.01" />
-        <path d="M9 15h6" />
-        <path d="M12 3v4" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg {...common} aria-hidden="true">
-      <path d="m14 7 3 3" />
-      <path d="m5 19 4.5-1 8-8a2.12 2.12 0 0 0-3-3l-8 8Z" />
-      <path d="m9 9 6 6" />
-    </svg>
-  );
 }
 
 function stringifyValue(value: unknown): string {
@@ -730,7 +703,14 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
   }
 
   if (normalizedToolName.includes('bash') && typeof input['command'] === 'string') {
-    return input['command'].slice(0, 120);
+    const cmd = input['command'].slice(0, 120);
+    const cwd =
+      typeof input['cwd'] === 'string' || typeof input['workdir'] === 'string'
+        ? trimInputPath(
+            (typeof input['cwd'] === 'string' ? input['cwd'] : input['workdir']) as string,
+          )
+        : undefined;
+    return cwd ? `${cwd} $ ${cmd}` : cmd;
   }
 
   if (normalizedToolName === 'read') {
@@ -933,126 +913,6 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
   } as ToolCallCardDisplayData['diffView'];
 }
 
-function resolvePausedStatusLabel(toolName: string): string {
-  const normalizedToolName = normalizeToolName(toolName);
-
-  if (normalizedToolName === 'askuserquestion' || normalizedToolName === 'question') {
-    return '等待回答';
-  }
-
-  if (normalizedToolName === 'exitplanmode') {
-    return '等待确认';
-  }
-
-  return '等待权限';
-}
-
-function resolveStatusMeta(status: ToolCardStatus, toolName: string): StatusMeta {
-  if (status === 'paused') {
-    return {
-      color: tokens.color.warning,
-      dot: tokens.color.warning,
-      label: resolvePausedStatusLabel(toolName),
-    };
-  }
-
-  if (status === 'failed') {
-    return {
-      color: tokens.color.danger,
-      dot: tokens.color.danger,
-      label: '失败',
-    };
-  }
-
-  if (status === 'completed') {
-    return {
-      color: tokens.color.success,
-      dot: tokens.color.success,
-      label: '完成',
-    };
-  }
-
-  return {
-    color: tokens.color.info,
-    dot: tokens.color.info,
-    label: '执行中',
-  };
-}
-
-function inferToolKind(toolName: string): ToolKind {
-  const normalized = normalizeToolName(toolName);
-  if (normalized === 'task') {
-    return 'agent';
-  }
-  if (normalized.includes('mcp') || normalized.includes('context7')) {
-    return 'mcp';
-  }
-  if (normalized.includes('skill') || normalized.includes('技能')) {
-    return 'skill';
-  }
-  if (
-    normalized.includes('agent') ||
-    normalized.includes('代理') ||
-    normalized.includes('oracle') ||
-    normalized.includes('subagent')
-  ) {
-    return 'agent';
-  }
-  return 'tool';
-}
-
-function iconForToolKind(kind: ToolKind): string {
-  if (kind === 'mcp') return 'MCP';
-  if (kind === 'skill') return 'SKILL';
-  if (kind === 'agent') return 'AGENT';
-  return 'TOOL';
-}
-
-function buildToolCopyText({
-  displayData,
-  displayToolName,
-  input,
-  isError,
-  output,
-  resumedAfterApproval,
-  statusLabel,
-  summary,
-  toolKindLabel,
-}: {
-  displayData: ToolCallCardDisplayData;
-  displayToolName: string;
-  input: Record<string, unknown>;
-  isError?: boolean;
-  output?: unknown;
-  resumedAfterApproval?: boolean;
-  statusLabel: string;
-  summary: string;
-  toolKindLabel: string;
-}): string {
-  const sections = [
-    `工具：${displayToolName}`,
-    `类型：${toolKindLabel}`,
-    `状态：${statusLabel}`,
-    `摘要：${summary || '查看详情'}`,
-  ];
-
-  if (resumedAfterApproval) {
-    sections.push('恢复：审批已通过后继续执行');
-  }
-
-  if (displayData.diffView?.summary) {
-    sections.push(`变更：${displayData.diffView.summary}`);
-  }
-
-  sections.push('', '输入', stringifyValue(input));
-
-  if (output !== undefined) {
-    sections.push('', isError ? '错误输出' : '输出', stringifyValue(output));
-  }
-
-  return sections.join('\n');
-}
-
 export function resolveToolCallCardDisplayData(input: {
   includeOutputDetails?: boolean;
   input: Record<string, unknown>;
@@ -1064,6 +924,9 @@ export function resolveToolCallCardDisplayData(input: {
     ? resolveTaskToolMeta(input.input, input.output)
     : undefined;
   const diffView = taskMeta ? undefined : resolveDiffView(input.output);
+  const bashView = taskMeta
+    ? undefined
+    : resolveBashTerminalView(input.toolName, input.input, input.output);
   const displayToolName = resolveDisplayToolName(input.toolName, taskMeta);
   const summary = taskMeta
     ? summarizeTaskTool(taskMeta)
@@ -1083,6 +946,7 @@ export function resolveToolCallCardDisplayData(input: {
   const hasDetails = showInputField || input.output !== undefined || taskMeta !== undefined;
 
   return {
+    bashView,
     displayToolName,
     diffView,
     summary,
@@ -1097,6 +961,7 @@ export function resolveToolCallCardDisplayData(input: {
 }
 
 export function ToolCallCard({
+  approvalActions,
   kind,
   toolCallId,
   toolName,
@@ -1157,19 +1022,21 @@ export function ToolCallCard({
   const showInputField = displayData.showInputField;
   const hasDetails = displayData.hasDetails;
   const hasInlineDiff = displayData.taskMeta === undefined && Boolean(displayData.diffView);
+  const bashView = displayData.bashView;
   const taskSummary = displayData.taskSummary;
   const effectiveOpen = open;
   const compactSummary = useMemo(() => summary || '查看详情', [summary]);
   const copyText = useMemo(
     () =>
       buildToolCopyText({
-        displayData,
+        diffSummary: displayData.diffView?.summary,
         displayToolName,
         input,
         isError,
         output,
         resumedAfterApproval,
         statusLabel: effectiveStatusLabel,
+        stringifyValue,
         summary,
         toolKindLabel,
       }),
@@ -1372,7 +1239,7 @@ export function ToolCallCard({
             </span>
             <Chevron open={effectiveOpen} />
           </button>
-          <CopyActionButton state={copyState} onClick={handleCopy} />
+          {!bashView && <CopyActionButton state={copyState} onClick={handleCopy} />}
         </div>
       ) : (
         <div
@@ -1487,7 +1354,117 @@ export function ToolCallCard({
               {effectiveStatusLabel}
             </span>
           </div>
-          <CopyActionButton state={copyState} onClick={handleCopy} />
+          {!bashView && <CopyActionButton state={copyState} onClick={handleCopy} />}
+        </div>
+      )}
+
+      {approvalActions && approvalActions.items.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            padding: hasDetails ? '2px 0 0 22px' : '0 0 0 22px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+              alignItems: 'center',
+            }}
+          >
+            {approvalActions.items.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                onClick={action.onClick}
+                disabled={action.disabled}
+                title={action.hint}
+                style={{
+                  appearance: 'none',
+                  borderRadius: 999,
+                  border: `1px solid ${
+                    action.primary
+                      ? `color-mix(in srgb, ${tokens.color.accent} 58%, ${tokens.color.borderSubtle})`
+                      : action.danger
+                        ? `color-mix(in srgb, ${tokens.color.danger} 46%, ${tokens.color.borderSubtle})`
+                        : `color-mix(in srgb, ${tokens.color.accent} 42%, ${tokens.color.borderSubtle})`
+                  }`,
+                  background: action.disabled
+                    ? `color-mix(in srgb, ${tokens.color.surface2} 78%, transparent)`
+                    : action.primary
+                      ? `linear-gradient(180deg, color-mix(in srgb, ${tokens.color.accent} 30%, transparent), color-mix(in srgb, ${tokens.color.accent} 18%, transparent))`
+                      : action.danger
+                        ? `color-mix(in srgb, ${tokens.color.danger} 12%, transparent)`
+                        : `color-mix(in srgb, ${tokens.color.accent} 14%, transparent)`,
+                  color: action.primary
+                    ? tokens.color.text
+                    : action.danger
+                      ? tokens.color.danger
+                      : tokens.color.text,
+                  boxShadow: action.primary
+                    ? `0 6px 18px color-mix(in srgb, ${tokens.color.accent} 22%, transparent)`
+                    : 'none',
+                  padding: action.primary ? '5px 12px' : '4px 10px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: action.primary ? '0.02em' : '0.03em',
+                  cursor: action.disabled ? 'not-allowed' : 'pointer',
+                  opacity: action.disabled ? 0.62 : 1,
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+          {(approvalActions.pendingLabel ||
+            approvalActions.helperMessage ||
+            approvalActions.errorMessage) && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+              }}
+            >
+              {approvalActions.pendingLabel && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: tokens.color.muted,
+                    fontWeight: 600,
+                  }}
+                >
+                  {approvalActions.pendingLabel}
+                </span>
+              )}
+              {approvalActions.helperMessage && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: tokens.color.muted,
+                    opacity: 0.92,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {approvalActions.helperMessage}
+                </span>
+              )}
+              {approvalActions.errorMessage && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: tokens.color.danger,
+                    fontWeight: 600,
+                  }}
+                >
+                  {approvalActions.errorMessage}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1524,6 +1501,17 @@ export function ToolCallCard({
             />
           </div>
         ))}
+
+      {!hasInlineDiff && !displayData.taskMeta && bashView && (
+        <div
+          style={{
+            padding: hasDetails ? '8px 0 0 22px' : '2px 0 0 22px',
+            marginTop: hasDetails ? 4 : 0,
+          }}
+        >
+          <BashTerminalCard compact={!effectiveOpen} view={bashView} />
+        </div>
+      )}
 
       {hasDetails && effectiveOpen && (
         <div
@@ -1601,6 +1589,11 @@ export function ToolCallCard({
           )}
           {displayData.taskMeta === undefined &&
             displayData.diffView === undefined &&
+            !bashView &&
+            showInputField && <ToolField label="输入" tone="muted" value={stringifyValue(input)} />}
+          {displayData.taskMeta === undefined &&
+            displayData.diffView === undefined &&
+            !bashView &&
             output !== undefined && (
               <ToolField
                 label={isError ? '错误输出' : '输出'}

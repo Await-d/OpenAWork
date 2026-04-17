@@ -5,7 +5,7 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import authPlugin from '../auth.js';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun } from '../db.js';
-import { appendSessionMessage } from '../session-message-store.js';
+import { appendSessionMessageV2 as appendSessionMessage } from '../message-v2-adapter.js';
 import { persistSessionFileBackup } from '../session-file-backup-store.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import requestWorkflowPlugin from '../request-workflow.js';
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
             'shared backup content should reuse same storage path',
           );
 
-          persistSessionFileDiffs({
+          await persistSessionFileDiffs({
             sessionId: parentSessionId,
             userId,
             clientRequestId: 'req-parent',

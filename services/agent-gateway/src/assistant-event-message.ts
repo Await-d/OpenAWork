@@ -57,42 +57,12 @@ function createAssistantEventText(event: RunEvent): string | null {
     });
   }
 
-  if (event.type === 'permission_asked') {
-    return createAssistantEventCardContent({
-      kind: classifyAssistantEventKind(`${event.toolName} ${event.previewAction ?? ''}`),
-      title: `等待权限 · ${event.toolName}`,
-      message: [event.previewAction, event.reason, `${event.scope} · ${event.riskLevel}`]
-        .filter((item) => typeof item === 'string' && item.trim().length > 0)
-        .join('\n'),
-      status: 'paused',
-    });
+  if (event.type === 'permission_asked' || event.type === 'permission_replied') {
+    return null;
   }
 
-  if (event.type === 'permission_replied') {
-    return createAssistantEventCardContent({
-      kind: 'permission',
-      title: '权限已响应',
-      message: formatPermissionDecision(event.decision),
-      status: event.decision === 'reject' ? 'error' : 'success',
-    });
-  }
-
-  if (event.type === 'question_asked') {
-    return createAssistantEventCardContent({
-      kind: 'task',
-      title: `等待回答 · ${event.toolName}`,
-      message: event.title,
-      status: 'paused',
-    });
-  }
-
-  if (event.type === 'question_replied') {
-    return createAssistantEventCardContent({
-      kind: 'task',
-      title: '问题已响应',
-      message: event.status === 'answered' ? '已回答，继续执行。' : '已忽略，等待进一步处理。',
-      status: event.status === 'answered' ? 'success' : 'paused',
-    });
+  if (event.type === 'question_asked' || event.type === 'question_replied') {
+    return null;
   }
 
   if (event.type === 'task_update') {
@@ -204,15 +174,6 @@ function formatTaskStatusLabel(
   if (status === 'failed') return '失败';
   if (status === 'cancelled') return '已取消';
   return '待开始';
-}
-
-function formatPermissionDecision(
-  decision: Extract<RunEvent, { type: 'permission_replied' }>['decision'],
-): string {
-  if (decision === 'once') return '本次允许';
-  if (decision === 'session') return '本会话允许';
-  if (decision === 'permanent') return '永久允许';
-  return '已拒绝';
 }
 
 function formatTaskTerminalReason(reason: string): string {

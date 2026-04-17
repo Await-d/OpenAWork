@@ -27,7 +27,6 @@ describe('tool-result-contract', () => {
         observability: {
           presentedToolName: 'Write',
           canonicalToolName: 'write',
-          toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
       }),
@@ -55,7 +54,6 @@ describe('tool-result-contract', () => {
       observability: {
         presentedToolName: 'Write',
         canonicalToolName: 'write',
-        toolSurfaceProfile: 'claude_code_default',
         adapterVersion: '1.0.0',
       },
     });
@@ -86,7 +84,6 @@ describe('tool-result-contract', () => {
         observability: {
           presentedToolName: 'Agent',
           canonicalToolName: 'call_omo_agent',
-          toolSurfaceProfile: 'claude_code_default',
           adapterVersion: '1.0.0',
         },
         eventMeta: {
@@ -119,7 +116,6 @@ describe('tool-result-contract', () => {
       observability: {
         presentedToolName: 'Agent',
         canonicalToolName: 'call_omo_agent',
-        toolSurfaceProfile: 'claude_code_default',
         adapterVersion: '1.0.0',
       },
       eventId: 'evt-1',

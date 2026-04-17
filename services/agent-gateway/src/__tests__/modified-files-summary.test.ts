@@ -19,7 +19,6 @@ describe('modified-files-summary', () => {
         observability: {
           presentedToolName: 'Write',
           canonicalToolName: 'write',
-          toolSurfaceProfile: 'openawork',
         },
         requestId: 'req-1:tool:call-1',
         toolCallId: 'call-1',
@@ -42,7 +41,6 @@ describe('modified-files-summary', () => {
         observability: {
           presentedToolName: 'Write',
           canonicalToolName: 'write',
-          toolSurfaceProfile: 'openawork',
         },
       },
     ]);

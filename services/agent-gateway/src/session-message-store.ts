@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { makeOrderedMessageId } from './ordered-id.js';
 import type {
   FileBackupRef,
   FileDiffContent,
@@ -123,6 +124,7 @@ export function hasToolOutputReference(messages: UpstreamChatMessage[]): boolean
   );
 }
 
+/** @deprecated Use StoredToolResult from message-v2-adapter.js */
 export interface StoredToolResult {
   clientRequestId?: string;
   fileDiffs?: FileDiffContent[];
@@ -315,6 +317,7 @@ export function filterVisibleSessionMessages(messages: Message[]): Message[] {
   return messages.filter((message) => !isCompactionMarkerMessage(message));
 }
 
+/** @deprecated Use listSessionMessagesV2 from message-v2-adapter.js */
 export function listSessionMessages(input: {
   sessionId: string;
   userId: string;
@@ -326,6 +329,7 @@ export function listSessionMessages(input: {
   return rows.map((row) => rowToMessage(row));
 }
 
+/** @deprecated Use appendSessionMessageV2 from message-v2-adapter.js */
 export function appendSessionMessage(input: {
   sessionId: string;
   userId: string;
@@ -381,7 +385,7 @@ export function appendSessionMessage(input: {
       [input.sessionId, input.userId],
     )?.next_seq ?? 1;
   const createdAt = input.createdAt ?? Date.now();
-  const messageId = input.messageId ?? randomUUID();
+  const messageId = input.messageId ?? makeOrderedMessageId();
   const contentJson = JSON.stringify(input.content);
 
   sqliteRun(
@@ -417,6 +421,7 @@ export function appendSessionMessage(input: {
   };
 }
 
+/** @deprecated Use appendCompactionMarkerMessageV2 from message-v2-adapter.js */
 export function appendCompactionMarkerMessage(input: {
   legacyMessagesJson?: string;
   omittedMessages?: number;
@@ -464,6 +469,35 @@ export function buildUpstreamConversation(
   return buildUpstreamConversationFromHistory(history);
 }
 
+/** Microcompact: replace tool_result content for messages older than the threshold.
+ * This is a lightweight token-reduction step that runs before every API round,
+ * clearing stale tool outputs while keeping recent ones intact.
+ * Returns a new array (does not mutate input). */
+export const MICROCOMPACT_AGE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
+export function microcompactByAge(
+  messages: Message[],
+  options: { ageThresholdMs?: number; now?: number } = {},
+): Message[] {
+  const threshold = options.ageThresholdMs ?? MICROCOMPACT_AGE_THRESHOLD_MS;
+  const now = options.now ?? Date.now();
+  const placeholder = '[Old tool result content cleared by microcompact]';
+
+  return messages.map((message) => {
+    if (message.role !== 'tool') return message;
+    const age = now - message.createdAt;
+    if (age < threshold) return message;
+
+    return {
+      ...message,
+      content: message.content.map((content) => {
+        if (content.type !== 'tool_result') return content;
+        return { ...content, output: placeholder };
+      }),
+    };
+  });
+}
+
 export function buildPreparedUpstreamConversation(
   messages: Message[],
   options: number | BuildPreparedUpstreamConversationOptions = 12,
@@ -477,8 +511,12 @@ export function buildPreparedUpstreamConversation(
   const marker = readLatestCompactionMarker(messages);
   const effectiveSummary = marker?.summary ?? llmCompactionSummary;
   const effectivePersistedMemory = marker?.persistedMemory ?? persistedMemory;
-  const normalizedMessages = messages.filter((message) => !isContextArtifactMessage(message));
-  const historySinceBoundary = selectMessagesSinceCompactionBoundary(
+  // Only filter out UI events and command cards — compaction markers are kept
+  // so that filterCompactedMessages can use them as boundaries
+  const normalizedMessages = messages.filter(
+    (message) => !isAssistantUiEventMessage(message) && !isCommandCardMessage(message),
+  );
+  const historySinceBoundary = filterCompactedMessages(
     normalizedMessages,
     effectivePersistedMemory,
     effectiveSummary,
@@ -487,8 +525,22 @@ export function buildPreparedUpstreamConversation(
     contextWindow && contextWindow > 0
       ? historySinceBoundary
       : selectSafeConversationWindow(historySinceBoundary, maxMessages);
-  const upstreamMessages = buildUpstreamConversationFromHistory(history);
+  // P3: Microcompact — clear old tool_result content to save tokens
+  const microcompactedHistory = microcompactByAge(history);
+  const upstreamMessages = buildUpstreamConversationFromHistory(microcompactedHistory);
   const compactSummaryInjected = !!effectiveSummary && effectiveSummary.trim().length > 0;
+
+  // If there is a compaction summary but no compaction marker in the message
+  // list (e.g. marker was filtered or summary comes from metadataJson), inject
+  // the summary as a user+assistant pair at the beginning of the conversation
+  // flow, following the opencode pattern.
+  const hasMarkerInHistory = microcompactedHistory.some((msg) => isCompactionMarkerMessage(msg));
+  if (compactSummaryInjected && !hasMarkerInHistory && effectiveSummary) {
+    upstreamMessages.unshift(
+      { role: 'user', content: 'What did we do so far?' },
+      { role: 'assistant', content: effectiveSummary },
+    );
+  }
   const report = buildPreparedUpstreamConversationReport({
     compactSummaryInjected,
     history,
@@ -500,7 +552,9 @@ export function buildPreparedUpstreamConversation(
 
   return {
     messages: upstreamMessages,
-    compactionSummary: compactSummaryInjected ? effectiveSummary : null,
+    // Compaction summary is now injected into the conversation flow as
+    // user+assistant message pair (opencode pattern), not as a system message.
+    compactionSummary: null,
     report,
   };
 }
@@ -590,10 +644,49 @@ export function isContextOverflow(
   return usage.inputTokens >= contextWindow - buffer;
 }
 
+/** Proactive compaction threshold: trigger before overflow.
+ * Uses a larger buffer (30K or 25% of contextWindow) so compaction
+ * runs while there is still room for the next API round. */
+export const PROACTIVE_COMPACTION_BUFFER_TOKENS = 30_000;
+
+export function isContextNearOverflow(
+  usage: { inputTokens: number },
+  contextWindow: number,
+  reserved?: number,
+): boolean {
+  if (contextWindow <= 0) {
+    return false;
+  }
+
+  const buffer =
+    reserved ?? Math.max(PROACTIVE_COMPACTION_BUFFER_TOKENS, Math.floor(contextWindow * 0.25));
+  return usage.inputTokens >= contextWindow - buffer;
+}
+
 function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChatMessage[] {
   const upstreamMessages: UpstreamChatMessage[] = [];
 
   messages.forEach((message) => {
+    // Handle compaction marker: convert to opencode-style user+assistant pair
+    // In opencode, a compaction boundary is:
+    //   user message with compaction part → "What did we do so far?"
+    //   assistant message with summary: true → the actual summary text
+    if (isCompactionMarkerMessage(message)) {
+      const markerRecord = readLatestCompactionMarker([message]);
+      if (markerRecord && markerRecord.summary.trim().length > 0) {
+        // Inject as user+assistant pair in conversation flow
+        upstreamMessages.push({
+          role: 'user',
+          content: 'What did we do so far?',
+        });
+        upstreamMessages.push({
+          role: 'assistant',
+          content: markerRecord.summary,
+        });
+      }
+      return;
+    }
+
     if (message.role === 'tool') {
       message.content.forEach((content) => {
         if (content.type !== 'tool_result') return;
@@ -942,6 +1035,7 @@ export function extractMessageText(message: Message | undefined): string {
     .trim();
 }
 
+/** @deprecated Use getSessionToolResultByCallId from message-v2-adapter.js */
 export function getSessionToolResultByCallId(input: {
   sessionId: string;
   toolCallId: string;
@@ -982,6 +1076,7 @@ export function getSessionToolResultByCallId(input: {
   return null;
 }
 
+/** @deprecated Use getLatestReferencedToolResult from message-v2-adapter.js */
 export function getLatestReferencedToolResult(input: {
   sessionId: string;
   userId: string;
@@ -1076,6 +1171,7 @@ function buildLargeToolOutputReference(input: {
   };
 }
 
+/** @deprecated Use getSessionMessageByRequestId from message-v2-adapter.js */
 export function getSessionMessageByRequestId(input: {
   clientRequestId: string;
   role: MessageRole;
@@ -1093,6 +1189,7 @@ export function getSessionMessageByRequestId(input: {
   };
 }
 
+/** @deprecated Use listSessionMessagesByRequestScope from message-v2-adapter.js */
 export function listSessionMessagesByRequestScope(input: {
   clientRequestId: string;
   sessionId: string;
@@ -1111,6 +1208,7 @@ export function listSessionMessagesByRequestScope(input: {
     .map((row) => rowToMessage(row));
 }
 
+/** @deprecated Use truncateSessionMessagesAfterV2 from message-v2-adapter.js */
 export function truncateSessionMessagesAfter(input: {
   sessionId: string;
   userId: string;
@@ -1148,6 +1246,7 @@ export function truncateSessionMessagesAfter(input: {
   return keepRows.map((row) => rowToMessage(row));
 }
 
+/** @deprecated Use updateSessionMessagesStatusByRequestScope from message-v2-adapter.js */
 export function updateSessionMessagesStatusByRequestScope(input: {
   clientRequestId: string;
   roles?: MessageRole[];
@@ -1181,6 +1280,7 @@ export function updateSessionMessagesStatusByRequestScope(input: {
   touchSession(input.sessionId, input.userId);
 }
 
+/** @deprecated Use deleteSessionMessagesByRequestScope from message-v2-adapter.js */
 export function deleteSessionMessagesByRequestScope(input: {
   clientRequestId: string;
   roles?: MessageRole[];
@@ -1248,26 +1348,64 @@ function selectSafeConversationWindow(messages: Message[], maxMessages: number):
   return ensureLatestUserMessage(selected.reverse(), messages);
 }
 
-function selectMessagesSinceCompactionBoundary(
+/**
+ * Filter messages using the opencode filterCompacted pattern.
+ *
+ * In opencode, messages are stored newest-first. filterCompacted iterates
+ * forward (newest→oldest), collecting messages until it hits a compaction
+ * boundary, then reverses to chronological order.
+ *
+ * In OpenAWork, messages are chronological (oldest first). So we find the
+ * boundary and return it plus everything after it — keeping only the messages
+ * after the most recent compaction boundary.
+ *
+ * Boundary detection supports two modes:
+ * 1. Compaction marker in message list (opencode pattern) — find the last
+ *    compaction marker assistant message and keep it + everything after.
+ * 2. Persisted memory coveredUntilMessageId (legacy fallback) — when no
+ *    marker exists in the message list, use the coveredUntilMessageId from
+ *    persisted compaction memory to slice.
+ */
+function filterCompactedMessages(
   messages: Message[],
   persistedMemory: PersistedCompactionMemory | null,
   llmCompactionSummary: string | undefined,
 ): Message[] {
-  if (messages.length === 0 || !llmCompactionSummary || llmCompactionSummary.trim().length === 0) {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  // Mode 1: Find the last compaction marker in message list (opencode pattern)
+  // This works regardless of whether llmCompactionSummary is provided —
+  // if a marker exists in the message list, it IS the boundary.
+  let boundaryIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isCompactionMarkerMessage(messages[i]!)) {
+      boundaryIndex = i;
+      break;
+    }
+  }
+
+  if (boundaryIndex >= 0) {
+    return messages.slice(boundaryIndex);
+  }
+
+  // Mode 2: Legacy fallback — use persistedMemory.coveredUntilMessageId
+  // Only applies when there's no marker in the message list but we have
+  // summary info from metadataJson
+  if (!llmCompactionSummary || llmCompactionSummary.trim().length === 0) {
     return messages;
   }
 
   const coveredUntilMessageId = persistedMemory?.coveredUntilMessageId;
-  if (!coveredUntilMessageId) {
-    return messages;
+  if (coveredUntilMessageId) {
+    const coveredIndex = messages.findIndex((message) => message.id === coveredUntilMessageId);
+    if (coveredIndex >= 0) {
+      return messages.slice(coveredIndex + 1);
+    }
   }
 
-  const coveredIndex = messages.findIndex((message) => message.id === coveredUntilMessageId);
-  if (coveredIndex < 0) {
-    return messages;
-  }
-
-  return messages.slice(coveredIndex + 1);
+  return messages;
 }
 
 function ensureLatestUserMessage(selected: Message[], allMessages: Message[]): Message[] {
@@ -1332,7 +1470,7 @@ function hydrateLegacyMessages(
       'SELECT id FROM session_messages WHERE id = ? LIMIT 1',
       [message.id],
     );
-    const nextMessageId = existing ? randomUUID() : message.id;
+    const nextMessageId = existing ? makeOrderedMessageId() : message.id;
     const contentJson = JSON.stringify(message.content);
     sqliteRun(
       "INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'final', NULL, ?, datetime('now'))",
@@ -1584,13 +1722,6 @@ function parseToolCallObservability(value: unknown): ToolCallObservabilityAnnota
   }
   if (typeof record['canonicalToolName'] === 'string') {
     parsed.canonicalToolName = record['canonicalToolName'];
-  }
-  if (
-    record['toolSurfaceProfile'] === 'openawork' ||
-    record['toolSurfaceProfile'] === 'claude_code_simple' ||
-    record['toolSurfaceProfile'] === 'claude_code_default'
-  ) {
-    parsed.toolSurfaceProfile = record['toolSurfaceProfile'];
   }
   if (typeof record['adapterVersion'] === 'string') {
     parsed.adapterVersion = record['adapterVersion'];

@@ -30,7 +30,7 @@ describe('transcript-visibility', () => {
     expect(filterTranscriptMessages([message])).toEqual([]);
   });
 
-  it('keeps non-compaction assistant events visible', () => {
+  it('hides all assistant_event cards from the visible transcript', () => {
     const message: ChatMessage = {
       id: 'assistant-permission',
       role: 'assistant',
@@ -48,11 +48,11 @@ describe('transcript-visibility', () => {
       status: 'completed',
     };
 
-    expect(shouldShowMessageInTranscript(message)).toBe(true);
-    expect(filterTranscriptMessages([message])).toEqual([message]);
+    expect(shouldShowMessageInTranscript(message)).toBe(false);
+    expect(filterTranscriptMessages([message])).toEqual([]);
   });
 
-  it('suppresses compaction run events from live transcript mirroring', () => {
+  it('suppresses operational run events from live transcript mirroring', () => {
     const compactionEvent: RunEvent = {
       type: 'compaction',
       summary: '保留最近 20 条消息，其余已压缩。',
@@ -64,8 +64,21 @@ describe('transcript-visibility', () => {
       label: '整理结论',
       status: 'in_progress',
     };
+    const auditEvent: RunEvent = {
+      type: 'audit_ref',
+      auditLogId: 'audit-1',
+      toolName: 'bash',
+    };
+    const childEvent: RunEvent = {
+      type: 'session_child',
+      sessionId: 'child-1',
+      parentSessionId: 'session-1',
+      title: '子代理',
+    };
 
     expect(shouldShowRunEventInTranscript(compactionEvent)).toBe(false);
-    expect(shouldShowRunEventInTranscript(taskEvent)).toBe(true);
+    expect(shouldShowRunEventInTranscript(taskEvent)).toBe(false);
+    expect(shouldShowRunEventInTranscript(auditEvent)).toBe(false);
+    expect(shouldShowRunEventInTranscript(childEvent)).toBe(false);
   });
 });

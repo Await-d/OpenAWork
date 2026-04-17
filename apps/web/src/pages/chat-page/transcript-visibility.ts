@@ -7,11 +7,7 @@ export function shouldShowMessageInTranscript(message: ChatMessage): boolean {
   }
 
   const assistantEvent = parseAssistantEventContent(message.content);
-  if (!assistantEvent) {
-    return true;
-  }
-
-  return assistantEvent.kind !== 'compaction';
+  return !assistantEvent;
 }
 
 export function filterTranscriptMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -19,5 +15,14 @@ export function filterTranscriptMessages(messages: ChatMessage[]): ChatMessage[]
 }
 
 export function shouldShowRunEventInTranscript(event: RunEvent): boolean {
-  return event.type !== 'compaction';
+  return (
+    event.type !== 'compaction' &&
+    event.type !== 'audit_ref' &&
+    event.type !== 'permission_asked' &&
+    event.type !== 'permission_replied' &&
+    event.type !== 'question_asked' &&
+    event.type !== 'question_replied' &&
+    event.type !== 'session_child' &&
+    event.type !== 'task_update'
+  );
 }

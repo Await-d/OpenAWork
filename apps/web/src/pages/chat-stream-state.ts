@@ -1,4 +1,5 @@
 import type { RunEvent, StreamChunk } from '@openAwork/shared';
+import { hasActivePendingPermissionRequest } from './chat-page/support.js';
 import type {
   AgentVizEvent,
   DAGNodeInfo,
@@ -58,6 +59,7 @@ export interface ToolCallCardModel {
   input: Record<string, unknown>;
   output?: unknown;
   isError: boolean;
+  pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
   status: ChatToolCallEntry['status'];
 }
@@ -124,6 +126,9 @@ export function getToolCallCards(state: ChatRightPanelState): ToolCallCardModel[
     input: toolCall.input,
     output: toolCall.output,
     isError: toolCall.isError === true || toolCall.status === 'failed',
+    ...(toolCall.pendingPermissionRequestId
+      ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
+      : {}),
     ...(toolCall.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     status: toolCall.status,
   }));
@@ -467,7 +472,7 @@ function applyToolResultEvent(
   state: ChatRightPanelState,
   event: Extract<RunEvent, { type: 'tool_result' }>,
 ): ChatRightPanelState {
-  const isPendingPermission = typeof event.pendingPermissionRequestId === 'string';
+  const isPendingPermission = hasActivePendingPermissionRequest(event);
   const resumedAfterApproval = event.resumedAfterApproval === true;
   const status = isPendingPermission
     ? ('paused' as const)

@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SessionMessageStoreModule from '../session-message-store.js';
 
 const mocks = vi.hoisted(() => ({
   getSessionMessageByRequestIdMock: vi.fn(),
@@ -21,16 +20,10 @@ vi.mock('../db.js', () => ({
   sqliteRun: vi.fn(() => undefined),
 }));
 
-vi.mock('../session-message-store.js', async () => {
-  const actual = await vi.importActual<typeof SessionMessageStoreModule>(
-    '../session-message-store.js',
-  );
-  return {
-    ...actual,
-    getSessionMessageByRequestId: mocks.getSessionMessageByRequestIdMock,
-    listSessionMessagesByRequestScope: mocks.listSessionMessagesByRequestScopeMock,
-  };
-});
+vi.mock('../message-v2-adapter.js', () => ({
+  getSessionMessageByRequestId: mocks.getSessionMessageByRequestIdMock,
+  listSessionMessagesByRequestScope: mocks.listSessionMessagesByRequestScopeMock,
+}));
 
 vi.mock('../session-permission-events.js', () => ({
   listSessionPermissionRunEvents: mocks.listSessionPermissionRunEventsMock,
@@ -75,7 +68,6 @@ describe('replayPersistedAssistantResponse', () => {
             observability: {
               presentedToolName: 'CodeSearch',
               canonicalToolName: 'codesearch',
-              toolSurfaceProfile: 'openawork',
             },
           },
         ],
@@ -118,7 +110,6 @@ describe('replayPersistedAssistantResponse', () => {
       observability: {
         presentedToolName: 'CodeSearch',
         canonicalToolName: 'codesearch',
-        toolSurfaceProfile: 'openawork',
       },
     });
   });

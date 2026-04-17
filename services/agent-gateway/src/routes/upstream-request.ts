@@ -4,7 +4,7 @@ import type { UpstreamProtocol } from './upstream-protocol.js';
 export type UpstreamRequestBody = Record<string, unknown>;
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
-interface UpstreamChatMessage {
+export interface UpstreamChatMessage {
   role: 'assistant' | 'system' | 'tool' | 'user';
   content: string | null;
   tool_call_id?: string;
@@ -162,7 +162,7 @@ function applyThinkingConfigToBody(
     case 'openai':
       if (protocol === 'responses') {
         if (thinking.enabled) {
-          nextBody['reasoning'] = { effort: thinking.effort };
+          nextBody['reasoning'] = { effort: thinking.effort, summary: 'auto' };
         } else {
           delete nextBody['reasoning'];
         }
@@ -362,6 +362,95 @@ function convertToolsToResponsesTools(tools: UpstreamFunctionToolDefinition[]): 
     parameters: tool.function.parameters ?? { type: 'object', properties: {} },
     strict: tool.function.strict ?? false,
   }));
+}
+
+/**
+ * Sanitize an upstream conversation by removing messages that would cause
+ * format errors at the upstream provider. Common issues include:
+ *
+ * 1. Orphaned tool_result messages whose tool_call_id doesn't match any
+ *    preceding assistant tool_call.
+ * 2. Tool messages not immediately preceded by an assistant message with
+ *    tool_calls.
+ * 3. Empty messages (no content and no tool_calls).
+ * 4. Consecutive messages with the same role (some providers reject this).
+ *
+ * Returns a new array — does not mutate input.
+ */
+export function sanitizeUpstreamConversation(
+  messages: UpstreamChatMessage[],
+): UpstreamChatMessage[] {
+  // Phase 1: Build the set of valid tool_call_ids from assistant messages
+  const validToolCallIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'assistant' && message.tool_calls) {
+      for (const tc of message.tool_calls) {
+        validToolCallIds.add(tc.id);
+      }
+    }
+  }
+
+  // Phase 2: Filter out orphaned tool results and empty messages,
+  // then fix role ordering issues
+  const filtered: UpstreamChatMessage[] = [];
+
+  for (const message of messages) {
+    // Skip empty messages (no content and no tool_calls)
+    if (
+      (!message.content || message.content.trim().length === 0) &&
+      (!message.tool_calls || message.tool_calls.length === 0) &&
+      message.role !== 'tool'
+    ) {
+      continue;
+    }
+
+    // Skip orphaned tool results
+    if (message.role === 'tool') {
+      if (!message.tool_call_id || !validToolCallIds.has(message.tool_call_id)) {
+        continue;
+      }
+      // Skip tool messages with empty content
+      if (!message.content || message.content.trim().length === 0) {
+        continue;
+      }
+    }
+
+    // Skip assistant messages with no content and no tool_calls
+    if (
+      message.role === 'assistant' &&
+      (!message.content || message.content.trim().length === 0) &&
+      (!message.tool_calls || message.tool_calls.length === 0)
+    ) {
+      continue;
+    }
+
+    filtered.push(message);
+  }
+
+  // Phase 3: Ensure tool messages are preceded by an assistant with tool_calls
+  const result: UpstreamChatMessage[] = [];
+  const seenToolCallIds = new Set<string>();
+
+  for (let i = 0; i < filtered.length; i++) {
+    const message = filtered[i]!;
+
+    if (message.role === 'assistant' && message.tool_calls) {
+      for (const tc of message.tool_calls) {
+        seenToolCallIds.add(tc.id);
+      }
+    }
+
+    if (message.role === 'tool') {
+      // Check if the tool_call_id was seen in a preceding assistant message
+      if (!seenToolCallIds.has(message.tool_call_id!)) {
+        continue;
+      }
+    }
+
+    result.push(message);
+  }
+
+  return result;
 }
 
 function isReasoningModel(model: string): boolean {

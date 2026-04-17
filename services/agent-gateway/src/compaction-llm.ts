@@ -24,6 +24,10 @@ const COMPACTION_SYSTEM_PROMPT = `你是一个专门负责会话摘要的 AI 助
 
 [用户想要完成什么目标？]
 
+## 用户原始请求 (As-Is)
+
+[列出所有用户的原始请求，保留用户的精确措辞和意图。这对压缩后保持上下文连续性至关重要。]
+
 ## 指令
 
 - [用户给出的重要指令]
@@ -36,6 +40,10 @@ const COMPACTION_SYSTEM_PROMPT = `你是一个专门负责会话摘要的 AI 助
 ## 已完成
 
 [已完成的工作、正在进行的工作、以及剩余的工作]
+
+## 禁止事项 (Critical Constraints)
+
+[明确禁止的事项：被明确禁止的操作、失败且不应重试的方法、用户的显式限制或偏好、会话中识别的反模式。这对避免压缩后重复犯错至关重要。]
 
 ## 相关文件/目录
 
@@ -57,7 +65,36 @@ export interface CompactionLlmResult {
   outputTokens: number;
 }
 
+const PTL_RETRY_TRIM_RATIO = 0.5; // On PTL retry, keep only the latest 50% of conversation messages
+const PTL_ERROR_PATTERNS = [
+  'context_length_exceeded',
+  'maximum context length',
+  'too many tokens',
+  'prompt is too long',
+  'input is too long',
+];
+
+function isPtlError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return PTL_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+}
+
 export async function callCompactionLlm(input: CompactionLlmInput): Promise<CompactionLlmResult> {
+  try {
+    return await callCompactionLlmOnce(input);
+  } catch (error: unknown) {
+    // P4: PTL retry — if the error is a context-length error, trim old messages and retry once
+    if (isPtlError(error) && input.conversationMessages.length > 4) {
+      const trimCount = Math.floor(input.conversationMessages.length * PTL_RETRY_TRIM_RATIO);
+      const trimmedMessages = input.conversationMessages.slice(trimCount);
+      return callCompactionLlmOnce({ ...input, conversationMessages: trimmedMessages });
+    }
+    throw error;
+  }
+}
+
+async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<CompactionLlmResult> {
   const protocol = input.route.upstreamProtocol;
   const messages: UpstreamChatMessage[] = [
     { role: 'system', content: COMPACTION_SYSTEM_PROMPT },

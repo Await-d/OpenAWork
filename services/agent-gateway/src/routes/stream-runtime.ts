@@ -237,7 +237,7 @@ async function continueFromApprovedToolResult(input: {
     );
     mergeFileDiffs(turnFileDiffs, resumedFileDiffs);
     if (resumedFileDiffs.length > 0) {
-      persistSessionFileDiffs({
+      await persistSessionFileDiffs({
         sessionId: input.sessionId,
         userId: input.userId,
         clientRequestId: input.payload.clientRequestId,

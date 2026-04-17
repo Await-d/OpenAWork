@@ -7,7 +7,7 @@ import type {
   InstalledComposerSkill,
 } from '../pages/chat-page/support.js';
 
-interface ComposerWorkspaceCatalog {
+export interface ComposerWorkspaceCatalog {
   agents: ComposerCapabilityItem[];
   agentTools: ComposerAgentTool[];
   installedSkills: InstalledComposerSkill[];

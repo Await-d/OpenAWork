@@ -256,7 +256,7 @@ function buildResumeTemplate(input: {
 }
 
 function getSortedMessages(messages: Message[]): Message[] {
-  return [...messages].sort((left, right) => left.createdAt - right.createdAt);
+  return [...messages].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function extractMessageTexts(message: Message): string[] {

@@ -815,38 +815,57 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     [addSavedWorkspacePath, setFileTreeRootPath, setSelectedWorkspacePath],
   );
 
+  const refreshSessionsAfterPermissionReply = useCallback(
+    (currentSessionId: string | null, targetSessionId: string) => {
+      const refreshTargets = new Set<string>();
+      if (currentSessionId) {
+        refreshTargets.add(currentSessionId);
+      }
+      refreshTargets.add(targetSessionId);
+
+      const flushRefresh = () => {
+        refreshTargets.forEach((sessionId) => {
+          requestCurrentSessionRefresh(sessionId);
+        });
+        requestSessionListRefresh();
+      };
+
+      flushRefresh();
+      // Follow up once more after the backend has had time to resume and persist
+      // the post-approval turn, so the chat page does not stay on a stale paused snapshot.
+      window.setTimeout(() => {
+        flushRefresh();
+      }, 2000);
+    },
+    [],
+  );
+
   const handlePermissionDecision = useCallback(
     async (requestId: string, decision: PermissionDecision) => {
-      if (!accessToken || !currentChatSessionId || !pendingPermission) {
+      if (!accessToken || !pendingPermission) {
         updatePendingPermission(null);
         return;
       }
+
+      const currentSessionId = currentChatSessionId;
+      const targetSessionId = pendingPermission.targetSessionId;
 
       setPermissionReplyPendingDecision(decision);
       setPermissionReplyError(null);
 
       try {
-        await createPermissionsClient(gatewayUrl).reply(
-          accessToken,
-          pendingPermission.targetSessionId,
-          {
-            requestId,
-            decision,
-          },
-        );
+        await createPermissionsClient(gatewayUrl).reply(accessToken, targetSessionId, {
+          requestId,
+          decision,
+        });
         updatePendingPermission(null);
-        // Delay to give the backend time to start the resume runtime thread
-        window.setTimeout(() => {
-          requestCurrentSessionRefresh(currentChatSessionId);
-          requestSessionListRefresh();
-        }, 500);
+        refreshSessionsAfterPermissionReply(currentSessionId, targetSessionId);
       } catch (error) {
         const resolved = resolvePermissionReplyError(error);
         if (resolved.dismissPrompt) {
           updatePendingPermission(null);
           toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
-          requestCurrentSessionRefresh(currentChatSessionId);
-          requestSessionListRefresh();
+          refreshSessionsAfterPermissionReply(currentSessionId, targetSessionId);
         } else {
           setPermissionReplyError(resolved.inlineMessage);
         }
@@ -854,7 +873,14 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         setPermissionReplyPendingDecision(null);
       }
     },
-    [accessToken, currentChatSessionId, gatewayUrl, pendingPermission, updatePendingPermission],
+    [
+      accessToken,
+      currentChatSessionId,
+      gatewayUrl,
+      pendingPermission,
+      refreshSessionsAfterPermissionReply,
+      updatePendingPermission,
+    ],
   );
 
   return (

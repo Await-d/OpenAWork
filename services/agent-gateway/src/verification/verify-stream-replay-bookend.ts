@@ -6,7 +6,7 @@ import { closeDb, connectDb, migrate, sqliteRun } from '../db.js';
 import requestWorkflowPlugin from '../request-workflow.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
-import { appendSessionMessage } from '../session-message-store.js';
+import { appendSessionMessageV2 as appendSessionMessage } from '../message-v2-adapter.js';
 import { persistSessionRunEventForRequest } from '../session-run-events.js';
 import { assert, withMockFetch, withTempEnv } from './task-verification-helpers.js';
 

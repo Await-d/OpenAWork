@@ -135,4 +135,59 @@ describe('recovery-read-model', () => {
     expect(interactions.pendingPermission?.requestId).toBe('perm-session');
     expect(interactions.pendingQuestion?.requestId).toBe('question-session');
   });
+
+  it('deduplicates pending permissions by request id while preserving the first entry order', () => {
+    const interactions = getRecoveryPendingInteractions({
+      pendingPermissions: [
+        {
+          requestId: 'perm-1',
+          sessionId: 'session-1',
+          toolName: 'bash',
+          scope: 'workspace-write',
+          reason: '第一次原因',
+          riskLevel: 'medium',
+          previewAction: '第一次操作',
+          status: 'pending',
+          createdAt: '2026-04-12T08:00:00.000Z',
+        },
+        {
+          requestId: 'perm-1',
+          sessionId: 'session-1',
+          toolName: 'bash',
+          scope: 'workspace-write',
+          reason: '更新后的原因',
+          riskLevel: 'high',
+          previewAction: '更新后的操作',
+          status: 'pending',
+          createdAt: '2026-04-12T08:01:00.000Z',
+        },
+        {
+          requestId: 'perm-2',
+          sessionId: 'session-1',
+          toolName: 'file_write',
+          scope: '/tmp/demo.txt',
+          reason: '第二条请求',
+          riskLevel: 'low',
+          previewAction: '写入 demo',
+          status: 'pending',
+          createdAt: '2026-04-12T08:02:00.000Z',
+        },
+      ],
+      session: {
+        pendingPermissions: [],
+        pendingQuestions: [],
+      },
+    });
+
+    expect(interactions.pendingPermissions).toHaveLength(2);
+    expect(interactions.pendingPermissions.map((request) => request.requestId)).toEqual([
+      'perm-1',
+      'perm-2',
+    ]);
+    expect(interactions.pendingPermissions[0]).toMatchObject({
+      reason: '更新后的原因',
+      riskLevel: 'high',
+      previewAction: '更新后的操作',
+    });
+  });
 });

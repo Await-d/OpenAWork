@@ -52,12 +52,12 @@ vi.mock('../db.js', () => ({
 
 vi.mock('../session-message-store.js', () => ({
   filterVisibleSessionMessages: vi.fn((messages) => messages),
-  listSessionMessages: listSessionMessagesMock,
-  truncateSessionMessagesAfter: vi.fn(() => []),
 }));
 
 vi.mock('../message-v2-adapter.js', () => ({
   listRuntimeSafeSessionMessagesV2: listRuntimeSafeSessionMessagesV2Mock,
+  listSessionMessagesV2: listSessionMessagesMock,
+  truncateSessionMessagesAfterV2: vi.fn(() => []),
 }));
 
 vi.mock('../request-workflow.js', () => ({

@@ -7,7 +7,7 @@ import {
   readMemorySettings,
   upsertExtractedMemories,
 } from './memory-store.js';
-import { listSessionMessages, listSessionMessagesByRequestScope } from './session-message-store.js';
+import { listSessionMessagesByRequestScope, listSessionMessagesV2 } from './message-v2-adapter.js';
 
 function readWorkspaceRootFromMetadata(metadataJson: string): string | null {
   try {
@@ -68,10 +68,9 @@ export function buildMemoryExtractionTextForSession(input: {
   userId: string;
 }): string {
   return buildMemoryExtractionTextFromMessages(
-    listSessionMessages({
+    listSessionMessagesV2({
       sessionId: input.sessionId,
       userId: input.userId,
-      legacyMessagesJson: input.legacyMessagesJson,
       statuses: ['final', 'error'],
     }),
   );

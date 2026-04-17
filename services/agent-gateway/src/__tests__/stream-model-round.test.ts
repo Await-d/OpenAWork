@@ -30,6 +30,9 @@ const mocks = vi.hoisted(() => ({
     ) => PreparedConversationMockResult
   >(() => ({ messages: [] as UpstreamChatMessage[], compactionSummary: null })),
   buildRoundSystemMessagesMock: vi.fn<() => Array<{ role: 'system'; content: string }>>(() => []),
+  injectSyntheticRequestContextMock: vi.fn(
+    <T extends { role: string; content: string | null }>(msgs: T[]) => msgs,
+  ),
   buildUpstreamConversationMock: vi.fn<
     (messages: Message[], maxMessages?: number) => UpstreamChatMessage[]
   >(() => []),
@@ -67,8 +70,15 @@ const mocks = vi.hoisted(() => ({
   writeAuditLogMock: vi.fn(),
 }));
 
+vi.mock('../message-v2-adapter.js', () => ({
+  appendSessionMessageV2: mocks.appendSessionMessageMock,
+  listSessionMessagesV2: mocks.listSessionMessagesMock,
+  updateSessionMessagesStatusByRequestScope: mocks.updateSessionMessagesStatusByRequestScopeMock,
+  appendSnapshotPart: vi.fn(),
+  appendPatchPart: vi.fn(),
+}));
+
 vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: mocks.appendSessionMessageMock,
   buildPreparedUpstreamConversation: (
     messages: Message[],
     options?:
@@ -86,8 +96,6 @@ vi.mock('../session-message-store.js', () => ({
     ),
   buildUpstreamConversation: mocks.buildUpstreamConversationMock,
   hasCompactionMarker: mocks.hasCompactionMarkerMock,
-  listSessionMessages: mocks.listSessionMessagesMock,
-  updateSessionMessagesStatusByRequestScope: mocks.updateSessionMessagesStatusByRequestScopeMock,
 }));
 
 vi.mock('../compaction-metadata.js', () => ({
@@ -108,11 +116,6 @@ vi.mock('../session-snapshot-store.js', () => ({
   createRequestSnapshotRef: mocks.createRequestSnapshotRefMock,
 }));
 
-vi.mock('../message-v2-adapter.js', () => ({
-  appendSnapshotPart: vi.fn(),
-  appendPatchPart: vi.fn(),
-}));
-
 vi.mock('../routes/stream-completion.js', () => ({
   resolveEofRoundDecision: mocks.resolveEofRoundDecisionMock,
 }));
@@ -124,6 +127,7 @@ vi.mock('../routes/upstream-error.js', () => ({
 
 vi.mock('../routes/upstream-request.js', () => ({
   buildUpstreamRequestBody: mocks.buildUpstreamRequestBodyMock,
+  sanitizeUpstreamConversation: (msgs: unknown[]) => msgs,
 }));
 
 vi.mock('../routes/stream-protocol.js', () => ({
@@ -136,6 +140,7 @@ vi.mock('../routes/stream-protocol.js', () => ({
 
 vi.mock('../routes/stream-system-prompts.js', () => ({
   buildRoundSystemMessages: mocks.buildRoundSystemMessagesMock,
+  injectSyntheticRequestContext: mocks.injectSyntheticRequestContextMock,
 }));
 
 vi.mock('../routes/stream.js', () => ({

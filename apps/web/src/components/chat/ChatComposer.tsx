@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AttachmentBar, ImagePreview, VoiceRecorder } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type {
@@ -7,6 +7,7 @@ import type {
   SlashCommandItem,
 } from '../../pages/chat-page/support.js';
 import { ProviderMark } from './chat-provider-display.js';
+import { detectThinkKeyword } from '../../pages/chat-page/think-keyword-detector.js';
 
 function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CSSProperties {
   switch (source) {
@@ -90,6 +91,9 @@ interface ChatComposerProps {
   mentionItems: MentionItem[];
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
+  agentOptions: Array<{ id: string; label: string }>;
+  manualAgentId: string;
+  defaultAgentLabel: string;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onInputSelect: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
@@ -109,6 +113,8 @@ interface ChatComposerProps {
   onToggleModelPicker: () => void;
   onToggleModelSettings: () => void;
   onToggleWebSearch: () => void;
+  onChangeManualAgentId: (agentId: string) => void;
+  onClearManualAgentId: () => void;
 }
 
 function ComposerHintChip({
@@ -188,6 +194,11 @@ export function ChatComposer({
   onToggleModelPicker,
   onToggleModelSettings,
   onToggleWebSearch,
+  agentOptions,
+  manualAgentId,
+  defaultAgentLabel,
+  onChangeManualAgentId,
+  onClearManualAgentId,
 }: ChatComposerProps) {
   const isHomeVariant = variant === 'home';
   const composerListRef = useRef<HTMLDivElement | null>(null);
@@ -215,6 +226,45 @@ export function ChatComposer({
   }, [imagePreviews]);
 
   const currentItems = composerMenu?.type === 'slash' ? slashCommandItems : mentionItems;
+
+  const agentCycleList = useMemo(
+    () => ['__default__', ...agentOptions.map((a) => a.id)],
+    [agentOptions],
+  );
+  const effectiveAgentId = manualAgentId.trim() || '__default__';
+  const currentAgentLabel = manualAgentId.trim()
+    ? (agentOptions.find((a) => a.id === manualAgentId.trim())?.label ?? manualAgentId.trim())
+    : defaultAgentLabel;
+  const hasAgentOverride = manualAgentId.trim().length > 0;
+
+  const handleAgentTabCycle = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (agentCycleList.length <= 1) return;
+      e.preventDefault();
+      const currentIdx = agentCycleList.indexOf(effectiveAgentId);
+      const nextIdx = e.shiftKey
+        ? (currentIdx - 1 + agentCycleList.length) % agentCycleList.length
+        : (currentIdx + 1) % agentCycleList.length;
+      const nextId = agentCycleList[nextIdx] ?? '__default__';
+      if (nextId === '__default__') {
+        onClearManualAgentId();
+      } else {
+        onChangeManualAgentId(nextId);
+      }
+    },
+    [agentCycleList, effectiveAgentId, onChangeManualAgentId, onClearManualAgentId],
+  );
+
+  const wrappedOnKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Tab' && !composerMenu) {
+        handleAgentTabCycle(e);
+        return;
+      }
+      onKeyDown(e);
+    },
+    [composerMenu, handleAgentTabCycle, onKeyDown],
+  );
 
   useEffect(() => {
     composerItemRefs.current.length = currentItems.length;
@@ -468,7 +518,7 @@ export function ChatComposer({
         )}
 
         <div
-          className="composer-shell"
+          className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}`}
           style={{
             padding: 6,
             display: 'flex',
@@ -493,8 +543,19 @@ export function ChatComposer({
           )}
 
           {showVoice && (
-            <div style={{ borderRadius: 12, overflow: 'hidden' }}>
-              <VoiceRecorder onTranscript={onVoiceTranscript} style={{ marginBottom: 0 }} />
+            <div
+              style={{
+                padding: '6px 8px',
+                borderRadius: 10,
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--surface)',
+              }}
+            >
+              <VoiceRecorder
+                onTranscript={onVoiceTranscript}
+                autoConfirm
+                style={{ marginBottom: 0 }}
+              />
             </div>
           )}
 
@@ -636,32 +697,117 @@ export function ChatComposer({
                 'border-color 220ms ease, border-radius 220ms ease, padding 220ms ease, background 220ms ease, gap 220ms ease',
             }}
           >
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={onInputChange}
-              onSelect={onInputSelect}
-              onPaste={onInputPaste}
-              onKeyDown={onKeyDown}
-              placeholder="发送消息…（Enter 发送，Shift+Enter 换行）"
-              rows={1}
-              style={{
-                width: '100%',
-                minHeight: 52,
-                background: 'transparent',
-                border: 'none',
-                padding: 0,
-                color: 'var(--text)',
-                fontSize: 11.5,
-                resize: 'none',
-                outline: 'none',
-                fontFamily: 'inherit',
-                lineHeight: 1.6,
-                maxHeight: 130,
-                overflowY: 'auto',
-                transition: 'min-height 220ms ease, font-size 220ms ease, max-height 220ms ease',
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={onInputChange}
+                onSelect={onInputSelect}
+                onPaste={onInputPaste}
+                onKeyDown={wrappedOnKeyDown}
+                placeholder="发送消息…（Enter 发送，Shift+Enter 换行，Tab 切换代理）"
+                rows={1}
+                style={{
+                  width: '100%',
+                  minHeight: 52,
+                  background: 'transparent',
+                  border: 'none',
+                  padding: agentOptions.length > 1 ? '0 64px 0 0' : 0,
+                  color: 'var(--text)',
+                  fontSize: 11.5,
+                  resize: 'none',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  lineHeight: 1.6,
+                  maxHeight: 130,
+                  overflowY: 'auto',
+                  transition: 'min-height 220ms ease, font-size 220ms ease, max-height 220ms ease',
+                }}
+              />
+              {agentOptions.length > 1 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 6,
+                    right: 2,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    height: 20,
+                    padding: '0 7px',
+                    borderRadius: 999,
+                    border: hasAgentOverride
+                      ? '1px solid color-mix(in oklch, var(--accent) 40%, var(--border-subtle))'
+                      : '1px solid var(--border-subtle)',
+                    background: hasAgentOverride
+                      ? 'color-mix(in oklch, var(--accent) 10%, var(--surface))'
+                      : 'color-mix(in oklch, var(--surface) 80%, transparent)',
+                    color: hasAgentOverride ? 'var(--accent)' : 'var(--text-3)',
+                    fontSize: 10,
+                    fontWeight: hasAgentOverride ? 600 : 500,
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    userSelect: 'none',
+                    transition: 'color 150ms ease, background 150ms ease, border-color 150ms ease',
+                  }}
+                  title="Tab 切换代理"
+                >
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8Z" />
+                    <path d="M9 22h6" />
+                  </svg>
+                  {currentAgentLabel}
+                </span>
+              )}
+            </div>
+
+            {thinkingEnabled &&
+              activeModelSupportsThinking &&
+              input.trim().length > 0 &&
+              detectThinkKeyword(input) && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+                    color: 'color-mix(in oklch, var(--accent) 70%, white 30%)',
+                    fontSize: 10,
+                    letterSpacing: 0.3,
+                    lineHeight: 1.5,
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8Z" />
+                    <path d="M10 22h4" />
+                  </svg>
+                  深度思考已激活
+                </div>
+              )}
 
             <div
               style={{
@@ -851,7 +997,7 @@ export function ChatComposer({
                   type="button"
                   onClick={onToggleVoice}
                   disabled={streaming}
-                  title="语音输入"
+                  title={showVoice ? '关闭语音输入' : '语音输入'}
                   className={`icon-btn${showVoice ? ' active' : ''}`}
                   style={{
                     border: '1px solid var(--border-subtle)',
@@ -863,8 +1009,14 @@ export function ChatComposer({
                     alignItems: 'center',
                     justifyContent: 'center',
                     opacity: streaming ? 0.45 : 1,
-                    background: 'var(--surface)',
-                    transition: 'width 220ms ease, height 220ms ease, opacity 150ms ease',
+                    background: showVoice
+                      ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                      : 'var(--surface)',
+                    color: showVoice
+                      ? 'color-mix(in oklch, var(--accent) 82%, white 18%)'
+                      : 'var(--text-3)',
+                    transition:
+                      'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
                   }}
                 >
                   <svg

@@ -62,12 +62,6 @@ vi.mock('../message-store-v2.js', () => ({
   truncateMessagesAfter: vi.fn(),
 }));
 
-vi.mock('../session-message-store.js', () => ({
-  appendSessionMessage: vi.fn(),
-  listSessionMessages: vi.fn(() => []),
-  truncateSessionMessagesAfter: vi.fn(),
-}));
-
 vi.mock('../session-snapshot-store.js', () => ({
   listSessionSnapshots: vi.fn(() => []),
 }));

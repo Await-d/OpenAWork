@@ -25,12 +25,10 @@ export interface SavedChatDefaults {
   providerId: string;
   reasoningEffort: ReasoningEffort;
   thinkingEnabled: boolean;
-  toolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
 }
 
 interface SettingsProvidersResponse {
   activeSelection?: { chat?: { providerId?: string; modelId?: string } };
-  defaultToolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   defaultThinking?: {
     chat?: { enabled?: boolean; effort?: ReasoningEffort };
   };
@@ -73,11 +71,6 @@ export async function loadSavedChatSessionDefaults(
       modelId: data.activeSelection?.chat?.modelId?.trim() ?? '',
       thinkingEnabled: data.defaultThinking?.chat?.enabled === true,
       reasoningEffort: normalizeReasoningEffort(data.defaultThinking?.chat?.effort),
-      toolSurfaceProfile:
-        data.defaultToolSurfaceProfile === 'claude_code_default' ||
-        data.defaultToolSurfaceProfile === 'claude_code_simple'
-          ? data.defaultToolSurfaceProfile
-          : 'openawork',
     },
     providers,
   };
@@ -101,10 +94,6 @@ export function buildSavedChatSessionMetadata(
 
   if (defaults.modelId) {
     metadata['modelId'] = defaults.modelId;
-  }
-
-  if (defaults.toolSurfaceProfile !== 'openawork') {
-    metadata['toolSurfaceProfile'] = defaults.toolSurfaceProfile;
   }
 
   const workingDirectory = options?.workingDirectory?.trim();

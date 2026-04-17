@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { closeDb, connectDb, migrate, sqliteAll, sqliteRun } from '../db.js';
-import { listSessionMessages } from '../session-message-store.js';
+import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
 import { listSessionSnapshots } from '../session-snapshot-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { withTempEnv } from './task-verification-helpers.js';
