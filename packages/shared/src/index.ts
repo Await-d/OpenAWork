@@ -22,11 +22,15 @@ export type CommandSurface = 'composer' | 'palette';
 
 export type CapabilityKind = 'agent' | 'skill' | 'mcp' | 'tool' | 'command';
 
-export type CoreRole = 'general' | 'researcher' | 'planner' | 'executor' | 'reviewer';
+export type CoreRole = 'general' | 'leader' | 'researcher' | 'planner' | 'executor' | 'reviewer';
 
-export type TeamCoreRole = Extract<CoreRole, 'planner' | 'researcher' | 'executor' | 'reviewer'>;
+export type TeamCoreRole = Extract<
+  CoreRole,
+  'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer'
+>;
 
 export const FIXED_TEAM_CORE_ROLE_BINDINGS: Record<TeamCoreRole, string> = {
+  leader: 'zeus',
   planner: 'oracle',
   researcher: 'librarian',
   executor: 'hephaestus',
@@ -34,6 +38,7 @@ export const FIXED_TEAM_CORE_ROLE_BINDINGS: Record<TeamCoreRole, string> = {
 };
 
 export const FIXED_TEAM_CORE_ROLE_ORDER: TeamCoreRole[] = [
+  'leader',
   'planner',
   'researcher',
   'executor',
@@ -50,6 +55,7 @@ export function isFixedTeamCoreAgentId(agentId: string): boolean {
 
 export type RolePreset =
   | 'default'
+  | 'coordinator'
   | 'explore'
   | 'analyst'
   | 'librarian'
@@ -87,6 +93,10 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
   { aliases?: string[]; canonicalRole: CanonicalRoleDescriptor }
 > = {
   build: { canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'high' } },
+  zeus: {
+    canonicalRole: { coreRole: 'leader', preset: 'coordinator', confidence: 'high' },
+    aliases: ['leader', 'team-leader', 'coordinator', '/prompts:team-leader'],
+  },
   plan: {
     canonicalRole: { coreRole: 'planner', preset: 'default', confidence: 'high' },
     aliases: ['planner', '/prompts:planner', '/ccg:team-plan'],
@@ -101,7 +111,7 @@ export const REFERENCE_AGENT_ROLE_METADATA: Record<
   },
   sisyphus: {
     canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'low' },
-    aliases: ['coordinator'],
+    aliases: ['sisyphus'],
   },
   hephaestus: {
     canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'high' },
@@ -145,6 +155,10 @@ export const ROLE_PRESET_PACKS: Record<RolePreset, RolePresetPack> = {
   default: {
     description: '通用兜底执行与基础编排',
     supportedCoreRoles: ['general', 'planner', 'executor'],
+  },
+  coordinator: {
+    description: '团队任务拆解、角色分派与协作编排',
+    supportedCoreRoles: ['leader'],
   },
   explore: {
     description: '代码库探索与模式检索',

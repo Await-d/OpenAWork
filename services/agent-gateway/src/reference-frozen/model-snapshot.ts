@@ -32,6 +32,19 @@ export const FROZEN_AGENT_MODEL_ENTRIES: Record<string, ReferenceModelEntry[]> =
     },
     { modelId: 'glm-5', providerHints: ['opencode-go'] },
   ],
+  zeus: [
+    {
+      modelId: 'gpt-5.4',
+      providerHints: ['openai', 'github-copilot', 'opencode'],
+      variant: 'xhigh',
+    },
+    {
+      modelId: 'claude-opus-4-6',
+      providerHints: ['anthropic', 'github-copilot', 'opencode'],
+      variant: 'max',
+    },
+    { modelId: 'glm-5', providerHints: ['opencode-go'] },
+  ],
   metis: [
     {
       modelId: 'claude-opus-4-6',

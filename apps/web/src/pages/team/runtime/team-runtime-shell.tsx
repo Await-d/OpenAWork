@@ -16,7 +16,11 @@ import {
   submitInteractionAgentFlow,
   type InteractionAgentRewriteArtifact,
 } from './interaction-agent-flow.js';
-import { submitTeamLeaderDispatchFlow, type LeaderDispatchArtifact } from './team-leader-flow.js';
+import {
+  submitTeamLeaderDispatchFlow,
+  type LeaderDispatchArtifact,
+  type TeamRosterMember,
+} from './team-leader-flow.js';
 import type { TeamActionFeedback } from '../use-team-collaboration.js';
 import {
   TeamAuditPanel,
@@ -1159,6 +1163,17 @@ export function TeamRuntimeShell({
     }
 
     // Auto-dispatch to team-leader after interaction-agent rewrite
+    const teamRoster: TeamRosterMember[] = roleBindingCards
+      .filter((card) => card.selectedAgent)
+      .map((card) => ({
+        role: card.role,
+        agentId: card.selectedAgent!.id,
+        agentLabel: card.selectedAgent!.label,
+        capability: card.recommendedCapabilities[0]?.canonicalRole?.preset
+          ? `${card.roleLabel}（${card.recommendedCapabilities[0].canonicalRole.preset}）`
+          : undefined,
+      }));
+
     const dispatchArtifact = await submitTeamLeaderDispatchFlow({
       submitMessage: async (message) => {
         try {
@@ -1172,6 +1187,7 @@ export function TeamRuntimeShell({
       context: buddyProjection.sessionTitle ?? undefined,
       gatewayUrl,
       token: accessToken ?? undefined,
+      teamRoster,
     });
 
     if (dispatchArtifact) {

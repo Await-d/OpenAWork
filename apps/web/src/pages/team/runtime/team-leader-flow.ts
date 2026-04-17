@@ -29,6 +29,13 @@ export interface LeaderDispatchArtifact {
   status: 'completed';
 }
 
+export interface TeamRosterMember {
+  role: string;
+  agentId: string;
+  agentLabel: string;
+  capability?: string;
+}
+
 // ─── Message Builder ───
 
 type LeaderPhase = 'completed' | 'processing' | 'started';
@@ -64,6 +71,7 @@ async function requestLeaderDispatch(
   gatewayUrl: string,
   token: string,
   context?: string,
+  teamRoster?: TeamRosterMember[],
 ): Promise<LeaderDispatchResult | null> {
   try {
     const response = await fetch(`${gatewayUrl}/team/leader/dispatch`, {
@@ -77,6 +85,7 @@ async function requestLeaderDispatch(
         recommendedRole: artifact.recommendedRole,
         rewrittenIntent: artifact.rewrittenIntent,
         sourceIntent: artifact.sourceIntent,
+        teamRoster: teamRoster ?? [],
       }),
     });
 
@@ -122,6 +131,7 @@ export async function submitTeamLeaderDispatchFlow(input: {
   context?: string;
   gatewayUrl?: string;
   token?: string;
+  teamRoster?: TeamRosterMember[];
 }): Promise<LeaderDispatchArtifact | null> {
   const { rewriteArtifact } = input;
   if (!rewriteArtifact.rewrittenIntent.trim()) {
@@ -156,6 +166,7 @@ export async function submitTeamLeaderDispatchFlow(input: {
       input.gatewayUrl,
       input.token,
       input.context,
+      input.teamRoster,
     );
 
     if (result) {

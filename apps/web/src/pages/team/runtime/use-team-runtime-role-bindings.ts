@@ -8,6 +8,7 @@ const EXECUTION_ROLES: CoreRole[] = [...FIXED_TEAM_CORE_ROLE_ORDER];
 
 const ROLE_LABELS: Record<CoreRole, string> = {
   general: '通用',
+  leader: '领导',
   planner: '规划',
   researcher: '研究',
   executor: '执行',

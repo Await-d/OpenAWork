@@ -42,6 +42,7 @@ export const PRESET_OPTIONS: RolePreset[] = [
 
 const CORE_ROLE_LABELS: Record<CoreRole, string> = {
   general: '通用',
+  leader: '领导',
   researcher: '研究',
   planner: '规划',
   executor: '执行',
@@ -50,6 +51,7 @@ const CORE_ROLE_LABELS: Record<CoreRole, string> = {
 
 const PRESET_LABELS: Record<RolePreset, string> = {
   default: '默认',
+  coordinator: '协调',
   explore: '探索',
   analyst: '分析',
   librarian: '资料检索',

@@ -16,6 +16,9 @@ export interface AgentTeamsSidebarTemplateBadge {
 
 export interface AgentTeamsWorkflowTemplateCard extends WorkflowTemplateRecord {
   badges?: AgentTeamsSidebarTemplateBadge[];
+  groupId?: string;
+  groupPriority?: number;
+  groupTitle?: string;
   metaLine?: string;
 }
 

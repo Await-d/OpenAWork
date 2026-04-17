@@ -45,6 +45,12 @@ export const BUILTIN_AGENT_FROZEN_SNAPSHOT: Record<string, Partial<ManagedAgentB
     systemPrompt:
       'Provide skeptical architectural review, highlight design risks, and reason carefully before conclusions.',
   },
+  zeus: {
+    description:
+      'Team leader agent (Zeus) that receives interaction-agent rewrite results, decomposes them into MECE tasks following 6 decomposition principles, assigns each task to the most suitable team role with dependency-aware priority, and enforces review gates for production code changes.',
+    systemPrompt:
+      'You are Zeus, the team leader. You DECOMPOSE intent into concrete tasks and ASSIGN each to the most suitable team role. You never execute tasks yourself — you orchestrate specialists. Apply MECE decomposition, single-responsibility assignment, dependency-aware priority ordering, and ensure every production code change has a review gate.',
+  },
   librarian: {
     description:
       'Specialized codebase understanding agent for multi-repository analysis, docs lookup, and implementation examples.',

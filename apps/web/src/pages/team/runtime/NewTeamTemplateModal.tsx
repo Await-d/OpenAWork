@@ -5,7 +5,13 @@ import { agentTeamsNewTemplateProviders } from './team-runtime-ui-config.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { XIcon, CheckIcon } from './TeamIcons.js';
 
-const REQUIRED_TEMPLATE_ROLES = ['planner', 'researcher', 'executor', 'reviewer'] as const;
+const REQUIRED_TEMPLATE_ROLES = [
+  'leader',
+  'planner',
+  'researcher',
+  'executor',
+  'reviewer',
+] as const;
 
 export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
   const { createTemplate, templateError, templateLoading } = useTeamRuntimeReferenceViewData();

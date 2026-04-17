@@ -12,7 +12,12 @@ export interface WorkflowEdgeRecord {
   target: string;
 }
 
-export type WorkflowTemplateRequiredRole = 'planner' | 'researcher' | 'executor' | 'reviewer';
+export type WorkflowTemplateRequiredRole =
+  | 'leader'
+  | 'planner'
+  | 'researcher'
+  | 'executor'
+  | 'reviewer';
 export type WorkflowTemplateScale = 'full' | 'large' | 'medium' | 'small';
 
 export interface WorkflowTeamTemplateMetadata {
@@ -28,7 +33,10 @@ export interface WorkflowTeamTemplateMetadata {
 }
 
 export interface WorkflowTemplateMetadata {
+  origin?: string;
+  seedKey?: string;
   teamTemplate?: WorkflowTeamTemplateMetadata;
+  templateKind?: string;
 }
 
 export interface WorkflowTemplateRecord {

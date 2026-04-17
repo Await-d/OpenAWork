@@ -917,115 +917,129 @@ export function SessionSidebar({
               暂无模板，点击新建创建
             </div>
           )}
-          {sidebarSections.map((section) =>
-            section.items.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                style={{
-                  appearance: 'none',
-                  padding: '7px 9px',
-                  borderRadius: 7,
-                  background: 'var(--surface)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  cursor: canCreateTemplate ? 'pointer' : 'not-allowed',
-                  transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
-                  border: '1px solid var(--border-subtle)',
-                  opacity: canCreateTemplate ? 1 : 0.6,
-                  textAlign: 'left',
-                }}
-                onClick={canCreateTemplate ? onNewTemplate : undefined}
-                disabled={!canCreateTemplate}
-                onMouseEnter={(e) => {
-                  if (!canCreateTemplate) return;
-                  e.currentTarget.style.borderColor =
-                    'color-mix(in oklch, var(--accent) 40%, transparent)';
-                  e.currentTarget.style.background = 'var(--surface-hover)';
-                  e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!canCreateTemplate) return;
-                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                  e.currentTarget.style.background = 'var(--surface)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <span
-                  style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}
-                >
-                  {item.title || section.title}
+          {sidebarSections.map((section) => (
+            <div key={section.id} style={{ display: 'grid', gap: 5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px' }}>
+                <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-2)' }}>
+                  {section.title}
                 </span>
-                {item.badges && item.badges.length > 0 ? (
+                <span
+                  style={{
+                    flex: 1,
+                    height: 1,
+                    background: 'var(--border-subtle)',
+                  }}
+                />
+              </div>
+              {section.items.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  style={{
+                    appearance: 'none',
+                    padding: '7px 9px',
+                    borderRadius: 7,
+                    background: 'var(--surface)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    cursor: canCreateTemplate ? 'pointer' : 'not-allowed',
+                    transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
+                    border: '1px solid var(--border-subtle)',
+                    opacity: canCreateTemplate ? 1 : 0.6,
+                    textAlign: 'left',
+                  }}
+                  onClick={canCreateTemplate ? onNewTemplate : undefined}
+                  disabled={!canCreateTemplate}
+                  onMouseEnter={(e) => {
+                    if (!canCreateTemplate) return;
+                    e.currentTarget.style.borderColor =
+                      'color-mix(in oklch, var(--accent) 40%, transparent)';
+                    e.currentTarget.style.background = 'var(--surface-hover)';
+                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!canCreateTemplate) return;
+                    e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                    e.currentTarget.style.background = 'var(--surface)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <span
+                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}
+                  >
+                    {item.title}
+                  </span>
+                  {item.badges && item.badges.length > 0 ? (
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                      {item.badges.map((badge) => (
+                        <span
+                          key={`${item.id}-${badge.label}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            minHeight: 15,
+                            padding: '0 5px',
+                            borderRadius: 999,
+                            background:
+                              badge.tone === 'accent'
+                                ? 'rgba(99, 102, 241, 0.14)'
+                                : badge.tone === 'success'
+                                  ? 'rgba(16, 185, 129, 0.14)'
+                                  : badge.tone === 'warning'
+                                    ? 'rgba(245, 158, 11, 0.16)'
+                                    : 'var(--surface-3)',
+                            color:
+                              badge.tone === 'accent'
+                                ? '#a5b4fc'
+                                : badge.tone === 'success'
+                                  ? '#86efac'
+                                  : badge.tone === 'warning'
+                                    ? '#fcd34d'
+                                    : 'var(--text-2)',
+                            fontSize: 8,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                    {item.badges.map((badge) => (
+                    {item.roleTagRows.flat().map((tag, i) => (
                       <span
-                        key={`${item.id}-${badge.label}`}
+                        key={`${tag.label}-${i}`}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
                           minHeight: 15,
                           padding: '0 5px',
                           borderRadius: 999,
-                          background:
-                            badge.tone === 'accent'
-                              ? 'rgba(99, 102, 241, 0.14)'
-                              : badge.tone === 'success'
-                                ? 'rgba(16, 185, 129, 0.14)'
-                                : badge.tone === 'warning'
-                                  ? 'rgba(245, 158, 11, 0.16)'
-                                  : 'var(--surface-3)',
-                          color:
-                            badge.tone === 'accent'
-                              ? '#a5b4fc'
-                              : badge.tone === 'success'
-                                ? '#86efac'
-                                : badge.tone === 'warning'
-                                  ? '#fcd34d'
-                                  : 'var(--text-2)',
+                          background: `color-mix(in oklch, ${tag.color} 12%, transparent)`,
+                          color: tag.color,
                           fontSize: 8,
-                          fontWeight: 700,
+                          fontWeight: 600,
                         }}
                       >
-                        {badge.label}
+                        {tag.label}
                       </span>
                     ))}
                   </div>
-                ) : null}
-                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                  {item.roleTagRows.flat().map((tag, i) => (
-                    <span
-                      key={`${tag.label}-${i}`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        minHeight: 15,
-                        padding: '0 5px',
-                        borderRadius: 999,
-                        background: `color-mix(in oklch, ${tag.color} 12%, transparent)`,
-                        color: tag.color,
-                        fontSize: 8,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {tag.label}
+                  {item.description && (
+                    <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                      {item.description}
                     </span>
-                  ))}
-                </div>
-                {item.description && (
-                  <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.4 }}>
-                    {item.description}
-                  </span>
-                )}
-                {item.metaLine ? (
-                  <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.45 }}>
-                    {item.metaLine}
-                  </span>
-                ) : null}
-              </button>
-            )),
-          )}
+                  )}
+                  {item.metaLine ? (
+                    <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.45 }}>
+                      {item.metaLine}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 

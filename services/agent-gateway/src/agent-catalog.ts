@@ -62,6 +62,7 @@ const BUILTIN_AGENT_BASE: ReadonlyArray<{
     source: 'builtin',
   },
   { id: 'oracle', label: 'oracle', description: '只读顾问 agent', source: 'builtin' },
+  { id: 'zeus', label: 'zeus', description: '团队领导/任务分派 agent', source: 'builtin' },
   {
     id: 'librarian',
     label: 'librarian',
@@ -103,6 +104,7 @@ const BUILTIN_AGENT_FALLBACK_PROMPTS: Record<string, string> = {
     'Design strategy and sequencing for larger tasks, with attention to trade-offs and execution order.',
   oracle:
     'Provide skeptical architectural review, highlight design risks, and reason carefully before conclusions.',
+  zeus: 'You are Zeus, the team leader. You DECOMPOSE intent into concrete tasks and ASSIGN each to the most suitable team role. You never execute tasks yourself — you orchestrate specialists. Apply MECE decomposition, single-responsibility assignment, dependency-aware priority ordering, and ensure every production code change has a review gate.',
   librarian:
     'Search external docs, references, and prior art, then summarize the most relevant implementation guidance.',
   metis:

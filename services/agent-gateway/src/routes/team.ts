@@ -203,6 +203,7 @@ interface WorkflowTemplateLookupRow {
 const workflowTeamTemplateSchema = z.object({
   defaultBindings: z
     .object({
+      leader: z.string().min(1).optional(),
       planner: z.string().min(1).optional(),
       researcher: z.string().min(1).optional(),
       executor: z.string().min(1).optional(),
@@ -211,7 +212,9 @@ const workflowTeamTemplateSchema = z.object({
     .optional(),
   defaultProvider: z.string().nullable().optional(),
   optionalAgentIds: z.array(z.string().min(1)).optional(),
-  requiredRoles: z.array(z.enum(['planner', 'researcher', 'executor', 'reviewer'])).optional(),
+  requiredRoles: z
+    .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
+    .optional(),
 });
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
@@ -1845,6 +1848,17 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     recommendedRole: z.string().optional(),
     sourceIntent: z.string().optional(),
     context: z.string().max(4000).optional(),
+    teamRoster: z
+      .array(
+        z.object({
+          role: z.string().min(1),
+          agentId: z.string().min(1),
+          agentLabel: z.string().min(1),
+          capability: z.string().optional(),
+        }),
+      )
+      .min(1)
+      .default([]),
   });
 
   interface LeaderDispatchedTask {
@@ -1859,6 +1873,43 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     dispatchedTasks: LeaderDispatchedTask[];
     leaderAnalysis: string;
     status: 'completed';
+  }
+
+  // Build a roster entry description for the prompt
+  function buildRosterTablePrompt(
+    roster: Array<{ role: string; agentId: string; agentLabel: string; capability?: string }>,
+  ): string {
+    const header = '| Role | Agent | Core Capability | When to Assign |';
+    const sep = '|------|-------|----------------|----------------|';
+    const rows = roster.map((member) => {
+      const cap = member.capability ?? inferCapabilityFromRole(member.role);
+      return `| ${member.role} | ${member.agentLabel} | ${cap} | 需要${cap}时 |`;
+    });
+    return `${header}\n${sep}\n${rows.join('\n')}`;
+  }
+
+  function buildDecisionMatrixPrompt(
+    roster: Array<{ role: string; agentId: string; agentLabel: string; capability?: string }>,
+  ): string {
+    const header = '| Task Domain | Assign To |';
+    const sep = '|-------------|-----------|';
+    const rows = roster.map((member) => {
+      const cap = member.capability ?? inferCapabilityFromRole(member.role);
+      return `| ${cap} | \`${member.role}\` |`;
+    });
+    return `${header}\n${sep}\n${rows.join('\n')}`;
+  }
+
+  function inferCapabilityFromRole(role: string): string {
+    const known: Record<string, string> = {
+      leader: '任务拆解、角色分派、协作编排',
+      planner: '架构设计、方案评审、战略规划',
+      researcher: '信息检索、文档查找、模式探索',
+      executor: '代码实现、工程落地、深度修改',
+      reviewer: '质量审查、风险挑刺、方案挑战',
+      general: '通用任务处理与执行',
+    };
+    return known[role] ?? `${role}相关任务`;
   }
 
   app.post(
@@ -1886,33 +1937,170 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(503).send({ error: 'Team leader LLM is not configured' });
       }
 
-      // Resolve role → agentId mapping from fixed bindings
-      const roleAgentMap: Record<string, string> = { ...FIXED_TEAM_CORE_ROLE_BINDINGS };
-      const roleOptions = FIXED_TEAM_CORE_ROLE_ORDER.map(
-        (role) => `${role}（绑定 agent: ${roleAgentMap[role]}）`,
-      ).join('、');
+      // Merge fixed bindings with dynamic roster; roster takes precedence
+      const rosterMap = new Map<
+        string,
+        { agentId: string; agentLabel: string; capability?: string }
+      >();
+      for (const [role, agentId] of Object.entries(FIXED_TEAM_CORE_ROLE_BINDINGS)) {
+        rosterMap.set(role, {
+          agentId,
+          agentLabel: agentId,
+          capability: inferCapabilityFromRole(role),
+        });
+      }
+      for (const member of body.data.teamRoster) {
+        rosterMap.set(member.role, {
+          agentId: member.agentId,
+          agentLabel: member.agentLabel,
+          capability: member.capability,
+        });
+      }
+      const fullRoster = Array.from(rosterMap.entries()).map(([role, info]) => ({ role, ...info }));
+      const validRoles = fullRoster.map((m) => m.role);
 
       const analyzeStep = child('llm-analyze');
       const contextBlock = body.data.context ? `\n\n当前工作区上下文：\n${body.data.context}` : '';
-      const prompt = `你是团队领导（team-leader）。你的任务是将 interaction-agent 改写后的结构化意图拆解为具体的团队任务，并分配给合适的角色。
+      const recommendedRoleHint = body.data.recommendedRole
+        ? `\ninteraction-agent 推荐首选角色：${body.data.recommendedRole}（请在拆解时优先考虑该角色的职责范围）`
+        : '';
+      const rosterTable = buildRosterTablePrompt(fullRoster);
+      const decisionMatrix = buildDecisionMatrixPrompt(fullRoster);
+      const validRolesList = validRoles.join(', ');
+      const prompt = `<identity>
+You are Zeus — the Team Leader of a multi-agent collaboration team.
 
-可用角色及绑定 agent：
-${roleOptions}
+In Greek mythology, Zeus is the king of the gods who delegates dominion to his siblings and children. You do the same: you receive structured intent, decompose it into concrete tasks, and assign each task to the most suitable team member.
 
-改写后的意图：${body.data.rewrittenIntent}
-推荐角色：${body.data.recommendedRole ?? '未指定'}${contextBlock}
+You are a commander, not a soldier. A conductor, not a musician. You DECOMPOSE, ASSIGN, and COORDINATE.
+You never execute tasks yourself. You orchestrate specialists who do.
+</identity>
 
-请按以下格式输出，每个任务一行：
-【分析】<你对这个意图的整体分析和拆解策略>
-【任务】<角色>|<优先级(low/medium/high)>|<任务标题>
-【任务】<角色>|<优先级(low/medium/high)>|<任务标题>
+<mission>
+Receive the interaction-agent's rewritten intent, decompose it into concrete executable tasks, and assign each task to the most suitable team role. One task per assignment. Parallel when independent. Cover all work streams.
+</mission>
+
+<team_roster>
+## Available Team Members
+
+${rosterTable}
+
+## Decision Matrix
+
+${decisionMatrix}
+
+**Each task MUST be assigned to exactly one role from the roster above. NO EXCEPTIONS.**
+</team_roster>
+
+<decomposition_rules>
+## 6 Decomposition Principles
+
+1. **MECE decomposition**: Tasks must be Mutually Exclusive and Collectively Exhaustive — no overlap, no gaps. Every piece of work belongs to exactly one task.
+
+2. **Single-responsibility**: Each task is owned by exactly one role. If a task spans multiple roles, split it into separate tasks with explicit dependencies.
+
+3. **Dependency ordering**: Tasks with dependencies MUST be ordered so prerequisites come first. Mark dependent tasks with \`medium\` or \`low\` priority; mark unblocked critical-path tasks as \`high\`.
+
+4. **Actionable titles**: Task titles MUST be imperative, specific, and verifiable.
+   - ❌ BAD: "处理问题" / "优化代码" / "研究一下"
+   - ✅ GOOD: "定位 /api/auth 502 错误的根因并输出诊断报告" / "将 UserService.extractProfile 拆分为 validateInput + transformOutput 两个纯函数"
+
+5. **Right-sizing**: Each task should be completable in one agent session. If too broad, split further. If trivially small, merge with related work.
+
+6. **Review gate**: Any task that modifies production code MUST have a corresponding reviewer task (if a reviewer role exists in the roster). No production change goes unreviewed.
+</decomposition_rules>
+
+<workflow>
+## Step 1: Intent Analysis
+
+Read the rewritten intent and answer:
+- What are the key work streams?
+- What are the dependencies between work streams?
+- What is the critical path?
+- What assumptions or risks exist?
+
+## Step 2: Task Decomposition
+
+For each work stream, decompose into tasks following the 6 principles above.
+
+**Before finalizing each task, verify:**
+\`\`\`
+TASK QUALITY CHECKLIST:
+□ Assigned to exactly one role from the roster?
+□ Title is imperative, specific, and verifiable?
+□ Scope is right-sized for one agent session?
+□ Dependencies on earlier tasks are noted?
+□ Priority reflects critical-path and dependency status?
+\`\`\`
+
+**If any answer is NO → rework the task before outputting.**
+
+## Step 3: Dependency & Priority Assignment
+
+| Priority | When to Use |
+|----------|-------------|
+| \`high\` | Critical-path tasks with no unmet dependencies; must-complete-first |
+| \`medium\` | Important but has dependency on a high-priority task; or non-critical-path |
+| \`low\` | Nice-to-have, optional, or depends on multiple prior tasks |
+
+## Step 4: Review Gate Check
+
+Before outputting, verify:
+\`\`\`
+REVIEW GATE CHECKLIST:
+□ Every production-code-changing task has a reviewer task? (if reviewer exists)
+□ No task is assigned to a role not in the roster?
+□ No two tasks overlap in scope?
+□ All dependencies are respected in priority ordering?
+\`\`\`
+</workflow>
+
+<boundaries>
+## What You DO vs What You DO NOT
+
+| You DO | You DO NOT |
+|--------|------------|
+| Decompose intent into tasks | Execute tasks yourself |
+| Assign tasks to roles | Write code, fix bugs, create files |
+| Determine priority & dependencies | Make implementation decisions |
+| Ensure coverage & no gaps | Skip the review gate |
+| Coordinate across roles | Assign tasks to roles not in the roster |
+</boundaries>
+
+<input>
+【改写后的意图】${body.data.rewrittenIntent}${recommendedRoleHint}${contextBlock}
+</input>
+
+<output_format>
+**Output exactly ONE 【分析】 block followed by one or more 【任务】 lines. NOTHING ELSE.**
+
+【分析】
+<Your decomposition strategy: What are the key work streams? What are the dependencies? Why did you assign each role? What risks or assumptions exist? Be specific — not "I assigned researcher because research is needed" but "librarian is assigned to locate the OAuth2 token refresh logic in src/auth/ because the executor will need the exact file path before modifying the flow.">
+
+【任务】<role>|<priority>|<title>
+【任务】<role>|<priority>|<title>
 ...
+</output_format>
 
-要求：
-1. 每个任务必须分配给 planner/researcher/executor/reviewer 之一
-2. 任务标题要具体、可执行
-3. 优先级根据依赖关系和重要性分配
-4. 用中文输出`;
+<critical_overrides>
+## Critical Rules
+
+**NEVER**:
+- Assign a task to a role not in the roster
+- Output vague or non-actionable task titles
+- Skip the review gate for production code changes
+- Merge unrelated work into one task
+- Output anything outside the 【分析】/【任务】 format
+- Use English in your output (all content in Chinese)
+
+**ALWAYS**:
+- Assign each task to exactly one role from: ${validRolesList}
+- Use priority values: high, medium, low
+- Include exactly one 【分析】 block
+- Include one or more 【任务】 lines
+- Make task titles imperative and verifiable
+- Consider the recommended role hint when provided
+</critical_overrides>`;
 
       try {
         const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
@@ -1940,13 +2128,9 @@ ${roleOptions}
 
         // If LLM failed to produce structured tasks, create a single fallback task
         if (parsedTasks.length === 0) {
-          const fallbackRole =
-            body.data.recommendedRole &&
-            FIXED_TEAM_CORE_ROLE_ORDER.includes(
-              body.data.recommendedRole as (typeof FIXED_TEAM_CORE_ROLE_ORDER)[number],
-            )
-              ? body.data.recommendedRole
-              : 'planner';
+          const fallbackRole = validRoles.includes(body.data.recommendedRole ?? '')
+            ? body.data.recommendedRole!
+            : (validRoles[0] ?? 'planner');
           parsedTasks.push({
             priority: 'medium',
             role: fallbackRole,
@@ -1959,12 +2143,13 @@ ${roleOptions}
         const dispatchedTasks: LeaderDispatchedTask[] = [];
 
         for (const task of parsedTasks) {
-          const normalizedRole = FIXED_TEAM_CORE_ROLE_ORDER.find(
-            (r) => r === task.role || task.role.includes(r),
+          // Resolve agent ID from roster: try exact match, then partial match
+          const rosterMapEntry = rosterMap.get(task.role);
+          const rosterFullEntry = fullRoster.find(
+            (m) => m.role === task.role || task.role.includes(m.role) || m.role.includes(task.role),
           );
-          const assigneeAgentId = normalizedRole
-            ? (roleAgentMap[normalizedRole] ?? task.role)
-            : task.role;
+          const assigneeAgentId = rosterMapEntry?.agentId ?? rosterFullEntry?.agentId ?? task.role;
+          const assigneeRole = rosterFullEntry?.role ?? task.role;
           const validPriority = ['low', 'medium', 'high'].includes(task.priority)
             ? (task.priority as 'low' | 'medium' | 'high')
             : 'medium';
@@ -1976,7 +2161,7 @@ ${roleOptions}
           );
 
           dispatchedTasks.push({
-            assigneeRole: normalizedRole ?? task.role,
+            assigneeRole,
             assigneeAgentId,
             priority: validPriority,
             taskId,

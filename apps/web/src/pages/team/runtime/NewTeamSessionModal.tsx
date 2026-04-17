@@ -33,6 +33,24 @@ export function NewTeamSessionModal({
   const creation = useTeamSessionCreation({ teamWorkspaceId });
   const [submitting, setSubmitting] = useState(false);
 
+  const groupedTemplates = useMemo(() => {
+    const groups = new Map<string, { items: typeof templates; title: string; priority: number }>();
+    for (const template of templates) {
+      const groupId = template.groupId ?? 'ungrouped';
+      const current = groups.get(groupId) ?? {
+        items: [] as typeof templates,
+        title: template.groupTitle ?? '模板',
+        priority: template.groupPriority ?? Number.MAX_SAFE_INTEGER,
+      };
+      current.items.push(template);
+      groups.set(groupId, current);
+    }
+
+    return Array.from(groups.entries())
+      .sort(([, left], [, right]) => left.priority - right.priority)
+      .map(([id, group]) => ({ id, ...group }));
+  }, [templates]);
+
   const availableOptionalAgents = useMemo(() => {
     const requiredAgentIds = new Set(
       Object.values(creation.draft.requiredRoleBindings).filter((value): value is string =>
@@ -182,80 +200,98 @@ export function NewTeamSessionModal({
                   暂无可用模板，当前可直接使用空白团队流程。
                 </span>
               ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {templates.map((template) => {
-                    const selected =
-                      creation.draft.source.kind === 'saved-template' &&
-                      creation.draft.source.templateId === template.id;
-                    return (
-                      <button
-                        key={template.id}
-                        type="button"
-                        onClick={() => creation.applyTemplate(template)}
-                        style={{
-                          display: 'grid',
-                          gap: 6,
-                          textAlign: 'left',
-                          padding: '14px 16px',
-                          borderRadius: 12,
-                          border: selected
-                            ? '1px solid var(--accent)'
-                            : '1px solid var(--border-subtle)',
-                          background: selected
-                            ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                            : 'var(--surface-2)',
-                          color: 'var(--text)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span style={{ fontSize: 13, fontWeight: 800 }}>{template.name}</span>
-                        {template.badges && template.badges.length > 0 ? (
-                          <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {template.badges.map((badge) => (
-                              <span
-                                key={`${template.id}-${badge.label}`}
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  minHeight: 18,
-                                  padding: '0 8px',
-                                  borderRadius: 999,
-                                  background:
-                                    badge.tone === 'accent'
-                                      ? 'rgba(99, 102, 241, 0.14)'
-                                      : badge.tone === 'success'
-                                        ? 'rgba(16, 185, 129, 0.14)'
-                                        : badge.tone === 'warning'
-                                          ? 'rgba(245, 158, 11, 0.16)'
-                                          : 'var(--surface-3)',
-                                  color:
-                                    badge.tone === 'accent'
-                                      ? '#a5b4fc'
-                                      : badge.tone === 'success'
-                                        ? '#86efac'
-                                        : badge.tone === 'warning'
-                                          ? '#fcd34d'
-                                          : 'var(--text-2)',
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {badge.label}
-                              </span>
-                            ))}
-                          </span>
-                        ) : null}
-                        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                          {template.description ?? '已保存的团队模板'}
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {groupedTemplates.map((group) => (
+                    <div key={group.id} style={{ display: 'grid', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-2)' }}>
+                          {group.title}
                         </span>
-                        {template.metaLine ? (
-                          <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                            {template.metaLine}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
+                        <span
+                          style={{
+                            flex: 1,
+                            height: 1,
+                            background: 'color-mix(in oklch, var(--border) 70%, transparent)',
+                          }}
+                        />
+                      </div>
+                      {group.items.map((template) => {
+                        const selected =
+                          creation.draft.source.kind === 'saved-template' &&
+                          creation.draft.source.templateId === template.id;
+                        return (
+                          <button
+                            key={template.id}
+                            type="button"
+                            onClick={() => creation.applyTemplate(template)}
+                            style={{
+                              display: 'grid',
+                              gap: 6,
+                              textAlign: 'left',
+                              padding: '14px 16px',
+                              borderRadius: 12,
+                              border: selected
+                                ? '1px solid var(--accent)'
+                                : '1px solid var(--border-subtle)',
+                              background: selected
+                                ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
+                                : 'var(--surface-2)',
+                              color: 'var(--text)',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 800 }}>{template.name}</span>
+                            {template.badges && template.badges.length > 0 ? (
+                              <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {template.badges.map((badge) => (
+                                  <span
+                                    key={`${template.id}-${badge.label}`}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      minHeight: 18,
+                                      padding: '0 8px',
+                                      borderRadius: 999,
+                                      background:
+                                        badge.tone === 'accent'
+                                          ? 'rgba(99, 102, 241, 0.14)'
+                                          : badge.tone === 'success'
+                                            ? 'rgba(16, 185, 129, 0.14)'
+                                            : badge.tone === 'warning'
+                                              ? 'rgba(245, 158, 11, 0.16)'
+                                              : 'var(--surface-3)',
+                                      color:
+                                        badge.tone === 'accent'
+                                          ? '#a5b4fc'
+                                          : badge.tone === 'success'
+                                            ? '#86efac'
+                                            : badge.tone === 'warning'
+                                              ? '#fcd34d'
+                                              : 'var(--text-2)',
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    {badge.label}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : null}
+                            <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                              {template.description ?? '已保存的团队模板'}
+                            </span>
+                            {template.metaLine ? (
+                              <span
+                                style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}
+                              >
+                                {template.metaLine}
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

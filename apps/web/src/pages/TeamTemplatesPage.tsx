@@ -424,11 +424,11 @@ export default function TeamTemplatesPage() {
     });
   }, []);
 
-  // Group templates by category
+  // Group templates by display grouping
   const sections = useMemo(() => {
     const map = new Map<string, typeof templates>();
     for (const t of templates) {
-      const key = t.category || 'team-playbook';
+      const key = t.groupId ?? 'ungrouped';
       const list = map.get(key) ?? [];
       list.push(t);
       map.set(key, list);
@@ -437,7 +437,7 @@ export default function TeamTemplatesPage() {
   }, [templates]);
 
   const categoryLabel = (id: string) =>
-    id === 'team-playbook' ? '团队模板' : id.replace(/[-_]/g, ' ');
+    templates.find((template) => template.groupId === id)?.groupTitle ?? '模板';
 
   return (
     <div className="page-root" style={{ background: SHELL_BACKGROUND, minHeight: '100dvh' }}>

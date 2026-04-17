@@ -21,15 +21,16 @@ interface CreateTeamWorkflowTemplateInput {
   provider: string;
 }
 
-const REQUIRED_TEMPLATE_ROLES: Array<'planner' | 'researcher' | 'executor' | 'reviewer'> = [
-  'planner',
-  'researcher',
-  'executor',
-  'reviewer',
-];
+const REQUIRED_TEMPLATE_ROLES: Array<
+  'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer'
+> = ['leader', 'planner', 'researcher', 'executor', 'reviewer'];
 
-function mapCanonicalRoleToTemplateLabel(role: 'planner' | 'researcher' | 'executor' | 'reviewer') {
+function mapCanonicalRoleToTemplateLabel(
+  role: 'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer',
+) {
   switch (role) {
+    case 'leader':
+      return '团队领导';
     case 'planner':
       return '团队负责人';
     case 'researcher':
@@ -85,11 +86,37 @@ const BUILTIN_AGENT_LABELS: Record<string, string> = {
   'sisyphus-junior': 'Sisyphus-Junior',
 };
 
+const TEMPLATE_GROUPS = {
+  recommended: { id: 'recommended-templates', title: '推荐模板', priority: 1 },
+  system: { id: 'system-default-templates', title: '系统默认模板', priority: 2 },
+  user: { id: 'user-templates', title: '我的模板', priority: 3 },
+} as const;
+
+function isSeedDevTemplate(template: WorkflowTemplateRecord): boolean {
+  return (
+    template.category === 'team-playbook' &&
+    template.metadata?.origin === 'seed' &&
+    template.metadata?.templateKind === 'default-dev'
+  );
+}
+
+function getTemplateGroup(template: WorkflowTemplateRecord) {
+  if (template.metadata?.teamTemplate?.recommendedDefault) {
+    return TEMPLATE_GROUPS.recommended;
+  }
+
+  if (isSeedDevTemplate(template)) {
+    return TEMPLATE_GROUPS.system;
+  }
+
+  return TEMPLATE_GROUPS.user;
+}
+
 function buildTemplateBadges(template: WorkflowTemplateRecord): AgentTeamsSidebarTemplateBadge[] {
   const badges: AgentTeamsSidebarTemplateBadge[] = [];
   const teamTemplate = template.metadata?.teamTemplate;
 
-  if (template.category === 'team-playbook') {
+  if (isSeedDevTemplate(template)) {
     badges.push({ label: '系统默认', tone: 'accent' });
   }
 
@@ -133,15 +160,34 @@ function buildTemplateMetaLine(template: WorkflowTemplateRecord): string | undef
 }
 
 function toTemplateCard(template: WorkflowTemplateRecord): AgentTeamsWorkflowTemplateCard {
+  const group = getTemplateGroup(template);
   return {
     ...template,
     badges: buildTemplateBadges(template),
+    groupId: group.id,
+    groupPriority: group.priority,
+    groupTitle: group.title,
     metaLine: buildTemplateMetaLine(template),
   };
 }
 
 function getTemplatePriority(template: WorkflowTemplateRecord): number {
   return template.metadata?.teamTemplate?.templatePriority ?? Number.MAX_SAFE_INTEGER;
+}
+
+function sortTemplates(left: WorkflowTemplateRecord, right: WorkflowTemplateRecord): number {
+  const leftGroup = getTemplateGroup(left);
+  const rightGroup = getTemplateGroup(right);
+  if (leftGroup.priority !== rightGroup.priority) {
+    return leftGroup.priority - rightGroup.priority;
+  }
+
+  const priorityDelta = getTemplatePriority(left) - getTemplatePriority(right);
+  if (priorityDelta !== 0) {
+    return priorityDelta;
+  }
+
+  return left.name.localeCompare(right.name, 'zh-CN');
 }
 
 function buildTemplateNodes(roleLabels: string[], providerLabel: string): WorkflowNodeRecord[] {
@@ -186,6 +232,7 @@ function buildTemplateEdges(roleLabels: string[]): WorkflowEdgeRecord[] {
 
 function buildRoleRows(roleLabels: string[]): Array<Array<{ color: string; label: string }>> {
   const roleColorMap = new Map([
+    ['团队领导', '#b45309'],
     ['团队负责人', '#d59b11'],
     ['研究员', '#5b5bd8'],
     ['执行者', '#378dff'],
@@ -220,12 +267,13 @@ function extractRoleLabels(template: WorkflowTemplateRecord): string[] {
 function mapTemplatesToSections(templates: WorkflowTemplateRecord[]): AgentTeamsSidebarSection[] {
   const groups = new Map<string, AgentTeamsSidebarSection>();
 
-  for (const template of templates) {
-    const sectionId = template.category || 'team-playbook';
+  for (const template of [...templates].sort(sortTemplates)) {
+    const group = getTemplateGroup(template);
+    const sectionId = group.id;
     const section = groups.get(sectionId) ?? {
       id: sectionId,
       items: [],
-      title: buildTemplateCategoryLabel(sectionId),
+      title: group.title,
     };
 
     const roleLabels = extractRoleLabels(template);
@@ -244,35 +292,7 @@ function mapTemplatesToSections(templates: WorkflowTemplateRecord[]): AgentTeams
 
   return Array.from(groups.values()).map((section) => ({
     ...section,
-    items: [...section.items].sort((left, right) => {
-      const leftTemplate = templates.find((template) => template.id === left.id);
-      const rightTemplate = templates.find((template) => template.id === right.id);
-      const priorityDelta =
-        getTemplatePriority(
-          leftTemplate ?? {
-            id: '',
-            name: '',
-            description: null,
-            category: '',
-            nodes: [],
-            edges: [],
-          },
-        ) -
-        getTemplatePriority(
-          rightTemplate ?? {
-            id: '',
-            name: '',
-            description: null,
-            category: '',
-            nodes: [],
-            edges: [],
-          },
-        );
-      if (priorityDelta !== 0) {
-        return priorityDelta;
-      }
-      return left.title.localeCompare(right.title, 'zh-CN');
-    }),
+    items: [...section.items],
   }));
 }
 
@@ -345,7 +365,7 @@ export function useTeamWorkflowTemplates() {
   );
 
   const templateCards = useMemo(
-    () => templates.map((template) => toTemplateCard(template)),
+    () => [...templates].sort(sortTemplates).map((template) => toTemplateCard(template)),
     [templates],
   );
   const sections = useMemo(() => mapTemplatesToSections(templates), [templates]);
