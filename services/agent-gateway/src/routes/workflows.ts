@@ -1,10 +1,12 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
+import { buildFixedTeamTemplateDefaultBindings } from '../team-template-metadata.js';
 import * as agentCore from '@openAwork/agent-core';
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
 
@@ -36,6 +38,27 @@ const optimizePromptSchema = z.object({
 });
 
 const createTemplateSchema = z.object({
+  metadata: z
+    .object({
+      teamTemplate: z
+        .object({
+          defaultBindings: z
+            .object({
+              planner: z.string().min(1).optional(),
+              researcher: z.string().min(1).optional(),
+              executor: z.string().min(1).optional(),
+              reviewer: z.string().min(1).optional(),
+            })
+            .optional(),
+          defaultProvider: z.string().nullable().optional(),
+          optionalAgentIds: z.array(z.string().min(1)).optional(),
+          requiredRoles: z
+            .array(z.enum(['planner', 'researcher', 'executor', 'reviewer']))
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   category: z.string().default('general'),
@@ -48,6 +71,7 @@ interface TemplateRow {
   name: string;
   description: string | null;
   category: string;
+  metadata_json: string;
   nodes_json: string;
   edges_json: string;
   created_at: string;
@@ -64,7 +88,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
 
       const queryStep = child('query');
       const rows = sqliteAll<TemplateRow>(
-        `SELECT id, name, description, category, nodes_json, edges_json, created_at, updated_at
+        `SELECT id, name, description, category, metadata_json, nodes_json, edges_json, created_at, updated_at
          FROM workflow_templates
          WHERE user_id = ?
          ORDER BY updated_at DESC`,
@@ -79,6 +103,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
           name: row.name,
           description: row.description,
           category: row.category,
+          metadata: JSON.parse(row.metadata_json || '{}') as Record<string, unknown>,
           nodes: JSON.parse(row.nodes_json) as unknown[],
           edges: JSON.parse(row.edges_json) as unknown[],
           createdAt: row.created_at,
@@ -112,17 +137,29 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
-      const { name, description, category, nodes, edges } = body.data;
+      const { name, description, category, metadata, nodes, edges } = body.data;
+      const normalizedMetadata =
+        category === 'team-playbook'
+          ? {
+              ...(metadata ?? {}),
+              teamTemplate: {
+                ...(metadata?.teamTemplate ?? {}),
+                defaultBindings: buildFixedTeamTemplateDefaultBindings(),
+                requiredRoles: [...FIXED_TEAM_CORE_ROLE_ORDER],
+              },
+            }
+          : (metadata ?? {});
       const templateId = randomUUID();
       const insertStep = child('insert', undefined, { category, templateId });
       sqliteRun(
-        `INSERT INTO workflow_templates (id, user_id, name, description, category, nodes_json, edges_json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO workflow_templates (id, user_id, name, description, category, metadata_json, nodes_json, edges_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           templateId,
           user.sub,
           name,
           description ?? null,
           category,
+          JSON.stringify(normalizedMetadata),
           JSON.stringify(nodes),
           JSON.stringify(edges),
         ],
@@ -130,7 +167,15 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       insertStep.succeed();
       step.succeed(undefined, { category, templateId });
 
-      return reply.status(201).send({ id: templateId, name, description, category, nodes, edges });
+      return reply.status(201).send({
+        id: templateId,
+        name,
+        description,
+        category,
+        metadata: normalizedMetadata,
+        nodes,
+        edges,
+      });
     },
   );
 

@@ -43,6 +43,18 @@ export interface CreateTeamThreadInput {
   title?: string;
 }
 
+export type TeamSessionTemplateSourceKind = 'blank' | 'builtin-template' | 'saved-template';
+
+export interface CreateTeamSessionInput {
+  title?: string;
+  source?: {
+    kind: TeamSessionTemplateSourceKind;
+    templateId?: string;
+  };
+  optionalAgentIds?: string[];
+  defaultProvider?: string | null;
+}
+
 export type ImportTeamWorkspaceSessionInput = SessionImportInput;
 
 export interface TeamMemberRecord {
@@ -145,6 +157,7 @@ export interface TeamRuntimeSessionRecord {
   id: string;
   metadataJson: string;
   parentSessionId: string | null;
+  stateStatus: string;
   title: string | null;
   updatedAt: string;
   workspacePath: string | null;
@@ -190,6 +203,11 @@ export interface TeamClient {
     teamWorkspaceId: string,
     input?: CreateTeamThreadInput,
   ): Promise<Session>;
+  createSession(
+    token: string,
+    teamWorkspaceId: string,
+    input: CreateTeamSessionInput,
+  ): Promise<Session>;
   importIntoWorkspace(
     token: string,
     teamWorkspaceId: string,
@@ -216,7 +234,7 @@ export interface TeamClient {
     input: { answers?: string[][]; requestId: string; status: 'answered' | 'dismissed' },
   ): Promise<void>;
   getWorkspaceSnapshot(token: string, teamWorkspaceId: string): Promise<TeamWorkspaceSnapshot>;
-  getRuntime(token: string): Promise<TeamRuntimeReadModel>;
+  getRuntime(token: string, options?: { teamWorkspaceId?: string }): Promise<TeamRuntimeReadModel>;
   listMembers(token: string): Promise<TeamMemberRecord[]>;
   createMember(token: string, input: CreateTeamMemberInput): Promise<TeamMemberRecord>;
   listAuditLogs(token: string, options?: { limit?: number }): Promise<TeamAuditLogRecord[]>;
@@ -236,6 +254,12 @@ export interface TeamClient {
     input: { permission: TeamSessionShareRecord['permission'] },
   ): Promise<TeamSessionShareRecord>;
   deleteSessionShare(token: string, shareId: string): Promise<void>;
+  updateSessionState(
+    token: string,
+    sessionId: string,
+    input: { stateStatus: 'idle' | 'running' | 'paused'; title?: string },
+  ): Promise<void>;
+  deleteSession(token: string, sessionId: string): Promise<string[]>;
 }
 
 function buildAuthHeaders(token: string): HeadersInit {
@@ -325,6 +349,28 @@ export function createTeamClient(baseUrl: string): TeamClient {
       );
       if (!response.ok) {
         throw new Error(`Failed to create team thread: ${response.status}`);
+      }
+      return (await response.json()) as Session;
+    },
+
+    async createSession(
+      token: string,
+      teamWorkspaceId: string,
+      input: CreateTeamSessionInput,
+    ): Promise<Session> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}/sessions`,
+        {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to create team session: ${response.status}`);
       }
       return (await response.json()) as Session;
     },
@@ -457,8 +503,16 @@ export function createTeamClient(baseUrl: string): TeamClient {
       return (await response.json()) as TeamWorkspaceSnapshot;
     },
 
-    async getRuntime(token: string): Promise<TeamRuntimeReadModel> {
-      const response = await fetch(`${baseUrl}/team/runtime`, {
+    async getRuntime(
+      token: string,
+      options?: { teamWorkspaceId?: string },
+    ): Promise<TeamRuntimeReadModel> {
+      const params = new URLSearchParams();
+      if (options?.teamWorkspaceId) {
+        params.set('teamWorkspaceId', options.teamWorkspaceId);
+      }
+      const suffix = params.toString();
+      const response = await fetch(`${baseUrl}/team/runtime${suffix ? `?${suffix}` : ''}`, {
         headers: buildAuthHeaders(token),
       });
       if (!response.ok) {
@@ -635,6 +689,39 @@ export function createTeamClient(baseUrl: string): TeamClient {
         throw new Error(`Failed to update session share: ${response.status}`);
       }
       return (await response.json()) as TeamSessionShareRecord;
+    },
+
+    async updateSessionState(
+      token: string,
+      sessionId: string,
+      input: { stateStatus: 'idle' | 'running' | 'paused'; title?: string },
+    ): Promise<void> {
+      const response = await fetch(`${baseUrl}/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'PATCH',
+        headers: {
+          ...buildAuthHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          state_status: input.stateStatus,
+          ...(input.title != null ? { title: input.title } : {}),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to update session state: ${response.status}`);
+      }
+    },
+
+    async deleteSession(token: string, sessionId: string): Promise<string[]> {
+      const response = await fetch(`${baseUrl}/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+        headers: buildAuthHeaders(token),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to delete session: ${response.status}`);
+      }
+      const data = (await response.json()) as { deletedSessionIds: string[]; ok: boolean };
+      return data.deletedSessionIds ?? [];
     },
   };
 }

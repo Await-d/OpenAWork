@@ -1,15 +1,29 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import type { AgentTeamsSidebarTeam } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
+import { ChromeBadge } from './team-runtime-shell-primitives.js';
 import { CONV_TYPE_META } from './team-runtime-shared.js';
 import { Icon, ChevronDownIcon, SendIcon } from './TeamIcons.js';
 
-export function ConversationTab({ selectedAgentId = '' }: { selectedAgentId?: string }) {
+export function ConversationTab({
+  selectedAgentId = '',
+  selectedTeam = null,
+}: {
+  selectedAgentId?: string;
+  selectedTeam?: AgentTeamsSidebarTeam | null;
+}) {
   const { busy, conversationCards, roleChips, sendMessage } = useTeamRuntimeReferenceViewData();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [expandedConvIds, setExpandedConvIds] = useState<Set<string>>(new Set());
   const [messageInput, setMessageInput] = useState('');
   const [sentMessages, setSentMessages] = useState<Record<string, string[]>>({});
   const [typeFilter, setTypeFilter] = useState<string>('all');
+
+  useEffect(() => {
+    setSelectedConvId(null);
+    setExpandedConvIds(new Set());
+    setMessageInput('');
+  }, [selectedTeam?.id]);
 
   const filteredCards = useMemo(() => {
     let result = conversationCards;
@@ -118,6 +132,44 @@ export function ConversationTab({ selectedAgentId = '' }: { selectedAgentId?: st
           })}
         </div>
       </div>
+
+      {selectedTeam ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 10,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--card-bg)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+              当前对话会话
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+              {selectedTeam.title}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ChromeBadge>
+              {selectedTeam.status === 'running'
+                ? '运行中'
+                : selectedTeam.status === 'paused'
+                  ? '已暂停'
+                  : selectedTeam.status === 'failed'
+                    ? '失败'
+                    : '已完成'}
+            </ChromeBadge>
+            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+          </div>
+        </div>
+      ) : null}
 
       {/* ── Main content: conversation list + sidebar ──────────────── */}
       <div

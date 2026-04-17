@@ -2,7 +2,6 @@ import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAw
 import { TeamSectionHeader } from '../team-page-sections.js';
 
 interface TeamRuntimeRoleBindingPanelProps {
-  agents: ManagedAgentRecord[];
   cards: Array<{
     recommendedCapabilities: CapabilityDescriptor[];
     role: CoreRole;
@@ -12,22 +11,19 @@ interface TeamRuntimeRoleBindingPanelProps {
   }>;
   error: string | null;
   loading: boolean;
-  onChange: (role: CoreRole, agentId: string) => void;
 }
 
 export function TeamRuntimeRoleBindingPanel({
-  agents,
   cards,
   error,
   loading,
-  onChange,
 }: TeamRuntimeRoleBindingPanelProps) {
   return (
     <section className="content-card" style={{ display: 'grid', gap: 12, padding: 16 }}>
       <TeamSectionHeader
         eyebrow="Execution roles"
         title="执行角色绑定"
-        description="先做当前 Team 里的本地试配：给 planner / researcher / executor / reviewer 选 Agent，并预览推荐能力。"
+        description="核心角色的 agent 绑定由系统预置并统一维护；这里仅展示当前绑定与推荐能力。"
       />
       {error ? (
         <div
@@ -53,18 +49,18 @@ export function TeamRuntimeRoleBindingPanel({
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{card.roleLabel}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{card.role}</span>
               </div>
-              <select
-                aria-label={`执行角色绑定-${card.role}`}
-                value={card.selectedAgentId}
-                onChange={(event) => onChange(card.role, event.target.value)}
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+                  background: 'var(--surface-2)',
+                  color: 'var(--text)',
+                  fontSize: 12,
+                }}
               >
-                <option value="">暂不绑定</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.label}
-                  </option>
-                ))}
-              </select>
+                {(card.selectedAgent?.label ?? card.selectedAgentId) || '系统预置绑定'}
+              </div>
               <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
                 当前 Agent：{card.selectedAgent?.label ?? '未选择'}
                 {card.selectedAgent?.canonicalRole?.coreRole

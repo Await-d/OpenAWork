@@ -5,6 +5,12 @@ import type { TeamActionFeedback } from '../use-team-collaboration.js';
 import { TeamSectionHeader } from '../team-page-sections.js';
 import type { TeamRuntimeMetric, TeamWorkspaceCardSummary } from './team-runtime-model.js';
 import { formatWorkspaceLabel, getSharedSessionStateLabel } from './team-runtime-model.js';
+import {
+  ChromeBadge,
+  CompactMetricPill,
+  RailEmptyState,
+  TEAM_RUNTIME_INSET_PANEL_STYLE,
+} from './team-runtime-shell-primitives.js';
 import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
 import { TeamRuntimeRoleBindingPanel } from './team-runtime-role-binding-panel.js';
 import { useRuntimeWorkbenchPanes } from './use-runtime-workbench-panes.js';
@@ -42,28 +48,6 @@ const PANEL_HEADER_STYLE: CSSProperties = {
   borderBottom: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
   background:
     'linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, var(--bg)) 0%, color-mix(in srgb, var(--surface) 82%, var(--bg)) 100%)',
-};
-
-const INSET_PANEL_STYLE: CSSProperties = {
-  display: 'grid',
-  gap: 8,
-  padding: 12,
-  borderRadius: 14,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
-};
-
-const STATUS_BADGE_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  minHeight: 24,
-  padding: '0 9px',
-  borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 76%, var(--bg))',
-  fontSize: 11,
-  color: 'var(--text-2)',
-  whiteSpace: 'nowrap',
 };
 
 const ACTIVITY_BUTTON_BASE_STYLE: CSSProperties = {
@@ -108,7 +92,7 @@ interface TeamRuntimeSelectedRunSummary {
   workspaceLabel: string;
 }
 
-interface TeamRuntimeShellFrameProps {
+export interface TeamRuntimeShellFrameProps {
   activeTabKey: string;
   activeTabLabel: string;
   activeTabSummary: string;
@@ -139,6 +123,9 @@ interface TeamRuntimeShellFrameProps {
   onSelectSharedSession: (sessionId: string) => void;
   onSelectWorkspaceKey: (workspaceKey: string) => void;
   onSubmitInteractionDraft: () => void;
+  onBuddyApproveAll?: () => void;
+  onBuddyReviewBlocked?: () => void;
+  onBuddyAnswerQuestions?: () => void;
   roleBindingAgents: ManagedAgentRecord[];
   roleBindingCards: Array<{
     recommendedCapabilities: CapabilityDescriptor[];
@@ -233,47 +220,6 @@ function RuntimeRailCounter({ label, value }: { label: string; value: string }) 
       <span style={{ fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
         {label}
       </span>
-    </div>
-  );
-}
-
-function ChromeBadge({ children }: { children: ReactNode }) {
-  return <span style={STATUS_BADGE_STYLE}>{children}</span>;
-}
-
-function CompactMetricPill({
-  hint,
-  label,
-  value,
-}: {
-  hint: string;
-  label: string;
-  value: number | string;
-}) {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gap: 3,
-        minWidth: 116,
-        padding: '8px 10px',
-        borderRadius: 12,
-        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-        background: 'color-mix(in srgb, var(--surface) 76%, var(--bg))',
-      }}
-    >
-      <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1 }}>{label}</span>
-      <span style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.1 }}>{value}</span>
-      <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.35 }}>{hint}</span>
-    </div>
-  );
-}
-
-function RailEmptyState({ description, title }: { description: string; title: string }) {
-  return (
-    <div style={INSET_PANEL_STYLE}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.65 }}>{description}</span>
     </div>
   );
 }
@@ -502,7 +448,7 @@ function RuntimeSidebar({
                   type="button"
                   onClick={() => onSelectWorkspaceKey(workspace.key)}
                   style={{
-                    ...INSET_PANEL_STYLE,
+                    ...TEAM_RUNTIME_INSET_PANEL_STYLE,
                     gap: 6,
                     width: '100%',
                     textAlign: 'left',
@@ -566,7 +512,7 @@ function RuntimeSidebar({
                       onSwitchToSessions();
                     }}
                     style={{
-                      ...INSET_PANEL_STYLE,
+                      ...TEAM_RUNTIME_INSET_PANEL_STYLE,
                       gap: 4,
                       width: '100%',
                       textAlign: 'left',
@@ -609,7 +555,7 @@ function RuntimeSidebar({
           </div>
           {workflowLaunch ? (
             <div style={{ display: 'grid', gap: 10 }}>
-              <div style={INSET_PANEL_STYLE}>
+              <div style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
                 <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
                   {workflowLaunch.templateDescription || '当前模板没有描述。'} ·{' '}
                   {workflowLaunch.nodeCount} 个节点
@@ -646,7 +592,7 @@ function RuntimeSidebar({
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
             {workspaceOverviewLines.map((line) => (
-              <div key={line} style={INSET_PANEL_STYLE}>
+              <div key={line} style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
                 <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65 }}>
                   {line}
                 </span>
@@ -791,11 +737,17 @@ function RuntimeDetailRail({
   roleBindingLoading,
   selectedRunSummary,
   setActiveDetailPanel,
+  onBuddyApproveAll,
+  onBuddyReviewBlocked,
+  onBuddyAnswerQuestions,
 }: {
   activeDetailPanel: DetailRailPanelKey;
   buddyProjection: TeamRuntimeShellFrameProps['buddyProjection'];
   detailPanels: DetailRailPanelKey[];
   interactionDraft: string;
+  onBuddyApproveAll?: () => void;
+  onBuddyReviewBlocked?: () => void;
+  onBuddyAnswerQuestions?: () => void;
   onInteractionDraftChange: (value: string) => void;
   onRoleBindingChange: (role: CoreRole, agentId: string) => void;
   onSubmitInteractionDraft: () => void;
@@ -869,7 +821,7 @@ function RuntimeDetailRail({
             />
             {selectedRunSummary ? (
               <div style={{ display: 'grid', gap: 10 }}>
-                <div style={INSET_PANEL_STYLE}>
+                <div style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
                   <span style={{ fontSize: 16, fontWeight: 800 }}>{selectedRunSummary.title}</span>
                   <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
                     工作区：{selectedRunSummary.workspaceLabel}
@@ -895,7 +847,7 @@ function RuntimeDetailRail({
                     { label: '待审批', value: selectedRunSummary.pendingApprovalCount },
                     { label: '待回答', value: selectedRunSummary.pendingQuestionCount },
                   ].map((item) => (
-                    <div key={item.label} style={INSET_PANEL_STYLE}>
+                    <div key={item.label} style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
                       <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.label}</span>
                       <span style={{ fontSize: 18, fontWeight: 800 }}>{item.value}</span>
                     </div>
@@ -945,16 +897,18 @@ function RuntimeDetailRail({
             runningCount={buddyProjection.runningCount}
             sessionTitle={buddyProjection.sessionTitle}
             workspaceLabel={buddyProjection.workspaceLabel}
+            onApproveAll={onBuddyApproveAll}
+            onReviewBlocked={onBuddyReviewBlocked}
+            onAnswerQuestions={onBuddyAnswerQuestions}
+            onSpriteClick={() => setActiveDetailPanel('interaction')}
           />
         ) : null}
 
         {activeDetailPanel === 'role-bindings' ? (
           <TeamRuntimeRoleBindingPanel
-            agents={roleBindingAgents}
             cards={roleBindingCards}
             error={roleBindingError}
             loading={roleBindingLoading}
-            onChange={onRoleBindingChange}
           />
         ) : null}
       </div>
@@ -1123,6 +1077,9 @@ export function TeamRuntimeShellFrame({
   onSelectSharedSession,
   onSelectWorkspaceKey,
   onSubmitInteractionDraft,
+  onBuddyApproveAll,
+  onBuddyReviewBlocked,
+  onBuddyAnswerQuestions,
   roleBindingAgents,
   roleBindingCards,
   roleBindingError,
@@ -1282,7 +1239,7 @@ export function TeamRuntimeShellFrame({
               {feedback ? (
                 <div
                   style={{
-                    ...INSET_PANEL_STYLE,
+                    ...TEAM_RUNTIME_INSET_PANEL_STYLE,
                     borderColor:
                       feedback.tone === 'success'
                         ? 'color-mix(in srgb, var(--success) 42%, var(--border))'
@@ -1301,7 +1258,7 @@ export function TeamRuntimeShellFrame({
               {error ? (
                 <div
                   style={{
-                    ...INSET_PANEL_STYLE,
+                    ...TEAM_RUNTIME_INSET_PANEL_STYLE,
                     borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border))',
                     background: 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
                     color: 'var(--danger)',
@@ -1432,6 +1389,9 @@ export function TeamRuntimeShellFrame({
                     buddyProjection={buddyProjection}
                     detailPanels={detailPanels}
                     interactionDraft={interactionDraft}
+                    onBuddyApproveAll={onBuddyApproveAll}
+                    onBuddyReviewBlocked={onBuddyReviewBlocked}
+                    onBuddyAnswerQuestions={onBuddyAnswerQuestions}
                     onInteractionDraftChange={onInteractionDraftChange}
                     onRoleBindingChange={onRoleBindingChange}
                     onSubmitInteractionDraft={onSubmitInteractionDraft}

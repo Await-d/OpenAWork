@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
-import type { AgentTeamsTaskCard } from './team-runtime-reference-mock.js';
+import { useCallback, useEffect, useState } from 'react';
+import type { AgentTeamsSidebarTeam, AgentTeamsTaskCard } from './team-runtime-types.js';
+import { ChromeBadge } from './team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { PANEL_STYLE, PRIORITY_META } from './team-runtime-shared.js';
 import { ChevronRightIcon, PlusIcon, TrashIcon } from './TeamIcons.js';
@@ -167,7 +168,7 @@ function TaskCard({
         <button
           type="button"
           onClick={() => onDelete(card.id)}
-          title="仅从当前视图隐藏"
+          title="推进到下一状态"
           style={{
             background: 'none',
             border: 'none',
@@ -185,12 +186,17 @@ function TaskCard({
   );
 }
 
-export function TasksTab() {
+export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSidebarTeam | null }) {
   const { busy, createTask, moveTask, taskLanes } = useTeamRuntimeReferenceViewData();
   const [addingLane, setAddingLane] = useState<string | null>(null);
-  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
   const [newTitle, setNewTitle] = useState('');
+
+  useEffect(() => {
+    setAddingLane(null);
+    setExpandedTaskIds(new Set());
+    setNewTitle('');
+  }, [selectedTeam?.id]);
 
   const toggleExpandTask = useCallback((id: string) => {
     setExpandedTaskIds((prev) => {
@@ -230,9 +236,12 @@ export function TasksTab() {
     [moveTask],
   );
 
-  const handleDeleteTask = useCallback((taskId: string) => {
-    setDeletedIds((prev) => new Set(prev).add(taskId));
-  }, []);
+  const handleDeleteTask = useCallback(
+    (taskId: string) => {
+      void moveTask(taskId, 'right');
+    },
+    [moveTask],
+  );
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -249,12 +258,47 @@ export function TasksTab() {
             fontWeight: 700,
           }}
         >
-          {taskLanes.reduce(
-            (sum, l) => sum + l.cards.filter((c) => !deletedIds.has(c.id)).length,
-            0,
-          )}
+          {taskLanes.reduce((sum, l) => sum + l.cards.length, 0)}
         </span>
       </div>
+
+      {selectedTeam ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 10,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--card-bg)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+              当前任务会话
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+              {selectedTeam.title}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ChromeBadge>
+              {selectedTeam.status === 'running'
+                ? '运行中'
+                : selectedTeam.status === 'paused'
+                  ? '已暂停'
+                  : selectedTeam.status === 'failed'
+                    ? '失败'
+                    : '已完成'}
+            </ChromeBadge>
+            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+          </div>
+        </div>
+      ) : null}
 
       {/* Kanban lanes */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
@@ -265,7 +309,7 @@ export function TasksTab() {
               : lane.id === 'doing'
                 ? 'var(--accent)'
                 : 'var(--warning)';
-          const visibleCards = lane.cards.filter((card) => !deletedIds.has(card.id));
+          const visibleCards = lane.cards;
 
           return (
             <section

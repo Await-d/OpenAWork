@@ -364,9 +364,17 @@ export function buildWorkspaceOutputCards(input: {
       ]
     : [];
 
+  const sortedSharedSessions = selectedSessionId
+    ? [...input.sharedSessions].sort((left, right) => {
+        if (left.sessionId === selectedSessionId) return -1;
+        if (right.sessionId === selectedSessionId) return 1;
+        return 0;
+      })
+    : input.sharedSessions;
+
   return [
     ...rewriteCard,
-    ...input.sharedSessions.map((sharedSession) => {
+    ...sortedSharedSessions.map((sharedSession) => {
       const selected =
         sharedSession.sessionId === selectedSessionId ? input.selectedSharedSession : null;
 

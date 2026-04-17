@@ -60,6 +60,29 @@ describe('team client runtime APIs', () => {
     await expect(client.getRuntime('token-2')).rejects.toThrow('Failed to load team runtime: 500');
   });
 
+  it('requests a workspace-scoped team runtime read model when teamWorkspaceId is provided', async () => {
+    fetchMock.mockResolvedValue(
+      createJsonResponse(200, {
+        auditLogs: [],
+        members: [],
+        messages: [],
+        runtimeTaskGroups: [],
+        sessionShares: [],
+        sessions: [],
+        sharedSessions: [],
+        tasks: [],
+      }),
+    );
+
+    const client = createTeamClient('http://gateway.test');
+    await client.getRuntime('token-1', { teamWorkspaceId: 'workspace-1' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://gateway.test/team/runtime?teamWorkspaceId=workspace-1',
+    );
+  });
+
   it('lists and reads team workspace roots', async () => {
     fetchMock
       .mockResolvedValueOnce(
@@ -161,6 +184,43 @@ describe('team client runtime APIs', () => {
       'http://gateway.test/team/workspaces/workspace-1/threads',
     );
     expect(thread.id).toBe('session-1');
+  });
+
+  it('creates a team session with optional agents and template source metadata', async () => {
+    fetchMock.mockResolvedValue(
+      createJsonResponse(201, {
+        id: 'session-2',
+        title: '研究团队 2026-04-16',
+        state_status: 'idle',
+        metadata_json: JSON.stringify({
+          teamWorkspaceId: 'workspace-1',
+          teamDefinition: {
+            source: { kind: 'blank' },
+          },
+          workingDirectory: '/repo/apps/web',
+        }),
+      }),
+    );
+
+    const client = createTeamClient('http://gateway.test');
+    const session = await client.createSession('token-1', 'workspace-1', {
+      title: '研究团队 2026-04-16',
+      optionalAgentIds: ['atlas'],
+      source: { kind: 'blank' },
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://gateway.test/team/workspaces/workspace-1/sessions',
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      title: '研究团队 2026-04-16',
+      optionalAgentIds: ['atlas'],
+      source: { kind: 'blank' },
+    });
+    expect(session.id).toBe('session-2');
   });
 
   it('loads a workspace-scoped team snapshot', async () => {

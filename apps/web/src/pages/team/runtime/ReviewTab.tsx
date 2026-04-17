@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { AgentTeamsReviewCard } from './team-runtime-reference-mock.js';
+import type { AgentTeamsReviewCard, AgentTeamsSidebarTeam } from './team-runtime-types.js';
+import { ChromeBadge } from './team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import {
   PANEL_STYLE,
@@ -9,7 +10,11 @@ import {
 } from './team-runtime-shared.js';
 import { Icon, ChevronDownIcon, UndoIcon } from './TeamIcons.js';
 
-export function ReviewTab() {
+export function ReviewTab({
+  selectedTeam = null,
+}: {
+  selectedTeam?: AgentTeamsSidebarTeam | null;
+}) {
   const { replyReview, reviewBusy, reviewCards, submitReviewComment } =
     useTeamRuntimeReferenceViewData();
   const [reviewStatuses, setReviewStatuses] = useState<
@@ -63,6 +68,13 @@ export function ReviewTab() {
     setReviewStatuses(nextStatuses);
   }, [reviewCards]);
 
+  useEffect(() => {
+    setExpandedIds(new Set());
+    setCommentingId(null);
+    setCommentInput('');
+    setComments({});
+  }, [selectedTeam?.id]);
+
   const pendingCount = Object.values(reviewStatuses).filter((s) => s === 'pending').length;
   const approvedCount = Object.values(reviewStatuses).filter((s) => s === 'approved').length;
   const rejectedCount = Object.values(reviewStatuses).filter((s) => s === 'rejected').length;
@@ -85,6 +97,44 @@ export function ReviewTab() {
           {reviewCards.length}
         </span>
       </div>
+
+      {selectedTeam ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 10,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--card-bg)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+              当前评审会话
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+              {selectedTeam.title}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ChromeBadge>
+              {selectedTeam.status === 'running'
+                ? '运行中'
+                : selectedTeam.status === 'paused'
+                  ? '已暂停'
+                  : selectedTeam.status === 'failed'
+                    ? '失败'
+                    : '已完成'}
+            </ChromeBadge>
+            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+          </div>
+        </div>
+      ) : null}
 
       {/* Two-column layout: review cards + summary sidebar */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 12 }}>

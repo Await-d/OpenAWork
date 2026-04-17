@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CompanionTerminalSprite } from '../../../components/chat/companion/companion-terminal-sprite.js';
 import {
   createCompanionProfile,
+  createHubbyProfile,
   type CompanionUtteranceSeed,
 } from '../../../components/chat/companion/companion-display-model.js';
 
@@ -13,6 +14,10 @@ interface TeamRuntimeBuddyProps {
   runningCount: number;
   sessionTitle: string | null;
   workspaceLabel: string;
+  onApproveAll?: () => void;
+  onReviewBlocked?: () => void;
+  onAnswerQuestions?: () => void;
+  onSpriteClick?: () => void;
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -100,10 +105,14 @@ export function TeamRuntimeBuddy({
   runningCount,
   sessionTitle,
   workspaceLabel,
+  onApproveAll,
+  onReviewBlocked,
+  onAnswerQuestions,
+  onSpriteClick,
 }: TeamRuntimeBuddyProps) {
   const prefersReducedMotion = usePrefersReducedMotion();
   const profile = useMemo(
-    () => createCompanionProfile(`team-runtime:${workspaceLabel}`),
+    () => createHubbyProfile(`team-runtime:${workspaceLabel}`),
     [workspaceLabel],
   );
   const liveOutput = useMemo(
@@ -131,40 +140,55 @@ export function TeamRuntimeBuddy({
       className="content-card"
       style={{
         display: 'grid',
-        gap: 12,
-        padding: 16,
-        borderRadius: 22,
+        gap: 8,
+        padding: 10,
+        borderRadius: 16,
         background:
           'radial-gradient(circle at top right, rgba(91, 140, 255, 0.16), transparent 32%), linear-gradient(180deg, color-mix(in srgb, var(--surface) 95%, rgba(15, 23, 42, 0.26)) 0%, var(--surface) 100%)',
       }}
     >
-      <div style={{ display: 'grid', gap: 4 }}>
+      <div style={{ display: 'grid', gap: 2 }}>
         <span
           style={{
-            fontSize: 11,
+            fontSize: 9,
             fontWeight: 700,
             textTransform: 'uppercase',
             letterSpacing: '0.18em',
             color: 'var(--accent)',
           }}
         >
-          Buddy / Hubby runtime
+          Buddy / Hubby
         </span>
-        <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>
+        <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.03em' }}>
           工作区动画代理
         </span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
-          任务动画层统一替换为 Buddy/Hubby，本切片只让它消费聚合状态摘要，不复述明细。
+        <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          消费聚合状态摘要，不复述明细。
         </span>
       </div>
-      <CompanionTerminalSprite
-        fading={false}
-        liveOutput={liveOutput}
-        petNonce={pendingApprovalCount + pendingQuestionCount + blockedCount}
-        prefersReducedMotion={prefersReducedMotion}
-        profile={profile}
-      />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div
+        onClick={onSpriteClick}
+        style={{
+          cursor: onSpriteClick ? 'pointer' : 'default',
+          borderRadius: 8,
+          transition: 'box-shadow 150ms ease',
+        }}
+        onMouseEnter={(e) => {
+          if (onSpriteClick) e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = 'none';
+        }}
+      >
+        <CompanionTerminalSprite
+          fading={false}
+          liveOutput={liveOutput}
+          petNonce={pendingApprovalCount + pendingQuestionCount + blockedCount}
+          prefersReducedMotion={prefersReducedMotion}
+          profile={profile}
+        />
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {[
           workspaceLabel,
           `${activeAgentCount} 个活跃主体`,
@@ -176,11 +200,11 @@ export function TeamRuntimeBuddy({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              padding: '4px 10px',
+              padding: '3px 7px',
               borderRadius: 999,
               border: '1px solid color-mix(in srgb, var(--border) 78%, transparent)',
               background: 'color-mix(in srgb, var(--surface) 88%, rgba(91, 140, 255, 0.08))',
-              fontSize: 11,
+              fontSize: 9.5,
               color: 'var(--text-2)',
             }}
           >
@@ -188,6 +212,67 @@ export function TeamRuntimeBuddy({
           </span>
         ))}
       </div>
+      {(pendingApprovalCount > 0 || pendingQuestionCount > 0 || blockedCount > 0) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+          {pendingApprovalCount > 0 && onApproveAll && (
+            <button
+              type="button"
+              onClick={onApproveAll}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 8,
+                border: '1px solid color-mix(in oklch, var(--success) 30%, transparent)',
+                background: 'color-mix(in oklch, var(--success) 10%, var(--surface))',
+                color: 'color-mix(in oklch, var(--success) 80%, white 20%)',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background 150ms ease',
+              }}
+            >
+              一键审批 ({pendingApprovalCount})
+            </button>
+          )}
+          {pendingQuestionCount > 0 && onAnswerQuestions && (
+            <button
+              type="button"
+              onClick={onAnswerQuestions}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 8,
+                border: '1px solid color-mix(in oklch, var(--warning) 30%, transparent)',
+                background: 'color-mix(in oklch, var(--warning) 10%, var(--surface))',
+                color: 'color-mix(in oklch, var(--warning) 80%, white 20%)',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background 150ms ease',
+              }}
+            >
+              回答问题 ({pendingQuestionCount})
+            </button>
+          )}
+          {blockedCount > 0 && onReviewBlocked && (
+            <button
+              type="button"
+              onClick={onReviewBlocked}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 8,
+                border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+                background: 'color-mix(in oklch, var(--danger) 10%, var(--surface))',
+                color: 'color-mix(in oklch, var(--danger) 80%, white 20%)',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background 150ms ease',
+              }}
+            >
+              查看阻塞 ({blockedCount})
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

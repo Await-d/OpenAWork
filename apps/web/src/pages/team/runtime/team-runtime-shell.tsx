@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuthStore } from '../../../stores/auth.js';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
@@ -11,7 +12,11 @@ import type {
   TeamTaskRecord,
 } from '@openAwork/web-client';
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
-import type { InteractionAgentRewriteArtifact } from './interaction-agent-flow.js';
+import {
+  submitInteractionAgentFlow,
+  type InteractionAgentRewriteArtifact,
+} from './interaction-agent-flow.js';
+import { submitTeamLeaderDispatchFlow, type LeaderDispatchArtifact } from './team-leader-flow.js';
 import type { TeamActionFeedback } from '../use-team-collaboration.js';
 import {
   TeamAuditPanel,
@@ -31,6 +36,7 @@ import {
   getSharedSessionStateLabel,
   type TeamRuntimeMetric,
 } from './team-runtime-model.js';
+import { buildTeamRuntimeShellViewModel } from './build-team-runtime-shell-view-model.js';
 import { TeamRuntimeShellFrame } from './team-runtime-shell-frame.js';
 import { useTeamRuntimeProjection } from './use-team-runtime-projection.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session-grouping.js';
@@ -335,6 +341,7 @@ export function TeamRuntimeShell({
   workflowLaunch,
   onLaunchWorkflowTemplate,
 }: TeamRuntimeShellProps) {
+  const { accessToken, gatewayUrl } = useAuthStore();
   const [activeTab, setActiveTab] = useState<RuntimeTabKey>('overview');
   const [interactionDraft, setInteractionDraft] = useState('');
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -397,7 +404,6 @@ export function TeamRuntimeShell({
   const isSingleColumn = viewportWidth < 1120;
   const isTwoColumn = viewportWidth >= 1120 && viewportWidth < 1500;
   const activeTabMeta = tabs.find((tab) => tab.key === activeTab) ?? tabs[0]!;
-  const headerMetrics = metrics.slice(0, 4);
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -1133,14 +1139,99 @@ export function TeamRuntimeShell({
       return;
     }
 
-    const succeeded = await onCreateInteractionMessage(trimmed);
-    if (!succeeded) {
+    const artifact = await submitInteractionAgentFlow({
+      submitMessage: async (message) => {
+        try {
+          await onCreateInteractionMessage(message.content);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      userIntent: trimmed,
+      context: buddyProjection.sessionTitle ?? undefined,
+      gatewayUrl,
+      token: accessToken ?? undefined,
+    });
+
+    if (!artifact) {
       return;
+    }
+
+    // Auto-dispatch to team-leader after interaction-agent rewrite
+    const dispatchArtifact = await submitTeamLeaderDispatchFlow({
+      submitMessage: async (message) => {
+        try {
+          await onCreateInteractionMessage(message.content);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      rewriteArtifact: artifact,
+      context: buddyProjection.sessionTitle ?? undefined,
+      gatewayUrl,
+      token: accessToken ?? undefined,
+    });
+
+    if (dispatchArtifact) {
+      onCreateTask();
     }
 
     setInteractionDraft('');
     setActiveTab('timeline');
   };
+
+  const shellFrameViewModel = buildTeamRuntimeShellViewModel({
+    activeTabMeta,
+    buddyProjection,
+    busy,
+    error,
+    feedback,
+    filteredSessionCount: filteredSessions.length,
+    filteredSessionShareCount: filteredSessionShares.length,
+    filteredSharedSessions,
+    interactionDraft,
+    isSingleColumn,
+    isTwoColumn,
+    mainContent: renderTabContent(),
+    metrics,
+    onActiveTabChange: (tabKey) => setActiveTab(tabKey as RuntimeTabKey),
+    onInteractionDraftChange: setInteractionDraft,
+    onLaunchWorkflowTemplate,
+    onRoleBindingChange,
+    onSelectSharedSession,
+    onSelectWorkspaceKey: setSelectedWorkspaceKey,
+    onSubmitInteractionDraft: handleSubmitInteractionDraft,
+    onBuddyApproveAll: useCallback(async () => {
+      const session = effectiveSelectedSharedSession;
+      if (!session) return;
+      for (const perm of session.pendingPermissions) {
+        await onCreateInteractionMessage(`审批通过：${perm.requestId}`);
+      }
+    }, [effectiveSelectedSharedSession, onCreateInteractionMessage]),
+    onBuddyReviewBlocked: useCallback(() => {
+      setActiveTab('tasks');
+    }, []),
+    onBuddyAnswerQuestions: useCallback(async () => {
+      const session = effectiveSelectedSharedSession;
+      if (!session) return;
+      for (const q of session.pendingQuestions) {
+        await onCreateInteractionMessage(`已回答问题：${q.requestId}`);
+      }
+    }, [effectiveSelectedSharedSession, onCreateInteractionMessage]),
+    roleBindingAgents,
+    roleBindingCards,
+    roleBindingError,
+    roleBindingLoading,
+    selectedRunSummary,
+    selectedSharedSessionId: effectiveSelectedSharedSession?.share.sessionId ?? null,
+    selectedWorkspace,
+    tabs,
+    workflowLaunch,
+    workspaceOverviewLines,
+    workspaceSummaries,
+  });
 
   return loading ? (
     <div className="page-root">
@@ -1156,42 +1247,6 @@ export function TeamRuntimeShell({
       </div>
     </div>
   ) : (
-    <TeamRuntimeShellFrame
-      activeTabKey={activeTabMeta.key}
-      activeTabLabel={activeTabMeta.label}
-      activeTabSummary={activeTabMeta.summary}
-      buddyProjection={buddyProjection}
-      busy={busy}
-      error={error}
-      feedback={feedback}
-      filteredSessionCount={filteredSessions.length}
-      filteredSessionShareCount={filteredSessionShares.length}
-      filteredSharedSessions={filteredSharedSessions}
-      headerMetrics={headerMetrics}
-      interactionDraft={interactionDraft}
-      isSingleColumn={isSingleColumn}
-      isTwoColumn={isTwoColumn}
-      mainContent={renderTabContent()}
-      onActiveTabChange={(tabKey) => setActiveTab(tabKey as RuntimeTabKey)}
-      onInteractionDraftChange={setInteractionDraft}
-      onLaunchWorkflowTemplate={onLaunchWorkflowTemplate}
-      onRoleBindingChange={onRoleBindingChange}
-      onSelectSharedSession={onSelectSharedSession}
-      onSelectWorkspaceKey={setSelectedWorkspaceKey}
-      onSubmitInteractionDraft={handleSubmitInteractionDraft}
-      roleBindingAgents={roleBindingAgents}
-      roleBindingCards={roleBindingCards}
-      roleBindingError={roleBindingError}
-      roleBindingLoading={roleBindingLoading}
-      selectedRunSummary={selectedRunSummary}
-      selectedSharedSessionId={effectiveSelectedSharedSession?.share.sessionId ?? null}
-      selectedWorkspaceKey={selectedWorkspaceKey}
-      selectedWorkspaceLabel={selectedWorkspace?.label ?? '全部工作区'}
-      selectedWorkspaceRunningCount={selectedWorkspace?.runningCount ?? 0}
-      tabs={tabs}
-      workspaceOverviewLines={workspaceOverviewLines}
-      workspaceSummaries={workspaceSummaries}
-      workflowLaunch={workflowLaunch}
-    />
+    <TeamRuntimeShellFrame {...shellFrameViewModel} />
   );
 }

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createAgentsClient, createCapabilitiesClient } from '@openAwork/web-client';
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
+import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import { useAuthStore } from '../../../stores/auth.js';
 
-const EXECUTION_ROLES: CoreRole[] = ['planner', 'researcher', 'executor', 'reviewer'];
+const EXECUTION_ROLES: CoreRole[] = [...FIXED_TEAM_CORE_ROLE_ORDER];
 
 const ROLE_LABELS: Record<CoreRole, string> = {
   general: '通用',
@@ -44,22 +45,7 @@ export function useTeamRuntimeRoleBindings() {
         }
         setAgents(nextAgents);
         setCapabilities(nextCapabilities);
-        setBindings((current) => {
-          const nextBindings = { ...current };
-          for (const role of EXECUTION_ROLES) {
-            if (nextBindings[role]) {
-              continue;
-            }
-
-            const suggested = nextAgents.find(
-              (agent) => agent.enabled && agent.canonicalRole?.coreRole === role,
-            );
-            if (suggested) {
-              nextBindings[role] = suggested.id;
-            }
-          }
-          return nextBindings;
-        });
+        setBindings({ ...FIXED_TEAM_CORE_ROLE_BINDINGS });
       })
       .catch((reason) => {
         if (!cancelled) {
@@ -102,11 +88,5 @@ export function useTeamRuntimeRoleBindings() {
     error,
     loading,
     roleCards,
-    setBinding(role: CoreRole, agentId: string) {
-      setBindings((current) => ({
-        ...current,
-        [role]: agentId || undefined,
-      }));
-    },
   };
 }

@@ -1,10 +1,10 @@
 import type { CSSProperties } from 'react';
 import type {
   AgentTeamsConversationCard,
-  AgentTeamsTaskCard,
   AgentTeamsMessageCard,
   AgentTeamsReviewCard,
-} from './team-runtime-reference-mock.js';
+  AgentTeamsTaskCard,
+} from './team-runtime-types.js';
 import type { IconKey } from './TeamIcons.js';
 
 export const SHELL_BACKGROUND = 'var(--bg)';

@@ -12,11 +12,31 @@ export interface WorkflowEdgeRecord {
   target: string;
 }
 
+export type WorkflowTemplateRequiredRole = 'planner' | 'researcher' | 'executor' | 'reviewer';
+export type WorkflowTemplateScale = 'full' | 'large' | 'medium' | 'small';
+
+export interface WorkflowTeamTemplateMetadata {
+  defaultBindings?: Partial<Record<WorkflowTemplateRequiredRole, string>>;
+  defaultProvider?: string | null;
+  optionalAgentIds?: string[];
+  recommendedDefault?: boolean;
+  requiredRoles?: WorkflowTemplateRequiredRole[];
+  templateFocus?: string;
+  templatePriority?: number;
+  templateScale?: WorkflowTemplateScale;
+  recommendedFor?: string;
+}
+
+export interface WorkflowTemplateMetadata {
+  teamTemplate?: WorkflowTeamTemplateMetadata;
+}
+
 export interface WorkflowTemplateRecord {
   id: string;
   name: string;
   description: string | null;
   category: string;
+  metadata?: WorkflowTemplateMetadata;
   nodes: WorkflowNodeRecord[];
   edges: WorkflowEdgeRecord[];
   createdAt?: string;
@@ -27,6 +47,7 @@ export interface CreateWorkflowTemplateInput {
   name: string;
   description?: string;
   category?: string;
+  metadata?: WorkflowTemplateMetadata;
   nodes: WorkflowNodeRecord[];
   edges: WorkflowEdgeRecord[];
 }

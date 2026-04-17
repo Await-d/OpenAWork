@@ -26,8 +26,10 @@ export { createAgentProfilesClient } from './agent-profiles.js';
 export type { AgentProfileRecord, AgentProfilesClient } from './agent-profiles.js';
 export { createTeamClient } from './team.js';
 export type {
+  CreateTeamSessionInput,
   CreateTeamThreadInput,
   ImportTeamWorkspaceSessionInput,
+  TeamSessionTemplateSourceKind,
   CreateTeamWorkspaceInput,
   CreateTeamMemberInput,
   CreateTeamMessageInput,
@@ -52,6 +54,10 @@ export type {
 export { createWorkflowsClient } from './workflows.js';
 export type {
   CreateWorkflowTemplateInput,
+  WorkflowTemplateMetadata,
+  WorkflowTeamTemplateMetadata,
+  WorkflowTemplateRequiredRole,
+  WorkflowTemplateScale,
   WorkflowEdgeRecord,
   WorkflowNodeRecord,
   WorkflowTemplateRecord,

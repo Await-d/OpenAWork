@@ -53,6 +53,12 @@ export default function NavRail({ clearAuth }: NavRailProps) {
             label === 'Channels' &&
             (location.pathname === '/channels' ||
               location.pathname.startsWith('/settings/channels'));
+          const isTemplatesActive =
+            label === 'Templates' && location.pathname.startsWith('/team/templates');
+          const isTeamActive =
+            label === 'Team' &&
+            location.pathname.startsWith('/team') &&
+            !location.pathname.startsWith('/team/templates');
 
           return (
             <NavLink
@@ -63,12 +69,13 @@ export default function NavRail({ clearAuth }: NavRailProps) {
               onPointerDown={() => preloadRoute(resolvedTo)}
               title={railLabelCn[label] ?? label}
               className={({ isActive }) =>
-                isChatActive || isChannelsActive || isActive
+                isChatActive || isChannelsActive || isTemplatesActive || isTeamActive || isActive
                   ? 'nav-rail-link-active'
                   : 'nav-rail-btn'
               }
               style={({ isActive }) => {
-                const isActiveState = isChatActive || isChannelsActive || isActive;
+                const isActiveState =
+                  isChatActive || isChannelsActive || isTemplatesActive || isTeamActive || isActive;
                 return {
                   display: 'flex',
                   width: '100%',

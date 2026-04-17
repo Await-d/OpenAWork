@@ -3,6 +3,7 @@ import React from 'react';
 export const railItems = [
   { to: '/chat', label: 'Chat' },
   { to: '/team', label: 'Team' },
+  { to: '/team/templates', label: 'Templates' },
   { to: '/sessions', label: 'Sessions' },
   { to: '/skills', label: 'Skills' },
   { to: '/agents', label: 'Agents' },
@@ -20,6 +21,7 @@ export const railLabelCn: Record<string, string> = {
   Agents: '智能体',
   Workflows: '工作流',
   Team: '团队',
+  Templates: '模板',
   Channels: '频道',
   Usage: '用量',
   Schedules: '定时',
@@ -115,6 +117,14 @@ export function railIcon(label: string) {
           <circle cx="9" cy="7" r="4" />
           <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </I>
+      );
+    case 'Templates':
+      return (
+        <I>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <line x1="3" y1="9" x2="21" y2="9" />
+          <line x1="9" y1="9" x2="9" y2="21" />
         </I>
       );
     case 'Settings':

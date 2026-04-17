@@ -16,10 +16,18 @@ import {
   type TeamTaskRecord,
   type UpdateTeamTaskInput,
 } from '@openAwork/web-client';
-import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth.js';
 
-interface TeamSnapshot extends TeamRuntimeReadModel {}
+const EMPTY_TEAM_RUNTIME_READ_MODEL: TeamRuntimeReadModel = {
+  auditLogs: [],
+  members: [],
+  messages: [],
+  runtimeTaskGroups: [],
+  sessionShares: [],
+  sharedSessions: [],
+  sessions: [],
+  tasks: [],
+};
 
 export interface TeamActionFeedback {
   message: string;
@@ -90,7 +98,11 @@ function sortSharedSessions(sessions: SharedSessionSummaryRecord[]): SharedSessi
   );
 }
 
-export function useTeamCollaboration() {
+export function useTeamCollaboration(
+  teamWorkspaceId?: string,
+  options: { enabled?: boolean } = {},
+) {
+  const enabled = options.enabled ?? true;
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const [auditLogs, setAuditLogs] = useState<TeamAuditLogRecord[]>([]);
@@ -104,6 +116,7 @@ export function useTeamCollaboration() {
       id: string;
       metadataJson: string;
       parentSessionId: string | null;
+      stateStatus: string;
       title: string | null;
       updatedAt: string;
       workspacePath: string | null;
@@ -128,7 +141,6 @@ export function useTeamCollaboration() {
   const selectedSharedSessionIdRef = useRef<string | null>(null);
 
   const client = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
-  const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
 
   useEffect(() => {
     selectedSharedSessionIdRef.current = selectedSharedSessionId;
@@ -149,26 +161,20 @@ export function useTeamCollaboration() {
       if (!accessToken) {
         return null;
       }
-      return sessionsClient.getSharedWithMe(accessToken, sessionId);
+      return client.getSharedSessionDetail(accessToken, sessionId);
     },
-    [accessToken, sessionsClient],
+    [accessToken, client],
   );
 
-  const loadSnapshot = useCallback(async (): Promise<TeamSnapshot> => {
-    if (!accessToken) {
-      return {
-        auditLogs: [],
-        members: [],
-        messages: [],
-        runtimeTaskGroups: [],
-        sessionShares: [],
-        sharedSessions: [],
-        sessions: [],
-        tasks: [],
-      };
+  const loadSnapshot = useCallback(async (): Promise<TeamRuntimeReadModel> => {
+    if (!accessToken || !enabled) {
+      return EMPTY_TEAM_RUNTIME_READ_MODEL;
     }
 
-    const runtime = await client.getRuntime(accessToken);
+    const runtime = await client.getRuntime(
+      accessToken,
+      teamWorkspaceId ? { teamWorkspaceId } : undefined,
+    );
 
     return {
       auditLogs: sortAuditLogs(runtime.auditLogs),
@@ -180,10 +186,10 @@ export function useTeamCollaboration() {
       sessions: runtime.sessions,
       tasks: sortTasks(runtime.tasks),
     };
-  }, [accessToken, client]);
+  }, [accessToken, client, enabled, teamWorkspaceId]);
 
   const refresh = useCallback(async () => {
-    if (!accessToken) {
+    if (!accessToken || !enabled) {
       setAuditLogs([]);
       setMembers([]);
       setTasks([]);
@@ -216,7 +222,7 @@ export function useTeamCollaboration() {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, loadSnapshot]);
+  }, [accessToken, enabled, loadSnapshot]);
 
   useEffect(() => {
     void refresh();
@@ -290,7 +296,7 @@ export function useTeamCollaboration() {
 
         let nextDetail = detail;
         try {
-          const presence = await sessionsClient.touchSharedPresence(
+          const presence = await client.touchSharedSessionPresence(
             accessToken,
             selectedSharedSessionId,
           );
@@ -325,7 +331,7 @@ export function useTeamCollaboration() {
     commitSelectedSharedSessionIfCurrent,
     loadSelectedSharedSessionDetail,
     selectedSharedSessionId,
-    sessionsClient,
+    client,
   ]);
 
   useEffect(() => {
@@ -339,28 +345,18 @@ export function useTeamCollaboration() {
     setRuntimeTasks([]);
     setRuntimeTasksLoading(true);
 
-    sessionsClient
-      .getTasks(accessToken, selectedSharedSessionId)
-      .then((tasks) => {
-        if (!cancelled) {
-          setRuntimeTasks(tasks);
-        }
-      })
-      .catch((_reason) => {
-        if (!cancelled) {
-          setRuntimeTasks([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setRuntimeTasksLoading(false);
-        }
-      });
+    const matchingGroup = runtimeTaskGroups.find((group) =>
+      group.sessionIds.includes(selectedSharedSessionId),
+    );
+    if (matchingGroup) {
+      setRuntimeTasks(matchingGroup.tasks);
+    }
+    setRuntimeTasksLoading(false);
 
     return () => {
       cancelled = true;
     };
-  }, [accessToken, selectedSharedSessionId, sessionsClient]);
+  }, [accessToken, selectedSharedSessionId, runtimeTaskGroups]);
 
   useEffect(() => {
     if (!accessToken || !selectedSharedSessionId) {
@@ -370,7 +366,7 @@ export function useTeamCollaboration() {
     let cancelled = false;
     const syncPresence = async () => {
       try {
-        const presence = await sessionsClient.touchSharedPresence(
+        const presence = await client.touchSharedSessionPresence(
           accessToken,
           selectedSharedSessionId,
         );
@@ -395,7 +391,7 @@ export function useTeamCollaboration() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [accessToken, selectedSharedSessionId, sessionsClient]);
+  }, [accessToken, selectedSharedSessionId, client]);
 
   const createSharedSessionComment = useCallback(
     async (sessionId: string, input: { content: string }) => {
@@ -407,7 +403,7 @@ export function useTeamCollaboration() {
       setError(null);
       setFeedback(null);
       try {
-        await sessionsClient.createSharedComment(accessToken, sessionId, input);
+        await client.createSharedSessionComment(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
         commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
         const snapshot = await loadSnapshot();
@@ -429,7 +425,7 @@ export function useTeamCollaboration() {
       commitSelectedSharedSessionIfCurrent,
       loadSelectedSharedSessionDetail,
       loadSnapshot,
-      sessionsClient,
+      client,
     ],
   );
 
@@ -446,7 +442,7 @@ export function useTeamCollaboration() {
       setSharedOperateError(null);
       setFeedback(null);
       try {
-        await sessionsClient.replySharedPermission(accessToken, sessionId, input);
+        await client.replySharedSessionPermission(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
         commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
         const snapshot = await loadSnapshot();
@@ -468,7 +464,7 @@ export function useTeamCollaboration() {
       commitSelectedSharedSessionIfCurrent,
       loadSelectedSharedSessionDetail,
       loadSnapshot,
-      sessionsClient,
+      client,
     ],
   );
 
@@ -485,7 +481,7 @@ export function useTeamCollaboration() {
       setSharedOperateError(null);
       setFeedback(null);
       try {
-        await sessionsClient.replySharedQuestion(accessToken, sessionId, input);
+        await client.replySharedSessionQuestion(accessToken, sessionId, input);
         const refreshedDetail = await loadSelectedSharedSessionDetail(sessionId);
         commitSelectedSharedSessionIfCurrent(sessionId, refreshedDetail);
         const snapshot = await loadSnapshot();
@@ -507,7 +503,7 @@ export function useTeamCollaboration() {
       commitSelectedSharedSessionIfCurrent,
       loadSelectedSharedSessionDetail,
       loadSnapshot,
-      sessionsClient,
+      client,
     ],
   );
 
@@ -595,6 +591,36 @@ export function useTeamCollaboration() {
     [accessToken, client, runMutation],
   );
 
+  const toggleSessionState = useCallback(
+    async (sessionId: string, currentStatus: string) => {
+      if (!accessToken) {
+        return false;
+      }
+      const nextStatus: 'running' | 'paused' = currentStatus === 'running' ? 'paused' : 'running';
+      return runMutation(
+        async () => {
+          await client.updateSessionState(accessToken, sessionId, {
+            stateStatus: nextStatus,
+          });
+        },
+        nextStatus === 'paused' ? '已暂停会话' : '已恢复会话',
+      );
+    },
+    [accessToken, client, runMutation],
+  );
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      if (!accessToken) {
+        return false;
+      }
+      return runMutation(async () => {
+        await client.deleteSession(accessToken, sessionId);
+      }, '已删除会话');
+    },
+    [accessToken, client, runMutation],
+  );
+
   return {
     auditLogs,
     busy,
@@ -603,6 +629,7 @@ export function useTeamCollaboration() {
     createSharedSessionComment,
     createSessionShare,
     createTask,
+    deleteSession,
     deleteSessionShare,
     error,
     feedback,
@@ -627,6 +654,7 @@ export function useTeamCollaboration() {
     sessions,
     setSelectedSharedSessionId,
     tasks,
+    toggleSessionState,
     updateSessionShare,
     updateTask,
   };

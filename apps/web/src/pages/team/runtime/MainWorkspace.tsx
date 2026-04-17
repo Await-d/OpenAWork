@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import type { AgentTeamsTabKey } from './team-runtime-reference-mock.js';
+import { useEffect, useState } from 'react';
+import { agentTeamsTabs } from './team-runtime-ui-config.js';
+import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { OfficeSidebar, useOfficeSceneState } from './OfficeScene.js';
 import { OfficeThreeCanvas } from './OfficeThreeCanvas.js';
@@ -9,7 +10,8 @@ import { MessagesTab } from './MessagesTab.js';
 import { OverviewTab } from './OverviewTab.js';
 import { ReviewTab } from './ReviewTab.js';
 import { TeamsTab } from './TeamsTab.js';
-import { Icon, ChevronDownIcon } from './TeamIcons.js';
+import { ChromeBadge, CompactMetricPill } from './team-runtime-shell-primitives.js';
+import { Icon } from './TeamIcons.js';
 import type { IconKey } from './TeamIcons.js';
 import { ViewGridIcon, ViewListIcon, ViewKanbanIcon, ViewSingleIcon } from './TeamIcons.js';
 
@@ -18,92 +20,24 @@ function MetricCard({
 }: {
   item: ReturnType<typeof useTeamRuntimeReferenceViewData>['metricCards'][number];
 }) {
-  const [hovered, setHovered] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   return (
-    <button
-      type="button"
-      onClick={() => setExpanded((e) => !e)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        border: '1px solid var(--border)',
-        borderLeft: hovered
-          ? `3px solid var(--accent)`
-          : `3px solid color-mix(in oklch, var(--accent) 40%, transparent)`,
-        background: hovered
-          ? 'color-mix(in oklch, var(--accent) 4%, var(--card-bg))'
-          : 'var(--card-bg)',
-        boxShadow: hovered ? 'var(--shadow-md)' : 'var(--shadow-sm)',
-        borderRadius: 10,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: '10px 14px',
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
-        textAlign: 'left',
-      }}
-    >
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            display: 'grid',
-            placeItems: 'center',
-            background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
-            flexShrink: 0,
-          }}
-        >
-          <Icon name={item.icon as IconKey} size={14} color="var(--accent)" />
-        </span>
-        <div style={{ display: 'grid', gap: 1, minWidth: 0, flex: 1 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 500 }}>
-            {item.label}
-          </span>
-          <span style={{ fontSize: 24, lineHeight: 1, fontWeight: 800, color: 'var(--text)' }}>
-            {item.value}
-          </span>
-        </div>
-        <span
-          style={{
-            background: 'none',
-            cursor: 'pointer',
-            padding: 4,
-            display: 'inline-flex',
-            alignItems: 'center',
-            transition: 'transform 0.15s',
-            transform: expanded ? 'rotate(180deg)' : 'none',
-          }}
-        >
-          <ChevronDownIcon size={10} color="var(--text-3)" />
-        </span>
-      </div>
-      {expanded && (
-        <div
-          style={{
-            padding: '6px 0 0',
-            borderTop: '1px solid var(--border-subtle)',
-            display: 'grid',
-            gap: 4,
-          }}
-        >
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>详细统计数据加载中...</span>
-        </div>
-      )}
-    </button>
+    <CompactMetricPill
+      icon={<Icon name={item.icon as IconKey} size={14} color="var(--accent)" />}
+      label={item.label}
+      value={item.value}
+    />
   );
 }
 
 export function MainWorkspace({
   activeTab,
+  selectedTeam,
   selectedAgentId,
   onSelectAgent,
   onNewTemplate,
 }: {
   activeTab: AgentTeamsTabKey;
+  selectedTeam: AgentTeamsSidebarTeam | null;
   selectedAgentId: string;
   onSelectAgent: (id: string) => void;
   onNewTemplate: () => void;
@@ -122,6 +56,38 @@ export function MainWorkspace({
         boxSizing: 'border-box',
       }}
     >
+      {selectedTeam ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 10,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '0 2px',
+          }}
+        >
+          <div style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>当前会话</span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+              {selectedTeam.title}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ChromeBadge>
+              {selectedTeam.status === 'running'
+                ? '运行中'
+                : selectedTeam.status === 'paused'
+                  ? '已暂停'
+                  : selectedTeam.status === 'failed'
+                    ? '失败'
+                    : '已完成'}
+            </ChromeBadge>
+            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+          </div>
+        </div>
+      ) : null}
+
       <div
         style={{
           display: 'grid',
@@ -177,17 +143,17 @@ export function MainWorkspace({
             </div>
           </div>
         ) : activeTab === 'conversation' ? (
-          <ConversationTab selectedAgentId={selectedAgentId} />
+          <ConversationTab selectedAgentId={selectedAgentId} selectedTeam={selectedTeam} />
         ) : activeTab === 'tasks' ? (
-          <TasksTab />
+          <TasksTab selectedTeam={selectedTeam} />
         ) : activeTab === 'messages' ? (
-          <MessagesTab />
+          <MessagesTab selectedTeam={selectedTeam} />
         ) : activeTab === 'overview' ? (
-          <OverviewTab />
+          <OverviewTab selectedTeam={selectedTeam} />
         ) : activeTab === 'review' ? (
-          <ReviewTab />
+          <ReviewTab selectedTeam={selectedTeam} />
         ) : activeTab === 'teams' ? (
-          <TeamsTab onNewTemplate={onNewTemplate} />
+          <TeamsTab />
         ) : null}
       </div>
     </section>
@@ -195,18 +161,27 @@ export function MainWorkspace({
 }
 
 export function FooterBar({
-  runningSeconds,
+  activeTab,
   viewMode,
   onViewModeChange,
 }: {
-  runningSeconds: number;
+  activeTab: AgentTeamsTabKey;
   viewMode: number;
   onViewModeChange: (mode: number) => void;
 }) {
-  const { footerLead, footerStats } = useTeamRuntimeReferenceViewData();
+  const { activeMode, footerLead, footerStats } = useTeamRuntimeReferenceViewData();
+  const [runningSeconds, setRunningSeconds] = useState(1001);
+
+  useEffect(() => {
+    const timer = setInterval(() => setRunningSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const mins = Math.floor(runningSeconds / 60);
   const secs = runningSeconds % 60;
   const timeStr = `${mins}m ${secs.toString().padStart(2, '0')}s`;
+  const activeTabLabel = agentTeamsTabs.find((tab) => tab.id === activeTab)?.label ?? activeTab;
+  const viewModeLabel = ['网格', '列表', '看板', '聚焦'][viewMode] ?? '视图';
 
   return (
     <footer
@@ -233,6 +208,8 @@ export function FooterBar({
           }}
         />
         <span>{footerLead}</span>
+        <ChromeBadge>{activeTabLabel}</ChromeBadge>
+        <ChromeBadge>{activeMode === 'live' ? '真实运行态' : '等待接入'}</ChromeBadge>
       </div>
 
       <div
@@ -285,17 +262,8 @@ export function FooterBar({
             <strong style={{ color: 'var(--text)' }}>{item.value}</strong>
           </span>
         ))}
-        <span
-          style={{
-            padding: '1px 6px',
-            borderRadius: 999,
-            background: 'var(--surface)',
-            fontSize: 10,
-            fontWeight: 600,
-          }}
-        >
-          运行 {timeStr}
-        </span>
+        <ChromeBadge>{viewModeLabel}</ChromeBadge>
+        <ChromeBadge>运行 {timeStr}</ChromeBadge>
       </div>
     </footer>
   );

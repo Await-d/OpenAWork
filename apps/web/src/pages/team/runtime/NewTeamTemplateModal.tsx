@@ -1,20 +1,22 @@
-import { useState, useCallback } from 'react';
-import {
-  agentTeamsNewTemplateRoles,
-  agentTeamsNewTemplateProviders,
-} from './team-runtime-reference-mock.js';
+import { useCallback, useMemo, useState } from 'react';
+import { FIXED_TEAM_CORE_ROLE_BINDINGS, type TeamCoreRole } from '@openAwork/shared';
+import { useTeamRuntimeRoleBindings } from './use-team-runtime-role-bindings.js';
+import { agentTeamsNewTemplateProviders } from './team-runtime-ui-config.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { XIcon, CheckIcon } from './TeamIcons.js';
 
+const REQUIRED_TEMPLATE_ROLES = ['planner', 'researcher', 'executor', 'reviewer'] as const;
+
 export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
   const { createTemplate, templateError, templateLoading } = useTeamRuntimeReferenceViewData();
+  const roleBindings = useTeamRuntimeRoleBindings();
   const [templateName, setTemplateName] = useState('');
-  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set());
+  const [selectedOptionalAgents, setSelectedOptionalAgents] = useState<Set<string>>(new Set());
   const [provider, setProvider] = useState('claude-code');
   const [created, setCreated] = useState(false);
 
-  const toggleRole = (value: string) => {
-    setSelectedRoles((prev) => {
+  const toggleOptionalAgent = (value: string) => {
+    setSelectedOptionalAgents((prev) => {
       const next = new Set(prev);
       if (next.has(value)) next.delete(value);
       else next.add(value);
@@ -22,14 +24,24 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
     });
   };
 
-  const isValid = templateName.trim().length > 0 && selectedRoles.size > 0;
+  const fixedRoleCards = useMemo(
+    () =>
+      roleBindings.roleCards.filter((roleCard) =>
+        REQUIRED_TEMPLATE_ROLES.includes(roleCard.role as (typeof REQUIRED_TEMPLATE_ROLES)[number]),
+      ),
+    [roleBindings.roleCards],
+  );
+
+  const hasValidTemplateName = templateName.trim().length > 0;
+  const hasCompleteDefaultBindings = fixedRoleCards.length === REQUIRED_TEMPLATE_ROLES.length;
+  const isValid = hasValidTemplateName && hasCompleteDefaultBindings;
 
   const handleCreate = useCallback(() => {
     if (!isValid) return;
     void createTemplate({
       name: templateName.trim(),
+      optionalAgentIds: Array.from(selectedOptionalAgents),
       provider,
-      roleValues: Array.from(selectedRoles),
     }).then((succeeded) => {
       if (!succeeded) {
         return;
@@ -37,7 +49,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
       setCreated(true);
       window.setTimeout(onClose, 1200);
     });
-  }, [createTemplate, isValid, onClose, provider, selectedRoles, templateName]);
+  }, [createTemplate, isValid, onClose, provider, selectedOptionalAgents, templateName]);
 
   return (
     <div
@@ -149,7 +161,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                   transition: 'border-color 0.15s',
                 }}
               />
-              {!templateName.trim() && (
+              {!hasValidTemplateName && (
                 <span style={{ fontSize: 9, color: 'var(--warning)', paddingLeft: 4 }}>
                   请输入模板名称
                 </span>
@@ -166,38 +178,37 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                   letterSpacing: '0.05em',
                 }}
               >
-                选择角色
+                核心角色（系统固定）
               </span>
-              <div id="team-template-roles" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {agentTeamsNewTemplateRoles.map((role) => {
-                  const selected = selectedRoles.has(role.value);
-                  return (
-                    <button
-                      key={role.value}
-                      type="button"
-                      onClick={() => toggleRole(role.value)}
-                      style={{
-                        padding: '5px 10px',
-                        borderRadius: 999,
-                        border: selected
-                          ? `1px solid ${role.color}`
-                          : '1px solid var(--border-subtle)',
-                        background: selected ? `${role.color}18` : 'var(--surface-2)',
-                        color: selected ? role.color : 'var(--text-3)',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {role.label}
-                    </button>
-                  );
-                })}
+              <div id="team-template-roles" style={{ display: 'grid', gap: 10 }}>
+                {fixedRoleCards.map((roleCard) => (
+                  <div
+                    key={roleCard.role}
+                    style={{
+                      display: 'grid',
+                      gap: 6,
+                      fontSize: 12,
+                      color: 'var(--text-2)',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
+                      background: 'color-mix(in oklch, var(--success) 8%, var(--bg))',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700 }}>{roleCard.roleLabel}</span>
+                    <span style={{ color: 'var(--text)' }}>
+                      {roleCard.selectedAgent?.label ??
+                        FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole]}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      该核心角色由系统固定绑定，用户不可修改。
+                    </span>
+                  </div>
+                ))}
               </div>
-              {selectedRoles.size === 0 && (
+              {!hasCompleteDefaultBindings && (
                 <span style={{ fontSize: 9, color: 'var(--warning)', paddingLeft: 4 }}>
-                  请至少选择一个角色
+                  正在加载系统默认核心角色绑定…
                 </span>
               )}
             </div>
@@ -240,6 +251,48 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                       }}
                     >
                       {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: 6 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--text-3)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                额外成员（可选）
+              </span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['atlas'].map((agentId) => {
+                  const active = selectedOptionalAgents.has(agentId);
+                  return (
+                    <button
+                      key={agentId}
+                      type="button"
+                      onClick={() => toggleOptionalAgent(agentId)}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: 999,
+                        border: active
+                          ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
+                          : '1px solid var(--border-subtle)',
+                        background: active
+                          ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
+                          : 'var(--surface-2)',
+                        color: active ? 'var(--success)' : 'var(--text-3)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {agentId}
                     </button>
                   );
                 })}

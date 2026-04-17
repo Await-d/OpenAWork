@@ -1,12 +1,16 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { AgentTeamsTimelineEventType } from './team-runtime-reference-mock.js';
-import { AGENT_TEAMS_EVENT_CONFIG } from './team-runtime-reference-mock.js';
+import { AGENT_TEAMS_EVENT_CONFIG } from './team-runtime-ui-config.js';
+import type { AgentTeamsSidebarTeam, AgentTeamsTimelineEventType } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { PANEL_STYLE, TREND_META } from './team-runtime-shared.js';
 import { Icon, ChevronDownIcon } from './TeamIcons.js';
 import type { IconKey } from './TeamIcons.js';
 
-export function OverviewTab() {
+export function OverviewTab({
+  selectedTeam = null,
+}: {
+  selectedTeam?: AgentTeamsSidebarTeam | null;
+}) {
   const { activityStats, overviewCards, timelineEvents } = useTeamRuntimeReferenceViewData();
   const [timelineFilter, setTimelineFilter] = useState<Set<AgentTeamsTimelineEventType>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,6 +68,77 @@ export function OverviewTab() {
         <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>运行概览</span>
       </div>
 
+      {selectedTeam ? (
+        <div
+          style={{
+            ...PANEL_STYLE,
+            padding: '12px 14px',
+            borderRadius: 10,
+            display: 'grid',
+            gap: 10,
+            borderLeft: '3px solid var(--accent)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 10,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+                当前会话摘要
+              </span>
+              <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+                {selectedTeam.title}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '3px 9px',
+                  borderRadius: 999,
+                  background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                  color: 'var(--accent)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {selectedTeam.status === 'running'
+                  ? '运行中'
+                  : selectedTeam.status === 'paused'
+                    ? '已暂停'
+                    : selectedTeam.status === 'failed'
+                      ? '失败'
+                      : '已完成'}
+              </span>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '3px 9px',
+                  borderRadius: 999,
+                  background: 'var(--surface-2)',
+                  color: 'var(--text-2)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                }}
+              >
+                {selectedTeam.subtitle}
+              </span>
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.65 }}>
+            当前右侧概览已与左侧会话选择联动。切换会话后，这里的标题与状态摘要会同步变化，方便确认你正在查看的是哪一个团队运行实例。
+          </span>
+        </div>
+      ) : null}
+
       {/* Overview metric cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
         {overviewCards.map((card) => {
@@ -72,32 +147,17 @@ export function OverviewTab() {
           return (
             <div
               key={card.id}
-              onClick={() => toggleCardExpand(card.id)}
               style={{
                 ...PANEL_STYLE,
                 padding: '12px 14px',
                 borderRadius: 10,
                 display: 'grid',
                 gap: 6,
-                cursor: 'pointer',
                 borderLeft: `3px solid var(--accent)`,
                 transition: 'background 0.15s, outline 0.15s, box-shadow 0.15s',
                 outline: isExpanded ? '1px solid var(--accent)' : 'none',
                 outlineOffset: -1,
                 boxShadow: isExpanded ? 'var(--shadow-md)' : 'var(--shadow-sm)',
-              }}
-              onMouseEnter={(e) => {
-                if (!isExpanded) {
-                  e.currentTarget.style.background =
-                    'color-mix(in oklch, var(--accent) 4%, var(--card-bg))';
-                  e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isExpanded) {
-                  e.currentTarget.style.background = 'var(--card-bg)';
-                  e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-                }
               }}
             >
               <div
@@ -242,8 +302,9 @@ export function OverviewTab() {
               const pct = Math.round((count / totalActivityCount) * 100);
               const isFiltered = timelineFilter.has(type as AgentTeamsTimelineEventType);
               return (
-                <div
+                <button
                   key={type}
+                  type="button"
                   onClick={() => toggleFilter(type as AgentTeamsTimelineEventType)}
                   style={{
                     display: 'grid',
@@ -251,6 +312,10 @@ export function OverviewTab() {
                     cursor: 'pointer',
                     opacity: isFiltered || timelineFilter.size === 0 ? 1 : 0.5,
                     transition: 'opacity 0.15s',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    textAlign: 'left',
                   }}
                 >
                   <div
@@ -289,7 +354,7 @@ export function OverviewTab() {
                       }}
                     />
                   </div>
-                </div>
+                </button>
               );
             })}
           {timelineFilter.size > 0 && (
@@ -429,8 +494,9 @@ export function OverviewTab() {
               });
               const isExpanded = expandedEventIds.has(event.id);
               return (
-                <div
+                <button
                   key={event.id}
+                  type="button"
                   onClick={() => toggleEventExpand(event.id)}
                   style={{
                     display: 'flex',
@@ -445,6 +511,11 @@ export function OverviewTab() {
                     transition: 'background 0.15s, box-shadow 0.15s',
                     borderLeft: `3px solid ${isExpanded ? config.color : 'transparent'}`,
                     boxShadow: isExpanded ? 'var(--shadow-sm)' : 'none',
+                    borderTop: 'none',
+                    borderRight: 'none',
+                    borderBottom: 'none',
+                    width: '100%',
+                    textAlign: 'left',
                   }}
                   onMouseEnter={(e) => {
                     if (!isExpanded) {
@@ -539,7 +610,7 @@ export function OverviewTab() {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>

@@ -1,10 +1,11 @@
 import { createTeamClient, type TeamWorkspaceSnapshot } from '@openAwork/web-client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '../../stores/auth.js';
 
 interface TeamWorkspaceSnapshotState {
   error: string | null;
   loading: boolean;
+  refresh: () => void;
   snapshot: TeamWorkspaceSnapshot | null;
 }
 
@@ -17,9 +18,15 @@ export function useTeamWorkspaceSnapshotState(
   const [snapshot, setSnapshot] = useState<TeamWorkspaceSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const refresh = useCallback(() => {
+    setRefreshTick((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    void refreshTick;
 
     if (!accessToken || !teamWorkspaceId) {
       setSnapshot(null);
@@ -56,11 +63,12 @@ export function useTeamWorkspaceSnapshotState(
     return () => {
       cancelled = true;
     };
-  }, [accessToken, client, teamWorkspaceId]);
+  }, [accessToken, client, teamWorkspaceId, refreshTick]);
 
   return {
     error,
     loading,
+    refresh,
     snapshot,
   };
 }

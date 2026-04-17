@@ -228,6 +228,16 @@ export default function App() {
             }
           />
           <Route
+            path="/team/templates"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES['team-templates'].component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES['team-templates'].title}
+              />
+            }
+          />
+          <Route
             path="/agents"
             element={
               <LazyRoutePage

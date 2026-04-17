@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
+import { listManagedAgentsForUser } from '../agent-catalog.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
@@ -60,6 +62,28 @@ const createThreadSchema = z.object({
   title: z.string().min(1).max(200).optional(),
 });
 
+const createTeamSessionSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    source: z
+      .object({
+        kind: z.enum(['blank', 'builtin-template', 'saved-template']),
+        templateId: z.string().min(1).optional(),
+      })
+      .optional(),
+    optionalAgentIds: z.array(z.string().min(1)).default([]),
+    defaultProvider: z.string().nullable().optional(),
+  })
+  .superRefine((input, ctx) => {
+    if (input.source && input.source.kind !== 'blank' && !input.source.templateId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'templateId is required when source kind is not blank',
+        path: ['source', 'templateId'],
+      });
+    }
+  });
+
 const importWorkspaceSessionSchema = z.object({
   id: z.string().optional(),
   messages: z.array(z.unknown()).default([]),
@@ -104,6 +128,10 @@ const auditLogsQuerySchema = z.object({
       return value;
     }, z.number().int().min(1).max(100).optional())
     .default(20),
+});
+
+const teamRuntimeQuerySchema = z.object({
+  teamWorkspaceId: z.string().min(1).optional(),
 });
 
 interface SessionShareRow {
@@ -166,7 +194,32 @@ interface TeamRuntimeTaskGroupRecord {
   workspacePath: string | null;
 }
 
+interface WorkflowTemplateLookupRow {
+  id: string;
+  metadata_json: string;
+  name: string;
+}
+
+const workflowTeamTemplateSchema = z.object({
+  defaultBindings: z
+    .object({
+      planner: z.string().min(1).optional(),
+      researcher: z.string().min(1).optional(),
+      executor: z.string().min(1).optional(),
+      reviewer: z.string().min(1).optional(),
+    })
+    .optional(),
+  defaultProvider: z.string().nullable().optional(),
+  optionalAgentIds: z.array(z.string().min(1)).optional(),
+  requiredRoles: z.array(z.enum(['planner', 'researcher', 'executor', 'reviewer'])).optional(),
+});
+
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
+  const SESSION_TEAM_WORKSPACE_ID_SQL =
+    "json_extract(CASE WHEN json_valid(metadata_json) THEN metadata_json ELSE '{}' END, '$.teamWorkspaceId')";
+  const JOINED_SESSION_TEAM_WORKSPACE_ID_SQL =
+    "json_extract(CASE WHEN json_valid(sess.metadata_json) THEN sess.metadata_json ELSE '{}' END, '$.teamWorkspaceId')";
+
   const normalizeMemberStatus = (status: string): 'idle' | 'working' | 'done' | 'error' => {
     if (status === 'working' || status === 'done' || status === 'error') return status;
     return 'idle';
@@ -221,6 +274,98 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       [shareId, userId],
     );
 
+  const getTeamWorkspaceForUser = (
+    userId: string,
+    teamWorkspaceId: string,
+  ): TeamWorkspaceRow | null =>
+    sqliteGet<TeamWorkspaceRow>(
+      `SELECT id, user_id, name, description, visibility, default_working_root, created_at, updated_at
+       FROM team_workspaces
+       WHERE user_id = ? AND id = ?
+       LIMIT 1`,
+      [userId, teamWorkspaceId],
+    ) ?? null;
+
+  const listTeamRuntimeSessionRows = (input: {
+    teamWorkspaceId?: string;
+    userId: string;
+  }): SessionRow[] => {
+    const query =
+      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
+        ? `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+           FROM sessions
+           WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} = ?
+           ORDER BY updated_at DESC`
+        : `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+           FROM sessions
+           WHERE user_id = ? AND ${SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
+           ORDER BY updated_at DESC`;
+
+    const params =
+      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
+        ? [input.userId, input.teamWorkspaceId]
+        : [input.userId];
+
+    return sqliteAll<SessionRow>(query, params).filter((row) => {
+      const metadata = parseSessionMetadataJson(row.metadata_json);
+      return typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
+        ? metadata['teamWorkspaceId'] === input.teamWorkspaceId
+        : metadata['teamWorkspaceId'] != null;
+    });
+  };
+
+  const listTeamSessionShareRows = (input: {
+    teamWorkspaceId?: string;
+    userId: string;
+  }): SessionShareRow[] => {
+    const query =
+      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
+        ? `SELECT
+             ss.id,
+             ss.session_id,
+             ss.member_id,
+             ss.permission,
+             ss.created_at,
+             ss.updated_at,
+             tm.name AS member_name,
+             tm.email AS member_email,
+             sess.title AS label,
+             sess.metadata_json AS session_metadata_json
+           FROM session_shares ss
+           JOIN team_members tm ON tm.id = ss.member_id
+           JOIN sessions sess ON sess.id = ss.session_id
+           WHERE ss.user_id = ? AND ${JOINED_SESSION_TEAM_WORKSPACE_ID_SQL} = ?
+           ORDER BY ss.created_at DESC`
+        : `SELECT
+             ss.id,
+             ss.session_id,
+             ss.member_id,
+             ss.permission,
+             ss.created_at,
+             ss.updated_at,
+             tm.name AS member_name,
+             tm.email AS member_email,
+             sess.title AS label,
+             sess.metadata_json AS session_metadata_json
+           FROM session_shares ss
+           JOIN team_members tm ON tm.id = ss.member_id
+           JOIN sessions sess ON sess.id = ss.session_id
+           WHERE ss.user_id = ? AND ${JOINED_SESSION_TEAM_WORKSPACE_ID_SQL} IS NOT NULL
+           ORDER BY ss.created_at DESC`;
+
+    const params =
+      typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
+        ? [input.userId, input.teamWorkspaceId]
+        : [input.userId];
+
+    return sqliteAll<SessionShareRow>(query, params).filter((row) => {
+      const metadata = parseSessionMetadataJson(row.session_metadata_json);
+      return typeof input.teamWorkspaceId === 'string' && input.teamWorkspaceId.length > 0
+        ? metadata['teamWorkspaceId'] === input.teamWorkspaceId
+        : metadata['teamWorkspaceId'] != null;
+    });
+  };
+
   const mapWorkspaceRow = (row: TeamWorkspaceRow) => ({
     id: row.id,
     name: row.name,
@@ -239,6 +384,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       typeof parseSessionMetadataJson(row.metadata_json)['parentSessionId'] === 'string'
         ? (parseSessionMetadataJson(row.metadata_json)['parentSessionId'] as string) || null
         : null,
+    stateStatus: row.state_status ?? 'idle',
     title: row.title ?? null,
     updatedAt: row.updated_at,
     workspacePath: getWorkspacePathFromMetadataJson({
@@ -250,23 +396,17 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
   const buildWorkspaceRuntimeTaskGroups = async (input: {
     sessionRows: SessionRow[];
-    teamWorkspaceId: string;
     userId: string;
   }): Promise<TeamRuntimeTaskGroupRecord[]> => {
-    const scopedSessionRows = input.sessionRows.filter((row) => {
-      const metadata = parseSessionMetadataJson(row.metadata_json);
-      return metadata['teamWorkspaceId'] === input.teamWorkspaceId;
-    });
-
     return mergeRuntimeTaskGroups(
       await Promise.all(
-        scopedSessionRows.map(async (row) => {
+        input.sessionRows.map(async (row) => {
           const workspacePath = getWorkspacePathFromMetadataJson({
             metadataJson: row.metadata_json,
             sessionId: row.id,
             userId: input.userId,
           });
-          const includedSessionIds = new Set(scopedSessionRows.map((sessionRow) => sessionRow.id));
+          const includedSessionIds = new Set(input.sessionRows.map((sessionRow) => sessionRow.id));
 
           const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
             includedSessionIds,
@@ -343,7 +483,6 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'team.workspace.create');
       const user = request.user as JwtPayload;
-
       const parseStep = child('parse-body');
       const body = createWorkspaceSchema.safeParse(request.body);
       if (!body.success) {
@@ -463,6 +602,207 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { teamWorkspaceId });
 
       return reply.send(updated ? mapWorkspaceRow(updated) : { error: 'Workspace not found' });
+    },
+  );
+
+  app.post(
+    '/team/workspaces/:teamWorkspaceId/sessions',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step, child } = startRequestWorkflow(request, 'team.session.create', undefined, {
+        teamWorkspaceId,
+      });
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = createTeamSessionSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const workspaceStep = child('resolve-workspace');
+      const workspace = getTeamWorkspaceForUser(user.sub, teamWorkspaceId);
+      if (!workspace) {
+        workspaceStep.fail('workspace not found');
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+      workspaceStep.succeed();
+
+      let templateLookup: {
+        id: string;
+        name: string;
+        teamTemplate: z.infer<typeof workflowTeamTemplateSchema>;
+      } | null = null;
+      if (body.data.source?.kind === 'saved-template' && body.data.source.templateId) {
+        const templateStep = child('resolve-template');
+        const templateRow = sqliteGet<WorkflowTemplateLookupRow>(
+          `SELECT id, name, metadata_json
+           FROM workflow_templates
+           WHERE user_id = ? AND id = ?
+           LIMIT 1`,
+          [user.sub, body.data.source.templateId],
+        );
+        if (!templateRow) {
+          templateStep.fail('template not found');
+          step.fail('template not found');
+          return reply.status(404).send({ error: 'Template not found' });
+        }
+
+        let parsedMetadata: unknown;
+        try {
+          parsedMetadata = JSON.parse(templateRow.metadata_json || '{}');
+        } catch {
+          templateStep.fail('template metadata invalid');
+          step.fail('template metadata invalid');
+          return reply.status(400).send({ error: 'Template metadata is invalid JSON' });
+        }
+
+        const teamTemplate = workflowTeamTemplateSchema.safeParse(
+          (parsedMetadata as { teamTemplate?: unknown })?.teamTemplate,
+        );
+        if (!teamTemplate.success) {
+          templateStep.fail('template metadata missing');
+          step.fail('template metadata missing');
+          return reply
+            .status(400)
+            .send({ error: 'Template does not contain a valid teamTemplate metadata payload' });
+        }
+
+        templateLookup = {
+          id: templateRow.id,
+          name: templateRow.name,
+          teamTemplate: teamTemplate.data,
+        };
+        templateStep.succeed(undefined, { templateId: templateRow.id });
+      }
+
+      const agentsStep = child('resolve-agents');
+      const managedAgents = listManagedAgentsForUser(user.sub).filter((agent) => agent.enabled);
+      const agentMap = new Map(managedAgents.map((agent) => [agent.id, agent]));
+      const requiredRoleBindings = FIXED_TEAM_CORE_ROLE_ORDER.map((role) => ({
+        role,
+        agentId: FIXED_TEAM_CORE_ROLE_BINDINGS[role],
+      }));
+      const invalidRequiredAgent = requiredRoleBindings.find(
+        (binding) => !agentMap.has(binding.agentId),
+      );
+      if (invalidRequiredAgent) {
+        agentsStep.fail('invalid required agent');
+        step.fail('invalid required agent');
+        return reply.status(400).send({ error: `Unknown agent: ${invalidRequiredAgent.agentId}` });
+      }
+
+      const requiredAgentIds = new Set(requiredRoleBindings.map((binding) => binding.agentId));
+      const optionalAgentIds = Array.from(
+        new Set(
+          body.data.optionalAgentIds.length > 0
+            ? body.data.optionalAgentIds
+            : (templateLookup?.teamTemplate.optionalAgentIds ?? []),
+        ),
+      );
+      const invalidOptionalAgent = optionalAgentIds.find((agentId) => !agentMap.has(agentId));
+      if (invalidOptionalAgent) {
+        agentsStep.fail('invalid optional agent');
+        step.fail('invalid optional agent');
+        return reply.status(400).send({ error: `Unknown optional agent: ${invalidOptionalAgent}` });
+      }
+      const overlappingOptionalAgent = optionalAgentIds.find((agentId) =>
+        requiredAgentIds.has(agentId),
+      );
+      if (overlappingOptionalAgent) {
+        agentsStep.fail('duplicate optional agent');
+        step.fail('duplicate optional agent');
+        return reply.status(400).send({
+          error: `Optional agent duplicates required binding: ${overlappingOptionalAgent}`,
+        });
+      }
+      agentsStep.succeed(undefined, {
+        optional: optionalAgentIds.length,
+        required: requiredRoleBindings.length,
+      });
+
+      const teamDefinition = {
+        createdAt: new Date().toISOString(),
+        defaultProvider:
+          body.data.defaultProvider ?? templateLookup?.teamTemplate.defaultProvider ?? null,
+        optionalMembers: optionalAgentIds.map((agentId) => {
+          const agent = agentMap.get(agentId)!;
+          return {
+            agentId: agent.id,
+            agentLabel: agent.label,
+            canonicalRole: agent.canonicalRole?.coreRole ?? null,
+          };
+        }),
+        requiredRoleBindings: requiredRoleBindings.map((binding) => {
+          const agent = agentMap.get(binding.agentId)!;
+          return {
+            agentId: agent.id,
+            agentLabel: agent.label,
+            role: binding.role,
+          };
+        }),
+        source: {
+          kind: body.data.source?.kind ?? 'blank',
+          ...(body.data.source?.templateId ? { templateId: body.data.source.templateId } : {}),
+          ...(templateLookup ? { templateName: templateLookup.name } : {}),
+        },
+      };
+
+      const metadataPatch = validateSessionMetadataPatch({
+        teamDefinition,
+        teamWorkspaceId,
+        workingDirectory: workspace.default_working_root ?? undefined,
+      });
+      if (!metadataPatch.success) {
+        step.fail('invalid metadata');
+        return reply
+          .status(400)
+          .send({ error: 'Invalid metadata', issues: metadataPatch.error.issues });
+      }
+
+      const normalizedMetadata = normalizeIncomingSessionMetadata(metadataPatch.data);
+      if (normalizedMetadata.workingDirectory === null) {
+        step.fail('forbidden path');
+        return reply.status(403).send({ error: 'Forbidden' });
+      }
+
+      const requestedParentSessionId = extractParentSessionIdFromMetadata(
+        normalizedMetadata.metadata,
+      );
+      const parentValidation = validateParentSessionBinding({
+        parentSessionId: requestedParentSessionId,
+        userId: user.sub,
+      });
+      if (!parentValidation.ok) {
+        step.fail(parentValidation.reason);
+        return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
+      }
+
+      const sessionId = randomUUID();
+      sqliteRun(
+        'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          sessionId,
+          user.sub,
+          '[]',
+          'idle',
+          JSON.stringify(normalizedMetadata.metadata),
+          body.data.title ?? workspace.name,
+        ],
+      );
+      step.succeed(undefined, { sessionId, teamWorkspaceId });
+
+      return reply.status(201).send({
+        id: sessionId,
+        metadata_json: JSON.stringify(normalizedMetadata.metadata),
+        state_status: 'idle',
+        title: body.data.title ?? workspace.name,
+      });
     },
   );
 
@@ -646,40 +986,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       workspaceStep.succeed();
 
       const sessionsStep = child('sessions');
-      const allSessionRows = sqliteAll<SessionRow>(
-        `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
-         FROM sessions
-         WHERE user_id = ?
-         ORDER BY updated_at DESC`,
-        [user.sub],
-      );
-      const scopedSessionRows = allSessionRows.filter((row) => {
-        const metadata = parseSessionMetadataJson(row.metadata_json);
-        return metadata['teamWorkspaceId'] === teamWorkspaceId;
-      });
+      const scopedSessionRows = listTeamRuntimeSessionRows({ userId: user.sub, teamWorkspaceId });
+      const scopedSessionIds = new Set(scopedSessionRows.map((row) => row.id));
       sessionsStep.succeed(undefined, { count: scopedSessionRows.length });
 
       const sharesStep = child('session-shares');
-      const scopedSessionIds = new Set(scopedSessionRows.map((row) => row.id));
-      const shareRows = sqliteAll<SessionShareRow>(
-        `SELECT
-           ss.id,
-           ss.session_id,
-           ss.member_id,
-           ss.permission,
-           ss.created_at,
-           ss.updated_at,
-           tm.name AS member_name,
-           tm.email AS member_email,
-           sess.title AS label,
-           sess.metadata_json AS session_metadata_json
-         FROM session_shares ss
-         JOIN team_members tm ON tm.id = ss.member_id
-         JOIN sessions sess ON sess.id = ss.session_id
-         WHERE ss.user_id = ?
-         ORDER BY ss.created_at DESC`,
-        [user.sub],
-      ).filter((row) => scopedSessionIds.has(row.session_id));
+      const shareRows = listTeamSessionShareRows({ userId: user.sub, teamWorkspaceId }).filter(
+        (row) => scopedSessionIds.has(row.session_id),
+      );
       sharesStep.succeed(undefined, { count: shareRows.length });
 
       const sharedSessionsStep = child('shared-with-me');
@@ -687,7 +1001,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         email: user.email,
         limit: 24,
         offset: 0,
-      }).filter((record) => record.session.workspacePath === workspace.default_working_root);
+        teamWorkspaceId,
+      });
       const sharedSessions = sharedSessionAccessRecords.map((sharedSession) => ({
         sessionId: sharedSession.session.id,
         title: sharedSession.session.title,
@@ -704,8 +1019,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
       const runtimeTaskGroupsStep = child('runtime-task-groups');
       const runtimeTaskGroups = await buildWorkspaceRuntimeTaskGroups({
-        sessionRows: allSessionRows,
-        teamWorkspaceId,
+        sessionRows: scopedSessionRows,
         userId: user.sub,
       });
       runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
@@ -733,66 +1047,114 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'team.runtime.get');
       const user = request.user as JwtPayload;
 
+      const queryStep = child('parse-query');
+      const query = teamRuntimeQuerySchema.safeParse(request.query);
+      if (!query.success) {
+        queryStep.fail('invalid query');
+        step.fail('invalid query');
+        return reply.status(400).send({ error: 'Invalid query', issues: query.error.issues });
+      }
+      queryStep.succeed(undefined, query.data.teamWorkspaceId ? query.data : undefined);
+
+      if (query.data.teamWorkspaceId) {
+        const workspaceStep = child('workspace');
+        const workspace = getTeamWorkspaceForUser(user.sub, query.data.teamWorkspaceId);
+        if (!workspace) {
+          workspaceStep.fail('workspace not found');
+          step.fail('workspace not found');
+          return reply.status(404).send({ error: 'Workspace not found' });
+        }
+        workspaceStep.succeed(undefined, { teamWorkspaceId: workspace.id });
+      }
+
+      // Run independent sync queries together, then overlap async task projection
+      // with remaining sync work that doesn't depend on its result.
       const membersStep = child('members');
-      const memberRows = sqliteAll<MemberRow>(
-        `SELECT id, name, email, role, avatar_url, status, created_at FROM team_members WHERE user_id = ? ORDER BY created_at ASC`,
-        [user.sub],
-      );
-      membersStep.succeed(undefined, { count: memberRows.length });
-
       const tasksStep = child('tasks');
-      const taskRows = sqliteAll<TaskRow>(
-        `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC`,
-        [user.sub],
-      );
-      tasksStep.succeed(undefined, { count: taskRows.length });
-
       const messagesStep = child('messages');
-      const messageRows = sqliteAll<MessageRow>(
-        `SELECT id, sender_id, content, type, created_at FROM team_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100`,
-        [user.sub],
-      );
+      const sessionsStep = child('sessions');
+
+      const [memberRows, taskRows, messageRows, sessionRows] = [
+        sqliteAll<MemberRow>(
+          `SELECT id, name, email, role, avatar_url, status, created_at FROM team_members WHERE user_id = ? ORDER BY created_at ASC`,
+          [user.sub],
+        ),
+        sqliteAll<TaskRow>(
+          `SELECT id, title, assignee_id, status, priority, result, created_at, updated_at FROM team_tasks WHERE user_id = ? ORDER BY created_at DESC`,
+          [user.sub],
+        ),
+        sqliteAll<MessageRow>(
+          `SELECT id, sender_id, content, type, created_at FROM team_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100`,
+          [user.sub],
+        ),
+        listTeamRuntimeSessionRows({
+          userId: user.sub,
+          teamWorkspaceId: query.data.teamWorkspaceId,
+        }),
+      ];
+
+      membersStep.succeed(undefined, { count: memberRows.length });
+      tasksStep.succeed(undefined, { count: taskRows.length });
       messagesStep.succeed(undefined, { count: messageRows.length });
 
-      const sharesStep = child('session-shares');
-      const shareRows = sqliteAll<SessionShareRow>(
-        `SELECT
-           ss.id,
-           ss.session_id,
-           ss.member_id,
-           ss.permission,
-           ss.created_at,
-           ss.updated_at,
-           tm.name AS member_name,
-           tm.email AS member_email,
-           sess.title AS label,
-           sess.metadata_json AS session_metadata_json
-         FROM session_shares ss
-         JOIN team_members tm ON tm.id = ss.member_id
-         JOIN sessions sess ON sess.id = ss.session_id
-         WHERE ss.user_id = ?
-         ORDER BY ss.created_at DESC`,
-        [user.sub],
-      );
-      sharesStep.succeed(undefined, { count: shareRows.length });
-
-      const sessionsStep = child('sessions');
-      const sessionRows = sqliteAll<SessionRow>(
-        `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
-        [user.sub],
-      );
+      const teamSessionIds = new Set(sessionRows.map((row) => row.id));
       sessionsStep.succeed(undefined, { count: sessionRows.length });
 
+      const sharesStep = child('session-shares');
+      const shareRows = listTeamSessionShareRows({
+        userId: user.sub,
+        teamWorkspaceId: query.data.teamWorkspaceId,
+      }).filter((row) => teamSessionIds.has(row.session_id));
+      sharesStep.succeed(undefined, { count: shareRows.length });
+
+      // Kick off async runtime task groups immediately — they are the slowest part.
+      // Run remaining sync queries (audit, shared sessions) in parallel with the async work.
+      const sharedSessionAccessRecords = listSharedSessionsForRecipient({
+        email: user.email,
+        limit: 24,
+        offset: 0,
+        ...(query.data.teamWorkspaceId
+          ? { teamWorkspaceId: query.data.teamWorkspaceId }
+          : { onlyTeamSessions: true }),
+      });
+
+      const runtimeTaskGroupsPromise = Promise.all(
+        sharedSessionAccessRecords.map(async (sharedSession) => {
+          const workspacePath = sharedSession.session.workspacePath ?? null;
+          const relatedSessionRows = sessionRows.filter(
+            (row) =>
+              getWorkspacePathFromMetadataJson({
+                metadataJson: row.metadata_json,
+                sessionId: row.id,
+                userId: user.sub,
+              }) === workspacePath,
+          );
+          const includedSessionIds = new Set(relatedSessionRows.map((sessionRow) => sessionRow.id));
+          if (!includedSessionIds.has(sharedSession.session.id)) {
+            includedSessionIds.add(sharedSession.session.id);
+          }
+
+          const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
+            includedSessionIds,
+            sessions: sessionRows,
+            sessionId: sharedSession.session.id,
+          });
+
+          return {
+            sessionIds: [sharedSession.session.id],
+            tasks: tasks.filter((task) => task.status !== 'cancelled'),
+            updatedAt,
+            workspacePath,
+          };
+        }),
+      );
+
+      // While async task projection runs, do the remaining sync work.
       const auditStep = child('audit-logs');
       const auditLogs = listTeamAuditLogs({ userId: user.sub, limit: 24 });
       auditStep.succeed(undefined, { count: auditLogs.length });
 
       const sharedSessionsStep = child('shared-with-me');
-      const sharedSessionAccessRecords = listSharedSessionsForRecipient({
-        email: user.email,
-        limit: 24,
-        offset: 0,
-      });
       const sharedSessions = sharedSessionAccessRecords.map((sharedSession) => ({
         sessionId: sharedSession.session.id,
         title: sharedSession.session.title,
@@ -807,41 +1169,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }));
       sharedSessionsStep.succeed(undefined, { count: sharedSessions.length });
 
+      // Await the async task projection — by now sync work is done, so this
+      // only blocks for the remaining async duration.
       const runtimeTaskGroupsStep = child('runtime-task-groups');
-      const runtimeTaskGroups = mergeRuntimeTaskGroups(
-        await Promise.all(
-          sharedSessionAccessRecords.map(async (sharedSession) => {
-            const workspacePath = sharedSession.session.workspacePath ?? null;
-            const relatedSessionRows = sessionRows.filter(
-              (row) =>
-                getWorkspacePathFromMetadataJson({
-                  metadataJson: row.metadata_json,
-                  sessionId: row.id,
-                  userId: user.sub,
-                }) === workspacePath,
-            );
-            const includedSessionIds = new Set(
-              relatedSessionRows.map((sessionRow) => sessionRow.id),
-            );
-            if (!includedSessionIds.has(sharedSession.session.id)) {
-              includedSessionIds.add(sharedSession.session.id);
-            }
-
-            const { tasks, updatedAt } = await buildMergedSessionTaskProjection({
-              includedSessionIds,
-              sessions: sessionRows,
-              sessionId: sharedSession.session.id,
-            });
-
-            return {
-              sessionIds: [sharedSession.session.id],
-              tasks: tasks.filter((task) => task.status !== 'cancelled'),
-              updatedAt,
-              workspacePath,
-            };
-          }),
-        ),
-      );
+      const runtimeTaskGroups = mergeRuntimeTaskGroups(await runtimeTaskGroupsPromise);
       runtimeTaskGroupsStep.succeed(undefined, { count: runtimeTaskGroups.length });
 
       const response = {
@@ -1422,4 +1753,267 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(204).send();
     },
   );
+
+  const interactionRewriteSchema = z.object({
+    intent: z.string().min(1).max(2000),
+    context: z.string().max(4000).optional(),
+  });
+
+  app.post(
+    '/team/interaction-agent/rewrite',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.interaction-agent.rewrite');
+
+      const parseStep = child('parse-body');
+      const body = interactionRewriteSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? '';
+      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
+      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
+
+      if (!AI_API_BASE_URL || !AI_API_KEY) {
+        step.fail('no llm config');
+        return reply.status(503).send({ error: 'Interaction agent LLM is not configured' });
+      }
+
+      const rewriteStep = child('llm-rewrite');
+      const contextBlock = body.data.context
+        ? `\n\n当前工作区上下文摘要：\n${body.data.context}`
+        : '';
+      const prompt = `你是一个团队协作交互代理（interaction-agent）。你的任务是将用户的自然语言意图改写为结构化的团队任务指令。
+
+改写要求：
+1. 保留用户原始意图的核心语义
+2. 将模糊需求拆解为可执行的子任务
+3. 为每个子任务推荐合适的执行角色（planner/researcher/executor/reviewer）
+4. 给出推荐的下一步动作
+5. 用中文输出
+
+用户意图：${body.data.intent}${contextBlock}
+
+请按以下格式输出：
+【改写结果】<改写后的结构化意图>
+【推荐角色】<planner/researcher/executor/reviewer>
+【下一步】<推荐的下一步动作>`;
+
+      try {
+        const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
+        const rewritten = await requestWorkflowLlmCompletion({
+          apiBaseUrl: AI_API_BASE_URL,
+          apiKey: AI_API_KEY,
+          model: AI_DEFAULT_MODEL,
+          prompt,
+          temperature: 0.3,
+        });
+        rewriteStep.succeed(undefined, { outputLength: rewritten.length });
+
+        const rewrittenIntent = extractField(rewritten, '改写结果') || rewritten;
+        const recommendedRole = extractField(rewritten, '推荐角色') || 'planner';
+        const recommendedNextStep =
+          extractField(rewritten, '下一步') ||
+          '可将这条改写结果继续落到 Team 任务、共享运行跟进项或执行角色分工。';
+
+        step.succeed();
+
+        return reply.send({
+          createdAt: Date.now(),
+          recommendedNextStep,
+          rewrittenIntent,
+          sourceIntent: body.data.intent,
+          status: 'completed',
+          recommendedRole,
+        });
+      } catch (_error: unknown) {
+        rewriteStep.fail('llm error');
+        step.fail('llm error');
+        return reply.status(500).send({ error: 'Interaction agent rewrite failed' });
+      }
+    },
+  );
+
+  // ─── Team Leader Dispatch ───
+
+  const leaderDispatchSchema = z.object({
+    rewrittenIntent: z.string().min(1),
+    recommendedRole: z.string().optional(),
+    sourceIntent: z.string().optional(),
+    context: z.string().max(4000).optional(),
+  });
+
+  interface LeaderDispatchedTask {
+    assigneeRole: string;
+    assigneeAgentId: string;
+    priority: 'low' | 'medium' | 'high';
+    taskId: string;
+    title: string;
+  }
+
+  interface LeaderDispatchResult {
+    dispatchedTasks: LeaderDispatchedTask[];
+    leaderAnalysis: string;
+    status: 'completed';
+  }
+
+  app.post(
+    '/team/leader/dispatch',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'team.leader.dispatch');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = leaderDispatchSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? '';
+      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
+      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
+
+      if (!AI_API_BASE_URL || !AI_API_KEY) {
+        step.fail('no llm config');
+        return reply.status(503).send({ error: 'Team leader LLM is not configured' });
+      }
+
+      // Resolve role → agentId mapping from fixed bindings
+      const roleAgentMap: Record<string, string> = { ...FIXED_TEAM_CORE_ROLE_BINDINGS };
+      const roleOptions = FIXED_TEAM_CORE_ROLE_ORDER.map(
+        (role) => `${role}（绑定 agent: ${roleAgentMap[role]}）`,
+      ).join('、');
+
+      const analyzeStep = child('llm-analyze');
+      const contextBlock = body.data.context ? `\n\n当前工作区上下文：\n${body.data.context}` : '';
+      const prompt = `你是团队领导（team-leader）。你的任务是将 interaction-agent 改写后的结构化意图拆解为具体的团队任务，并分配给合适的角色。
+
+可用角色及绑定 agent：
+${roleOptions}
+
+改写后的意图：${body.data.rewrittenIntent}
+推荐角色：${body.data.recommendedRole ?? '未指定'}${contextBlock}
+
+请按以下格式输出，每个任务一行：
+【分析】<你对这个意图的整体分析和拆解策略>
+【任务】<角色>|<优先级(low/medium/high)>|<任务标题>
+【任务】<角色>|<优先级(low/medium/high)>|<任务标题>
+...
+
+要求：
+1. 每个任务必须分配给 planner/researcher/executor/reviewer 之一
+2. 任务标题要具体、可执行
+3. 优先级根据依赖关系和重要性分配
+4. 用中文输出`;
+
+      try {
+        const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
+        const analysis = await requestWorkflowLlmCompletion({
+          apiBaseUrl: AI_API_BASE_URL,
+          apiKey: AI_API_KEY,
+          model: AI_DEFAULT_MODEL,
+          prompt,
+          temperature: 0.3,
+        });
+        analyzeStep.succeed(undefined, { outputLength: analysis.length });
+
+        // Parse tasks from LLM output
+        const leaderAnalysis = extractField(analysis, '分析') || analysis;
+        const taskPattern = /【任务】(.+?)\|(.+?)\|(.+?)(?:【|$)/gs;
+        const parsedTasks: Array<{ role: string; priority: string; title: string }> = [];
+        let match: RegExpExecArray | null;
+        while ((match = taskPattern.exec(analysis)) !== null) {
+          parsedTasks.push({
+            role: match[1]!.trim(),
+            priority: match[2]!.trim(),
+            title: match[3]!.trim(),
+          });
+        }
+
+        // If LLM failed to produce structured tasks, create a single fallback task
+        if (parsedTasks.length === 0) {
+          const fallbackRole =
+            body.data.recommendedRole &&
+            FIXED_TEAM_CORE_ROLE_ORDER.includes(
+              body.data.recommendedRole as (typeof FIXED_TEAM_CORE_ROLE_ORDER)[number],
+            )
+              ? body.data.recommendedRole
+              : 'planner';
+          parsedTasks.push({
+            priority: 'medium',
+            role: fallbackRole,
+            title: body.data.rewrittenIntent,
+          });
+        }
+
+        // Create team_task records
+        const insertStep = child('insert-tasks');
+        const dispatchedTasks: LeaderDispatchedTask[] = [];
+
+        for (const task of parsedTasks) {
+          const normalizedRole = FIXED_TEAM_CORE_ROLE_ORDER.find(
+            (r) => r === task.role || task.role.includes(r),
+          );
+          const assigneeAgentId = normalizedRole
+            ? (roleAgentMap[normalizedRole] ?? task.role)
+            : task.role;
+          const validPriority = ['low', 'medium', 'high'].includes(task.priority)
+            ? (task.priority as 'low' | 'medium' | 'high')
+            : 'medium';
+
+          const taskId = randomUUID();
+          sqliteRun(
+            `INSERT INTO team_tasks (id, user_id, title, assignee_id, status, priority, result) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [taskId, user.sub, task.title, assigneeAgentId, 'pending', validPriority, null],
+          );
+
+          dispatchedTasks.push({
+            assigneeRole: normalizedRole ?? task.role,
+            assigneeAgentId,
+            priority: validPriority,
+            taskId,
+            title: task.title,
+          });
+        }
+        insertStep.succeed(undefined, { taskCount: dispatchedTasks.length });
+
+        logTeamAudit({
+          action: 'task_created',
+          actorEmail: user.email,
+          actorUserId: user.sub,
+          detail: `team-leader 自动分派 ${dispatchedTasks.length} 个任务：${dispatchedTasks.map((t) => `${t.title}→${t.assigneeRole}`).join('；')}`,
+          entityId: dispatchedTasks[0]?.taskId ?? 'batch',
+          entityType: 'team_task',
+          summary: `team-leader 从 interaction-agent 改写结果自动创建 ${dispatchedTasks.length} 个任务`,
+          userId: user.sub,
+        });
+
+        step.succeed(undefined, { taskCount: dispatchedTasks.length });
+
+        return reply.send({
+          dispatchedTasks,
+          leaderAnalysis,
+          status: 'completed',
+        } satisfies LeaderDispatchResult);
+      } catch (_error: unknown) {
+        analyzeStep.fail('llm error');
+        step.fail('llm error');
+        return reply.status(500).send({ error: 'Team leader dispatch failed' });
+      }
+    },
+  );
+}
+
+function extractField(text: string, label: string): string | null {
+  const pattern = new RegExp(`【${label}】(.+?)(?:【|$)`, 's');
+  const match = pattern.exec(text);
+  return match?.[1]?.trim() ?? null;
 }

@@ -1,10 +1,15 @@
-import { useState, useCallback, useMemo } from 'react';
-import type { AgentTeamsMessageCard } from './team-runtime-reference-mock.js';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import type { AgentTeamsMessageCard, AgentTeamsSidebarTeam } from './team-runtime-types.js';
+import { ChromeBadge } from './team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { PANEL_STYLE, MSG_TYPE_META } from './team-runtime-shared.js';
 import { Icon, DirectIcon, SendIcon, XIcon } from './TeamIcons.js';
 
-export function MessagesTab() {
+export function MessagesTab({
+  selectedTeam = null,
+}: {
+  selectedTeam?: AgentTeamsSidebarTeam | null;
+}) {
   const { busy, messageCards, sendMessage } = useTeamRuntimeReferenceViewData();
   const [typeFilter, setTypeFilter] = useState<Set<AgentTeamsMessageCard['type']>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -12,6 +17,15 @@ export function MessagesTab() {
   const [replies, setReplies] = useState<Record<string, string[]>>({});
   const [broadcastInput, setBroadcastInput] = useState('');
   const [broadcasts, setBroadcasts] = useState<string[]>([]);
+
+  useEffect(() => {
+    setTypeFilter(new Set());
+    setReplyingTo(null);
+    setReplyInput('');
+    setReplies({});
+    setBroadcastInput('');
+    setBroadcasts([]);
+  }, [selectedTeam?.id]);
 
   const toggleTypeFilter = useCallback((type: AgentTeamsMessageCard['type']) => {
     setTypeFilter((prev) => {
@@ -122,6 +136,44 @@ export function MessagesTab() {
           )}
         </div>
       </div>
+
+      {selectedTeam ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 10,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--card-bg)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+              当前消息会话
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+              {selectedTeam.title}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ChromeBadge>
+              {selectedTeam.status === 'running'
+                ? '运行中'
+                : selectedTeam.status === 'paused'
+                  ? '已暂停'
+                  : selectedTeam.status === 'failed'
+                    ? '失败'
+                    : '已完成'}
+            </ChromeBadge>
+            <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge>
+          </div>
+        </div>
+      ) : null}
 
       {/* Two-column layout: messages + broadcast panel */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 12 }}>

@@ -11,6 +11,10 @@ const { listSharedSessionsForRecipientMock } = vi.hoisted(() => ({
   listSharedSessionsForRecipientMock: vi.fn(),
 }));
 
+const { listManagedAgentsForUserMock } = vi.hoisted(() => ({
+  listManagedAgentsForUserMock: vi.fn(),
+}));
+
 vi.mock('../auth.js', () => ({ requireAuth: async () => undefined }));
 
 vi.mock('../request-workflow.js', () => ({
@@ -32,6 +36,10 @@ vi.mock('../db.js', () => ({
 
 vi.mock('../session-shared-access.js', () => ({
   listSharedSessionsForRecipient: listSharedSessionsForRecipientMock,
+}));
+
+vi.mock('../agent-catalog.js', () => ({
+  listManagedAgentsForUser: listManagedAgentsForUserMock,
 }));
 
 import { teamRoutes } from '../routes/team.js';
@@ -171,6 +179,19 @@ beforeEach(async () => {
     if (sql.includes('FROM team_tasks')) {
       return { id: 'task-1' };
     }
+    if (sql.includes('FROM workflow_templates')) {
+      return {
+        id: 'workflow-1',
+        name: '研究团队模板',
+        metadata_json: JSON.stringify({
+          teamTemplate: {
+            defaultProvider: 'claude-code',
+            optionalAgentIds: ['atlas'],
+            requiredRoles: ['planner', 'researcher'],
+          },
+        }),
+      };
+    }
     if (sql.includes('FROM sessions')) {
       return {
         id: 'session-1',
@@ -209,24 +230,69 @@ beforeEach(async () => {
       currentSharePermission = params[0] as 'view' | 'comment' | 'operate';
     }
   });
-  listSharedSessionsForRecipientMock.mockReturnValue([
-    {
-      session: {
-        id: 'shared-session-1',
-        title: '上线回顾',
-        stateStatus: 'paused',
-        workspacePath: '/repo/apps/web',
-        createdAt: '2026-04-04T03:00:00.000Z',
-        updatedAt: '2026-04-04T03:30:00.000Z',
-        metadataJson: JSON.stringify({ workingDirectory: '/repo/apps/web' }),
-      },
-      ownerUserId: 'owner-1',
-      permission: 'comment',
-      messagesJson: '[]',
-      shareCreatedAt: '2026-04-04T04:00:00.000Z',
-      shareUpdatedAt: '2026-04-04T04:15:00.000Z',
-      sharedByEmail: 'owner@openawork.local',
+  listSharedSessionsForRecipientMock.mockImplementation(
+    (input: {
+      email: string;
+      limit: number;
+      offset: number;
+      onlyTeamSessions?: boolean;
+      teamWorkspaceId?: string;
+    }) => {
+      void input.email;
+      void input.limit;
+      void input.offset;
+
+      const rows = [
+        {
+          session: {
+            id: 'session-1',
+            title: '上线回顾',
+            stateStatus: 'paused',
+            workspacePath: '/repo/apps/web',
+            createdAt: '2026-04-04T03:00:00.000Z',
+            updatedAt: '2026-04-04T03:30:00.000Z',
+            metadataJson: JSON.stringify({
+              teamWorkspaceId: 'workspace-1',
+              workingDirectory: '/repo/apps/web',
+            }),
+          },
+          ownerUserId: 'owner-1',
+          permission: 'comment',
+          messagesJson: '[]',
+          shareCreatedAt: '2026-04-04T04:00:00.000Z',
+          shareUpdatedAt: '2026-04-04T04:15:00.000Z',
+          sharedByEmail: 'owner@openawork.local',
+        },
+      ];
+
+      return rows.filter((row) => {
+        const metadata = JSON.parse(row.session.metadataJson) as { teamWorkspaceId?: string };
+        if (input.teamWorkspaceId) {
+          return metadata.teamWorkspaceId === input.teamWorkspaceId;
+        }
+        if (input.onlyTeamSessions) {
+          return metadata.teamWorkspaceId != null;
+        }
+        return true;
+      });
     },
+  );
+  listManagedAgentsForUserMock.mockReturnValue([
+    { id: 'oracle', label: 'Oracle', enabled: true, canonicalRole: { coreRole: 'planner' } },
+    {
+      id: 'librarian',
+      label: 'Librarian',
+      enabled: true,
+      canonicalRole: { coreRole: 'researcher' },
+    },
+    {
+      id: 'hephaestus',
+      label: 'Hephaestus',
+      enabled: true,
+      canonicalRole: { coreRole: 'executor' },
+    },
+    { id: 'momus', label: 'Momus', enabled: true, canonicalRole: { coreRole: 'reviewer' } },
+    { id: 'atlas', label: 'Atlas', enabled: true, canonicalRole: { coreRole: 'reviewer' } },
   ]);
 
   app = Fastify();
@@ -300,6 +366,83 @@ describe('teamRoutes collaboration slice', () => {
     });
   });
 
+  it('creates a team session with canonical teamDefinition metadata', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/team/workspaces/workspace-1/sessions',
+      payload: {
+        title: '研究团队 2026-04-16',
+        source: { kind: 'blank' },
+        optionalAgentIds: ['atlas'],
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const payload = res.json() as { metadata_json: string; title: string; state_status: string };
+    const metadata = JSON.parse(payload.metadata_json) as {
+      teamDefinition: {
+        optionalMembers: Array<{ agentId: string; agentLabel: string }>;
+        requiredRoleBindings: Array<{ agentId: string; agentLabel: string; role: string }>;
+        source: { kind: string };
+      };
+      teamWorkspaceId: string;
+      workingDirectory: string;
+    };
+
+    expect(payload).toMatchObject({
+      state_status: 'idle',
+      title: '研究团队 2026-04-16',
+    });
+    expect(metadata.teamWorkspaceId).toBe('workspace-1');
+    expect(metadata.workingDirectory).toBe('/repo/apps/web');
+    expect(metadata.teamDefinition.source.kind).toBe('blank');
+    expect(metadata.teamDefinition.requiredRoleBindings).toEqual([
+      { role: 'planner', agentId: 'oracle', agentLabel: 'Oracle' },
+      { role: 'researcher', agentId: 'librarian', agentLabel: 'Librarian' },
+      { role: 'executor', agentId: 'hephaestus', agentLabel: 'Hephaestus' },
+      { role: 'reviewer', agentId: 'momus', agentLabel: 'Momus' },
+    ]);
+    expect(metadata.teamDefinition.optionalMembers).toEqual([
+      { agentId: 'atlas', agentLabel: 'Atlas', canonicalRole: 'reviewer' },
+    ]);
+  });
+
+  it('resolves saved-template metadata and records templateName/defaultProvider', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/team/workspaces/workspace-1/sessions',
+      payload: {
+        title: '模板团队会话',
+        source: { kind: 'saved-template', templateId: 'workflow-1' },
+        optionalAgentIds: [],
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const payload = res.json() as { metadata_json: string };
+    const metadata = JSON.parse(payload.metadata_json) as {
+      teamDefinition: {
+        defaultProvider: string | null;
+        optionalMembers: Array<{
+          agentId: string;
+          agentLabel: string;
+          canonicalRole: string | null;
+        }>;
+        source: { kind: string; templateId?: string; templateName?: string };
+      };
+    };
+
+    expect(metadata.teamDefinition.source).toEqual({
+      kind: 'saved-template',
+      templateId: 'workflow-1',
+      templateName: '研究团队模板',
+    });
+    expect(metadata.teamDefinition.defaultProvider).toBe('claude-code');
+    expect(metadata.teamDefinition.optionalMembers).toEqual([
+      { agentId: 'atlas', agentLabel: 'Atlas', canonicalRole: 'reviewer' },
+    ]);
+  });
+
   it('loads a workspace-scoped team snapshot', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -307,6 +450,12 @@ describe('teamRoutes collaboration slice', () => {
     });
 
     expect(res.statusCode).toBe(200);
+    expect(listSharedSessionsForRecipientMock).toHaveBeenCalledWith({
+      email: 'owner@openawork.local',
+      limit: 24,
+      offset: 0,
+      teamWorkspaceId: 'workspace-1',
+    });
     expect(res.json()).toMatchObject({
       workspace: {
         id: 'workspace-1',
@@ -320,7 +469,7 @@ describe('teamRoutes collaboration slice', () => {
       ],
       sharedSessions: [
         expect.objectContaining({
-          sessionId: 'shared-session-1',
+          sessionId: 'session-1',
         }),
       ],
       sessionShares: [
@@ -329,6 +478,150 @@ describe('teamRoutes collaboration slice', () => {
         }),
       ],
     });
+  });
+
+  it('returns 404 when loading a workspace-scoped runtime for an unknown workspace', async () => {
+    const baseGet = sqliteGetMock.getMockImplementation();
+    sqliteGetMock.mockImplementation((sql: string, params?: unknown[]) => {
+      if (
+        sql.includes('FROM team_workspaces') &&
+        Array.isArray(params) &&
+        params[1] === 'workspace-missing'
+      ) {
+        return undefined;
+      }
+
+      if (!baseGet) {
+        return undefined;
+      }
+
+      return baseGet(sql, params);
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/team/workspaces/workspace-missing/runtime',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'Workspace not found' });
+  });
+
+  it('filters unrelated shares and foreign-workspace shared sessions from a workspace runtime snapshot', async () => {
+    const baseAll = sqliteAllMock.getMockImplementation();
+    sqliteAllMock.mockImplementation((sql: string) => {
+      const rows = baseAll ? baseAll(sql) : [];
+      if (!Array.isArray(rows)) {
+        return rows;
+      }
+
+      if (sql.includes('FROM session_shares')) {
+        return [
+          ...rows,
+          {
+            id: 'share-foreign',
+            session_id: 'foreign-session',
+            member_id: 'member-1',
+            permission: 'view',
+            created_at: '2026-03-22T00:30:00.000Z',
+            updated_at: '2026-03-22T01:30:00.000Z',
+            member_name: '林雾',
+            member_email: 'linwu@openawork.local',
+            label: 'API 讨论',
+            session_metadata_json: JSON.stringify({
+              teamWorkspaceId: 'workspace-2',
+              workingDirectory: '/repo/apps/api',
+            }),
+          },
+        ];
+      }
+
+      return rows;
+    });
+
+    listSharedSessionsForRecipientMock.mockImplementation(
+      (input: {
+        email: string;
+        limit: number;
+        offset: number;
+        onlyTeamSessions?: boolean;
+        teamWorkspaceId?: string;
+      }) => {
+        void input.email;
+        void input.limit;
+        void input.offset;
+
+        const rows = [
+          {
+            session: {
+              id: 'session-1',
+              title: '上线回顾',
+              stateStatus: 'paused',
+              workspacePath: '/repo/apps/web',
+              createdAt: '2026-04-04T03:00:00.000Z',
+              updatedAt: '2026-04-04T03:30:00.000Z',
+              metadataJson: JSON.stringify({
+                teamWorkspaceId: 'workspace-1',
+                workingDirectory: '/repo/apps/web',
+              }),
+            },
+            ownerUserId: 'owner-1',
+            permission: 'comment',
+            messagesJson: '[]',
+            shareCreatedAt: '2026-04-04T04:00:00.000Z',
+            shareUpdatedAt: '2026-04-04T04:15:00.000Z',
+            sharedByEmail: 'owner@openawork.local',
+          },
+          {
+            session: {
+              id: 'shared-session-foreign',
+              title: 'API 回顾',
+              stateStatus: 'running',
+              workspacePath: '/repo/apps/api',
+              createdAt: '2026-04-04T05:00:00.000Z',
+              updatedAt: '2026-04-04T05:30:00.000Z',
+              metadataJson: JSON.stringify({
+                teamWorkspaceId: 'workspace-2',
+                workingDirectory: '/repo/apps/api',
+              }),
+            },
+            ownerUserId: 'owner-2',
+            permission: 'view',
+            messagesJson: '[]',
+            shareCreatedAt: '2026-04-04T06:00:00.000Z',
+            shareUpdatedAt: '2026-04-04T06:15:00.000Z',
+            sharedByEmail: 'api-owner@openawork.local',
+          },
+        ];
+
+        return rows.filter((row) => {
+          const metadata = JSON.parse(row.session.metadataJson) as { teamWorkspaceId?: string };
+          if (input.teamWorkspaceId) {
+            return metadata.teamWorkspaceId === input.teamWorkspaceId;
+          }
+          if (input.onlyTeamSessions) {
+            return metadata.teamWorkspaceId != null;
+          }
+          return true;
+        });
+      },
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/team/workspaces/workspace-1/runtime',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.body) as {
+      sessionShares: Array<{ id: string; sessionId: string }>;
+      sharedSessions: Array<{ sessionId: string; workspacePath: string | null }>;
+    };
+
+    expect(payload.sessionShares.map((share) => share.id)).toEqual(['share-1']);
+    expect(payload.sharedSessions).toEqual([
+      expect.objectContaining({ sessionId: 'session-1', workspacePath: '/repo/apps/web' }),
+    ]);
   });
 
   it('imports a session into a workspace through the bridge endpoint', async () => {
@@ -560,6 +853,7 @@ describe('teamRoutes collaboration slice', () => {
     expect(listSharedSessionsForRecipientMock).toHaveBeenCalledWith({
       email: 'owner@openawork.local',
       limit: 24,
+      onlyTeamSessions: true,
       offset: 0,
     });
     expect(JSON.parse(response.body)).toMatchObject({
@@ -568,13 +862,9 @@ describe('teamRoutes collaboration slice', () => {
       messages: [expect.objectContaining({ id: 'msg-1', content: '任务已认领' })],
       runtimeTaskGroups: [expect.objectContaining({ workspacePath: '/repo/apps/web' })],
       sessionShares: [expect.objectContaining({ id: 'share-1', workspacePath: '/repo/apps/web' })],
-      sessions: [
-        expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' }),
-        expect.objectContaining({ id: 'session-2', workspacePath: '/repo/apps/web' }),
-        expect.objectContaining({ id: 'session-3', workspacePath: '/repo/apps/web' }),
-      ],
+      sessions: [expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' })],
       sharedSessions: [
-        expect.objectContaining({ sessionId: 'shared-session-1', workspacePath: '/repo/apps/web' }),
+        expect.objectContaining({ sessionId: 'session-1', workspacePath: '/repo/apps/web' }),
       ],
       auditLogs: [expect.objectContaining({ action: 'share_created', entityId: 'share-1' })],
     });
@@ -585,11 +875,71 @@ describe('teamRoutes collaboration slice', () => {
         tasks: Array<{ id: string; status: string }>;
       }>;
     };
-    expect(runtime.runtimeTaskGroups[0]?.sessionIds).toEqual(
-      expect.arrayContaining(['shared-session-1']),
-    );
+    expect(runtime.runtimeTaskGroups[0]?.sessionIds).toEqual(expect.arrayContaining(['session-1']));
     expect(runtime.runtimeTaskGroups[0]?.tasks.some((task) => task.status === 'cancelled')).toBe(
       false,
     );
+  });
+
+  it('returns a workspace-scoped aggregated runtime read model when teamWorkspaceId is provided', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/team/runtime?teamWorkspaceId=workspace-1',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(listSharedSessionsForRecipientMock).toHaveBeenCalledWith({
+      email: 'owner@openawork.local',
+      limit: 24,
+      offset: 0,
+      teamWorkspaceId: 'workspace-1',
+    });
+    expect(JSON.parse(response.body)).toMatchObject({
+      sessions: [expect.objectContaining({ id: 'session-1', workspacePath: '/repo/apps/web' })],
+    });
+  });
+
+  it('filters unrelated session shares out of the aggregated team runtime read model', async () => {
+    const baseAll = sqliteAllMock.getMockImplementation();
+    sqliteAllMock.mockImplementation((sql: string) => {
+      const rows = baseAll ? baseAll(sql) : [];
+      if (!Array.isArray(rows)) {
+        return rows;
+      }
+
+      if (sql.includes('FROM session_shares')) {
+        return [
+          ...rows,
+          {
+            id: 'share-foreign',
+            session_id: 'foreign-session',
+            member_id: 'member-1',
+            permission: 'view',
+            created_at: '2026-03-22T00:30:00.000Z',
+            updated_at: '2026-03-22T01:30:00.000Z',
+            member_name: '林雾',
+            member_email: 'linwu@openawork.local',
+            label: '无关共享',
+            session_metadata_json: JSON.stringify({
+              teamWorkspaceId: 'workspace-foreign',
+              workingDirectory: '/repo/apps/api',
+            }),
+          },
+        ];
+      }
+
+      return rows;
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/team/runtime' });
+
+    expect(response.statusCode).toBe(200);
+    const payload = JSON.parse(response.body) as {
+      sessionShares: Array<{ id: string; sessionId: string }>;
+    };
+
+    expect(payload.sessionShares).toEqual([
+      expect.objectContaining({ id: 'share-1', sessionId: 'session-1' }),
+    ]);
   });
 });

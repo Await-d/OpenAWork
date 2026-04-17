@@ -5,31 +5,15 @@ import type {
   TeamTaskRecord,
   TeamWorkspaceDetail,
   TeamWorkspaceSnapshot,
+  TeamWorkspaceSummary,
 } from '@openAwork/web-client';
 import { createTeamClient } from '@openAwork/web-client';
-import { createSessionsClient } from '@openAwork/web-client';
-import { useNavigate } from 'react-router';
 import { useAuthStore } from '../../../stores/auth.js';
 import { useTeamCollaboration } from '../use-team-collaboration.js';
 import type { TeamActionFeedback } from '../use-team-collaboration.js';
 import { getSharedSessionStateLabel } from './team-runtime-model.js';
+import { AGENT_TEAMS_EVENT_CONFIG } from './team-runtime-ui-config.js';
 import {
-  agentTeamsActivityStats,
-  AGENT_TEAMS_EVENT_CONFIG,
-  agentTeamsConversationCards,
-  agentTeamsFooterLead,
-  agentTeamsFooterStats,
-  agentTeamsHistoryTeams,
-  agentTeamsMessageCards,
-  agentTeamsMetricCards,
-  agentTeamsOfficeAgents,
-  agentTeamsOverviewCards,
-  agentTeamsReviewCards,
-  agentTeamsRoleChips,
-  agentTeamsRunningTeams,
-  agentTeamsSidebarSections,
-  agentTeamsTimelineEvents,
-  agentTeamsWorkspaceGroups,
   type AgentTeamsConversationCard,
   type AgentTeamsFooterStat,
   type AgentTeamsMessageCard,
@@ -40,11 +24,12 @@ import {
   type AgentTeamsRoleChip,
   type AgentTeamsSidebarSection,
   type AgentTeamsSidebarTeam,
+  type AgentTeamsWorkflowTemplateCard,
   type AgentTeamsTaskLane,
   type AgentTeamsTimelineEvent,
   type AgentTeamsTimelineEventType,
   type AgentTeamsWorkspaceGroup,
-} from './team-runtime-reference-mock.js';
+} from './team-runtime-types.js';
 import { useTeamRuntimeProjection } from './use-team-runtime-projection.js';
 import { useTeamRuntimeRoleBindings } from './use-team-runtime-role-bindings.js';
 import { useTeamWorkflowTemplates } from './use-team-workflow-templates.js';
@@ -67,8 +52,13 @@ export interface TeamRuntimeReferenceViewData {
   createSession: (workspacePath?: string | null) => Promise<boolean>;
   createTemplate: (input: {
     name: string;
+    optionalAgentIds?: string[];
     provider: string;
-    roleValues: string[];
+  }) => Promise<boolean>;
+  createWorkspace: (input: {
+    name: string;
+    description?: string;
+    defaultWorkingRoot?: string;
   }) => Promise<boolean>;
   defaultSelectedAgentId: string;
   defaultSelectedTeamId: string;
@@ -99,6 +89,7 @@ export interface TeamRuntimeReferenceViewData {
     title: string;
   };
   workspaceGroups: AgentTeamsWorkspaceGroup[];
+  workspaces: TeamWorkspaceSummary[];
   historyTeams: AgentTeamsSidebarTeam[];
   createTask: (input: TaskDraftInput) => Promise<boolean>;
   moveTask: (taskId: string, direction: 'left' | 'right') => Promise<boolean>;
@@ -106,15 +97,23 @@ export interface TeamRuntimeReferenceViewData {
   submitReviewComment: (cardId: string, content: string) => Promise<boolean>;
   selectTeam: (teamId: string) => void;
   sendMessage: (input: { content: string; type?: TeamMessageRecord['type'] }) => Promise<boolean>;
+  toggleSessionState: (sessionId: string, currentStatus: string) => Promise<boolean>;
+  deleteSession: (sessionId: string) => Promise<boolean>;
+  templates: AgentTeamsWorkflowTemplateCard[];
 }
 
 interface TeamRuntimeReferenceDataOptions {
   activeWorkspace?: TeamWorkspaceDetail | null;
+  collaborationEnabled?: boolean;
+  teamWorkspaceId?: string | null;
   activeWorkspaceSnapshot?: TeamWorkspaceSnapshot | null;
+  selectedTeamId?: string | null;
   workspaceSnapshotError?: string | null;
   workspaceSnapshotLoading?: boolean;
   workspaceError?: string | null;
   workspaceLoading?: boolean;
+  workspaces?: TeamWorkspaceSummary[];
+  onWorkspacesChanged?: () => void;
 }
 
 const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewData | null>(null);
@@ -158,60 +157,102 @@ const OFFICE_AGENT_POSITIONS = [
   { x: 73, y: 59 },
   { x: 80, y: 63 },
   { x: 85, y: 66 },
+  { x: 76, y: 69 },
 ] as const;
 
-const MOCK_VIEW_DATA: TeamRuntimeReferenceViewData = {
+function mapOfficeStatusFromRole(role: 'planner' | 'researcher' | 'executor' | 'reviewer') {
+  switch (role) {
+    case 'planner':
+      return 'discussing' as const;
+    case 'researcher':
+    case 'executor':
+      return 'working' as const;
+    case 'reviewer':
+      return 'resting' as const;
+  }
+}
+
+function resolveOfficeRole(
+  role: string | null | undefined,
+  index: number,
+): 'planner' | 'researcher' | 'executor' | 'reviewer' {
+  if (role === 'planner' || role === 'researcher' || role === 'executor' || role === 'reviewer') {
+    return role;
+  }
+
+  return index === 0
+    ? 'planner'
+    : index === 1
+      ? 'researcher'
+      : index === 2
+        ? 'executor'
+        : 'reviewer';
+}
+
+function buildEmptyActivityStats(): Record<string, number> {
+  const stats: Record<string, number> = {};
+
+  for (const type of Object.keys(AGENT_TEAMS_EVENT_CONFIG)) {
+    stats[type] = 0;
+  }
+
+  return stats;
+}
+
+const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
   activeMode: 'mock',
-  activityStats: agentTeamsActivityStats,
+  activityStats: buildEmptyActivityStats(),
   busy: false,
   canCreateSession: false,
   canCreateTemplate: false,
   canManageRuntime: false,
   canManageSessionEntries: false,
-  conversationCards: agentTeamsConversationCards,
+  conversationCards: [],
   async createSession() {
     return false;
   },
   async createTemplate() {
     return false;
   },
-  defaultSelectedAgentId: agentTeamsRoleChips[0]?.id ?? 'leader',
-  defaultSelectedTeamId: agentTeamsRunningTeams[0]?.id ?? 'team-research',
+  async createWorkspace() {
+    return false;
+  },
+  defaultSelectedAgentId: 'leader',
+  defaultSelectedTeamId: '',
   error: null,
   feedback: null,
-  footerLead: agentTeamsFooterLead,
-  footerStats: agentTeamsFooterStats,
+  footerLead: '活跃 0 / 共 0',
+  footerStats: [],
   loading: false,
-  messageCards: agentTeamsMessageCards,
-  metricCards: agentTeamsMetricCards,
-  officeAgents: agentTeamsOfficeAgents,
-  overviewCards: agentTeamsOverviewCards,
-  reviewCards: agentTeamsReviewCards,
+  messageCards: [],
+  metricCards: [],
+  officeAgents: [],
+  overviewCards: [],
+  reviewCards: [],
   reviewBusy: false,
-  roleChips: agentTeamsRoleChips,
-  runningTeams: agentTeamsRunningTeams,
-  sidebarSections: agentTeamsSidebarSections,
-  templateCount: agentTeamsSidebarSections.reduce(
-    (count, section) => count + section.items.length,
-    0,
-  ),
+  roleChips: [],
+  runningTeams: [],
+  sidebarSections: [],
+  templateCount: 0,
   templateError: null,
   templateLoading: false,
+  templates: [],
   taskLanes: [
     { id: 'todo', title: '待办', cards: [] },
     { id: 'doing', title: '进行中', cards: [] },
     { id: 'review', title: '待评审', cards: [] },
   ],
-  timelineEvents: agentTeamsTimelineEvents,
+  timelineEvents: [],
   topSummary: {
-    description: '当前未接入真实 Team Runtime，使用参考布局 mock 数据展示。',
-    memberCount: '4 成员',
-    onlineCount: '4 在线',
-    status: '已暂停',
-    title: '研究团队-2026-03-31',
+    description: '当前还没有可展示的 Team Runtime 数据。',
+    memberCount: '0 成员',
+    onlineCount: '0 在线',
+    status: '等待接入',
+    title: '团队工作空间',
   },
-  workspaceGroups: agentTeamsWorkspaceGroups,
-  historyTeams: agentTeamsHistoryTeams,
+  workspaceGroups: [],
+  workspaces: [],
+  historyTeams: [],
   async createTask() {
     return false;
   },
@@ -226,6 +267,12 @@ const MOCK_VIEW_DATA: TeamRuntimeReferenceViewData = {
     return false;
   },
   async submitReviewComment() {
+    return false;
+  },
+  async toggleSessionState() {
+    return false;
+  },
+  async deleteSession() {
     return false;
   },
 };
@@ -298,7 +345,7 @@ function mapSidebarStatus(stateStatus: string | undefined): AgentTeamsSidebarTea
   if (stateStatus === 'running') {
     return 'running';
   }
-  if (stateStatus === 'paused') {
+  if (stateStatus === 'paused' || stateStatus === 'idle') {
     return 'paused';
   }
   return 'completed';
@@ -398,7 +445,7 @@ export function TeamRuntimeReferenceDataProvider({
 }
 
 export function useTeamRuntimeReferenceViewData(): TeamRuntimeReferenceViewData {
-  return useContext(TeamRuntimeReferenceDataContext) ?? MOCK_VIEW_DATA;
+  return useContext(TeamRuntimeReferenceDataContext) ?? EMPTY_VIEW_DATA;
 }
 
 export function useResolvedTeamRuntimeReferenceData(
@@ -406,15 +453,17 @@ export function useResolvedTeamRuntimeReferenceData(
 ): TeamRuntimeReferenceViewData {
   const activeWorkspace = options.activeWorkspace ?? null;
   const activeWorkspaceSnapshot = options.activeWorkspaceSnapshot ?? null;
+  const selectedTeamId = options.selectedTeamId ?? null;
   const workspaceSnapshotError = options.workspaceSnapshotError ?? null;
   const workspaceSnapshotLoading = options.workspaceSnapshotLoading ?? false;
   const workspaceError = options.workspaceError ?? null;
   const workspaceLoading = options.workspaceLoading ?? false;
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
-  const navigate = useNavigate();
   const teamClient = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
-  const collaboration = useTeamCollaboration();
+  const collaboration = useTeamCollaboration(options.teamWorkspaceId ?? undefined, {
+    enabled: options.collaborationEnabled ?? true,
+  });
   const roleBindings = useTeamRuntimeRoleBindings();
   const workflowTemplates = useTeamWorkflowTemplates();
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
@@ -438,12 +487,20 @@ export function useResolvedTeamRuntimeReferenceData(
 
   const selectTeam = useCallback(
     (teamId: string) => {
-      if (!collaboration.sharedSessions.some((session) => session.sessionId === teamId)) {
+      const isSharedSession = collaboration.sharedSessions.some(
+        (session) => session.sessionId === teamId,
+      );
+      const isSession = collaboration.sessions.some((session) => session.id === teamId);
+      if (!isSharedSession && !isSession) {
         return;
       }
-      collaboration.setSelectedSharedSessionId(teamId);
+      collaboration.setSelectedSharedSessionId(isSharedSession ? teamId : null);
     },
-    [collaboration.setSelectedSharedSessionId, collaboration.sharedSessions],
+    [
+      collaboration.setSelectedSharedSessionId,
+      collaboration.sharedSessions,
+      collaboration.sessions,
+    ],
   );
 
   const sendMessage = useCallback(
@@ -464,30 +521,20 @@ export function useResolvedTeamRuntimeReferenceData(
 
   const createSession = useCallback(
     async (workspacePath?: string | null) => {
-      if (!accessToken) {
+      const targetWorkspace = activeWorkspace ?? options.workspaces?.[0] ?? null;
+      if (!accessToken || !targetWorkspace) {
         return false;
       }
 
       setSessionActionBusy(true);
       try {
-        if (activeWorkspace) {
-          const session = await teamClient.createThread(accessToken, activeWorkspace.id, {
-            metadata: workspacePath ? { workingDirectory: workspacePath } : undefined,
-          });
-          if (!session.id) {
-            return false;
-          }
-          await collaboration.refresh();
-          return true;
-        }
-
-        const session = await createSessionsClient(gatewayUrl).create(accessToken, {
-          metadata: workspacePath ? { workingDirectory: workspacePath } : {},
+        const session = await teamClient.createThread(accessToken, targetWorkspace.id, {
+          metadata: workspacePath ? { workingDirectory: workspacePath } : undefined,
         });
         if (!session.id) {
           return false;
         }
-        void navigate(`/chat/${session.id}`);
+        await collaboration.refresh();
         return true;
       } catch {
         return false;
@@ -495,7 +542,32 @@ export function useResolvedTeamRuntimeReferenceData(
         setSessionActionBusy(false);
       }
     },
-    [accessToken, activeWorkspace, collaboration, gatewayUrl, navigate, teamClient],
+    [accessToken, activeWorkspace, collaboration, options.workspaces, teamClient],
+  );
+
+  const createWorkspace = useCallback(
+    async (input: { name: string; description?: string; defaultWorkingRoot?: string }) => {
+      if (!accessToken) {
+        return false;
+      }
+
+      setSessionActionBusy(true);
+      try {
+        await teamClient.createWorkspace(accessToken, {
+          name: input.name,
+          description: input.description ?? null,
+          defaultWorkingRoot: input.defaultWorkingRoot ?? null,
+        });
+        await collaboration.refresh();
+        options.onWorkspacesChanged?.();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
   );
 
   const createTask = useCallback(
@@ -587,45 +659,57 @@ export function useResolvedTeamRuntimeReferenceData(
     [collaboration.createSharedSessionComment, collaboration.selectedSharedSession],
   );
 
-  const liveValue = useMemo<TeamRuntimeReferenceViewData>(() => {
-    if (!hasAuth) {
-      return MOCK_VIEW_DATA;
-    }
+  // --- Split memos: shared intermediates ---
+  const roleChips = useMemo(
+    () =>
+      ROLE_SLOT_CONFIG.map((slot, index) => {
+        const member = collaboration.members[index] ?? null;
+        const binding = roleBindings.roleCards[index] ?? null;
+        const boundAgent = binding?.selectedAgent ?? null;
+        return {
+          accent: slot.accent,
+          badge:
+            boundAgent?.label.slice(0, 1).toUpperCase() ??
+            member?.name.slice(0, 1).toUpperCase() ??
+            slot.badge,
+          id: boundAgent?.id ?? member?.id ?? slot.id,
+          leader: slot.leader || binding?.role === 'planner',
+          provider:
+            boundAgent?.label ?? boundAgent?.id ?? binding?.roleLabel ?? slot.fallbackProvider,
+          role: boundAgent?.label ?? member?.name ?? slot.fallbackLabel,
+          status: mapMemberStatusLabel(member?.status),
+        } satisfies AgentTeamsRoleChip;
+      }),
+    [collaboration.members, roleBindings.roleCards],
+  );
 
-    const roleChips = ROLE_SLOT_CONFIG.map((slot, index) => {
-      const member = collaboration.members[index] ?? null;
-      const binding = roleBindings.roleCards[index] ?? null;
-      return {
-        accent: slot.accent,
-        badge: member?.name.slice(0, 1).toUpperCase() ?? slot.badge,
-        id: member?.id ?? slot.id,
-        leader: slot.leader,
-        provider:
-          binding?.selectedAgent?.label ??
-          binding?.selectedAgent?.id ??
-          binding?.roleLabel ??
-          slot.fallbackProvider,
-        role: member?.name ?? slot.fallbackLabel,
-        status: mapMemberStatusLabel(member?.status),
-      } satisfies AgentTeamsRoleChip;
-    });
-
-    const accentByMemberId = new Map<string, string>();
+  const accentByMemberId = useMemo(() => {
+    const map = new Map<string, string>();
     roleChips.forEach((chip, index) => {
       const memberId = collaboration.members[index]?.id;
       if (memberId) {
-        accentByMemberId.set(memberId, chip.accent);
+        map.set(memberId, chip.accent);
       }
     });
-    const memberNameById = new Map(collaboration.members.map((member) => [member.id, member.name]));
-    const activeViewerCount =
-      collaboration.selectedSharedSession?.presence.filter((entry) => entry.active).length ?? 0;
-    const onlineCount =
-      activeViewerCount ||
-      collaboration.members.filter((member) => member.status === 'working').length;
-    const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
-    const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
-    const selectedSharedSummary =
+    return map;
+  }, [collaboration.members, roleChips]);
+
+  const memberNameById = useMemo(
+    () => new Map(collaboration.members.map((member) => [member.id, member.name])),
+    [collaboration.members],
+  );
+
+  const snapshotSharedSessions = activeWorkspaceSnapshot?.sharedSessions ?? [];
+  const snapshotSessions = activeWorkspaceSnapshot?.sessions ?? [];
+
+  const selectedSharedSummary = useMemo(() => {
+    return (
+      (selectedTeamId != null
+        ? snapshotSharedSessions.find((session) => session.sessionId === selectedTeamId)
+        : null) ??
+      (selectedTeamId != null
+        ? collaboration.sharedSessions.find((session) => session.sessionId === selectedTeamId)
+        : null) ??
       collaboration.selectedSharedSession?.share ??
       snapshotSharedSessions.find(
         (session) => session.sessionId === collaboration.selectedSharedSessionId,
@@ -635,106 +719,121 @@ export function useResolvedTeamRuntimeReferenceData(
       ) ??
       snapshotSharedSessions[0] ??
       collaboration.sharedSessions[0] ??
-      null;
+      null
+    );
+  }, [
+    selectedTeamId,
+    snapshotSharedSessions,
+    collaboration.sharedSessions,
+    collaboration.selectedSharedSession?.share,
+    collaboration.selectedSharedSessionId,
+  ]);
 
-    const workspaceGroups = (() => {
-      if (snapshotSharedSessions.length === 0 && snapshotSessions.length === 0) {
-        if (collaboration.sharedSessions.length === 0 && collaboration.sessions.length === 0) {
-          return agentTeamsWorkspaceGroups;
-        }
-      }
+  const selectedRuntimeSession = useMemo(() => {
+    return (
+      (selectedTeamId != null
+        ? snapshotSessions.find((session) => session.id === selectedTeamId)
+        : null) ??
+      (selectedTeamId != null
+        ? collaboration.sessions.find((session) => session.id === selectedTeamId)
+        : null) ??
+      null
+    );
+  }, [selectedTeamId, snapshotSessions, collaboration.sessions]);
 
-      if (snapshotSharedSessions.length === 0 && snapshotSessions.length === 0) {
-        if (collaboration.sharedSessions.length === 0 && collaboration.sessions.length === 0) {
-          return agentTeamsWorkspaceGroups;
-        }
+  const isSelectedTeamPaused = useMemo(
+    () =>
+      selectedSharedSummary?.stateStatus === 'paused' ||
+      selectedSharedSummary?.stateStatus === 'idle' ||
+      selectedRuntimeSession?.stateStatus === 'paused' ||
+      selectedRuntimeSession?.stateStatus === 'idle',
+    [selectedSharedSummary?.stateStatus, selectedRuntimeSession?.stateStatus],
+  );
 
-        const groups = new Map<string, AgentTeamsWorkspaceGroup>();
-        for (const sharedSession of collaboration.sharedSessions) {
-          const key = sharedSession.workspacePath ?? '__unbound__';
-          const current = groups.get(key) ?? {
-            workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
-            workspacePath: sharedSession.workspacePath,
-            sessions: [],
-          };
-          current.sessions.push({
-            id: sharedSession.sessionId,
-            status: mapSidebarStatus(sharedSession.stateStatus),
-            subtitle: `${getSharedSessionStateLabel(sharedSession.stateStatus)} · ${formatRelativeTime(sharedSession.shareUpdatedAt)}`,
-            title: sharedSession.title ?? sharedSession.sessionId,
-          });
-          groups.set(key, current);
-        }
+  // --- Split memos: workspace groups ---
+  const workspaceGroups = useMemo(() => {
+    const effectiveSessions =
+      snapshotSessions.length > 0 ? snapshotSessions : collaboration.sessions;
+    const effectiveSharedSessions =
+      snapshotSharedSessions.length > 0 ? snapshotSharedSessions : collaboration.sharedSessions;
 
-        if (groups.size === 0) {
-          for (const session of collaboration.sessions) {
-            const key = session.workspacePath ?? '__unbound__';
-            const current = groups.get(key) ?? {
-              workspaceLabel: formatWorkspaceLabel(session.workspacePath),
-              workspacePath: session.workspacePath,
-              sessions: [],
-            };
-            current.sessions.push({
-              id: session.id,
-              status: 'completed',
-              subtitle: `最近更新 · ${formatRelativeTime(session.updatedAt)}`,
-              title: session.title ?? session.id,
-            });
-            groups.set(key, current);
-          }
-        }
+    if (effectiveSessions.length === 0 && effectiveSharedSessions.length === 0) {
+      return [];
+    }
 
-        return Array.from(groups.values()).map((group) => ({
-          ...group,
-          sessions: [...group.sessions].sort((left, right) =>
-            left.title.localeCompare(right.title, 'zh-CN'),
-          ),
-        }));
-      }
+    const groups = new Map<string, AgentTeamsWorkspaceGroup>();
+    const seenSessionIds = new Set<string>();
 
-      const groups = new Map<string, AgentTeamsWorkspaceGroup>();
-      for (const session of snapshotSessions) {
-        const key = session.workspacePath ?? '__unbound__';
-        const current = groups.get(key) ?? {
-          workspaceLabel: formatWorkspaceLabel(session.workspacePath),
-          workspacePath: session.workspacePath,
-          sessions: [],
-        };
-        current.sessions.push({
-          id: session.id,
-          status: 'completed',
-          subtitle: `最近更新 · ${formatRelativeTime(session.updatedAt)}`,
-          title: session.title ?? session.id,
-        });
-        groups.set(key, current);
-      }
+    for (const session of effectiveSessions) {
+      if (seenSessionIds.has(session.id)) continue;
+      seenSessionIds.add(session.id);
+      const key = session.workspacePath ?? '__unbound__';
+      const current = groups.get(key) ?? {
+        workspaceLabel: formatWorkspaceLabel(session.workspacePath),
+        workspacePath: session.workspacePath,
+        sessions: [],
+      };
+      current.sessions.push({
+        id: session.id,
+        status: mapSidebarStatus(session.stateStatus),
+        subtitle: `${getSharedSessionStateLabel(session.stateStatus)} · ${formatRelativeTime(session.updatedAt)}`,
+        title: session.title ?? session.id,
+      });
+      groups.set(key, current);
+    }
 
-      return Array.from(groups.values()).map((group) => ({
-        ...group,
-        sessions: [...group.sessions].sort((left, right) =>
-          left.title.localeCompare(right.title, 'zh-CN'),
-        ),
-      }));
-    })();
+    for (const sharedSession of effectiveSharedSessions) {
+      if (seenSessionIds.has(sharedSession.sessionId)) continue;
+      seenSessionIds.add(sharedSession.sessionId);
+      const key = sharedSession.workspacePath ?? '__unbound__';
+      const current = groups.get(key) ?? {
+        workspaceLabel: formatWorkspaceLabel(sharedSession.workspacePath),
+        workspacePath: sharedSession.workspacePath,
+        sessions: [],
+      };
+      current.sessions.push({
+        id: sharedSession.sessionId,
+        status: mapSidebarStatus(sharedSession.stateStatus),
+        subtitle: `${getSharedSessionStateLabel(sharedSession.stateStatus)} · ${formatRelativeTime(sharedSession.shareUpdatedAt)}`,
+        title: sharedSession.title ?? sharedSession.sessionId,
+      });
+      groups.set(key, current);
+    }
 
-    const effectiveWorkspaceGroups = (() => {
-      if (!activeWorkspace?.defaultWorkingRoot) {
-        return workspaceGroups;
-      }
+    return Array.from(groups.values()).map((group) => ({
+      ...group,
+      sessions: [...group.sessions].sort((left, right) =>
+        left.title.localeCompare(right.title, 'zh-CN'),
+      ),
+    }));
+  }, [
+    collaboration.sessions,
+    collaboration.sharedSessions,
+    snapshotSessions,
+    snapshotSharedSessions,
+  ]);
 
-      const filteredGroups = workspaceGroups.filter(
-        (group) => group.workspacePath === activeWorkspace.defaultWorkingRoot,
-      );
+  const effectiveWorkspaceGroups = useMemo(() => {
+    if (!activeWorkspace?.defaultWorkingRoot) {
+      return workspaceGroups;
+    }
+    const filteredGroups = workspaceGroups.filter(
+      (group) => group.workspacePath === activeWorkspace.defaultWorkingRoot,
+    );
+    return filteredGroups.length > 0 ? filteredGroups : workspaceGroups;
+  }, [activeWorkspace?.defaultWorkingRoot, workspaceGroups]);
 
-      return filteredGroups.length > 0 ? filteredGroups : workspaceGroups;
-    })();
-
+  const { runningTeams, historyTeams, defaultSelectedTeamId } = useMemo(() => {
     const allSidebarTeams = effectiveWorkspaceGroups.flatMap((group) => group.sessions);
-    const runningTeams = allSidebarTeams.filter((team) => team.status === 'running');
-    const historyTeams = allSidebarTeams.filter((team) => team.status !== 'running');
+    const running = allSidebarTeams.filter((team) => team.status === 'running');
+    const history = allSidebarTeams.filter((team) => team.status !== 'running');
     const preferredWorkspacePath = activeWorkspace?.defaultWorkingRoot ?? null;
-    const defaultSelectedTeamId =
+    const defaultId =
       snapshotSessions.find(
+        (session) =>
+          preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
+      )?.id ??
+      collaboration.sessions.find(
         (session) =>
           preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
       )?.id ??
@@ -748,11 +847,22 @@ export function useResolvedTeamRuntimeReferenceData(
           preferredWorkspacePath != null && session.workspacePath === preferredWorkspacePath,
       )?.sessionId ??
       collaboration.selectedSharedSessionId ??
-      runningTeams[0]?.id ??
-      historyTeams[0]?.id ??
-      MOCK_VIEW_DATA.defaultSelectedTeamId;
+      running[0]?.id ??
+      history[0]?.id ??
+      '';
+    return { runningTeams: running, historyTeams: history, defaultSelectedTeamId: defaultId };
+  }, [
+    effectiveWorkspaceGroups,
+    activeWorkspace?.defaultWorkingRoot,
+    snapshotSessions,
+    collaboration.sessions,
+    collaboration.sharedSessions,
+    collaboration.selectedSharedSessionId,
+  ]);
 
-    const metricCards: AgentTeamsMetricCard[] = [
+  // --- Split memos: metric cards ---
+  const metricCards = useMemo(
+    (): AgentTeamsMetricCard[] => [
       {
         icon: 'members',
         label: '成员',
@@ -768,18 +878,19 @@ export function useResolvedTeamRuntimeReferenceData(
         label: '汇报',
         value: String(collaboration.messages.length),
       },
-    ];
+    ],
+    [collaboration.members.length, collaboration.tasks, collaboration.messages.length],
+  );
 
+  // --- Split memos: task lanes ---
+  const taskLanes = useMemo((): AgentTeamsTaskLane[] => {
     const taskSource =
       collaboration.tasks.length > 0 ? collaboration.tasks : collaboration.runtimeTaskRecords;
-    const taskLanes: AgentTeamsTaskLane[] = [
+    const lanes: AgentTeamsTaskLane[] = [
       { id: 'todo', title: '待办', cards: [] },
       { id: 'doing', title: '进行中', cards: [] },
       { id: 'review', title: '待评审', cards: [] },
     ];
-    const todoLane = taskLanes[0];
-    const doingLane = taskLanes[1];
-    const reviewLane = taskLanes[2];
 
     for (const task of taskSource) {
       const assigneeName = task.assigneeId
@@ -788,7 +899,7 @@ export function useResolvedTeamRuntimeReferenceData(
       const assigneeAccent =
         (task.assigneeId ? accentByMemberId.get(task.assigneeId) : undefined) ??
         ROLE_SLOT_CONFIG[1].accent;
-      taskLanes
+      lanes
         .find((lane) => lane.id === mapTaskToLaneId(task.status))
         ?.cards.push({
           assignee: assigneeName,
@@ -808,62 +919,67 @@ export function useResolvedTeamRuntimeReferenceData(
           title: task.title,
         });
     }
+    return lanes;
+  }, [collaboration.tasks, collaboration.runtimeTaskRecords, memberNameById, accentByMemberId]);
 
-    const conversationCards = (() => {
-      const items = [
-        ...collaboration.messages.map((message) => {
-          const name = memberNameById.get(message.memberId) ?? '团队成员';
-          const title =
-            message.content.length > 20 ? `${message.content.slice(0, 20)}…` : message.content;
-          return {
-            body: message.content,
-            agentId: message.memberId,
-            id: `message-${message.id}`,
-            meta: `${name} · 团队消息`,
-            role: name,
-            roleAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
-            timestamp: formatClock(message.timestamp),
-            title,
-            type: mapConversationType(message.type),
-          } satisfies AgentTeamsConversationCard;
-        }),
-        ...collaboration.auditLogs.map((log, index) => {
-          const accent =
-            ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ?? ROLE_SLOT_CONFIG[0].accent;
-          return {
-            body: log.detail ?? log.summary,
-            agentId: log.actorUserId ?? undefined,
-            id: `audit-${log.id}`,
-            meta: `${log.actorEmail ?? '系统'} · 审计轨迹`,
-            role: log.actorEmail ?? '系统',
-            roleAccent: accent,
-            timestamp: formatClock(log.createdAt),
-            title: log.summary,
-            type: 'result' as const,
-          } satisfies AgentTeamsConversationCard;
-        }),
-      ]
-        .sort((left, right) => right.timestamp.localeCompare(left.timestamp, 'zh-CN'))
-        .slice(0, 6);
+  // --- Split memos: conversation cards ---
+  const conversationCards = useMemo((): AgentTeamsConversationCard[] => {
+    const items = [
+      ...collaboration.messages.map((message) => {
+        const name = memberNameById.get(message.memberId) ?? '团队成员';
+        const title =
+          message.content.length > 20 ? `${message.content.slice(0, 20)}…` : message.content;
+        return {
+          body: message.content,
+          agentId: message.memberId,
+          id: `message-${message.id}`,
+          meta: `${name} · 团队消息`,
+          role: name,
+          roleAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
+          timestamp: formatClock(message.timestamp),
+          title,
+          type: mapConversationType(message.type),
+        } satisfies AgentTeamsConversationCard;
+      }),
+      ...collaboration.auditLogs.map((log, index) => {
+        const accent =
+          ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ?? ROLE_SLOT_CONFIG[0].accent;
+        return {
+          body: log.detail ?? log.summary,
+          agentId: log.actorUserId ?? undefined,
+          id: `audit-${log.id}`,
+          meta: `${log.actorEmail ?? '系统'} · 审计轨迹`,
+          role: log.actorEmail ?? '系统',
+          roleAccent: accent,
+          timestamp: formatClock(log.createdAt),
+          title: log.summary,
+          type: 'result' as const,
+        } satisfies AgentTeamsConversationCard;
+      }),
+    ]
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp, 'zh-CN'))
+      .slice(0, 6);
 
-      const fallbackCards: AgentTeamsConversationCard[] = [
-        {
-          body: '当前还没有团队消息，发送第一条同步消息后这里会展示真实协作轨迹。',
-          agentId: undefined,
-          id: 'empty-conversation',
-          meta: '实时协作 · 等待启动',
-          role: 'Team Runtime',
-          roleAccent: ROLE_SLOT_CONFIG[0].accent,
-          timestamp: '刚刚',
-          title: '等待第一条协作消息',
-          type: 'broadcast',
-        },
-      ];
+    return items.length > 0
+      ? items
+      : [
+          {
+            body: '当前还没有团队消息，发送第一条同步消息后这里会展示真实协作轨迹。',
+            agentId: undefined,
+            id: 'empty-conversation',
+            meta: '实时协作 · 等待启动',
+            role: 'Team Runtime',
+            roleAccent: ROLE_SLOT_CONFIG[0].accent,
+            timestamp: '刚刚',
+            title: '等待第一条协作消息',
+            type: 'broadcast',
+          },
+        ];
+  }, [collaboration.messages, collaboration.auditLogs, memberNameById, accentByMemberId]);
 
-      return items.length > 0 ? items : fallbackCards;
-    })();
-
-    const messageCards: AgentTeamsMessageCard[] =
+  // --- Split memos: message cards ---
+  const messageCards = useMemo(
+    (): AgentTeamsMessageCard[] =>
       collaboration.messages.length > 0
         ? [...collaboration.messages]
             .sort((left, right) => right.timestamp - left.timestamp)
@@ -899,12 +1015,209 @@ export function useResolvedTeamRuntimeReferenceData(
               toAccent: ROLE_SLOT_CONFIG[2]?.accent ?? ROLE_SLOT_CONFIG[0].accent,
               type: 'update',
             },
-          ];
+          ],
+    [collaboration.messages, memberNameById, accentByMemberId],
+  );
 
-    const pendingReviewCount =
-      (collaboration.selectedSharedSession?.pendingPermissions.length ?? 0) +
-      (collaboration.selectedSharedSession?.pendingQuestions.length ?? 0);
+  // --- Split memos: review cards ---
+  const reviewCards = useMemo((): AgentTeamsReviewCard[] => {
+    const permissionCards =
+      collaboration.selectedSharedSession?.pendingPermissions.map(
+        (request, index) =>
+          ({
+            actionable: true,
+            assignee: collaboration.selectedSharedSession?.share.sharedByEmail ?? '共享运行',
+            assigneeAccent:
+              ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
+              ROLE_SLOT_CONFIG[0].accent,
+            id: `permission-${request.requestId}`,
+            priority: request.riskLevel,
+            requestId: request.requestId,
+            reviewKind: 'permission',
+            sessionId: collaboration.selectedSharedSession?.share.sessionId,
+            status:
+              request.status === 'pending'
+                ? 'pending'
+                : request.status === 'approved'
+                  ? 'approved'
+                  : 'rejected',
+            summary: `${request.reason} · 作用域 ${request.scope}`,
+            title: `权限审批 · ${request.toolName}`,
+            type: 'security',
+          }) satisfies AgentTeamsReviewCard,
+      ) ?? [];
 
+    const questionCards =
+      collaboration.selectedSharedSession?.pendingQuestions.map(
+        (request, index) =>
+          ({
+            actionable: true,
+            assignee: collaboration.selectedSharedSession?.share.sharedByEmail ?? '共享运行',
+            assigneeAccent:
+              ROLE_SLOT_CONFIG[(index + 1) % ROLE_SLOT_CONFIG.length]?.accent ??
+              ROLE_SLOT_CONFIG[0].accent,
+            id: `question-${request.requestId}`,
+            priority: 'medium',
+            requestId: request.requestId,
+            reviewKind: 'question',
+            sessionId: collaboration.selectedSharedSession?.share.sessionId,
+            status:
+              request.status === 'pending'
+                ? 'pending'
+                : request.status === 'answered'
+                  ? 'approved'
+                  : 'rejected',
+            summary: request.questions[0]?.question ?? request.title,
+            title: `待答复 · ${request.title}`,
+            type: 'content',
+          }) satisfies AgentTeamsReviewCard,
+      ) ?? [];
+
+    const auditCards = collaboration.auditLogs.slice(0, 3).map(
+      (log, index) =>
+        ({
+          actionable: false,
+          assignee: log.actorEmail ?? '系统',
+          assigneeAccent:
+            ROLE_SLOT_CONFIG[(index + 2) % ROLE_SLOT_CONFIG.length]?.accent ??
+            ROLE_SLOT_CONFIG[0].accent,
+          id: `audit-${log.id}`,
+          priority: 'low',
+          reviewKind: 'audit',
+          status: 'approved',
+          summary: log.detail ?? log.summary,
+          title: log.summary,
+          type: 'code',
+        }) satisfies AgentTeamsReviewCard,
+    );
+
+    const cards = [...permissionCards, ...questionCards, ...auditCards].slice(0, 8);
+    return cards.length > 0
+      ? cards
+      : [
+          {
+            actionable: false,
+            assignee: 'Team Runtime',
+            assigneeAccent: ROLE_SLOT_CONFIG[0].accent,
+            id: 'review-empty',
+            priority: 'low',
+            status: 'approved',
+            summary: '当前共享运行没有待处理的权限请求或提问，最近审计轨迹也已归档。',
+            title: '暂无待审事项',
+            type: 'design',
+          } satisfies AgentTeamsReviewCard,
+        ];
+  }, [collaboration.selectedSharedSession, collaboration.auditLogs]);
+
+  // --- Split memos: timeline events ---
+  const timelineEvents = useMemo((): AgentTeamsTimelineEvent[] => {
+    const events = [
+      ...collaboration.messages.map(
+        (message) =>
+          ({
+            agentAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
+            agentId: message.memberId,
+            agentName: memberNameById.get(message.memberId) ?? '团队成员',
+            detail: message.content,
+            id: `message-${message.id}`,
+            timestamp: new Date(message.timestamp).toISOString(),
+            type: mapTimelineEventTypeFromMessage(message.type),
+          }) satisfies AgentTeamsTimelineEvent,
+      ),
+      ...collaboration.auditLogs.map(
+        (log, index) =>
+          ({
+            agentAccent:
+              ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
+              ROLE_SLOT_CONFIG[0].accent,
+            agentId: log.actorUserId ?? `audit-${index}`,
+            agentName: log.actorEmail ?? '系统',
+            detail: log.detail ?? log.summary,
+            id: `audit-${log.id}`,
+            timestamp: log.createdAt,
+            type: mapTimelineEventTypeFromAudit(log.action),
+          }) satisfies AgentTeamsTimelineEvent,
+      ),
+    ]
+      .sort(
+        (left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
+      )
+      .slice(0, 16);
+
+    return events;
+  }, [collaboration.messages, collaboration.auditLogs, accentByMemberId, memberNameById]);
+
+  const activityStats = useMemo(() => {
+    const stats = timelineEvents.reduce<Record<string, number>>((acc, event) => {
+      acc[event.type] = (acc[event.type] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    for (const type of Object.keys(AGENT_TEAMS_EVENT_CONFIG)) {
+      stats[type] = stats[type] ?? 0;
+    }
+    return stats;
+  }, [timelineEvents]);
+
+  // --- Split memos: office agents ---
+  const officeAgents = useMemo(
+    (): AgentTeamsOfficeAgent[] =>
+      OFFICE_AGENT_POSITIONS.map((position, index) => {
+        const chip = roleChips[index]!;
+        const binding = roleBindings.roleCards[index] ?? null;
+        const boundRole = binding?.role ?? null;
+        const boundAgent = binding?.selectedAgent ?? null;
+        const effectiveRole = resolveOfficeRole(
+          boundAgent?.canonicalRole?.coreRole ?? boundRole,
+          index,
+        );
+        const taskNote =
+          index === 0
+            ? `待处理 ${collaboration.selectedSharedSession?.pendingPermissions.length ?? 0} 个审批`
+            : index === 1
+              ? `推进 ${taskLanes[1]?.cards.length ?? 0} 个进行中任务`
+              : `待回答 ${collaboration.selectedSharedSession?.pendingQuestions.length ?? 0} 个问题`;
+
+        const extraNote =
+          index === 2 && collaboration.tasks.filter((task) => task.status === 'failed').length > 0
+            ? `阻塞 ${collaboration.tasks.filter((task) => task.status === 'failed').length} 项`
+            : undefined;
+
+        const agentStatus = isSelectedTeamPaused
+          ? 'resting'
+          : mapOfficeStatusFromRole(effectiveRole);
+
+        return {
+          accent: chip.accent,
+          crown: effectiveRole === 'planner' || chip.leader,
+          extraNote,
+          id: boundAgent?.id ?? chip.id,
+          label:
+            effectiveRole === 'planner'
+              ? `[L] ${boundAgent?.label ?? chip.role}`
+              : (boundAgent?.label ?? chip.role),
+          note: taskNote,
+          status: agentStatus,
+          x: position.x,
+          y: position.y,
+        } satisfies AgentTeamsOfficeAgent;
+      }),
+    [
+      roleChips,
+      roleBindings.roleCards,
+      collaboration.selectedSharedSession,
+      collaboration.tasks,
+      taskLanes,
+      isSelectedTeamPaused,
+    ],
+  );
+
+  // --- Split memos: overview cards ---
+  const pendingReviewCount =
+    (collaboration.selectedSharedSession?.pendingPermissions.length ?? 0) +
+    (collaboration.selectedSharedSession?.pendingQuestions.length ?? 0);
+
+  const overviewCards = useMemo((): AgentTeamsOverviewCard[] => {
     const runtimeStartCandidates = [
       ...collaboration.messages.map((message) => message.timestamp),
       ...collaboration.auditLogs.map((log) => new Date(log.createdAt).getTime()),
@@ -915,7 +1228,7 @@ export function useResolvedTeamRuntimeReferenceData(
       ...collaboration.sharedSessions.map((session) => new Date(session.shareCreatedAt).getTime()),
     ].filter((value) => Number.isFinite(value));
 
-    const overviewCards: AgentTeamsOverviewCard[] = [
+    return [
       {
         icon: 'members',
         id: 'overview-active-members',
@@ -930,9 +1243,9 @@ export function useResolvedTeamRuntimeReferenceData(
         icon: 'tasks',
         id: 'overview-tasks',
         label: '办公室任务',
-        note: `待办 ${todoLane?.cards.length ?? 0} · 进行中 ${doingLane?.cards.length ?? 0} · 待评审 ${reviewLane?.cards.length ?? 0}`,
-        trend: (doingLane?.cards.length ?? 0) > 0 ? 'up' : 'stable',
-        value: String(taskSource.length),
+        note: `待办 ${taskLanes[0]?.cards.length ?? 0} · 进行中 ${taskLanes[1]?.cards.length ?? 0} · 待评审 ${taskLanes[2]?.cards.length ?? 0}`,
+        trend: (taskLanes[1]?.cards.length ?? 0) > 0 ? 'up' : 'stable',
+        value: String(collaboration.tasks.length || collaboration.runtimeTaskRecords.length),
       },
       {
         icon: 'overview',
@@ -971,176 +1284,30 @@ export function useResolvedTeamRuntimeReferenceData(
         value: formatRuntimeDuration(runtimeStartCandidates),
       },
     ];
+  }, [
+    collaboration.members,
+    collaboration.tasks,
+    collaboration.runtimeTaskRecords,
+    collaboration.sharedSessions,
+    collaboration.messages,
+    collaboration.auditLogs,
+    collaboration.selectedSharedSession,
+    taskLanes,
+    selectedSharedSummary,
+    pendingReviewCount,
+  ]);
 
-    const reviewCards = (() => {
-      const permissionCards =
-        collaboration.selectedSharedSession?.pendingPermissions.map(
-          (request, index) =>
-            ({
-              actionable: true,
-              assignee: collaboration.selectedSharedSession?.share.sharedByEmail ?? '共享运行',
-              assigneeAccent:
-                ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
-                ROLE_SLOT_CONFIG[0].accent,
-              id: `permission-${request.requestId}`,
-              priority: request.riskLevel,
-              requestId: request.requestId,
-              reviewKind: 'permission',
-              sessionId: collaboration.selectedSharedSession?.share.sessionId,
-              status:
-                request.status === 'pending'
-                  ? 'pending'
-                  : request.status === 'approved'
-                    ? 'approved'
-                    : 'rejected',
-              summary: `${request.reason} · 作用域 ${request.scope}`,
-              title: `权限审批 · ${request.toolName}`,
-              type: 'security',
-            }) satisfies AgentTeamsReviewCard,
-        ) ?? [];
-
-      const questionCards =
-        collaboration.selectedSharedSession?.pendingQuestions.map(
-          (request, index) =>
-            ({
-              actionable: true,
-              assignee: collaboration.selectedSharedSession?.share.sharedByEmail ?? '共享运行',
-              assigneeAccent:
-                ROLE_SLOT_CONFIG[(index + 1) % ROLE_SLOT_CONFIG.length]?.accent ??
-                ROLE_SLOT_CONFIG[0].accent,
-              id: `question-${request.requestId}`,
-              priority: 'medium',
-              requestId: request.requestId,
-              reviewKind: 'question',
-              sessionId: collaboration.selectedSharedSession?.share.sessionId,
-              status:
-                request.status === 'pending'
-                  ? 'pending'
-                  : request.status === 'answered'
-                    ? 'approved'
-                    : 'rejected',
-              summary: request.questions[0]?.question ?? request.title,
-              title: `待答复 · ${request.title}`,
-              type: 'content',
-            }) satisfies AgentTeamsReviewCard,
-        ) ?? [];
-
-      const auditCards = collaboration.auditLogs.slice(0, 3).map(
-        (log, index) =>
-          ({
-            actionable: false,
-            assignee: log.actorEmail ?? '系统',
-            assigneeAccent:
-              ROLE_SLOT_CONFIG[(index + 2) % ROLE_SLOT_CONFIG.length]?.accent ??
-              ROLE_SLOT_CONFIG[0].accent,
-            id: `audit-${log.id}`,
-            priority: 'low',
-            reviewKind: 'audit',
-            status: 'approved',
-            summary: log.detail ?? log.summary,
-            title: log.summary,
-            type: 'code',
-          }) satisfies AgentTeamsReviewCard,
-      );
-
-      const cards = [...permissionCards, ...questionCards, ...auditCards].slice(0, 8);
-      return cards.length > 0
-        ? cards
-        : [
-            {
-              actionable: false,
-              assignee: 'Team Runtime',
-              assigneeAccent: ROLE_SLOT_CONFIG[0].accent,
-              id: 'review-empty',
-              priority: 'low',
-              status: 'approved',
-              summary: '当前共享运行没有待处理的权限请求或提问，最近审计轨迹也已归档。',
-              title: '暂无待审事项',
-              type: 'design',
-            } satisfies AgentTeamsReviewCard,
-          ];
-    })();
-
-    const timelineEvents = (() => {
-      const events = [
-        ...collaboration.messages.map(
-          (message) =>
-            ({
-              agentAccent: accentByMemberId.get(message.memberId) ?? ROLE_SLOT_CONFIG[0].accent,
-              agentId: message.memberId,
-              agentName: memberNameById.get(message.memberId) ?? '团队成员',
-              detail: message.content,
-              id: `message-${message.id}`,
-              timestamp: new Date(message.timestamp).toISOString(),
-              type: mapTimelineEventTypeFromMessage(message.type),
-            }) satisfies AgentTeamsTimelineEvent,
-        ),
-        ...collaboration.auditLogs.map(
-          (log, index) =>
-            ({
-              agentAccent:
-                ROLE_SLOT_CONFIG[index % ROLE_SLOT_CONFIG.length]?.accent ??
-                ROLE_SLOT_CONFIG[0].accent,
-              agentId: log.actorUserId ?? `audit-${index}`,
-              agentName: log.actorEmail ?? '系统',
-              detail: log.detail ?? log.summary,
-              id: `audit-${log.id}`,
-              timestamp: log.createdAt,
-              type: mapTimelineEventTypeFromAudit(log.action),
-            }) satisfies AgentTeamsTimelineEvent,
-        ),
-      ]
-        .sort(
-          (left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-        )
-        .slice(0, 16);
-
-      return events.length > 0 ? events : agentTeamsTimelineEvents;
-    })();
-
-    const activityStats = timelineEvents.reduce<Record<string, number>>((stats, event) => {
-      stats[event.type] = (stats[event.type] ?? 0) + 1;
-      return stats;
-    }, {});
-
-    for (const type of Object.keys(AGENT_TEAMS_EVENT_CONFIG)) {
-      activityStats[type] = activityStats[type] ?? 0;
+  // --- Final assembly memo ---
+  const liveValue = useMemo<TeamRuntimeReferenceViewData | null>(() => {
+    if (!hasAuth) {
+      return null;
     }
 
-    const officeAgents = OFFICE_AGENT_POSITIONS.map((position, index) => {
-      const chip = roleChips[index]!;
-      const taskNote =
-        index === 0
-          ? `待处理 ${collaboration.selectedSharedSession?.pendingPermissions.length ?? 0} 个审批`
-          : index === 1
-            ? `推进 ${doingLane?.cards.length ?? 0} 个进行中任务`
-            : `待回答 ${collaboration.selectedSharedSession?.pendingQuestions.length ?? 0} 个问题`;
-
-      const extraNote =
-        index === 2 && collaboration.tasks.filter((task) => task.status === 'failed').length > 0
-          ? `阻塞 ${collaboration.tasks.filter((task) => task.status === 'failed').length} 项`
-          : undefined;
-
-      const agentStatus =
-        index === 0
-          ? ('discussing' as const)
-          : index === 1
-            ? ('working' as const)
-            : ('resting' as const);
-
-      return {
-        accent: chip.accent,
-        crown: chip.leader,
-        extraNote,
-        id: chip.id,
-        label: index === 0 ? `[L] ${chip.role}` : chip.role,
-        note: taskNote,
-        status: agentStatus,
-        x: position.x,
-        y: position.y,
-      } satisfies AgentTeamsOfficeAgent;
-    });
-
+    const activeViewerCount =
+      collaboration.selectedSharedSession?.presence.filter((entry) => entry.active).length ?? 0;
+    const onlineCount =
+      activeViewerCount ||
+      collaboration.members.filter((member) => member.status === 'working').length;
     const failedTaskCount = collaboration.tasks.filter((task) => task.status === 'failed').length;
     const pendingTaskCount = collaboration.tasks.filter((task) => task.status === 'pending').length;
     const runningTaskCount = collaboration.tasks.filter(
@@ -1153,15 +1320,16 @@ export function useResolvedTeamRuntimeReferenceData(
       busy: collaboration.busy || sessionActionBusy,
       canCreateSession: true,
       canCreateTemplate: workflowTemplates.canCreateTemplate,
-      canManageRuntime: false,
-      canManageSessionEntries: false,
+      canManageRuntime: hasAuth && Boolean(activeWorkspace),
+      canManageSessionEntries: hasAuth && Boolean(activeWorkspace),
       conversationCards,
       createSession,
       createTemplate: workflowTemplates.createTemplate,
+      createWorkspace,
       createTask,
-      defaultSelectedAgentId: roleChips[0]?.id ?? MOCK_VIEW_DATA.defaultSelectedAgentId,
+      defaultSelectedAgentId: roleChips[0]?.id ?? 'leader',
       defaultSelectedTeamId,
-      error: workspaceError ?? collaboration.error,
+      error: workspaceError ?? workspaceSnapshotError ?? collaboration.error,
       feedback: collaboration.feedback,
       footerLead: `活跃 ${projection.buddyProjection.activeAgentCount} / 共 ${collaboration.members.length}`,
       footerStats: [
@@ -1174,7 +1342,11 @@ export function useResolvedTeamRuntimeReferenceData(
         { label: '异常', value: String(failedTaskCount) },
       ],
       historyTeams,
-      loading: collaboration.loading || roleBindings.loading || workspaceLoading,
+      loading:
+        collaboration.loading ||
+        roleBindings.loading ||
+        workspaceLoading ||
+        workspaceSnapshotLoading,
       messageCards,
       metricCards,
       moveTask,
@@ -1189,9 +1361,12 @@ export function useResolvedTeamRuntimeReferenceData(
       sendMessage,
       sidebarSections: workflowTemplates.sections,
       submitReviewComment,
+      toggleSessionState: collaboration.toggleSessionState,
+      deleteSession: collaboration.deleteSession,
       templateCount: workflowTemplates.templateCount,
       templateError: workflowTemplates.error,
       templateLoading: workflowTemplates.loading,
+      templates: workflowTemplates.templateCards,
       taskLanes,
       timelineEvents,
       topSummary: {
@@ -1203,52 +1378,77 @@ export function useResolvedTeamRuntimeReferenceData(
               : '当前已切换到真实 Team Runtime 数据源，等待第一条共享运行进入。',
         memberCount: `${collaboration.members.length} 成员`,
         onlineCount: `${onlineCount} 在线`,
-        status: selectedSharedSummary?.stateStatus === 'paused' ? '已暂停' : '运行中',
+        status:
+          selectedSharedSummary?.stateStatus === 'paused'
+            ? '已暂停'
+            : collaboration.sessions.some((s) => s.stateStatus === 'idle')
+              ? '已暂停'
+              : '运行中',
         title: activeWorkspace?.name ?? selectedSharedSummary?.title ?? '团队工作空间',
       },
       workspaceGroups: effectiveWorkspaceGroups,
+      workspaces: options.workspaces ?? [],
     } satisfies TeamRuntimeReferenceViewData;
   }, [
-    activeWorkspace,
-    activeWorkspaceSnapshot,
-    collaboration.auditLogs,
+    hasAuth,
+    collaboration.selectedSharedSession,
+    collaboration.members,
+    collaboration.tasks,
     collaboration.busy,
-    createSession,
     collaboration.error,
     collaboration.feedback,
     collaboration.loading,
-    collaboration.members,
-    collaboration.messages,
-    collaboration.runtimeTaskRecords,
-    collaboration.selectedSharedSession,
-    collaboration.selectedSharedSessionId,
-    collaboration.sessions,
-    collaboration.sharedCommentBusy,
-    collaboration.sharedOperateBusy,
     collaboration.sharedSessions,
-    collaboration.tasks,
+    collaboration.sessions,
+    collaboration.sharedOperateBusy,
+    collaboration.sharedCommentBusy,
+    collaboration.toggleSessionState,
+    collaboration.deleteSession,
+    sessionActionBusy,
+    activeWorkspace,
+    workspaceError,
+    workspaceSnapshotError,
+    workspaceLoading,
+    workspaceSnapshotLoading,
+    roleBindings.loading,
     workflowTemplates.canCreateTemplate,
     workflowTemplates.createTemplate,
     workflowTemplates.error,
     workflowTemplates.loading,
     workflowTemplates.sections,
     workflowTemplates.templateCount,
+    workflowTemplates.templateCards,
+    createSession,
+    createWorkspace,
     createTask,
-    hasAuth,
     moveTask,
-    projection.buddyProjection.activeAgentCount,
-    projection.buddyProjection,
-    projection.workspaceOverviewLines,
-    roleBindings.loading,
-    roleBindings.roleCards,
     replyReview,
-    sessionActionBusy,
     selectTeam,
     sendMessage,
     submitReviewComment,
-    workspaceError,
-    workspaceLoading,
+    selectedSharedSummary,
+    snapshotSharedSessions,
+    projection.buddyProjection.activeAgentCount,
+    projection.workspaceOverviewLines,
+    pendingReviewCount,
+    activityStats,
+    conversationCards,
+    defaultSelectedTeamId,
+    effectiveWorkspaceGroups,
+    historyTeams,
+    messageCards,
+    metricCards,
+    officeAgents,
+    overviewCards,
+    reviewCards,
+    roleChips,
+    runningTeams,
+    taskLanes,
+    timelineEvents,
+    options.workspaces,
   ]);
 
-  return liveValue;
+  const resolvedValue = liveValue ?? EMPTY_VIEW_DATA;
+
+  return resolvedValue;
 }

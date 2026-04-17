@@ -103,10 +103,32 @@ export function OfficeSidebar({
   onSelectAgent: (id: string) => void;
   state: OfficeSceneState;
 }) {
-  const { canManageRuntime, officeAgents } = useTeamRuntimeReferenceViewData();
+  const { canManageRuntime, officeAgents, topSummary } = useTeamRuntimeReferenceViewData();
   const { agentPaused, toggleAgentPause } = state;
 
   const selectedAgent = officeAgents.find((a) => a.id === selectedAgentId);
+  const pausedLikeCount = officeAgents.filter(
+    (agent) => agent.status === 'resting' || agentPaused.has(agent.id),
+  ).length;
+  const onlineCount = Math.max(0, officeAgents.length - pausedLikeCount);
+  const isSessionPaused = topSummary.status === '已暂停';
+  const selectedAgentUsesLocalPause = selectedAgent ? agentPaused.has(selectedAgent.id) : false;
+  const selectedAgentIsResting = selectedAgent?.status === 'resting';
+  const selectedAgentStatusLabel = isSessionPaused
+    ? '休息中'
+    : selectedAgentUsesLocalPause
+      ? '已暂停'
+      : selectedAgentIsResting
+        ? '休息中'
+        : selectedAgent?.status === 'discussing'
+          ? '讨论中'
+          : '运行中';
+  const selectedAgentDotColor =
+    isSessionPaused || selectedAgentUsesLocalPause || selectedAgentIsResting
+      ? 'var(--warning)'
+      : selectedAgent?.status === 'discussing'
+        ? 'var(--accent)'
+        : 'var(--success)';
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -132,7 +154,7 @@ export function OfficeSidebar({
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {officeAgents.length - agentPaused.size}/{officeAgents.length}
+              {onlineCount}/{officeAgents.length}
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -145,7 +167,7 @@ export function OfficeSidebar({
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {agentPaused.size}
+              {pausedLikeCount}
             </span>
           </div>
         </div>
@@ -187,14 +209,15 @@ export function OfficeSidebar({
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  background: agentPaused.has(selectedAgent.id)
-                    ? 'var(--warning)'
-                    : 'var(--success)',
-                  boxShadow: agentPaused.has(selectedAgent.id) ? 'none' : '0 0 4px var(--success)',
+                  background: selectedAgentDotColor,
+                  boxShadow:
+                    selectedAgentUsesLocalPause || selectedAgentIsResting
+                      ? 'none'
+                      : `0 0 4px ${selectedAgentDotColor}`,
                 }}
               />
               <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
-                {agentPaused.has(selectedAgent.id) ? '已暂停' : '运行中'}
+                {selectedAgentStatusLabel}
               </span>
             </div>
             {selectedAgent.note && (
@@ -206,6 +229,7 @@ export function OfficeSidebar({
               <div style={{ display: 'flex', gap: 6, padding: '2px 0' }}>
                 <button
                   type="button"
+                  disabled={isSessionPaused}
                   onClick={() => toggleAgentPause(selectedAgent.id)}
                   style={{
                     display: 'inline-flex',
@@ -213,24 +237,37 @@ export function OfficeSidebar({
                     gap: 4,
                     padding: '3px 8px',
                     borderRadius: 6,
-                    border: agentPaused.has(selectedAgent.id)
-                      ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
-                      : '1px solid color-mix(in oklch, var(--warning) 40%, transparent)',
-                    background: agentPaused.has(selectedAgent.id)
-                      ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
-                      : 'color-mix(in oklch, var(--warning) 10%, var(--bg))',
-                    color: agentPaused.has(selectedAgent.id) ? 'var(--success)' : 'var(--warning)',
+                    border: isSessionPaused
+                      ? '1px solid color-mix(in oklch, var(--border) 70%, transparent)'
+                      : agentPaused.has(selectedAgent.id)
+                        ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
+                        : '1px solid color-mix(in oklch, var(--warning) 40%, transparent)',
+                    background: isSessionPaused
+                      ? 'color-mix(in oklch, var(--surface) 88%, var(--bg))'
+                      : agentPaused.has(selectedAgent.id)
+                        ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
+                        : 'color-mix(in oklch, var(--warning) 10%, var(--bg))',
+                    color: isSessionPaused
+                      ? 'var(--text-3)'
+                      : agentPaused.has(selectedAgent.id)
+                        ? 'var(--success)'
+                        : 'var(--warning)',
                     fontSize: 10,
                     fontWeight: 700,
-                    cursor: 'pointer',
+                    cursor: isSessionPaused ? 'not-allowed' : 'pointer',
+                    opacity: isSessionPaused ? 0.8 : 1,
                   }}
                 >
-                  {agentPaused.has(selectedAgent.id) ? (
+                  {isSessionPaused ? null : agentPaused.has(selectedAgent.id) ? (
                     <ResumeIcon size={9} color="var(--success)" />
                   ) : (
                     <PauseIcon size={9} color="var(--warning)" />
                   )}
-                  {agentPaused.has(selectedAgent.id) ? '恢复' : '暂停'}
+                  {isSessionPaused
+                    ? '会话已暂停'
+                    : agentPaused.has(selectedAgent.id)
+                      ? '恢复'
+                      : '暂停'}
                 </button>
               </div>
             ) : (

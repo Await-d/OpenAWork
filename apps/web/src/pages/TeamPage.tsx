@@ -1,6 +1,7 @@
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentTeamsTabKey } from './team/runtime/team-runtime-reference-mock.js';
+import { createTeamClient } from '@openAwork/web-client';
+import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './team/runtime/team-runtime-types.js';
 import {
   TeamRuntimeReferenceDataProvider,
   useTeamRuntimeReferenceViewData,
@@ -10,26 +11,41 @@ import { SHELL_BACKGROUND } from './team/runtime/team-runtime-shared.js';
 import { TopTeamHeader } from './team/runtime/TopTeamHeader.js';
 import { TabRow } from './team/runtime/TabRow.js';
 import { FooterBar, MainWorkspace } from './team/runtime/MainWorkspace.js';
+import { NewTeamSessionModal } from './team/runtime/NewTeamSessionModal.js';
 import { NewTeamTemplateModal } from './team/runtime/NewTeamTemplateModal.js';
 import { SessionSidebar } from './team/runtime/TeamSessionSidebar.js';
 import { useTeamWorkspaceSnapshotState } from './team/use-team-workspace-snapshot-state.js';
 import { useTeamWorkspaceState } from './team/use-team-workspace-state.js';
+import { useAuthStore } from '../stores/auth.js';
+import type { TeamSessionCreationDraft } from './team/runtime/team-session-creation.types.js';
 
-function TeamPageLayout() {
+function TeamPageLayout({
+  activeWorkspaceId,
+  activeWorkspaceName,
+  onRefreshSnapshot,
+  onRefreshWorkspaces,
+  pendingCreatedSessionId,
+  selectedTeamId,
+  setPendingCreatedSessionId,
+  setSelectedTeamId,
+}: {
+  activeWorkspaceId: string | null;
+  activeWorkspaceName: string;
+  onRefreshSnapshot: () => void;
+  onRefreshWorkspaces: () => void;
+  pendingCreatedSessionId: string | null;
+  selectedTeamId: string;
+  setPendingCreatedSessionId: (teamId: string | null) => void;
+  setSelectedTeamId: (teamId: string) => void;
+}) {
   const data = useTeamRuntimeReferenceViewData();
+  const { accessToken, gatewayUrl } = useAuthStore();
   const [activeTab, setActiveTab] = useState<AgentTeamsTabKey>('office');
   const [selectedAgentId, setSelectedAgentId] = useState(data.defaultSelectedAgentId);
-  const [isPaused, setIsPaused] = useState(data.topSummary.status === '已暂停');
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [showNewTemplateModal, setShowNewTemplateModal] = useState(false);
-  const [runningSeconds, setRunningSeconds] = useState(1001);
   const [viewMode, setViewMode] = useState(1);
-  const [selectedTeamId, setSelectedTeamId] = useState(data.defaultSelectedTeamId);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  useEffect(() => {
-    const timer = setInterval(() => setRunningSeconds((seconds) => seconds + 1), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (!data.roleChips.some((chip) => chip.id === selectedAgentId)) {
@@ -37,34 +53,38 @@ function TeamPageLayout() {
     }
   }, [data.defaultSelectedAgentId, data.roleChips, selectedAgentId]);
 
-  useEffect(() => {
-    if (!selectedTeamId) {
-      setSelectedTeamId(data.defaultSelectedTeamId);
-      return;
-    }
-
-    const exists = data.workspaceGroups.some((group) =>
-      group.sessions.some((session) => session.id === selectedTeamId),
+  const selectedTeam = useMemo<AgentTeamsSidebarTeam | null>(() => {
+    return (
+      data.workspaceGroups
+        .flatMap((group) => group.sessions)
+        .find((session) => session.id === selectedTeamId) ?? null
     );
-    if (!exists) {
-      setSelectedTeamId(data.defaultSelectedTeamId);
-    }
-  }, [data.defaultSelectedTeamId, data.workspaceGroups, selectedTeamId]);
+  }, [data.workspaceGroups, selectedTeamId]);
 
-  useEffect(() => {
-    setIsPaused(data.topSummary.status === '已暂停');
-  }, [data.topSummary.status]);
+  const isSelectedTeamPaused = useMemo(() => {
+    if (!selectedTeam) {
+      return data.topSummary.status === '已暂停';
+    }
+
+    return selectedTeam.status !== 'running';
+  }, [data.topSummary.status, selectedTeam]);
+
+  const canToggleSelectedTeam =
+    data.canManageRuntime &&
+    selectedTeam != null &&
+    selectedTeam.status !== 'completed' &&
+    selectedTeam.status !== 'failed';
 
   const handleSelectAgent = useCallback((id: string) => {
     setSelectedAgentId((previous) => (previous === id ? '' : id));
   }, []);
 
   const handleTogglePause = useCallback(() => {
-    if (!data.canManageRuntime) {
+    if (!canToggleSelectedTeam || !selectedTeamId || !selectedTeam) {
       return;
     }
-    setIsPaused((previous) => !previous);
-  }, [data.canManageRuntime]);
+    void data.toggleSessionState(selectedTeamId, selectedTeam.status);
+  }, [canToggleSelectedTeam, data.toggleSessionState, selectedTeam, selectedTeamId]);
 
   const handleOpenTemplate = useCallback(() => {
     if (!data.canCreateTemplate) {
@@ -78,19 +98,52 @@ function TeamPageLayout() {
       setSelectedTeamId(teamId);
       data.selectTeam(teamId);
     },
-    [data],
+    [data, setSelectedTeamId],
+  );
+
+  const handleSubmitDraft = useCallback(
+    async (draft: TeamSessionCreationDraft) => {
+      if (!accessToken || !gatewayUrl || !activeWorkspaceId) {
+        throw new Error('未登录，无法创建团队会话');
+      }
+
+      const client = createTeamClient(gatewayUrl);
+      const session = await client.createSession(accessToken, activeWorkspaceId, {
+        title: draft.title.trim() || undefined,
+        source: draft.source,
+        optionalAgentIds: draft.optionalAgentIds,
+        defaultProvider: draft.defaultProvider,
+      });
+
+      onRefreshWorkspaces();
+      onRefreshSnapshot();
+      setPendingCreatedSessionId(session.id);
+      setSelectedTeamId(session.id);
+      data.selectTeam(session.id);
+    },
+    [
+      accessToken,
+      activeWorkspaceId,
+      data,
+      gatewayUrl,
+      onRefreshSnapshot,
+      onRefreshWorkspaces,
+      setPendingCreatedSessionId,
+      setSelectedTeamId,
+    ],
   );
 
   const mainContent = useMemo(
     () => (
       <MainWorkspace
         activeTab={activeTab}
+        selectedTeam={selectedTeam}
         selectedAgentId={selectedAgentId}
         onSelectAgent={handleSelectAgent}
         onNewTemplate={handleOpenTemplate}
       />
     ),
-    [activeTab, handleOpenTemplate, handleSelectAgent, selectedAgentId],
+    [activeTab, handleOpenTemplate, handleSelectAgent, selectedAgentId, selectedTeam],
   );
 
   return (
@@ -107,9 +160,7 @@ function TeamPageLayout() {
       >
         {!sidebarCollapsed && (
           <SessionSidebar
-            onCreateSession={(workspacePath) => {
-              void data.createSession(workspacePath);
-            }}
+            onOpenNewSessionModal={() => setShowNewSessionModal(true)}
             selectedTeamId={selectedTeamId}
             onSelectTeam={handleSelectTeam}
             onNewTemplate={handleOpenTemplate}
@@ -126,11 +177,12 @@ function TeamPageLayout() {
           }}
         >
           <TopTeamHeader
+            selectedTeam={selectedTeam}
             selectedAgentId={selectedAgentId}
             onSelectAgent={handleSelectAgent}
-            isPaused={isPaused}
+            isPaused={isSelectedTeamPaused}
             onTogglePause={handleTogglePause}
-            canManageRuntime={data.canManageRuntime}
+            canManageRuntime={canToggleSelectedTeam}
             onExpandSidebar={sidebarCollapsed ? () => setSidebarCollapsed(false) : undefined}
           />
           <TabRow activeTab={activeTab} onSelect={setActiveTab} />
@@ -142,65 +194,21 @@ function TeamPageLayout() {
                 'linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 96%, var(--bg)) 100%)',
             }}
           >
-            {(data.activeMode === 'live' || data.loading || data.error || data.feedback) && (
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  padding: '10px 16px 0',
-                }}
-              >
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    minHeight: 24,
-                    padding: '0 10px',
-                    borderRadius: 999,
-                    background:
-                      data.activeMode === 'live'
-                        ? 'color-mix(in oklch, var(--success) 12%, transparent)'
-                        : 'color-mix(in oklch, var(--accent) 12%, transparent)',
-                    color: data.activeMode === 'live' ? 'var(--success)' : 'var(--accent)',
-                    fontSize: 11,
-                    fontWeight: 700,
-                  }}
-                >
-                  {data.activeMode === 'live' ? '已接入真实 Team Runtime' : '参考 Mock 模式'}
-                </span>
-                {data.loading ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                    正在同步团队运行数据…
-                  </span>
-                ) : null}
-                {data.error ? (
-                  <span style={{ fontSize: 11, color: 'var(--danger)' }}>{data.error}</span>
-                ) : null}
-                {data.feedback ? (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: data.feedback.tone === 'success' ? 'var(--success)' : 'var(--warning)',
-                    }}
-                  >
-                    {data.feedback.message}
-                  </span>
-                ) : null}
-              </div>
-            )}
             {mainContent}
           </div>
-          <FooterBar
-            runningSeconds={runningSeconds}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />
+          <FooterBar activeTab={activeTab} viewMode={viewMode} onViewModeChange={setViewMode} />
         </div>
       </div>
       {showNewTemplateModal && data.canCreateTemplate && (
         <NewTeamTemplateModal onClose={() => setShowNewTemplateModal(false)} />
+      )}
+      {showNewSessionModal && data.canCreateSession && activeWorkspaceId && (
+        <NewTeamSessionModal
+          onClose={() => setShowNewSessionModal(false)}
+          onSubmitDraft={handleSubmitDraft}
+          teamWorkspaceId={activeWorkspaceId}
+          workspaceLabel={activeWorkspaceName}
+        />
       )}
     </div>
   );
@@ -208,20 +216,68 @@ function TeamPageLayout() {
 
 export default function TeamPage() {
   const { teamWorkspaceId } = useParams<{ teamWorkspaceId?: string }>();
+  const navigate = useNavigate();
   const workspaceState = useTeamWorkspaceState(teamWorkspaceId);
-  const workspaceSnapshotState = useTeamWorkspaceSnapshotState(teamWorkspaceId);
+  const resolvedTeamWorkspaceId = teamWorkspaceId ?? workspaceState.workspaces[0]?.id ?? null;
+  const workspaceSnapshotState = useTeamWorkspaceSnapshotState(
+    resolvedTeamWorkspaceId ?? undefined,
+  );
+  const [pendingCreatedSessionId, setPendingCreatedSessionId] = useState<string | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState('');
+
+  // Auto-navigate to first workspace when visiting /team without an ID
+  useEffect(() => {
+    if (!teamWorkspaceId && !workspaceState.loading && resolvedTeamWorkspaceId) {
+      void navigate(`/team/${resolvedTeamWorkspaceId}`, { replace: true });
+    }
+  }, [navigate, resolvedTeamWorkspaceId, teamWorkspaceId, workspaceState.loading]);
+
   const data = useResolvedTeamRuntimeReferenceData({
     activeWorkspace: workspaceState.activeWorkspace,
+    collaborationEnabled: Boolean(resolvedTeamWorkspaceId),
+    teamWorkspaceId: resolvedTeamWorkspaceId,
     activeWorkspaceSnapshot: workspaceSnapshotState.snapshot,
+    selectedTeamId,
     workspaceSnapshotError: workspaceSnapshotState.error,
     workspaceSnapshotLoading: workspaceSnapshotState.loading,
     workspaceError: workspaceState.error,
     workspaceLoading: workspaceState.loading,
+    workspaces: workspaceState.workspaces,
+    onWorkspacesChanged: workspaceState.refresh,
   });
+
+  useEffect(() => {
+    if (!selectedTeamId) {
+      setSelectedTeamId(data.defaultSelectedTeamId);
+      return;
+    }
+
+    const exists = data.workspaceGroups.some((group) =>
+      group.sessions.some((session) => session.id === selectedTeamId),
+    );
+    if (exists && pendingCreatedSessionId === selectedTeamId) {
+      setPendingCreatedSessionId(null);
+    }
+    if (!exists && pendingCreatedSessionId === selectedTeamId) {
+      return;
+    }
+    if (!exists) {
+      setSelectedTeamId(data.defaultSelectedTeamId);
+    }
+  }, [data.defaultSelectedTeamId, data.workspaceGroups, pendingCreatedSessionId, selectedTeamId]);
 
   return (
     <TeamRuntimeReferenceDataProvider value={data}>
-      <TeamPageLayout />
+      <TeamPageLayout
+        activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
+        activeWorkspaceName={workspaceState.activeWorkspace?.name ?? '当前工作区'}
+        onRefreshSnapshot={workspaceSnapshotState.refresh}
+        onRefreshWorkspaces={workspaceState.refresh}
+        pendingCreatedSessionId={pendingCreatedSessionId}
+        selectedTeamId={selectedTeamId}
+        setPendingCreatedSessionId={setPendingCreatedSessionId}
+        setSelectedTeamId={setSelectedTeamId}
+      />
     </TeamRuntimeReferenceDataProvider>
   );
 }

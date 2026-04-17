@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { AgentTeamsSidebarTeam } from './team-runtime-reference-mock.js';
+import { useNavigate } from 'react-router';
+import type { AgentTeamsSidebarTeam } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import {
   PlusIcon,
@@ -34,17 +35,11 @@ function SidebarSessionRow({
   onTogglePause: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [hovered, setHovered] = useState(false);
   const meta = STATUS_META[team.status] ?? STATUS_META.completed!;
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(team.id)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+    <div
       style={{
-        appearance: 'none',
         display: 'flex',
         flexDirection: 'column',
         width: '100%',
@@ -52,53 +47,95 @@ function SidebarSessionRow({
         padding: '6px 8px 6px 10px',
         background: isSelected
           ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-          : hovered
-            ? 'var(--surface-hover)'
-            : 'transparent',
-        cursor: 'pointer',
+          : 'transparent',
         transition: 'background 0.15s, box-shadow 0.15s',
         border: 'none',
         borderLeft: `3px solid ${meta.color}`,
         boxShadow: isSelected
           ? `inset 0 0 0 1px color-mix(in oklch, var(--accent) 25%, transparent)`
-          : hovered
-            ? `inset 0 0 0 1px var(--border-subtle)`
-            : 'none',
-        textAlign: 'left',
+          : 'none',
       }}
     >
       {/* Top row: status dot + title + actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
-        {/* Status dot */}
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: meta.color,
-            flexShrink: 0,
-            boxShadow: meta.pulse ? `0 0 4px ${meta.color}` : 'none',
-            animation: meta.pulse ? 'dot-pulse 2s ease-in-out infinite' : 'none',
-          }}
-        />
-        {/* Title */}
-        <span
+        <button
+          type="button"
+          onClick={() => onSelect(team.id)}
           style={{
             flex: 1,
+            display: 'grid',
+            gap: 2,
             minWidth: 0,
-            fontSize: 12,
-            fontWeight: isSelected ? 600 : 400,
-            color: 'var(--text)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            lineHeight: 1.4,
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            textAlign: 'left',
+            cursor: 'pointer',
           }}
         >
-          {team.title}
-        </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: meta.color,
+                flexShrink: 0,
+                boxShadow: meta.pulse ? `0 0 4px ${meta.color}` : 'none',
+                animation: meta.pulse ? 'dot-pulse 2s ease-in-out infinite' : 'none',
+              }}
+            />
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: 12,
+                fontWeight: isSelected ? 600 : 400,
+                color: 'var(--text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                lineHeight: 1.4,
+              }}
+            >
+              {team.title}
+            </span>
+          </span>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingLeft: 12,
+            }}
+          >
+            <span
+              style={{
+                flex: 1,
+                fontSize: 10,
+                color: 'var(--text-3)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                lineHeight: 1.3,
+              }}
+            >
+              {team.subtitle}
+            </span>
+            <span
+              style={{
+                fontSize: 9,
+                color: meta.color,
+                flexShrink: 0,
+                fontWeight: 500,
+              }}
+            >
+              {meta.label}
+            </span>
+          </span>
+        </button>
         {/* Hover actions */}
-        {allowManage && hovered && (
+        {allowManage && (
           <span style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
             {team.status !== 'completed' && team.status !== 'failed' && (
               <button
@@ -161,72 +198,52 @@ function SidebarSessionRow({
           </span>
         )}
       </div>
-      {/* Bottom row: subtitle + status label */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          marginTop: 2,
-          paddingLeft: 12,
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            fontSize: 10,
-            color: 'var(--text-3)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            lineHeight: 1.3,
-          }}
-        >
-          {team.subtitle}
-        </span>
-        <span
-          style={{
-            fontSize: 9,
-            color: meta.color,
-            flexShrink: 0,
-            fontWeight: 500,
-          }}
-        >
-          {meta.label}
-        </span>
-      </div>
-    </button>
+    </div>
   );
 }
 
 export function SessionSidebar({
-  onCreateSession,
+  onOpenNewSessionModal,
   selectedTeamId,
   onSelectTeam,
   onNewTemplate,
   onCollapse,
 }: {
-  onCreateSession?: (workspacePath?: string | null) => void;
+  onOpenNewSessionModal?: (workspacePath?: string | null) => void;
   selectedTeamId: string;
   onSelectTeam: (id: string) => void;
   onNewTemplate: () => void;
   onCollapse: () => void;
 }) {
+  const navigate = useNavigate();
   const {
     canCreateSession,
     canCreateTemplate,
     canManageSessionEntries,
+    createWorkspace,
+    deleteSession: deleteSessionAction,
     runningTeams,
     sidebarSections,
     templateCount,
     templateError,
     templateLoading,
+    toggleSessionState,
     workspaceGroups,
+    workspaces,
   } = useTeamRuntimeReferenceViewData();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [sessionSearch, setSessionSearch] = useState('');
-  const [pausedSessionIds, setPausedSessionIds] = useState<Set<string>>(new Set());
-  const [deletedSessionIds, setDeletedSessionIds] = useState<Set<string>>(new Set());
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+
+  const handleCreateWorkspace = useCallback(async () => {
+    if (!newWorkspaceName.trim()) return;
+    const ok = await createWorkspace({ name: newWorkspaceName.trim() });
+    if (ok) {
+      setNewWorkspaceName('');
+      setShowCreateWorkspace(false);
+    }
+  }, [createWorkspace, newWorkspaceName]);
 
   const toggleGroup = useCallback((key: string) => {
     setCollapsedGroups((prev) => {
@@ -237,32 +254,30 @@ export function SessionSidebar({
     });
   }, []);
 
-  const togglePauseSession = useCallback((id: string) => {
-    setPausedSessionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const togglePauseSession = useCallback(
+    (id: string) => {
+      const team = workspaceGroups.flatMap((g) => g.sessions).find((s) => s.id === id);
+      if (!team) return;
+      void toggleSessionState(id, team.status);
+    },
+    [toggleSessionState, workspaceGroups],
+  );
 
-  const deleteSession = useCallback((id: string) => {
-    setDeletedSessionIds((prev) => new Set(prev).add(id));
-  }, []);
+  const deleteSession = useCallback(
+    (id: string) => {
+      void deleteSessionAction(id);
+    },
+    [deleteSessionAction],
+  );
 
   const getEffectiveStatus = (team: AgentTeamsSidebarTeam) => {
-    if (pausedSessionIds.has(team.id)) return 'paused' as const;
     return team.status;
   };
 
   const filteredGroups = useMemo(() => {
-    const base = workspaceGroups.map((group) => ({
-      ...group,
-      sessions: group.sessions.filter((s) => !deletedSessionIds.has(s.id)),
-    }));
-    if (!sessionSearch.trim()) return base.filter((g) => g.sessions.length > 0);
+    if (!sessionSearch.trim()) return workspaceGroups.filter((g) => g.sessions.length > 0);
     const q = sessionSearch.toLowerCase();
-    return base
+    return workspaceGroups
       .map((group) => ({
         ...group,
         sessions: group.sessions.filter(
@@ -270,10 +285,9 @@ export function SessionSidebar({
         ),
       }))
       .filter((group) => group.sessions.length > 0);
-  }, [deletedSessionIds, sessionSearch, workspaceGroups]);
+  }, [sessionSearch, workspaceGroups]);
 
-  const totalSessionCount =
-    workspaceGroups.reduce((n, g) => n + g.sessions.length, 0) - deletedSessionIds.size;
+  const totalSessionCount = workspaceGroups.reduce((n, g) => n + g.sessions.length, 0);
   const selectedWorkspacePath =
     workspaceGroups.find((group) => group.sessions.some((session) => session.id === selectedTeamId))
       ?.workspacePath ?? null;
@@ -312,7 +326,7 @@ export function SessionSidebar({
       >
         <button
           type="button"
-          onClick={() => onCreateSession?.(selectedWorkspacePath)}
+          onClick={() => onOpenNewSessionModal?.(selectedWorkspacePath)}
           title="新建团队会话"
           disabled={!canCreateSession}
           style={{
@@ -442,13 +456,145 @@ export function SessionSidebar({
       <div
         style={{
           flex: 1,
-          overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
+          minHeight: 0,
         }}
       >
+        {/* ── No workspace prompt ─────────────────────────────────── */}
+        {workspaces.length === 0 && (
+          <div
+            style={{
+              padding: '12px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                padding: '12px 12px',
+                borderRadius: 8,
+                border: '1px dashed var(--border-subtle)',
+                background: 'color-mix(in oklch, var(--accent) 4%, transparent)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                alignItems: 'center',
+                textAlign: 'center',
+              }}
+            >
+              <span style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                尚未创建团队工作空间
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                创建工作空间后即可开始团队协作
+              </span>
+              {!showCreateWorkspace ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCreateWorkspace(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    background: 'var(--accent)',
+                    border: 'none',
+                    color: 'var(--accent-text)',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    transition: 'opacity 0.15s',
+                  }}
+                >
+                  <PlusIcon size={11} color="var(--accent-text)" />
+                  创建工作空间
+                </button>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    width: '100%',
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="工作空间名称"
+                    value={newWorkspaceName}
+                    onChange={(e) => setNewWorkspaceName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleCreateWorkspace();
+                      if (e.key === 'Escape') setShowCreateWorkspace(false);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '5px 8px',
+                      borderRadius: 5,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--surface)',
+                      color: 'var(--text)',
+                      fontSize: 11,
+                      outline: 'none',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateWorkspace()}
+                      disabled={!newWorkspaceName.trim()}
+                      style={{
+                        flex: 1,
+                        padding: '4px 8px',
+                        borderRadius: 5,
+                        background: 'var(--accent)',
+                        border: 'none',
+                        color: 'var(--accent-text)',
+                        cursor: newWorkspaceName.trim() ? 'pointer' : 'not-allowed',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        opacity: newWorkspaceName.trim() ? 1 : 0.5,
+                      }}
+                    >
+                      创建
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateWorkspace(false)}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 5,
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border-subtle)',
+                        color: 'var(--text-3)',
+                        cursor: 'pointer',
+                        fontSize: 10,
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Sessions section ────────────────────────────────────── */}
-        <div style={{ padding: '0 6px 4px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div
+          style={{
+            padding: '0 6px 4px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+          }}
+        >
           {/* Section header */}
           <div
             style={{
@@ -670,6 +816,9 @@ export function SessionSidebar({
             gap: 4,
             borderTop: '1px solid var(--border-subtle)',
             marginTop: 4,
+            flexShrink: 0,
+            maxHeight: '40%',
+            overflowY: 'auto',
           }}
         >
           {/* Section header */}
@@ -700,6 +849,22 @@ export function SessionSidebar({
                 background: 'var(--border-subtle)',
               }}
             />
+            <button
+              type="button"
+              onClick={() => navigate('/team/templates')}
+              style={{
+                appearance: 'none',
+                border: 'none',
+                background: 'transparent',
+                fontSize: 9,
+                color: 'var(--accent)',
+                cursor: 'pointer',
+                fontWeight: 600,
+                padding: 0,
+              }}
+            >
+              管理
+            </button>
             <span
               style={{
                 fontSize: 9,
@@ -792,6 +957,42 @@ export function SessionSidebar({
                 >
                   {item.title || section.title}
                 </span>
+                {item.badges && item.badges.length > 0 ? (
+                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                    {item.badges.map((badge) => (
+                      <span
+                        key={`${item.id}-${badge.label}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          minHeight: 15,
+                          padding: '0 5px',
+                          borderRadius: 999,
+                          background:
+                            badge.tone === 'accent'
+                              ? 'rgba(99, 102, 241, 0.14)'
+                              : badge.tone === 'success'
+                                ? 'rgba(16, 185, 129, 0.14)'
+                                : badge.tone === 'warning'
+                                  ? 'rgba(245, 158, 11, 0.16)'
+                                  : 'var(--surface-3)',
+                          color:
+                            badge.tone === 'accent'
+                              ? '#a5b4fc'
+                              : badge.tone === 'success'
+                                ? '#86efac'
+                                : badge.tone === 'warning'
+                                  ? '#fcd34d'
+                                  : 'var(--text-2)',
+                          fontSize: 8,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                   {item.roleTagRows.flat().map((tag, i) => (
                     <span
@@ -817,6 +1018,11 @@ export function SessionSidebar({
                     {item.description}
                   </span>
                 )}
+                {item.metaLine ? (
+                  <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.45 }}>
+                    {item.metaLine}
+                  </span>
+                ) : null}
               </button>
             )),
           )}

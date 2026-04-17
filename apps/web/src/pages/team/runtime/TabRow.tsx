@@ -1,5 +1,5 @@
-import type { AgentTeamsTabKey } from './team-runtime-reference-mock.js';
-import { agentTeamsTabs } from './team-runtime-reference-mock.js';
+import { agentTeamsTabs } from './team-runtime-ui-config.js';
+import type { AgentTeamsTabKey } from './team-runtime-types.js';
 import { Icon } from './TeamIcons.js';
 import type { IconKey } from './TeamIcons.js';
 

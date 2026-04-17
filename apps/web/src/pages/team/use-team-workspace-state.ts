@@ -3,13 +3,14 @@ import {
   type TeamWorkspaceDetail,
   type TeamWorkspaceSummary,
 } from '@openAwork/web-client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '../../stores/auth.js';
 
 interface TeamWorkspaceState {
   activeWorkspace: TeamWorkspaceDetail | null;
   error: string | null;
   loading: boolean;
+  refresh: () => void;
   workspaces: TeamWorkspaceSummary[];
 }
 
@@ -21,6 +22,11 @@ export function useTeamWorkspaceState(teamWorkspaceId?: string): TeamWorkspaceSt
   const [activeWorkspace, setActiveWorkspace] = useState<TeamWorkspaceDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const refresh = useCallback(() => {
+    setRefreshTick((t) => t + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,12 +80,13 @@ export function useTeamWorkspaceState(teamWorkspaceId?: string): TeamWorkspaceSt
     return () => {
       cancelled = true;
     };
-  }, [accessToken, client, teamWorkspaceId]);
+  }, [accessToken, client, teamWorkspaceId, refreshTick]);
 
   return {
     activeWorkspace,
     error,
     loading,
+    refresh,
     workspaces,
   };
 }

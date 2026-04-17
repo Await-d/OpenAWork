@@ -1,4 +1,5 @@
-import type { AgentTeamsRoleChip } from './team-runtime-reference-mock.js';
+import type { AgentTeamsRoleChip, AgentTeamsSidebarTeam } from './team-runtime-types.js';
+import { ChromeBadge } from './team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { ExpandRightIcon, TeamsIcon, ResumeIcon, PauseIcon, CheckIcon } from './TeamIcons.js';
 
@@ -93,6 +94,7 @@ function RoleChip({
 }
 
 export function TopTeamHeader({
+  selectedTeam,
   canManageRuntime,
   selectedAgentId,
   onSelectAgent,
@@ -106,8 +108,18 @@ export function TopTeamHeader({
   isPaused: boolean;
   onTogglePause: () => void;
   onExpandSidebar?: () => void;
+  selectedTeam: AgentTeamsSidebarTeam | null;
 }) {
-  const { roleChips, topSummary } = useTeamRuntimeReferenceViewData();
+  const {
+    activeMode,
+    error,
+    feedback,
+    loading,
+    roleChips,
+    topSummary,
+    workspaceGroups,
+    workspaces,
+  } = useTeamRuntimeReferenceViewData();
 
   return (
     <header
@@ -215,6 +227,12 @@ export function TopTeamHeader({
           >
             {topSummary.onlineCount}
           </span>
+          <ChromeBadge>
+            {activeMode === 'live' ? '已接入真实 Team Runtime' : '等待 Team Runtime'}
+          </ChromeBadge>
+          <ChromeBadge>{workspaces.length} 工作区</ChromeBadge>
+          <ChromeBadge>{workspaceGroups.length} 分组</ChromeBadge>
+          {selectedTeam ? <ChromeBadge>当前会话 {selectedTeam.title}</ChromeBadge> : null}
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
@@ -319,6 +337,26 @@ export function TopTeamHeader({
         </div>
       </div>
 
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 10,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+          {topSummary.description}
+        </span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <ChromeBadge>{topSummary.status}</ChromeBadge>
+          <ChromeBadge>{topSummary.memberCount}</ChromeBadge>
+          <ChromeBadge>{topSummary.onlineCount}</ChromeBadge>
+          {selectedTeam ? <ChromeBadge>{selectedTeam.subtitle}</ChromeBadge> : null}
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {roleChips.map((item) => (
           <RoleChip
@@ -329,6 +367,65 @@ export function TopTeamHeader({
           />
         ))}
       </div>
+
+      {(loading || error || feedback) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {loading ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: 24,
+                padding: '0 10px',
+                borderRadius: 999,
+                background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                color: 'var(--text-2)',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              正在同步团队运行数据…
+            </span>
+          ) : null}
+          {error ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: 24,
+                padding: '0 10px',
+                borderRadius: 999,
+                background: 'color-mix(in oklch, var(--danger) 12%, transparent)',
+                color: 'var(--danger)',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {error}
+            </span>
+          ) : null}
+          {feedback ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: 24,
+                padding: '0 10px',
+                borderRadius: 999,
+                background:
+                  feedback.tone === 'success'
+                    ? 'color-mix(in oklch, var(--success) 12%, transparent)'
+                    : 'color-mix(in oklch, var(--warning) 12%, transparent)',
+                color: feedback.tone === 'success' ? 'var(--success)' : 'var(--warning)',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {feedback.message}
+            </span>
+          ) : null}
+        </div>
+      )}
     </header>
   );
 }

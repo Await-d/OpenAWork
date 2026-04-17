@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Outlet, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import { useAuthStore } from './stores/auth.js';
 
 vi.mock('./components/Layout.js', () => ({
@@ -59,8 +60,17 @@ let workflowTemplates: Array<{
   description: string | null;
   edges: Array<{ id: string; source: string; target: string }>;
   id: string;
+  metadata?: Record<string, unknown>;
   name: string;
   nodes: Array<{ id: string; label: string; type: string; x: number; y: number }>;
+}> = [];
+let createdTeamSessions: Array<{
+  id: string;
+  metadataJson: string;
+  parentSessionId: string | null;
+  title: string;
+  updatedAt: string;
+  workspacePath: string | null;
 }> = [];
 
 beforeEach(() => {
@@ -68,12 +78,14 @@ beforeEach(() => {
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
   createTemplateCalls = 0;
+  createdTeamSessions = [];
   workflowTemplates = [
     {
       id: 'workflow-1',
       name: '审批流模板',
       description: '用于多人协作审批。',
       category: 'team-playbook',
+      metadata: {},
       nodes: [
         { id: 'start', label: '开始', type: 'start', x: 40, y: 40 },
         { id: 'end', label: '结束', type: 'end', x: 320, y: 40 },
@@ -143,6 +155,66 @@ beforeEach(() => {
                 description: '只读顾问 agent',
                 aliases: ['architect'],
                 canonicalRole: { coreRole: 'planner', preset: 'architect', confidence: 'medium' },
+              },
+              {
+                id: 'librarian',
+                origin: 'builtin',
+                source: 'reference',
+                enabled: true,
+                removable: false,
+                resettable: false,
+                hasOverrides: false,
+                createdAt: '1970-01-01T00:00:00.000Z',
+                updatedAt: '1970-01-01T00:00:00.000Z',
+                label: 'librarian',
+                description: '资料检索 agent',
+                aliases: ['research'],
+                canonicalRole: { coreRole: 'researcher', confidence: 'medium' },
+              },
+              {
+                id: 'hephaestus',
+                origin: 'builtin',
+                source: 'reference',
+                enabled: true,
+                removable: false,
+                resettable: false,
+                hasOverrides: false,
+                createdAt: '1970-01-01T00:00:00.000Z',
+                updatedAt: '1970-01-01T00:00:00.000Z',
+                label: 'hephaestus',
+                description: '执行 agent',
+                aliases: ['execute'],
+                canonicalRole: { coreRole: 'executor', confidence: 'medium' },
+              },
+              {
+                id: 'momus',
+                origin: 'builtin',
+                source: 'reference',
+                enabled: true,
+                removable: false,
+                resettable: false,
+                hasOverrides: false,
+                createdAt: '1970-01-01T00:00:00.000Z',
+                updatedAt: '1970-01-01T00:00:00.000Z',
+                label: 'momus',
+                description: '审查 agent',
+                aliases: ['review'],
+                canonicalRole: { coreRole: 'reviewer', confidence: 'medium' },
+              },
+              {
+                id: 'atlas',
+                origin: 'builtin',
+                source: 'reference',
+                enabled: true,
+                removable: false,
+                resettable: false,
+                hasOverrides: false,
+                createdAt: '1970-01-01T00:00:00.000Z',
+                updatedAt: '1970-01-01T00:00:00.000Z',
+                label: 'atlas',
+                description: '额外成员 agent',
+                aliases: ['optional'],
+                canonicalRole: { coreRole: 'reviewer', confidence: 'low' },
               },
             ],
           }),
@@ -284,6 +356,44 @@ beforeEach(() => {
         } as Response;
       }
 
+      if (url.pathname.endsWith('/team/workspaces/workspace-1/sessions')) {
+        const parsedBody = bodyText ? JSON.parse(bodyText) : {};
+        const session = {
+          id: 'team-session-created-1',
+          metadata_json: JSON.stringify({
+            teamWorkspaceId: 'workspace-1',
+            teamDefinition: {
+              defaultProvider: parsedBody.defaultProvider ?? null,
+              optionalMembers: Array.isArray(parsedBody.optionalAgentIds)
+                ? parsedBody.optionalAgentIds.map((agentId: string) => ({ agentId }))
+                : [],
+              requiredRoleBindings: [
+                { role: 'planner', agentId: 'oracle' },
+                { role: 'researcher', agentId: 'librarian' },
+                { role: 'executor', agentId: 'hephaestus' },
+                { role: 'reviewer', agentId: 'momus' },
+              ],
+              source: parsedBody.source ?? { kind: 'blank' },
+            },
+            workingDirectory: '/home/await/project/OpenAWork',
+          }),
+          state_status: 'idle',
+          title: parsedBody.title ?? '研究团队 2026-04-16',
+        };
+        createdTeamSessions.push({
+          id: session.id,
+          metadataJson: session.metadata_json,
+          parentSessionId: null,
+          title: session.title,
+          updatedAt: '2026-04-04T00:30:00.000Z',
+          workspacePath: '/home/await/project/OpenAWork',
+        });
+        return {
+          ok: true,
+          json: async () => session,
+        } as Response;
+      }
+
       if (url.pathname.endsWith('/team/workspaces/workspace-1/runtime')) {
         return {
           ok: true,
@@ -307,6 +417,7 @@ beforeEach(() => {
                 updatedAt: '2026-04-04T00:00:00.000Z',
                 workspacePath: '/home/await/project/OpenAWork',
               },
+              ...createdTeamSessions,
             ],
             sharedSessions: [
               {
@@ -465,11 +576,28 @@ beforeEach(() => {
       if (url.pathname.endsWith('/workflows/templates')) {
         if (method === 'POST') {
           const body = bodyText.length > 0 ? (JSON.parse(bodyText) as Record<string, unknown>) : {};
+          const normalizedMetadata =
+            body.category === 'team-playbook'
+              ? {
+                  ...(body.metadata && typeof body.metadata === 'object'
+                    ? (body.metadata as Record<string, unknown>)
+                    : {}),
+                  teamTemplate: {
+                    ...((body.metadata as { teamTemplate?: Record<string, unknown> } | undefined)
+                      ?.teamTemplate ?? {}),
+                    defaultBindings: { ...FIXED_TEAM_CORE_ROLE_BINDINGS },
+                    requiredRoles: [...FIXED_TEAM_CORE_ROLE_ORDER],
+                  },
+                }
+              : body.metadata && typeof body.metadata === 'object'
+                ? (body.metadata as Record<string, unknown>)
+                : {};
           const created = {
             id: 'workflow-created',
             name: String(body.name ?? '未命名模板'),
             description: typeof body.description === 'string' ? body.description : null,
             category: typeof body.category === 'string' ? body.category : 'team-playbook',
+            metadata: normalizedMetadata,
             nodes: Array.isArray(body.nodes)
               ? (body.nodes as Array<{
                   id: string;
@@ -549,6 +677,35 @@ async function waitForText(text: string, attempts = 30): Promise<void> {
   }
 
   throw new Error(`Timed out waiting for text: ${text}`);
+}
+
+async function waitForPathname(readPathname: () => string, expected: string, attempts = 30) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (readPathname() === expected) {
+      return;
+    }
+
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  throw new Error(`Timed out waiting for pathname: ${expected}`);
+}
+
+function getButtonByText(container: HTMLDivElement | null, label: string) {
+  return Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+    button.textContent?.includes(label),
+  ) as HTMLButtonElement | undefined;
+}
+
+function setInputValue(element: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  setter?.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 describe('App routing', () => {
@@ -655,7 +812,176 @@ describe('App routing', () => {
     expect(container?.querySelector('[data-testid="layout-shell"]')).toBeTruthy();
     expect(container?.textContent).toContain('AGENT TEAMS');
     expect(container?.textContent).toContain('已接入真实 Team Runtime');
-    expect(container?.textContent).toContain('林雾');
+    expect(container?.textContent).toContain('oracle');
+  });
+
+  it('redirects unauthenticated /team access back to / before TeamPage mounts', async () => {
+    const { default: App } = await import('./App.js');
+    let pathname = '';
+
+    function LocationProbe() {
+      const location = useLocation();
+      pathname = location.pathname;
+      return null;
+    }
+
+    useAuthStore.setState({ accessToken: null });
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team']}>
+          <App />
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForPathname(() => pathname, '/');
+    expect(container?.textContent).toContain('欢迎回来');
+    expect(container?.textContent).not.toContain('AGENT TEAMS');
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn<typeof fetch>>;
+    expect(
+      fetchMock.mock.calls.some(([input]) => {
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl, 'http://localhost:3000');
+        return url.pathname.startsWith('/team');
+      }),
+    ).toBe(false);
+  });
+
+  it('redirects /team to the first available team workspace route', async () => {
+    const { default: App } = await import('./App.js');
+    let pathname = '';
+
+    function LocationProbe() {
+      const location = useLocation();
+      pathname = location.pathname;
+      return null;
+    }
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team']}>
+          <App />
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForPathname(() => pathname, '/team/workspace-1');
+    await waitForText('研究团队-2026-03-31');
+  });
+
+  it('keeps /team when no team workspace is available and does not load a workspace snapshot', async () => {
+    const { default: App } = await import('./App.js');
+    let pathname = '';
+
+    function LocationProbe() {
+      const location = useLocation();
+      pathname = location.pathname;
+      return null;
+    }
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn<typeof fetch>>;
+    const baseFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const rawUrl =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawUrl, 'http://localhost:3000');
+
+      if (url.pathname === '/team/workspaces') {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (!baseFetch) {
+        throw new Error('Missing base fetch implementation');
+      }
+
+      return baseFetch(input, init);
+    });
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team']}>
+          <App />
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForPathname(() => pathname, '/team');
+    await waitForText('AGENT TEAMS');
+
+    expect(
+      fetchMock.mock.calls.some(([input]) => {
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl, 'http://localhost:3000');
+        return url.pathname === '/team/workspaces/workspace-1/runtime';
+      }),
+    ).toBe(false);
+  });
+
+  it('surfaces a workspace load error banner after /team auto-redirects to the first workspace', async () => {
+    const { default: App } = await import('./App.js');
+    let pathname = '';
+
+    function LocationProbe() {
+      const location = useLocation();
+      pathname = location.pathname;
+      return null;
+    }
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn<typeof fetch>>;
+    const baseFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const rawUrl =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawUrl, 'http://localhost:3000');
+
+      if (url.pathname === '/team/workspaces/workspace-1') {
+        return new Response(JSON.stringify({ error: 'workspace failed' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (!baseFetch) {
+        throw new Error('Missing base fetch implementation');
+      }
+
+      return baseFetch(input, init);
+    });
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team']}>
+          <App />
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForPathname(() => pathname, '/team/workspace-1');
+    await waitForText('Failed to load team workspace: 500');
+    expect(container?.textContent).toContain('AGENT TEAMS');
   });
 
   it('renders the team page on /team/:teamWorkspaceId', async () => {
@@ -729,15 +1055,9 @@ describe('App routing', () => {
       await Promise.resolve();
     });
 
-    const roleButtons = Array.from(container?.querySelectorAll('button') ?? []).filter((button) =>
-      ['团队负责人', '研究员A'].includes(button.textContent?.trim() ?? ''),
-    ) as HTMLButtonElement[];
-
-    await act(async () => {
-      roleButtons.at(-2)?.click();
-      roleButtons.at(-1)?.click();
-      await Promise.resolve();
-    });
+    expect(container?.textContent).toContain('核心角色（系统固定）');
+    expect(container?.textContent).toContain('该核心角色由系统固定绑定，用户不可修改。');
+    expect(container?.querySelectorAll('select')).toHaveLength(0);
 
     const createButton = [...Array.from(container?.querySelectorAll('button') ?? [])]
       .reverse()
@@ -754,9 +1074,21 @@ describe('App routing', () => {
 
     expect(createTemplateCalls).toBe(1);
     expect(workflowTemplates.some((template) => template.name === '研究协作剧本')).toBe(true);
+    expect(workflowTemplates[0]?.metadata).toMatchObject({
+      teamTemplate: {
+        defaultBindings: {
+          planner: 'oracle',
+          researcher: 'librarian',
+          executor: 'hephaestus',
+          reviewer: 'momus',
+        },
+        defaultProvider: 'claude-code',
+        requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+      },
+    });
   });
 
-  it('creates a team-owned thread from the workspace route', async () => {
+  it('submits the blank team session wizard through the dedicated sessions route', async () => {
     const { default: App } = await import('./App.js');
 
     await act(async () => {
@@ -770,13 +1102,53 @@ describe('App routing', () => {
       await Promise.resolve();
     });
 
-    const createSessionButton = container?.querySelector(
-      'button[title="新建团队会话"]',
-    ) as HTMLButtonElement | null;
+    await waitForText('AGENT TEAMS');
+
+    const createSessionButton = getButtonByText(container, '新建会话');
     expect(createSessionButton).toBeTruthy();
 
     await act(async () => {
       createSessionButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container?.textContent).toContain('新建团队会话');
+    expect(container?.textContent).toContain('当前工作区：OpenAWork');
+
+    await act(async () => {
+      getButtonByText(container, '下一步')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const titleInput = container?.querySelector(
+      '#new-team-session-title',
+    ) as HTMLInputElement | null;
+    expect(titleInput).toBeTruthy();
+
+    await act(async () => {
+      setInputValue(titleInput!, '研究团队 2026-04-16');
+      await Promise.resolve();
+    });
+
+    expect(container?.textContent).toContain('该核心角色使用系统固定 agent，用户不可修改。');
+
+    await act(async () => {
+      getButtonByText(container, '下一步')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButtonByText(container, 'Atlas')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButtonByText(container, '下一步')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButtonByText(container, '确认创建')?.click();
+      await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -792,7 +1164,136 @@ describe('App routing', () => {
         const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
         return method === 'POST' && url.pathname === '/team/workspaces/workspace-1/threads';
       }),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([input, init]) => {
+        const rawUrl =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl, 'http://localhost:3000');
+        const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
+        return method === 'POST' && url.pathname === '/team/workspaces/workspace-1/sessions';
+      }),
     ).toBe(true);
+  });
+
+  it('submits a saved-template team session with prefilled bindings', async () => {
+    workflowTemplates = [
+      {
+        id: 'workflow-1',
+        name: '研究团队模板',
+        description: '预填完整团队绑定',
+        category: 'team-playbook',
+        metadata: {
+          teamTemplate: {
+            defaultBindings: {
+              planner: 'oracle',
+              researcher: 'librarian',
+              executor: 'hephaestus',
+              reviewer: 'momus',
+            },
+            defaultProvider: 'claude-code',
+            optionalAgentIds: ['atlas'],
+            requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+          },
+        },
+        nodes: [],
+        edges: [],
+      },
+    ];
+
+    const { default: App } = await import('./App.js');
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/team/workspace-1']}>
+          <App />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitForText('AGENT TEAMS');
+
+    const createSessionButton = getButtonByText(container, '新建会话');
+    expect(createSessionButton).toBeTruthy();
+
+    await act(async () => {
+      createSessionButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const templateButton = [...Array.from(container?.querySelectorAll('button') ?? [])]
+      .reverse()
+      .find((button) => button.textContent?.includes('研究团队模板')) as
+      | HTMLButtonElement
+      | undefined;
+    expect(templateButton).toBeTruthy();
+    await act(async () => {
+      templateButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      getButtonByText(container, '下一步')?.click();
+      await Promise.resolve();
+    });
+
+    expect(container?.textContent).toContain('该核心角色使用系统固定 agent，用户不可修改。');
+    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('librarian');
+    expect(container?.textContent).toContain('hephaestus');
+    expect(container?.textContent).toContain('momus');
+
+    const titleInput = container?.querySelector(
+      '#new-team-session-title',
+    ) as HTMLInputElement | null;
+    expect(titleInput).toBeTruthy();
+    await act(async () => {
+      setInputValue(titleInput!, '模板团队会话');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      getButtonByText(container, '下一步')?.click();
+      await Promise.resolve();
+    });
+    expect(container?.textContent).toContain('atlas');
+
+    await act(async () => {
+      getButtonByText(container, '下一步')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButtonByText(container, '确认创建')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const fetchMock = globalThis.fetch as unknown as {
+      mock: { calls: Array<[string | URL | Request, RequestInit | undefined]> };
+    };
+    const createCall = fetchMock.mock.calls.find(([input, init]) => {
+      const rawUrl =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawUrl, 'http://localhost:3000');
+      const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
+      return method === 'POST' && url.pathname === '/team/workspaces/workspace-1/sessions';
+    });
+
+    expect(createCall).toBeTruthy();
+    const body = JSON.parse(createCall?.[1]?.body as string);
+    expect(body).toMatchObject({
+      title: '模板团队会话',
+      source: { kind: 'saved-template', templateId: 'workflow-1' },
+      defaultProvider: 'claude-code',
+      optionalAgentIds: ['atlas'],
+    });
+    expect(body.requiredRoleBindings).toBeUndefined();
   });
 
   it('loads workspace snapshot on /team/:teamWorkspaceId', async () => {

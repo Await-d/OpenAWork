@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import type { AgentTeamsOfficeAgent } from './team-runtime-reference-mock.js';
+import type { AgentTeamsOfficeAgent } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import type { OfficeSceneState } from './OfficeScene.js';
 
@@ -1443,7 +1443,7 @@ export function OfficeThreeCanvas({
   const slideIdxRef = useRef(0);
   const slideTimerRef = useRef(0);
   const hoveredIdRef = useRef<string | null>(null);
-  const { officeAgents, metricCards, topSummary, footerStats, activityStats } =
+  const { canManageRuntime, officeAgents, metricCards, topSummary, footerStats, activityStats } =
     useTeamRuntimeReferenceViewData();
   const officeAgentsRef = useRef<AgentTeamsOfficeAgent[]>([]);
   const metricCardsRef = useRef(metricCards);
@@ -1479,7 +1479,7 @@ export function OfficeThreeCanvas({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     el.appendChild(renderer.domElement);
@@ -1696,10 +1696,10 @@ export function OfficeThreeCanvas({
     window.addEventListener('pointerup', onPointerUp);
 
     // ── Animation loop ──────────────────────────────────────────────
-    const clock = new THREE.Clock();
+    let startTime = performance.now();
     const animate = () => {
       animIdRef.current = requestAnimationFrame(animate);
-      const elapsed = clock.getElapsedTime();
+      const elapsed = (performance.now() - startTime) / 1000;
       tickRef.current += 1;
       const frame = tickRef.current;
 
@@ -2101,7 +2101,23 @@ export function OfficeThreeCanvas({
 
   const { agentPaused, toggleAgentPause } = state;
   const selectedAgent = officeAgentsRef.current.find((a) => a.id === selectedAgentId);
+  const isSessionPaused = topSummary.status === '已暂停';
   const isPaused = selectedAgent ? agentPaused.has(selectedAgent.id) : false;
+  const selectedAgentStatusLabel = isSessionPaused
+    ? '休息中'
+    : isPaused
+      ? '已暂停'
+      : selectedAgent?.status === 'resting'
+        ? '休息中'
+        : selectedAgent?.status === 'discussing'
+          ? '讨论中'
+          : '运行中';
+  const selectedAgentDotColor =
+    isSessionPaused || isPaused || selectedAgent?.status === 'resting'
+      ? 'var(--warning)'
+      : selectedAgent?.status === 'discussing'
+        ? 'var(--accent)'
+        : 'var(--success)';
 
   return (
     <div
@@ -2141,7 +2157,7 @@ export function OfficeThreeCanvas({
               gap: 8,
               alignItems: 'center',
               background: 'rgba(26, 28, 44, 0.88)',
-              border: `1px solid ${isPaused ? 'rgba(239, 90, 90, 0.4)' : 'rgba(63, 185, 80, 0.4)'}`,
+              border: `1px solid ${isSessionPaused || isPaused ? 'rgba(239, 90, 90, 0.4)' : selectedAgent?.status === 'discussing' ? 'rgba(240, 136, 62, 0.4)' : 'rgba(63, 185, 80, 0.4)'}`,
               borderRadius: 14,
               padding: '14px 12px',
               backdropFilter: 'blur(10px)',
@@ -2163,7 +2179,7 @@ export function OfficeThreeCanvas({
               style={{
                 fontSize: 10,
                 fontWeight: 700,
-                color: isPaused ? 'var(--warning)' : 'var(--success)',
+                color: selectedAgentDotColor,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
@@ -2174,44 +2190,61 @@ export function OfficeThreeCanvas({
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  background: isPaused ? 'var(--warning)' : 'var(--success)',
-                  boxShadow: isPaused ? 'none' : '0 0 4px var(--success)',
+                  background: selectedAgentDotColor,
+                  boxShadow:
+                    isSessionPaused || isPaused || selectedAgent?.status === 'resting'
+                      ? 'none'
+                      : `0 0 4px ${selectedAgentDotColor}`,
                 }}
               />
-              {isPaused ? '已暂停' : '运行中'}
+              {selectedAgentStatusLabel}
             </span>
-            <button
-              type="button"
-              onClick={() => toggleAgentPause(selectedAgent.id)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                padding: '8px 14px',
-                borderRadius: 10,
-                border: isPaused
-                  ? '1px solid color-mix(in oklch, var(--success) 50%, transparent)'
-                  : '1px solid color-mix(in oklch, var(--warning) 50%, transparent)',
-                background: isPaused
-                  ? 'color-mix(in oklch, var(--success) 15%, var(--bg))'
-                  : 'color-mix(in oklch, var(--warning) 15%, var(--bg))',
-                color: isPaused ? 'var(--success)' : 'var(--warning)',
-                fontSize: 14,
-                fontWeight: 800,
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-                minWidth: 60,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'scale(1.05)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'scale(1)';
-              }}
-            >
-              {isPaused ? '▶ 恢复' : '⏸ 暂停'}
-            </button>
+            {canManageRuntime ? (
+              <button
+                type="button"
+                disabled={isSessionPaused}
+                onClick={() => toggleAgentPause(selectedAgent.id)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  padding: '8px 14px',
+                  borderRadius: 10,
+                  border: isSessionPaused
+                    ? '1px solid color-mix(in oklch, var(--border) 70%, transparent)'
+                    : isPaused
+                      ? '1px solid color-mix(in oklch, var(--success) 50%, transparent)'
+                      : '1px solid color-mix(in oklch, var(--warning) 50%, transparent)',
+                  background: isSessionPaused
+                    ? 'color-mix(in oklch, var(--surface) 88%, var(--bg))'
+                    : isPaused
+                      ? 'color-mix(in oklch, var(--success) 15%, var(--bg))'
+                      : 'color-mix(in oklch, var(--warning) 15%, var(--bg))',
+                  color: isSessionPaused
+                    ? 'var(--text-3)'
+                    : isPaused
+                      ? 'var(--success)'
+                      : 'var(--warning)',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: isSessionPaused ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                  minWidth: 60,
+                  opacity: isSessionPaused ? 0.8 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSessionPaused) {
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                {isSessionPaused ? '会话已暂停' : isPaused ? '▶ 恢复' : '⏸ 暂停'}
+              </button>
+            ) : null}
           </div>
         )}
       </div>
