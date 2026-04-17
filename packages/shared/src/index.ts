@@ -14,7 +14,6 @@ export type {
   ToolCallContent,
   ToolCallObservabilityAnnotation,
   ToolResultContent,
-  ToolSurfaceProfile,
 } from './message-schema.js';
 
 export type DialogueMode = 'clarify' | 'coding' | 'programmer';
@@ -24,6 +23,30 @@ export type CommandSurface = 'composer' | 'palette';
 export type CapabilityKind = 'agent' | 'skill' | 'mcp' | 'tool' | 'command';
 
 export type CoreRole = 'general' | 'researcher' | 'planner' | 'executor' | 'reviewer';
+
+export type TeamCoreRole = Extract<CoreRole, 'planner' | 'researcher' | 'executor' | 'reviewer'>;
+
+export const FIXED_TEAM_CORE_ROLE_BINDINGS: Record<TeamCoreRole, string> = {
+  planner: 'oracle',
+  researcher: 'librarian',
+  executor: 'hephaestus',
+  reviewer: 'momus',
+};
+
+export const FIXED_TEAM_CORE_ROLE_ORDER: TeamCoreRole[] = [
+  'planner',
+  'researcher',
+  'executor',
+  'reviewer',
+];
+
+export const FIXED_TEAM_CORE_AGENT_IDS = Array.from(
+  new Set(Object.values(FIXED_TEAM_CORE_ROLE_BINDINGS)),
+);
+
+export function isFixedTeamCoreAgentId(agentId: string): boolean {
+  return FIXED_TEAM_CORE_AGENT_IDS.includes(agentId);
+}
 
 export type RolePreset =
   | 'default'
@@ -584,7 +607,7 @@ export interface StreamCompactionChunk {
   summary: string;
   trigger: 'manual' | 'automatic';
   phase?: 'started' | 'completed' | 'failed';
-  cause?: 'manual' | 'usage_overflow' | 'provider_overflow';
+  cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
   strategy?: 'summary_only' | 'replay' | 'synthetic_continue';
   compactedMessages?: number;
   representedMessages?: number;

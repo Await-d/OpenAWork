@@ -13,12 +13,9 @@ export interface ToolCallContent {
   rawArguments?: string;
 }
 
-export type ToolSurfaceProfile = 'openawork' | 'claude_code_simple' | 'claude_code_default';
-
 export interface ToolCallObservabilityAnnotation {
   presentedToolName?: string;
   canonicalToolName?: string;
-  toolSurfaceProfile?: ToolSurfaceProfile;
   adapterVersion?: string;
 }
 
@@ -92,4 +89,5 @@ export interface Message {
   role: MessageRole;
   content: MessageContent[];
   createdAt: number;
+  clientRequestId?: string;
 }
