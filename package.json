@@ -64,5 +64,10 @@
     "**/*.{js,json,md,yaml,yml}": [
       "prettier --check"
     ]
-  }
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ]
 }
