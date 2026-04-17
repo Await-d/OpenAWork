@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenAWork.Gateway.Application\OpenAWork.Gateway.Application.csproj" />
+    <ProjectReference Include="..\OpenAWork.Gateway.Domain\OpenAWork.Gateway.Domain.csproj" />
+    <ProjectReference Include="..\OpenAWork.Gateway.Contracts\OpenAWork.Gateway.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.6" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

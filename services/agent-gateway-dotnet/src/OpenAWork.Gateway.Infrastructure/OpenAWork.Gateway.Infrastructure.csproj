@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\OpenAWork.Gateway.Application\OpenAWork.Gateway.Application.csproj" />
+    <ProjectReference Include="..\OpenAWork.Gateway.Domain\OpenAWork.Gateway.Domain.csproj" />
+    <ProjectReference Include="..\OpenAWork.Gateway.Contracts\OpenAWork.Gateway.Contracts.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
