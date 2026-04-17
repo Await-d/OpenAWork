@@ -6,7 +6,6 @@ export interface AgentProfileRecord {
   modelId: string | null;
   note: string | null;
   providerId: string | null;
-  toolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   updatedAt: string;
   workspacePath: string;
 }
@@ -22,7 +21,6 @@ export interface AgentProfilesClient {
       agentId?: string;
       providerId?: string;
       modelId?: string;
-      toolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
       note?: string;
     },
   ): Promise<AgentProfileRecord>;
@@ -35,7 +33,6 @@ export interface AgentProfilesClient {
       agentId?: string;
       providerId?: string;
       modelId?: string;
-      toolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
       note?: string;
     }>,
   ): Promise<AgentProfileRecord>;
