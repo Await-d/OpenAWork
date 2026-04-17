@@ -1008,7 +1008,7 @@ describe('App routing', () => {
 
     await act(async () => {
       root?.render(
-        <MemoryRouter initialEntries={['/team/templates']}>
+        <MemoryRouter initialEntries={['/templates']}>
           <App />
         </MemoryRouter>,
       );
@@ -1049,8 +1049,11 @@ describe('App routing', () => {
     });
 
     expect(container?.textContent).toContain('核心角色（系统固定）');
-    expect(container?.textContent).toContain('该核心角色由系统固定绑定，用户不可修改。');
     expect(container?.querySelectorAll('select')).toHaveLength(0);
+    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('librarian');
+    expect(container?.textContent).toContain('hephaestus');
+    expect(container?.textContent).toContain('momus');
 
     const createButton = [...Array.from(container?.querySelectorAll('button') ?? [])]
       .reverse()

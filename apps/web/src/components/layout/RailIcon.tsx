@@ -3,7 +3,7 @@ import React from 'react';
 export const railItems = [
   { to: '/chat', label: 'Chat' },
   { to: '/team', label: 'Team' },
-  { to: '/team/templates', label: 'Templates' },
+  { to: '/templates', label: 'Templates' },
   { to: '/sessions', label: 'Sessions' },
   { to: '/skills', label: 'Skills' },
   { to: '/agents', label: 'Agents' },

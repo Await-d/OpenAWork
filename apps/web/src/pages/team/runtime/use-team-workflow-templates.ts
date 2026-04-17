@@ -364,6 +364,51 @@ export function useTeamWorkflowTemplates() {
     [accessToken, client],
   );
 
+  const removeTemplate = useCallback(
+    async (templateId: string) => {
+      if (!accessToken) return false;
+      setBusy(true);
+      setError(null);
+      try {
+        await client.removeTemplate(accessToken, templateId);
+        setTemplates((current) => current.filter((t) => t.id !== templateId));
+        return true;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : '删除模板失败');
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [accessToken, client],
+  );
+
+  const duplicateTemplate = useCallback(
+    async (source: WorkflowTemplateRecord) => {
+      if (!accessToken) return false;
+      setBusy(true);
+      setError(null);
+      try {
+        const created = await client.createTemplate(accessToken, {
+          name: `${source.name} (副本)`,
+          description: source.description ?? undefined,
+          category: source.category,
+          metadata: source.metadata,
+          nodes: source.nodes,
+          edges: source.edges,
+        });
+        setTemplates((current) => [created, ...current]);
+        return true;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : '复制模板失败');
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [accessToken, client],
+  );
+
   const templateCards = useMemo(
     () => [...templates].sort(sortTemplates).map((template) => toTemplateCard(template)),
     [templates],
@@ -374,9 +419,11 @@ export function useTeamWorkflowTemplates() {
     busy,
     canCreateTemplate: Boolean(accessToken),
     createTemplate,
+    duplicateTemplate,
     error,
     loading,
     refresh,
+    removeTemplate,
     sections,
     templateCards,
     templateCount: templates.length,

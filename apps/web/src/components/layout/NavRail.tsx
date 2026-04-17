@@ -54,11 +54,8 @@ export default function NavRail({ clearAuth }: NavRailProps) {
             (location.pathname === '/channels' ||
               location.pathname.startsWith('/settings/channels'));
           const isTemplatesActive =
-            label === 'Templates' && location.pathname.startsWith('/team/templates');
-          const isTeamActive =
-            label === 'Team' &&
-            location.pathname.startsWith('/team') &&
-            !location.pathname.startsWith('/team/templates');
+            label === 'Templates' && location.pathname.startsWith('/templates');
+          const isTeamActive = label === 'Team' && location.pathname.startsWith('/team');
 
           return (
             <NavLink

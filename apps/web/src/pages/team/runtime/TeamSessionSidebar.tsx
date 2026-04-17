@@ -851,7 +851,7 @@ export function SessionSidebar({
             />
             <button
               type="button"
-              onClick={() => navigate('/team/templates')}
+              onClick={() => navigate('/templates')}
               style={{
                 appearance: 'none',
                 border: 'none',
