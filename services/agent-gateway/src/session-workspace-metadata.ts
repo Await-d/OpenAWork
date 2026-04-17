@@ -2,12 +2,31 @@ import { z } from 'zod';
 import { validateWorkspacePath } from './workspace-paths.js';
 import { upstreamRetryMaxRetriesSchema } from './upstream-retry-policy.js';
 
-export const TOOL_SURFACE_PROFILES = [
-  'openawork',
-  'claude_code_simple',
-  'claude_code_default',
-] as const;
-export type ToolSurfaceProfile = (typeof TOOL_SURFACE_PROFILES)[number];
+const teamDefinitionSchema = z.object({
+  createdAt: z.string().optional(),
+  defaultProvider: z.string().nullable().optional(),
+  optionalMembers: z
+    .array(
+      z.object({
+        agentId: z.string().min(1).max(200),
+        agentLabel: z.string().min(1).max(200),
+        canonicalRole: z.string().min(1).max(120).nullable().optional(),
+      }),
+    )
+    .optional(),
+  requiredRoleBindings: z.array(
+    z.object({
+      agentId: z.string().min(1).max(200),
+      agentLabel: z.string().min(1).max(200),
+      role: z.enum(['planner', 'researcher', 'executor', 'reviewer']),
+    }),
+  ),
+  source: z.object({
+    kind: z.enum(['blank', 'builtin-template', 'saved-template']),
+    templateId: z.string().min(1).max(200).optional(),
+    templateName: z.string().min(1).max(200).optional(),
+  }),
+});
 
 const sessionMetadataPatchSchema = z
   .object({
@@ -19,9 +38,9 @@ const sessionMetadataPatchSchema = z
     planMode: z.boolean().optional(),
     providerId: z.string().min(1).max(200).optional(),
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+    teamDefinition: teamDefinitionSchema.optional(),
     teamWorkspaceId: z.string().min(1).max(200).optional(),
     thinkingEnabled: z.boolean().optional(),
-    toolSurfaceProfile: z.enum(TOOL_SURFACE_PROFILES).optional(),
     upstreamRetryMaxRetries: upstreamRetryMaxRetriesSchema.optional(),
     webSearchEnabled: z.boolean().optional(),
     workingDirectory: z.string().optional(),
@@ -124,12 +143,4 @@ export function isSessionWorkspaceRebindingAttempt(
   }
 
   return currentWorkingDirectory !== nextWorkingDirectory;
-}
-
-export function extractToolSurfaceProfile(metadata: Record<string, unknown>): ToolSurfaceProfile {
-  const raw = metadata['toolSurfaceProfile'];
-  if (typeof raw === 'string' && (TOOL_SURFACE_PROFILES as readonly string[]).includes(raw)) {
-    return raw as ToolSurfaceProfile;
-  }
-  return 'openawork';
 }

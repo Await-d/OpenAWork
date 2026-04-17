@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import { validateWorkspacePath } from './workspace-paths.js';
-import type { ToolSurfaceProfile } from './session-workspace-metadata.js';
 
 export interface AgentProfileRecord {
   agentId: string | null;
@@ -11,7 +10,6 @@ export interface AgentProfileRecord {
   modelId: string | null;
   note: string | null;
   providerId: string | null;
-  toolSurfaceProfile: ToolSurfaceProfile;
   updatedAt: string;
   workspacePath: string;
 }
@@ -22,7 +20,6 @@ export interface UpsertAgentProfileInput {
   modelId?: string;
   note?: string;
   providerId?: string;
-  toolSurfaceProfile?: ToolSurfaceProfile;
   workspacePath: string;
 }
 
@@ -34,14 +31,13 @@ interface AgentProfileRow {
   model_id: string | null;
   note: string | null;
   provider_id: string | null;
-  tool_surface_profile: ToolSurfaceProfile;
   updated_at: string;
   workspace_path: string;
 }
 
 export function listAgentProfilesForUser(userId: string): AgentProfileRecord[] {
   return sqliteAll<AgentProfileRow>(
-    `SELECT id, workspace_path, label, agent_id, provider_id, model_id, tool_surface_profile, note, created_at, updated_at
+    `SELECT id, workspace_path, label, agent_id, provider_id, model_id, note, created_at, updated_at
      FROM agent_profiles
      WHERE user_id = ?
      ORDER BY updated_at DESC, created_at DESC`,
@@ -54,7 +50,7 @@ export function getAgentProfileForUser(
   profileId: string,
 ): AgentProfileRecord | null {
   const row = sqliteGet<AgentProfileRow>(
-    `SELECT id, workspace_path, label, agent_id, provider_id, model_id, tool_surface_profile, note, created_at, updated_at
+    `SELECT id, workspace_path, label, agent_id, provider_id, model_id, note, created_at, updated_at
      FROM agent_profiles WHERE user_id = ? AND id = ? LIMIT 1`,
     [userId, profileId],
   );
@@ -71,7 +67,7 @@ export function getAgentProfileForWorkspace(
   }
 
   const row = sqliteGet<AgentProfileRow>(
-    `SELECT id, workspace_path, label, agent_id, provider_id, model_id, tool_surface_profile, note, created_at, updated_at
+    `SELECT id, workspace_path, label, agent_id, provider_id, model_id, note, created_at, updated_at
      FROM agent_profiles WHERE user_id = ? AND workspace_path = ? LIMIT 1`,
     [userId, safeWorkspacePath],
   );
@@ -85,8 +81,8 @@ export function createAgentProfileForUser(
   const workspacePath = requireWorkspacePath(input.workspacePath);
   const id = randomUUID();
   sqliteRun(
-    `INSERT INTO agent_profiles (id, user_id, workspace_path, label, agent_id, provider_id, model_id, tool_surface_profile, note, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+    `INSERT INTO agent_profiles (id, user_id, workspace_path, label, agent_id, provider_id, model_id, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     [
       id,
       userId,
@@ -95,7 +91,6 @@ export function createAgentProfileForUser(
       input.agentId?.trim() || null,
       input.providerId?.trim() || null,
       input.modelId?.trim() || null,
-      input.toolSurfaceProfile ?? 'openawork',
       input.note?.trim() || null,
     ],
   );
@@ -117,7 +112,7 @@ export function updateAgentProfileForUser(
     : current.workspacePath;
   sqliteRun(
     `UPDATE agent_profiles
-     SET workspace_path = ?, label = ?, agent_id = ?, provider_id = ?, model_id = ?, tool_surface_profile = ?, note = ?, updated_at = datetime('now')
+     SET workspace_path = ?, label = ?, agent_id = ?, provider_id = ?, model_id = ?, note = ?, updated_at = datetime('now')
      WHERE id = ? AND user_id = ?`,
     [
       workspacePath,
@@ -125,7 +120,6 @@ export function updateAgentProfileForUser(
       input.agentId !== undefined ? input.agentId.trim() || null : current.agentId,
       input.providerId !== undefined ? input.providerId.trim() || null : current.providerId,
       input.modelId !== undefined ? input.modelId.trim() || null : current.modelId,
-      input.toolSurfaceProfile ?? current.toolSurfaceProfile,
       input.note !== undefined ? input.note.trim() || null : current.note,
       profileId,
       userId,
@@ -147,7 +141,6 @@ function mapAgentProfileRow(row: AgentProfileRow): AgentProfileRecord {
     modelId: row.model_id,
     note: row.note,
     providerId: row.provider_id,
-    toolSurfaceProfile: row.tool_surface_profile,
     updatedAt: row.updated_at,
     workspacePath: row.workspace_path,
   };

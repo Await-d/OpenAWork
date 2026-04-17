@@ -27,12 +27,11 @@ const getCurrentAgentProfileMock = vi.fn(async (): Promise<AgentProfileRecord | 
 vi.mock('../utils/chat-session-defaults.js', () => ({
   buildSavedChatSessionMetadata: vi.fn(
     (
-      defaults: { toolSurfaceProfile: string },
+      _defaults: Record<string, unknown>,
       options?: { parentSessionId?: string | null; workingDirectory?: string | null },
     ) => ({
       ...(options?.workingDirectory ? { workingDirectory: options.workingDirectory } : {}),
       ...(options?.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
-      toolSurfaceProfile: defaults.toolSurfaceProfile,
     }),
   ),
   loadSavedChatSessionDefaults: vi.fn(async () => ({
@@ -41,7 +40,6 @@ vi.mock('../utils/chat-session-defaults.js', () => ({
       modelId: 'gpt-5',
       thinkingEnabled: false,
       reasoningEffort: 'medium',
-      toolSurfaceProfile: 'claude_code_default',
     },
     providers: [],
   })),
@@ -334,7 +332,6 @@ describe('useSessions run-state overrides', () => {
       'token-123',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          toolSurfaceProfile: 'claude_code_default',
           workingDirectory: '/workspace/demo',
         }),
       }),
@@ -349,7 +346,6 @@ describe('useSessions run-state overrides', () => {
       agentId: 'sisyphus-junior',
       providerId: 'anthropic',
       modelId: 'claude-sonnet-4.5',
-      toolSurfaceProfile: 'claude_code_simple',
       note: null,
       createdAt: '2026-04-05T00:00:00.000Z',
       updatedAt: '2026-04-05T00:00:00.000Z',
@@ -390,7 +386,6 @@ describe('useSessions run-state overrides', () => {
           agentId: 'sisyphus-junior',
           modelId: 'claude-sonnet-4.5',
           providerId: 'anthropic',
-          toolSurfaceProfile: 'claude_code_simple',
           workingDirectory: '/workspace/demo',
         }),
       }),

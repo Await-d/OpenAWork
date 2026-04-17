@@ -417,11 +417,6 @@ function parseApprovedPermissionResumePayload(
                 typeof observabilityCandidate['canonicalToolName'] === 'string'
                   ? observabilityCandidate['canonicalToolName']
                   : 'unknown',
-              toolSurfaceProfile:
-                observabilityCandidate['toolSurfaceProfile'] === 'claude_code_simple' ||
-                observabilityCandidate['toolSurfaceProfile'] === 'claude_code_default'
-                  ? observabilityCandidate['toolSurfaceProfile']
-                  : 'openawork',
               adapterVersion:
                 typeof observabilityCandidate['adapterVersion'] === 'string'
                   ? observabilityCandidate['adapterVersion']

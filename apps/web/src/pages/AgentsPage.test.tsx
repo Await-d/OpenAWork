@@ -101,16 +101,16 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
           id: 'oracle',
           origin: 'builtin',
           source: 'builtin',
-          enabled: body['enabled'] ?? true,
+          enabled: true,
           removable: false,
           resettable: true,
           hasOverrides: true,
           createdAt: '1970-01-01T00:00:00.000Z',
           updatedAt: new Date().toISOString(),
-          label: body['label'] ?? '架构顾问',
-          description: body['description'] ?? '只读顾问 agent',
-          aliases: body['aliases'] ?? ['architect', 'debugger'],
-          canonicalRole: body['canonicalRole'] ?? {
+          label: 'oracle',
+          description: '只读顾问 agent',
+          aliases: ['architect', 'debugger'],
+          canonicalRole: {
             coreRole: 'planner',
             preset: 'architect',
             confidence: 'medium',
@@ -118,8 +118,8 @@ const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit
           model: body['model'] ?? 'gpt-5.4',
           variant: body['variant'] ?? 'high',
           fallbackModels: body['fallbackModels'] ?? ['claude-opus-4-6', 'kimi-k2.5'],
-          systemPrompt: body['systemPrompt'] ?? 'Review architecture carefully',
-          note: body['note'] ?? '优先用于方案评审',
+          systemPrompt: 'Review architecture carefully',
+          note: '优先用于方案评审',
         },
       }),
     } as Response;
@@ -232,7 +232,7 @@ afterEach(() => {
 });
 
 describe('AgentsPage', () => {
-  it('loads agents, updates a builtin agent, and resets it to default', async () => {
+  it('loads agents, updates builtin model settings, and resets them to default', async () => {
     await act(async () => {
       root!.render(<AgentsPage />);
     });
@@ -243,17 +243,13 @@ describe('AgentsPage', () => {
     expect(rendered.textContent).toContain('架构顾问');
     expect(rendered.textContent).toContain('规划 / 架构');
     expect(rendered.textContent).toContain('默认模型 gpt-5.4');
+    expect(rendered.textContent).toContain('名称、角色、提示词与启用状态由系统固定管理');
 
     const nameInput = rendered.querySelector(
       'input[placeholder="例如：架构顾问"]',
     ) as HTMLInputElement | null;
     expect(nameInput).not.toBeNull();
-    await act(async () => {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-      descriptor?.set?.call(nameInput, '首席架构顾问');
-      nameInput!.dispatchEvent(new Event('input', { bubbles: true }));
-      nameInput!.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    expect(nameInput?.disabled).toBe(true);
 
     const modelInput = rendered.querySelector(
       'input[placeholder="例如：openai/gpt-5.4 或 gpt-5.4"]',
@@ -299,7 +295,7 @@ describe('AgentsPage', () => {
             JSON.stringify(['claude-opus-4-6', 'kimi-k2.5']),
       ),
     ).toBe(true);
-    expect(rendered.textContent).toContain('首席架构顾问');
+    expect(rendered.textContent).toContain('oracle');
 
     const resetButton = Array.from(rendered.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === '恢复默认',
@@ -343,6 +339,17 @@ describe('AgentsPage', () => {
       nameInput!.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
+    const promptInput = rendered.querySelector(
+      'textarea[placeholder="可选：记录该 Agent 的系统提示词或执行说明…"]',
+    ) as HTMLTextAreaElement | null;
+    expect(promptInput).not.toBeNull();
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(promptInput, '请协助开发团队处理额外实现任务。');
+      promptInput!.dispatchEvent(new Event('input', { bubbles: true }));
+      promptInput!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
     const createButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('创建 Agent'),
     );
@@ -355,6 +362,14 @@ describe('AgentsPage', () => {
     expect(requestLog.some((entry) => entry.method === 'POST' && entry.path === '/agents')).toBe(
       true,
     );
+    expect(
+      requestLog.some(
+        (entry) =>
+          entry.method === 'POST' &&
+          entry.path === '/agents' &&
+          entry.body?.['systemPrompt'] === '请协助开发团队处理额外实现任务。',
+      ),
+    ).toBe(true);
     expect(rendered.textContent).toContain('custom-debugger');
 
     const customAgentButton = Array.from(rendered.querySelectorAll('button')).find(
@@ -386,7 +401,7 @@ describe('AgentsPage', () => {
     ).toBe(true);
   });
 
-  it('toggles builtin enabled state and triggers reset-all action', async () => {
+  it('does not expose builtin enable toggle and still triggers reset-all action', async () => {
     await act(async () => {
       root!.render(<AgentsPage />);
     });
@@ -396,17 +411,7 @@ describe('AgentsPage', () => {
     const toggleButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('禁用 Agent'),
     );
-    expect(toggleButton).not.toBeNull();
-
-    await act(async () => {
-      toggleButton!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    await flushEffects();
-
-    expect(
-      requestLog.some((entry) => entry.method === 'PUT' && entry.path === '/agents/oracle'),
-    ).toBe(true);
-    expect(rendered.textContent).toContain('已禁用');
+    expect(toggleButton).toBeUndefined();
 
     const resetAllButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('全部恢复默认'),

@@ -4,6 +4,7 @@ interface ParsedSessionMetadata {
   dialogueMode: SessionDialogueMode;
   modelId?: string;
   parentSessionId?: string;
+  teamWorkspaceId?: string;
   workingDirectory: string | null;
   yoloMode: boolean;
 }
@@ -51,6 +52,10 @@ export function hasParentSession(metadataJson?: string): boolean {
   return extractParentSessionId(metadataJson) !== null;
 }
 
+export function hasTeamWorkspace(metadataJson?: string): boolean {
+  return parseSessionMetadata(metadataJson).teamWorkspaceId != null;
+}
+
 function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
   if (!metadataJson) {
     return FALLBACK_PARSED_SESSION_METADATA;
@@ -66,6 +71,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       dialogueMode?: unknown;
       modelId?: unknown;
       parentSessionId?: unknown;
+      teamWorkspaceId?: unknown;
       workingDirectory?: unknown;
       yoloMode?: unknown;
     };
@@ -79,6 +85,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
           : FALLBACK_PARSED_SESSION_METADATA.dialogueMode,
       modelId: normalizeOptionalString(parsed.modelId),
       parentSessionId: normalizeOptionalString(parsed.parentSessionId),
+      teamWorkspaceId: normalizeOptionalString(parsed.teamWorkspaceId),
       workingDirectory: normalizeOptionalString(parsed.workingDirectory) ?? null,
       yoloMode: parsed.yoloMode === true,
     };

@@ -367,30 +367,39 @@ function buildBuiltinAgentRecord(id: string, override?: StoredBuiltinOverride): 
   if (!builtin) {
     throw new Error(`Unknown builtin agent: ${id}`);
   }
+  const sanitizedOverride = override
+    ? {
+        model: override.model,
+        variant: override.variant,
+        fallbackModels: override.fallbackModels,
+        updatedAt: override.updatedAt,
+        enabled: override.enabled,
+      }
+    : undefined;
   const defaultBody = defaultBodyForBuiltin(id);
   const currentBody = normalizeBody({
     ...defaultBody,
-    label: override?.label ?? defaultBody.label,
-    description: override?.description ?? defaultBody.description,
-    aliases: override?.aliases ?? defaultBody.aliases,
-    canonicalRole: override?.canonicalRole ?? defaultBody.canonicalRole,
-    model: override?.model ?? defaultBody.model,
-    variant: override?.variant ?? defaultBody.variant,
-    fallbackModels: override?.fallbackModels ?? defaultBody.fallbackModels,
-    systemPrompt: override?.systemPrompt ?? defaultBody.systemPrompt,
-    note: override?.note ?? defaultBody.note,
+    model: sanitizedOverride?.model ?? defaultBody.model,
+    variant: sanitizedOverride?.variant ?? defaultBody.variant,
+    fallbackModels: sanitizedOverride?.fallbackModels ?? defaultBody.fallbackModels,
   });
+
+  const hasModelOverrides =
+    (sanitizedOverride?.model ?? defaultBody.model) !== defaultBody.model ||
+    (sanitizedOverride?.variant ?? defaultBody.variant) !== defaultBody.variant ||
+    JSON.stringify(sanitizedOverride?.fallbackModels ?? defaultBody.fallbackModels) !==
+      JSON.stringify(defaultBody.fallbackModels);
 
   return {
     id,
     origin: 'builtin',
     source: builtin.source,
-    enabled: override?.enabled ?? true,
+    enabled: sanitizedOverride?.enabled ?? true,
     removable: false,
-    resettable: Boolean(override),
-    hasOverrides: Boolean(override),
+    resettable: hasModelOverrides,
+    hasOverrides: hasModelOverrides,
     createdAt: SYSTEM_CREATED_AT,
-    updatedAt: override?.updatedAt ?? SYSTEM_CREATED_AT,
+    updatedAt: sanitizedOverride?.updatedAt ?? SYSTEM_CREATED_AT,
     ...currentBody,
   };
 }
@@ -473,6 +482,9 @@ export function createManagedAgentForUser(
 ): ManagedAgentRecord {
   const catalog = loadStoredCatalog(userId);
   const body = normalizeBody(input as CreateManagedAgentInput & Record<string, unknown>);
+  if (!body.systemPrompt) {
+    throw new Error('Custom agent systemPrompt is required');
+  }
   const now = new Date().toISOString();
   const id = normalizeOptionalText(input.id) ?? generateCustomAgentId(body.label, catalog);
   if (BUILTIN_AGENT_MAP.has(id) || catalog.customAgents[id]) {
@@ -518,44 +530,36 @@ export function updateManagedAgentForUser(
   }
 
   const current = catalog.builtinOverrides[agentId] ?? {};
+  const forbiddenFields = [
+    'label',
+    'description',
+    'aliases',
+    'canonicalRole',
+    'systemPrompt',
+    'note',
+    'enabled',
+  ].filter((field) => field in input);
+
+  if (forbiddenFields.length > 0) {
+    throw new Error('Builtin agents only allow model configuration updates');
+  }
+
   const next: StoredBuiltinOverride = {
-    label: input.label !== undefined ? normalizeOptionalText(input.label) : current.label,
-    description:
-      input.description !== undefined
-        ? normalizeOptionalText(input.description)
-        : current.description,
-    aliases: input.aliases !== undefined ? normalizeAliases(input.aliases) : current.aliases,
-    canonicalRole: input.canonicalRole !== undefined ? input.canonicalRole : current.canonicalRole,
     model: input.model !== undefined ? normalizeOptionalText(input.model) : current.model,
     variant: input.variant !== undefined ? normalizeOptionalText(input.variant) : current.variant,
     fallbackModels:
       input.fallbackModels !== undefined
         ? normalizeModelList(input.fallbackModels)
         : current.fallbackModels,
-    systemPrompt:
-      input.systemPrompt !== undefined
-        ? normalizeOptionalText(input.systemPrompt)
-        : current.systemPrompt,
-    note: input.note !== undefined ? normalizeOptionalText(input.note) : current.note,
-    enabled: input.enabled ?? current.enabled,
     updatedAt: now,
   };
 
   const builtinDefault = defaultBodyForBuiltin(agentId);
   const sameAsDefault =
-    (next.label ?? builtinDefault.label) === builtinDefault.label &&
-    (next.description ?? builtinDefault.description) === builtinDefault.description &&
-    JSON.stringify(next.aliases ?? builtinDefault.aliases) ===
-      JSON.stringify(builtinDefault.aliases) &&
-    JSON.stringify(next.canonicalRole ?? builtinDefault.canonicalRole) ===
-      JSON.stringify(builtinDefault.canonicalRole) &&
     (next.model ?? builtinDefault.model) === builtinDefault.model &&
     (next.variant ?? builtinDefault.variant) === builtinDefault.variant &&
     JSON.stringify(next.fallbackModels ?? builtinDefault.fallbackModels) ===
-      JSON.stringify(builtinDefault.fallbackModels) &&
-    (next.systemPrompt ?? builtinDefault.systemPrompt) === builtinDefault.systemPrompt &&
-    (next.note ?? builtinDefault.note) === builtinDefault.note &&
-    (next.enabled ?? true) === true;
+      JSON.stringify(builtinDefault.fallbackModels);
 
   if (sameAsDefault) {
     delete catalog.builtinOverrides[agentId];

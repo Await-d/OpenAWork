@@ -695,21 +695,39 @@ function ToggleRow({
 }
 
 function AgentForm({
+  isBuiltin,
   state,
   setState,
 }: {
+  isBuiltin: boolean;
   state: AgentEditorState;
   setState: React.Dispatch<React.SetStateAction<AgentEditorState>>;
 }) {
   return (
     <div style={{ display: 'grid', gap: 12 }}>
+      {isBuiltin ? (
+        <div
+          style={{
+            borderRadius: 14,
+            border: '1px solid color-mix(in oklab, var(--accent) 28%, var(--border-subtle) 72%)',
+            background: 'color-mix(in oklab, var(--accent-muted) 22%, var(--surface) 78%)',
+            padding: '12px 14px',
+            fontSize: 12,
+            color: 'var(--text-2)',
+            lineHeight: 1.7,
+          }}
+        >
+          内置 Agent 的名称、角色、提示词与启用状态由系统固定管理；这里仅允许调整模型配置。
+        </div>
+      ) : null}
       <label style={labelStyle()}>
         名称
         <input
           value={state.label}
           onChange={(event) => setState((current) => ({ ...current, label: event.target.value }))}
           placeholder="例如：架构顾问"
-          style={fieldStyle()}
+          disabled={isBuiltin}
+          style={{ ...fieldStyle(), opacity: isBuiltin ? 0.7 : 1 }}
         />
       </label>
 
@@ -721,7 +739,13 @@ function AgentForm({
             setState((current) => ({ ...current, description: event.target.value }))
           }
           placeholder="描述这个 Agent 的用途与职责…"
-          style={{ ...fieldStyle(), minHeight: 96, resize: 'vertical' }}
+          disabled={isBuiltin}
+          style={{
+            ...fieldStyle(),
+            minHeight: 96,
+            resize: 'vertical',
+            opacity: isBuiltin ? 0.7 : 1,
+          }}
         />
       </label>
 
@@ -733,7 +757,8 @@ function AgentForm({
             setState((current) => ({ ...current, aliasesText: event.target.value }))
           }
           placeholder="architect, reviewer, debugger"
-          style={fieldStyle()}
+          disabled={isBuiltin}
+          style={{ ...fieldStyle(), opacity: isBuiltin ? 0.7 : 1 }}
         />
       </label>
 
@@ -745,7 +770,8 @@ function AgentForm({
             onChange={(event) =>
               setState((current) => ({ ...current, coreRole: event.target.value as '' | CoreRole }))
             }
-            style={fieldStyle()}
+            disabled={isBuiltin}
+            style={{ ...fieldStyle(), opacity: isBuiltin ? 0.7 : 1 }}
           >
             <option value="">未设置</option>
             {CORE_ROLE_OPTIONS.map((role) => (
@@ -762,7 +788,8 @@ function AgentForm({
             onChange={(event) =>
               setState((current) => ({ ...current, preset: event.target.value as '' | RolePreset }))
             }
-            style={fieldStyle()}
+            disabled={isBuiltin}
+            style={{ ...fieldStyle(), opacity: isBuiltin ? 0.7 : 1 }}
           >
             <option value="">未设置</option>
             {PRESET_OPTIONS.map((preset) => (
@@ -839,18 +866,29 @@ function AgentForm({
 
       <label style={labelStyle()}>
         系统提示词
-        {!state.systemPrompt && (
+        {!state.systemPrompt && !isBuiltin && (
           <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-3)' }}>
             当前内置智能体未提供独立提示词时，这里会保持为空。
           </span>
         )}
+        {isBuiltin ? (
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-3)' }}>
+            内置 Agent 的系统提示词由系统维护，用户不可修改。
+          </span>
+        ) : null}
         <textarea
           value={state.systemPrompt}
           onChange={(event) =>
             setState((current) => ({ ...current, systemPrompt: event.target.value }))
           }
           placeholder="可选：记录该 Agent 的系统提示词或执行说明…"
-          style={{ ...fieldStyle(), minHeight: 120, resize: 'vertical' }}
+          disabled={isBuiltin}
+          style={{
+            ...fieldStyle(),
+            minHeight: 120,
+            resize: 'vertical',
+            opacity: isBuiltin ? 0.7 : 1,
+          }}
         />
       </label>
 
@@ -860,16 +898,24 @@ function AgentForm({
           value={state.note}
           onChange={(event) => setState((current) => ({ ...current, note: event.target.value }))}
           placeholder="记录这个 Agent 的使用注意事项…"
-          style={{ ...fieldStyle(), minHeight: 96, resize: 'vertical' }}
+          disabled={isBuiltin}
+          style={{
+            ...fieldStyle(),
+            minHeight: 96,
+            resize: 'vertical',
+            opacity: isBuiltin ? 0.7 : 1,
+          }}
         />
       </label>
 
-      <ToggleRow
-        label="启用智能体"
-        hint="禁用后将从 /capabilities 能力目录中移除。"
-        checked={state.enabled}
-        onChange={() => setState((current) => ({ ...current, enabled: !current.enabled }))}
-      />
+      {!isBuiltin ? (
+        <ToggleRow
+          label="启用智能体"
+          hint="禁用后将从 /capabilities 能力目录中移除。"
+          checked={state.enabled}
+          onChange={() => setState((current) => ({ ...current, enabled: !current.enabled }))}
+        />
+      ) : null}
     </div>
   );
 }
@@ -911,7 +957,7 @@ export function AgentsEditorPanel({
             title="新增自定义智能体"
             subtitle="创建一个新的自定义智能体，它会进入智能体目录并可被后续能力目录消费。"
           />
-          <AgentForm state={editorState} setState={setEditorState} />
+          <AgentForm isBuiltin={false} state={editorState} setState={setEditorState} />
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
@@ -937,7 +983,7 @@ export function AgentsEditorPanel({
         <div style={{ display: 'grid', gap: 16 }}>
           <PanelTitle
             title={selectedAgent.label}
-            subtitle={`编辑${selectedAgent.origin === 'builtin' ? '内置智能体覆盖项' : '自定义智能体'}实体。`}
+            subtitle={`编辑${selectedAgent.origin === 'builtin' ? '内置智能体模型配置' : '自定义智能体'}实体。`}
           />
           <div style={{ display: 'grid', gap: 10 }}>
             <InfoRow label="智能体 ID" value={selectedAgent.id} />
@@ -958,7 +1004,11 @@ export function AgentsEditorPanel({
             />
             <InfoRow label="创建时间" value={selectedAgent.createdAt} />
           </div>
-          <AgentForm state={editorState} setState={setEditorState} />
+          <AgentForm
+            isBuiltin={selectedAgent.origin === 'builtin'}
+            state={editorState}
+            setState={setEditorState}
+          />
           {saveMessage && <div style={{ color: '#86efac', fontSize: 13 }}>{saveMessage}</div>}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
@@ -969,14 +1019,16 @@ export function AgentsEditorPanel({
             >
               {saving ? '保存中…' : '保存 Agent 实体'}
             </button>
-            <button
-              type="button"
-              onClick={onToggleEnabled}
-              disabled={saving}
-              style={secondaryButtonStyle(saving)}
-            >
-              {selectedAgent.enabled ? '禁用 Agent' : '启用 Agent'}
-            </button>
+            {selectedAgent.origin === 'custom' ? (
+              <button
+                type="button"
+                onClick={onToggleEnabled}
+                disabled={saving}
+                style={secondaryButtonStyle(saving)}
+              >
+                {selectedAgent.enabled ? '禁用 Agent' : '启用 Agent'}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onResetOne}

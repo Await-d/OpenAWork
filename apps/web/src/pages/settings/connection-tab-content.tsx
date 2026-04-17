@@ -18,15 +18,11 @@ interface ConnectionTabContentProps {
   providers: AIProviderRef[];
   activeSelection: ActiveSelectionRef;
   defaultThinking: ThinkingDefaultsRef;
-  defaultToolSurfaceProfile: 'openawork' | 'claude_code_default' | 'claude_code_simple';
   agentProfiles: AgentProfileRecord[];
   hasUnsavedDefaultChanges: boolean;
   isSavingDefaultChanges: boolean;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelectionRef>>;
   setDefaultThinking: React.Dispatch<React.SetStateAction<ThinkingDefaultsRef>>;
-  setDefaultToolSurfaceProfile: React.Dispatch<
-    React.SetStateAction<'openawork' | 'claude_code_default' | 'claude_code_simple'>
-  >;
   saveDefaultModelSettings: () => void;
   deleteAgentProfile: (profileId: string) => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
@@ -67,13 +63,11 @@ export function ConnectionTabContent({
   providers,
   activeSelection,
   defaultThinking,
-  defaultToolSurfaceProfile,
   agentProfiles,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   setActiveSelection,
   setDefaultThinking,
-  setDefaultToolSurfaceProfile,
   saveDefaultModelSettings,
   deleteAgentProfile,
   handleAddModel,
@@ -139,26 +133,7 @@ export function ConnectionTabContent({
           <div
             style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
           >
-            <div style={{ display: 'grid', gap: 6, maxWidth: 320 }}>
-              <h4 style={{ ...ST, fontSize: 13, marginBottom: 0 }}>默认工具配置档</h4>
-              <select
-                aria-label="默认工具配置档"
-                value={defaultToolSurfaceProfile}
-                onChange={(event) =>
-                  setDefaultToolSurfaceProfile(
-                    event.target.value as
-                      | 'openawork'
-                      | 'claude_code_default'
-                      | 'claude_code_simple',
-                  )
-                }
-                style={IS}
-              >
-                <option value="openawork">OpenAWork 全功能</option>
-                <option value="claude_code_default">Claude Code 默认</option>
-                <option value="claude_code_simple">Claude Code 精简</option>
-              </select>
-            </div>
+            <div style={{ display: 'grid', gap: 6, maxWidth: 320 }} />
             <button
               type="button"
               onClick={saveDefaultModelSettings}
@@ -261,7 +236,7 @@ export function ConnectionTabContent({
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
                     代理：{profile.agentId ?? '默认'} · Provider：{profile.providerId ?? '默认'} ·
-                    Model：{profile.modelId ?? '默认'} · 配置档：{profile.toolSurfaceProfile}
+                    Model：{profile.modelId ?? '默认'}
                   </div>
                 </div>
               ))

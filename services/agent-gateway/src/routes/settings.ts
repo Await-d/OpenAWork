@@ -16,7 +16,6 @@ import {
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
 } from '../provider-config.js';
-import { TOOL_SURFACE_PROFILES } from '../session-workspace-metadata.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
 import {
@@ -102,15 +101,6 @@ interface PermissionRequestHistoryRow {
 interface UserSettingRow {
   key: string;
   value: string;
-}
-
-const defaultToolSurfaceProfileSchema = z.enum(TOOL_SURFACE_PROFILES);
-
-function readDefaultToolSurfaceProfile(
-  value: string | undefined,
-): 'openawork' | 'claude_code_simple' | 'claude_code_default' {
-  const parsed = defaultToolSurfaceProfileSchema.safeParse(parseStoredJson(value));
-  return parsed.success ? parsed.data : 'openawork';
 }
 
 const AUDIT_PAYLOAD_MAX_STRING_LENGTH = 1000;
@@ -586,10 +576,6 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
         [user.sub],
       );
-      const toolSurfaceRow = sqliteGet<UserSettingRow>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_tool_surface_profile'`,
-        [user.sub],
-      );
       loadStep.succeed();
 
       const materializeStep = child('materialize');
@@ -601,7 +587,6 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         ? filterEnabledProviderConfig(materialized)
         : materialized;
       const defaultThinking = parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
-      const defaultToolSurfaceProfile = readDefaultToolSurfaceProfile(toolSurfaceRow?.value);
       materializeStep.succeed(undefined, { providers: providers.length });
       step.succeed(undefined, { providers: providers.length });
 
@@ -609,7 +594,6 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         providers,
         activeSelection,
         defaultThinking,
-        defaultToolSurfaceProfile,
       });
     },
   );
@@ -628,10 +612,6 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       );
       const thinkingRow = sqliteGet<UserSettingRow>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
-        [user.sub],
-      );
-      const toolSurfaceRow = sqliteGet<UserSettingRow>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_tool_surface_profile'`,
         [user.sub],
       );
       loadSelectionStep.succeed(undefined, { found: selectionRow !== undefined });
@@ -655,9 +635,6 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const defaultThinking = parsed.data.defaultThinking
         ? parsed.data.defaultThinking
         : parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
-      const defaultToolSurfaceProfile = parsed.data.defaultToolSurfaceProfile
-        ? parsed.data.defaultToolSurfaceProfile
-        : readDefaultToolSurfaceProfile(toolSurfaceRow?.value);
       materializeStep.succeed(undefined, { providers: providers.length });
 
       const saveProvidersStep = child('save-providers');
@@ -682,20 +659,12 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, JSON.stringify(defaultThinking)],
       );
       saveThinkingStep.succeed();
-      const saveToolSurfaceStep = child('save-default-tool-surface-profile');
-      sqliteRun(
-        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'default_tool_surface_profile', ?)
-         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-        [user.sub, JSON.stringify(defaultToolSurfaceProfile)],
-      );
-      saveToolSurfaceStep.succeed();
       step.succeed(undefined, { providers: providers.length });
 
       return reply.send({
         providers,
         activeSelection,
         defaultThinking,
-        defaultToolSurfaceProfile,
       });
     },
   );
@@ -1100,6 +1069,122 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         checkError,
         checkedAt: new Date().toISOString(),
       });
+    },
+  );
+
+  const buddyChatSchema = z.object({
+    message: z.string().min(1).max(2000),
+    context: z
+      .object({
+        sessionBusy: z.boolean().optional(),
+        pendingApprovals: z.number().optional(),
+        pendingQuestions: z.number().optional(),
+        runningTasks: z.number().optional(),
+        blockedTasks: z.number().optional(),
+        todoCount: z.number().optional(),
+      })
+      .optional(),
+    agentId: z.string().optional(),
+  });
+
+  app.post(
+    '/settings/companion/chat',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.companion.chat');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = buddyChatSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? '';
+      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
+      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
+
+      if (!AI_API_BASE_URL || !AI_API_KEY) {
+        step.fail('no llm config');
+        return reply.status(503).send({ error: 'Companion chat LLM is not configured' });
+      }
+
+      const { loadCompanionSettingsForUser } = await import('../companion-settings.js');
+      const companionSettings = loadCompanionSettingsForUser(
+        user.sub,
+        user.email,
+        body.data.agentId,
+      );
+      const profile = companionSettings.profile;
+      const intro = (await import('../companion-settings.js')).buildCompanionIntroText(profile);
+
+      const contextParts: string[] = [];
+      if (body.data.context) {
+        const ctx = body.data.context;
+        if (ctx.sessionBusy) contextParts.push('当前会话正在运行中');
+        if (ctx.pendingApprovals && ctx.pendingApprovals > 0)
+          contextParts.push(`${ctx.pendingApprovals} 个待审批项`);
+        if (ctx.pendingQuestions && ctx.pendingQuestions > 0)
+          contextParts.push(`${ctx.pendingQuestions} 个待回答问题`);
+        if (ctx.runningTasks && ctx.runningTasks > 0)
+          contextParts.push(`${ctx.runningTasks} 个正在运行的任务`);
+        if (ctx.blockedTasks && ctx.blockedTasks > 0)
+          contextParts.push(`${ctx.blockedTasks} 个被阻塞的任务`);
+        if (ctx.todoCount && ctx.todoCount > 0) contextParts.push(`${ctx.todoCount} 个待办事项`);
+      }
+
+      const contextBlock =
+        contextParts.length > 0
+          ? `\n\n当前工作台状态：\n${contextParts.map((p) => `- ${p}`).join('\n')}`
+          : '';
+
+      const prompt = `你是 ${profile.name}，一个 OpenAWork 工作台的低打扰陪跑 companion。
+
+角色设定：
+${intro}
+${profile.name} 的定位：${profile.archetype}。
+行为基调：${profile.note}。
+关注标签：${profile.traits.join(' / ')}。
+
+你的行为准则：
+1. 保持极短、低打扰，不主动展开，不抢主助手的话筒
+2. 只在必要时补充轻量提醒、节奏反馈或陪伴式短句
+3. 语气要贴合你的角色设定，但不要过度表演
+4. 不要重复用户已经知道的信息
+5. 用中文回复，控制在 40 字以内
+${contextBlock}
+
+用户对你说：${body.data.message}
+
+请以 ${profile.name} 的身份简短回复：`;
+
+      const chatStep = child('llm-chat');
+      try {
+        const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
+        const response = await requestWorkflowLlmCompletion({
+          apiBaseUrl: AI_API_BASE_URL,
+          apiKey: AI_API_KEY,
+          model: AI_DEFAULT_MODEL,
+          prompt,
+          temperature: 0.7,
+        });
+        chatStep.succeed(undefined, { outputLength: response.length });
+        step.succeed();
+
+        return reply.send({
+          text: response.trim(),
+          profileName: profile.name,
+          profileSpecies: profile.species,
+          tone: 'chat',
+        });
+      } catch (_error: unknown) {
+        chatStep.fail('llm error');
+        step.fail('llm error');
+        return reply.status(500).send({ error: 'Companion chat failed' });
+      }
     },
   );
 }

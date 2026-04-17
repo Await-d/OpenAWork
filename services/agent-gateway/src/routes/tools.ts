@@ -2,15 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import {
-  buildGatewayToolDefinitions,
-  buildGatewayToolDefinitionsForProfile,
-} from '../tool-definitions.js';
+import { buildGatewayToolDefinitions } from '../tool-definitions.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
-import {
-  extractToolSurfaceProfile,
-  parseSessionMetadataJson,
-} from '../session-workspace-metadata.js';
 
 interface SessionMetadataRow {
   metadata_json: string;
@@ -32,9 +25,7 @@ export async function toolsRoutes(app: FastifyInstance): Promise<void> {
         : undefined;
       const visibleTools = sessionMetadataRow?.metadata_json
         ? filterEnabledGatewayToolsForSession(
-            buildGatewayToolDefinitionsForProfile(
-              extractToolSurfaceProfile(parseSessionMetadataJson(sessionMetadataRow.metadata_json)),
-            ),
+            buildGatewayToolDefinitions(),
             sessionMetadataRow.metadata_json,
           )
         : buildGatewayToolDefinitions();

@@ -344,7 +344,12 @@ export default function AgentsPage() {
     }
   }
 
-  const canSave = editorState.label.trim().length > 0;
+  const canSave =
+    editorMode === 'create'
+      ? editorState.label.trim().length > 0 && editorState.systemPrompt.trim().length > 0
+      : selectedAgent?.origin === 'builtin'
+        ? true
+        : editorState.label.trim().length > 0 && editorState.systemPrompt.trim().length > 0;
 
   return (
     <div className="page-root">

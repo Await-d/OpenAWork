@@ -306,15 +306,6 @@ function parseQuestionResumePayload(
                       'canonicalToolName'
                     ] as string)
                   : 'unknown',
-              toolSurfaceProfile:
-                (parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] ===
-                  'claude_code_simple' ||
-                (parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] ===
-                  'claude_code_default'
-                  ? ((parsed['observability'] as Record<string, unknown>)['toolSurfaceProfile'] as
-                      | 'claude_code_simple'
-                      | 'claude_code_default')
-                  : 'openawork',
               adapterVersion:
                 typeof (parsed['observability'] as Record<string, unknown>)['adapterVersion'] ===
                 'string'

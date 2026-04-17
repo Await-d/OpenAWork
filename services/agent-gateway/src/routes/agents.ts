@@ -44,7 +44,7 @@ const createManagedAgentSchema = z.object({
   model: z.string().trim().min(1).max(200).optional(),
   variant: z.string().trim().min(1).max(80).optional(),
   fallbackModels: z.array(z.string().trim().min(1).max(200)).optional(),
-  systemPrompt: z.string().trim().max(4000).optional(),
+  systemPrompt: z.string().trim().min(1).max(4000),
   note: z.string().trim().max(400).optional(),
   enabled: z.boolean().optional().default(true),
 });
@@ -123,10 +123,14 @@ export async function agentsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { agentId: agent.id });
       return reply.send({ agent });
     } catch (error) {
-      step.fail(error instanceof Error ? error.message : 'update failed');
-      return reply
-        .status(404)
-        .send({ error: error instanceof Error ? error.message : 'Update failed' });
+      const message = error instanceof Error ? error.message : 'Update failed';
+      step.fail(message);
+      const statusCode =
+        message.includes('only allow model configuration updates') ||
+        message.includes('systemPrompt is required')
+          ? 400
+          : 404;
+      return reply.status(statusCode).send({ error: message });
     }
   });
 

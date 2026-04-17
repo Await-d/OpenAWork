@@ -133,12 +133,6 @@ export default function SettingsPage() {
     chat: { ...DEFAULT_THINKING_DEFAULTS.chat },
     fast: { ...DEFAULT_THINKING_DEFAULTS.fast },
   });
-  const [defaultToolSurfaceProfile, setDefaultToolSurfaceProfileState] = useState<
-    'openawork' | 'claude_code_default' | 'claude_code_simple'
-  >('openawork');
-  const [savedDefaultToolSurfaceProfile, setSavedDefaultToolSurfaceProfile] = useState<
-    'openawork' | 'claude_code_default' | 'claude_code_simple'
-  >('openawork');
   const [savingDefaultModelSettings, setSavingDefaultModelSettings] = useState(false);
   const [filePatterns, setFilePatterns] = useState<string[]>([]);
   const [githubTriggers, setGithubTriggers] = useState<Array<{ repo: string; events: string[] }>>(
@@ -265,16 +259,8 @@ export default function SettingsPage() {
   const hasUnsavedDefaultModelChanges = React.useMemo(
     () =>
       JSON.stringify(activeSelection) !== JSON.stringify(savedActiveSelection) ||
-      JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking) ||
-      defaultToolSurfaceProfile !== savedDefaultToolSurfaceProfile,
-    [
-      activeSelection,
-      savedActiveSelection,
-      defaultThinking,
-      savedDefaultThinking,
-      defaultToolSurfaceProfile,
-      savedDefaultToolSurfaceProfile,
-    ],
+      JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking),
+    [activeSelection, savedActiveSelection, defaultThinking, savedDefaultThinking],
   );
 
   const updateDevtoolsSourceState = React.useCallback(
@@ -589,7 +575,6 @@ export default function SettingsPage() {
             providers: AIProviderRef[] | null;
             activeSelection?: ActiveSelectionRef | null;
             defaultThinking?: ThinkingDefaultsRef | null;
-            defaultToolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
           }>,
       )
       .then((d) => {
@@ -609,13 +594,6 @@ export default function SettingsPage() {
         savedDefaultThinkingRef.current = normalizedThinking;
         setDefaultThinkingState(normalizedThinking);
         setSavedDefaultThinkingState(normalizedThinking);
-        const normalizedToolSurfaceProfile =
-          d.defaultToolSurfaceProfile === 'claude_code_default' ||
-          d.defaultToolSurfaceProfile === 'claude_code_simple'
-            ? d.defaultToolSurfaceProfile
-            : 'openawork';
-        setDefaultToolSurfaceProfileState(normalizedToolSurfaceProfile);
-        setSavedDefaultToolSurfaceProfile(normalizedToolSurfaceProfile);
       });
     void fetch(`${gatewayUrl}/settings/mcp-servers`, { headers: h })
       .then((r) => r.json() as Promise<{ servers: MCPServerEntry[] }>)
@@ -827,7 +805,6 @@ export default function SettingsPage() {
             providers: next,
             activeSelection: nextSel,
             defaultThinking: nextThinking,
-            defaultToolSurfaceProfile,
           }),
         });
 
@@ -835,7 +812,6 @@ export default function SettingsPage() {
           providers?: AIProviderRef[];
           activeSelection?: ActiveSelectionRef;
           defaultThinking?: ThinkingDefaultsRef;
-          defaultToolSurfaceProfile?: 'openawork' | 'claude_code_default' | 'claude_code_simple';
           error?: string;
         };
 
@@ -876,13 +852,6 @@ export default function SettingsPage() {
             setSavedDefaultThinkingState(normalizedThinking);
           }
         }
-        const normalizedToolSurfaceProfile =
-          data.defaultToolSurfaceProfile === 'claude_code_default' ||
-          data.defaultToolSurfaceProfile === 'claude_code_simple'
-            ? data.defaultToolSurfaceProfile
-            : 'openawork';
-        setDefaultToolSurfaceProfileState(normalizedToolSurfaceProfile);
-        setSavedDefaultToolSurfaceProfile(normalizedToolSurfaceProfile);
       };
 
       const queuedSave = providerSaveQueueRef.current.catch(() => undefined).then(runSave);
@@ -892,7 +861,7 @@ export default function SettingsPage() {
       );
       await queuedSave;
     },
-    [token, gatewayUrl, defaultToolSurfaceProfile],
+    [token, gatewayUrl],
   );
 
   const setMcpServers = React.useCallback(
@@ -984,15 +953,6 @@ export default function SettingsPage() {
       setSavingDefaultModelSettings(false);
     }
   }, [token, savingDefaultModelSettings, saveProviders]);
-
-  const setDefaultToolSurfaceProfile = React.useCallback(
-    (updater: React.SetStateAction<'openawork' | 'claude_code_default' | 'claude_code_simple'>) => {
-      setDefaultToolSurfaceProfileState((prev) =>
-        typeof updater === 'function' ? updater(prev) : updater,
-      );
-    },
-    [],
-  );
 
   const deleteAgentProfile = React.useCallback(
     async (profileId: string) => {
@@ -1386,12 +1346,10 @@ export default function SettingsPage() {
                     providers={providers}
                     activeSelection={activeSelection}
                     defaultThinking={defaultThinking}
-                    defaultToolSurfaceProfile={defaultToolSurfaceProfile}
                     hasUnsavedDefaultChanges={hasUnsavedDefaultModelChanges}
                     isSavingDefaultChanges={savingDefaultModelSettings}
                     setActiveSelection={setActiveSelection}
                     setDefaultThinking={setDefaultThinking}
-                    setDefaultToolSurfaceProfile={setDefaultToolSurfaceProfile}
                     saveDefaultModelSettings={() => {
                       void saveDefaultModelSettings();
                     }}

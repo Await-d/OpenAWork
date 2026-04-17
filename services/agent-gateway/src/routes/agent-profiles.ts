@@ -10,7 +10,6 @@ import {
   updateAgentProfileForUser,
 } from '../agent-profile-store.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { TOOL_SURFACE_PROFILES } from '../session-workspace-metadata.js';
 
 const profileBodySchema = z.object({
   agentId: z.string().trim().min(1).max(120).optional(),
@@ -18,7 +17,6 @@ const profileBodySchema = z.object({
   modelId: z.string().trim().min(1).max(200).optional(),
   note: z.string().trim().max(400).optional(),
   providerId: z.string().trim().min(1).max(200).optional(),
-  toolSurfaceProfile: z.enum(TOOL_SURFACE_PROFILES).optional(),
   workspacePath: z.string().trim().min(1),
 });
 

@@ -29,7 +29,7 @@ import {
   buildSavedChatSessionMetadata,
   loadSavedChatSessionDefaults,
 } from '../utils/chat-session-defaults.js';
-import { extractParentSessionId } from '../utils/session-metadata.js';
+import { extractParentSessionId, hasTeamWorkspace } from '../utils/session-metadata.js';
 import { logger } from '../utils/logger.js';
 
 export interface Session {
@@ -136,7 +136,10 @@ export function useSessions() {
           }
         }
 
-        return applySessionRunStateOverrides(hydratedSessions, runStateOverridesRef.current);
+        const nonTeamSessions = hydratedSessions.filter(
+          (session) => !hasTeamWorkspace(session.metadata_json),
+        );
+        return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
       });
       if (fetchRequestIdRef.current !== requestId) {
         return;
@@ -172,9 +175,6 @@ export function useSessions() {
                 ...(profile.agentId ? { agentId: profile.agentId } : {}),
                 ...(profile.providerId ? { providerId: profile.providerId } : {}),
                 ...(profile.modelId ? { modelId: profile.modelId } : {}),
-                ...(profile.toolSurfaceProfile !== 'openawork'
-                  ? { toolSurfaceProfile: profile.toolSurfaceProfile }
-                  : {}),
               };
             }
           }

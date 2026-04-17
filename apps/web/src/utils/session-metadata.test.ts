@@ -4,6 +4,7 @@ import {
   extractWorkingDirectory,
   getSessionModeLabels,
   hasParentSession,
+  hasTeamWorkspace,
 } from './session-metadata.js';
 
 describe('session-metadata', () => {
@@ -28,10 +29,19 @@ describe('session-metadata', () => {
     expect(getSessionModeLabels(metadataJson)).toEqual(['编程', 'YOLO', 'Claude Sonnet 4']);
   });
 
+  it('detects team workspace in metadata', () => {
+    const withTeam = JSON.stringify({ teamWorkspaceId: 'workspace-1' });
+    const withoutTeam = JSON.stringify({ workingDirectory: '/repo' });
+    expect(hasTeamWorkspace(withTeam)).toBe(true);
+    expect(hasTeamWorkspace(withoutTeam)).toBe(false);
+    expect(hasTeamWorkspace(undefined)).toBe(false);
+    expect(hasTeamWorkspace('not-json')).toBe(false);
+  });
+
   it('falls back safely for invalid metadata', () => {
     expect(extractParentSessionId('not-json')).toBeNull();
     expect(extractWorkingDirectory('not-json')).toBeNull();
     expect(hasParentSession('not-json')).toBe(false);
-    expect(getSessionModeLabels('not-json')).toEqual(['澄清']);
+    expect(getSessionModeLabels('not-json')).toEqual(['澄清(方案)']);
   });
 });
