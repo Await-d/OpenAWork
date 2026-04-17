@@ -570,6 +570,36 @@ describe('resolveModelRouteFromProvider', () => {
     expect(route.model).toBe('gpt-4o');
   });
 
+  it('uses chat_completions protocol for OpenAI providers with non-official base URLs (proxies)', () => {
+    const provider = {
+      ...getBuiltinProviderPreset('openai'),
+      baseUrl: 'https://my-proxy.example.com/v1',
+      apiKey: 'sk-proxy',
+    };
+
+    const route = resolveModelRouteFromProvider(provider, 'gpt-4o', {
+      maxTokens: 2048,
+      temperature: 1,
+    });
+
+    expect(route.apiBaseUrl).toBe('https://my-proxy.example.com/v1');
+    expect(route.upstreamProtocol).toBe('chat_completions');
+  });
+
+  it('uses responses protocol for OpenAI providers with the official api.openai.com base URL', () => {
+    const provider = {
+      ...getBuiltinProviderPreset('openai'),
+    };
+
+    const route = resolveModelRouteFromProvider(provider, 'gpt-4o', {
+      maxTokens: 2048,
+      temperature: 1,
+    });
+
+    expect(route.apiBaseUrl).toBe('https://api.openai.com/v1');
+    expect(route.upstreamProtocol).toBe('responses');
+  });
+
   it('falls back to provider apiKeyEnv when apiKey is absent', () => {
     vi.stubEnv('OPENAI_API_KEY', 'sk-from-env');
     const provider = {

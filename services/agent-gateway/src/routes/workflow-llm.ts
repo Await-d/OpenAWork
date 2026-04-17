@@ -23,7 +23,11 @@ export interface WorkflowLlmRequest {
 
 export function buildWorkflowLlmRequest(input: WorkflowLlmRequestConfig): WorkflowLlmRequest {
   const providerType = inferWorkflowProviderType(input.apiBaseUrl, input.model);
-  const upstreamProtocol = resolveUpstreamProtocol({ model: input.model, providerType });
+  const upstreamProtocol = resolveUpstreamProtocol({
+    model: input.model,
+    providerType,
+    baseUrl: input.apiBaseUrl,
+  });
   const requestOverrides = buildRequestOverrides(undefined, undefined, input.model);
   const body = {
     ...buildUpstreamRequestBody({

@@ -137,8 +137,6 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
   const requestOverrides = buildRequestOverrides(undefined, undefined, model);
   const providerType =
     builtinProvider?.type ?? (model.startsWith('claude') ? 'anthropic' : undefined);
-  const upstreamProtocol = resolveUpstreamProtocol({ model, providerType });
-
   const isAnthropic = providerType === 'anthropic';
   const apiBaseUrl = normalizeBaseUrl(
     (builtinProvider ? resolveProviderDefaultBaseUrl(builtinProvider.type) : undefined) ??
@@ -146,6 +144,7 @@ export function resolveModelRoute(request: ModelRequest): ModelRouteConfig {
         ? (globalThis.process?.env['ANTHROPIC_API_BASE_URL'] ?? 'https://api.anthropic.com/v1')
         : OPENAI_BASE),
   );
+  const upstreamProtocol = resolveUpstreamProtocol({ model, providerType, baseUrl: apiBaseUrl });
 
   const apiKey = builtinProvider
     ? resolveProviderApiKey(builtinProvider)
@@ -186,12 +185,18 @@ export function resolveModelRouteFromProvider(
     modelConfig?.requestOverrides,
     modelId,
   );
-  const upstreamProtocol = resolveUpstreamProtocol({ model: modelId, providerType: provider.type });
+  const resolvedProviderBaseUrl =
+    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
+  const upstreamProtocol = resolveUpstreamProtocol({
+    model: modelId,
+    providerType: provider.type,
+    baseUrl: resolvedProviderBaseUrl,
+  });
 
   return {
     model: modelId,
     variant: request.variant,
-    apiBaseUrl: normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
+    apiBaseUrl: resolvedProviderBaseUrl,
     apiKey: resolveProviderApiKey(provider),
     maxTokens: requestOverrides.maxTokens ?? request.maxTokens,
     temperature: requestOverrides.temperature ?? request.temperature,
@@ -220,11 +225,17 @@ export function resolveCompactionRoute(
     modelConfig?.requestOverrides,
     modelId,
   );
-  const upstreamProtocol = resolveUpstreamProtocol({ model: modelId, providerType: provider.type });
+  const resolvedCompactionBaseUrl =
+    normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type);
+  const upstreamProtocol = resolveUpstreamProtocol({
+    model: modelId,
+    providerType: provider.type,
+    baseUrl: resolvedCompactionBaseUrl,
+  });
 
   return {
     model: modelId,
-    apiBaseUrl: normalizeBaseUrl(provider.baseUrl) || resolveProviderDefaultBaseUrl(provider.type),
+    apiBaseUrl: resolvedCompactionBaseUrl,
     apiKey: resolveProviderApiKey(provider),
     maxTokens: requestOverrides.maxTokens ?? 4096,
     temperature: 0,
