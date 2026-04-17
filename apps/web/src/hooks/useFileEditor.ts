@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 
@@ -45,25 +45,29 @@ function getLanguage(path: string): string {
 export function useFileEditor() {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
-  const uiState = useUIStateStore();
+  const openFilePaths = useUIStateStore((s) => s.openFilePaths);
+  const activeFilePath = useUIStateStore((s) => s.activeFilePath);
+  const setOpenFilePaths = useUIStateStore((s) => s.setOpenFilePaths);
+  const setActiveFilePath = useUIStateStore((s) => s.setActiveFilePath);
 
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const persistedPaths = uiState.openFilePaths;
-  const persistedActive = uiState.activeFilePath;
-
-  const setOpenFilePaths = uiState.setOpenFilePaths;
+  const persistedPaths = openFilePaths;
+  const persistedActive = activeFilePath;
+  const openFilePathsRef = useRef(openFiles.map((f) => f.path));
+  openFilePathsRef.current = openFiles.map((f) => f.path);
   useEffect(() => {
-    setOpenFilePaths(openFiles.map((f) => f.path));
+    const next = openFilePathsRef.current;
+    setOpenFilePaths(next);
   }, [openFiles, setOpenFilePaths]);
 
   const openFile = useCallback(
     async (path: string) => {
       const existing = openFiles.find((f) => f.path === path);
       if (existing) {
-        uiState.setActiveFilePath(path);
+        setActiveFilePath(path);
         return;
       }
       setLoading(true);
@@ -83,14 +87,14 @@ export function useFileEditor() {
           language: getLanguage(path),
         };
         setOpenFiles((prev) => [...prev, file]);
-        uiState.setActiveFilePath(path);
+        setActiveFilePath(path);
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : '打开文件失败');
       } finally {
         setLoading(false);
       }
     },
-    [openFiles, token, gatewayUrl, uiState],
+    [openFiles, token, gatewayUrl, setActiveFilePath],
   );
 
   useEffect(() => {
@@ -132,15 +136,14 @@ export function useFileEditor() {
       setOpenFiles((prev) => {
         const idx = prev.findIndex((f) => f.path === path);
         const next = prev.filter((f) => f.path !== path);
-        const currentActive = uiState.activeFilePath;
-        if (currentActive === path) {
+        if (activeFilePath === path) {
           const nextActive = next[Math.max(0, idx - 1)]?.path ?? next[0]?.path ?? null;
-          uiState.setActiveFilePath(nextActive);
+          setActiveFilePath(nextActive);
         }
         return next;
       });
     },
-    [uiState],
+    [activeFilePath, setActiveFilePath],
   );
 
   const updateContent = useCallback((path: string, content: string) => {
@@ -172,8 +175,6 @@ export function useFileEditor() {
     [openFiles, token, gatewayUrl],
   );
 
-  const activeFilePath = uiState.activeFilePath;
-  const setActiveFilePath = uiState.setActiveFilePath;
   const activeFile = openFiles.find((f) => f.path === activeFilePath) ?? null;
 
   const isDirty = (path: string) => {

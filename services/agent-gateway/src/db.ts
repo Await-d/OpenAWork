@@ -239,25 +239,6 @@ export async function migrate(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_notification_preferences_user ON notification_preferences(user_id, channel, event_type)',
   );
   db.exec(
-    `CREATE TABLE IF NOT EXISTS agent_profiles (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      workspace_path TEXT NOT NULL,
-      label TEXT NOT NULL,
-      agent_id TEXT,
-      provider_id TEXT,
-      model_id TEXT,
-      tool_surface_profile TEXT NOT NULL DEFAULT 'openawork',
-      note TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(user_id, workspace_path)
-    )`,
-  );
-  db.exec(
-    'CREATE INDEX IF NOT EXISTS idx_agent_profiles_user_updated ON agent_profiles(user_id, updated_at DESC)',
-  );
-  db.exec(
     `CREATE TABLE IF NOT EXISTS session_shares (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

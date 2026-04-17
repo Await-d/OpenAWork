@@ -108,6 +108,8 @@ function ComposerHarness() {
       thinkingEnabled={false}
       variant="home"
       webSearchEnabled={false}
+      onOptimizePrompt={undefined}
+      onReplaceInput={undefined}
     />
   );
 }

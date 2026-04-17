@@ -130,7 +130,7 @@ async function mockTeamTemplateSessionFlow(page: Page): Promise<{
           executor: 'hephaestus',
           reviewer: 'momus',
         },
-        defaultProvider: 'claude-code',
+        defaultProvider: 'anthropic',
         optionalAgentIds: ['atlas'],
         requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
       },
@@ -334,7 +334,7 @@ test.describe('Team saved template -> create session', () => {
       title: '模板团队会话',
       source: { kind: 'saved-template', templateId: 'workflow-1' },
       optionalAgentIds: ['atlas'],
-      defaultProvider: 'claude-code',
+      defaultProvider: 'anthropic',
     });
     expect(mocks.getCreateSessionPayload()?.requiredRoleBindings).toBeUndefined();
 

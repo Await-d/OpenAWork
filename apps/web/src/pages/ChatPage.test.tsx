@@ -244,31 +244,6 @@ const getTodoLanesMock = vi.fn<
 const getTasksMock = vi.fn<(_token: string, _sessionId: string) => Promise<SessionTask[]>>(
   async () => [],
 );
-const getCurrentAgentProfileMock = vi.fn(async () => null);
-const createAgentProfileMock = vi.fn(async (_token: string, input: Record<string, unknown>) => ({
-  id: 'profile-1',
-  label: String(input['label'] ?? '项目配置'),
-  workspacePath: String(input['workspacePath'] ?? '/repo/alpha'),
-  agentId: (input['agentId'] as string | undefined) ?? null,
-  providerId: (input['providerId'] as string | undefined) ?? null,
-  modelId: (input['modelId'] as string | undefined) ?? null,
-  note: null,
-  createdAt: '2026-04-05T00:00:00.000Z',
-  updatedAt: '2026-04-05T00:00:00.000Z',
-}));
-const updateAgentProfileMock = vi.fn(
-  async (_token: string, _profileId: string, input: Record<string, unknown>) => ({
-    id: 'profile-1',
-    label: String(input['label'] ?? '项目配置'),
-    workspacePath: String(input['workspacePath'] ?? '/repo/alpha'),
-    agentId: (input['agentId'] as string | undefined) ?? null,
-    providerId: (input['providerId'] as string | undefined) ?? null,
-    modelId: (input['modelId'] as string | undefined) ?? null,
-    note: null,
-    createdAt: '2026-04-05T00:00:00.000Z',
-    updatedAt: '2026-04-05T00:00:00.000Z',
-  }),
-);
 const updateMetadataMock = vi.fn(async () => undefined);
 const listPendingPermissionsMock = vi.fn<
   (_token: string, _sessionId: string) => Promise<PendingPermissionRequest[]>
@@ -420,11 +395,6 @@ vi.mock('@openAwork/web-client', () => ({
   })),
   createCapabilitiesClient: vi.fn(() => ({
     list: listCapabilitiesMock,
-  })),
-  createAgentProfilesClient: vi.fn(() => ({
-    create: createAgentProfileMock,
-    getCurrent: getCurrentAgentProfileMock,
-    update: updateAgentProfileMock,
   })),
 }));
 
@@ -885,8 +855,6 @@ beforeEach(() => {
   listMessageRatingsMock.mockImplementation(async () => []);
   setMessageRatingMock.mockClear();
   deleteMessageRatingMock.mockClear();
-  createAgentProfileMock.mockClear();
-  updateAgentProfileMock.mockClear();
   createSessionMock.mockClear();
   truncateMessagesMock.mockClear();
   importSessionMock.mockClear();
@@ -922,8 +890,6 @@ beforeEach(() => {
   updateMetadataMock.mockClear();
   getTasksMock.mockReset();
   getTasksMock.mockImplementation(async () => []);
-  getCurrentAgentProfileMock.mockReset();
-  getCurrentAgentProfileMock.mockImplementation(async () => null);
   useAuthStore.setState({ accessToken: 'token-123', gatewayUrl: 'http://localhost:3000' });
   Object.defineProperty(globalThis.navigator, 'clipboard', {
     configurable: true,
@@ -6412,43 +6378,6 @@ describe('ChatPage', () => {
       'token-123',
       'session-1',
       'assistant-feedback',
-    );
-  });
-
-  it('saves the current chat configuration as a workspace agent profile', async () => {
-    workspaceMock.workingDirectory = '/repo/alpha';
-    listCapabilitiesMock.mockImplementationOnce(
-      async () =>
-        [
-          {
-            id: 'hephaestus',
-            kind: 'agent',
-            label: 'Hephaestus',
-            description: '程序员执行代理',
-            source: 'builtin',
-            callable: false,
-          },
-        ] as Array<Record<string, unknown>>,
-    );
-
-    const rendered = await renderChatPage('/chat/session-1');
-    const saveProfileButton = Array.from(rendered.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('保存为项目配置'),
-    );
-
-    expect(saveProfileButton).toBeTruthy();
-
-    act(() => {
-      saveProfileButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    await flushEffects();
-
-    expect(createAgentProfileMock).toHaveBeenCalledWith(
-      'token-123',
-      expect.objectContaining({
-        workspacePath: '/repo/alpha',
-      }),
     );
   });
 

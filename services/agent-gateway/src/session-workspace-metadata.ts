@@ -18,7 +18,10 @@ const teamDefinitionSchema = z.object({
     z.object({
       agentId: z.string().min(1).max(200),
       agentLabel: z.string().min(1).max(200),
-      role: z.enum(['planner', 'researcher', 'executor', 'reviewer']),
+      modelId: z.string().min(1).max(200).optional(),
+      providerId: z.string().min(1).max(200).optional(),
+      role: z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']),
+      variant: z.string().min(1).max(80).optional(),
     }),
   ),
   source: z.object({

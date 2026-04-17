@@ -185,5 +185,7 @@ export interface AgentTeamsTimelineEvent {
 
 export interface TeamTemplateProviderOption {
   label: string;
+  modelId?: string;
   value: string;
+  variant?: string;
 }

@@ -17,7 +17,14 @@ export function resolveUpstreamProtocol(input: {
   model: string;
   providerType?: string;
   baseUrl?: string;
+  /** Per-provider explicit override — takes priority over all heuristics. */
+  explicitOverride?: UpstreamProtocol;
 }): UpstreamProtocol {
+  // Explicit provider-level override wins over everything.
+  if (input.explicitOverride) {
+    return input.explicitOverride;
+  }
+
   if (input.providerType === 'openai') {
     // Only use the Responses API when pointing at the official OpenAI API.
     // Most OpenAI-compatible proxies (one-api, new-api, etc.) only support

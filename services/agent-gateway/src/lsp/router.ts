@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { requireAuth } from '../auth.js';
 import { getRequestWorkflow, startRequestWorkflow } from '../request-workflow.js';
 
-const lspManager = new LSPManager();
+const lspManager = new LSPManager({ autoInstall: true });
 
 const touchSchema = z.object({
   path: z.string().min(1),
@@ -22,9 +22,16 @@ export async function lspRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'lsp.status');
       const fetchStep = child('fetch');
       const status = await lspManager.status();
-      fetchStep.succeed(undefined, { servers: Array.isArray(status) ? status.length : 0 });
-      step.succeed(undefined, { servers: Array.isArray(status) ? status.length : 0 });
-      return reply.send({ servers: status });
+      const missing = lspManager.missingServers();
+      fetchStep.succeed(undefined, {
+        servers: status.length,
+        missing: missing.filter((s) => !s.installed).length,
+      });
+      step.succeed(undefined, {
+        servers: status.length,
+        missing: missing.filter((s) => !s.installed).length,
+      });
+      return reply.send({ servers: status, missing });
     },
   );
 
@@ -63,6 +70,48 @@ export async function lspRoutes(app: FastifyInstance): Promise<void> {
       invokeStep.succeed();
       step.succeed(undefined, { waitForDiagnostics: body.data.waitForDiagnostics });
       return reply.send({ ok: true });
+    },
+  );
+
+  app.get(
+    '/lsp/servers',
+    { onRequest: [requireAuth] },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const servers = lspManager.missingServers();
+      return reply.send({ servers });
+    },
+  );
+
+  const installSchema = z.object({
+    serverId: z.string().min(1),
+  });
+
+  app.post(
+    '/lsp/install',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'lsp.install');
+      const body = installSchema.safeParse(request.body);
+      if (!body.success) {
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      const { serverId } = body.data;
+      const success = await lspManager.ensureInstalled(serverId);
+      step.succeed(undefined, { serverId, success });
+      return reply.send({ serverId, installed: success });
+    },
+  );
+
+  app.post(
+    '/lsp/install-all',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'lsp.install-all');
+      const results = await lspManager.ensureAllInstalled();
+      const installedCount = Object.values(results).filter(Boolean).length;
+      step.succeed(undefined, { installedCount, totalCount: Object.keys(results).length });
+      return reply.send({ results });
     },
   );
 

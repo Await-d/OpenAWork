@@ -91,6 +91,12 @@ export interface AIProviderRef {
   enabled: boolean;
   apiKey?: string;
   baseUrl?: string;
+  /** Override the auto-detected upstream protocol.
+   *  - 'responses':       Use OpenAI Responses API (/v1/responses)
+   *  - 'chat_completions': Use OpenAI Chat Completions API (/v1/chat/completions)
+   *  - undefined:          Auto-detect based on provider type and base URL
+   */
+  upstreamProtocol?: 'chat_completions' | 'responses';
   defaultModels: AIModelConfigRef[];
 }
 
@@ -117,6 +123,7 @@ export interface ProviderEditData {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
+  upstreamProtocol?: 'chat_completions' | 'responses';
 }
 
 export interface ProviderSettingsProps {
@@ -169,6 +176,7 @@ function emptyForm(provider?: AIProviderRef): ProviderEditData {
     enabled: provider?.enabled ?? true,
     apiKey: provider?.apiKey ?? '',
     baseUrl: provider?.baseUrl ?? '',
+    upstreamProtocol: provider?.upstreamProtocol,
   };
 }
 
@@ -225,7 +233,7 @@ interface InlineFormProps {
 function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormProps) {
   const [form, setForm] = useState<ProviderEditData>(initial);
 
-  function set(field: keyof ProviderEditData, value: string | boolean) {
+  function set(field: keyof ProviderEditData, value: string | boolean | undefined) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -307,6 +315,24 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             onChange={(e) => set('baseUrl', e.target.value)}
             placeholder="https://api.example.com/v1"
           />
+        </div>
+        <div style={col}>
+          <label htmlFor="pf-protocol" style={labelStyle}>
+            Upstream Protocol
+          </label>
+          <select
+            id="pf-protocol"
+            style={inputStyle}
+            value={form.upstreamProtocol ?? ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              set('upstreamProtocol', v === '' ? undefined : v);
+            }}
+          >
+            <option value="">Auto-detect</option>
+            <option value="chat_completions">Chat Completions (/v1/chat/completions)</option>
+            <option value="responses">Responses (/v1/responses)</option>
+          </select>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

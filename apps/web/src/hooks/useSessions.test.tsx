@@ -4,7 +4,6 @@ import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentProfileRecord } from '@openAwork/web-client';
 import { useSessions } from './useSessions.js';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
@@ -22,8 +21,6 @@ const listMock = vi.fn(async () => [
   },
 ]);
 const createSessionMock = vi.fn(async () => ({ id: 'session-new' }));
-const getCurrentAgentProfileMock = vi.fn(async (): Promise<AgentProfileRecord | null> => null);
-
 vi.mock('../utils/chat-session-defaults.js', () => ({
   buildSavedChatSessionMetadata: vi.fn(
     (
@@ -46,9 +43,6 @@ vi.mock('../utils/chat-session-defaults.js', () => ({
 }));
 
 vi.mock('@openAwork/web-client', () => ({
-  createAgentProfilesClient: vi.fn(() => ({
-    getCurrent: getCurrentAgentProfileMock,
-  })),
   createSessionsClient: vi.fn(() => ({
     list: listMock,
     create: createSessionMock,
@@ -109,7 +103,6 @@ beforeEach(() => {
 
   listMock.mockClear();
   createSessionMock.mockClear();
-  getCurrentAgentProfileMock.mockClear();
   listedSessionStateStatus = 'idle';
   window.sessionStorage.clear();
   useAuthStore.setState({
@@ -332,60 +325,6 @@ describe('useSessions run-state overrides', () => {
       'token-123',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          workingDirectory: '/workspace/demo',
-        }),
-      }),
-    );
-  });
-
-  it('prefers the workspace agent profile over generic saved defaults when creating a new session', async () => {
-    getCurrentAgentProfileMock.mockResolvedValueOnce({
-      id: 'profile-1',
-      workspacePath: '/workspace/demo',
-      label: 'Demo Profile',
-      agentId: 'sisyphus-junior',
-      providerId: 'anthropic',
-      modelId: 'claude-sonnet-4.5',
-      note: null,
-      createdAt: '2026-04-05T00:00:00.000Z',
-      updatedAt: '2026-04-05T00:00:00.000Z',
-    });
-
-    let sessionsState: ReturnType<typeof useSessions> | null = null;
-
-    await act(async () => {
-      root!.render(
-        <MemoryRouter initialEntries={['/chat']}>
-          <Routes>
-            <Route
-              path="*"
-              element={
-                <HookHarness
-                  onReady={(value) => {
-                    sessionsState = value;
-                  }}
-                />
-              }
-            />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    await flushEffects();
-
-    await act(async () => {
-      await sessionsState!.newSession('/workspace/demo', null);
-      await Promise.resolve();
-    });
-
-    expect(createSessionMock).toHaveBeenCalledWith(
-      'token-123',
-      expect.objectContaining({
-        metadata: expect.objectContaining({
-          agentId: 'sisyphus-junior',
-          modelId: 'claude-sonnet-4.5',
-          providerId: 'anthropic',
           workingDirectory: '/workspace/demo',
         }),
       }),

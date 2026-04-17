@@ -47,7 +47,12 @@ const BUILTIN_AGENT_BASE: ReadonlyArray<{
   { id: 'build', label: 'build', description: '默认主 agent', source: 'builtin' },
   { id: 'plan', label: 'plan', description: '规划 agent', source: 'builtin' },
   { id: 'general', label: 'general', description: '通用 agent', source: 'builtin' },
-  { id: 'explore', label: 'explore', description: '代码探索 agent', source: 'builtin' },
+  {
+    id: 'explore',
+    label: 'explore',
+    description: '代码库搜索专家 — 意图分析、并行搜索、结构化结果',
+    source: 'builtin',
+  },
   {
     id: 'sisyphus',
     label: 'sisyphus',
@@ -105,13 +110,13 @@ const BUILTIN_AGENT_BASE: ReadonlyArray<{
   {
     id: 'multimodal-looker',
     label: 'multimodal-looker',
-    description: '多模态查看 agent',
+    description: '多模态分析专家 — PDF/图片/图表解读、信息提取',
     source: 'builtin',
   },
   {
     id: 'sisyphus-junior',
     label: 'sisyphus-junior',
-    description: '按 category 路由的执行 agent',
+    description: '聚焦执行者 — 绝不委派、待办纪律、原子化执行',
     source: 'builtin',
   },
 ];
@@ -125,7 +130,7 @@ const BUILTIN_AGENT_FALLBACK_PROMPTS: Record<string, string> = {
   general:
     'Handle general-purpose software work with balanced reasoning, concrete implementation, and verification.',
   explore:
-    'Inspect the codebase, locate relevant files and patterns, and summarize grounded findings before changes.',
+    '你是 Explore — 代码库搜索专家。只读模式，意图分析+并行搜索+结构化结果。所有路径必须绝对路径，回答实际需求而非字面请求。',
   sisyphus:
     '你是 Sisyphus — 强大的 AI 编排代理。你规划、委派、验证、交付。拒绝 AI slop。有专家时绝不独自工作，评估搜索复杂度后再探索，并行执行独立任务。',
   hephaestus:
@@ -144,9 +149,9 @@ const BUILTIN_AGENT_FALLBACK_PROMPTS: Record<string, string> = {
   atlas:
     '你是 Atlas — 编排验证专家。委派任务，验证一切。没有证据 = 未完成。绝不自己写代码，绝不信任子 agent 的未验证声明。',
   'multimodal-looker':
-    'Inspect visual or multimodal inputs and extract the details needed for the current task.',
+    '你是 Multimodal Looker — 多模态文件解读专家。只读模式，解读 PDF/图片/图表，仅提取请求所需信息，直接返回不加前言。',
   'sisyphus-junior':
-    'Execute focused category-routed work quickly while keeping results concrete and verifiable.',
+    '你是 Sisyphus-Junior — 聚焦执行者。绝不委派，待办纪律强制，原子化执行，变更文件必须通过诊断检查。',
 };
 
 function normalizeOptionalText(value: unknown): string | undefined {

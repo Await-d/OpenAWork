@@ -4,10 +4,7 @@ import { ContextUsageMeter } from './context-usage-meter.js';
 
 interface ChatTopBarProps {
   dialogueMode: DialogueMode;
-  currentProfileLabel?: string;
-  hasWorkspaceProfile: boolean;
   onChangeDialogueMode: (mode: DialogueMode) => void;
-  onSaveWorkspaceProfile: () => void;
   yoloMode: boolean;
   onToggleYolo: () => void;
   editorMode: boolean;
@@ -21,10 +18,7 @@ interface ChatTopBarProps {
 
 export function ChatTopBar({
   dialogueMode,
-  currentProfileLabel,
-  hasWorkspaceProfile,
   onChangeDialogueMode,
-  onSaveWorkspaceProfile,
   yoloMode,
   onToggleYolo,
   editorMode,
@@ -68,39 +62,6 @@ export function ChatTopBar({
           onChange={onChangeDialogueMode}
           style={{ flexShrink: 0 }}
         />
-        {currentProfileLabel !== undefined ? (
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 6px',
-              borderRadius: 10,
-              border: '1px solid var(--border-subtle)',
-              background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
-            }}
-          >
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>项目配置</span>
-            <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{currentProfileLabel}</span>
-            <button
-              type="button"
-              onClick={onSaveWorkspaceProfile}
-              style={{
-                height: 28,
-                padding: '0 8px',
-                borderRadius: 7,
-                border: '1px solid var(--border-subtle)',
-                background: 'transparent',
-                color: 'var(--text)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {hasWorkspaceProfile ? '更新项目配置' : '保存为项目配置'}
-            </button>
-          </div>
-        ) : null}
       </div>
 
       {/* Right group: YOLO + editor + panel — unified pill container */}

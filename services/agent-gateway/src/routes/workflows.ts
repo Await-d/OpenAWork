@@ -37,6 +37,13 @@ const optimizePromptSchema = z.object({
   candidateCount: z.number().int().min(1).max(5).optional(),
 });
 
+const roleBindingSchema = z.object({
+  agentId: z.string().min(1),
+  modelId: z.string().min(1).optional(),
+  providerId: z.string().min(1).optional(),
+  variant: z.string().min(1).max(80).optional(),
+});
+
 const createTemplateSchema = z.object({
   metadata: z
     .object({
@@ -44,16 +51,17 @@ const createTemplateSchema = z.object({
         .object({
           defaultBindings: z
             .object({
-              planner: z.string().min(1).optional(),
-              researcher: z.string().min(1).optional(),
-              executor: z.string().min(1).optional(),
-              reviewer: z.string().min(1).optional(),
+              leader: z.union([z.string().min(1), roleBindingSchema]).optional(),
+              planner: z.union([z.string().min(1), roleBindingSchema]).optional(),
+              researcher: z.union([z.string().min(1), roleBindingSchema]).optional(),
+              executor: z.union([z.string().min(1), roleBindingSchema]).optional(),
+              reviewer: z.union([z.string().min(1), roleBindingSchema]).optional(),
             })
             .optional(),
           defaultProvider: z.string().nullable().optional(),
           optionalAgentIds: z.array(z.string().min(1)).optional(),
           requiredRoles: z
-            .array(z.enum(['planner', 'researcher', 'executor', 'reviewer']))
+            .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
             .optional(),
         })
         .optional(),
@@ -144,7 +152,10 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
               ...(metadata ?? {}),
               teamTemplate: {
                 ...(metadata?.teamTemplate ?? {}),
-                defaultBindings: buildFixedTeamTemplateDefaultBindings(),
+                defaultBindings: {
+                  ...buildFixedTeamTemplateDefaultBindings(),
+                  ...(metadata?.teamTemplate?.defaultBindings ?? {}),
+                },
                 requiredRoles: [...FIXED_TEAM_CORE_ROLE_ORDER],
               },
             }

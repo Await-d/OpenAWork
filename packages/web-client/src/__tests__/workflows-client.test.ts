@@ -30,7 +30,7 @@ describe('workflows client metadata support', () => {
           category: 'team-playbook',
           metadata: {
             teamTemplate: {
-              defaultProvider: 'claude-code',
+              defaultProvider: 'anthropic',
               optionalAgentIds: ['atlas'],
               requiredRoles: ['planner', 'researcher'],
             },
@@ -45,7 +45,7 @@ describe('workflows client metadata support', () => {
     const templates = await client.listTemplates('token-1');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(templates[0]?.metadata?.teamTemplate?.defaultProvider).toBe('claude-code');
+    expect(templates[0]?.metadata?.teamTemplate?.defaultProvider).toBe('anthropic');
     expect(templates[0]?.metadata?.teamTemplate?.optionalAgentIds).toEqual(['atlas']);
   });
 
@@ -58,7 +58,7 @@ describe('workflows client metadata support', () => {
         category: 'team-playbook',
         metadata: {
           teamTemplate: {
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
             requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
           },
@@ -74,7 +74,7 @@ describe('workflows client metadata support', () => {
       category: 'team-playbook',
       metadata: {
         teamTemplate: {
-          defaultProvider: 'claude-code',
+          defaultProvider: 'anthropic',
           optionalAgentIds: ['atlas'],
           requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
         },
@@ -88,7 +88,7 @@ describe('workflows client metadata support', () => {
     expect(JSON.parse(requestBody as string)).toMatchObject({
       metadata: {
         teamTemplate: {
-          defaultProvider: 'claude-code',
+          defaultProvider: 'anthropic',
           optionalAgentIds: ['atlas'],
         },
       },

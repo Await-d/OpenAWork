@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentBar, ImagePreview, VoiceRecorder } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type {
@@ -6,6 +6,7 @@ import type {
   MentionItem,
   SlashCommandItem,
 } from '../../pages/chat-page/support.js';
+import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
 import { ProviderMark } from './chat-provider-display.js';
 import { detectThinkKeyword } from '../../pages/chat-page/think-keyword-detector.js';
 
@@ -115,6 +116,8 @@ interface ChatComposerProps {
   onToggleWebSearch: () => void;
   onChangeManualAgentId: (agentId: string) => void;
   onClearManualAgentId: () => void;
+  onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
+  onReplaceInput?: (nextValue: string) => void;
 }
 
 function ComposerHintChip({
@@ -199,7 +202,13 @@ export function ChatComposer({
   defaultAgentLabel,
   onChangeManualAgentId,
   onClearManualAgentId,
+  onOptimizePrompt,
+  onReplaceInput,
 }: ChatComposerProps) {
+  const [optimizeLoading, setOptimizeLoading] = useState(false);
+  const [optimizeResult, setOptimizeResult] = useState<PromptOptimizerResult | null>(null);
+  const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const optimizePopoverRef = useRef<HTMLDivElement | null>(null);
   const isHomeVariant = variant === 'home';
   const composerListRef = useRef<HTMLDivElement | null>(null);
   const composerItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -809,6 +818,232 @@ export function ChatComposer({
                 </div>
               )}
 
+            {optimizeError && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  background: 'color-mix(in srgb, rgb(239 68 68) 8%, transparent)',
+                  color: 'color-mix(in srgb, rgb(239 68 68) 80%, white 20%)',
+                  fontSize: 10,
+                  lineHeight: 1.5,
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+                {optimizeError}
+                <button
+                  type="button"
+                  onClick={() => setOptimizeError(null)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontSize: 10,
+                    lineHeight: 1,
+                    marginLeft: 2,
+                    opacity: 0.7,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {optimizeResult && (
+              <div
+                ref={optimizePopoverRef}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  background: 'var(--surface)',
+                  overflow: 'hidden',
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '6px 10px 5px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-2)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span
+                      style={{
+                        width: 18,
+                        height: 18,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 999,
+                        background: 'color-mix(in oklch, var(--success, #10b981) 14%, transparent)',
+                        color: 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)',
+                        flexShrink: 0,
+                        fontSize: 9,
+                      }}
+                    >
+                      ✦
+                    </span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>
+                      提示词优化建议
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOptimizeResult(null);
+                      setOptimizeError(null);
+                    }}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--text-3)',
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontSize: 11,
+                      lineHeight: 1,
+                    }}
+                    title="关闭"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {optimizeResult.rationale && (
+                  <div
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: 10,
+                      color: 'var(--text-2)',
+                      lineHeight: 1.5,
+                      borderBottom: '1px solid var(--border-subtle)',
+                      background: 'color-mix(in oklch, var(--success, #10b981) 4%, transparent)',
+                    }}
+                  >
+                    {optimizeResult.rationale}
+                  </div>
+                )}
+                <div
+                  style={{ padding: '6px 6px', display: 'flex', flexDirection: 'column', gap: 4 }}
+                >
+                  {optimizeResult.candidates.map((candidate: PromptCandidate) => {
+                    const isRecommended = candidate.id === optimizeResult.recommended;
+                    return (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        onClick={() => {
+                          onReplaceInput?.(candidate.text);
+                          setOptimizeResult(null);
+                          setOptimizeError(null);
+                          requestAnimationFrame(() => {
+                            if (!textareaRef.current) return;
+                            textareaRef.current.focus();
+                            textareaRef.current.setSelectionRange(
+                              candidate.text.length,
+                              candidate.text.length,
+                            );
+                          });
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          border: isRecommended
+                            ? '1px solid color-mix(in oklch, var(--success, #10b981) 30%, var(--border-subtle))'
+                            : '1px solid var(--border-subtle)',
+                          borderRadius: 8,
+                          background: isRecommended
+                            ? 'color-mix(in oklch, var(--success, #10b981) 6%, transparent)'
+                            : 'transparent',
+                          color: 'var(--text)',
+                          padding: '6px 8px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 3,
+                          transition: 'background 150ms ease, border-color 150ms ease',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: isRecommended ? 700 : 600,
+                              color: isRecommended
+                                ? 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)'
+                                : 'var(--text-2)',
+                            }}
+                          >
+                            {isRecommended ? '★ 推荐' : `候选 ${candidate.id}`}
+                          </span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            lineHeight: 1.5,
+                            color: 'var(--text)',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {candidate.text}
+                        </span>
+                        {candidate.improvements.length > 0 && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: 3,
+                              marginTop: 2,
+                            }}
+                          >
+                            {candidate.improvements.map((imp: string, idx: number) => (
+                              <span
+                                key={idx}
+                                style={{
+                                  fontSize: 9,
+                                  padding: '1px 5px',
+                                  borderRadius: 999,
+                                  background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+                                  color: 'color-mix(in oklch, var(--accent) 70%, white 30%)',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {imp}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div
               style={{
                 display: 'flex',
@@ -1075,6 +1310,68 @@ export function ChatComposer({
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                {onOptimizePrompt && input.trim().length > 0 && !streaming && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (optimizeResult) {
+                        setOptimizeResult(null);
+                        setOptimizeError(null);
+                        return;
+                      }
+                      setOptimizeLoading(true);
+                      setOptimizeError(null);
+                      onOptimizePrompt(input.trim())
+                        .then((result) => {
+                          setOptimizeResult(result);
+                        })
+                        .catch((err: unknown) => {
+                          setOptimizeError(err instanceof Error ? err.message : '优化失败');
+                        })
+                        .finally(() => {
+                          setOptimizeLoading(false);
+                        });
+                    }}
+                    disabled={optimizeLoading}
+                    title="提示词优化"
+                    className={`icon-btn${optimizeResult ? ' active' : ''}`}
+                    style={{
+                      border: optimizeResult
+                        ? '1px solid color-mix(in oklch, var(--success, #10b981) 40%, var(--border-subtle))'
+                        : '1px solid var(--border-subtle)',
+                      borderRadius: 8,
+                      width: 26,
+                      height: 26,
+                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: optimizeResult
+                        ? 'color-mix(in oklch, var(--success, #10b981) 10%, transparent)'
+                        : 'var(--surface)',
+                      color: optimizeResult
+                        ? 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)'
+                        : 'color-mix(in oklch, var(--accent) 72%, white 28%)',
+                      cursor: optimizeLoading ? 'wait' : 'pointer',
+                      transition:
+                        'background 150ms ease, color 150ms ease, border-color 150ms ease',
+                    }}
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
+                    </svg>
+                  </button>
+                )}
                 {showQueueAction && (
                   <button
                     type="button"

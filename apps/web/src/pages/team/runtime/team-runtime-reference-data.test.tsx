@@ -408,7 +408,7 @@ describe('useResolvedTeamRuntimeReferenceData', () => {
             category: 'team-playbook',
             metadata: {
               teamTemplate: {
-                defaultProvider: 'claude-code',
+                defaultProvider: 'anthropic',
                 optionalAgentIds: ['atlas'],
                 requiredRoles: ['planner', 'researcher'],
               },
@@ -423,6 +423,6 @@ describe('useResolvedTeamRuntimeReferenceData', () => {
     const state = await mountHarness();
 
     expect(state.templates).toHaveLength(1);
-    expect(state.templates[0]?.metadata?.teamTemplate?.defaultProvider).toBe('claude-code');
+    expect(state.templates[0]?.metadata?.teamTemplate?.defaultProvider).toBe('anthropic');
   });
 });

@@ -125,4 +125,50 @@ describe('resolveUpstreamProtocol', () => {
       }),
     ).toBe('chat_completions');
   });
+
+  describe('explicitOverride', () => {
+    it('overrides auto-detection to chat_completions even for official OpenAI base URL', () => {
+      expect(
+        resolveUpstreamProtocol({
+          model: 'gpt-4o',
+          providerType: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          explicitOverride: 'chat_completions',
+        }),
+      ).toBe('chat_completions');
+    });
+
+    it('overrides auto-detection to responses even for proxy base URL', () => {
+      expect(
+        resolveUpstreamProtocol({
+          model: 'gpt-4o',
+          providerType: 'openai',
+          baseUrl: 'https://my-proxy.example.com/v1',
+          explicitOverride: 'responses',
+        }),
+      ).toBe('responses');
+    });
+
+    it('overrides auto-detection for non-openai provider types', () => {
+      expect(
+        resolveUpstreamProtocol({
+          model: 'claude-sonnet-4-0',
+          providerType: 'anthropic',
+          baseUrl: 'https://api.anthropic.com/v1',
+          explicitOverride: 'responses',
+        }),
+      ).toBe('responses');
+    });
+
+    it('falls back to auto-detection when explicitOverride is undefined', () => {
+      expect(
+        resolveUpstreamProtocol({
+          model: 'gpt-4o',
+          providerType: 'openai',
+          baseUrl: 'https://my-proxy.example.com/v1',
+          explicitOverride: undefined,
+        }),
+      ).toBe('chat_completions');
+    });
+  });
 });

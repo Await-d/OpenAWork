@@ -1,5 +1,6 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
+import { validateThinkingBlocks } from '../thinking-block-validator.js';
 import {
   readLastCompactionLlmSummary,
   readPersistedCompactionMemory,
@@ -282,6 +283,7 @@ export async function runModelRound(input: {
   dialogueModePrompt?: string | null;
   yoloModePrompt?: string | null;
   companionPrompt?: string | null;
+  dynamicAgentPrompt?: string | null;
   syntheticContinuationPrompt?: string;
   memoryBlock?: string | null;
   writeChunk: (chunk: RunEvent) => void;
@@ -342,12 +344,27 @@ export async function runModelRound(input: {
       yoloModePrompt: input.yoloModePrompt,
       memoryBlock: input.memoryBlock,
       thinkingLanguagePrompt,
+      dynamicAgentPrompt: input.dynamicAgentPrompt,
     }),
     ...conversationWithSynthetic,
     ...(input.syntheticContinuationPrompt
       ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt }]
       : []),
   ];
+
+  // Thinking block validator (oh-my-opencode thinking-block-validator pattern):
+  // Proactively validate and fix message structure BEFORE sending to Anthropic API.
+  // Prevents "Expected thinking/redacted_thinking but found tool_use" errors.
+  const modelId = input.route.model ?? '';
+  validateThinkingBlocks(
+    rawUpstreamMessages as Array<{
+      role: string;
+      content?: string | unknown[];
+      [k: string]: unknown;
+    }>,
+    modelId,
+  );
+
   const upstreamMessages = sanitizeUpstreamConversation(rawUpstreamMessages);
   const upstreamPath =
     input.route.upstreamProtocol === 'responses' ? '/responses' : '/chat/completions';

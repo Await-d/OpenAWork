@@ -13,12 +13,22 @@ const REQUIRED_TEMPLATE_ROLES = [
   'reviewer',
 ] as const;
 
+const VARIANT_OPTIONS: Array<{ value: string; label: string; hint: string }> = [
+  { value: 'minimal', label: '极低', hint: '几乎不推理' },
+  { value: 'low', label: '低', hint: '轻度推理' },
+  { value: 'medium', label: '中', hint: '标准推理' },
+  { value: 'high', label: '高', hint: '深度推理' },
+  { value: 'xhigh', label: '极高', hint: '最大推理' },
+];
+
 export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
   const { createTemplate, templateError, templateLoading } = useTeamRuntimeReferenceViewData();
   const roleBindings = useTeamRuntimeRoleBindings();
   const [templateName, setTemplateName] = useState('');
   const [selectedOptionalAgents, setSelectedOptionalAgents] = useState<Set<string>>(new Set());
-  const [provider, setProvider] = useState('claude-code');
+  const [roleProviders, setRoleProviders] = useState<Record<string, string>>({});
+  const [roleVariants, setRoleVariants] = useState<Record<string, string>>({});
+  const [roleModelIds, setRoleModelIds] = useState<Record<string, string>>({});
   const [created, setCreated] = useState(false);
 
   const toggleOptionalAgent = (value: string) => {
@@ -44,10 +54,29 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
 
   const handleCreate = useCallback(() => {
     if (!isValid) return;
+    const defaultBindings: Record<
+      string,
+      { agentId: string; providerId?: string; modelId?: string; variant?: string }
+    > = {};
+    for (const roleCard of fixedRoleCards) {
+      const providerId = roleProviders[roleCard.role];
+      const providerOption = agentTeamsNewTemplateProviders.find((p) => p.value === providerId);
+      const customModelId = roleModelIds[roleCard.role]?.trim();
+      const customVariant = roleVariants[roleCard.role];
+      defaultBindings[roleCard.role] = {
+        agentId:
+          roleCard.selectedAgent?.id ??
+          FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole],
+        ...(providerId ? { providerId } : {}),
+        modelId: customModelId || providerOption?.modelId,
+        variant: customVariant || providerOption?.variant || undefined,
+      };
+    }
     void createTemplate({
       name: templateName.trim(),
       optionalAgentIds: Array.from(selectedOptionalAgents),
-      provider,
+      provider: Object.values(roleProviders)[0] ?? 'anthropic',
+      defaultBindings,
     }).then((succeeded) => {
       if (!succeeded) {
         return;
@@ -55,7 +84,17 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
       setCreated(true);
       window.setTimeout(onClose, 1200);
     });
-  }, [createTemplate, isValid, onClose, provider, selectedOptionalAgents, templateName]);
+  }, [
+    createTemplate,
+    fixedRoleCards,
+    isValid,
+    onClose,
+    roleModelIds,
+    roleProviders,
+    roleVariants,
+    selectedOptionalAgents,
+    templateName,
+  ]);
 
   return (
     <div
@@ -184,83 +223,162 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                   letterSpacing: '0.05em',
                 }}
               >
-                核心角色（系统固定）
+                核心角色 · 供应商 / 模型 / 思考等级
               </span>
               <div id="team-template-roles" style={{ display: 'grid', gap: 10 }}>
-                {fixedRoleCards.map((roleCard) => (
-                  <div
-                    key={roleCard.role}
-                    style={{
-                      display: 'grid',
-                      gap: 6,
-                      fontSize: 12,
-                      color: 'var(--text-2)',
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
-                      background: 'color-mix(in oklch, var(--success) 8%, var(--bg))',
-                    }}
-                  >
-                    <span style={{ fontWeight: 700 }}>{roleCard.roleLabel}</span>
-                    <span style={{ color: 'var(--text)' }}>
-                      {roleCard.selectedAgent?.label ??
-                        FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole]}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                      该核心角色由系统固定绑定，用户不可修改。
-                    </span>
-                  </div>
-                ))}
+                {fixedRoleCards.map((roleCard) => {
+                  const currentProvider = roleProviders[roleCard.role] ?? '';
+                  return (
+                    <div
+                      key={roleCard.role}
+                      style={{
+                        display: 'grid',
+                        gap: 6,
+                        fontSize: 12,
+                        color: 'var(--text-2)',
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
+                        background: 'color-mix(in oklch, var(--success) 8%, var(--bg))',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <span style={{ fontWeight: 700 }}>{roleCard.roleLabel}</span>
+                        <span style={{ color: 'var(--text)', fontSize: 11 }}>
+                          {roleCard.selectedAgent?.label ??
+                            FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole]}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {agentTeamsNewTemplateProviders.map((p) => {
+                          const active = currentProvider === p.value;
+                          return (
+                            <button
+                              key={p.value}
+                              type="button"
+                              onClick={() =>
+                                setRoleProviders((prev) => ({
+                                  ...prev,
+                                  [roleCard.role]: active ? '' : p.value,
+                                }))
+                              }
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                border: active
+                                  ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
+                                  : '1px solid var(--border-subtle)',
+                                background: active
+                                  ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
+                                  : 'var(--surface-2)',
+                                color: active ? 'var(--success)' : 'var(--text-3)',
+                                fontSize: 10,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              {p.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {currentProvider && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 9, color: 'var(--text-3)', minWidth: 32 }}>
+                              模型
+                            </span>
+                            <input
+                              value={
+                                roleModelIds[roleCard.role] ??
+                                agentTeamsNewTemplateProviders.find(
+                                  (p) => p.value === currentProvider,
+                                )?.modelId ??
+                                ''
+                              }
+                              onChange={(e) =>
+                                setRoleModelIds((prev) => ({
+                                  ...prev,
+                                  [roleCard.role]: e.target.value,
+                                }))
+                              }
+                              placeholder="默认模型"
+                              style={{
+                                flex: 1,
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                border: '1px solid var(--border-subtle)',
+                                background: 'var(--bg)',
+                                color: 'var(--text)',
+                                fontSize: 10,
+                                outline: 'none',
+                              }}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 9, color: 'var(--text-3)', minWidth: 32 }}>
+                              思考
+                            </span>
+                            <div style={{ display: 'flex', gap: 3 }}>
+                              {VARIANT_OPTIONS.map((opt) => {
+                                const currentVariant =
+                                  roleVariants[roleCard.role] ??
+                                  agentTeamsNewTemplateProviders.find(
+                                    (p) => p.value === currentProvider,
+                                  )?.variant ??
+                                  '';
+                                const active = currentVariant === opt.value;
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    title={opt.hint}
+                                    onClick={() =>
+                                      setRoleVariants((prev) => ({
+                                        ...prev,
+                                        [roleCard.role]: active ? '' : opt.value,
+                                      }))
+                                    }
+                                    style={{
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      border: active
+                                        ? '1px solid color-mix(in oklch, var(--accent) 60%, transparent)'
+                                        : '1px solid var(--border-subtle)',
+                                      background: active
+                                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg))'
+                                        : 'var(--surface-2)',
+                                      color: active ? 'var(--accent)' : 'var(--text-3)',
+                                      fontSize: 9,
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s',
+                                    }}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               {!hasCompleteDefaultBindings && (
                 <span style={{ fontSize: 9, color: 'var(--warning)', paddingLeft: 4 }}>
                   正在加载系统默认核心角色绑定…
                 </span>
               )}
-            </div>
-
-            <div style={{ display: 'grid', gap: 6 }}>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: 'var(--text-3)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                }}
-              >
-                默认 Provider
-              </span>
-              <div id="team-template-provider" style={{ display: 'flex', gap: 6 }}>
-                {agentTeamsNewTemplateProviders.map((p) => {
-                  const active = provider === p.value;
-                  return (
-                    <button
-                      key={p.value}
-                      type="button"
-                      onClick={() => setProvider(p.value)}
-                      style={{
-                        flex: 1,
-                        padding: '6px 10px',
-                        borderRadius: 8,
-                        border: active
-                          ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
-                          : '1px solid var(--border-subtle)',
-                        background: active
-                          ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
-                          : 'var(--surface-2)',
-                        color: active ? 'var(--success)' : 'var(--text-3)',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
             <div style={{ display: 'grid', gap: 6 }}>

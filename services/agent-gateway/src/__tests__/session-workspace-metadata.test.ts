@@ -112,7 +112,7 @@ describe('session workspace metadata helpers', () => {
     const result = validateSessionMetadataPatch({
       teamDefinition: {
         createdAt: '2026-04-16T00:00:00.000Z',
-        defaultProvider: 'claude-code',
+        defaultProvider: 'anthropic',
         optionalMembers: [
           {
             agentId: 'atlas',

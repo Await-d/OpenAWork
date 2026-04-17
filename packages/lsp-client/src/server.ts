@@ -125,6 +125,8 @@ const SHELL_ROOT_MARKERS = [
 export const TypescriptServer: LSPServerInfo = {
   id: 'typescript',
   extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'],
+  binary: 'typescript-language-server',
+  installCommand: 'npm install -g typescript-language-server typescript',
   root: NearestRoot(
     ['package-lock.json', 'bun.lockb', 'bun.lock', 'pnpm-lock.yaml', 'yarn.lock', 'package.json'],
     ['deno.json', 'deno.jsonc'],
@@ -143,6 +145,8 @@ export const TypescriptServer: LSPServerInfo = {
 export const GoplsServer: LSPServerInfo = {
   id: 'gopls',
   extensions: ['.go'],
+  binary: 'gopls',
+  installCommand: 'go install golang.org/x/tools/gopls@latest',
   root: NearestRoot(['go.mod', 'go.sum', 'go.work']),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('gopls');
@@ -154,6 +158,8 @@ export const GoplsServer: LSPServerInfo = {
 export const PyrightServer: LSPServerInfo = {
   id: 'pyright',
   extensions: ['.py', '.pyi'],
+  binary: ['pyright-langserver', 'pylsp'],
+  installCommand: 'npm install -g pyright',
   root: NearestRoot(['pyproject.toml', 'setup.py', 'requirements.txt', 'Pipfile', 'setup.cfg']),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('pyright-langserver') ?? whichSync('pylsp');
@@ -165,6 +171,8 @@ export const PyrightServer: LSPServerInfo = {
 export const JsonServer: LSPServerInfo = {
   id: 'json',
   extensions: ['.json', '.jsonc', '.json5'],
+  binary: 'vscode-json-language-server',
+  installCommand: 'npm install -g vscode-json-languageserver',
   root: NearestRoot(WEB_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('vscode-json-language-server');
@@ -176,6 +184,8 @@ export const JsonServer: LSPServerInfo = {
 export const HtmlServer: LSPServerInfo = {
   id: 'html',
   extensions: ['.html', '.htm'],
+  binary: 'vscode-html-language-server',
+  installCommand: 'npm install -g vscode-html-languageserver-bin',
   root: NearestRoot(WEB_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('vscode-html-language-server');
@@ -187,6 +197,8 @@ export const HtmlServer: LSPServerInfo = {
 export const CssServer: LSPServerInfo = {
   id: 'css',
   extensions: ['.css', '.scss', '.sass', '.less'],
+  binary: 'vscode-css-language-server',
+  installCommand: 'npm install -g vscode-css-languageserver-bin',
   root: NearestRoot(WEB_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('vscode-css-language-server');
@@ -198,6 +210,8 @@ export const CssServer: LSPServerInfo = {
 export const YamlServer: LSPServerInfo = {
   id: 'yaml',
   extensions: ['.yaml', '.yml'],
+  binary: 'yaml-language-server',
+  installCommand: 'npm install -g yaml-language-server',
   root: NearestRoot(YAML_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('yaml-language-server');
@@ -209,6 +223,8 @@ export const YamlServer: LSPServerInfo = {
 export const DockerfileServer: LSPServerInfo = {
   id: 'dockerfile',
   extensions: ['dockerfile'],
+  binary: 'docker-language-server',
+  installCommand: 'npm install -g docker-language-server',
   root: NearestRoot(DOCKER_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('docker-language-server');
@@ -220,6 +236,8 @@ export const DockerfileServer: LSPServerInfo = {
 export const DockerComposeServer: LSPServerInfo = {
   id: 'dockercompose',
   extensions: DOCKER_COMPOSE_FILES,
+  binary: 'docker-language-server',
+  installCommand: 'npm install -g docker-language-server',
   root: NearestRoot(DOCKER_COMPOSE_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('docker-language-server');
@@ -231,6 +249,8 @@ export const DockerComposeServer: LSPServerInfo = {
 export const DockerBakeServer: LSPServerInfo = {
   id: 'dockerbake',
   extensions: DOCKER_BAKE_FILES,
+  binary: 'docker-language-server',
+  installCommand: 'npm install -g docker-language-server',
   root: NearestRoot(DOCKER_BAKE_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('docker-language-server');
@@ -245,6 +265,8 @@ export const ESLintServer: LSPServerInfo = {
   role: 'supplemental',
   slot: 'js-lint',
   priority: 1,
+  binary: 'vscode-eslint-language-server',
+  installCommand: 'npm install -g vscode-eslint-language-server',
   root: NearestRoot([
     '.eslintrc',
     '.eslintrc.js',
@@ -275,6 +297,8 @@ export const BiomeServer: LSPServerInfo = {
   role: 'supplemental',
   slot: 'js-lint',
   priority: 2,
+  binary: 'biome',
+  installCommand: 'npm install -g @biomejs/biome',
   root: NearestRoot(['biome.json', 'biome.jsonc']),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('biome');
@@ -286,6 +310,8 @@ export const BiomeServer: LSPServerInfo = {
 export const ShellscriptServer: LSPServerInfo = {
   id: 'shellscript',
   extensions: ['.sh', '.bash', '.zsh'],
+  binary: 'bash-language-server',
+  installCommand: 'npm install -g bash-language-server',
   root: NearestRoot(SHELL_ROOT_MARKERS),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('bash-language-server');
@@ -297,6 +323,8 @@ export const ShellscriptServer: LSPServerInfo = {
 export const RustAnalyzerServer: LSPServerInfo = {
   id: 'rust-analyzer',
   extensions: ['.rs'],
+  binary: 'rust-analyzer',
+  installCommand: 'rustup component add rust-analyzer || cargo install rust-analyzer',
   root: NearestRoot(['Cargo.toml', 'Cargo.lock']),
   async spawn(root: string): Promise<LSPServerHandle | undefined> {
     const bin = whichSync('rust-analyzer');

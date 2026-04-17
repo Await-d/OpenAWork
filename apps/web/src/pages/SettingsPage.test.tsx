@@ -86,9 +86,6 @@ function createFetchMock(options?: {
 
       return jsonResponse({ providers, activeSelection });
     }
-    if (path.endsWith('/agent-profiles')) {
-      return jsonResponse({ profiles: [] });
-    }
     if (path.endsWith('/settings/mcp-servers')) {
       return jsonResponse({ servers: [] });
     }

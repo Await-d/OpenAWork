@@ -171,9 +171,6 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 vi.mock('@openAwork/web-client', () => ({
-  createAgentProfilesClient: vi.fn(() => ({
-    getCurrent: vi.fn(async () => null),
-  })),
   createSessionsClient: vi.fn(() => ({
     create: createSessionMock,
     get: getSessionMock,

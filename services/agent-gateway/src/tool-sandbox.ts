@@ -964,6 +964,29 @@ function buildTaskTags(input: {
   ];
 }
 
+interface TeamRoleBindingEntry {
+  agentId: string;
+  modelId?: string;
+  providerId?: string;
+  variant?: string;
+}
+
+function findTeamRoleBindingForAgent(
+  sessionMetadata: Record<string, unknown>,
+  agentId: string,
+): TeamRoleBindingEntry | undefined {
+  const teamDefinition = sessionMetadata['teamDefinition'];
+  if (typeof teamDefinition !== 'object' || teamDefinition === null) return undefined;
+  const requiredRoleBindings = (teamDefinition as Record<string, unknown>)['requiredRoleBindings'];
+  if (!Array.isArray(requiredRoleBindings)) return undefined;
+  return requiredRoleBindings.find(
+    (binding: unknown) =>
+      typeof binding === 'object' &&
+      binding !== null &&
+      (binding as { agentId: string }).agentId === agentId,
+  ) as TeamRoleBindingEntry | undefined;
+}
+
 function buildDelegatedChildRequestData(input: {
   agentId: string;
   childSessionId: string;
@@ -2699,12 +2722,43 @@ async function executeGatewayManagedTool(
         userId,
         resolvedAgent.modelEntries,
       );
-      const delegatedModel = selectedDelegatedModel
+      const parentSessionRow = sqliteGet<{ metadata_json: string }>(
+        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, userId],
+      );
+      const parentSessionMetadata = parentSessionRow
+        ? parseSessionMetadataJson(parentSessionRow.metadata_json)
+        : {};
+      const teamRoleBinding = findTeamRoleBindingForAgent(
+        parentSessionMetadata,
+        resolvedAgent.agentId,
+      );
+      const delegatedModel = teamRoleBinding
         ? {
-            ...selectedDelegatedModel,
-            ...(resolvedAgent.modelVariant ? { variant: resolvedAgent.modelVariant } : {}),
+            modelId:
+              teamRoleBinding.modelId ??
+              selectedDelegatedModel?.modelId ??
+              resolvedAgent.modelEntries[0]?.modelId ??
+              teamRoleBinding.agentId,
+            ...(teamRoleBinding.providerId
+              ? { providerId: teamRoleBinding.providerId }
+              : selectedDelegatedModel?.providerId
+                ? { providerId: selectedDelegatedModel.providerId }
+                : {}),
+            ...(teamRoleBinding.variant
+              ? { variant: teamRoleBinding.variant }
+              : resolvedAgent.modelVariant
+                ? { variant: resolvedAgent.modelVariant }
+                : selectedDelegatedModel?.variant
+                  ? { variant: selectedDelegatedModel.variant }
+                  : {}),
           }
-        : undefined;
+        : selectedDelegatedModel
+          ? {
+              ...selectedDelegatedModel,
+              ...(resolvedAgent.modelVariant ? { variant: resolvedAgent.modelVariant } : {}),
+            }
+          : undefined;
       const requestedSkills = resolvedAgent.requestedSkills;
       const category = parsed.data.category?.trim();
       const taskTags = buildTaskTags({
@@ -2734,13 +2788,6 @@ async function executeGatewayManagedTool(
         prompt: parsed.data.prompt,
         systemPrompt: resolvedAgent.systemPrompt,
       });
-      const parentSessionRow = sqliteGet<{ metadata_json: string }>(
-        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-        [sessionId, userId],
-      );
-      const parentSessionMetadata = parentSessionRow
-        ? parseSessionMetadataJson(parentSessionRow.metadata_json)
-        : {};
       const canExecuteImmediately = childRequestData !== null;
       const shouldRunInBackground = canExecuteImmediately && parsed.data.run_in_background === true;
       const parentToolReference =

@@ -1,9 +1,11 @@
+import { execSync } from 'child_process';
 import { findServerForFile, findServersForFile, ALL_SERVERS } from './server.js';
 import { createLSPClient } from './client.js';
 import type {
   LSPServerInfo,
   LSPClientInfo,
   LSPServerStatus,
+  LSPMissingServer,
   DiagnosticSummary,
   LSPManagerOptions,
 } from './types.js';
@@ -16,17 +18,34 @@ const SEVERITY_MAP: Record<number, DiagnosticSummary['severity']> = {
   4: 'hint',
 };
 
+function isBinaryInstalled(binary: string | string[] | undefined): boolean {
+  if (!binary) return false;
+  const binaries = Array.isArray(binary) ? binary : [binary];
+  return binaries.some((bin) => {
+    try {
+      execSync(`which ${bin} 2>/dev/null || where ${bin} 2>/dev/null`, {
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export class LSPManager {
   private clients: LSPClientInfo[] = [];
   private spawning = new Map<string, Promise<LSPClientInfo | undefined>>();
   private broken = new Set<string>();
   private servers: LSPServerInfo[];
+  private autoInstall: boolean;
   private diagnosticHandlers: Array<(path: string, diagnostics: Diagnostic[]) => void> = [];
 
   constructor(input: LSPServerInfo[] | LSPManagerOptions = ALL_SERVERS) {
     const opts = Array.isArray(input) ? { servers: input } : input;
     const disabled = new Set(opts.disabledServerIds ?? []);
     this.servers = (opts.servers ?? ALL_SERVERS).filter((server) => !disabled.has(server.id));
+    this.autoInstall = opts.autoInstall ?? false;
   }
 
   private clientKey(serverId: string, root: string): string {
@@ -43,7 +62,19 @@ export class LSPManager {
   ): Promise<LSPClientInfo | undefined> {
     const key = this.clientKey(serverInfo.id, root);
 
-    if (this.broken.has(key)) return undefined;
+    if (this.broken.has(key)) {
+      // If autoInstall is enabled, try installing the missing binary
+      if (this.autoInstall && serverInfo.installCommand) {
+        const wasInstalled = await this.ensureInstalled(serverInfo.id);
+        if (wasInstalled) {
+          this.broken.delete(key);
+        } else {
+          return undefined;
+        }
+      } else {
+        return undefined;
+      }
+    }
 
     const existing = this.findClient(serverInfo.id, root);
     if (existing) return existing;
@@ -53,7 +84,14 @@ export class LSPManager {
 
     const spawning = (async () => {
       try {
-        const handle = await serverInfo.spawn(root);
+        let handle = await serverInfo.spawn(root);
+        // If spawn fails and autoInstall is enabled, try installing then retry
+        if (!handle && this.autoInstall && serverInfo.installCommand) {
+          const wasInstalled = await this.ensureInstalled(serverInfo.id);
+          if (wasInstalled) {
+            handle = await serverInfo.spawn(root);
+          }
+        }
         if (!handle) {
           this.broken.add(key);
           return undefined;
@@ -228,6 +266,59 @@ export class LSPManager {
     this.broken.clear();
   }
 
+  /**
+   * Attempt to install a missing LSP server binary.
+   * Returns true if the binary is available after the install attempt.
+   * Safe to call multiple times — no-op if already installed.
+   */
+  async ensureInstalled(serverId: string): Promise<boolean> {
+    const server = this.servers.find((s) => s.id === serverId);
+    if (!server?.installCommand || !server.binary) return false;
+
+    if (isBinaryInstalled(server.binary)) return true;
+
+    try {
+      execSync(server.installCommand, {
+        stdio: 'pipe',
+        timeout: 120_000,
+      });
+    } catch {
+      return false;
+    }
+
+    return isBinaryInstalled(server.binary);
+  }
+
+  /**
+   * Ensure all configured LSP server binaries are installed (when autoInstall is on).
+   * Returns a map of serverId → install success.
+   */
+  async ensureAllInstalled(): Promise<Record<string, boolean>> {
+    const results: Record<string, boolean> = {};
+    for (const server of this.servers) {
+      if (server.binary && server.installCommand) {
+        results[server.id] = await this.ensureInstalled(server.id);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * List all configured servers and their installation status.
+   * Useful for UI to show which LSP servers are available or need installation.
+   */
+  missingServers(): LSPMissingServer[] {
+    return this.servers
+      .filter((s) => s.binary)
+      .map((s) => ({
+        id: s.id,
+        extensions: s.extensions,
+        binary: s.binary!,
+        installCommand: s.installCommand,
+        installed: isBinaryInstalled(s.binary),
+      }));
+  }
+
   private async clientForFile(filePath: string): Promise<LSPClientInfo | undefined> {
     const serverInfo = findServerForFile(filePath, this.servers);
     if (!serverInfo) return undefined;
@@ -263,6 +354,7 @@ export type {
   LSPServerHandle,
   LSPClientInfo,
   LSPServerStatus,
+  LSPMissingServer,
   DiagnosticSummary,
   RootFunction,
   LSPManagerOptions,

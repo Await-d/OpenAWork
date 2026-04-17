@@ -16,6 +16,10 @@ import type {
 } from './team-runtime-types.js';
 
 interface CreateTeamWorkflowTemplateInput {
+  defaultBindings?: Record<
+    string,
+    { agentId: string; providerId?: string; modelId?: string; variant?: string }
+  >;
   name: string;
   optionalAgentIds?: string[];
   provider: string;
@@ -45,9 +49,14 @@ function mapCanonicalRoleToTemplateLabel(
 function buildTeamTemplateMetadata(
   provider: string,
   optionalAgentIds: string[] = [],
+  defaultBindings?: Record<
+    string,
+    { agentId: string; providerId?: string; modelId?: string; variant?: string }
+  >,
 ): WorkflowTemplateMetadata {
   return {
     teamTemplate: {
+      ...(defaultBindings ? { defaultBindings } : {}),
       defaultProvider: provider,
       optionalAgentIds,
       requiredRoles: REQUIRED_TEMPLATE_ROLES,
@@ -348,7 +357,11 @@ export function useTeamWorkflowTemplates() {
           category: 'team-playbook',
           description: buildTemplateDescription(input.name, providerLabel, roleLabels),
           edges: buildTemplateEdges(roleLabels),
-          metadata: buildTeamTemplateMetadata(input.provider, input.optionalAgentIds),
+          metadata: buildTeamTemplateMetadata(
+            input.provider,
+            input.optionalAgentIds,
+            input.defaultBindings,
+          ),
           name: input.name,
           nodes: buildTemplateNodes(roleLabels, providerLabel),
         });

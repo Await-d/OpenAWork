@@ -1,3 +1,5 @@
+import { truncateQuestionLabels } from './question-label-truncator.js';
+
 export type ClaudeCodeCompatLevel = 'high' | 'medium' | 'low';
 
 export interface ClaudeCodeToolEntry {
@@ -334,10 +336,17 @@ export function normalizeInputForCanonical(
           })
         : rawInput.questions;
 
+      // Question label truncator (oh-my-opencode question-label-truncator pattern):
+      // Truncate overly long option labels to prevent UI overflow.
+      const truncatedFields =
+        normalizedQuestions !== undefined
+          ? truncateQuestionLabels({ questions: normalizedQuestions })
+          : {};
+
       return {
         canonicalName: 'question',
         normalizedFields: {
-          ...(normalizedQuestions !== undefined ? { questions: normalizedQuestions } : {}),
+          ...truncatedFields,
         },
         remapped: true,
       };

@@ -40,10 +40,36 @@ beforeEach(() => {
       { id: 'atlas', label: 'Atlas', enabled: true },
     ],
     roleCards: [
-      { role: 'planner', roleLabel: '规划', selectedAgentId: 'prometheus' },
-      { role: 'researcher', roleLabel: '研究', selectedAgentId: 'librarian' },
-      { role: 'executor', roleLabel: '执行', selectedAgentId: 'hephaestus' },
-      { role: 'reviewer', roleLabel: '审查', selectedAgentId: 'momus' },
+      {
+        role: 'leader',
+        roleLabel: '领导',
+        selectedAgentId: 'zeus',
+        selectedAgent: { id: 'zeus', label: 'Zeus' },
+      },
+      {
+        role: 'planner',
+        roleLabel: '规划',
+        selectedAgentId: 'prometheus',
+        selectedAgent: { id: 'prometheus', label: 'Prometheus' },
+      },
+      {
+        role: 'researcher',
+        roleLabel: '研究',
+        selectedAgentId: 'librarian',
+        selectedAgent: { id: 'librarian', label: 'Librarian' },
+      },
+      {
+        role: 'executor',
+        roleLabel: '执行',
+        selectedAgentId: 'hephaestus',
+        selectedAgent: { id: 'hephaestus', label: 'Hephaestus' },
+      },
+      {
+        role: 'reviewer',
+        roleLabel: '审查',
+        selectedAgentId: 'momus',
+        selectedAgent: { id: 'momus', label: 'Momus' },
+      },
     ],
   });
   container = document.createElement('div');
@@ -97,11 +123,20 @@ describe('NewTeamTemplateModal', () => {
       await Promise.resolve();
     });
 
-    expect(mockCreateTemplate).toHaveBeenCalledWith({
-      name: '研究协作剧本',
-      optionalAgentIds: ['atlas'],
-      provider: 'claude-code',
-    });
+    expect(mockCreateTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: '研究协作剧本',
+        optionalAgentIds: ['atlas'],
+        provider: 'anthropic',
+        defaultBindings: expect.objectContaining({
+          leader: expect.objectContaining({ agentId: 'zeus' }),
+          planner: expect.objectContaining({ agentId: 'prometheus' }),
+          researcher: expect.objectContaining({ agentId: 'librarian' }),
+          executor: expect.objectContaining({ agentId: 'hephaestus' }),
+          reviewer: expect.objectContaining({ agentId: 'momus' }),
+        }),
+      }),
+    );
   });
 
   it('shows the fixed core role summary instead of editable role selectors', async () => {
@@ -110,8 +145,7 @@ describe('NewTeamTemplateModal', () => {
       await Promise.resolve();
     });
 
-    expect(container?.textContent).toContain('核心角色（系统固定）');
-    expect(container?.textContent).toContain('该核心角色由系统固定绑定，用户不可修改。');
+    expect(container?.textContent).toContain('核心角色 · 供应商 / 模型 / 思考等级');
     expect(container?.querySelectorAll('select')).toHaveLength(0);
   });
 });

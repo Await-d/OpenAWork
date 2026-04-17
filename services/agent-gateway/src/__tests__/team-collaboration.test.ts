@@ -185,7 +185,7 @@ beforeEach(async () => {
         name: '研究团队模板',
         metadata_json: JSON.stringify({
           teamTemplate: {
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
             requiredRoles: ['planner', 'researcher'],
           },
@@ -278,6 +278,13 @@ beforeEach(async () => {
     },
   );
   listManagedAgentsForUserMock.mockReturnValue([
+    { id: 'zeus', label: 'Zeus', enabled: true, canonicalRole: { coreRole: 'leader' } },
+    {
+      id: 'prometheus',
+      label: 'Prometheus',
+      enabled: true,
+      canonicalRole: { coreRole: 'planner' },
+    },
     { id: 'oracle', label: 'Oracle', enabled: true, canonicalRole: { coreRole: 'researcher' } },
     {
       id: 'librarian',
@@ -397,6 +404,7 @@ describe('teamRoutes collaboration slice', () => {
     expect(metadata.workingDirectory).toBe('/repo/apps/web');
     expect(metadata.teamDefinition.source.kind).toBe('blank');
     expect(metadata.teamDefinition.requiredRoleBindings).toEqual([
+      { role: 'leader', agentId: 'zeus', agentLabel: 'Zeus' },
       { role: 'planner', agentId: 'prometheus', agentLabel: 'Prometheus' },
       { role: 'researcher', agentId: 'librarian', agentLabel: 'Librarian' },
       { role: 'executor', agentId: 'hephaestus', agentLabel: 'Hephaestus' },
@@ -437,7 +445,7 @@ describe('teamRoutes collaboration slice', () => {
       templateId: 'workflow-1',
       templateName: '研究团队模板',
     });
-    expect(metadata.teamDefinition.defaultProvider).toBe('claude-code');
+    expect(metadata.teamDefinition.defaultProvider).toBe('anthropic');
     expect(metadata.teamDefinition.optionalMembers).toEqual([
       { agentId: 'atlas', agentLabel: 'Atlas', canonicalRole: 'reviewer' },
     ]);

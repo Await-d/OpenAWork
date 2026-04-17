@@ -88,6 +88,19 @@ import {
   recoverThinkingBlockOrder,
   type RecoveryResult,
 } from '../session-recovery.js';
+import { detectDelegateTaskError, buildRetryGuidance } from '../delegate-task-retry.js';
+import { truncateToolOutput } from '../tool-output-truncator.js';
+import { detectEmptyTaskResponse } from '../empty-task-response-detector.js';
+import { buildDynamicOrchestratorPrompt } from '../dynamic-agent-prompt-builder.js';
+import { appendTaskResumeInfo } from '../task-resume-info.js';
+import { checkAiComments } from '../comment-checker.js';
+import { checkNonInteractiveBash, buildBannedCommandWarning } from '../non-interactive-env.js';
+import {
+  checkPrometheusToolGuard,
+  PLANNING_CONSULT_WARNING,
+  PROMETHEUS_WORKFLOW_REMINDER,
+} from '../prometheus-md-only.js';
+import { shouldInjectNotepadDirective, NOTEPAD_DIRECTIVE } from '../sisyphus-junior-notepad.js';
 import { runModelRound } from './stream-model-round.js';
 import {
   clearSessionRuntimeThread,
@@ -1032,6 +1045,7 @@ You called a search/read tool directly. For complex multi-file exploration, cons
 ALWAYS prefer: Multiple parallel task_create calls > Direct search tool calls`;
 
 export async function executeToolCalls(input: {
+  agentId?: string;
   clientRequestId: string;
   executionContext?: SandboxExecutionContext;
   enabledToolNames: Set<string>;
@@ -1045,6 +1059,7 @@ export async function executeToolCalls(input: {
   turnFileDiffs?: Map<string, FileDiffContent>;
   userId: string;
   writeChunk: (chunk: RunEvent) => void;
+  workspaceRoot?: string;
 }): Promise<{ hasPendingPermission: boolean }> {
   const sandbox = createDefaultSandbox();
   const sessionMetadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
@@ -1078,27 +1093,75 @@ export async function executeToolCalls(input: {
       rawInput: parsedInput,
     };
 
-    const result = isMissingRequiredToolArguments(
-      toolCall.toolName,
-      normalizedInputText,
-      parsedInput,
-    )
+    // Prometheus MD-only guard (oh-my-opencode prometheus-md-only pattern):
+    // Block Prometheus from writing outside .sisyphus/*.md, inject read-only
+    // warning on task delegation, and workflow reminder on plan writes.
+    const currentAgentId = input.agentId ?? '';
+    const workspaceRoot = input.workspaceRoot ?? workingDirectory ?? process.cwd();
+    const prometheusGuard = checkPrometheusToolGuard({
+      agentId: currentAgentId,
+      toolName: toolCall.toolName,
+      filePath: (parsedInput['filePath'] ??
+        parsedInput['path'] ??
+        parsedInput['file'] ??
+        '') as string,
+      prompt: (parsedInput['prompt'] ?? '') as string,
+      workspaceRoot,
+    });
+    if (!prometheusGuard.blocked) {
+      // Only inject prompt modifications when the tool call will actually execute
+      if (prometheusGuard.injectConsultWarning && typeof parsedInput['prompt'] === 'string') {
+        parsedInput['prompt'] = PLANNING_CONSULT_WARNING + parsedInput['prompt'];
+      }
+
+      // Sisyphus Junior notepad directive (oh-my-opencode sisyphus-junior-notepad pattern):
+      // When orchestrator delegates tasks, inject notepad location and plan read-only directive.
+      if (
+        (toolCall.toolName === 'task' || toolCall.toolName === 'delegate_task') &&
+        typeof parsedInput['prompt'] === 'string' &&
+        shouldInjectNotepadDirective(currentAgentId, parsedInput['prompt'])
+      ) {
+        parsedInput['prompt'] = NOTEPAD_DIRECTIVE + parsedInput['prompt'];
+      }
+
+      // Non-interactive env (oh-my-opencode non-interactive-env pattern):
+      // Prepend env vars to git commands in non-interactive environments.
+      if (
+        toolCall.toolName.toLowerCase() === 'bash' &&
+        typeof parsedInput['command'] === 'string'
+      ) {
+        const niCheck = checkNonInteractiveBash(parsedInput['command']);
+        if (niCheck.modifiedCommand) {
+          parsedInput['command'] = niCheck.modifiedCommand;
+        }
+      }
+    }
+
+    const result = prometheusGuard.blocked
       ? {
           toolCallId,
           toolName: toolCall.toolName,
-          output: buildMissingToolArgumentsMessage(toolCall.toolName, workingDirectory),
+          output: prometheusGuard.blockMessage ?? 'Operation blocked by Prometheus guard.',
           isError: true,
           durationMs: 0,
         }
-      : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
-        ? await sandbox.execute(request, input.signal, input.sessionId, input.executionContext)
-        : {
+      : isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput)
+        ? {
             toolCallId,
             toolName: toolCall.toolName,
-            output: `Tool "${toolCall.toolName}" is not enabled for this request`,
+            output: buildMissingToolArgumentsMessage(toolCall.toolName, workingDirectory),
             isError: true,
             durationMs: 0,
-          };
+          }
+        : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
+          ? await sandbox.execute(request, input.signal, input.sessionId, input.executionContext)
+          : {
+              toolCallId,
+              toolName: toolCall.toolName,
+              output: `Tool "${toolCall.toolName}" is not enabled for this request`,
+              isError: true,
+              durationMs: 0,
+            };
 
     // Agent usage reminder (oh-my-opencode agentUsageReminder pattern):
     // When search/read tools are called directly without using task delegation,
@@ -1125,6 +1188,64 @@ export async function executeToolCalls(input: {
         }
       }
       agentUsageReminderCount++;
+    }
+
+    // Delegate task retry (oh-my-opencode delegate-task-retry pattern):
+    // When task/delegate_task returns an error, detect the pattern and append
+    // retry guidance so the LLM can self-correct on the next turn.
+    if (
+      typeof result.output === 'string' &&
+      (toolCall.toolName === 'task' || toolCall.toolName === 'delegate_task')
+    ) {
+      const delegateError = detectDelegateTaskError(result.output);
+      if (delegateError) {
+        result.output += buildRetryGuidance(delegateError);
+      }
+    }
+
+    // Tool output truncator (oh-my-opencode tool-output-truncator pattern):
+    // Truncate excessively long tool outputs to prevent context window overflow.
+    if (typeof result.output === 'string') {
+      result.output = truncateToolOutput(toolCall.toolName, result.output);
+    }
+
+    // Prometheus workflow reminder (oh-my-opencode prometheus-md-only pattern):
+    // When Prometheus writes a plan file, append the mandatory workflow reminder.
+    if (prometheusGuard.injectWorkflowReminder) {
+      if (typeof result.output === 'string') {
+        result.output += PROMETHEUS_WORKFLOW_REMINDER;
+      } else if (result.output && typeof result.output === 'object') {
+        (result.output as Record<string, unknown>)['_workflowReminder'] =
+          PROMETHEUS_WORKFLOW_REMINDER.trim();
+      }
+    }
+
+    // Empty task response detector (oh-my-opencode empty-task-response-detector pattern):
+    // When the task tool returns an empty response, append a warning so the
+    // LLM knows the task didn't produce output (rather than assuming success).
+    if (typeof result.output === 'string') {
+      result.output = detectEmptyTaskResponse(toolCall.toolName, result.output);
+    }
+
+    // Task resume info (oh-my-opencode task-resume-info pattern):
+    // When task/delegate_task output contains a session ID, append a
+    // "to continue" hint so the LLM knows how to resume the task later.
+    if (typeof result.output === 'string') {
+      result.output = appendTaskResumeInfo(toolCall.toolName, result.output);
+    }
+
+    // Comment checker (oh-my-opencode comment-checker pattern):
+    // Detect AI-generated comments in write/edit tool output and append warning.
+    result.output = checkAiComments(toolCall.toolName, result.output);
+
+    // Non-interactive env (oh-my-opencode non-interactive-env pattern):
+    // Warn about banned interactive commands in bash tool output.
+    if (typeof result.output === 'string' && toolCall.toolName.toLowerCase() === 'bash') {
+      const bashInput = toolCall.inputText ?? '';
+      const niCheck = checkNonInteractiveBash(bashInput);
+      if (niCheck.hasBannedCommand && niCheck.bannedCommand) {
+        result.output += '\n' + buildBannedCommandWarning(niCheck.bannedCommand);
+      }
     }
 
     const observability = buildStreamToolObservability({
@@ -1285,6 +1406,14 @@ export async function handleStreamRequest(input: {
     requestData.message,
   );
   const capabilityContext = buildCapabilityContext(input.user.sub, input.sessionId);
+  // Dynamic agent prompt (oh-my-opencode dynamic-agent-prompt-builder pattern):
+  // For orchestrator agents (sisyphus, atlas, zeus), inject delegation table,
+  // tool selection table, key triggers, and agent-specific sections.
+  const effectiveAgentId = route.effectiveAgentId ?? requestData.agentId ?? '';
+  const ORCHESTRATOR_AGENT_IDS = new Set(['sisyphus', 'atlas', 'zeus']);
+  const dynamicAgentPrompt = ORCHESTRATOR_AGENT_IDS.has(effectiveAgentId)
+    ? buildDynamicOrchestratorPrompt()
+    : null;
   const detector = new KeywordDetectorImpl();
   const detection = detector.detect(requestData.message);
   const injectedPrompt = detection.injectedPrompt ?? null;
@@ -1599,6 +1728,7 @@ export async function handleStreamRequest(input: {
           dialogueModePrompt,
           yoloModePrompt,
           companionPrompt,
+          dynamicAgentPrompt,
           syntheticContinuationPrompt,
           memoryBlock,
           writeChunk: emitChunk,
@@ -1868,6 +1998,7 @@ export async function handleStreamRequest(input: {
         }
 
         const toolCallsResult = await executeToolCalls({
+          agentId: route.effectiveAgentId ?? requestData.agentId,
           clientRequestId: requestData.clientRequestId,
           executionContext: createStreamExecutionContext(
             requestData.clientRequestId,
@@ -1885,6 +2016,9 @@ export async function handleStreamRequest(input: {
           turnFileDiffs,
           userId: input.user.sub,
           writeChunk: emitChunk,
+          workspaceRoot: parseSessionMetadataJson(input.sessionContext.metadataJson)[
+            'workingDirectory'
+          ] as string | undefined,
         });
 
         if (toolCallsResult.hasPendingPermission) {

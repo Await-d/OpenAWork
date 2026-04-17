@@ -62,8 +62,6 @@ import { MemoryTabContent } from './settings/memory-tab-content.js';
 import { CompanionTabContent } from './settings/companion-tab-content.js';
 import { useMemoryManagement } from './settings/use-memory-management.js';
 import { useSettingsTabActions } from './settings/use-settings-tab-actions.js';
-import { createAgentProfilesClient } from '@openAwork/web-client';
-import type { AgentProfileRecord } from '@openAwork/web-client';
 import type {
   DevtoolsSourceKey,
   DevtoolsSourceState,
@@ -115,7 +113,6 @@ export default function SettingsPage() {
   });
 
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
-  const [agentProfiles, setAgentProfiles] = useState<AgentProfileRecord[]>([]);
   const [providers, setProviders] = useState<AIProviderRef[]>([]);
   const [activeSelection, setActiveSelectionState] = useState<ActiveSelectionRef>({
     chat: { providerId: '', modelId: '' },
@@ -598,13 +595,6 @@ export default function SettingsPage() {
     void fetch(`${gatewayUrl}/settings/mcp-servers`, { headers: h })
       .then((r) => r.json() as Promise<{ servers: MCPServerEntry[] }>)
       .then((d) => setMcpServersState(d.servers ?? []));
-    void createAgentProfilesClient(gatewayUrl)
-      .list(token)
-      .then((profiles) => setAgentProfiles(profiles))
-      .catch((error: unknown) => {
-        logger.error('failed to load agent profiles', error);
-        setAgentProfiles([]);
-      });
     void fetch(`${gatewayUrl}/usage/records`, { headers: h })
       .then(async (response) => {
         if (!response.ok) {
@@ -954,22 +944,6 @@ export default function SettingsPage() {
     }
   }, [token, savingDefaultModelSettings, saveProviders]);
 
-  const deleteAgentProfile = React.useCallback(
-    async (profileId: string) => {
-      if (!token) {
-        return;
-      }
-
-      try {
-        await createAgentProfilesClient(gatewayUrl).remove(token, profileId);
-        setAgentProfiles((previous) => previous.filter((profile) => profile.id !== profileId));
-      } catch (error) {
-        logger.error('failed to delete agent profile', error);
-      }
-    },
-    [gatewayUrl, token],
-  );
-
   function handleAddProvider(data?: ProviderEditData) {
     if (!data) return;
     setProviders((prev) => {
@@ -985,6 +959,7 @@ export default function SettingsPage() {
             enabled: data.enabled,
             apiKey: data.apiKey.trim() || undefined,
             baseUrl: data.baseUrl.trim() || existingTemplate.baseUrl,
+            upstreamProtocol: data.upstreamProtocol,
           }
         : {
             id:
@@ -996,6 +971,7 @@ export default function SettingsPage() {
             enabled: data.enabled,
             apiKey: data.apiKey.trim() || undefined,
             baseUrl: data.baseUrl.trim() || undefined,
+            upstreamProtocol: data.upstreamProtocol,
             defaultModels: [],
           };
       const next = [...prev, nextProvider];
@@ -1022,6 +998,7 @@ export default function SettingsPage() {
               enabled: data.enabled,
               apiKey: data.apiKey.trim() || undefined,
               baseUrl: data.baseUrl.trim() || undefined,
+              upstreamProtocol: data.upstreamProtocol,
             }
           : provider,
       );
@@ -1342,7 +1319,6 @@ export default function SettingsPage() {
               <div style={{ width: '100%' }}>
                 {activeTab === 'connection' && (
                   <ConnectionTabContent
-                    agentProfiles={agentProfiles}
                     providers={providers}
                     activeSelection={activeSelection}
                     defaultThinking={defaultThinking}
@@ -1352,9 +1328,6 @@ export default function SettingsPage() {
                     setDefaultThinking={setDefaultThinking}
                     saveDefaultModelSettings={() => {
                       void saveDefaultModelSettings();
-                    }}
-                    deleteAgentProfile={(profileId) => {
-                      void deleteAgentProfile(profileId);
                     }}
                     handleAddModel={handleAddModel}
                     handleRemoveModel={handleRemoveModel}

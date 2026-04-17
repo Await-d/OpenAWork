@@ -51,6 +51,10 @@ export interface TeamRuntimeReferenceViewData {
   conversationCards: AgentTeamsConversationCard[];
   createSession: (workspacePath?: string | null) => Promise<boolean>;
   createTemplate: (input: {
+    defaultBindings?: Record<
+      string,
+      { agentId: string; providerId?: string; modelId?: string; variant?: string }
+    >;
     name: string;
     optionalAgentIds?: string[];
     provider: string;

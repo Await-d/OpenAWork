@@ -70,6 +70,15 @@ export type RoleOverlay = 'writer' | 'multimodal';
 
 export type RoleAliasConfidence = 'low' | 'medium' | 'high';
 
+export type AgentCategory = 'exploration' | 'specialist' | 'advisor' | 'utility';
+
+export type AgentCost = 'FREE' | 'CHEAP' | 'EXPENSIVE';
+
+export interface DelegationTrigger {
+  domain: string;
+  trigger: string;
+}
+
 export interface RolePresetPack {
   description: string;
   supportedCoreRoles: CoreRole[];
@@ -90,64 +99,124 @@ export interface RoleAliasMapping extends CanonicalRoleDescriptor {
 
 export const REFERENCE_AGENT_ROLE_METADATA: Record<
   string,
-  { aliases?: string[]; canonicalRole: CanonicalRoleDescriptor }
+  {
+    aliases?: string[];
+    canonicalRole: CanonicalRoleDescriptor;
+    category?: AgentCategory;
+    cost?: AgentCost;
+    triggers?: DelegationTrigger[];
+    keyTrigger?: string;
+    useWhen?: string[];
+    avoidWhen?: string[];
+  }
 > = {
-  build: { canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'high' } },
+  build: {
+    canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'high' },
+    category: 'specialist',
+    cost: 'FREE',
+  },
   zeus: {
     canonicalRole: { coreRole: 'leader', preset: 'coordinator', confidence: 'high' },
     aliases: ['leader', 'team-leader', 'coordinator', '/prompts:team-leader'],
+    category: 'advisor',
+    cost: 'EXPENSIVE',
+    triggers: [{ domain: '任务拆解', trigger: '意图需要分解为多个子任务并分派给团队角色' }],
   },
   plan: {
     canonicalRole: { coreRole: 'planner', preset: 'default', confidence: 'high' },
     aliases: ['planner', '/prompts:planner', '/ccg:team-plan'],
+    category: 'specialist',
+    cost: 'FREE',
   },
   general: {
     canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'high' },
     aliases: ['default', 'general-purpose'],
+    category: 'specialist',
+    cost: 'FREE',
   },
   explore: {
     canonicalRole: { coreRole: 'researcher', preset: 'explore', confidence: 'high' },
     aliases: ['explorer'],
+    category: 'exploration',
+    cost: 'FREE',
+    keyTrigger: '2+ 模块涉及 → 启动 explore 后台',
+    triggers: [{ domain: 'Explore', trigger: '查找现有代码库结构、模式和风格' }],
+    useWhen: ['需要多角度搜索', '不熟悉的模块结构', '跨层模式发现'],
+    avoidWhen: ['确切知道搜索什么', '单个关键词/模式足够', '已知文件位置'],
   },
   sisyphus: {
     canonicalRole: { coreRole: 'general', preset: 'default', confidence: 'low' },
     aliases: ['sisyphus'],
+    category: 'specialist',
+    cost: 'EXPENSIVE',
+    triggers: [{ domain: '编排', trigger: '复杂任务需要规划、委派、验证、交付' }],
   },
   hephaestus: {
     canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'high' },
     aliases: ['executor', '/prompts:executor', '/ccg:team-exec'],
+    category: 'specialist',
+    cost: 'EXPENSIVE',
+    triggers: [{ domain: '实施', trigger: '代码实现、工程落地、深度修改' }],
   },
   prometheus: {
     canonicalRole: { coreRole: 'planner', preset: 'default', confidence: 'high' },
     aliases: ['planner'],
+    category: 'advisor',
+    cost: 'EXPENSIVE',
+    triggers: [{ domain: '规划', trigger: '战略规划、工作计划设计、需求访谈' }],
   },
   oracle: {
     canonicalRole: { coreRole: 'researcher', preset: 'architect', confidence: 'high' },
     aliases: ['architect', 'debugger', 'code-reviewer', 'init-architect'],
+    category: 'advisor',
+    cost: 'EXPENSIVE',
+    keyTrigger: '架构决策/困难调试 → 咨询 Oracle',
+    triggers: [{ domain: '架构', trigger: '架构决策、困难调试、战略审查' }],
+    useWhen: ['架构决策需要深度分析', '困难 bug 需要诊断', '代码审查需要战略视角'],
+    avoidWhen: ['简单实现任务', '已知方案的直接执行'],
   },
   librarian: {
     canonicalRole: { coreRole: 'researcher', preset: 'librarian', confidence: 'high' },
     aliases: ['librarian'],
+    category: 'exploration',
+    cost: 'CHEAP',
+    keyTrigger: '外部库/文档提及 → 启动 librarian',
+    triggers: [{ domain: 'Librarian', trigger: '搜索外部文档、官方 API、OSS 实现' }],
+    useWhen: ['不熟悉的库需要查文档', '需要官方 API 用法', '需要 OSS 实现示例'],
+    avoidWhen: ['搜索自己的代码库', '已知文件位置'],
   },
   metis: {
     canonicalRole: { coreRole: 'researcher', preset: 'analyst', confidence: 'high' },
     aliases: ['analyst', '/prompts:analyst', '/ccg:team-research'],
+    category: 'advisor',
+    cost: 'CHEAP',
+    triggers: [{ domain: '预规划', trigger: '规划前分析请求，检测歧义和 AI-slop 风险' }],
   },
   momus: {
     canonicalRole: { coreRole: 'reviewer', preset: 'critic', confidence: 'high' },
     aliases: ['critic', '/prompts:critic', '/ccg:team-review'],
+    category: 'advisor',
+    cost: 'CHEAP',
+    triggers: [{ domain: '审查', trigger: '工作计划审查，捕捉缺口、歧义和缺失上下文' }],
   },
   atlas: {
     canonicalRole: { coreRole: 'reviewer', preset: 'verifier', confidence: 'low' },
     aliases: ['verifier', '/prompts:verifier'],
+    category: 'advisor',
+    cost: 'EXPENSIVE',
+    triggers: [{ domain: '验证', trigger: '编排验证，委派任务并验证完成证据' }],
   },
   'multimodal-looker': {
     canonicalRole: { coreRole: 'researcher', overlays: ['multimodal'], confidence: 'medium' },
     aliases: ['multimodal', 'ui-ux-designer'],
+    category: 'utility',
+    cost: 'CHEAP',
   },
   'sisyphus-junior': {
     canonicalRole: { coreRole: 'executor', preset: 'default', confidence: 'high' },
-    aliases: ['executor'],
+    aliases: ['junior'],
+    category: 'specialist',
+    cost: 'CHEAP',
   },
 };
 

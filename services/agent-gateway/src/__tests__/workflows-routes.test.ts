@@ -41,7 +41,7 @@ beforeEach(async () => {
       category: 'team-playbook',
       metadata_json: JSON.stringify({
         teamTemplate: {
-          defaultProvider: 'claude-code',
+          defaultProvider: 'anthropic',
           optionalAgentIds: ['atlas'],
           requiredRoles: ['planner', 'researcher'],
         },
@@ -74,7 +74,7 @@ describe('workflowRoutes metadata support', () => {
         category: 'team-playbook',
         metadata: {
           teamTemplate: {
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
             requiredRoles: ['planner', 'researcher'],
           },
@@ -93,14 +93,15 @@ describe('workflowRoutes metadata support', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'prometheus',
-              researcher: 'librarian',
-              executor: 'hephaestus',
-              reviewer: 'momus',
+              leader: { agentId: 'zeus' },
+              planner: { agentId: 'prometheus' },
+              researcher: { agentId: 'librarian' },
+              executor: { agentId: 'hephaestus' },
+              reviewer: { agentId: 'momus' },
             },
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
-            requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+            requiredRoles: ['leader', 'planner', 'researcher', 'executor', 'reviewer'],
           },
         },
         nodes: [],
@@ -114,14 +115,15 @@ describe('workflowRoutes metadata support', () => {
       JSON.stringify({
         teamTemplate: {
           defaultBindings: {
-            planner: 'prometheus',
-            researcher: 'librarian',
-            executor: 'hephaestus',
-            reviewer: 'momus',
+            leader: { agentId: 'zeus' },
+            planner: { agentId: 'prometheus' },
+            researcher: { agentId: 'librarian' },
+            executor: { agentId: 'hephaestus' },
+            reviewer: { agentId: 'momus' },
           },
-          defaultProvider: 'claude-code',
+          defaultProvider: 'anthropic',
           optionalAgentIds: ['atlas'],
-          requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+          requiredRoles: ['leader', 'planner', 'researcher', 'executor', 'reviewer'],
         },
       }),
     );
@@ -130,14 +132,15 @@ describe('workflowRoutes metadata support', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'prometheus',
-              researcher: 'librarian',
-              executor: 'hephaestus',
-              reviewer: 'momus',
+              leader: { agentId: 'zeus' },
+              planner: { agentId: 'prometheus' },
+              researcher: { agentId: 'librarian' },
+              executor: { agentId: 'hephaestus' },
+              reviewer: { agentId: 'momus' },
             },
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
-            requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+            requiredRoles: ['leader', 'planner', 'researcher', 'executor', 'reviewer'],
           },
         },
       }),
@@ -154,13 +157,13 @@ describe('workflowRoutes metadata support', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'prometheus',
-              researcher: 'librarian',
-              executor: 'hephaestus',
+              planner: { agentId: 'prometheus' },
+              researcher: { agentId: 'librarian' },
+              executor: { agentId: 'hephaestus' },
             },
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
-            requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+            requiredRoles: ['leader', 'planner', 'researcher', 'executor', 'reviewer'],
           },
         },
         nodes: [],
@@ -174,12 +177,13 @@ describe('workflowRoutes metadata support', () => {
       expect.objectContaining({
         teamTemplate: expect.objectContaining({
           defaultBindings: {
-            planner: 'prometheus',
-            researcher: 'librarian',
-            executor: 'hephaestus',
-            reviewer: 'momus',
+            leader: { agentId: 'zeus' },
+            planner: { agentId: 'prometheus' },
+            researcher: { agentId: 'librarian' },
+            executor: { agentId: 'hephaestus' },
+            reviewer: { agentId: 'momus' },
           },
-          requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+          requiredRoles: ['leader', 'planner', 'researcher', 'executor', 'reviewer'],
         }),
       }),
     );

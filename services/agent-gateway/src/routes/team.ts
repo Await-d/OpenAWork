@@ -200,14 +200,21 @@ interface WorkflowTemplateLookupRow {
   name: string;
 }
 
+const roleBindingSchema = z.object({
+  agentId: z.string().min(1),
+  modelId: z.string().min(1).optional(),
+  providerId: z.string().min(1).optional(),
+  variant: z.string().min(1).max(80).optional(),
+});
+
 const workflowTeamTemplateSchema = z.object({
   defaultBindings: z
     .object({
-      leader: z.string().min(1).optional(),
-      planner: z.string().min(1).optional(),
-      researcher: z.string().min(1).optional(),
-      executor: z.string().min(1).optional(),
-      reviewer: z.string().min(1).optional(),
+      leader: z.union([z.string().min(1), roleBindingSchema]).optional(),
+      planner: z.union([z.string().min(1), roleBindingSchema]).optional(),
+      researcher: z.union([z.string().min(1), roleBindingSchema]).optional(),
+      executor: z.union([z.string().min(1), roleBindingSchema]).optional(),
+      reviewer: z.union([z.string().min(1), roleBindingSchema]).optional(),
     })
     .optional(),
   defaultProvider: z.string().nullable().optional(),
@@ -687,10 +694,29 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const agentsStep = child('resolve-agents');
       const managedAgents = listManagedAgentsForUser(user.sub).filter((agent) => agent.enabled);
       const agentMap = new Map(managedAgents.map((agent) => [agent.id, agent]));
-      const requiredRoleBindings = FIXED_TEAM_CORE_ROLE_ORDER.map((role) => ({
-        role,
-        agentId: FIXED_TEAM_CORE_ROLE_BINDINGS[role],
-      }));
+      const templateDefaultBindings = templateLookup?.teamTemplate.defaultBindings;
+      const requiredRoleBindings = FIXED_TEAM_CORE_ROLE_ORDER.map((role) => {
+        const templateBinding = templateDefaultBindings?.[role];
+        const agentId =
+          typeof templateBinding === 'object' && templateBinding?.agentId
+            ? templateBinding.agentId
+            : typeof templateBinding === 'string' && templateBinding.trim().length > 0
+              ? templateBinding
+              : FIXED_TEAM_CORE_ROLE_BINDINGS[role];
+        return {
+          role,
+          agentId,
+          ...(typeof templateBinding === 'object' && templateBinding?.providerId
+            ? { providerId: templateBinding.providerId }
+            : {}),
+          ...(typeof templateBinding === 'object' && templateBinding?.modelId
+            ? { modelId: templateBinding.modelId }
+            : {}),
+          ...(typeof templateBinding === 'object' && templateBinding?.variant
+            ? { variant: templateBinding.variant }
+            : {}),
+        };
+      });
       const invalidRequiredAgent = requiredRoleBindings.find(
         (binding) => !agentMap.has(binding.agentId),
       );
@@ -747,6 +773,9 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
             agentId: agent.id,
             agentLabel: agent.label,
             role: binding.role,
+            ...(binding.providerId ? { providerId: binding.providerId } : {}),
+            ...(binding.modelId ? { modelId: binding.modelId } : {}),
+            ...(binding.variant ? { variant: binding.variant } : {}),
           };
         }),
         source: {

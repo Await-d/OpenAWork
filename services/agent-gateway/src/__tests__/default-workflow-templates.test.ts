@@ -61,11 +61,26 @@ describe('default workflow template seeding', () => {
   it('ships complete default bindings for every core role in each seed template', () => {
     for (const template of DEFAULT_WORKFLOW_TEMPLATE_SEEDS) {
       expect(template.metadata.teamTemplate.defaultBindings).toMatchObject({
-        planner: expect.any(String),
-        researcher: expect.any(String),
-        executor: expect.any(String),
-        reviewer: expect.any(String),
+        leader: expect.objectContaining({ agentId: expect.any(String) }),
+        planner: expect.objectContaining({ agentId: expect.any(String) }),
+        researcher: expect.objectContaining({ agentId: expect.any(String) }),
+        executor: expect.objectContaining({ agentId: expect.any(String) }),
+        reviewer: expect.objectContaining({ agentId: expect.any(String) }),
       });
+    }
+  });
+
+  it('populates nodes and edges for every seed template', () => {
+    for (const template of DEFAULT_WORKFLOW_TEMPLATE_SEEDS) {
+      expect(template.nodes.length).toBeGreaterThan(0);
+      expect(template.edges.length).toBeGreaterThan(0);
+      // Should have start, one subagent per required role, and end nodes
+      const requiredCount = template.metadata.teamTemplate.requiredRoles.length;
+      expect(template.nodes.filter((n) => n.type === 'subagent')).toHaveLength(requiredCount);
+      expect(template.nodes[0]?.type).toBe('start');
+      expect(template.nodes[template.nodes.length - 1]?.type).toBe('end');
+      // Edges should connect sequentially: start → role1 → ... → end
+      expect(template.edges).toHaveLength(requiredCount + 1);
     }
   });
 

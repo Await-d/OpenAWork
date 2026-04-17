@@ -22,8 +22,6 @@ export { createCapabilitiesClient } from './capabilities.js';
 export type { CapabilitiesClient } from './capabilities.js';
 export { createAgentsClient } from './agents.js';
 export type { AgentsClient } from './agents.js';
-export { createAgentProfilesClient } from './agent-profiles.js';
-export type { AgentProfileRecord, AgentProfilesClient } from './agent-profiles.js';
 export { createTeamClient } from './team.js';
 export type {
   CreateTeamSessionInput,
@@ -54,6 +52,9 @@ export type {
 export { createWorkflowsClient } from './workflows.js';
 export type {
   CreateWorkflowTemplateInput,
+  OptimizePromptInput,
+  PromptCandidate,
+  PromptOptimizerResult,
   WorkflowTemplateMetadata,
   WorkflowTeamTemplateMetadata,
   WorkflowTemplateRequiredRole,

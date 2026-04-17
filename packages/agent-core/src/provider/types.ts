@@ -70,6 +70,12 @@ export interface AIProvider {
   apiKeyEnv?: string;
   oauth?: OAuthConfig;
   requestOverrides?: RequestOverrides;
+  /** Override the auto-detected upstream protocol for this provider.
+   *  When set, this takes priority over model-id and base-URL heuristics.
+   *  - 'responses':     Use OpenAI Responses API (/v1/responses)
+   *  - 'chat_completions': Use OpenAI Chat Completions API (/v1/chat/completions)
+   */
+  upstreamProtocol?: 'chat_completions' | 'responses';
   defaultModels: AIModelConfig[];
   createdAt: string;
   updatedAt: string;

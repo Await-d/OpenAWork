@@ -15,6 +15,10 @@ export interface LSPServerInfo {
   role?: 'primary' | 'supplemental';
   slot?: string;
   priority?: number;
+  /** Binary name(s) checked by whichSync before spawn. Used for install detection. */
+  binary?: string | string[];
+  /** Command to install the server binary, e.g. 'npm install -g typescript-language-server'. */
+  installCommand?: string;
   root: RootFunction;
   spawn(root: string): Promise<LSPServerHandle | undefined>;
 }
@@ -22,6 +26,8 @@ export interface LSPServerInfo {
 export interface LSPManagerOptions {
   servers?: LSPServerInfo[];
   disabledServerIds?: string[];
+  /** When true, automatically install missing LSP server binaries. Default: false. */
+  autoInstall?: boolean;
 }
 
 export interface LSPClientInfo {
@@ -68,6 +74,14 @@ export interface LSPServerStatus {
   running: boolean;
   fileCount: number;
   diagnosticCount: number;
+}
+
+export interface LSPMissingServer {
+  id: string;
+  extensions: string[];
+  binary: string | string[];
+  installCommand?: string;
+  installed: boolean;
 }
 
 export interface DiagnosticSummary {

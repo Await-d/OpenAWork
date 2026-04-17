@@ -15,10 +15,14 @@ export const agentTeamsTabs: AgentTeamsTabDefinition[] = [
 ];
 
 export const agentTeamsNewTemplateProviders: TeamTemplateProviderOption[] = [
-  { value: 'claude-code', label: 'Claude Code' },
-  { value: 'codex-cli', label: 'Codex CLI' },
-  { value: 'gemini-cli', label: 'Gemini CLI' },
-  { value: 'iflow', label: 'iFlow' },
+  { value: 'anthropic', label: 'Anthropic', modelId: 'claude-sonnet-4-6', variant: 'high' },
+  { value: 'openai', label: 'OpenAI', modelId: 'gpt-5.4', variant: 'high' },
+  { value: 'gemini', label: 'Gemini', modelId: 'gemini-3.1-pro', variant: 'high' },
+  { value: 'deepseek', label: 'DeepSeek', modelId: 'deepseek-r2', variant: 'high' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'qwen', label: 'Qwen', modelId: 'qwen3-coder', variant: 'medium' },
+  { value: 'moonshot', label: 'Moonshot', modelId: 'kimi-k2.5', variant: 'medium' },
 ];
 
 export const AGENT_TEAMS_EVENT_CONFIG: Record<

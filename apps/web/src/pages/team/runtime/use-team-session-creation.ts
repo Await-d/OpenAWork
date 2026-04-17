@@ -67,16 +67,27 @@ export function useTeamSessionCreation(options: UseTeamSessionCreationOptions) {
 
   const applyTemplate = useCallback((template: WorkflowTemplateRecord) => {
     const teamTemplate = template.metadata?.teamTemplate;
-    const defaultBindings = teamTemplate?.defaultBindings ?? {};
+    const rawBindings = teamTemplate?.defaultBindings ?? {};
+
+    const requiredRoleBindings: Record<string, string> = { ...FIXED_TEAM_CORE_ROLE_BINDINGS };
+    for (const [role, binding] of Object.entries(rawBindings) as Array<[string, unknown]>) {
+      if (typeof binding === 'string' && binding.trim().length > 0) {
+        requiredRoleBindings[role] = binding;
+      } else if (
+        typeof binding === 'object' &&
+        binding !== null &&
+        'agentId' in binding &&
+        typeof (binding as { agentId: string }).agentId === 'string'
+      ) {
+        requiredRoleBindings[role] = (binding as { agentId: string }).agentId;
+      }
+    }
 
     setDraft((current) => ({
       ...current,
       defaultProvider: teamTemplate?.defaultProvider ?? current.defaultProvider,
       optionalAgentIds: [...(teamTemplate?.optionalAgentIds ?? [])],
-      requiredRoleBindings: {
-        ...FIXED_TEAM_CORE_ROLE_BINDINGS,
-        ...defaultBindings,
-      },
+      requiredRoleBindings,
       source: {
         kind: 'saved-template',
         templateId: template.id,

@@ -91,6 +91,7 @@ export const aiProviderSchema = z
     apiKeyEnv: z.string().optional(),
     oauth: oauthConfigSchema.optional(),
     requestOverrides: requestOverridesSchema.optional(),
+    upstreamProtocol: z.enum(['chat_completions', 'responses']).optional(),
     defaultModels: z.array(aiModelConfigSchema),
     createdAt: z.string().optional(),
     updatedAt: z.string().optional(),

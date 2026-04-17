@@ -86,12 +86,12 @@ describe('useTeamSessionCreation', () => {
     metadata: {
       teamTemplate: {
         defaultBindings: {
-          executor: 'hephaestus',
-          planner: 'prometheus',
-          researcher: 'librarian',
-          reviewer: 'momus',
+          executor: { agentId: 'hephaestus' },
+          planner: { agentId: 'prometheus' },
+          researcher: { agentId: 'librarian' },
+          reviewer: { agentId: 'momus' },
         },
-        defaultProvider: 'claude-code',
+        defaultProvider: 'anthropic',
         optionalAgentIds: ['atlas'],
         requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
       },
@@ -108,6 +108,7 @@ describe('useTeamSessionCreation', () => {
     expect(harness.getState().draft.source.kind).toBe('blank');
     expect(harness.getState().draft.optionalAgentIds).toEqual([]);
     expect(harness.getState().draft.requiredRoleBindings).toEqual({
+      leader: 'zeus',
       planner: 'prometheus',
       researcher: 'librarian',
       executor: 'hephaestus',
@@ -194,7 +195,7 @@ describe('useTeamSessionCreation', () => {
       kind: 'saved-template',
       templateId: 'workflow-1',
     });
-    expect(harness.getState().draft.defaultProvider).toBe('claude-code');
+    expect(harness.getState().draft.defaultProvider).toBe('anthropic');
     expect(harness.getState().draft.optionalAgentIds).toEqual(['atlas']);
     expect(harness.getState().draft.requiredRoleBindings.executor).toBe('hephaestus');
     expect(harness.getState().draft.requiredRoleBindings.planner).toBe('prometheus');

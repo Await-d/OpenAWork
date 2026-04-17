@@ -191,6 +191,7 @@ export function resolveModelRouteFromProvider(
     model: modelId,
     providerType: provider.type,
     baseUrl: resolvedProviderBaseUrl,
+    explicitOverride: provider.upstreamProtocol,
   });
 
   return {
@@ -231,6 +232,7 @@ export function resolveCompactionRoute(
     model: modelId,
     providerType: provider.type,
     baseUrl: resolvedCompactionBaseUrl,
+    explicitOverride: provider.upstreamProtocol,
   });
 
   return {

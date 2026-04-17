@@ -585,7 +585,12 @@ beforeEach(() => {
                   teamTemplate: {
                     ...((body.metadata as { teamTemplate?: Record<string, unknown> } | undefined)
                       ?.teamTemplate ?? {}),
-                    defaultBindings: { ...FIXED_TEAM_CORE_ROLE_BINDINGS },
+                    defaultBindings: Object.fromEntries(
+                      Object.entries(FIXED_TEAM_CORE_ROLE_BINDINGS).map(([role, agentId]) => [
+                        role,
+                        { agentId },
+                      ]),
+                    ),
                     requiredRoles: [...FIXED_TEAM_CORE_ROLE_ORDER],
                   },
                 }
@@ -812,7 +817,7 @@ describe('App routing', () => {
     expect(container?.querySelector('[data-testid="layout-shell"]')).toBeTruthy();
     expect(container?.textContent).toContain('AGENT TEAMS');
     expect(container?.textContent).toContain('已接入真实 Team Runtime');
-    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('librarian');
   });
 
   it('redirects unauthenticated /team access back to / before TeamPage mounts', async () => {
@@ -1050,14 +1055,14 @@ describe('App routing', () => {
 
     expect(container?.textContent).toContain('核心角色（系统固定）');
     expect(container?.querySelectorAll('select')).toHaveLength(0);
-    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('prometheus');
     expect(container?.textContent).toContain('librarian');
     expect(container?.textContent).toContain('hephaestus');
     expect(container?.textContent).toContain('momus');
 
     const createButton = [...Array.from(container?.querySelectorAll('button') ?? [])]
       .reverse()
-      .find((button: Element) => button.textContent?.includes('创建模板')) as
+      .find((button: Element) => button.textContent?.includes('确认组建')) as
       | HTMLButtonElement
       | undefined;
     expect(createButton).toBeTruthy();
@@ -1073,13 +1078,13 @@ describe('App routing', () => {
     expect(workflowTemplates[0]?.metadata).toMatchObject({
       teamTemplate: {
         defaultBindings: {
-          planner: 'prometheus',
-          researcher: 'librarian',
-          executor: 'hephaestus',
-          reviewer: 'momus',
+          planner: { agentId: 'prometheus' },
+          researcher: { agentId: 'librarian' },
+          executor: { agentId: 'hephaestus' },
+          reviewer: { agentId: 'momus' },
         },
-        defaultProvider: 'claude-code',
-        requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
+        defaultProvider: 'anthropic',
+        requiredRoles: ['leader', 'planner', 'researcher', 'executor', 'reviewer'],
       },
     });
   });
@@ -1182,12 +1187,12 @@ describe('App routing', () => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'prometheus',
-              researcher: 'librarian',
-              executor: 'hephaestus',
-              reviewer: 'momus',
+              planner: { agentId: 'prometheus' },
+              researcher: { agentId: 'librarian' },
+              executor: { agentId: 'hephaestus' },
+              reviewer: { agentId: 'momus' },
             },
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
             requiredRoles: ['planner', 'researcher', 'executor', 'reviewer'],
           },
@@ -1239,7 +1244,7 @@ describe('App routing', () => {
     });
 
     expect(container?.textContent).toContain('该核心角色使用系统固定 agent，用户不可修改。');
-    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('prometheus');
     expect(container?.textContent).toContain('librarian');
     expect(container?.textContent).toContain('hephaestus');
     expect(container?.textContent).toContain('momus');
@@ -1286,7 +1291,7 @@ describe('App routing', () => {
     expect(body).toMatchObject({
       title: '模板团队会话',
       source: { kind: 'saved-template', templateId: 'workflow-1' },
-      defaultProvider: 'claude-code',
+      defaultProvider: 'anthropic',
       optionalAgentIds: ['atlas'],
     });
     expect(body.requiredRoleBindings).toBeUndefined();

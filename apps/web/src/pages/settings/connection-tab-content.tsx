@@ -1,5 +1,4 @@
 import type React from 'react';
-import type { AgentProfileRecord } from '@openAwork/web-client';
 import {
   MCPServerConfig,
   MCPServerList,
@@ -18,13 +17,11 @@ interface ConnectionTabContentProps {
   providers: AIProviderRef[];
   activeSelection: ActiveSelectionRef;
   defaultThinking: ThinkingDefaultsRef;
-  agentProfiles: AgentProfileRecord[];
   hasUnsavedDefaultChanges: boolean;
   isSavingDefaultChanges: boolean;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelectionRef>>;
   setDefaultThinking: React.Dispatch<React.SetStateAction<ThinkingDefaultsRef>>;
   saveDefaultModelSettings: () => void;
-  deleteAgentProfile: (profileId: string) => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
   handleRemoveModel: (providerId: string, modelId: string) => void;
   handleUpdateModel: (
@@ -63,13 +60,11 @@ export function ConnectionTabContent({
   providers,
   activeSelection,
   defaultThinking,
-  agentProfiles,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   setActiveSelection,
   setDefaultThinking,
   saveDefaultModelSettings,
-  deleteAgentProfile,
   handleAddModel,
   handleRemoveModel,
   handleUpdateModel,
@@ -192,56 +187,6 @@ export function ConnectionTabContent({
             onRemoveModel={handleRemoveModel}
             onUpdateModel={handleUpdateModel}
           />
-        </div>
-        <div style={{ ...SS, marginTop: 12 }}>
-          <h4 style={{ ...ST, fontSize: 13, marginBottom: 8 }}>项目配置档</h4>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {agentProfiles.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                还没有保存任何项目配置。进入具体会话后，可以在聊天顶部使用“保存为项目配置”把当前
-                agent / 模型 / 工具配置档固化到对应工作区。
-              </div>
-            ) : (
-              agentProfiles.map((profile) => (
-                <div
-                  key={profile.id}
-                  style={{
-                    display: 'grid',
-                    gap: 6,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: '1px solid var(--border-subtle)',
-                    background: 'color-mix(in oklab, var(--surface) 86%, var(--bg-2) 14%)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      alignItems: 'start',
-                    }}
-                  >
-                    <div style={{ display: 'grid', gap: 4 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                        {profile.label}
-                      </span>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                        {profile.workspacePath}
-                      </span>
-                    </div>
-                    <button type="button" onClick={() => deleteAgentProfile(profile.id)} style={BP}>
-                      删除
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
-                    代理：{profile.agentId ?? '默认'} · Provider：{profile.providerId ?? '默认'} ·
-                    Model：{profile.modelId ?? '默认'}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         </div>
       </div>
       <section style={SS}>

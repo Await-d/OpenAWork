@@ -29,12 +29,11 @@ import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../hooks/useComposerWorkspaceCatalog.js';
 import { useWorkspace } from '../hooks/useWorkspace.js';
 import {
-  createAgentProfilesClient,
   createPermissionsClient,
   createSessionsClient,
+  createWorkflowsClient,
 } from '@openAwork/web-client';
 import type {
-  AgentProfileRecord,
   PendingPermissionRequest,
   PendingQuestionRequest,
   PermissionDecision,
@@ -253,7 +252,6 @@ export default function ChatPage() {
   const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('clarify');
   const [manualAgentId, setManualAgentId] = useState('');
-  const [currentAgentProfile, setCurrentAgentProfile] = useState<AgentProfileRecord | null>(null);
   const [yoloMode, setYoloMode] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -417,7 +415,6 @@ export default function ChatPage() {
     handleReasoningEffortChange,
     handleManualAgentChange,
     handleClearManualAgentId,
-    handleSaveWorkspaceProfile,
   } = useSessionSettingsCallbacks(
     {
       dialogueMode,
@@ -429,7 +426,6 @@ export default function ChatPage() {
       activeModelId,
       manualAgentId,
       effectiveWorkingDirectory,
-      currentAgentProfile,
       sessionMetadataDirty,
       sessionMetadataDirtyRef,
     },
@@ -440,7 +436,6 @@ export default function ChatPage() {
       setThinkingEnabled,
       setReasoningEffort,
       setManualAgentId,
-      setCurrentAgentProfile,
       setSessionMetadataDirty,
     },
     gatewayUrl,
@@ -583,31 +578,6 @@ export default function ChatPage() {
   useEffect(() => {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
   }, [effectiveWorkingDirectory, setFileTreeRootPath]);
-
-  useEffect(() => {
-    if (!token || !effectiveWorkingDirectory) {
-      setCurrentAgentProfile(null);
-      return;
-    }
-
-    let cancelled = false;
-    void createAgentProfilesClient(gatewayUrl)
-      .getCurrent(token, effectiveWorkingDirectory)
-      .then((profile) => {
-        if (!cancelled) {
-          setCurrentAgentProfile(profile);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCurrentAgentProfile(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveWorkingDirectory, gatewayUrl, token]);
 
   const { planTasks, agentEvents, planHistory, dagNodes, dagEdges, compactions } = rightPanelState;
   const toolCallCards = useMemo(() => getToolCallCards(rightPanelState), [rightPanelState]);
@@ -3182,14 +3152,7 @@ export default function ChatPage() {
         >
           <ChatTopBar
             dialogueMode={dialogueMode}
-            currentProfileLabel={
-              effectiveWorkingDirectory
-                ? (currentAgentProfile?.label ?? '当前工作区尚未保存项目配置')
-                : undefined
-            }
             onChangeDialogueMode={handleDialogueModeChange}
-            hasWorkspaceProfile={Boolean(currentAgentProfile)}
-            onSaveWorkspaceProfile={() => void handleSaveWorkspaceProfile()}
             yoloMode={yoloMode}
             onToggleYolo={handleToggleYolo}
             editorMode={editorMode}
@@ -3484,6 +3447,20 @@ export default function ChatPage() {
             defaultAgentLabel={defaultAgentLabel}
             onChangeManualAgentId={handleManualAgentChange}
             onClearManualAgentId={handleClearManualAgentId}
+            onOptimizePrompt={
+              token
+                ? async (text: string) => {
+                    const client = createWorkflowsClient(gatewayUrl);
+                    return client.optimizePrompt(token, {
+                      originalPrompt: text,
+                      context: 'AI对话提示词优化：提取关键内容、转换为专业术语、增强指令明确性',
+                      targetAudience: 'AI助手',
+                      candidateCount: 3,
+                    });
+                  }
+                : undefined
+            }
+            onReplaceInput={(nextValue: string) => setInput(nextValue)}
           />
         </div>
         <ChatEditorPane

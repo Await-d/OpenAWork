@@ -290,6 +290,8 @@ export interface RoundSystemMessagesInput {
   yoloModePrompt?: string | null;
   memoryBlock?: string | null;
   thinkingLanguagePrompt?: string | null;
+  /** Dynamic agent prompt sections (delegation table, tool selection, etc.) for orchestrator agents */
+  dynamicAgentPrompt?: string | null;
 }
 
 /**
@@ -313,7 +315,8 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
-  ];
+    input.dynamicAgentPrompt,
+  ].filter((part): part is string => typeof part === 'string' && part.length > 0);
 
   // Part 2: Dynamic suffix — changes per round
   const dynamicContent = input.memoryBlock ?? MEMORY_BLOCK_PLACEHOLDER;

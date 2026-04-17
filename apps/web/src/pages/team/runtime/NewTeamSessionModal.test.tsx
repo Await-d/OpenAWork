@@ -85,10 +85,10 @@ beforeEach(() => {
         metadata: {
           teamTemplate: {
             defaultBindings: {
-              planner: 'prometheus',
-              researcher: 'librarian',
+              planner: { agentId: 'prometheus' },
+              researcher: { agentId: 'librarian' },
             },
-            defaultProvider: 'claude-code',
+            defaultProvider: 'anthropic',
             optionalAgentIds: ['atlas'],
             requiredRoles: ['planner', 'researcher'],
           },
@@ -187,7 +187,7 @@ describe('NewTeamSessionModal', () => {
 
     expect(container?.textContent).toContain('确认配置');
     expect(container?.textContent).toContain('研究团队 2026-04-16');
-    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('prometheus');
     expect(container?.textContent).toContain('Atlas');
   });
 
@@ -212,7 +212,7 @@ describe('NewTeamSessionModal', () => {
       await Promise.resolve();
     });
 
-    expect(container?.textContent).toContain('oracle');
+    expect(container?.textContent).toContain('prometheus');
     expect(container?.textContent).toContain('librarian');
 
     await act(async () => {
