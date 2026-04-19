@@ -67,8 +67,6 @@ src/
 ```bash
 pnpm --filter @openAwork/web dev        # Vite 开发服务器
 pnpm --filter @openAwork/web build      # 生产构建 → dist/
-pnpm --filter @openAwork/web test       # Vitest
-pnpm --filter @openAwork/web test:e2e   # Playwright E2E
 ```
 
 ## 代码组织规则
