@@ -72,6 +72,7 @@ export interface SessionSnapshotLoaderReturn {
     session: Session,
     nextSessionStateStatus: SessionStateStatus | null,
     activeStream: SessionActiveStream | null,
+    messages: ChatMessage[],
   ) => void;
   loadCurrentSessionSnapshot: (
     targetSessionId: string,
@@ -138,11 +139,13 @@ export function useSessionSnapshotLoader(
       session: Session,
       nextSessionStateStatus: SessionStateStatus | null,
       activeStream: SessionActiveStream | null,
+      messages: ChatMessage[],
     ) => {
       setRecoveredStreamSnapshot(
         recoverActiveAssistantStream({
           activeStreamStartedAt: activeStream?.startedAtMs ?? null,
           hasActiveStream: activeStream !== null,
+          messages,
           runEvents: Array.isArray(session.runEvents) ? session.runEvents : [],
           sessionStateStatus: nextSessionStateStatus,
         }),
@@ -193,6 +196,7 @@ export function useSessionSnapshotLoader(
         prepared.session,
         prepared.sessionStateStatus,
         recovery.activeStream,
+        prepared.normalizedMessages,
       );
       setIsSessionSnapshotReady(true);
     },

@@ -28,6 +28,7 @@ import { hasUsableReportedUsageSnapshot } from './stream-usage.js';
 import { buildChatContextUsageSnapshot, type ChatContextUsageSnapshot } from './context-usage.js';
 import type { ToolCallCardModel } from '../chat-stream-state.js';
 import type { TaskToolRuntimeLookup } from './task-tool-runtime.js';
+import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
 
 export interface ChatRenderDataInput {
   messages: ChatMessage[];
@@ -39,10 +40,11 @@ export interface ChatRenderDataInput {
   visibleStreaming: boolean;
   visibleStreamBuffer: string;
   visibleStreamThinkingBuffer: string;
+  visibleStreamThinkingBlocks: string[];
   visibleStreamStartedAt: number | null;
   visibleReportedStreamUsage: ChatBackendUsageSnapshot | null;
   activeStreamFirstTokenLatencyMs: number | null;
-  currentAssistantStreamMessageIdRef: React.MutableRefObject<string | null>;
+  activeStreamMessageId: string | null;
   toolCallCards: ToolCallCardModel[];
   resolveAssistantCapabilityKind: (text: string | undefined) => string | undefined;
   resolveInlinePermissionActions?: (requestId: string) =>
@@ -93,10 +95,11 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     visibleStreaming,
     visibleStreamBuffer,
     visibleStreamThinkingBuffer,
+    visibleStreamThinkingBlocks,
     visibleStreamStartedAt,
     visibleReportedStreamUsage,
     activeStreamFirstTokenLatencyMs,
-    currentAssistantStreamMessageIdRef,
+    activeStreamMessageId,
     toolCallCards,
     resolveAssistantCapabilityKind,
     resolveInlinePermissionActions,
@@ -299,13 +302,13 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
 
     return {
       message: {
-        id: currentAssistantStreamMessageIdRef.current ?? '__streaming__',
+        id: activeStreamMessageId ?? '__streaming__',
         role: 'assistant',
         content:
           toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
             ? createAssistantTraceContent({
-                ...(visibleStreamThinkingBuffer.trim().length > 0
-                  ? { reasoningBlocks: [visibleStreamThinkingBuffer] }
+                ...(visibleStreamThinkingBlocks.length > 0
+                  ? { reasoningBlocks: visibleStreamThinkingBlocks }
                   : {}),
                 text: visibleStreamBuffer,
                 toolCalls: toolCallCards.map((toolCall) => ({
@@ -360,8 +363,9 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     visibleStreamBuffer,
     visibleStreamStartedAt,
     visibleStreamThinkingBuffer,
+    visibleStreamThinkingBlocks,
     visibleStreaming,
-    currentAssistantStreamMessageIdRef,
+    activeStreamMessageId,
   ]);
 
   const historicalGroupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
@@ -371,40 +375,26 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   }, [handleCopyMessageGroup, historicalRenderedMessageEntries]);
 
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    if (!streamingRenderedMessageEntry) {
+    const mergedEntries = mergeStreamingEntryIntoHistoricalEntries(
+      historicalRenderedMessageEntries,
+      streamingRenderedMessageEntry,
+      activeStreamMessageId,
+    );
+
+    if (mergedEntries === historicalRenderedMessageEntries) {
       return historicalGroupedMessageEntries;
     }
 
-    const lastHistoricalGroup =
-      historicalGroupedMessageEntries[historicalGroupedMessageEntries.length - 1];
-
-    if (
-      lastHistoricalGroup &&
-      lastHistoricalGroup.role === streamingRenderedMessageEntry.message.role
-    ) {
-      const mergedGroup = decorateAssistantGroupActions(
-        {
-          ...lastHistoricalGroup,
-          entries: [...lastHistoricalGroup.entries, streamingRenderedMessageEntry],
-        },
-        handleCopyMessageGroup,
-      );
-
-      return [...historicalGroupedMessageEntries.slice(0, -1), mergedGroup];
-    }
-
-    return [
-      ...historicalGroupedMessageEntries,
-      decorateAssistantGroupActions(
-        {
-          entries: [streamingRenderedMessageEntry],
-          key: streamingRenderedMessageEntry.message.id,
-          role: streamingRenderedMessageEntry.message.role,
-        },
-        handleCopyMessageGroup,
-      ),
-    ];
-  }, [handleCopyMessageGroup, historicalGroupedMessageEntries, streamingRenderedMessageEntry]);
+    return groupChatRenderEntries(mergedEntries).map((group) =>
+      decorateAssistantGroupActions(group, handleCopyMessageGroup),
+    );
+  }, [
+    activeStreamMessageId,
+    handleCopyMessageGroup,
+    historicalGroupedMessageEntries,
+    historicalRenderedMessageEntries,
+    streamingRenderedMessageEntry,
+  ]);
 
   return {
     assistantUsageDetails,

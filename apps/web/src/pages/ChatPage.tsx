@@ -29,8 +29,9 @@ import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../hooks/useComposerWorkspaceCatalog.js';
 import { useWorkspace } from '../hooks/useWorkspace.js';
 import {
-  createPermissionsClient,
+  createPendingPermissionRequestSnapshot,
   createSessionsClient,
+  dedupePendingPermissionRequests,
   createWorkflowsClient,
 } from '@openAwork/web-client';
 import type {
@@ -43,7 +44,7 @@ import type {
   SessionRecoveryReadModel,
   SessionTask,
 } from '@openAwork/web-client';
-import type { CommandResultCard, Message, RunEvent } from '@openAwork/shared';
+import type { CommandResultCard, Message, RunEvent, StreamThinkingChunk } from '@openAwork/shared';
 import { logger } from '../utils/logger.js';
 import {
   publishSessionPendingPermission,
@@ -53,6 +54,11 @@ import {
   subscribeCurrentSessionRefresh,
 } from '../utils/session-list-events.js';
 import { extractWorkingDirectory } from '../utils/session-metadata.js';
+import {
+  getPermissionReplyStatusCode,
+  getPermissionReplySuccessMessage,
+  replyPermissionRequest,
+} from '../utils/permission-reply.js';
 import type { MCPServerStatus } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import WorkspacePickerModal from '../components/WorkspacePickerModal.js';
@@ -73,11 +79,14 @@ import {
   parseToolCallInputText,
   parseSessionModeMetadata,
   reconcileSnapshotChatMessages,
+  replaceOrAppendStreamedAssistantMessage,
   sanitizeComposerPlainText,
   hasActivePendingPermissionRequest,
   upsertPermissionEventMessage,
   type ReasoningEffort,
+  partsFromAssistantTrace,
   type ChatMessage,
+  type ChatMessagePart,
   type ComposerMenuState,
   type WorkspaceFileMentionItem,
 } from './chat-page/support.js';
@@ -85,6 +94,7 @@ import {
   filterTranscriptMessages,
   shouldShowRunEventInTranscript,
 } from './chat-page/transcript-visibility.js';
+import { isAutoAcceptEnabled } from './chat-page/permission-auto-respond.js';
 import { ChatRightPanel } from './chat-page/chat-right-panel.js';
 import {
   useChatMessageActions,
@@ -166,6 +176,12 @@ import {
   type RecoveredActiveAssistantStream,
 } from './chat-page/stream-recovery.js';
 import {
+  appendStreamingThinkingChunk,
+  extractStreamingThinkingTexts,
+  joinStreamingThinkingTexts,
+  type StreamingThinkingBlock,
+} from './chat-page/streaming-thinking.js';
+import {
   createQueuedComposerPreview,
   hydrateQueuedComposerMessage,
   toPersistedQueuedComposerMessage,
@@ -209,6 +225,7 @@ export default function ChatPage() {
   const [stoppingStream, setStoppingStream] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
   const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
+  const [streamThinkingBlocks, setStreamThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
   const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
     null,
   );
@@ -324,6 +341,7 @@ export default function ChatPage() {
   } = useStreamReveal(prefersReducedMotion, {
     setStreamBuffer,
     setStreamThinkingBuffer,
+    setStreamThinkingBlocks,
     setRecoveredStreamSnapshot,
     setStreaming,
     setStoppingStream,
@@ -772,13 +790,18 @@ export default function ChatPage() {
   ]);
   const visibleStreaming = streaming || recoveredStreamSnapshot !== null;
   const visibleStreamBuffer = streaming ? streamBuffer : (recoveredStreamSnapshot?.text ?? '');
+  const visibleStreamThinkingBlocks = streaming
+    ? extractStreamingThinkingTexts(streamThinkingBlocks)
+    : extractStreamingThinkingTexts(recoveredStreamSnapshot?.thinkingBlocks ?? []);
   const visibleStreamThinkingBuffer = streaming
     ? streamThinkingBuffer
-    : (recoveredStreamSnapshot?.thinking ?? '');
+    : joinStreamingThinkingTexts(recoveredStreamSnapshot?.thinkingBlocks ?? []);
   const visibleStreamStartedAt = streaming
     ? activeStreamStartedAt
     : (recoveredStreamSnapshot?.startedAt ?? null);
   const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
+  const activeStreamMessageId =
+    currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
   const queuedComposerPreviews = useMemo(
     () => queuedComposerMessages.map((item) => createQueuedComposerPreview(item)),
     [queuedComposerMessages],
@@ -866,6 +889,7 @@ export default function ChatPage() {
           prepared.session,
           prepared.sessionStateStatus,
           session.activeStream,
+          prepared.normalizedMessages,
         );
       })
       .catch(() => undefined);
@@ -1004,6 +1028,7 @@ export default function ChatPage() {
               prepared.session,
               prepared.sessionStateStatus,
               recovery.activeStream,
+              prepared.normalizedMessages,
             );
             setIsSessionSnapshotReady(true);
           });
@@ -1076,6 +1101,7 @@ export default function ChatPage() {
               prepared.session,
               prepared.sessionStateStatus,
               recovery.activeStream,
+              prepared.normalizedMessages,
             );
             setIsSessionSnapshotReady(true);
             if (!sessionMetadataDirtyRef.current) {
@@ -1660,6 +1686,7 @@ export default function ChatPage() {
     streamRevealNextAllowedAtRef.current = 0;
     setStreamBuffer('');
     setStreamThinkingBuffer('');
+    setStreamThinkingBlocks([]);
     isNearBottomRef.current = true;
     setHasPendingFollowContent(false);
     setShowScrollToBottom(false);
@@ -1671,11 +1698,13 @@ export default function ChatPage() {
     const liveToolCalls = new Map<string, LiveToolCallState>();
     const requestProviderId = activeProviderId || undefined;
     const requestModelLabel = (activeModelOption?.label ?? activeModelId) || undefined;
+    const requestAgentId = effectiveAgentId || undefined;
 
-    const buildAssistantTraceMessageContent = (
+    const buildAssistantTraceMessage = (
+      messageId: string,
       textContent: string,
       finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
-    ): string => {
+    ): { content: string; parts: ChatMessagePart[] } => {
       const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
         const nextToolState =
           finalStatus === 'error' && toolCallState.status === 'streaming'
@@ -1723,15 +1752,19 @@ export default function ChatPage() {
       });
 
       const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
-      if (reasoningBlocks.length === 0 && toolCalls.length === 0) {
-        return textContent;
-      }
-
-      return createAssistantTraceContent({
+      const tracePayload = {
         ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
         text: textContent,
         toolCalls,
-      });
+      };
+
+      const content =
+        reasoningBlocks.length === 0 && toolCalls.length === 0
+          ? textContent
+          : createAssistantTraceContent(tracePayload);
+      const parts = partsFromAssistantTrace(messageId, tracePayload);
+
+      return { content, parts };
     };
 
     const userMsg: ChatMessage = {
@@ -1754,6 +1787,7 @@ export default function ChatPage() {
     const requestText = text;
     let accumulated = '';
     let accumulatedThinking = '';
+    let accumulatedThinkingBlocks: StreamingThinkingBlock[] = [];
     let firstTokenObservedAt: number | null = null;
     let toolPanelRevealed = false;
     let pausedForPermission = false;
@@ -1890,36 +1924,36 @@ export default function ChatPage() {
         }
 
         if (event.type === 'permission_asked') {
-          pausedForPermission = true;
-          setSessionStateStatus('paused');
-          setMessages((previous) => upsertPermissionEventMessage(previous, event));
-          setPendingPermissions((previous) => {
-            const nextPermission: PendingPermissionRequest = {
-              createdAt: new Date(event.occurredAt ?? Date.now()).toISOString(),
-              decision: undefined,
-              previewAction: event.previewAction,
-              reason: event.reason,
+          // Auto-accept: if enabled for this session, auto-reply 'once' without pausing.
+          // Mirrors opencode's permission-auto-respond pattern.
+          if (token && isAutoAcceptEnabled(sid)) {
+            void replyPermissionRequest({
+              decision: 'once',
+              gatewayUrl,
               requestId: event.requestId,
-              riskLevel: event.riskLevel,
-              scope: event.scope,
               sessionId: sid,
-              status: 'pending',
-              toolName: event.toolName,
-            };
-
-            const existingIndex = previous.findIndex(
-              (permission) => permission.requestId === event.requestId,
-            );
-            if (existingIndex === -1) {
-              return [nextPermission, ...previous];
-            }
-
-            return previous.map((permission, index) =>
-              index === existingIndex ? { ...permission, ...nextPermission } : permission,
-            );
-          });
-          resetStreamState();
-          requestSessionListRefresh();
+              token,
+            }).catch(() => {
+              // Fallback: if auto-reply fails, show permission UI normally
+              setSessionStateStatus('paused');
+              setMessages((previous) => upsertPermissionEventMessage(previous, event));
+            });
+          } else {
+            pausedForPermission = true;
+            setSessionStateStatus('paused');
+            setMessages((previous) => upsertPermissionEventMessage(previous, event));
+            setPendingPermissions((previous) => {
+              return dedupePendingPermissionRequests([
+                createPendingPermissionRequestSnapshot(event, sid),
+                ...previous,
+              ]);
+            });
+            // NOTE: Do NOT call resetStreamState() here.
+            // permission_asked arrives before onDone(tool_permission). Resetting stream state
+            // here clears currentAssistantStreamMessageIdRef, causing onDone to create a
+            // duplicate assistant message with a new ID. Let onDone handle the reset.
+            requestSessionListRefresh();
+          }
         }
 
         if (event.type === 'permission_replied') {
@@ -1932,6 +1966,7 @@ export default function ChatPage() {
                 previous,
                 event.requestId,
                 event.decision,
+                event.feedback,
               ),
               event.requestId,
             ),
@@ -1999,12 +2034,14 @@ export default function ChatPage() {
           setHasPendingFollowContent((previous) => previous || true);
         }
       },
-      onThinkingDelta: (delta: string) => {
+      onThinkingDelta: (chunk: StreamThinkingChunk) => {
         if (activeSessionRef.current !== sid || stoppingStreamRef.current) {
           return;
         }
 
-        accumulatedThinking += delta;
+        accumulatedThinkingBlocks = appendStreamingThinkingChunk(accumulatedThinkingBlocks, chunk);
+        accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
+        setStreamThinkingBlocks(accumulatedThinkingBlocks);
         setStreamThinkingBuffer(accumulatedThinking);
       },
       onToolCall: (chunk) => {
@@ -2019,8 +2056,14 @@ export default function ChatPage() {
           }
         }
       },
-      onDone: (stopReason) => {
+      onDone: (stopReason, streamAgentId) => {
         if (activeSessionRef.current !== sid) {
+          requestSessionListRefresh();
+          return;
+        }
+        // question_asked already called resetStreamState(), so an unexpected onDone
+        // would create a duplicate assistant message with a fresh ID. Bail out.
+        if (pausedForQuestion) {
           requestSessionListRefresh();
           return;
         }
@@ -2041,56 +2084,79 @@ export default function ChatPage() {
           accumulatedThinking.trim().length > 0 ||
           toolCallIds.size > 0;
         if (hasRenderableAssistantReply || !wasCancelled) {
-          const content = buildAssistantTraceMessageContent(finalAccumulatedText, traceFinalStatus);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
-              role: 'assistant',
-              content,
-              createdAt: finishedAt,
-              durationMs: finishedAt - requestStartedAt,
-              stopReason: resolvedStopReason,
-              tokenEstimate: estimateTokenCount(
-                [accumulatedThinking, finalAccumulatedText]
-                  .filter((item) => item.trim().length > 0)
-                  .join('\n\n'),
-              ),
-              toolCallCount: toolCallIds.size,
-              providerId: requestProviderId,
-              model: requestModelLabel,
-              firstTokenLatencyMs:
-                firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
-              status: 'completed',
-            },
-          ]);
+          const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+          const { content, parts } = buildAssistantTraceMessage(
+            msgId,
+            finalAccumulatedText,
+            traceFinalStatus,
+          );
+          setMessages((prev) =>
+            replaceOrAppendStreamedAssistantMessage(
+              prev,
+              {
+                id: msgId,
+                role: 'assistant',
+                content,
+                parts,
+                createdAt: finishedAt,
+                durationMs: finishedAt - requestStartedAt,
+                stopReason: resolvedStopReason,
+                tokenEstimate: estimateTokenCount(
+                  [accumulatedThinking, finalAccumulatedText]
+                    .filter((item) => item.trim().length > 0)
+                    .join('\n\n'),
+                ),
+                toolCallCount: toolCallIds.size,
+                providerId: requestProviderId,
+                model: requestModelLabel,
+                agentId: streamAgentId || requestAgentId,
+                firstTokenLatencyMs:
+                  firstTokenObservedAt !== null
+                    ? firstTokenObservedAt - requestStartedAt
+                    : undefined,
+                status: 'completed',
+              },
+              toolCallIds,
+            ),
+          );
         } else if (wasCancelled) {
-          const content = buildAssistantTraceMessageContent('已停止', traceFinalStatus);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
-              role: 'assistant',
-              content,
-              createdAt: finishedAt,
-              durationMs: finishedAt - requestStartedAt,
-              stopReason: resolvedStopReason,
-              tokenEstimate: estimateTokenCount(
-                [accumulatedThinking, '已停止']
-                  .filter((item) => item.trim().length > 0)
-                  .join('\n\n'),
-              ),
-              toolCallCount: toolCallIds.size,
-              providerId: requestProviderId,
-              model: requestModelLabel,
-              firstTokenLatencyMs:
-                firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
-              status: 'completed',
-            },
-          ]);
+          const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+          const { content, parts } = buildAssistantTraceMessage(msgId, '已停止', traceFinalStatus);
+          setMessages((prev) =>
+            replaceOrAppendStreamedAssistantMessage(
+              prev,
+              {
+                id: msgId,
+                role: 'assistant',
+                content,
+                parts,
+                createdAt: finishedAt,
+                durationMs: finishedAt - requestStartedAt,
+                stopReason: resolvedStopReason,
+                tokenEstimate: estimateTokenCount(
+                  [accumulatedThinking, '已停止']
+                    .filter((item) => item.trim().length > 0)
+                    .join('\n\n'),
+                ),
+                toolCallCount: toolCallIds.size,
+                providerId: requestProviderId,
+                model: requestModelLabel,
+                agentId: streamAgentId || requestAgentId,
+                firstTokenLatencyMs:
+                  firstTokenObservedAt !== null
+                    ? firstTokenObservedAt - requestStartedAt
+                    : undefined,
+                status: 'completed',
+              },
+              toolCallIds,
+            ),
+          );
         }
         setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
         resetStreamState();
+        window.setTimeout(() => {
+          void loadCurrentSessionSnapshot(sid).catch(() => undefined);
+        }, 0);
         requestSessionListRefresh();
       },
       onError: (code: string, message?: string) => {
@@ -2105,13 +2171,19 @@ export default function ChatPage() {
         const finishedAt = Date.now();
         const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
         logger.error('stream error', message ? `${code}: ${message}` : code);
-        const content = buildAssistantTraceMessageContent(errorContent, 'error');
+        const errorMsgId = makeOrderedMessageId();
+        const { content: errorTraceContent, parts: errorParts } = buildAssistantTraceMessage(
+          errorMsgId,
+          errorContent,
+          'error',
+        );
         setMessages((prev) => [
           ...prev,
           {
-            id: makeOrderedMessageId(),
+            id: errorMsgId,
             role: 'assistant',
-            content,
+            content: errorTraceContent,
+            parts: errorParts,
             createdAt: finishedAt,
             durationMs: finishedAt - requestStartedAt,
             stopReason: 'error',
@@ -2123,6 +2195,7 @@ export default function ChatPage() {
             toolCallCount: toolCallIds.size,
             providerId: requestProviderId,
             model: requestModelLabel,
+            agentId: requestAgentId,
             firstTokenLatencyMs:
               firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
             status: 'error',
@@ -2203,7 +2276,7 @@ export default function ChatPage() {
   );
 
   const handleInlinePermissionDecision = useCallback(
-    async (request: PendingPermissionRequest, decision: PermissionDecision) => {
+    async (request: PendingPermissionRequest, decision: PermissionDecision, feedback?: string) => {
       if (!token) {
         setStreamError('当前未登录，无法处理权限审批。');
         return;
@@ -2217,21 +2290,23 @@ export default function ChatPage() {
       });
 
       try {
-        await createPermissionsClient(gatewayUrl).reply(token, request.sessionId, {
-          requestId: request.requestId,
+        await replyPermissionRequest({
           decision,
+          feedback,
+          gatewayUrl,
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+          token,
         });
-        const successMessage =
-          decision === 'once'
-            ? '已提交：本次允许'
-            : decision === 'session'
-              ? '已提交：本会话允许'
-              : decision === 'permanent'
-                ? '已提交：永久允许'
-                : '已提交：已拒绝';
+        const successMessage = getPermissionReplySuccessMessage(decision);
         setMessages((previous) =>
           dismissPermissionEventMessage(
-            applyPermissionDecisionToLocalAssistantMessages(previous, request.requestId, decision),
+            applyPermissionDecisionToLocalAssistantMessages(
+              previous,
+              request.requestId,
+              decision,
+              feedback,
+            ),
             request.requestId,
           ),
         );
@@ -2244,12 +2319,7 @@ export default function ChatPage() {
         toast(successMessage, decision === 'reject' ? 'warning' : 'success', 2200);
         refreshSessionsAfterInlinePermissionReply(request.sessionId);
       } catch (error) {
-        const status =
-          typeof error === 'object' &&
-          error !== null &&
-          typeof Reflect.get(error, 'status') === 'number'
-            ? (Reflect.get(error, 'status') as number)
-            : null;
+        const status = getPermissionReplyStatusCode(error);
         const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
 
         if (status === 404 || status === 409) {
@@ -2363,24 +2433,29 @@ export default function ChatPage() {
     const sid = currentSessionId;
     const attachSessionViewEpoch = currentSessionViewRef.current.epoch;
     const initialText = recoveredStreamSnapshot?.text ?? '';
-    const initialThinking = recoveredStreamSnapshot?.thinking ?? '';
+    const initialThinkingBlocks = recoveredStreamSnapshot?.thinkingBlocks ?? [];
+    const initialThinking = joinStreamingThinkingTexts(initialThinkingBlocks);
     const initialUsage = recoveredStreamSnapshot?.usage ?? null;
     const requestStartedAt = recoveredStreamSnapshot?.startedAt ?? Date.now();
     const requestProviderId = activeProviderId || undefined;
     const requestModelLabel = activeModelId || undefined;
+    const requestAgentId = effectiveAgentId || undefined;
+    const recoveredModifiedFilesSummary = recoveredStreamSnapshot?.modifiedFilesSummary;
     const requestTextCodePoints = Array.from(initialText);
     let attachStateInitialized = false;
     let accumulated = initialText;
     let accumulatedThinking = initialThinking;
+    let accumulatedThinkingBlocks = initialThinkingBlocks;
     let firstTokenObservedAt: number | null = null;
     let pausedForPermission = false;
     let pausedForQuestion = false;
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
-    const buildAttachTraceContent = (
+    const buildAttachTraceMessage = (
+      messageId: string,
       textContent: string,
       finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
-    ): string => {
+    ): { content: string; parts: ChatMessagePart[] } => {
       const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
         const nextToolState =
           finalStatus === 'error' && toolCallState.status === 'streaming'
@@ -2428,14 +2503,20 @@ export default function ChatPage() {
       });
 
       const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
-      if (reasoningBlocks.length === 0 && toolCalls.length === 0) {
-        return textContent;
-      }
-      return createAssistantTraceContent({
+      const tracePayload = {
+        ...(recoveredModifiedFilesSummary
+          ? { modifiedFilesSummary: recoveredModifiedFilesSummary }
+          : {}),
         ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
         text: textContent,
         toolCalls,
-      });
+      };
+      const content =
+        reasoningBlocks.length === 0 && toolCalls.length === 0
+          ? textContent
+          : createAssistantTraceContent(tracePayload);
+      const parts = partsFromAssistantTrace(messageId, tracePayload);
+      return { content, parts };
     };
 
     const ensureAttachStateInitialized = () => {
@@ -2443,7 +2524,45 @@ export default function ChatPage() {
         return;
       }
       attachStateInitialized = true;
-      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+      currentAssistantStreamMessageIdRef.current =
+        recoveredStreamSnapshot?.messageId ?? makeOrderedMessageId();
+      for (const [index, recoveredToolCall] of (
+        recoveredStreamSnapshot?.toolCalls ?? []
+      ).entries()) {
+        const recoveredToolCallId =
+          recoveredToolCall.toolCallId ??
+          `${currentAssistantStreamMessageIdRef.current ?? 'recovered-stream'}:tool:${index}`;
+        toolCallIds.add(recoveredToolCallId);
+
+        let recoveredInputText = '';
+        try {
+          recoveredInputText = JSON.stringify(recoveredToolCall.input);
+        } catch (error) {
+          logger.warn('failed to serialize recovered tool input', error);
+        }
+
+        liveToolCalls.set(recoveredToolCallId, {
+          createdAt: requestStartedAt,
+          ...(recoveredToolCall.durationMs !== undefined
+            ? { completedAt: requestStartedAt + recoveredToolCall.durationMs }
+            : {}),
+          inputText: recoveredInputText,
+          output: recoveredToolCall.output,
+          isError: recoveredToolCall.isError,
+          pendingPermissionRequestId: recoveredToolCall.pendingPermissionRequestId,
+          resumedAfterApproval: recoveredToolCall.resumedAfterApproval,
+          toolCallId: recoveredToolCallId,
+          status:
+            recoveredToolCall.status === 'paused'
+              ? 'paused'
+              : recoveredToolCall.status === 'completed'
+                ? 'completed'
+                : recoveredToolCall.status === 'failed'
+                  ? 'error'
+                  : 'streaming',
+          toolName: recoveredToolCall.toolName,
+        });
+      }
       stoppingStreamRef.current = false;
       streamingRef.current = true;
       setStreaming(true);
@@ -2454,6 +2573,7 @@ export default function ChatPage() {
       setActiveStreamFirstTokenLatencyMs(null);
       setStreamBuffer(initialText);
       setStreamThinkingBuffer(initialThinking);
+      setStreamThinkingBlocks(initialThinkingBlocks);
       setRecoveredStreamSnapshot(null);
       streamRevealTargetRef.current = initialText;
       streamRevealVisibleRef.current = initialText;
@@ -2592,36 +2712,33 @@ export default function ChatPage() {
           }
 
           if (event.type === 'permission_asked') {
-            pausedForPermission = true;
-            setSessionStateStatus('paused');
-            setMessages((previous) => upsertPermissionEventMessage(previous, event));
-            setPendingPermissions((previous) => {
-              const nextPermission: PendingPermissionRequest = {
-                createdAt: new Date(event.occurredAt ?? Date.now()).toISOString(),
-                decision: undefined,
-                previewAction: event.previewAction,
-                reason: event.reason,
+            if (token && isAutoAcceptEnabled(sid)) {
+              void replyPermissionRequest({
+                decision: 'once',
+                gatewayUrl,
                 requestId: event.requestId,
-                riskLevel: event.riskLevel,
-                scope: event.scope,
                 sessionId: sid,
-                status: 'pending',
-                toolName: event.toolName,
-              };
-
-              const existingIndex = previous.findIndex(
-                (permission) => permission.requestId === event.requestId,
-              );
-              if (existingIndex === -1) {
-                return [nextPermission, ...previous];
-              }
-
-              return previous.map((permission, index) =>
-                index === existingIndex ? { ...permission, ...nextPermission } : permission,
-              );
-            });
-            resetStreamState();
-            requestSessionListRefresh();
+                token,
+              }).catch(() => {
+                setSessionStateStatus('paused');
+                setMessages((previous) => upsertPermissionEventMessage(previous, event));
+              });
+            } else {
+              pausedForPermission = true;
+              setSessionStateStatus('paused');
+              setMessages((previous) => upsertPermissionEventMessage(previous, event));
+              setPendingPermissions((previous) => {
+                return dedupePendingPermissionRequests([
+                  createPendingPermissionRequestSnapshot(event, sid),
+                  ...previous,
+                ]);
+              });
+              // NOTE: Do NOT call resetStreamState() here.
+              // permission_asked arrives before onDone(tool_permission). Resetting stream state
+              // here clears currentAssistantStreamMessageIdRef, causing onDone to create a
+              // duplicate assistant message with a new ID. Let onDone handle the reset.
+              requestSessionListRefresh();
+            }
           }
 
           if (event.type === 'permission_replied') {
@@ -2634,6 +2751,7 @@ export default function ChatPage() {
                   previous,
                   event.requestId,
                   event.decision,
+                  event.feedback,
                 ),
                 event.requestId,
               ),
@@ -2709,12 +2827,17 @@ export default function ChatPage() {
             setHasPendingFollowContent((previous) => previous || true);
           }
         },
-        onThinkingDelta: (delta) => {
+        onThinkingDelta: (chunk) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch) || stoppingStreamRef.current) {
             return;
           }
           ensureAttachStateInitialized();
-          accumulatedThinking += delta;
+          accumulatedThinkingBlocks = appendStreamingThinkingChunk(
+            accumulatedThinkingBlocks,
+            chunk,
+          );
+          accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
+          setStreamThinkingBlocks(accumulatedThinkingBlocks);
           setStreamThinkingBuffer(accumulatedThinking);
         },
         onToolCall: (chunk) => {
@@ -2727,8 +2850,14 @@ export default function ChatPage() {
             setRightTab('tools');
           }
         },
-        onDone: (stopReason) => {
+        onDone: (stopReason, streamAgentId) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
+            requestSessionListRefresh();
+            return;
+          }
+          // question_asked already called resetStreamState(), so an unexpected onDone
+          // would create a duplicate assistant message with a fresh ID. Bail out.
+          if (pausedForQuestion) {
             requestSessionListRefresh();
             return;
           }
@@ -2750,38 +2879,48 @@ export default function ChatPage() {
             accumulatedThinking.trim().length > 0 ||
             toolCallIds.size > 0;
           if (hasRenderableAssistantReply || !wasCancelled) {
-            const content = buildAttachTraceContent(finalAccumulatedText, traceFinalStatus);
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
-                role: 'assistant',
-                content,
-                createdAt: finishedAt,
-                durationMs: finishedAt - requestStartedAt,
-                stopReason: resolvedStopReason,
-                tokenEstimate: estimateTokenCount(
-                  [accumulatedThinking, finalAccumulatedText]
-                    .filter((item) => item.trim().length > 0)
-                    .join('\n\n'),
-                ),
-                toolCallCount: toolCallIds.size,
-                providerId: requestProviderId,
-                model: requestModelLabel,
-                firstTokenLatencyMs:
-                  firstTokenObservedAt !== null
-                    ? firstTokenObservedAt - requestStartedAt
-                    : undefined,
-                status: 'completed',
-              },
-            ]);
+            const attachMsgId =
+              currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+            const { content, parts } = buildAttachTraceMessage(
+              attachMsgId,
+              finalAccumulatedText,
+              traceFinalStatus,
+            );
+            setMessages((prev) =>
+              replaceOrAppendStreamedAssistantMessage(
+                prev,
+                {
+                  id: attachMsgId,
+                  role: 'assistant',
+                  content,
+                  parts,
+                  createdAt: finishedAt,
+                  durationMs: finishedAt - requestStartedAt,
+                  stopReason: resolvedStopReason,
+                  tokenEstimate: estimateTokenCount(
+                    [accumulatedThinking, finalAccumulatedText]
+                      .filter((item) => item.trim().length > 0)
+                      .join('\n\n'),
+                  ),
+                  toolCallCount: toolCallIds.size,
+                  providerId: requestProviderId,
+                  model: requestModelLabel,
+                  agentId: streamAgentId || requestAgentId,
+                  firstTokenLatencyMs:
+                    firstTokenObservedAt !== null
+                      ? firstTokenObservedAt - requestStartedAt
+                      : undefined,
+                  status: 'completed',
+                },
+                toolCallIds,
+              ),
+            );
           }
           setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
           resetStreamState();
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
-              // Preserve the richer local ordering until the backend snapshot catches up.
             }).catch(() => undefined);
           }, 0);
           requestSessionListRefresh();
@@ -2799,13 +2938,20 @@ export default function ChatPage() {
           const finishedAt = Date.now();
           const errorContent = message ? `[错误: ${code}] ${message}` : `[错误: ${code}]`;
           logger.error('attach stream error', message ? `${code}: ${message}` : code);
-          const content = buildAttachTraceContent(errorContent, 'error');
+          const attachErrorMsgId =
+            currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+          const { content: attachErrorContent, parts: attachErrorParts } = buildAttachTraceMessage(
+            attachErrorMsgId,
+            errorContent,
+            'error',
+          );
           setMessages((prev) => [
             ...prev,
             {
-              id: currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId(),
+              id: attachErrorMsgId,
               role: 'assistant',
-              content,
+              content: attachErrorContent,
+              parts: attachErrorParts,
               createdAt: finishedAt,
               durationMs: finishedAt - requestStartedAt,
               stopReason: 'error',
@@ -2817,6 +2963,7 @@ export default function ChatPage() {
               toolCallCount: toolCallIds.size,
               providerId: requestProviderId,
               model: requestModelLabel,
+              agentId: requestAgentId,
               firstTokenLatencyMs:
                 firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
               status: 'error',
@@ -3110,10 +3257,11 @@ export default function ChatPage() {
     visibleStreaming,
     visibleStreamBuffer,
     visibleStreamThinkingBuffer,
+    visibleStreamThinkingBlocks,
     visibleStreamStartedAt,
     visibleReportedStreamUsage,
     activeStreamFirstTokenLatencyMs,
-    currentAssistantStreamMessageIdRef,
+    activeStreamMessageId,
     toolCallCards,
     resolveAssistantCapabilityKind,
     resolveInlinePermissionActions,
@@ -3325,7 +3473,9 @@ export default function ChatPage() {
                       bottomRef={bottomRef}
                       currentUserEmail={currentUserEmail}
                       groups={groupedMessageEntries}
+                      pendingPermissions={pendingPermissions}
                       providerCatalog={providerCatalog}
+                      resolveInlinePermissionActions={resolveInlinePermissionActions}
                       scrollRegionRef={scrollRegionRef}
                     />
                   ) : (
