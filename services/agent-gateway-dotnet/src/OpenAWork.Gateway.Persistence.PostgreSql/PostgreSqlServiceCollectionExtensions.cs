@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenAWork.Gateway.Application.Abstractions.Observability;
 using OpenAWork.Gateway.Application.Abstractions.Persistence;
+using OpenAWork.Gateway.Application.Abstractions.Auth;
 using OpenAWork.Gateway.Persistence.EFCore;
 using OpenAWork.Gateway.Persistence.EFCore.Readers;
 using OpenAWork.Gateway.Persistence.EFCore.Services;
@@ -28,8 +29,20 @@ public static class PostgreSqlServiceCollectionExtensions
 
         services.AddScoped<GatewayDatabaseInitializer>();
         services.AddScoped<ICommandTransactionRunner, GatewayCommandTransactionRunner>();
+        services.AddScoped<IUserAuthStore, UserAuthStore>();
+        services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
+        services.AddScoped<IUserRegistrationBootstrapper, UserRegistrationBootstrapper>();
         services.AddScoped<IUserSettingsReader, UserSettingsReader>();
+        services.AddScoped<IUserSettingsWriter, UserSettingsWriter>();
+        services.AddScoped<IInstalledSkillReader, InstalledSkillReader>();
         services.AddScoped<IRequestWorkflowLogStore, RequestWorkflowLogStore>();
+        services.AddScoped<IMessageV2Store, MessageV2Store>();
+        services.AddScoped<ISyncEventStore, SyncEventStore>();
+        services.AddScoped<ISessionRunEventStore, SessionRunEventStore>();
+        services.AddScoped<ISessionRuntimeThreadStore, SessionRuntimeThreadStore>();
+        services.AddScoped<IPermissionRequestStore, PermissionRequestStore>();
+        services.AddScoped<IQuestionRequestStore, QuestionRequestStore>();
+        services.AddScoped<ITaskParentAutoResumeContextStore, TaskParentAutoResumeContextStore>();
         return services;
     }
 }

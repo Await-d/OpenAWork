@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using OpenAWork.Gateway.Application.Abstractions.Observability;
 using OpenAWork.Gateway.Contracts.Observability;
 using OpenAWork.Gateway.Persistence.EFCore.Entities;
@@ -36,6 +37,33 @@ public sealed class RequestWorkflowLogStore(GatewayDbContext dbContext) : IReque
 
         dbContext.RequestWorkflowLogs.Add(record);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RequestWorkflowLogEntry>> ListByUserAsync(string userId, int limit, CancellationToken cancellationToken)
+    {
+        return await dbContext.RequestWorkflowLogs
+            .AsNoTracking()
+            .Where((record) => record.UserId == userId)
+            .OrderByDescending((record) => record.Id)
+            .Take(limit)
+            .Select((record) => new RequestWorkflowLogEntry(
+                record.Id,
+                record.RequestId,
+                record.UserId,
+                record.SessionId,
+                record.Method,
+                record.Path,
+                record.StatusCode,
+                record.WorkflowJson,
+                record.CreatedAtUtc))
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<int> DeleteErrorLogsByUserAsync(string userId, CancellationToken cancellationToken)
+    {
+        return dbContext.RequestWorkflowLogs
+            .Where((record) => record.UserId == userId && record.StatusCode >= 400)
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     private static string? DetectSessionId(string path)

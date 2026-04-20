@@ -10,4 +10,8 @@ public interface IRequestWorkflowLogStore
         int statusCode,
         string? userId,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<RequestWorkflowLogEntry>> ListByUserAsync(string userId, int limit, CancellationToken cancellationToken);
+
+    Task<int> DeleteErrorLogsByUserAsync(string userId, CancellationToken cancellationToken);
 }

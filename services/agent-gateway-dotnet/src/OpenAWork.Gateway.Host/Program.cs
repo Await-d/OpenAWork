@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text;
 using System.Net.WebSockets;
+using System.Threading.RateLimiting;
 using MediatR;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http.Json;
@@ -20,17 +21,42 @@ public partial class Program
     public static async Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        ConfigureGatewayUrls(builder);
 
         builder.Services.Configure<JsonOptions>((options) =>
         {
             options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         });
 
+        builder.Services.AddCors((options) =>
+        {
+            options.AddDefaultPolicy((policy) => policy
+                .AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod());
+        });
+
         builder.Services.AddProblemDetails();
         builder.Services.AddExceptionHandler<GatewayExceptionHandler>();
+        builder.Services.AddRateLimiter((options) =>
+        {
+            options.AddPolicy("auth", (httpContext) =>
+            {
+                var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: remoteIp,
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 20,
+                        QueueLimit = 0,
+                        Window = TimeSpan.FromMinutes(1),
+                        AutoReplenishment = true,
+                    });
+            });
+        });
         builder.Services.AddGatewayAuthentication(builder.Configuration);
         builder.Services.AddGatewayApplication();
-        builder.Services.AddGatewayInfrastructure();
+        builder.Services.AddGatewayInfrastructure(builder.Configuration);
         builder.Services.AddGatewayPersistence(builder.Configuration);
 
         var app = builder.Build();
@@ -39,6 +65,8 @@ public partial class Program
         {
             SuppressDiagnosticsCallback = static _ => false,
         });
+        app.UseCors();
+        app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseWebSockets();
@@ -49,7 +77,17 @@ public partial class Program
             var response = await sender.Send(new GetHealthQuery(), cancellationToken);
             return TypedResults.Ok(response);
         });
+        app.MapAuthRoutes();
+        app.MapCommandsRoutes();
+        app.MapSessionStreamRoutes();
+        app.MapPermissionsRoutes();
+        app.MapSessionsRoutes();
+        app.MapAgentsRoutes();
+        app.MapWorkflowsRoutes();
         app.MapSettingsRoutes();
+        app.MapToolsRoutes();
+        app.MapCapabilitiesRoutes();
+        app.MapUsageRoutes();
 
         app.MapGet("/stream/sse", async (HttpContext context) =>
         {
@@ -78,9 +116,30 @@ public partial class Program
         {
             var databaseInitializer = scope.ServiceProvider.GetRequiredService<GatewayDatabaseInitializer>();
             await databaseInitializer.InitializeAsync(CancellationToken.None);
+
+            var defaultAdminSeeder = scope.ServiceProvider.GetRequiredService<OpenAWork.Gateway.Application.Abstractions.Auth.IDefaultAdminSeeder>();
+            await defaultAdminSeeder.SeedAsync(CancellationToken.None);
+
+            var registrationBootstrapper = scope.ServiceProvider.GetRequiredService<OpenAWork.Gateway.Application.Abstractions.Auth.IUserRegistrationBootstrapper>();
+            await registrationBootstrapper.EnsureDefaultsForAllUsersAsync(CancellationToken.None);
         }
 
         await app.RunAsync();
+    }
+
+    private static void ConfigureGatewayUrls(WebApplicationBuilder builder)
+    {
+        if (!string.IsNullOrWhiteSpace(builder.Configuration["ASPNETCORE_URLS"]))
+        {
+            return;
+        }
+
+        var host = builder.Configuration["GATEWAY_HOST"];
+        var port = builder.Configuration["GATEWAY_PORT"];
+
+        var resolvedHost = string.IsNullOrWhiteSpace(host) ? "0.0.0.0" : host;
+        var resolvedPort = int.TryParse(port, out var parsedPort) ? parsedPort : 3000;
+        builder.WebHost.UseUrls($"http://{resolvedHost}:{resolvedPort}");
     }
 }
 

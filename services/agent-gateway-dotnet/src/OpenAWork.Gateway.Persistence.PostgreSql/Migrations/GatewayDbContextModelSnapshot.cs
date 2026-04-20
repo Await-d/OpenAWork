@@ -22,6 +22,90 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.InstalledSkillRecord", b =>
+                {
+                    b.Property<string>("SkillId")
+                        .HasColumnType("text")
+                        .HasColumnName("skill_id");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("GrantedPermissionsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("granted_permissions_json");
+
+                    b.Property<long>("InstalledAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("installed_at");
+
+                    b.Property<string>("ManifestJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("manifest_json");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("SkillId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("installed_skills", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.RefreshTokenRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("token_hash");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("refresh_tokens", (string)null);
+                });
+
             modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.RequestWorkflowLogRecord", b =>
                 {
                     b.Property<long>("Id")
@@ -77,6 +161,530 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("request_workflow_logs", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.EventLogRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AggregateId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("aggregate_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DataJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("data");
+
+                    b.Property<long>("Seq")
+                        .HasColumnType("bigint")
+                        .HasColumnName("seq");
+
+                    b.Property<long>("Timestamp")
+                        .HasColumnType("bigint")
+                        .HasColumnName("timestamp");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("type");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AggregateId", "Seq")
+                        .IsUnique()
+                        .HasDatabaseName("idx_event_log_aggregate_seq");
+
+                    b.ToTable("event_log", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.EventSequenceRecord", b =>
+                {
+                    b.Property<string>("AggregateId")
+                        .HasColumnType("text")
+                        .HasColumnName("aggregate_id");
+
+                    b.Property<long>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("seq")
+                        .HasDefaultValue(0L);
+
+                    b.HasKey("AggregateId");
+
+                    b.ToTable("event_sequences", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRunEventRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ClientRequestId")
+                        .HasColumnType("text")
+                        .HasColumnName("client_request_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("EventId")
+                        .HasColumnType("text")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("event_type");
+
+                    b.Property<long?>("OccurredAtMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("occurred_at_ms");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload_json");
+
+                    b.Property<string>("RunId")
+                        .HasColumnType("text")
+                        .HasColumnName("run_id");
+
+                    b.Property<long?>("Seq")
+                        .HasColumnType("bigint")
+                        .HasColumnName("seq");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId", "ClientRequestId", "Seq")
+                        .HasDatabaseName("idx_session_run_events_session_request_seq");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("session_run_events", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRuntimeThreadRecord", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("ClientRequestId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("client_request_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<long>("HeartbeatAtMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("heartbeat_at_ms");
+
+                    b.Property<long>("StartedAtMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("started_at_ms");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("SessionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("session_runtime_threads", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("MessagesJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("messages_json");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("{}")
+                        .HasColumnName("metadata_json");
+
+                    b.Property<string>("StateStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("idle")
+                        .HasColumnName("state_status");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "UpdatedAtUtc");
+
+                    b.ToTable("sessions", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.MessageV2Record", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DataJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("data");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<long>("TimeCreated")
+                        .HasColumnType("bigint")
+                        .HasColumnName("time_created");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId", "TimeCreated", "Id")
+                        .HasDatabaseName("idx_message_v2_session_time");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("message_v2", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.PermissionRequestRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AlwaysJson")
+                        .HasColumnType("text")
+                        .HasColumnName("always_json");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Decision")
+                        .HasColumnType("text")
+                        .HasColumnName("decision");
+
+                    b.Property<long?>("ExpiresAtMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("PreviewAction")
+                        .HasColumnType("text")
+                        .HasColumnName("preview_action");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("RequestPayloadJson")
+                        .HasColumnType("text")
+                        .HasColumnName("request_payload_json");
+
+                    b.Property<string>("RiskLevel")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("risk_level");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("scope");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("pending")
+                        .HasColumnName("status");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tool_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId");
+
+                    b.ToTable("permission_requests", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.QuestionRequestRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AnswerJson")
+                        .HasColumnType("text")
+                        .HasColumnName("answer_json");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<long?>("ExpiresAtMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("QuestionsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("questions_json");
+
+                    b.Property<string>("RequestPayloadJson")
+                        .HasColumnType("text")
+                        .HasColumnName("request_payload_json");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("pending")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tool_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("question_requests", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.TaskParentAutoResumeContextRecord", b =>
+                {
+                    b.Property<string>("ChildSessionId")
+                        .HasColumnType("text")
+                        .HasColumnName("child_session_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("ParentSessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("parent_session_id");
+
+                    b.Property<string>("RequestDataJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("request_data_json");
+
+                    b.Property<string>("TaskId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("task_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("ChildSessionId");
+
+                    b.HasIndex("ParentSessionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("task_parent_auto_resume_contexts", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.PartV2Record", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DataJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("data");
+
+                    b.Property<string>("MessageId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("message_id");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("session_id");
+
+                    b.Property<long>("TimeCreated")
+                        .HasColumnType("bigint")
+                        .HasColumnName("time_created");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId", "Id")
+                        .HasDatabaseName("idx_part_v2_message");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("idx_part_v2_session");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("part_v2", (string)null);
                 });
 
             modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", b =>
@@ -147,7 +755,285 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
                     b.ToTable("user_settings", (string)null);
                 });
 
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.WorkflowTemplateRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("general")
+                        .HasColumnName("category");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("EdgesJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("edges_json");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("{}")
+                        .HasColumnName("metadata_json");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NodesJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("nodes_json");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("workflow_templates", (string)null);
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.InstalledSkillRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.RefreshTokenRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.UserSettingRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRunEventRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Session");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRuntimeThreadRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Session");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRunEventRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Session");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.MessageV2Record", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Session");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.PermissionRequestRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.PermissionDecisionLogRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.QuestionRequestRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Session");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.TaskParentAutoResumeContextRecord", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "ChildSession")
+                        .WithMany()
+                        .HasForeignKey("ChildSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "ParentSession")
+                        .WithMany()
+                        .HasForeignKey("ParentSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChildSession");
+
+                    b.Navigation("ParentSession");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.PartV2Record", b =>
+                {
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.MessageV2Record", "Message")
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.SessionRecord", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("Session");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OpenAWork.Gateway.Persistence.EFCore.Entities.WorkflowTemplateRecord", b =>
                 {
                     b.HasOne("OpenAWork.Gateway.Persistence.EFCore.Entities.UserRecord", "User")
                         .WithMany()

@@ -50,7 +50,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             Title = "Gateway request failed.",
             Status = StatusCodes.Status500InternalServerError,
             Type = "https://openawork.dev/problems/gateway-unhandled",
-            Detail = exception.Message,
+            Detail = "An unexpected error occurred.",
         };
 
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;

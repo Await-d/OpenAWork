@@ -11,4 +11,8 @@ public sealed class HttpContextCurrentUser(IHttpContextAccessor httpContextAcces
     public string? UserId =>
         httpContextAccessor.HttpContext?.User.FindFirst("sub")?.Value
         ?? httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    public string? Email =>
+        httpContextAccessor.HttpContext?.User.FindFirst("email")?.Value
+        ?? httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.Email)?.Value;
 }

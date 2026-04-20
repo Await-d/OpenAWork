@@ -18,6 +18,8 @@ public sealed class GatewayWebApplicationFactory : WebApplicationFactory<OpenAWo
         builder.UseSetting("OPENAWORK_DATABASE_PATH", DatabasePath);
         builder.UseSetting("ConnectionStrings:Sqlite", $"Data Source={DatabasePath}");
         builder.UseSetting("JWT_SECRET", "change-me-in-production-min-32-chars");
+        builder.UseSetting("JWT_ISSUER", "OpenAWork.Gateway.DotNet");
+        builder.UseSetting("JWT_AUDIENCE", "OpenAWork.Client");
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_, configurationBuilder) =>
         {
@@ -27,6 +29,8 @@ public sealed class GatewayWebApplicationFactory : WebApplicationFactory<OpenAWo
                 ["OPENAWORK_DATABASE_PATH"] = DatabasePath,
                 ["ConnectionStrings:Sqlite"] = $"Data Source={DatabasePath}",
                 ["JWT_SECRET"] = "change-me-in-production-min-32-chars",
+                ["JWT_ISSUER"] = "OpenAWork.Gateway.DotNet",
+                ["JWT_AUDIENCE"] = "OpenAWork.Client",
             });
         });
     }
