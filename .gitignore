@@ -46,3 +46,4 @@ coverage
 /**/**/*.db
 /**/**/*.db-*
 services/agent-gateway/data/
+/tsconfig.tsbuildinfo
