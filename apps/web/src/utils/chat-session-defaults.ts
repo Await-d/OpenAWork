@@ -1,3 +1,7 @@
+import {
+  DEFAULT_IMAGE_GENERATION_SIZE,
+  normalizeImageGenerationSize,
+} from '@openAwork/shared';
 import type { ReasoningEffort } from '../pages/chat-page/support.js';
 
 export interface ChatSettingsModel {
@@ -6,10 +10,20 @@ export interface ChatSettingsModel {
   enabled: boolean;
   contextWindow?: number;
   maxOutputTokens?: number;
+  supportsImageGeneration?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
   thinking?: { enabled: boolean; budgetTokens?: number; mode?: ReasoningEffort };
+}
+
+export interface SavedChatImageDefaults {
+  providerId: string;
+  modelId: string;
+  size: string;
+  quality: 'low' | 'medium' | 'high';
+  outputFormat: 'png' | 'jpeg' | 'webp';
+  background: 'auto' | 'opaque';
 }
 
 export interface ChatSettingsProvider {
@@ -28,10 +42,14 @@ export interface SavedChatDefaults {
 }
 
 interface SettingsProvidersResponse {
-  activeSelection?: { chat?: { providerId?: string; modelId?: string } };
+  activeSelection?: {
+    chat?: { providerId?: string; modelId?: string };
+    image?: { providerId?: string; modelId?: string };
+  };
   defaultThinking?: {
     chat?: { enabled?: boolean; effort?: ReasoningEffort };
   };
+  imageGenerationDefaults?: Partial<Omit<SavedChatImageDefaults, 'providerId' | 'modelId'>>;
   providers?: ChatSettingsProvider[];
 }
 
@@ -48,7 +66,11 @@ function normalizeReasoningEffort(value: unknown): ReasoningEffort {
 export async function loadSavedChatSessionDefaults(
   gatewayUrl: string,
   token: string,
-): Promise<{ defaults: SavedChatDefaults; providers: ChatSettingsProvider[] }> {
+): Promise<{
+  defaults: SavedChatDefaults;
+  imageDefaults: SavedChatImageDefaults;
+  providers: ChatSettingsProvider[];
+}> {
   const response = await fetch(`${gatewayUrl}/settings/providers?enabledOnly=true`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -71,6 +93,25 @@ export async function loadSavedChatSessionDefaults(
       modelId: data.activeSelection?.chat?.modelId?.trim() ?? '',
       thinkingEnabled: data.defaultThinking?.chat?.enabled === true,
       reasoningEffort: normalizeReasoningEffort(data.defaultThinking?.chat?.effort),
+    },
+    imageDefaults: {
+      providerId: data.activeSelection?.image?.providerId?.trim() ?? '',
+      modelId: data.activeSelection?.image?.modelId?.trim() ?? '',
+      size: normalizeImageGenerationSize(
+        data.imageGenerationDefaults?.size,
+        DEFAULT_IMAGE_GENERATION_SIZE,
+      ),
+      quality:
+        data.imageGenerationDefaults?.quality === 'low' ||
+        data.imageGenerationDefaults?.quality === 'high'
+          ? data.imageGenerationDefaults.quality
+          : 'medium',
+      outputFormat:
+        data.imageGenerationDefaults?.outputFormat === 'jpeg' ||
+        data.imageGenerationDefaults?.outputFormat === 'webp'
+          ? data.imageGenerationDefaults.outputFormat
+          : 'png',
+      background: data.imageGenerationDefaults?.background === 'opaque' ? 'opaque' : 'auto',
     },
     providers,
   };

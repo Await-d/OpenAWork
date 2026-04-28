@@ -6,6 +6,8 @@ interface ArtifactUploadRecord {
   id: string;
   name: string;
   preview?: string;
+  type?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface ArtifactUploadResponse {
@@ -20,6 +22,15 @@ export interface UploadChatAttachmentsOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface UploadedChatAttachment {
+  artifactId: string;
+  dataUrl?: string;
+  fileName: string;
+  mimeType?: string;
+  preview?: string;
+  type: AttachmentItem['type'];
+}
+
 function inferAttachmentType(file: File): AttachmentItem['type'] {
   if (file.type.startsWith('image/')) {
     return 'image';
@@ -28,17 +39,6 @@ function inferAttachmentType(file: File): AttachmentItem['type'] {
     return 'audio';
   }
   return 'file';
-}
-
-function describeAttachmentType(type: AttachmentItem['type']): string {
-  switch (type) {
-    case 'image':
-      return '图片';
-    case 'audio':
-      return '音频';
-    default:
-      return '文件';
-  }
 }
 
 function isArtifactUploadRecord(value: unknown): value is ArtifactUploadRecord {
@@ -50,14 +50,38 @@ function isArtifactUploadRecord(value: unknown): value is ArtifactUploadRecord {
   return typeof candidate['id'] === 'string' && typeof candidate['name'] === 'string';
 }
 
-function buildFailedAttachmentLine(file: File): string {
-  return `- ${file.name} (${describeAttachmentType(inferAttachmentType(file))}，上传失败)`;
+export function buildUploadedAttachmentSummaryLine(input: UploadedChatAttachment): string {
+  return input.preview
+    ? `- ${input.fileName} (artifact:${input.artifactId})\n内容摘录:\n${input.preview}`
+    : `- ${input.fileName} (artifact:${input.artifactId})`;
 }
 
-function buildSuccessfulAttachmentLine(artifact: ArtifactUploadRecord): string {
-  return artifact.preview
-    ? `- ${artifact.name} (artifact:${artifact.id})\n内容摘录:\n${artifact.preview}`
-    : `- ${artifact.name} (artifact:${artifact.id})`;
+function toUploadedChatAttachment(
+  file: File,
+  artifact: ArtifactUploadRecord,
+  contentBase64: string,
+): UploadedChatAttachment | null {
+  if (!isArtifactUploadRecord(artifact)) {
+    return null;
+  }
+
+  const metadataMimeType =
+    artifact.metadata && typeof artifact.metadata['mimeType'] === 'string'
+      ? artifact.metadata['mimeType']
+      : undefined;
+
+  return {
+    artifactId: artifact.id,
+    ...(file.type.startsWith('image/')
+      ? {
+          dataUrl: `data:${metadataMimeType ?? file.type ?? 'image/png'};base64,${contentBase64}`,
+        }
+      : {}),
+    fileName: artifact.name,
+    ...(metadataMimeType || file.type ? { mimeType: metadataMimeType ?? file.type } : {}),
+    ...(artifact.preview ? { preview: artifact.preview } : {}),
+    type: inferAttachmentType(file),
+  };
 }
 
 export function buildAttachmentSummary(lines: string[]): string {
@@ -98,12 +122,12 @@ export async function uploadChatAttachments({
   sessionId,
   token,
   fetchImpl = fetch,
-}: UploadChatAttachmentsOptions): Promise<string[]> {
+}: UploadChatAttachmentsOptions): Promise<UploadedChatAttachment[]> {
   if (!token) {
-    return files.map((file) => buildFailedAttachmentLine(file));
+    return [];
   }
 
-  return Promise.all(
+  const uploaded = await Promise.all(
     files.map(async (file) => {
       try {
         const contentBase64 = await fileToBase64(file);
@@ -121,18 +145,20 @@ export async function uploadChatAttachments({
           }),
         });
         if (!response.ok) {
-          return buildFailedAttachmentLine(file);
+          return null;
         }
 
         const payload = (await response.json()) as ArtifactUploadResponse;
         if (!isArtifactUploadRecord(payload.artifact)) {
-          return buildFailedAttachmentLine(file);
+          return null;
         }
 
-        return buildSuccessfulAttachmentLine(payload.artifact);
+        return toUploadedChatAttachment(file, payload.artifact, contentBase64);
       } catch {
-        return buildFailedAttachmentLine(file);
+        return null;
       }
     }),
   );
+
+  return uploaded.filter((item): item is UploadedChatAttachment => item !== null);
 }

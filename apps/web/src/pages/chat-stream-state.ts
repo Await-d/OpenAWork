@@ -1,4 +1,4 @@
-import type { RunEvent, StreamChunk } from '@openAwork/shared';
+import type { BatchSubToolProgress, RunEvent, StreamChunk, TaskTimeoutSource, ToolSearchStatus } from '@openAwork/shared';
 import { hasActivePendingPermissionRequest } from './chat-page/support.js';
 import type {
   AgentVizEvent,
@@ -17,6 +17,7 @@ type ChatPlanTask = PlanTask & {
   result?: string;
   errorMessage?: string;
   terminalReason?: string;
+  timeoutSource?: Extract<RunEvent, { type: 'task_update' }>['timeoutSource'];
 };
 
 type ChatTaskUpdateEvent = Extract<RunEvent, { type: 'task_update' }> & {
@@ -35,6 +36,11 @@ export interface ChatToolCallEntry {
   pendingPermissionRequestId?: string;
   resumedAfterApproval?: boolean;
   status: 'running' | 'paused' | 'completed' | 'failed';
+  batchProgress?: {
+    subTools: BatchSubToolProgress[];
+    completedCount: number;
+    totalCount: number;
+  };
 }
 
 export interface ChatRightPanelState {
@@ -197,9 +203,12 @@ export function applyChatRightPanelChunk(
   switch (chunk.type) {
     case 'text_delta':
     case 'thinking_delta':
+    case 'thinking_end':
       return state;
     case 'tool_call_delta':
       return applyToolCallDelta(state, chunk);
+    case 'tool_search':
+      return applyToolSearchEvent(state, chunk);
     case 'done':
       return finalizeRun(
         state,
@@ -239,6 +248,10 @@ export function applyChatRightPanelEvent(
       ],
       agentEvents: [...state.agentEvents, createEvent('agent_done', '已记录会话压缩结果')],
     };
+  }
+
+  if (event.type === 'tool_progress') {
+    return applyToolProgressEvent(state, event);
   }
 
   if (event.type === 'tool_result') {
@@ -343,6 +356,7 @@ function applyTaskUpdateEvent(
     result: event.result ?? existingTask?.result,
     errorMessage: event.errorMessage ?? existingTask?.errorMessage,
     terminalReason: event.reason ?? existingTask?.terminalReason,
+    timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
   });
 
   const dagNodes = upsertById(state.dagNodes, event.taskId, {
@@ -379,6 +393,7 @@ function applyTaskUpdateEvent(
     event.result,
     event.errorMessage,
     event.reason,
+    event.timeoutSource,
   );
 
   return {
@@ -400,14 +415,41 @@ function buildTaskEventLabel(
   result?: string,
   errorMessage?: string,
   reason?: string,
+  timeoutSource?: TaskTimeoutSource | Extract<RunEvent, { type: 'task_update' }>['timeoutSource'],
 ): string {
   const parts: string[] = [base];
   if (assignedAgent) parts.push(`代理：${assignedAgent}`);
-  if (reason === 'timeout') parts.push('原因：超时');
+  if (reason === 'timeout') {
+    const timeoutLabel = timeoutSource === 'first_response' ? '首响应未到' : '超时';
+    parts.push(`原因：${timeoutLabel}`);
+  }
   else if (reason) parts.push(`原因：${reason}`);
   if (errorMessage) parts.push(`错误：${truncate(errorMessage, 60)}`);
   else if (result) parts.push(`结果：${truncate(result, 60)}`);
   return parts.join(' · ');
+}
+
+const TOOL_SEARCH_LABEL: Record<ToolSearchStatus, string> = {
+  in_progress: '正在准备工具搜索…',
+  searching: '正在搜索可用工具…',
+  completed: '工具搜索完成',
+};
+
+function applyToolSearchEvent(
+  state: ChatRightPanelState,
+  chunk: Extract<StreamChunk, { type: 'tool_search' }>,
+): ChatRightPanelState {
+  const label = TOOL_SEARCH_LABEL[chunk.status];
+  const hasExistingSearchEvent = state.agentEvents.some(
+    (event) => event.type === 'tool_search' && event.label === label,
+  );
+  if (hasExistingSearchEvent) {
+    return state;
+  }
+  return {
+    ...state,
+    agentEvents: [...state.agentEvents, createEvent('tool_search', label)],
+  };
 }
 
 function applyToolCallDelta(
@@ -465,6 +507,32 @@ function applyToolCallDelta(
     dagNodes,
     dagEdges,
     agentEvents,
+  };
+}
+
+function applyToolProgressEvent(
+  state: ChatRightPanelState,
+  event: Extract<RunEvent, { type: 'tool_progress' }>,
+): ChatRightPanelState {
+  const existing = state.toolCalls.find((item) => item.toolCallId === event.toolCallId);
+  const toolCalls = upsertById(state.toolCalls, event.toolCallId, {
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    inputText: existing?.inputText ?? '',
+    input: existing?.input ?? {},
+    output: existing?.output,
+    isError: existing?.isError,
+    status: 'running',
+    batchProgress: {
+      subTools: event.subTools,
+      completedCount: event.completedCount,
+      totalCount: event.totalCount,
+    },
+  });
+
+  return {
+    ...state,
+    toolCalls,
   };
 }
 

@@ -14,7 +14,6 @@ import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import {
   createNotificationsClient,
-  createPermissionsClient,
   createQuestionsClient,
   createSessionsClient,
 } from '@openAwork/web-client';
@@ -33,8 +32,13 @@ import {
   subscribeSessionPendingQuestion,
 } from '../utils/session-list-events.js';
 import { subscribeNotificationPreferenceRefresh } from '../utils/notification-preference-events.js';
+import {
+  toSessionPendingPermissionStateFromRequest,
+  type SessionPendingPermissionState,
+} from '../utils/pending-permission-state.js';
 import { toast } from './ToastNotification.js';
 import { getRecoveryPendingInteractions } from '../pages/chat-page/recovery-read-model.js';
+import { replyPermissionRequest } from '../utils/permission-reply.js';
 
 type NotificationPreferenceMap = Record<NotificationPreferenceEventType, boolean>;
 
@@ -69,43 +73,7 @@ function isBrowserNotificationEnabled(
   return true;
 }
 
-interface PendingPermissionPromptState {
-  requestId: string;
-  targetSessionId: string;
-  toolName: string;
-  scope: string;
-  reason: string;
-  riskLevel: 'low' | 'medium' | 'high';
-  previewAction?: string;
-}
-
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
-
-function toPendingPermissionPromptState(
-  request: {
-    requestId: string;
-    sessionId: string;
-    toolName: string;
-    scope: string;
-    reason: string;
-    riskLevel: 'low' | 'medium' | 'high';
-    previewAction?: string;
-  } | null,
-): PendingPermissionPromptState | null {
-  if (!request) {
-    return null;
-  }
-
-  return {
-    requestId: request.requestId,
-    targetSessionId: request.sessionId,
-    toolName: request.toolName,
-    scope: request.scope,
-    reason: request.reason,
-    riskLevel: request.riskLevel,
-    previewAction: request.previewAction,
-  };
-}
 
 function resolvePermissionReplyError(error: unknown): {
   dismissPrompt: boolean;
@@ -315,7 +283,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   );
   const paletteDescriptors = useCommandRegistry('palette');
 
-  const [pendingPermission, setPendingPermission] = useState<PendingPermissionPromptState | null>(
+  const [pendingPermission, setPendingPermission] = useState<SessionPendingPermissionState | null>(
     null,
   );
   const [permissionReplyPendingDecision, setPermissionReplyPendingDecision] =
@@ -335,12 +303,13 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
   const notificationPreferencesRef = useRef<NotificationPreferenceMap>(
     DEFAULT_NOTIFICATION_PREFERENCES,
   );
+  const notificationsAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     notificationPreferencesRef.current = notificationPreferences;
   }, [notificationPreferences]);
 
-  const updatePendingPermission = useCallback((next: PendingPermissionPromptState | null) => {
+  const updatePendingPermission = useCallback((next: SessionPendingPermissionState | null) => {
     setPendingPermission(next);
     setPermissionReplyPendingDecision(null);
     setPermissionReplyError(null);
@@ -371,33 +340,48 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         setNotifications([]);
         return;
       }
+      if (notificationsAbortRef.current) {
+        return;
+      }
+      const controller = new AbortController();
+      notificationsAbortRef.current = controller;
       const effectivePreferences = options?.preferences ?? notificationPreferencesRef.current;
-      const nextNotifications = await createNotificationsClient(gatewayUrl).list(accessToken, {
-        limit: 12,
-        status: 'unread',
-      });
-      setNotifications(nextNotifications);
+      try {
+        const nextNotifications = await createNotificationsClient(gatewayUrl).list(accessToken, {
+          limit: 12,
+          signal: controller.signal,
+          status: 'unread',
+        });
+        if (controller.signal.aborted) {
+          return;
+        }
+        setNotifications(nextNotifications);
 
-      if (
-        typeof window !== 'undefined' &&
-        document.visibilityState === 'hidden' &&
-        'Notification' in window &&
-        Notification.permission === 'granted'
-      ) {
-        nextNotifications.forEach((item) => {
-          if (seenNotificationIdsRef.has(item.id)) {
-            return;
-          }
-          seenNotificationIdsRef.add(item.id);
-          if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) {
-            return;
-          }
-          new Notification(item.title, { body: item.body, tag: item.id });
-        });
-      } else {
-        nextNotifications.forEach((item) => {
-          seenNotificationIdsRef.add(item.id);
-        });
+        if (
+          typeof window !== 'undefined' &&
+          document.visibilityState === 'hidden' &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          nextNotifications.forEach((item) => {
+            if (seenNotificationIdsRef.has(item.id)) {
+              return;
+            }
+            seenNotificationIdsRef.add(item.id);
+            if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) {
+              return;
+            }
+            new Notification(item.title, { body: item.body, tag: item.id });
+          });
+        } else {
+          nextNotifications.forEach((item) => {
+            seenNotificationIdsRef.add(item.id);
+          });
+        }
+      } finally {
+        if (notificationsAbortRef.current === controller) {
+          notificationsAbortRef.current = null;
+        }
       }
     },
     [accessToken, gatewayUrl, seenNotificationIdsRef],
@@ -458,11 +442,11 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
       const recovery = await createSessionsClient(gatewayUrl).getRecovery(
         accessToken,
         sessionId,
-        options,
+        { ...options, messageLimit: 1 },
       );
       const pendingInteractions = getRecoveryPendingInteractions(recovery);
       updatePendingPermission(
-        toPendingPermissionPromptState(pendingInteractions.pendingPermission),
+        toSessionPendingPermissionStateFromRequest(pendingInteractions.pendingPermission),
       );
       applyPendingQuestion(pendingInteractions.pendingQuestion, {
         preserveAnswersForSameRequest: options?.preserveQuestionAnswersForSameRequest === true,
@@ -553,6 +537,10 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
       cancelled = true;
       if (intervalId !== null) {
         window.clearInterval(intervalId);
+      }
+      if (notificationsAbortRef.current) {
+        notificationsAbortRef.current.abort();
+        notificationsAbortRef.current = null;
       }
     };
   }, [accessToken, loadNotificationPreferences, loadNotifications]);
@@ -854,9 +842,12 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
       setPermissionReplyError(null);
 
       try {
-        await createPermissionsClient(gatewayUrl).reply(accessToken, targetSessionId, {
-          requestId,
+        await replyPermissionRequest({
           decision,
+          requestId,
+          gatewayUrl,
+          sessionId: targetSessionId,
+          token: accessToken,
         });
         updatePendingPermission(null);
         refreshSessionsAfterPermissionReply(currentSessionId, targetSessionId);
@@ -912,7 +903,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 500 }}
         />
       )}
-      {pendingQuestion && (
+      {pendingQuestion && !isChatRoute && (
         <QuestionPromptCard
           answers={pendingQuestionAnswers}
           errorMessage={pendingQuestionReplyError ?? undefined}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -9,7 +9,12 @@ const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript';
 
-export default function MarkdownMessageContent({
+// Memoized: props are primitives (content / streaming) and shallow comparison
+// hits 100% when the message content has not changed. Without this, every
+// recovery commit triggers full remark/rehype + react-markdown re-parse for
+// every message in the list, which is the dominant cost of the
+// `'message' handler took N ms` violation surfaced after recovery payloads.
+const MarkdownMessageContent = memo(function MarkdownMessageContent({
   content,
   streaming = false,
 }: {
@@ -27,7 +32,9 @@ export default function MarkdownMessageContent({
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+export default MarkdownMessageContent;
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 className="chat-markdown-h1">{children}</h1>,
@@ -53,6 +60,79 @@ const markdownComponents: Components = {
     </a>
   ),
   pre: ({ children }) => <>{children}</>,
+  code: ({ children, className, ...props }) => {
+    const match = /language-([\w-]+)/.exec(className ?? '');
+    const codeContent = normalizeCodeChildren(children);
+
+    if (!match && !className) {
+      return (
+        <code className="chat-markdown-inline-code" {...props}>
+          {children}
+        </code>
+      );
+    }
+
+    const rawLanguage = match?.[1]?.toLowerCase();
+    const language = rawLanguage?.toUpperCase();
+
+    if (isThinkingLanguage(rawLanguage)) {
+      return <ThinkingCodeBlock codeContent={codeContent} />;
+    }
+
+    if (isMarkdownLanguage(rawLanguage)) {
+      return (
+        <MarkdownPreviewCodeBlock
+          codeContent={codeContent}
+          codeProps={props}
+          className={className}
+          language={language}
+        />
+      );
+    }
+
+    const previewKind = getStaticPreviewKind(rawLanguage);
+    if (previewKind) {
+      return (
+        <StaticPreviewCodeBlock
+          codeContent={codeContent}
+          codeProps={props}
+          className={className}
+          language={language}
+          previewKind={previewKind}
+        />
+      );
+    }
+
+    return (
+      <div className="chat-markdown-code-block">
+        <div className="chat-markdown-code-toolbar">
+          <div className="chat-markdown-code-label">{language ?? 'CODE'}</div>
+          <button
+            type="button"
+            data-testid="chat-markdown-code-copy"
+            className="chat-markdown-code-copy"
+            onClick={() => {
+              const copyRequest = navigator.clipboard?.writeText(
+                getCopyableCodeText(codeContent).replace(/\n$/, ''),
+              );
+              void copyRequest?.catch(() => undefined);
+            }}
+          >
+            复制代码
+          </button>
+        </div>
+        <pre className="chat-markdown-pre">
+          <code className={className} {...props}>
+            {codeContent}
+          </code>
+        </pre>
+      </div>
+    );
+  },
+};
+
+const noMarkdownPreviewComponents: Components = {
+  ...markdownComponents,
   code: ({ children, className, ...props }) => {
     const match = /language-([\w-]+)/.exec(className ?? '');
     const codeContent = normalizeCodeChildren(children);
@@ -144,6 +224,10 @@ function getCopyableCodeText(content: ReactNode): string {
   }
 
   return '';
+}
+
+function isMarkdownLanguage(language: string | undefined): boolean {
+  return language === 'markdown' || language === 'md';
 }
 
 function isThinkingLanguage(language: string | undefined): boolean {
@@ -407,6 +491,135 @@ function getPreviewSandbox(_previewKind: StaticPreviewKind): string {
   return 'allow-scripts';
 }
 
+const MARKDOWN_PREVIEW_COLLAPSED_HEIGHT = 300;
+
+function MarkdownPreviewCodeBlock({
+  codeContent,
+  codeProps,
+  className,
+  language,
+}: {
+  codeContent: ReactNode;
+  codeProps: Record<string, unknown>;
+  className?: string;
+  language?: string;
+}) {
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
+  const isLong = copyableCode.length > 400 || copyableCode.split('\n').length > 15;
+  const shouldCollapse = isLong && !expanded;
+
+  return (
+    <div className="chat-markdown-code-block" data-preview-open={previewOpen ? 'true' : undefined}>
+      <div className="chat-markdown-code-toolbar">
+        <div className="chat-markdown-code-toolbar-meta">
+          <div className="chat-markdown-code-label">{language ?? 'MARKDOWN'}</div>
+          <span className="chat-markdown-preview-badge">文档预览</span>
+        </div>
+        <div className="chat-markdown-code-actions">
+          <button
+            type="button"
+            data-testid="chat-markdown-preview-toggle"
+            className="chat-markdown-code-copy"
+            aria-pressed={previewOpen}
+            onClick={() => setPreviewOpen((value) => !value)}
+            style={
+              previewOpen
+                ? {
+                    background: 'color-mix(in oklch, var(--accent) 16%, var(--surface) 84%)',
+                    borderColor: 'color-mix(in oklch, var(--accent) 30%, var(--border) 70%)',
+                    color: 'var(--accent)',
+                  }
+                : undefined
+            }
+          >
+            {previewOpen ? '源文本' : '预览'}
+          </button>
+          <button
+            type="button"
+            data-testid="chat-markdown-code-copy"
+            className="chat-markdown-code-copy"
+            onClick={() => {
+              const copyRequest = navigator.clipboard?.writeText(copyableCode);
+              void copyRequest?.catch(() => undefined);
+            }}
+          >
+            复制
+          </button>
+          <button
+            type="button"
+            className="chat-markdown-code-copy"
+            onClick={() => {
+              const blob = new Blob([copyableCode], { type: 'text/markdown' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `document-${Date.now()}.md`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+          >
+            下载
+          </button>
+        </div>
+      </div>
+      {previewOpen ? (
+        <div style={{ padding: '12px 14px 8px' }}>
+          <div
+            style={
+              shouldCollapse
+                ? { maxHeight: MARKDOWN_PREVIEW_COLLAPSED_HEIGHT, overflow: 'clip' }
+                : undefined
+            }
+          >
+            <div className="chat-markdown">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+                components={noMarkdownPreviewComponents}
+              >
+                {copyableCode}
+              </ReactMarkdown>
+            </div>
+          </div>
+          {shouldCollapse && (
+            <div
+              style={{
+                marginTop: -64,
+                height: 64,
+                background:
+                  'linear-gradient(transparent, color-mix(in oklch, var(--bg-2) 92%, transparent))',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+          {isLong && (
+            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
+              <button
+                type="button"
+                onClick={() => setExpanded((prev) => !prev)}
+                className="chat-markdown-code-copy"
+                style={{ fontSize: 11 }}
+              >
+                {expanded ? '收起' : '展开全部'}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <pre className="chat-markdown-pre">
+          <code className={className} {...codeProps}>
+            {codeContent}
+          </code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function StaticPreviewCodeBlock({
   codeContent,
   codeProps,
@@ -519,12 +732,30 @@ function StaticPreviewCodeBlock({
 }
 
 function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
   const previewSource = getCopyableCodeText(codeContent).replace(/\n$/, '');
   const labeledSource = `*Thinking:* ${previewSource}`;
+  const lineCount = previewSource.split('\n').length;
+  const isCollapsible = lineCount > 1;
+  const shouldCollapse = isCollapsible && !expanded;
 
   return (
-    <div className="assistant-reasoning-block">
-      <div className="assistant-reasoning-body">
+    <div
+      className="assistant-reasoning-block"
+      data-collapsed={shouldCollapse ? 'true' : undefined}
+    >
+      <div
+        className="assistant-reasoning-body"
+        style={
+          shouldCollapse
+            ? {
+                maxHeight: `${2 * 1.6 * 13 + 4}px`,
+                overflow: 'clip',
+                position: 'relative',
+              }
+            : undefined
+        }
+      >
         <div className="assistant-rich-content-body">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
@@ -535,6 +766,29 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
           </ReactMarkdown>
         </div>
       </div>
+      {shouldCollapse && (
+        <div
+          style={{
+            position: 'relative',
+            marginTop: -30,
+            height: 30,
+            background:
+              'linear-gradient(to bottom, transparent 0%, color-mix(in oklch, var(--bg) 80%, transparent) 40%, var(--bg) 100%)',
+            pointerEvents: 'none',
+            borderRadius: '0 0 6px 6px',
+          }}
+        />
+      )}
+      {isCollapsible && (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="chat-markdown-code-copy"
+          style={{ fontSize: 10, marginTop: 2, display: 'block', marginLeft: 'auto' }}
+        >
+          {expanded ? '收起思考' : '展开思考'}
+        </button>
+      )}
     </div>
   );
 }

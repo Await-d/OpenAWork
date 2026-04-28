@@ -45,27 +45,12 @@ const PANEL_SECTION_EYEBROW_STYLE: React.CSSProperties = {
   letterSpacing: '0.06em',
 };
 
-const PANEL_ACTION_LINK_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: 32,
-  padding: '0 12px',
-  borderRadius: 999,
-  border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border))',
-  background: 'color-mix(in oklch, var(--accent) 14%, var(--surface) 86%)',
-  color: 'var(--text)',
-  fontSize: 11,
-  fontWeight: 700,
-  lineHeight: 1,
-  textDecoration: 'none',
-};
 
-const PANEL_ACTION_DISABLED_STYLE: React.CSSProperties = {
-  ...PANEL_ACTION_LINK_STYLE,
-  opacity: 0.56,
-  cursor: 'not-allowed',
-};
+function fmtOverviewTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
 
 function splitSessionTodosByLane(sessionTodos: SessionTodoItem[]): {
   mainTodos: SessionTodoItem[];
@@ -129,6 +114,20 @@ function getSessionTodoPriorityLabel(todo: SessionTodoItem): string {
   return '低优先级';
 }
 
+function formatTaskTimeoutSourceLabel(timeoutSource: SessionTask['timeoutSource']): string {
+  return timeoutSource === 'first_response' ? '首响应未到' : '执行超时';
+}
+
+function formatSessionTaskTimeoutText(task: HierarchicalSessionTask): string {
+  if (task.terminalReason !== 'timeout') {
+    return task.terminalReason ?? '';
+  }
+
+  return task.timeoutSource
+    ? `子任务执行超时（${formatTaskTimeoutSourceLabel(task.timeoutSource)}）`
+    : '子任务执行超时';
+}
+
 function formatSessionTaskStatus(task: HierarchicalSessionTask): string {
   if ((task.subtaskCount ?? 0) > 0) {
     const completed = task.completedSubtaskCount ?? 0;
@@ -152,7 +151,11 @@ function formatSessionTaskStatus(task: HierarchicalSessionTask): string {
     return '已完成';
   }
   if (task.status === 'failed') {
-    return task.terminalReason === 'timeout' ? '执行超时' : '执行失败';
+    return task.terminalReason === 'timeout'
+      ? task.timeoutSource
+        ? `执行超时 · ${formatTaskTimeoutSourceLabel(task.timeoutSource)}`
+        : '执行超时'
+      : '执行失败';
   }
   if (task.status === 'cancelled') {
     return '已取消';
@@ -359,18 +362,16 @@ export function ChatHistoryTabContent(props: {
                       title={
                         task.errorMessage ??
                         task.result ??
-                        (task.terminalReason === 'timeout'
-                          ? '子任务执行超时。'
-                          : task.terminalReason)
+                        formatSessionTaskTimeoutText(task)
                       }
                     >
                       {task.errorMessage
                         ? `✗ ${task.errorMessage}`
                         : task.result
                           ? `✓ ${task.result}`
-                          : task.terminalReason === 'timeout'
-                            ? '✗ 子任务执行超时。'
-                            : `✗ ${task.terminalReason ?? ''}`}
+                          : task.terminalReason
+                            ? `✗ ${formatSessionTaskTimeoutText(task)}`
+                            : ''}
                     </div>
                   )}
                 </div>
@@ -798,8 +799,10 @@ export function ChatOverviewTabContent(props: {
     },
     { label: 'YOLO 模式', value: yoloMode ? '开启' : '关闭' },
     {
-      label: 'Token 估算',
-      value: `~${Math.round(messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4).toLocaleString()} tokens`,
+      label: '上下文用量',
+      value: contextUsageSnapshot
+        ? `${contextUsageSnapshot.estimated ? '≈' : ''}${Math.round((contextUsageSnapshot.usedTokens / Math.max(1, contextUsageSnapshot.maxTokens)) * 100)}% · ${fmtOverviewTokens(contextUsageSnapshot.usedTokens)}/${fmtOverviewTokens(contextUsageSnapshot.maxTokens)}`
+        : '—',
     },
     { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
     { label: '子会话', value: `${childSessions.length} 个` },
@@ -847,146 +850,137 @@ export function ChatOverviewTabContent(props: {
         : '当前会话没有最近检查点，主要依赖实时 attach / replay 恢复。';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       <div
         style={{
-          ...PANEL_SECTION_STYLE,
-          display: 'grid',
-          gridTemplateColumns: 'minmax(68px, 88px) 1fr',
-          gap: 1,
-          padding: 1,
-          overflow: 'hidden',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '2px 10px',
+          padding: '6px 4px',
+          fontSize: 11,
+          lineHeight: 1.5,
+          color: 'var(--text-3)',
         }}
       >
-        {overviewRows.map(({ label, value }, idx) => (
-          <div
-            key={label}
-            style={{
-              display: 'contents',
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--text-3)',
-                padding: '5px 8px',
-                lineHeight: 1.35,
-                background:
-                  idx % 2 === 0
-                    ? 'color-mix(in oklch, var(--surface) 68%, transparent)'
-                    : 'color-mix(in oklch, var(--surface) 54%, transparent)',
-              }}
-            >
-              {label}
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--text)',
-                padding: '5px 8px',
-                overflowWrap: 'anywhere',
-                textAlign: 'right',
-                lineHeight: 1.4,
-                background:
-                  idx % 2 === 0
-                    ? 'color-mix(in oklch, var(--surface) 68%, transparent)'
-                    : 'color-mix(in oklch, var(--surface) 54%, transparent)',
-              }}
-              title={value}
-            >
-              {value}
-            </div>
-          </div>
+        {overviewRows.map(({ label, value }) => (
+          <span key={label} title={value}>
+            <span style={{ fontWeight: 600 }}>{label}</span>{' '}
+            <span style={{ color: 'var(--text-2)' }}>{value}</span>
+          </span>
         ))}
       </div>
-      <div style={PANEL_SECTION_STYLE}>
+
+      <div style={{ borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)', margin: '2px 0' }} />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 4px' }}>
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 8,
-            flexWrap: 'wrap',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={PANEL_SECTION_EYEBROW_STYLE}>会话状态</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
-              {sessionStateStatus === 'paused' ? '等待处理中的会话' : '运行恢复已就绪'}
-            </div>
-          </div>
-          <button type="button" style={PANEL_ACTION_LINK_STYLE} onClick={onOpenRecoveryStrategy}>
-            打开恢复详情
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
-          {recoverySummary}
-        </div>
-        <div
-          style={{
-            marginTop: 8,
-            paddingTop: 8,
-            borderTop: '1px solid color-mix(in oklch, var(--border) 60%, transparent)',
-          }}
-        >
-          <div
+          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
+            <span style={{ fontWeight: 700, color: 'var(--text)' }}>
+              {sessionStateStatus === 'paused' ? '等待处理' : '恢复就绪'}
+            </span>
+            {' · '}
+            {recoverySummary}
+          </span>
+          <button
+            type="button"
+            onClick={onOpenRecoveryStrategy}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              flexWrap: 'wrap',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--accent)',
+              cursor: 'pointer',
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '1px 4px',
+              flexShrink: 0,
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={PANEL_SECTION_EYEBROW_STYLE}>内容产物</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.4 }}>
-                {artifactCountLabel}
-              </div>
-            </div>
-            {artifactsWorkspaceHref ? (
-              <Link style={PANEL_ACTION_LINK_STYLE} to={artifactsWorkspaceHref}>
-                打开产物工作区
-              </Link>
-            ) : (
-              <span aria-disabled="true" style={PANEL_ACTION_DISABLED_STYLE}>
-                打开产物工作区
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 4 }}>
-            {artifactDescription}
-          </div>
+            恢复详情 →
+          </button>
         </div>
-      </div>
-      <div style={PANEL_SECTION_STYLE}>
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 8,
-            flexWrap: 'wrap',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={PANEL_SECTION_EYEBROW_STYLE}>上下文</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
-              {contextSummaryText}
-            </div>
-          </div>
-          <button type="button" style={PANEL_ACTION_LINK_STYLE} onClick={onCompactSession}>
-            立即压缩会话
+          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
+            <span style={{ fontWeight: 600 }}>产物</span> {artifactCountLabel}
+          </span>
+          {artifactsWorkspaceHref ? (
+            <Link
+              to={artifactsWorkspaceHref}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--accent)',
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '1px 4px',
+                flexShrink: 0,
+                textDecoration: 'none',
+              }}
+            >
+              产物工作区 →
+            </Link>
+          ) : (
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', opacity: 0.56, padding: '1px 4px', flexShrink: 0 }}>
+              产物工作区 →
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)', margin: '2px 0' }} />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 4px' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
+            <span style={{ fontWeight: 700, color: 'var(--text)' }}>上下文</span>
+            {' · '}
+            {contextSummaryText}
+          </span>
+          <button
+            type="button"
+            onClick={onCompactSession}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--accent)',
+              cursor: 'pointer',
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '1px 4px',
+              flexShrink: 0,
+            }}
+          >
+            压缩会话 →
           </button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.45 }}>
           {[
-            yoloMode ? '⚡ YOLO 模式' : '',
+            yoloMode ? '⚡ YOLO' : '',
             attachmentItems.length > 0 ? `📎 ${attachmentItems.length} 附件` : '',
             workspaceFileItems.length > 0 ? `📂 ${workspaceFileItems.length} 索引文件` : '',
           ]
             .filter(Boolean)
-            .join('  ·  ') || <span style={{ color: 'var(--text-3)' }}>无额外上下文注入</span>}
+            .join(' · ') || '无额外上下文注入'}
         </div>
         <ContextPanel
           items={contextItems}

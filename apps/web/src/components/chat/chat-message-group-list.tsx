@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ChatUsageDetails } from '../../pages/chat-page/support.js';
-import { parseAssistantTraceContent } from '../../pages/chat-page/support.js';
-import { MessageRow, sharedUiThemeVars } from './ChatPageSections.js';
+import { readAssistantTracePayload } from '../../pages/chat-page/support.js';
+import {
+  InlinePermissionQuickBar,
+  MessageRow,
+  sharedUiThemeVars,
+  type ResolveInlinePermissionActionsFn,
+} from './ChatPageSections.js';
 
 export interface ChatRenderAction {
   id: string;
@@ -30,6 +35,15 @@ export interface ChatProviderDescriptor {
   type?: string;
 }
 
+export interface InlinePermissionQuickBarPermission {
+  requestId: string;
+  toolName: string;
+  reason: string;
+  scope: string;
+  riskLevel: string;
+  previewAction?: string;
+}
+
 interface ChatMessageGroupListProps {
   activeModelId: string;
   activeModelLabel?: string;
@@ -37,7 +51,9 @@ interface ChatMessageGroupListProps {
   bottomRef: React.RefObject<HTMLDivElement | null>;
   currentUserEmail: string;
   groups: ChatRenderGroup[];
+  pendingPermissions?: InlinePermissionQuickBarPermission[];
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
+  resolveInlinePermissionActions?: ResolveInlinePermissionActionsFn;
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -55,10 +71,15 @@ export function ChatMessageGroupList({
   bottomRef,
   currentUserEmail,
   groups,
+  pendingPermissions,
   providerCatalog,
+  resolveInlinePermissionActions,
   scrollRegionRef,
 }: ChatMessageGroupListProps) {
   const shouldVirtualize = groups.length >= VIRTUALIZATION_GROUP_THRESHOLD;
+  const activePendingPermissions = pendingPermissions?.filter((p) => p.requestId) ?? [];
+  const showQuickBar =
+    activePendingPermissions.length > 0 && resolveInlinePermissionActions !== undefined;
 
   if (!shouldVirtualize) {
     return (
@@ -74,6 +95,12 @@ export function ChatMessageGroupList({
             providerCatalog={providerCatalog}
           />
         ))}
+        {showQuickBar && (
+          <InlinePermissionQuickBar
+            permissions={activePendingPermissions}
+            resolveActions={resolveInlinePermissionActions}
+          />
+        )}
         <div ref={bottomRef} style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }} />
       </>
     );
@@ -87,7 +114,9 @@ export function ChatMessageGroupList({
       bottomRef={bottomRef}
       currentUserEmail={currentUserEmail}
       groups={groups}
+      pendingPermissions={activePendingPermissions}
       providerCatalog={providerCatalog}
+      resolveInlinePermissionActions={showQuickBar ? resolveInlinePermissionActions : undefined}
       scrollRegionRef={scrollRegionRef}
     />
   );
@@ -100,7 +129,9 @@ function VirtualizedChatGroupViewport({
   bottomRef,
   currentUserEmail,
   groups,
+  pendingPermissions,
   providerCatalog,
+  resolveInlinePermissionActions,
   scrollRegionRef,
 }: ChatMessageGroupListProps) {
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
@@ -295,6 +326,12 @@ function VirtualizedChatGroupViewport({
           );
         })}
       </div>
+      {pendingPermissions && pendingPermissions.length > 0 && resolveInlinePermissionActions && (
+        <InlinePermissionQuickBar
+          permissions={pendingPermissions}
+          resolveActions={resolveInlinePermissionActions}
+        />
+      )}
       <div ref={bottomRef} style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }} />
     </>
   );
@@ -362,7 +399,7 @@ function estimateGroupHeight(group: ChatRenderGroup): number {
     }
 
     // Try to parse assistant trace content for a more accurate estimate.
-    const trace = parseAssistantTraceContent(message.content);
+    const trace = readAssistantTracePayload(message);
     if (trace) {
       // Text content
       const textChars = trace.text.length;

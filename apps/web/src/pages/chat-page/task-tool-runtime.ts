@@ -15,6 +15,8 @@ export interface TaskToolRuntimeSnapshot {
   sessionId?: string;
   status: TaskToolRuntimeStatus;
   taskId: string;
+  timeoutSource?: SessionTask['timeoutSource'];
+  terminalReason?: SessionTask['terminalReason'];
   title: string;
   updatedAt: number;
 }
@@ -85,6 +87,8 @@ export function buildTaskToolRuntimeLookup(
       sessionId: task.sessionId,
       status: mapTaskStatusToRuntimeStatus(task.status, childSession?.state_status),
       taskId: task.id,
+      timeoutSource: task.timeoutSource,
+      terminalReason: task.terminalReason,
       title: task.title,
       updatedAt: task.updatedAt,
     };

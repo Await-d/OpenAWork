@@ -23,6 +23,7 @@ export function shouldShowRunEventInTranscript(event: RunEvent): boolean {
     event.type !== 'question_asked' &&
     event.type !== 'question_replied' &&
     event.type !== 'session_child' &&
-    event.type !== 'task_update'
+    event.type !== 'task_update' &&
+    event.type !== 'tool_search'
   );
 }

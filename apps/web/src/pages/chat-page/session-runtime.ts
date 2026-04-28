@@ -6,7 +6,7 @@ import type {
   SessionTodo,
   SessionTodoLanes,
 } from '@openAwork/web-client';
-import type { SessionPendingPermissionState } from '../../utils/session-list-events.js';
+export { toSessionPendingPermissionState } from '../../utils/pending-permission-state.js';
 
 type AbortableSessionsClient = ReturnType<typeof createSessionsClient> & {
   getChildren: (
@@ -165,25 +165,6 @@ export function shouldPollSessionRuntime(options: {
     hasActiveSessionTasks(options.sessionTasks) ||
     options.pendingPermissions.some((permission) => permission.status === 'pending')
   );
-}
-
-export function toSessionPendingPermissionState(
-  pendingPermissions: PendingPermissionRequest[],
-): SessionPendingPermissionState | null {
-  const next = pendingPermissions.find((permission) => permission.status === 'pending');
-  if (!next) {
-    return null;
-  }
-
-  return {
-    previewAction: next.previewAction,
-    reason: next.reason,
-    requestId: next.requestId,
-    riskLevel: next.riskLevel,
-    scope: next.scope,
-    targetSessionId: next.sessionId,
-    toolName: next.toolName,
-  };
 }
 
 export function flattenSessionTodoLanes(todoLanes: SessionTodoLanes): SessionTodoItem[] {

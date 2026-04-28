@@ -1,12 +1,16 @@
 import type { ModifiedFilesSummaryContent, RunEvent } from '@openAwork/shared';
 import type { SessionStateStatus } from './session-runtime.js';
 import {
-  parseAssistantTraceContent,
+  readAssistantTracePayload,
   type AssistantTraceToolCall,
   type ChatMessage,
 } from './support.js';
 import { mergeChatBackendUsageSnapshot, type ChatBackendUsageSnapshot } from './stream-usage.js';
-import { appendStreamingThinkingChunk, type StreamingThinkingBlock } from './streaming-thinking.js';
+import {
+  appendStreamingThinkingChunk,
+  markStreamingThinkingChunkEnded,
+  type StreamingThinkingBlock,
+} from './streaming-thinking.js';
 
 export interface RecoveredActiveAssistantStream {
   messageId: string | null;
@@ -71,7 +75,7 @@ function findRecoveredAssistantAnchor(input: {
       continue;
     }
 
-    const assistantTrace = parseAssistantTraceContent(message.content);
+    const assistantTrace = readAssistantTracePayload(message);
     if (!assistantTrace) {
       continue;
     }
@@ -108,11 +112,15 @@ function findRecoveredAssistantAnchor(input: {
 export function recoverActiveAssistantStream(
   input: RecoverActiveAssistantStreamInput,
 ): RecoveredActiveAssistantStream | null {
-  if (!isRecoverableSessionStatus(input.sessionStateStatus) || input.runEvents.length === 0) {
+  const hasActiveStream = input.hasActiveStream === true;
+  if (input.runEvents.length === 0) {
     return null;
   }
 
-  const hasActiveStream = input.hasActiveStream === true;
+  if (!hasActiveStream && !isRecoverableSessionStatus(input.sessionStateStatus)) {
+    return null;
+  }
+
   if (input.sessionStateStatus === 'paused' && !hasActiveStream) {
     return null;
   }
@@ -171,6 +179,11 @@ export function recoverActiveAssistantStream(
     if (event.type === 'thinking_delta') {
       thinkingBlocks = appendStreamingThinkingChunk(thinkingBlocks, event);
       hasRenderableContent = true;
+      continue;
+    }
+
+    if (event.type === 'thinking_end') {
+      thinkingBlocks = markStreamingThinkingChunkEnded(thinkingBlocks, event);
       continue;
     }
 

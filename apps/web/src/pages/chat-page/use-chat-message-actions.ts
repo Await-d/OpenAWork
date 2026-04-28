@@ -1,16 +1,19 @@
 import { useCallback } from 'react';
 import type { SessionMessageRatingRecord, SessionMessageRatingValue } from '@openAwork/web-client';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
+import type { InputImageContent } from '@openAwork/shared';
 import type { ChatMessage } from './support.js';
-import { parseAssistantEventContent, parseAssistantTraceContent } from './support.js';
+import { parseAssistantEventContent, readAssistantTracePayload } from './support.js';
 
 export interface HistoryEditPrompt {
   hasCodeMarkers: boolean;
+  inputParts?: InputImageContent[];
   messageId: string;
   text: string;
 }
 
 export interface RetryPrompt {
+  inputParts?: InputImageContent[];
   sourceMessageId: string;
   text: string;
 }
@@ -25,7 +28,6 @@ export interface UseChatMessageActionsOptions {
   messages: ChatMessage[];
   messageRatings: Record<string, SessionMessageRatingRecord>;
   onToggleMessageRating: (message: ChatMessage, rating: SessionMessageRatingValue) => void;
-  focusComposerWithText: (text: string) => void;
   setHistoryEditPrompt: React.Dispatch<React.SetStateAction<HistoryEditPrompt | null>>;
   setRetryPrompt: React.Dispatch<React.SetStateAction<RetryPrompt | null>>;
 }
@@ -36,7 +38,9 @@ export interface UseChatMessageActionsReturn {
   handleCopyMessageGroup: (groupMessages: ChatMessage[]) => void;
   handleEditRetryMessage: (message: ChatMessage) => void;
   handleRetryMessage: (messageId: string) => void;
-  findRetrySource: (messageId: string) => { id: string; text: string } | null;
+  findRetrySource: (
+    messageId: string,
+  ) => { id: string; inputParts?: InputImageContent[]; text: string } | null;
   isHistoricalUserMessage: (messageId: string) => boolean;
   containsCodeMarkers: (text: string) => boolean;
   buildMessageActions: (message: ChatMessage) => MessageActionItem[];
@@ -49,7 +53,6 @@ export function useChatMessageActions(
     messages,
     messageRatings,
     onToggleMessageRating,
-    focusComposerWithText,
     setHistoryEditPrompt,
     setRetryPrompt,
   } = options;
@@ -62,7 +65,7 @@ export function useChatMessageActions(
         .filter((item) => item && item.trim().length > 0)
         .join('\n');
     }
-    const assistantTrace = parseAssistantTraceContent(message.content);
+    const assistantTrace = readAssistantTracePayload(message);
     if (assistantTrace) {
       const lines = [
         ...(assistantTrace.reasoningBlocks ?? []).map((item) => `_Thinking:_\n\n${item}`),
@@ -112,13 +115,20 @@ export function useChatMessageActions(
   }, []);
 
   const findRetrySource = useCallback(
-    (messageId: string): { id: string; text: string } | null => {
+    (
+      messageId: string,
+    ): { id: string; inputParts?: InputImageContent[]; text: string } | null => {
       const index = messages.findIndex((item) => item.id === messageId);
       if (index === -1) return null;
       for (let cursor = index; cursor >= 0; cursor -= 1) {
         const candidate = messages[cursor];
         if (candidate?.role === 'user') {
-          return { id: candidate.id, text: candidate.content };
+          const inputParts = extractInputImageParts(candidate.rawContent);
+          return {
+            id: candidate.id,
+            text: candidate.content,
+            ...(inputParts.length > 0 ? { inputParts } : {}),
+          };
         }
       }
       return null;
@@ -167,24 +177,26 @@ export function useChatMessageActions(
 
   const handleEditRetryMessage = useCallback(
     (message: ChatMessage) => {
-      if (isHistoricalUserMessage(message.id)) {
-        setHistoryEditPrompt({
-          messageId: message.id,
-          text: message.content,
-          hasCodeMarkers: containsCodeMarkers(message.content),
-        });
-        return;
-      }
-      focusComposerWithText(message.content);
+      const inputParts = extractInputImageParts(message.rawContent);
+      setHistoryEditPrompt({
+        messageId: message.id,
+        text: message.content,
+        hasCodeMarkers: containsCodeMarkers(message.content),
+        ...(inputParts.length > 0 ? { inputParts } : {}),
+      });
     },
-    [containsCodeMarkers, focusComposerWithText, isHistoricalUserMessage, setHistoryEditPrompt],
+    [containsCodeMarkers, setHistoryEditPrompt],
   );
 
   const handleRetryMessage = useCallback(
     (messageId: string) => {
       const retrySource = findRetrySource(messageId);
       if (!retrySource) return;
-      setRetryPrompt({ sourceMessageId: retrySource.id, text: retrySource.text });
+      setRetryPrompt({
+        sourceMessageId: retrySource.id,
+        text: retrySource.text,
+        ...(retrySource.inputParts ? { inputParts: retrySource.inputParts } : {}),
+      });
     },
     [findRetrySource, setRetryPrompt],
   );
@@ -246,4 +258,21 @@ export function useChatMessageActions(
     containsCodeMarkers,
     buildMessageActions,
   };
+}
+
+function extractInputImageParts(rawContent: unknown): InputImageContent[] {
+  if (!Array.isArray(rawContent)) return [];
+  return rawContent.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (record['type'] !== 'input_image') return [];
+    const part: InputImageContent = {
+      type: 'input_image',
+      ...(typeof record['artifactId'] === 'string' ? { artifactId: record['artifactId'] } : {}),
+      ...(typeof record['fileName'] === 'string' ? { fileName: record['fileName'] } : {}),
+      ...(typeof record['imageUrl'] === 'string' ? { imageUrl: record['imageUrl'] } : {}),
+      ...(typeof record['mimeType'] === 'string' ? { mimeType: record['mimeType'] } : {}),
+    };
+    return [part];
+  });
 }

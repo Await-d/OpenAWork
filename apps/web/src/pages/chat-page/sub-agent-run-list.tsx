@@ -14,6 +14,12 @@ export interface SubAgentRunItem {
   result?: string;
   errorMessage?: string;
   terminalReason?: string;
+  timeoutSource?: SessionTask['timeoutSource'];
+  messageCount: number;
+}
+
+function formatTimeoutSourceLabel(timeoutSource: SessionTask['timeoutSource']): string {
+  return timeoutSource === 'first_response' ? '首响应未到' : '执行超时';
 }
 
 function getStatusStyle(status: SubAgentDisplayStatus): React.CSSProperties {
@@ -79,13 +85,17 @@ function truncateSummary(value: string, max: number): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
-function statusWeight(status: SubAgentDisplayStatus): number {
+function isActiveStatus(status: SubAgentDisplayStatus): boolean {
+  return status === 'running' || status === 'paused';
+}
+
+function statusSortBucket(status: SubAgentDisplayStatus): number {
+  // Active (running/paused) = 0, failed/cancelled = 1, completed = 2, pending = 3
   if (status === 'running') return 0;
-  if (status === 'paused') return 1;
-  if (status === 'failed') return 2;
-  if (status === 'pending') return 3;
-  if (status === 'completed') return 4;
-  return 5;
+  if (status === 'paused') return 0;
+  if (status === 'failed' || status === 'cancelled') return 1;
+  if (status === 'completed') return 2;
+  return 3;
 }
 
 function mapSessionStateToSubAgentStatus(
@@ -148,6 +158,8 @@ export function buildSubAgentRunItems(
       result: task.result,
       errorMessage: task.errorMessage,
       terminalReason: task.terminalReason,
+      timeoutSource: task.timeoutSource,
+      messageCount: childSession?.messages?.length ?? 0,
     });
   }
 
@@ -165,17 +177,175 @@ export function buildSubAgentRunItems(
       result: existing?.result,
       errorMessage: existing?.errorMessage,
       terminalReason: existing?.terminalReason,
+      timeoutSource: existing?.timeoutSource,
+      messageCount: session.messages?.length ?? existing?.messageCount ?? 0,
     });
   }
 
   return Array.from(itemsBySessionId.values()).sort((left, right) => {
-    const byStatus = statusWeight(left.status) - statusWeight(right.status);
-    if (byStatus !== 0) {
-      return byStatus;
+    const byBucket = statusSortBucket(left.status) - statusSortBucket(right.status);
+    if (byBucket !== 0) {
+      return byBucket;
     }
 
-    return left.title.localeCompare(right.title, 'zh-CN');
+    // Within same bucket: most recent (higher sessionId lexicographically) first
+    return right.sessionId.localeCompare(left.sessionId);
   });
+}
+
+const activeCount = (items: SubAgentRunItem[]): number =>
+  items.filter((i) => isActiveStatus(i.status)).length;
+
+function SubAgentItemCard({
+  item,
+  selected,
+  onSelect,
+}: {
+  item: SubAgentRunItem;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const statusStyle = getStatusStyle(item.status);
+  const summary = item.errorMessage
+    ? truncateSummary(item.errorMessage, 28)
+    : item.result
+      ? truncateSummary(item.result, 28)
+      : undefined;
+  const timeoutHint =
+    item.terminalReason === 'timeout' && item.timeoutSource
+      ? `超时原因：${formatTimeoutSourceLabel(item.timeoutSource)}`
+      : undefined;
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3,
+        padding: '6px 7px',
+        borderRadius: 8,
+        border: selected
+          ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle))'
+          : '1px solid transparent',
+        background: selected
+          ? 'color-mix(in oklch, var(--surface) 84%, var(--accent) 16%)'
+          : 'transparent',
+        color: 'var(--text)',
+        boxShadow: 'none',
+        cursor: 'pointer',
+        textAlign: 'left',
+        width: '100%',
+        transition: 'background 140ms ease, border-color 140ms ease',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            flexShrink: 0,
+            background:
+              item.status === 'running'
+                ? 'var(--accent)'
+                : item.status === 'completed'
+                  ? '#34d399'
+                  : item.status === 'failed'
+                    ? '#ef4444'
+                    : '#f59e0b',
+            boxShadow:
+              item.status === 'running'
+                ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'
+                : 'none',
+            animation: item.status === 'running' ? 'sub-agent-pulse 1.5s ease-in-out infinite' : 'none',
+          }}
+        />
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: selected ? 'var(--text)' : 'var(--text-2)',
+            lineHeight: 1.2,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: 1,
+            minWidth: 0,
+          }}
+          title={item.title}
+        >
+          {item.title}
+        </span>
+        <span
+          style={{
+            ...statusStyle,
+            fontSize: 7.5,
+            fontWeight: 700,
+            padding: '0 4px',
+            borderRadius: 999,
+            lineHeight: '14px',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          {getStatusLabel(item.status)}
+        </span>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          paddingLeft: 12,
+          fontSize: 8.5,
+          color: 'var(--text-3)',
+          lineHeight: 1.2,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {item.assignedAgent && <span>{item.assignedAgent}</span>}
+        {item.messageCount > 0 && <span>{item.messageCount} 条</span>}
+      </div>
+      {summary && (
+        <div
+          style={{
+            paddingLeft: 12,
+            fontSize: 8,
+            color: item.errorMessage ? '#fca5a5' : 'var(--text-3)',
+            lineHeight: 1.3,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={item.errorMessage ?? item.result}
+        >
+          {summary}
+        </div>
+      )}
+      {timeoutHint && (
+        <div
+          style={{
+            paddingLeft: 12,
+            fontSize: 8,
+            color: '#fbbf24',
+            lineHeight: 1.25,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={timeoutHint}
+        >
+          {timeoutHint}
+        </div>
+      )}
+    </button>
+  );
 }
 
 export function SubAgentRunList({
@@ -191,315 +361,106 @@ export function SubAgentRunList({
     return null;
   }
 
-  const selectedItem = items.find((item) => item.sessionId === selectedSessionId) ?? null;
+  const running = activeCount(items);
 
   return (
     <section
       aria-label="子代理运行列表"
       style={{
-        padding: '1px 10px 4px',
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 200,
+        zIndex: 10,
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '12px 0 12px 8px',
+        overflowY: 'auto',
+        scrollbarWidth: 'thin',
+        pointerEvents: 'auto',
         background: 'transparent',
-        flexShrink: 0,
       }}
     >
+      <style>{`@keyframes sub-agent-pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }`}</style>
       <div
         style={{
-          maxWidth: 740,
-          margin: '0 auto',
-          width: '100%',
           display: 'flex',
           flexDirection: 'column',
-          gap: 3,
+          gap: 2,
         }}
       >
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-            minWidth: 0,
-            flexWrap: 'wrap',
+            gap: 5,
+            padding: '0 7px 6px',
           }}
         >
           <div
-            style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap' }}
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              color: 'var(--text-2)',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
           >
-            <div
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                color: 'var(--text-2)',
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-              }}
-            >
-              子代理运行
-            </div>
+            子代理
+          </div>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '0 5px',
+              borderRadius: 999,
+              border: '1px solid var(--border-subtle)',
+              background: 'color-mix(in oklch, var(--surface) 82%, transparent)',
+              fontSize: 8,
+              fontWeight: 700,
+              color: 'var(--text-3)',
+            }}
+          >
+            {items.length}
+          </span>
+          {running > 0 && (
             <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
+                gap: 3,
                 padding: '0 5px',
                 borderRadius: 999,
-                border: '1px solid var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--surface) 82%, transparent)',
-                fontSize: 8.5,
+                border: '1px solid color-mix(in oklch, var(--accent) 36%, var(--border-subtle))',
+                background: 'color-mix(in oklch, var(--accent) 14%, var(--surface))',
+                fontSize: 8,
                 fontWeight: 700,
-                color: 'var(--text-3)',
+                color: 'var(--accent)',
               }}
             >
-              {items.length} 个子会话
-            </span>
-            {selectedItem && (
               <span
                 style={{
-                  minWidth: 0,
-                  fontSize: 8.5,
-                  color: 'var(--text-3)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: 280,
+                  width: 4,
+                  height: 4,
+                  borderRadius: '50%',
+                  background: 'var(--accent)',
+                  animation: 'sub-agent-pulse 1.5s ease-in-out infinite',
                 }}
-                title={selectedItem.title}
-              >
-                焦点 · {selectedItem.title}
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: 8.5, color: 'var(--text-3)' }}>Alt↑↓</div>
+              />
+              {running} 活跃
+            </span>
+          )}
         </div>
-        <div
-          style={{
-            display: 'flex',
-            gap: 4,
-            overflowX: 'auto',
-            paddingBottom: 0,
-            scrollbarWidth: 'thin',
-          }}
-        >
-          {items.map((item) => {
-            const selected = item.sessionId === selectedSessionId;
-            const showTaskLabel = shouldShowTaskLabel(item);
-            return (
-              <button
-                key={item.sessionId}
-                type="button"
-                onClick={() => onSelectSession(item.sessionId)}
-                aria-pressed={selected}
-                style={{
-                  flexShrink: 0,
-                  minWidth: 162,
-                  maxWidth: 286,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'stretch',
-                  gap: 3,
-                  padding: '6px 8px',
-                  borderRadius: 9,
-                  border: selected
-                    ? '1px solid color-mix(in oklch, var(--accent) 50%, var(--border-subtle))'
-                    : '1px solid var(--border-subtle)',
-                  background: selected
-                    ? 'color-mix(in oklch, var(--surface) 84%, var(--accent) 16%)'
-                    : 'color-mix(in oklch, var(--surface) 94%, transparent)',
-                  color: 'var(--text)',
-                  boxShadow: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 6,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      minWidth: 0,
-                      flex: 1,
-                    }}
-                  >
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        flexShrink: 0,
-                        background:
-                          item.status === 'running'
-                            ? 'var(--accent)'
-                            : item.status === 'completed'
-                              ? '#34d399'
-                              : item.status === 'failed'
-                                ? '#ef4444'
-                                : '#f59e0b',
-                        boxShadow:
-                          item.status === 'running'
-                            ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'
-                            : 'none',
-                      }}
-                    />
-                    <span
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        minWidth: 0,
-                        flex: 1,
-                      }}
-                    >
-                      <span
-                        style={{
-                          minWidth: 0,
-                          flex: 1,
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: 'var(--text)',
-                          lineHeight: 1.15,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title={item.title}
-                      >
-                        {item.title}
-                      </span>
-                      {item.assignedAgent && (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 2,
-                            fontSize: 7.5,
-                            fontWeight: 700,
-                            color: 'color-mix(in oklch, var(--accent) 80%, var(--text-3))',
-                            background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                            border:
-                              '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))',
-                            borderRadius: 999,
-                            padding: '0 4px',
-                            letterSpacing: '0.01em',
-                            maxWidth: 84,
-                            flexShrink: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                          title={item.assignedAgent}
-                        >
-                          ◈ {item.assignedAgent}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '1px 5px',
-                      borderRadius: 999,
-                      fontSize: 8.5,
-                      fontWeight: 700,
-                      ...getStatusStyle(item.status),
-                    }}
-                  >
-                    {getStatusLabel(item.status)}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    minWidth: 0,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 8.5,
-                      color: 'var(--text-3)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      minWidth: 0,
-                      flex: showTaskLabel ? '0 1 auto' : 1,
-                    }}
-                    title={
-                      showTaskLabel
-                        ? `${item.shortSessionId} · ${item.taskLabel}`
-                        : item.shortSessionId
-                    }
-                  >
-                    会话 · {item.shortSessionId}
-                    {showTaskLabel ? ` · ${item.taskLabel}` : ''}
-                  </span>
-                  {(item.errorMessage ?? item.result ?? item.terminalReason) && (
-                    <span
-                      style={{
-                        fontSize: 7.5,
-                        color:
-                          item.errorMessage || item.terminalReason
-                            ? '#fca5a5'
-                            : 'color-mix(in srgb, #86efac 90%, var(--text-3))',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                        flex: 1,
-                        textAlign: 'right',
-                      }}
-                      title={
-                        item.errorMessage ??
-                        item.result ??
-                        (item.terminalReason === 'timeout'
-                          ? '子代理执行超时。'
-                          : item.terminalReason)
-                      }
-                    >
-                      {truncateSummary(
-                        item.errorMessage ??
-                          item.result ??
-                          (item.terminalReason === 'timeout'
-                            ? '子代理执行超时。'
-                            : (item.terminalReason ?? '')),
-                        32,
-                      )}
-                    </span>
-                  )}
-                  {selected && (
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '0 4px',
-                        borderRadius: 999,
-                        background: 'color-mix(in oklch, var(--accent) 16%, transparent)',
-                        color: 'var(--accent)',
-                        fontSize: 8,
-                        fontWeight: 700,
-                      }}
-                    >
-                      当前查看
-                    </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+
+        {items.map((item) => (
+          <SubAgentItemCard
+            key={item.sessionId}
+            item={item}
+            selected={item.sessionId === selectedSessionId}
+            onSelect={() => onSelectSession(item.sessionId)}
+          />
+        ))}
       </div>
     </section>
   );

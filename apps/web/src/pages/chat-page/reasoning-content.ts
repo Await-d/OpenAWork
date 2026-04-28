@@ -20,16 +20,45 @@ export function collectTextCandidateFields(content: Record<string, unknown>): un
   ];
 }
 
+export interface ReasoningBlockWithTiming {
+  text: string;
+  startedAt?: number;
+  endedAt?: number;
+}
+
 export function extractReasoningBlocks(
   rawContent: unknown[],
   extractTextFragments: (value: unknown) => string[],
 ): string[] {
-  const blocks = rawContent
-    .flatMap((item) => extractReasoningFragments(item, extractTextFragments))
-    .map((item) => normalizeReasoningText(item))
-    .filter((item) => item.length > 0);
+  return extractReasoningBlocksWithTimings(rawContent, extractTextFragments).map(
+    (entry) => entry.text,
+  );
+}
 
-  return blocks.filter((item, index) => blocks.indexOf(item) === index);
+export function extractReasoningBlocksWithTimings(
+  rawContent: unknown[],
+  extractTextFragments: (value: unknown) => string[],
+): ReasoningBlockWithTiming[] {
+  const fragments = rawContent.flatMap((item) =>
+    extractReasoningFragmentsWithTimings(item, extractTextFragments),
+  );
+  const normalized = fragments
+    .map((entry) => ({
+      text: normalizeReasoningText(entry.text),
+      startedAt: entry.startedAt,
+      endedAt: entry.endedAt,
+    }))
+    .filter((entry) => entry.text.length > 0);
+
+  // Dedupe by text while keeping the first matching timing.
+  const seen = new Set<string>();
+  const result: ReasoningBlockWithTiming[] = [];
+  for (const entry of normalized) {
+    if (seen.has(entry.text)) continue;
+    seen.add(entry.text);
+    result.push(entry);
+  }
+  return result;
 }
 
 export function isReasoningRecord(content: Record<string, unknown>): boolean {
@@ -50,12 +79,14 @@ export function normalizeReasoningText(value: string): string {
   return value.replaceAll('[REDACTED]', '').trim();
 }
 
-function extractReasoningFragments(
+function extractReasoningFragmentsWithTimings(
   value: unknown,
   extractTextFragments: (value: unknown) => string[],
-): string[] {
+): ReasoningBlockWithTiming[] {
   if (Array.isArray(value)) {
-    return value.flatMap((item) => extractReasoningFragments(item, extractTextFragments));
+    return value.flatMap((item) =>
+      extractReasoningFragmentsWithTimings(item, extractTextFragments),
+    );
   }
 
   if (!value || typeof value !== 'object') {
@@ -72,7 +103,20 @@ function extractReasoningFragments(
     .join('\n')
     .trim();
 
-  return block.length > 0 ? [block] : [];
+  if (block.length === 0) {
+    return [];
+  }
+
+  const startedAt =
+    typeof content['startedAt'] === 'number' && Number.isFinite(content['startedAt'])
+      ? (content['startedAt'] as number)
+      : undefined;
+  const endedAt =
+    typeof content['endedAt'] === 'number' && Number.isFinite(content['endedAt'])
+      ? (content['endedAt'] as number)
+      : undefined;
+
+  return [{ text: block, startedAt, endedAt }];
 }
 
 function formatReasoningBlockForPlainText(text: string): string {

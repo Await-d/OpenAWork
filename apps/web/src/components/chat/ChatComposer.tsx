@@ -1,62 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentBar, ImagePreview, VoiceRecorder } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
-import type {
-  ComposerMenuState,
-  MentionItem,
-  SlashCommandItem,
-} from '../../pages/chat-page/support.js';
+import type { ComposerMenuState, MentionItem, SlashCommandItem } from '../../pages/chat-page/support.js';
 import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
 import { ProviderMark } from './chat-provider-display.js';
+import { ChatImageGenerationControls } from './ChatImageGenerationControls.js';
+import {
+  ComposerHintChip,
+  composerHeaderTitleStyle,
+  composerListPrimaryTextStyle,
+  getSlashBadgeStyle,
+} from './chat-composer-primitives.js';
 import { detectThinkKeyword } from '../../pages/chat-page/think-keyword-detector.js';
-
-function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CSSProperties {
-  switch (source) {
-    case 'agent':
-      return {
-        background: 'color-mix(in oklch, var(--warning) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--warning) 84%, white 16%)',
-      };
-    case 'mcp':
-      return {
-        background: 'color-mix(in oklch, var(--info, #3b82f6) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--info, #3b82f6) 82%, white 18%)',
-      };
-    case 'skill':
-      return {
-        background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--accent) 80%, white 20%)',
-      };
-    case 'tool':
-      return {
-        background: 'color-mix(in oklch, var(--success, #10b981) 14%, transparent)',
-        color: 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)',
-      };
-    default:
-      return {
-        background: 'var(--accent-muted)',
-        color: 'var(--accent)',
-      };
-  }
-}
-
-const composerHeaderTitleStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--text)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-
-const composerListPrimaryTextStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 11,
-  fontWeight: 600,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
+import type { SavedChatImageDefaults } from '../../utils/chat-session-defaults.js';
 
 interface ChatComposerProps {
   variant: 'home' | 'session';
@@ -70,6 +26,12 @@ interface ChatComposerProps {
   showModelPicker: boolean;
   showModelSettings: boolean;
   activeModelSupportsThinking: boolean;
+  hasConfiguredImageModel: boolean;
+  imageGenerationBusy: boolean;
+  imageGenerationDefaults: SavedChatImageDefaults;
+  imageGenerationMode: boolean;
+  imageModelLabel: string;
+  imagePluginEnabled?: boolean;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   input: string;
@@ -113,40 +75,14 @@ interface ChatComposerProps {
   onRequestFiles: () => void;
   onToggleModelPicker: () => void;
   onToggleModelSettings: () => void;
+  onToggleImageGenerationMode: () => void;
   onToggleWebSearch: () => void;
+  onUpdateImageGenerationDefaults: (updates: Partial<SavedChatImageDefaults>) => void;
   onChangeManualAgentId: (agentId: string) => void;
   onClearManualAgentId: () => void;
+  onDropFiles?: (files: File[]) => void;
   onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
   onReplaceInput?: (nextValue: string) => void;
-}
-
-function ComposerHintChip({
-  label,
-  tone = 'default',
-}: {
-  label: string;
-  tone?: 'default' | 'accent';
-}) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 20,
-        padding: '0 7px',
-        borderRadius: 999,
-        border: '1px solid var(--border-subtle)',
-        background: tone === 'accent' ? 'var(--accent-muted)' : 'transparent',
-        color: tone === 'accent' ? 'var(--accent)' : 'var(--text-3)',
-        fontSize: 10,
-        fontWeight: tone === 'accent' ? 600 : 500,
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-    >
-      {label}
-    </span>
-  );
 }
 
 export function ChatComposer({
@@ -161,6 +97,12 @@ export function ChatComposer({
   showModelPicker,
   showModelSettings,
   activeModelSupportsThinking,
+  hasConfiguredImageModel,
+  imageGenerationBusy,
+  imageGenerationDefaults,
+  imageGenerationMode,
+  imageModelLabel,
+  imagePluginEnabled = true,
   webSearchEnabled,
   thinkingEnabled,
   input,
@@ -196,15 +138,20 @@ export function ChatComposer({
   onRequestFiles,
   onToggleModelPicker,
   onToggleModelSettings,
+  onToggleImageGenerationMode,
   onToggleWebSearch,
+  onUpdateImageGenerationDefaults,
   agentOptions,
   manualAgentId,
   defaultAgentLabel,
   onChangeManualAgentId,
   onClearManualAgentId,
+  onDropFiles,
   onOptimizePrompt,
   onReplaceInput,
 }: ChatComposerProps) {
+  const [composerDragging, setComposerDragging] = useState(false);
+  const composerDragCounterRef = useRef(0);
   const [optimizeLoading, setOptimizeLoading] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<PromptOptimizerResult | null>(null);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
@@ -297,19 +244,24 @@ export function ChatComposer({
   }, [composerMenu, currentItems.length]);
 
   const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
-  const canSubmit = input.trim().length > 0 || attachedFiles.length > 0;
+  const canSubmit = imageGenerationMode
+    ? input.trim().length > 0
+    : input.trim().length > 0 || attachedFiles.length > 0;
   const effectiveStopCapability =
     stopCapability !== 'none' ? stopCapability : canStopSession ? 'precise' : 'none';
   const showStopAction =
     streaming || effectiveStopCapability === 'precise' || effectiveStopCapability === 'best_effort';
   const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
   const showQueueAction =
-    Boolean(onQueueMessage) && (showStopAction || hasRemoteSessionBusyState) && canSubmit;
+    !imageGenerationMode &&
+    Boolean(onQueueMessage) &&
+    (showStopAction || hasRemoteSessionBusyState) &&
+    canSubmit;
   const primaryButtonDisabled = showStopAction
     ? stoppingStream
     : hasRemoteSessionBusyState
       ? true
-      : !canSubmit;
+      : imageGenerationBusy || !canSubmit;
 
   return (
     <div
@@ -528,15 +480,78 @@ export function ChatComposer({
 
         <div
           className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}`}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            composerDragCounterRef.current += 1;
+            if (composerDragCounterRef.current === 1) setComposerDragging(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            composerDragCounterRef.current -= 1;
+            if (composerDragCounterRef.current <= 0) {
+              composerDragCounterRef.current = 0;
+              setComposerDragging(false);
+            }
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            composerDragCounterRef.current = 0;
+            setComposerDragging(false);
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0 && onDropFiles) onDropFiles(files);
+          }}
           style={{
             padding: 6,
             display: 'flex',
             flexDirection: 'column',
             gap: 7,
             borderRadius: 14,
-            transition: 'padding 220ms ease, border-radius 220ms ease, gap 220ms ease',
+            transition:
+              'padding 220ms ease, border-radius 220ms ease, gap 220ms ease, border-color 150ms ease, background 150ms ease',
+            position: 'relative',
+            ...(composerDragging
+              ? {
+                  borderColor: 'var(--accent)',
+                  borderStyle: 'dashed',
+                  background:
+                    'color-mix(in oklch, var(--accent) 4%, var(--bg-2))',
+                }
+              : {}),
           }}
         >
+          {composerDragging && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background:
+                  'color-mix(in oklch, var(--accent) 6%, transparent)',
+                zIndex: 10,
+                pointerEvents: 'none',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--accent)',
+                }}
+              >
+                释放以添加附件
+              </span>
+            </div>
+          )}
           {imagePreviews.length > 0 && (
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '1px 1px 0' }}>
               {imagePreviews.map((item) => (
@@ -566,6 +581,21 @@ export function ChatComposer({
                 style={{ marginBottom: 0 }}
               />
             </div>
+          )}
+
+          {imageGenerationMode && (
+            <ChatImageGenerationControls
+              busy={imageGenerationBusy}
+              disabled={streaming || imageGenerationBusy}
+              hasConfiguredModel={hasConfiguredImageModel}
+              imageDefaults={imageGenerationDefaults}
+              imageMode={imageGenerationMode}
+              imageModelLabel={imageModelLabel}
+              imagePluginEnabled={imagePluginEnabled}
+              onToggleImageMode={onToggleImageGenerationMode}
+              onUpdateImageDefaults={onUpdateImageGenerationDefaults}
+              variant="panel"
+            />
           )}
 
           {attachmentItems.length > 0 && (
@@ -1189,7 +1219,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   onClick={onToggleWebSearch}
-                  disabled={streaming}
+                  disabled={streaming || imageGenerationBusy}
                   title={webSearchEnabled ? '关闭联网搜索' : '开启联网搜索'}
                   className={`icon-btn${webSearchEnabled ? ' active' : ''}`}
                   style={{
@@ -1201,7 +1231,7 @@ export function ChatComposer({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    opacity: streaming ? 0.45 : 1,
+                    opacity: streaming || imageGenerationBusy ? 0.45 : 1,
                     background: webSearchEnabled
                       ? 'color-mix(in oklch, var(--info, #3b82f6) 10%, transparent)'
                       : 'var(--surface)',
@@ -1228,10 +1258,22 @@ export function ChatComposer({
                     <path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9Z" />
                   </svg>
                 </button>
+                <ChatImageGenerationControls
+                  busy={imageGenerationBusy}
+                  disabled={streaming || imageGenerationBusy}
+                  hasConfiguredModel={hasConfiguredImageModel}
+                  imageDefaults={imageGenerationDefaults}
+                  imageMode={imageGenerationMode}
+                  imageModelLabel={imageModelLabel}
+                  imagePluginEnabled={imagePluginEnabled}
+                  onToggleImageMode={onToggleImageGenerationMode}
+                  onUpdateImageDefaults={onUpdateImageGenerationDefaults}
+                  variant="toggle"
+                />
                 <button
                   type="button"
                   onClick={onToggleVoice}
-                  disabled={streaming}
+                  disabled={streaming || imageGenerationBusy}
                   title={showVoice ? '关闭语音输入' : '语音输入'}
                   className={`icon-btn${showVoice ? ' active' : ''}`}
                   style={{
@@ -1243,7 +1285,7 @@ export function ChatComposer({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    opacity: streaming ? 0.45 : 1,
+                    opacity: streaming || imageGenerationBusy ? 0.45 : 1,
                     background: showVoice
                       ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
                       : 'var(--surface)',
@@ -1274,8 +1316,8 @@ export function ChatComposer({
                 <button
                   type="button"
                   onClick={onRequestFiles}
-                  disabled={streaming}
-                  title="上传文件"
+                  disabled={streaming || imageGenerationBusy}
+                  title={imageGenerationMode ? '上传参考图' : '上传文件'}
                   className="icon-btn"
                   style={{
                     border: '1px solid var(--border-subtle)',
@@ -1286,7 +1328,7 @@ export function ChatComposer({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    opacity: streaming ? 0.45 : 1,
+                    opacity: streaming || imageGenerationBusy ? 0.45 : 1,
                     background: 'var(--surface)',
                     transition: 'width 220ms ease, height 220ms ease, opacity 150ms ease',
                   }}
@@ -1424,10 +1466,14 @@ export function ChatComposer({
                           : '当前运行流仍受此页控制 · 可直接停止'
                     : showQueueAction
                       ? `可先追加到队列${queuedMessages.length > 0 ? ` · 已排队 ${queuedMessages.length} 条` : ''}`
+                      : imageGenerationBusy
+                        ? '图片生成中 · 请等待结果返回'
                       : sessionBusyState === 'running'
                         ? '会话持续运行中 · 正在同步最新结果'
-                        : sessionBusyState === 'paused'
+                      : sessionBusyState === 'paused'
                           ? '会话等待处理 · 处理后继续同步'
+                          : imageGenerationMode
+                            ? 'Enter 生成 · Shift+Enter 换行'
                           : isHomeVariant
                             ? 'Enter 发送 · Shift+Enter 换行'
                             : 'Enter 发送'}
@@ -1480,9 +1526,11 @@ export function ChatComposer({
                           : '停止'
                       : sessionBusyState === 'running'
                         ? '运行中'
-                        : sessionBusyState === 'paused'
+                      : sessionBusyState === 'paused'
                           ? '待处理'
-                          : '发送'}
+                          : imageGenerationMode
+                            ? '生成'
+                            : '发送'}
                   </span>
                   <svg
                     aria-hidden="true"

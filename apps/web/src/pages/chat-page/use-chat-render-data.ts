@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import type { ChatMessage, ChatUsageDetails } from './support.js';
+import type { ChatMessage, ChatMessagePart, ChatUsageDetails } from './support.js';
 import {
   estimateTokenCount,
-  parseAssistantTraceContent,
+  readAssistantTracePayload,
   clearResolvedPendingPermissionFromMessage,
   createAssistantTraceContent,
+  partsFromAssistantTrace,
 } from './support.js';
 import { shouldShowMessageInTranscript } from './transcript-visibility.js';
 import type {
@@ -46,6 +47,13 @@ export interface ChatRenderDataInput {
   activeStreamFirstTokenLatencyMs: number | null;
   activeStreamMessageId: string | null;
   toolCallCards: ToolCallCardModel[];
+  /**
+   * Ordered live-stream parts in wire-arrival order. When present and
+   * non-empty, the streaming virtual message uses this as its `parts` so
+   * the live render mirrors the gateway's true event sequence (rather than
+   * the legacy reasoning → text → tool flattening).
+   */
+  streamingOrderedParts?: ChatMessagePart[];
   resolveAssistantCapabilityKind: (text: string | undefined) => string | undefined;
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
@@ -68,6 +76,8 @@ export interface ChatRenderDataInput {
   openChildSessionInspector: (sessionId: string) => void;
   selectedChildSessionId: string | null;
   taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined;
+  visibleMessageCount?: number;
+  serverTotalTurnCount?: number | null;
 }
 
 export interface ChatRenderDataReturn {
@@ -78,6 +88,7 @@ export interface ChatRenderDataReturn {
   streamingUsageDetails: ChatUsageDetails | undefined;
   contextUsageSnapshot: ChatContextUsageSnapshot | null;
   sanitizedHistoricalMessages: ChatMessage[];
+  hiddenMessageCount: number;
   historicalRenderedMessageEntries: ChatRenderEntry[];
   streamingRenderedMessageEntry: ChatRenderEntry | null;
   historicalGroupedMessageEntries: ChatRenderGroup[];
@@ -101,6 +112,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     activeStreamFirstTokenLatencyMs,
     activeStreamMessageId,
     toolCallCards,
+    streamingOrderedParts,
     resolveAssistantCapabilityKind,
     resolveInlinePermissionActions,
     buildMessageActions,
@@ -108,6 +120,8 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     openChildSessionInspector,
     selectedChildSessionId,
     taskToolRuntimeLookup,
+    visibleMessageCount,
+    serverTotalTurnCount,
   } = input;
 
   const assistantUsageDetails = useMemo(() => {
@@ -245,7 +259,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       }
 
       let nextMessage: ChatMessage | null = message;
-      const assistantTrace = parseAssistantTraceContent(message.content);
+      const assistantTrace = readAssistantTracePayload(message);
       if (!assistantTrace) {
         return shouldShowMessageInTranscript(message) ? [message] : [];
       }
@@ -272,8 +286,26 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     });
   }, [messages, pendingPermissions]);
 
+  const visibleMessages = useMemo(() => {
+    if (visibleMessageCount === undefined || visibleMessageCount >= sanitizedHistoricalMessages.length) {
+      return sanitizedHistoricalMessages;
+    }
+    return sanitizedHistoricalMessages.slice(-visibleMessageCount);
+  }, [sanitizedHistoricalMessages, visibleMessageCount]);
+
+  const localHiddenCount = sanitizedHistoricalMessages.length - visibleMessages.length;
+  const localUserMessageCount = useMemo(
+    () => sanitizedHistoricalMessages.filter((m) => m.role === 'user').length,
+    [sanitizedHistoricalMessages],
+  );
+  const serverUnloadedTurns =
+    typeof serverTotalTurnCount === 'number' && serverTotalTurnCount > localUserMessageCount
+      ? serverTotalTurnCount - localUserMessageCount
+      : 0;
+  const hiddenMessageCount = localHiddenCount + serverUnloadedTurns;
+
   const historicalRenderedMessageEntries = useMemo<ChatRenderEntry[]>(() => {
-    return sanitizedHistoricalMessages.map((message) => ({
+    return visibleMessages.map((message) => ({
       message,
       actions: buildMessageActions(message),
       renderContent: (currentMessage: ChatMessage) =>
@@ -291,7 +323,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     openChildSessionInspector,
     resolveInlinePermissionActions,
     selectedChildSessionId,
-    sanitizedHistoricalMessages,
+    visibleMessages,
     taskToolRuntimeLookup,
   ]);
 
@@ -338,10 +370,44 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
             .join('\n\n'),
         ),
         toolCallCount: toolCallCards.length > 0 ? toolCallCards.length : undefined,
+        // Prefer the wire-faithful ordered segments when ChatPage has been
+        // accumulating them. This makes the live render preserve the true
+        // event order (tool → text → tool, reasoning interleaved with tool
+        // output, etc.) instead of the legacy reasoning → text → tool
+        // flattening produced by `partsFromAssistantTrace`. The legacy
+        // reorder is kept as a fallback so attach paths that haven't yet
+        // populated segments still render something.
+        parts:
+          streamingOrderedParts && streamingOrderedParts.length > 0
+            ? streamingOrderedParts
+            : toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
+              ? partsFromAssistantTrace(activeStreamMessageId ?? '__streaming__', {
+                  ...(visibleStreamThinkingBlocks.length > 0
+                    ? { reasoningBlocks: visibleStreamThinkingBlocks }
+                    : {}),
+                  text: visibleStreamBuffer,
+                  toolCalls: toolCallCards.map((toolCall) => ({
+                    kind: resolveAssistantCapabilityKind(toolCall.toolName) as
+                      | 'tool'
+                      | 'agent'
+                      | 'skill'
+                      | 'mcp'
+                      | undefined,
+                    toolCallId: toolCall.toolCallId,
+                    toolName: toolCall.toolName,
+                    input: toolCall.input as Record<string, unknown>,
+                    output: toolCall.output,
+                    isError: toolCall.isError,
+                    pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
+                    resumedAfterApproval: toolCall.resumedAfterApproval,
+                    status: toolCall.status,
+                  })),
+                })
+              : undefined,
         status: 'streaming',
       },
       renderContent: (message: ChatMessage) =>
-        renderStreamingChatMessageContentWithOptions(message.content, {
+        renderStreamingChatMessageContentWithOptions(message, {
           onOpenChildSession: openChildSessionInspector,
           resolveInlinePermissionActions,
           selectedChildSessionId,
@@ -358,6 +424,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     resolveAssistantCapabilityKind,
     selectedChildSessionId,
     streamingUsageDetails,
+    streamingOrderedParts,
     taskToolRuntimeLookup,
     toolCallCards,
     visibleStreamBuffer,
@@ -404,6 +471,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     streamingUsageDetails,
     contextUsageSnapshot,
     sanitizedHistoricalMessages,
+    hiddenMessageCount,
     historicalRenderedMessageEntries,
     streamingRenderedMessageEntry,
     historicalGroupedMessageEntries,

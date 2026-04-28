@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { startTransition, useCallback } from 'react';
 import type {
   Session,
   SessionActiveStream,
@@ -58,7 +58,15 @@ export interface SessionSnapshotLoaderSetters {
       | ((prev: PendingQuestionRequest[]) => PendingQuestionRequest[]),
   ) => void;
   setSessionStateStatus: (value: SessionStateStatus | null) => void;
-  setRecoveredStreamSnapshot: (value: RecoveredActiveAssistantStream | null) => void;
+  setRecoveryActiveStream: (value: SessionActiveStream | null) => void;
+  setRecoveredStreamSnapshot: (
+    value:
+      | RecoveredActiveAssistantStream
+      | null
+      | ((
+          prev: RecoveredActiveAssistantStream | null,
+        ) => RecoveredActiveAssistantStream | null),
+  ) => void;
   setIsSessionSnapshotReady: (value: boolean) => void;
 }
 
@@ -78,8 +86,10 @@ export interface SessionSnapshotLoaderReturn {
     targetSessionId: string,
     options?: {
       expectedSessionViewEpoch?: number;
+      messageLimit?: number;
       replaceMessages?: boolean;
       signal?: AbortSignal;
+      since?: number;
     },
   ) => Promise<void>;
 }
@@ -102,6 +112,7 @@ export function useSessionSnapshotLoader(
     setPendingPermissions,
     setPendingQuestions,
     setSessionStateStatus,
+    setRecoveryActiveStream,
     setRecoveredStreamSnapshot,
     setIsSessionSnapshotReady,
   } = setters;
@@ -110,16 +121,17 @@ export function useSessionSnapshotLoader(
     async (targetSessionId: string, signal?: AbortSignal, expectedSessionViewEpoch?: number) => {
       if (!token) return;
       const sessionViewEpoch = expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
-      const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
+      const status = await createSessionsClient(gatewayUrl).getStatus(token, targetSessionId, {
         signal,
       });
       if (signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) return;
-      const pendingInteractions = getRecoveryPendingInteractions(recovery);
-      setSessionTodos(flattenSessionTodoLanes(recovery.todoLanes));
-      setChildSessions((previous) => mergeChildSessions(previous, recovery.children));
-      setSessionTasks((previous) => mergeSessionTasks(previous, recovery.tasks));
+      const pendingInteractions = getRecoveryPendingInteractions(status);
+      setSessionTodos(flattenSessionTodoLanes(status.todoLanes));
+      setChildSessions((previous) => mergeChildSessions(previous, status.children));
+      setSessionTasks((previous) => mergeSessionTasks(previous, status.tasks));
       setPendingPermissions(pendingInteractions.pendingPermissions);
       setPendingQuestions(pendingInteractions.pendingQuestions);
+      setRecoveryActiveStream(status.activeStream);
     },
     [
       gatewayUrl,
@@ -131,6 +143,7 @@ export function useSessionSnapshotLoader(
       setSessionTasks,
       setPendingPermissions,
       setPendingQuestions,
+      setRecoveryActiveStream,
     ],
   );
 
@@ -141,15 +154,26 @@ export function useSessionSnapshotLoader(
       activeStream: SessionActiveStream | null,
       messages: ChatMessage[],
     ) => {
-      setRecoveredStreamSnapshot(
-        recoverActiveAssistantStream({
-          activeStreamStartedAt: activeStream?.startedAtMs ?? null,
-          hasActiveStream: activeStream !== null,
-          messages,
-          runEvents: Array.isArray(session.runEvents) ? session.runEvents : [],
-          sessionStateStatus: nextSessionStateStatus,
-        }),
-      );
+      const next = recoverActiveAssistantStream({
+        activeStreamStartedAt: activeStream?.startedAtMs ?? null,
+        hasActiveStream: activeStream !== null,
+        messages,
+        runEvents: Array.isArray(session.runEvents) ? session.runEvents : [],
+        sessionStateStatus: nextSessionStateStatus,
+      });
+      if (next !== null) {
+        setRecoveredStreamSnapshot(next);
+        return;
+      }
+      // When recovery yields no renderable snapshot but the session is still
+      // running (or paused), keep any previously cached snapshot — for example
+      // one populated from useSessionViewCache when switching back into a
+      // mid-flight session — until the attach pipeline overwrites it.
+      const sessionStillStreaming =
+        activeStream !== null ||
+        nextSessionStateStatus === 'running' ||
+        nextSessionStateStatus === 'paused';
+      setRecoveredStreamSnapshot((previous) => (sessionStillStreaming ? previous : null));
     },
     [setRecoveredStreamSnapshot],
   );
@@ -159,46 +183,59 @@ export function useSessionSnapshotLoader(
       targetSessionId: string,
       options?: {
         expectedSessionViewEpoch?: number;
+        messageLimit?: number;
         replaceMessages?: boolean;
         signal?: AbortSignal;
+        since?: number;
       },
     ) => {
       if (!token) return;
       const sessionViewEpoch =
         options?.expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
       const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
+        messageLimit: options?.messageLimit,
         signal: options?.signal,
+        since: options?.since,
       });
       if (options?.signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch))
         return;
 
       const prepared = prepareSessionRecoveryState(recovery);
-      if (options?.replaceMessages === true) {
-        setMessages(prepared.normalizedMessages);
-      } else if (streamingRef.current) {
-        // skip reconciliation during streaming
-      } else {
-        setMessages((previous) =>
-          reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+      // Mark recovery-driven state syncs as a transition so React can split
+      // the commit across frames and yield to higher-priority work (input,
+      // SSE `message` handler). Without this, a fresh recovery payload of
+      // ~10 messages with reasoning + tool cards lands as a single ~400ms
+      // synchronous render — surfacing as `[Violation] 'message' handler`
+      // because React's Scheduler dispatches commits via MessageChannel.
+      startTransition(() => {
+        if (options?.replaceMessages === true) {
+          setMessages(prepared.normalizedMessages);
+        } else if (streamingRef.current) {
+          // skip reconciliation during streaming
+        } else {
+          setMessages((previous) =>
+            reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+          );
+        }
+        setMessageRatings(prepared.messageRatings);
+        setRightPanelState(
+          buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
         );
-      }
-      setMessageRatings(prepared.messageRatings);
-      setRightPanelState(
-        buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
-      );
-      setSessionTodos(prepared.sessionTodos);
-      setChildSessions(recovery.children);
-      setSessionTasks(recovery.tasks);
-      setPendingPermissions(prepared.pendingPermissions);
-      setPendingQuestions(prepared.pendingQuestions);
-      setSessionStateStatus(prepared.sessionStateStatus);
-      syncRecoveredStreamSnapshot(
-        prepared.session,
-        prepared.sessionStateStatus,
-        recovery.activeStream,
-        prepared.normalizedMessages,
-      );
-      setIsSessionSnapshotReady(true);
+        setSessionTodos(prepared.sessionTodos);
+        setChildSessions(recovery.children);
+        setSessionTasks(recovery.tasks);
+        setPendingPermissions(prepared.pendingPermissions);
+        setPendingQuestions(prepared.pendingQuestions);
+        setSessionStateStatus(prepared.sessionStateStatus);
+        setRecoveryActiveStream(recovery.activeStream);
+        syncRecoveredStreamSnapshot(
+          prepared.session,
+          prepared.sessionStateStatus,
+          recovery.activeStream,
+          prepared.normalizedMessages,
+        );
+        setIsSessionSnapshotReady(true);
+      });
     },
     [
       gatewayUrl,
@@ -216,6 +253,7 @@ export function useSessionSnapshotLoader(
       setPendingPermissions,
       setPendingQuestions,
       setSessionStateStatus,
+      setRecoveryActiveStream,
       setIsSessionSnapshotReady,
     ],
   );

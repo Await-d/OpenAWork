@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { calculateStreamingRevealStep, calculateStreamingRevealDelay } from './streaming-reveal.js';
+import type { StreamingThinkingBlock } from './streaming-thinking.js';
+import type { ChatMessagePart } from './support.js';
 
 export interface StreamRevealSetters {
   setStreamBuffer: (value: string) => void;
   setStreamThinkingBuffer: (value: string) => void;
+  setStreamThinkingBlocks: (value: StreamingThinkingBlock[]) => void;
+  /** Clear the ordered streaming segment list when the stream resets. */
+  setStreamingSegments: (value: ChatMessagePart[]) => void;
   setRecoveredStreamSnapshot: (value: null) => void;
   setStreaming: (value: boolean) => void;
   setStoppingStream: (value: boolean) => void;
@@ -32,6 +37,8 @@ export function useStreamReveal(
   const {
     setStreamBuffer,
     setStreamThinkingBuffer,
+    setStreamThinkingBlocks,
+    setStreamingSegments,
     setRecoveredStreamSnapshot,
     setStreaming,
     setStoppingStream,
@@ -61,6 +68,8 @@ export function useStreamReveal(
     streamRevealNextAllowedAtRef.current = 0;
     setStreamBuffer('');
     setStreamThinkingBuffer('');
+    setStreamThinkingBlocks([]);
+    setStreamingSegments([]);
     setRecoveredStreamSnapshot(null);
     streamingRef.current = false;
     setStreaming(false);
@@ -71,6 +80,8 @@ export function useStreamReveal(
   }, [
     setStreamBuffer,
     setStreamThinkingBuffer,
+    setStreamThinkingBlocks,
+    setStreamingSegments,
     setRecoveredStreamSnapshot,
     setStreaming,
     setStoppingStream,

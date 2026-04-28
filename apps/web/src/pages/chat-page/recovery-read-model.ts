@@ -1,3 +1,8 @@
+import {
+  dedupePendingPermissionRequests,
+  findFirstPendingPermission,
+  toPendingPermissionRequests,
+} from '@openAwork/web-client';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { normalizeChatMessages, type ChatMessage } from './support.js';
 import { filterTranscriptMessages } from './transcript-visibility.js';
@@ -18,26 +23,6 @@ interface RecoveryPendingInteractionSource {
   session?: RecoverySessionRecord | null;
 }
 
-function isPendingPermissionRequest(value: unknown): value is PendingPermissionRequest {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record['requestId'] === 'string' &&
-    typeof record['sessionId'] === 'string' &&
-    typeof record['toolName'] === 'string' &&
-    typeof record['scope'] === 'string' &&
-    typeof record['reason'] === 'string' &&
-    (record['riskLevel'] === 'low' ||
-      record['riskLevel'] === 'medium' ||
-      record['riskLevel'] === 'high') &&
-    typeof record['status'] === 'string' &&
-    typeof record['createdAt'] === 'string'
-  );
-}
-
 function isPendingQuestionRequest(value: unknown): value is PendingQuestionRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -55,34 +40,8 @@ function isPendingQuestionRequest(value: unknown): value is PendingQuestionReque
   );
 }
 
-function toPendingPermissionRequests(value: unknown): PendingPermissionRequest[] {
-  return Array.isArray(value) ? value.filter((item) => isPendingPermissionRequest(item)) : [];
-}
-
 function toPendingQuestionRequests(value: unknown): PendingQuestionRequest[] {
   return Array.isArray(value) ? value.filter((item) => isPendingQuestionRequest(item)) : [];
-}
-
-function dedupePendingPermissionRequests(
-  requests: PendingPermissionRequest[],
-): PendingPermissionRequest[] {
-  const mergedByRequestId = new Map<string, PendingPermissionRequest>();
-  const order: string[] = [];
-
-  for (const request of requests) {
-    const existing = mergedByRequestId.get(request.requestId);
-    if (!existing) {
-      order.push(request.requestId);
-      mergedByRequestId.set(request.requestId, request);
-      continue;
-    }
-
-    mergedByRequestId.set(request.requestId, { ...existing, ...request });
-  }
-
-  return order
-    .map((requestId) => mergedByRequestId.get(requestId))
-    .filter((request): request is PendingPermissionRequest => request !== undefined);
 }
 
 function getRecoverySessionRecord(
@@ -117,8 +76,7 @@ export function getRecoveryPendingInteractions(source: RecoveryPendingInteractio
 
   return {
     pendingPermissions: dedupedPendingPermissions,
-    pendingPermission:
-      dedupedPendingPermissions.find((request) => request.status === 'pending') ?? null,
+    pendingPermission: findFirstPendingPermission(dedupedPendingPermissions),
     pendingQuestions: resolvedPendingQuestions,
     pendingQuestion:
       resolvedPendingQuestions.find((request) => request.status === 'pending') ?? null,

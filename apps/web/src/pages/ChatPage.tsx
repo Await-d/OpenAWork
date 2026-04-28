@@ -3,11 +3,13 @@ import { makeOrderedMessageId } from './chat-page/ordered-id.js';
 import { useFileEditor } from '../hooks/useFileEditor.js';
 import { usePageActivation } from '../components/CachedRouteOutlet.js';
 import { ChatComposer } from '../components/chat/ChatComposer.js';
+import { ChatImageGenerationResultStrip } from '../components/chat/ChatImageGenerationResultStrip.js';
 import {
   ChatMessageGroupList,
   type ChatRenderEntry,
   type ChatRenderGroup,
 } from '../components/chat/chat-message-group-list.js';
+import { ChatRemoteStreamPlaceholder } from '../components/chat/chat-remote-stream-placeholder.js';
 import { ChatSessionSkeleton } from '../components/chat/chat-session-skeleton.js';
 import { ChatTopBar } from '../components/chat/ChatTopBar.js';
 import {
@@ -39,6 +41,7 @@ import type {
   PendingQuestionRequest,
   PermissionDecision,
   Session,
+  SessionActiveStream,
   SessionMessageRatingRecord,
   SessionMessageRatingValue,
   SessionRecoveryReadModel,
@@ -83,6 +86,7 @@ import {
   sanitizeComposerPlainText,
   hasActivePendingPermissionRequest,
   upsertPermissionEventMessage,
+  type AssistantTraceToolCall,
   type ReasoningEffort,
   partsFromAssistantTrace,
   type ChatMessage,
@@ -123,6 +127,13 @@ import { useScrollManager } from './chat-page/use-scroll-manager.js';
 import { useComposerCallbacks } from './chat-page/use-composer-callbacks.js';
 import { useComposerQueue } from './chat-page/use-composer-queue.js';
 import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
+import { handleInterruptedAttachStream } from './chat-page/attach-stream-reconnect.js';
+import { createAttachStreamReconnectWiring } from './chat-page/attach-stream-reconnect-wiring.js';
+import {
+  shouldAttemptAttachToSession,
+  shouldResetAttachAttempt,
+} from './chat-page/attach-stream-eligibility.js';
+import { useStreamAttachRetry } from './chat-page/use-stream-attach-retry.js';
 import { useModelPrices } from './chat-page/use-model-prices.js';
 import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
 import { useChatRenderData } from './chat-page/use-chat-render-data.js';
@@ -139,6 +150,8 @@ import { executeServerCommand } from './chat-page/server-command-item.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
 import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
 import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
+import { useChatImageGeneration } from './chat-page/use-chat-image-generation.js';
+import type { SessionImageGenerationResponse } from './chat-page/use-chat-image-generation.js';
 import {
   SessionRunStateBar,
   SessionRunStatePlaceholder,
@@ -166,6 +179,7 @@ import {
   createInitialChatRightPanelState,
   getToolCallCards,
   startChatRightPanelRun,
+  type ChatRightPanelState,
 } from './chat-stream-state.js';
 import {
   mergeChatBackendUsageSnapshot,
@@ -177,10 +191,20 @@ import {
 } from './chat-page/stream-recovery.js';
 import {
   appendStreamingThinkingChunk,
+  extractStreamingThinkingDurations,
+  extractStreamingThinkingEndedFlags,
   extractStreamingThinkingTexts,
   joinStreamingThinkingTexts,
+  markStreamingThinkingChunkEnded,
   type StreamingThinkingBlock,
 } from './chat-page/streaming-thinking.js';
+import {
+  appendStreamingTextDelta,
+  appendStreamingThinkingDelta,
+  applyToolResultToStreamingSegment,
+  markStreamingReasoningSegmentEnded,
+  upsertStreamingToolSegment,
+} from './chat-page/streaming-segments.js';
 import {
   createQueuedComposerPreview,
   hydrateQueuedComposerMessage,
@@ -191,13 +215,28 @@ import {
   deleteQueuedComposerFiles,
   restoreQueuedComposerFiles,
 } from './chat-page/queued-composer-file-store.js';
-import { appendAttachmentSummary, uploadChatAttachments } from './chat-page/attachment-upload.js';
+import {
+  appendAttachmentSummary,
+  buildUploadedAttachmentSummaryLine,
+  uploadChatAttachments,
+} from './chat-page/attachment-upload.js';
 import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
 } from '../utils/chat-session-defaults.js';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js';
 import { CompanionStage } from '../components/chat/companion/companion-stage.js';
+import { InlineQuestionPanel } from '../components/chat/InlineQuestionPanel.js';
+import { createQuestionsClient } from '@openAwork/web-client';
+import type { InputImageContent } from '@openAwork/shared';
+import {
+  useSessionViewCache,
+  type SessionViewStreamingSnapshot,
+} from './chat-page/use-session-view-cache.js';
+
+const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
+const LOAD_MORE_MESSAGE_INCREMENT = 20;
+const INITIAL_TURN_LIMIT = 10;
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -226,7 +265,16 @@ export default function ChatPage() {
   const [streamBuffer, setStreamBuffer] = useState('');
   const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
   const [streamThinkingBlocks, setStreamThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
+  // Ordered live-stream parts (reasoning / text / tool) preserving the wire
+  // arrival sequence. Drives both the live render (so interleaving like
+  // tool → text → tool is faithful) and the per-round commit message so the
+  // committed messages match the gateway's ordered persistence. Empty when
+  // there is no active stream.
+  const [streamingSegments, setStreamingSegments] = useState<ChatMessagePart[]>([]);
   const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
+    null,
+  );
+  const [recoveryActiveStream, setRecoveryActiveStream] = useState<SessionActiveStream | null>(
     null,
   );
   const [recoveredStreamSnapshot, setRecoveredStreamSnapshot] =
@@ -242,6 +290,8 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
   const pendingSessionNormalizeTimeoutRef = useRef<number | null>(null);
   const activeSessionRef = useRef<string | null>(sessionId ?? null);
   const currentLoadedSessionIdRef = useRef<string | null>(currentSessionId);
@@ -281,14 +331,41 @@ export default function ChatPage() {
   const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [visibleMessageCount, setVisibleMessageCount] = useState(DEFAULT_VISIBLE_MESSAGE_COUNT);
+  const [serverTotalTurnCount, setServerTotalTurnCount] = useState<number | null>(null);
   const modelPrices = useModelPrices(gatewayUrl, token);
   const [rightPanelState, setRightPanelState] = useState(() => createInitialChatRightPanelState());
+  // Live refs that mirror streaming/right-panel state so that effects (especially
+  // session-switch cleanup) can read the latest values without depending on them.
+  const streamBufferRef = useRef('');
+  streamBufferRef.current = streamBuffer;
+  const streamThinkingBlocksRef = useRef<StreamingThinkingBlock[]>([]);
+  streamThinkingBlocksRef.current = streamThinkingBlocks;
+  const streamingSegmentsRef = useRef<ChatMessagePart[]>([]);
+  streamingSegmentsRef.current = streamingSegments;
+  const reportedStreamUsageRef = useRef<ChatBackendUsageSnapshot | null>(null);
+  reportedStreamUsageRef.current = reportedStreamUsage;
+  const activeStreamStartedAtRef = useRef<number | null>(null);
+  activeStreamStartedAtRef.current = activeStreamStartedAt;
+  const rightPanelStateRef = useRef<ChatRightPanelState>(rightPanelState);
+  rightPanelStateRef.current = rightPanelState;
   const [childSessions, setChildSessions] = useState<Session[]>([]);
   const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
   const [sessionTodos, setSessionTodos] = useState<SessionTodoItem[]>([]);
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionRequest[]>([]);
+  const [latestGeneratedImageResult, setLatestGeneratedImageResult] = useState<{
+    artifactId: string;
+    artifactTitle: string;
+    modelLabel: string;
+  } | null>(null);
+  const [inlineQuestionAnswers, setInlineQuestionAnswers] = useState<string[][]>([]);
+  const [inlineQuestionCustomInputs, setInlineQuestionCustomInputs] = useState<string[]>([]);
+  const [inlineQuestionReplyStatus, setInlineQuestionReplyStatus] = useState<
+    'answered' | 'dismissed' | null
+  >(null);
+  const [inlineQuestionReplyError, setInlineQuestionReplyError] = useState<string | null>(null);
   const [inlinePermissionPendingDecision, setInlinePermissionPendingDecision] = useState<{
     decision: PermissionDecision;
     requestId: string;
@@ -297,6 +374,7 @@ export default function ChatPage() {
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
+  const sessionRestoredFromCacheRef = useRef(false);
   const [historyEditPrompt, setHistoryEditPrompt] = useState<HistoryEditPrompt | null>(null);
   const [, startSessionSwitchTransition] = useTransition();
   const [retryPrompt, setRetryPrompt] = useState<RetryPrompt | null>(null);
@@ -342,6 +420,7 @@ export default function ChatPage() {
     setStreamBuffer,
     setStreamThinkingBuffer,
     setStreamThinkingBlocks,
+    setStreamingSegments,
     setRecoveredStreamSnapshot,
     setStreaming,
     setStoppingStream,
@@ -349,6 +428,12 @@ export default function ChatPage() {
     setActiveStreamFirstTokenLatencyMs,
   });
   const attachAttemptedSessionRef = useRef<string | null>(null);
+  // Tracks the last logged attach-eligibility signature so the diagnostic
+  // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
+  // decision-relevant inputs actually change (not on every token delta).
+  const attachEligibilitySignatureRef = useRef<string | null>(null);
+  const { attachRetryNonce, cancelAttachRetry, scheduleAttachRetry } = useStreamAttachRetry();
+  const sessionViewCache = useSessionViewCache();
   const { activateSessionView, isCurrentSessionView, isCurrentSessionRequest } =
     useSessionViewGuard({
       activeSessionRef,
@@ -421,6 +506,22 @@ export default function ChatPage() {
 
     return buildQueuedComposerScopeKey(currentUserEmail, currentSessionId);
   }, [currentSessionId, currentUserEmail]);
+  const {
+    applySavedImageDefaults,
+    generateImageForSession,
+    hasConfiguredImageModel,
+    imageGenerationBusy,
+    imageGenerationDefaults,
+    imageGenerationMode,
+    imageModelLabel,
+    imagePluginEnabled,
+    toggleImageGenerationMode,
+    updateImageGenerationDefaults,
+  } = useChatImageGeneration({
+    gatewayUrl,
+    providers,
+    token,
+  });
 
   const {
     buildSessionMetadata,
@@ -591,6 +692,7 @@ export default function ChatPage() {
     void currentSessionId;
     setReportedStreamUsage(null);
     setMessageRatings({});
+    setLatestGeneratedImageResult(null);
   }, [currentSessionId]);
 
   useEffect(() => {
@@ -618,13 +720,13 @@ export default function ChatPage() {
     if (!token) {
       return null;
     }
-    const { defaults, providers: loadedProviders } = await loadSavedChatSessionDefaults(
+    const { defaults, imageDefaults, providers: loadedProviders } = await loadSavedChatSessionDefaults(
       gatewayUrl,
       token,
     );
     savedChatDefaultsRef.current = defaults;
 
-    return { defaults, providers: loadedProviders };
+    return { defaults, imageDefaults, providers: loadedProviders };
   }, [gatewayUrl, token]);
 
   useEffect(() => {
@@ -697,7 +799,7 @@ export default function ChatPage() {
           return;
         }
 
-        const { defaults, providers: loadedProviders } = loaded;
+        const { defaults, imageDefaults, providers: loadedProviders } = loaded;
 
         setActiveProviderId((prev) => {
           const normalizedPrev = prev.trim();
@@ -716,6 +818,7 @@ export default function ChatPage() {
         });
 
         setProviders(loadedProviders);
+        applySavedImageDefaults(imageDefaults);
 
         if (!sessionId) {
           setThinkingEnabled(defaults.thinkingEnabled);
@@ -723,7 +826,7 @@ export default function ChatPage() {
         }
       })
       .catch(() => null);
-  }, [loadSavedChatDefaults, sessionId, token]);
+  }, [applySavedImageDefaults, loadSavedChatDefaults, sessionId, token]);
 
   const { loadSessionRuntimeSnapshot, syncRecoveredStreamSnapshot, loadCurrentSessionSnapshot } =
     useSessionSnapshotLoader(
@@ -741,6 +844,7 @@ export default function ChatPage() {
         setPendingPermissions,
         setPendingQuestions,
         setSessionStateStatus,
+        setRecoveryActiveStream,
         setRecoveredStreamSnapshot,
         setIsSessionSnapshotReady,
       },
@@ -758,8 +862,12 @@ export default function ChatPage() {
       return sessionStateStatus;
     }
 
+    if (recoveryActiveStream !== null) {
+      return 'running';
+    }
+
     return null;
-  }, [sessionStateStatus, streaming]);
+  }, [recoveryActiveStream, sessionStateStatus, streaming]);
   const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
   const isCurrentSessionRunning = sessionStateStatus === 'running';
   const canStopCurrentSessionStream = Boolean(
@@ -800,6 +908,12 @@ export default function ChatPage() {
     ? activeStreamStartedAt
     : (recoveredStreamSnapshot?.startedAt ?? null);
   const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
+  // Surfaces the wire-faithful ordered parts during an active stream so the
+  // live render reflects gateway event order. During recovery we have no
+  // segment list (the recovery snapshot only carries text + thinkingBlocks),
+  // so we fall back to an empty array which makes `useChatRenderData`
+  // reconstruct a placeholder message via the legacy reordered path.
+  const visibleStreamingSegments = streaming ? streamingSegments : [];
   const activeStreamMessageId =
     currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
   const queuedComposerPreviews = useMemo(
@@ -864,7 +978,7 @@ export default function ChatPage() {
     const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
 
     void createSessionsClient(gatewayUrl)
-      .getRecovery(token, targetSessionId)
+      .getRecovery(token, targetSessionId, { messageLimit: INITIAL_TURN_LIMIT })
       .then((session) => {
         if (cancelled || !isCurrentSessionView(targetSessionId, expectedSessionViewEpoch)) {
           return;
@@ -872,25 +986,30 @@ export default function ChatPage() {
 
         const prepared = prepareSessionRecoveryState(session);
         lastParentTaskSyncMarkerRef.current = nextMarker;
-        setMessages((previous) =>
-          reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
-        );
-        setMessageRatings(prepared.messageRatings);
-        setRightPanelState(
-          buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
-        );
-        setSessionTodos(prepared.sessionTodos);
-        setChildSessions(session.children);
-        setSessionTasks(session.tasks);
-        setPendingPermissions(prepared.pendingPermissions);
-        setPendingQuestions(prepared.pendingQuestions);
-        setSessionStateStatus(prepared.sessionStateStatus);
-        syncRecoveredStreamSnapshot(
-          prepared.session,
-          prepared.sessionStateStatus,
-          session.activeStream,
-          prepared.normalizedMessages,
-        );
+        // Recovery commit involves a full message-list re-render incl.
+        // markdown / reasoning / tool cards — keep it non-urgent so React
+        // can split work across frames instead of blocking the main thread.
+        startSessionSwitchTransition(() => {
+          setMessages((previous) =>
+            reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+          );
+          setMessageRatings(prepared.messageRatings);
+          setRightPanelState(
+            buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
+          );
+          setSessionTodos(prepared.sessionTodos);
+          setChildSessions(session.children);
+          setSessionTasks(session.tasks);
+          setPendingPermissions(prepared.pendingPermissions);
+          setPendingQuestions(prepared.pendingQuestions);
+          setSessionStateStatus(prepared.sessionStateStatus);
+          syncRecoveredStreamSnapshot(
+            prepared.session,
+            prepared.sessionStateStatus,
+            session.activeStream,
+            prepared.normalizedMessages,
+          );
+        });
       })
       .catch(() => undefined);
 
@@ -930,6 +1049,130 @@ export default function ChatPage() {
     );
   }, [currentSessionId, pendingQuestions]);
 
+  const activePendingQuestion = useMemo(
+    () => pendingQuestions.find((q) => q.status === 'pending') ?? null,
+    [pendingQuestions],
+  );
+
+  useEffect(() => {
+    if (!activePendingQuestion) {
+      return;
+    }
+    setInlineQuestionAnswers(activePendingQuestion.questions.map(() => []));
+    setInlineQuestionCustomInputs(activePendingQuestion.questions.map(() => ''));
+    setInlineQuestionReplyStatus(null);
+    setInlineQuestionReplyError(null);
+  }, [activePendingQuestion?.requestId]);
+
+  const toggleInlineQuestionOption = useCallback(
+    (questionIndex: number, optionLabel: string, multiple: boolean) => {
+      setInlineQuestionAnswers((prev) => {
+        const next = prev.map((a) => [...a]);
+        while (next.length <= questionIndex) {
+          next.push([]);
+        }
+        const current = next[questionIndex] ?? [];
+        if (multiple) {
+          next[questionIndex] = current.includes(optionLabel)
+            ? current.filter((a) => a !== optionLabel)
+            : [...current, optionLabel];
+        } else {
+          next[questionIndex] = current.includes(optionLabel) ? [] : [optionLabel];
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleInlineQuestionCustomInput = useCallback(
+    (questionIndex: number, value: string) => {
+      setInlineQuestionCustomInputs((prev) => {
+        const next = [...prev];
+        while (next.length <= questionIndex) {
+          next.push('');
+        }
+        next[questionIndex] = value;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const replyInlineQuestion = useCallback(
+    async (status: 'answered' | 'dismissed') => {
+      if (!token || !activePendingQuestion) {
+        return;
+      }
+
+      const mergedAnswers = activePendingQuestion.questions.map((_, index) => {
+        const selected = inlineQuestionAnswers[index] ?? [];
+        const custom = (inlineQuestionCustomInputs[index] ?? '').trim();
+        return custom ? [...selected, custom] : selected;
+      });
+
+      const payload =
+        status === 'answered'
+          ? { answers: mergedAnswers, requestId: activePendingQuestion.requestId, status }
+          : { requestId: activePendingQuestion.requestId, status };
+
+      try {
+        setInlineQuestionReplyStatus(status);
+        setInlineQuestionReplyError(null);
+        await createQuestionsClient(gatewayUrl).reply(
+          token,
+          activePendingQuestion.sessionId,
+          payload,
+        );
+        setPendingQuestions((prev) =>
+          prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
+        );
+        if (currentSessionId) {
+          requestCurrentSessionRefresh(currentSessionId);
+        }
+        requestSessionListRefresh();
+      } catch (error) {
+        const isHttp =
+          typeof error === 'object' &&
+          error !== null &&
+          typeof Reflect.get(error, 'status') === 'number';
+        if (isHttp) {
+          const httpStatus = Reflect.get(error, 'status') as number;
+          const data = Reflect.get(error, 'data') as { error?: string } | undefined;
+          if (
+            (httpStatus === 409 || httpStatus === 404) &&
+            (data?.error === 'Question request expired' ||
+              data?.error === 'Question request already resolved' ||
+              httpStatus === 404)
+          ) {
+            setPendingQuestions((prev) =>
+              prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
+            );
+            toast('问题已过期或已处理，已重新同步。', 'warning', 3000);
+            if (currentSessionId) {
+              requestCurrentSessionRefresh(currentSessionId);
+            }
+            requestSessionListRefresh();
+            return;
+          }
+        }
+        setInlineQuestionReplyError(
+          error instanceof Error ? error.message : '提交回答失败，请重试。',
+        );
+      } finally {
+        setInlineQuestionReplyStatus(null);
+      }
+    },
+    [
+      token,
+      gatewayUrl,
+      activePendingQuestion,
+      currentSessionId,
+      inlineQuestionAnswers,
+      inlineQuestionCustomInputs,
+    ],
+  );
+
   useSessionSidebarRunState({
     activeStreamSessionId: activeGatewayStreamSessionId,
     currentSessionId,
@@ -952,6 +1195,9 @@ export default function ChatPage() {
         : activateSessionView(requestedSessionId);
 
     if (!requestedSessionId || !token) {
+      cancelAttachRetry();
+      attachAttemptedSessionRef.current = null;
+      setRecoveryActiveStream(null);
       if (currentLoadedSessionIdRef.current !== null) {
         if (chatView !== 'home') {
           navigateToHome();
@@ -960,6 +1206,8 @@ export default function ChatPage() {
         setSelectedChildSessionId(null);
         setIsSessionLoading(false);
         setMessages([]);
+        setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+        setServerTotalTurnCount(null);
         setRightPanelState(createInitialChatRightPanelState());
         setSessionTodos([]);
         setChildSessions([]);
@@ -981,7 +1229,52 @@ export default function ChatPage() {
     let cancelled = false;
     const runtimeSnapshotController = new AbortController();
 
+    // Save current session view to cache before switching away. When a stream is
+    // mid-flight on the previous session, also snapshot the live streaming buffers
+    // and right-panel state so that switching back can immediately repaint the
+    // in-progress assistant message instead of waiting for an attach event.
+    const previousSessionId = currentLoadedSessionIdRef.current;
+    if (previousSessionId && previousSessionId !== requestedSessionId) {
+      let streamingSnapshot: SessionViewStreamingSnapshot | undefined;
+      if (streamingRef.current) {
+        const cachedToolCalls: AssistantTraceToolCall[] = getToolCallCards(
+          rightPanelStateRef.current,
+        ).map((toolCall) => ({
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          input: toolCall.input,
+          ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),
+          isError: toolCall.isError,
+          ...(toolCall.pendingPermissionRequestId
+            ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
+            : {}),
+          ...(toolCall.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+          status: toolCall.status,
+        }));
+        streamingSnapshot = {
+          recoveredStream: {
+            messageId: currentAssistantStreamMessageIdRef.current,
+            startedAt: activeStreamStartedAtRef.current,
+            text: streamBufferRef.current,
+            thinkingBlocks: streamThinkingBlocksRef.current,
+            toolCalls: cachedToolCalls,
+            usage: reportedStreamUsageRef.current,
+          },
+          rightPanelState: rightPanelStateRef.current,
+        };
+      }
+      sessionViewCache.save(
+        previousSessionId,
+        messagesRef.current,
+        scrollRegionRef.current,
+        streamingSnapshot,
+      );
+    }
+
     navigateToSession();
+    cancelAttachRetry();
+    attachAttemptedSessionRef.current = null;
+    setRecoveryActiveStream(null);
     setCurrentSessionId(requestedSessionId);
 
     if (shouldPreserveBootstrapState) {
@@ -998,7 +1291,10 @@ export default function ChatPage() {
 
     if (shouldSoftReloadCurrentSession) {
       createSessionsClient(gatewayUrl)
-        .getRecovery(token, requestedSessionId, { signal: runtimeSnapshotController.signal })
+        .getRecovery(token, requestedSessionId, {
+          messageLimit: INITIAL_TURN_LIMIT,
+          signal: runtimeSnapshotController.signal,
+        })
         .then((recovery) => {
           if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
             return;
@@ -1024,6 +1320,7 @@ export default function ChatPage() {
             setPendingPermissions(prepared.pendingPermissions);
             setPendingQuestions(prepared.pendingQuestions);
             setSessionStateStatus(prepared.sessionStateStatus);
+            setRecoveryActiveStream(recovery.activeStream);
             syncRecoveredStreamSnapshot(
               prepared.session,
               prepared.sessionStateStatus,
@@ -1045,15 +1342,39 @@ export default function ChatPage() {
       };
     }
 
+    // Check cache for the target session to avoid skeleton flash
+    const cachedView = sessionViewCache.restore(requestedSessionId);
+
     setSelectedChildSessionId(null);
-    setIsSessionLoading(true);
-    setMessages([]);
+    if (cachedView) {
+      // Apply cached messages immediately — skip skeleton
+      sessionRestoredFromCacheRef.current = true;
+      setMessages(cachedView.messages);
+      setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+      setIsSessionLoading(false);
+      // Restore scroll position after React renders the cached messages
+      const cachedScrollTop = cachedView.scrollTop;
+      ignoreScrollEventsUntilRef.current = performance.now() + 600;
+      requestAnimationFrame(() => {
+        const sr = scrollRegionRef.current;
+        if (sr && !cancelled) {
+          sr.scrollTo({ top: cachedScrollTop, behavior: 'auto' });
+        }
+      });
+    } else {
+      sessionRestoredFromCacheRef.current = false;
+      setIsSessionLoading(true);
+      setMessages([]);
+      setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+    }
     setRightPanelState(createInitialChatRightPanelState());
+    setServerTotalTurnCount(null);
     setChildSessions([]);
     setSessionTasks([]);
     setPendingPermissions([]);
     setPendingQuestions([]);
     setSessionStateStatus(null);
+    setRecoveryActiveStream(null);
     setIsSessionSnapshotReady(false);
     setSessionModesHydrated(false);
     setSessionMetadataDirty(false);
@@ -1069,10 +1390,28 @@ export default function ChatPage() {
     setActiveProviderId('');
     setActiveModelId('');
 
+    // If we cached an in-flight streaming snapshot for this session, replay it
+    // immediately so the user sees the in-progress assistant message right away.
+    // The subsequent getRecovery + attach pipeline will then take over without
+    // a visible "blank" gap.
+    if (cachedView?.streamingSnapshot) {
+      setRightPanelState(cachedView.streamingSnapshot.rightPanelState);
+      setRecoveredStreamSnapshot(cachedView.streamingSnapshot.recoveredStream);
+      setSessionStateStatus('running');
+    }
+
     createSessionsClient(gatewayUrl)
-      .getRecovery(token, requestedSessionId, { signal: runtimeSnapshotController.signal })
+      .getRecovery(token, requestedSessionId, {
+        messageLimit: INITIAL_TURN_LIMIT,
+        signal: runtimeSnapshotController.signal,
+      })
       .then((recovery) => {
+        console.log('[RECOVERY]', requestedSessionId, {
+          activeStream: recovery.activeStream,
+          sessionStateStatus: (recovery.session as unknown as Record<string, unknown>)?.state_status,
+        });
         if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
+          console.log('[RECOVERY] skipped — cancelled or view mismatch');
           return;
         }
         const prepared = prepareSessionRecoveryState(recovery);
@@ -1083,20 +1422,44 @@ export default function ChatPage() {
           }
 
           startSessionSwitchTransition(() => {
-            setMessages(prepared.normalizedMessages);
+            if (streamingRef.current) {
+              // While streaming, don't replace messages — the stream is authoritative
+            } else if (cachedView) {
+              setMessages((previous) =>
+                reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
+              );
+            } else {
+              setMessages(prepared.normalizedMessages);
+            }
             setMessageRatings(prepared.messageRatings);
-            setRightPanelState(
-              buildRightPanelStateFromSessionSnapshot(
-                prepared.session,
-                prepared.normalizedMessages,
-              ),
+            // When the previous in-flight streaming snapshot was just replayed from
+            // the view cache, prefer keeping the cached right-panel state — the
+            // server-side runEvents typically lag behind the live stream, so
+            // rebuilding from them here would visually "lose" the in-progress tool
+            // cards until attach catches up. The attach pipeline will continue
+            // updating the right-panel state as new events arrive.
+            const sessionStillStreamingFromRecovery =
+              recovery.activeStream !== null ||
+              prepared.sessionStateStatus === 'running' ||
+              prepared.sessionStateStatus === 'paused';
+            const shouldKeepCachedRightPanel = Boolean(
+              cachedView?.streamingSnapshot && sessionStillStreamingFromRecovery,
             );
+            if (!shouldKeepCachedRightPanel) {
+              setRightPanelState(
+                buildRightPanelStateFromSessionSnapshot(
+                  prepared.session,
+                  prepared.normalizedMessages,
+                ),
+              );
+            }
             setSessionTodos(prepared.sessionTodos);
             setChildSessions(recovery.children);
             setSessionTasks(recovery.tasks);
             setPendingPermissions(prepared.pendingPermissions);
             setPendingQuestions(prepared.pendingQuestions);
             setSessionStateStatus(prepared.sessionStateStatus);
+            setRecoveryActiveStream(recovery.activeStream);
             syncRecoveredStreamSnapshot(
               prepared.session,
               prepared.sessionStateStatus,
@@ -1104,6 +1467,7 @@ export default function ChatPage() {
               prepared.normalizedMessages,
             );
             setIsSessionSnapshotReady(true);
+            setServerTotalTurnCount(recovery.totalTurnCount ?? null);
             if (!sessionMetadataDirtyRef.current) {
               setDialogueMode(metadata.dialogueMode);
               setManualAgentId(metadata.agentId ?? '');
@@ -1153,6 +1517,7 @@ export default function ChatPage() {
         setSessionTodos([]);
         setRightPanelState(createInitialChatRightPanelState());
         setSessionStateStatus(null);
+        setRecoveryActiveStream(null);
         setIsSessionSnapshotReady(false);
         clearSessionMetadataDirty();
         setSessionModesHydrated(true);
@@ -1172,6 +1537,7 @@ export default function ChatPage() {
     activateSessionView,
     chatView,
     clearSessionMetadataDirty,
+    cancelAttachRetry,
     gatewayUrl,
     isCurrentSessionView,
     navigateToHome,
@@ -1179,6 +1545,7 @@ export default function ChatPage() {
     resetStreamState,
     sessionId,
     sessionReloadNonce,
+    sessionViewCache,
     syncRecoveredStreamSnapshot,
     token,
   ]);
@@ -1240,10 +1607,18 @@ export default function ChatPage() {
       initialDelayMs: REMOTE_STREAM_RECOVERY_POLL_MS,
       intervalMs: REMOTE_STREAM_RECOVERY_POLL_MS,
       run: async (signal) => {
-        await loadCurrentSessionSnapshot(targetSessionId, {
-          expectedSessionViewEpoch,
-          signal,
-        });
+        // During active streaming, messages arrive via SSE in real-time.
+        // Use lightweight /status endpoint instead of full /recovery to
+        // avoid redundant full-message queries and serialization.
+        if (streamingRef.current) {
+          await loadSessionRuntimeSnapshot(targetSessionId, signal, expectedSessionViewEpoch);
+        } else {
+          await loadCurrentSessionSnapshot(targetSessionId, {
+            expectedSessionViewEpoch,
+            messageLimit: INITIAL_TURN_LIMIT,
+            signal,
+          });
+        }
       },
     });
 
@@ -1255,6 +1630,7 @@ export default function ChatPage() {
     isPageActive,
     isSessionSnapshotReady,
     loadCurrentSessionSnapshot,
+    loadSessionRuntimeSnapshot,
     remoteSessionBusyState,
     sessionModesHydrated,
     token,
@@ -1310,6 +1686,38 @@ export default function ChatPage() {
         editorMode,
       },
     );
+
+  const prevSnapshotReadyRef = useRef(false);
+  useEffect(() => {
+    if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messages.length > 0) {
+      // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
+      if (sessionRestoredFromCacheRef.current) {
+        sessionRestoredFromCacheRef.current = false;
+        prevSnapshotReadyRef.current = isSessionSnapshotReady;
+        return;
+      }
+      isNearBottomRef.current = true;
+      ignoreScrollEventsUntilRef.current = performance.now() + 600;
+      const timer = window.setTimeout(() => {
+        const sr = scrollRegionRef.current;
+        if (sr) {
+          sr.scrollTo({ top: sr.scrollHeight, behavior: 'auto' });
+        } else {
+          bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+        }
+      }, 200);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+    prevSnapshotReadyRef.current = isSessionSnapshotReady;
+  }, [isSessionSnapshotReady, messages.length, isNearBottomRef, ignoreScrollEventsUntilRef, scrollRegionRef, bottomRef]);
+
+  useEffect(() => {
+    if (!isSessionSnapshotReady) {
+      prevSnapshotReadyRef.current = false;
+    }
+  }, [isSessionSnapshotReady]);
 
   const focusComposerWithText = useCallback((text: string) => {
     setInput(text);
@@ -1370,13 +1778,12 @@ export default function ChatPage() {
     messages,
     messageRatings,
     onToggleMessageRating: handleToggleMessageRating,
-    focusComposerWithText,
     setHistoryEditPrompt,
     setRetryPrompt,
   });
 
   const createBranchSessionFromMessage = useCallback(
-    async (text: string, sourceMessageId: string) => {
+    async (text: string, sourceMessageId: string, inputParts?: InputImageContent[]) => {
       if (!token) return;
       const originSessionId = activeSessionRef.current;
 
@@ -1420,9 +1827,18 @@ export default function ChatPage() {
       setSessionModesHydrated(true);
       resetStreamState();
       setStreamError(null);
-      focusComposerWithText(text);
-      requestSessionListRefresh();
-      void navigate(`/chat/${imported.sessionId}`);
+      if (inputParts && inputParts.length > 0) {
+        requestSessionListRefresh();
+        void navigate(`/chat/${imported.sessionId}`);
+        await sendMessage(text, {
+          existingInputParts: inputParts,
+          forcedSessionId: imported.sessionId,
+        });
+      } else {
+        focusComposerWithText(text);
+        requestSessionListRefresh();
+        void navigate(`/chat/${imported.sessionId}`);
+      }
       return imported.sessionId;
     },
     [
@@ -1433,12 +1849,17 @@ export default function ChatPage() {
       gatewayUrl,
       navigate,
       resetStreamState,
+      sendMessage,
       token,
     ],
   );
 
   const truncateSessionMessagesInPlace = useCallback(
-    async (sessionId: string, messageId: string): Promise<Message[]> => {
+    async (
+      sessionId: string,
+      messageId: string,
+      messageText?: string,
+    ): Promise<Message[]> => {
       if (!token) return [];
       const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
         method: 'POST',
@@ -1446,7 +1867,7 @@ export default function ChatPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ messageId, inclusive: true }),
+        body: JSON.stringify({ messageId, inclusive: true, messageText }),
       });
       if (!res.ok) {
         throw new Error(`Failed to truncate session messages: ${res.status}`);
@@ -1487,6 +1908,7 @@ export default function ChatPage() {
         if (loadedDefaults) {
           savedDefaults = loadedDefaults.defaults;
           setProviders(loadedDefaults.providers);
+          applySavedImageDefaults(loadedDefaults.imageDefaults);
         }
       } catch {
         savedDefaults = null;
@@ -1570,9 +1992,43 @@ export default function ChatPage() {
     fileInputRef,
   });
 
+  const appendImageGenerationSummaryMessage = useCallback(
+    (input: {
+      artifactTitle: string;
+      messageSummary: string;
+      modelId: string;
+      providerId: string;
+      revisedPrompt: string | null;
+      sourcePrompt: string;
+    }) => {
+      const revisedPromptText = input.revisedPrompt?.trim();
+      const content =
+        revisedPromptText && revisedPromptText !== input.sourcePrompt.trim()
+          ? `${input.messageSummary}\n结果：${input.artifactTitle}\n提示词改写：${revisedPromptText}\n已写入产物工作区。`
+          : `${input.messageSummary}\n结果：${input.artifactTitle}\n已写入产物工作区。`;
+      const createdAt = Date.now();
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: makeOrderedMessageId(createdAt),
+          role: 'assistant',
+          content,
+          createdAt,
+          model: input.modelId,
+          providerId: input.providerId,
+          status: 'completed',
+          tokenEstimate: estimateTokenCount(content),
+        },
+      ]);
+    },
+    [],
+  );
+
   async function sendMessage(
     overrideText?: string,
     options?: {
+      existingInputParts?: InputImageContent[];
       forcedSessionId?: string;
       queuedAttachmentItems?: AttachmentItem[];
       queuedFiles?: File[];
@@ -1582,15 +2038,141 @@ export default function ChatPage() {
     const sourceInput = sanitizeComposerPlainText(overrideText ?? input);
     const effectiveFiles = options?.queuedFiles ?? attachedFiles;
     if (
-      (!sourceInput.trim() && effectiveFiles.length === 0) ||
+      (!sourceInput.trim() && (imageGenerationMode || effectiveFiles.length === 0)) ||
       streaming ||
-      remoteSessionBusyState
+      remoteSessionBusyState ||
+      imageGenerationBusy
     ) {
       return false;
     }
     const requestOriginSessionId = activeSessionRef.current;
     setStreamError(null);
     let text = sourceInput.trim();
+
+    if (imageGenerationMode) {
+      if (!hasConfiguredImageModel) {
+        const message = '请先在设置中配置可用的图片模型，然后再使用图片生成模式。';
+        setStreamError(message);
+        toast(message, 'warning');
+        return false;
+      }
+
+      if (overrideText === undefined && options?.queuedFiles === undefined) {
+        clearComposerDraft();
+      }
+
+      let sid: string;
+      try {
+        sid = options?.forcedSessionId ?? (await ensureSession());
+      } catch (err) {
+        logger.error('session create failed', err);
+        if (activeSessionRef.current === requestOriginSessionId) {
+          setStreamError(err instanceof Error ? err.message : '会话创建失败');
+        }
+        return false;
+      }
+
+      if (activeSessionRef.current !== sid) {
+        return false;
+      }
+
+      let imageEditArtifacts: Array<{ artifactId: string; fileName?: string; mimeType?: string }> | undefined;
+      let localImageInputs: InputImageContent[] | undefined;
+      if (effectiveFiles.length > 0) {
+        const invalidAttachment = effectiveFiles.find((file) => !file.type.startsWith('image/'));
+        if (invalidAttachment) {
+          const message = '图片生成模式只支持图片作为参考图，请移除非图片附件后重试。';
+          setStreamError(message);
+          toast(message, 'warning');
+          return false;
+        }
+
+        const uploadedAttachments = await uploadChatAttachments({
+          files: effectiveFiles,
+          gatewayUrl,
+          sessionId: sid,
+          token,
+        });
+        imageEditArtifacts = uploadedAttachments
+          .filter((attachment) => attachment.type === 'image')
+          .map((attachment) => ({
+            artifactId: attachment.artifactId,
+            ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+            ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+          }));
+        localImageInputs = uploadedAttachments
+          .filter((attachment) => attachment.type === 'image')
+          .map((attachment) => ({
+            type: 'input_image',
+            artifactId: attachment.artifactId,
+            ...(attachment.dataUrl ? { imageUrl: attachment.dataUrl } : {}),
+            ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+            ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+          }));
+        if (options?.queuedFiles === undefined) {
+          setAttachedFiles([]);
+          setAttachmentItems([]);
+        }
+      }
+
+      const requestStartedAt = Date.now();
+      const userMsg: ChatMessage = {
+        id: makeOrderedMessageId(requestStartedAt),
+        role: 'user',
+        content: text,
+        ...(localImageInputs ? { rawContent: [{ type: 'text', text }, ...localImageInputs] } : {}),
+        createdAt: requestStartedAt,
+        tokenEstimate: estimateTokenCount(text),
+        status: 'completed',
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      if (options?.queuedMessageId && queuedComposerScope) {
+        void deleteQueuedComposerFiles({
+          queueId: options.queuedMessageId,
+          scope: queuedComposerScope,
+        });
+      }
+
+      try {
+        const payload = await generateImageForSession({
+          ...(imageEditArtifacts ? { inputArtifacts: imageEditArtifacts } : {}),
+          prompt: text,
+          sessionId: sid,
+        });
+        if (activeSessionRef.current !== sid) {
+          return false;
+        }
+
+        const responsePayload = payload as SessionImageGenerationResponse;
+
+        appendImageGenerationSummaryMessage({
+          artifactTitle: responsePayload.artifact.title,
+          messageSummary: responsePayload.messageSummary,
+          modelId: responsePayload.parameters.modelId,
+          providerId: responsePayload.parameters.providerId,
+          revisedPrompt: responsePayload.revisedPrompt,
+          sourcePrompt: text,
+        });
+        setLatestGeneratedImageResult({
+          artifactId: responsePayload.artifact.id,
+          artifactTitle: responsePayload.artifact.title,
+          modelLabel: imageModelLabel || responsePayload.parameters.modelId,
+        });
+        setSessionReloadNonce((value) => value + 1);
+        requestSessionListRefresh();
+        toast('图片已生成，可在产物工作区查看。', 'success');
+        return true;
+      } catch (error) {
+        if (activeSessionRef.current === sid) {
+          const message = error instanceof Error ? error.message : '图片生成失败，请稍后重试。';
+          setStreamError(message);
+          toast(message, 'error');
+        }
+        return false;
+      }
+    }
+
     const matchedClientCommand =
       effectiveFiles.length === 0
         ? matchClientSlashCommand(text, composerCommandDescriptors)
@@ -1658,40 +2240,73 @@ export default function ChatPage() {
       return false;
     }
 
+    let requestInputParts: InputImageContent[] | undefined;
+    let localRequestInputParts: InputImageContent[] | undefined;
+
     if (effectiveFiles.length > 0) {
-      const uploadedAttachmentLines = await uploadChatAttachments({
+      const uploadedAttachments = await uploadChatAttachments({
         files: effectiveFiles,
         gatewayUrl,
         sessionId: sid,
         token,
       });
+      const imageInputParts: InputImageContent[] = uploadedAttachments
+        .filter((attachment) => attachment.type === 'image')
+        .map((attachment) => ({
+          type: 'input_image',
+          artifactId: attachment.artifactId,
+          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        }));
+      const localImageParts: InputImageContent[] = uploadedAttachments
+        .filter((attachment) => attachment.type === 'image')
+        .map((attachment) => ({
+          type: 'input_image',
+          artifactId: attachment.artifactId,
+          ...(attachment.dataUrl ? { imageUrl: attachment.dataUrl } : {}),
+          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        }));
+      const uploadedAttachmentLines = uploadedAttachments
+        .filter((attachment) => attachment.type !== 'image')
+        .map((attachment) => buildUploadedAttachmentSummaryLine(attachment));
       text = appendAttachmentSummary(text, uploadedAttachmentLines);
       if (options?.queuedFiles === undefined) {
         setAttachedFiles([]);
         setAttachmentItems([]);
       }
+
+      if (imageInputParts.length > 0) {
+        requestInputParts = imageInputParts;
+        localRequestInputParts = localImageParts;
+      }
+    } else if (options?.existingInputParts && options.existingInputParts.length > 0) {
+      requestInputParts = options.existingInputParts;
+      localRequestInputParts = options.existingInputParts;
     }
 
+    // ── Reset refs (no re-render) ──
     currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
     streamingRef.current = true;
-    setStreaming(true);
-    setStoppingStream(false);
     stoppingStreamRef.current = false;
-    setSessionStateStatus('running');
-    setReportedStreamUsage(null);
     streamRevealTargetRef.current = '';
     streamRevealVisibleRef.current = '';
     streamRevealTargetCodePointsRef.current = [];
     streamRevealVisibleCodePointCountRef.current = 0;
     streamRevealNextAllowedAtRef.current = 0;
+    isNearBottomRef.current = true;
+
+    // ── Batch state updates (single React render) ──
+    const requestStartedAt = Date.now();
+    setStreaming(true);
+    setStoppingStream(false);
+    setSessionStateStatus('running');
+    setReportedStreamUsage(null);
     setStreamBuffer('');
     setStreamThinkingBuffer('');
     setStreamThinkingBlocks([]);
-    isNearBottomRef.current = true;
     setHasPendingFollowContent(false);
     setShowScrollToBottom(false);
-
-    const requestStartedAt = Date.now();
     setActiveStreamStartedAt(requestStartedAt);
     setActiveStreamFirstTokenLatencyMs(null);
     const toolCallIds = new Set<string>();
@@ -1704,7 +2319,12 @@ export default function ChatPage() {
       messageId: string,
       textContent: string,
       finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
-    ): { content: string; parts: ChatMessagePart[] } => {
+    ): {
+      content: string;
+      parts: ChatMessagePart[];
+      reasoningBlocksEndedFlags?: boolean[];
+      reasoningBlocksDurationsMs?: number[];
+    } => {
       const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
         const nextToolState =
           finalStatus === 'error' && toolCallState.status === 'streaming'
@@ -1739,7 +2359,10 @@ export default function ChatPage() {
           kind: resolveAssistantCapabilityKind(nextToolState.toolName),
           toolCallId: nextToolState.toolCallId,
           toolName: nextToolState.toolName,
-          input: parseToolCallInputText(nextToolState.inputText),
+          input: {
+            ...parseToolCallInputText(nextToolState.inputText),
+            ...(nextToolState.batchProgress ? { _batchProgress: nextToolState.batchProgress } : {}),
+          },
           output: nextToolState.output,
           isError: nextToolState.isError,
           ...(hasPendingPermission
@@ -1751,26 +2374,63 @@ export default function ChatPage() {
         };
       });
 
-      const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
+      const reasoningBlocks = extractStreamingThinkingTexts(accumulatedThinkingBlocks);
+      const reasoningBlocksEndedFlags =
+        reasoningBlocks.length > 0
+          ? extractStreamingThinkingEndedFlags(accumulatedThinkingBlocks)
+          : undefined;
+      const reasoningBlocksDurationsMs =
+        reasoningBlocks.length > 0
+          ? extractStreamingThinkingDurations(accumulatedThinkingBlocks)
+          : undefined;
+      const reasoningBlocksTimings =
+        reasoningBlocks.length > 0
+          ? accumulatedThinkingBlocks
+              .filter((block) => block.text.trim().length > 0)
+              .map((block) => ({
+                ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
+                ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
+              }))
+          : undefined;
+      const hasPersistableTiming =
+        reasoningBlocksTimings?.some(
+          (entry) => typeof entry.startedAt === 'number' || typeof entry.endedAt === 'number',
+        ) ?? false;
       const tracePayload = {
         ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
+        ...(hasPersistableTiming && reasoningBlocksTimings
+          ? { reasoningBlocksTimings }
+          : {}),
         text: textContent,
         toolCalls,
       };
 
-      const content =
-        reasoningBlocks.length === 0 && toolCalls.length === 0
-          ? textContent
-          : createAssistantTraceContent(tracePayload);
+      const content = textContent;
       const parts = partsFromAssistantTrace(messageId, tracePayload);
 
-      return { content, parts };
+      return {
+        content,
+        parts,
+        ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+        ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
+      };
     };
 
+    const userRawContent: Array<{ type: 'text'; text: string } | InputImageContent> = [
+      ...(text.length > 0 ? [{ type: 'text' as const, text }] : []),
+      ...(localRequestInputParts ?? requestInputParts ?? []),
+    ];
+    const displayMessageForStream =
+      text.length > 0
+        ? text
+        : requestInputParts && requestInputParts.length > 0
+          ? `上传了 ${requestInputParts.length} 张图片`
+          : text;
     const userMsg: ChatMessage = {
       id: makeOrderedMessageId(),
       role: 'user',
       content: text,
+      rawContent: userRawContent,
       createdAt: requestStartedAt,
       tokenEstimate: estimateTokenCount(text),
       status: 'completed',
@@ -1788,17 +2448,155 @@ export default function ChatPage() {
     let accumulated = '';
     let accumulatedThinking = '';
     let accumulatedThinkingBlocks: StreamingThinkingBlock[] = [];
+    // Ordered, wire-faithful segment list — kept alongside the legacy
+    // accumulated* buffers so existing flows (thinking duration extraction,
+    // stream-reveal, etc.) keep working while the UI now reads `parts`
+    // straight from this list. Reset on round boundaries / cancel / done.
+    let accumulatedSegments: ChatMessagePart[] = [];
+    const reasoningSegmentMeta = new Map<string, { blockKey: string }>();
+    let pendingThinkingFlushFrame: number | null = null;
+    let pendingSegmentsFlushFrame: number | null = null;
+    const flushThinkingState = () => {
+      pendingThinkingFlushFrame = null;
+      // Guard against late RAF callbacks landing after the stream was reset
+      // (session switch / cancel / round-close) to prevent UI from flashing
+      // stale reasoning content over the cleared buffer.
+      if (!streamingRef.current || activeSessionRef.current !== sid) {
+        return;
+      }
+      setStreamThinkingBlocks(accumulatedThinkingBlocks);
+      setStreamThinkingBuffer(accumulatedThinking);
+    };
+    const scheduleThinkingFlush = () => {
+      if (pendingThinkingFlushFrame !== null) return;
+      pendingThinkingFlushFrame = window.requestAnimationFrame(flushThinkingState);
+    };
+    const cancelThinkingFlush = () => {
+      if (pendingThinkingFlushFrame !== null) {
+        window.cancelAnimationFrame(pendingThinkingFlushFrame);
+        pendingThinkingFlushFrame = null;
+      }
+    };
+    const flushSegmentsState = () => {
+      pendingSegmentsFlushFrame = null;
+      if (!streamingRef.current || activeSessionRef.current !== sid) return;
+      setStreamingSegments(accumulatedSegments);
+    };
+    const scheduleSegmentsFlush = () => {
+      if (pendingSegmentsFlushFrame !== null) return;
+      pendingSegmentsFlushFrame = window.requestAnimationFrame(flushSegmentsState);
+    };
+    const cancelSegmentsFlush = () => {
+      if (pendingSegmentsFlushFrame !== null) {
+        window.cancelAnimationFrame(pendingSegmentsFlushFrame);
+        pendingSegmentsFlushFrame = null;
+      }
+    };
     let firstTokenObservedAt: number | null = null;
     let toolPanelRevealed = false;
     let pausedForPermission = false;
     let pausedForQuestion = false;
+    let currentRoundStartedAt = requestStartedAt;
+    let firstTokenLatencyAttached = false;
     const requestModelSupportsThinking = activeModelOption?.supportsThinking === true;
+
+    // Round boundary commit:
+    // The gateway persists one assistant message per agent round (see
+    // `routes/stream-model-round.ts`); the live UI must mirror that structure
+    // so reasoning/tool/text parts render in the true wire order both during
+    // streaming and after refresh. When a fresh wave of thinking arrives after
+    // any tool_call has been issued in this round, commit the current round
+    // as a finalized assistant message and roll the message id forward.
+    const closeCurrentStreamingRoundIntoMessage = (timestamp: number) => {
+      const closingMessageId = currentAssistantStreamMessageIdRef.current;
+      if (!closingMessageId) return;
+      if (
+        liveToolCalls.size === 0 &&
+        accumulatedThinking.trim().length === 0 &&
+        accumulated.trim().length === 0
+      ) {
+        return;
+      }
+      // Cancel any pending RAF so the upcoming setStreamThinkingBlocks([])
+      // / setStreamThinkingBuffer('') reset is not overwritten by a late flush.
+      cancelThinkingFlush();
+      cancelSegmentsFlush();
+      const { content } = buildAssistantTraceMessage(
+        closingMessageId,
+        accumulated,
+        'completed',
+      );
+      // Prefer the ordered segment list as the canonical parts source so the
+      // committed round message reflects the wire-arrival order. Fall back
+      // to the legacy reordered parts only when no segments were collected
+      // (e.g. attach scenarios that bypass this path).
+      const parts =
+        accumulatedSegments.length > 0
+          ? accumulatedSegments
+          : buildAssistantTraceMessage(closingMessageId, accumulated, 'completed').parts;
+      const roundToolCallIds = new Set(liveToolCalls.keys());
+      // Only the first round that finalizes after the first token observation
+      // should expose firstTokenLatencyMs; subsequent rounds reuse the same
+      // observation and would double-render the metric in their footers.
+      const shouldAttachFirstTokenLatency =
+        firstTokenObservedAt !== null && !firstTokenLatencyAttached;
+      setMessages((prev) =>
+        replaceOrAppendStreamedAssistantMessage(
+          prev,
+          {
+            id: closingMessageId,
+            role: 'assistant',
+            content,
+            parts,
+            createdAt: timestamp,
+            durationMs: timestamp - currentRoundStartedAt,
+            tokenEstimate: estimateTokenCount(
+              [accumulatedThinking, accumulated]
+                .filter((item) => item.trim().length > 0)
+                .join('\n\n'),
+            ),
+            toolCallCount: roundToolCallIds.size,
+            providerId: requestProviderId,
+            model: requestModelLabel,
+            agentId: requestAgentId,
+            ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+              ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+              : {}),
+            status: 'completed',
+          },
+          roundToolCallIds,
+        ),
+      );
+      if (shouldAttachFirstTokenLatency) {
+        firstTokenLatencyAttached = true;
+      }
+
+      accumulated = '';
+      accumulatedThinking = '';
+      accumulatedThinkingBlocks = [];
+      accumulatedSegments = [];
+      reasoningSegmentMeta.clear();
+      liveToolCalls.clear();
+      streamRevealTargetRef.current = '';
+      streamRevealVisibleRef.current = '';
+      streamRevealTargetCodePointsRef.current = [];
+      streamRevealVisibleCodePointCountRef.current = 0;
+      streamRevealNextAllowedAtRef.current = 0;
+      setStreamBuffer('');
+      setStreamThinkingBuffer('');
+      setStreamingSegments([]);
+      setStreamThinkingBlocks([]);
+      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+      currentRoundStartedAt = timestamp;
+    };
+
     setRightPanelState((prev) => startChatRightPanelRun(prev, text));
 
     client.stream(sid, requestText, {
       agentId: effectiveAgentId,
       dialogueMode,
-      displayMessage: text,
+      displayMessage: displayMessageForStream,
+      ...(requestInputParts ? { inputParts: requestInputParts } : {}),
       onEvent: (event) => {
         if (activeSessionRef.current !== sid) {
           return;
@@ -1807,9 +2605,10 @@ export default function ChatPage() {
         if (event.type === 'tool_call_delta') {
           toolCallIds.add(event.toolCallId);
           const previous = liveToolCalls.get(event.toolCallId);
+          const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
           liveToolCalls.set(event.toolCallId, {
             createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
-            inputText: `${previous?.inputText ?? ''}${event.inputDelta}`,
+            inputText: nextInputText,
             output: previous?.output,
             isError: previous?.isError,
             resumedAfterApproval: previous?.resumedAfterApproval,
@@ -1817,10 +2616,44 @@ export default function ChatPage() {
             status: 'streaming',
             toolName: event.toolName,
           });
+          // Mirror into the ordered segment list — first delta opens a new
+          // tool segment positioned at the current end of the list, later
+          // deltas update the segment in place with the parsed input.
+          accumulatedSegments = upsertStreamingToolSegment(accumulatedSegments, {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            input: parseToolCallInputText(nextInputText),
+            status: 'running',
+            kind: resolveAssistantCapabilityKind(event.toolName) as
+              | 'agent'
+              | 'mcp'
+              | 'skill'
+              | 'tool'
+              | undefined,
+          });
+          scheduleSegmentsFlush();
         }
 
         if (event.type === 'usage') {
           setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
+        }
+
+        if (event.type === 'tool_progress') {
+          const previous = liveToolCalls.get(event.toolCallId);
+          liveToolCalls.set(event.toolCallId, {
+            createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
+            inputText: previous?.inputText ?? '',
+            output: previous?.output,
+            isError: previous?.isError,
+            toolCallId: event.toolCallId,
+            status: 'streaming',
+            toolName: event.toolName,
+            batchProgress: {
+              subTools: event.subTools,
+              completedCount: event.completedCount,
+              totalCount: event.totalCount,
+            },
+          });
         }
 
         if (event.type === 'tool_result') {
@@ -1842,6 +2675,20 @@ export default function ChatPage() {
             status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
             toolName: event.toolName,
           });
+          // Update the matching tool segment with the result so the live
+          // render (and the about-to-be-committed round message) shows the
+          // tool output / error status alongside the right tool call.
+          accumulatedSegments = applyToolResultToStreamingSegment(accumulatedSegments, {
+            toolCallId: event.toolCallId,
+            output: event.output,
+            isError: hasPendingPermission ? false : event.isError,
+            status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+            ...(hasPendingPermission && rawPendingPermissionRequestId
+              ? { pendingPermissionRequestId: rawPendingPermissionRequestId }
+              : {}),
+            ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+          });
+          scheduleSegmentsFlush();
           setMessages((previousMessages) => {
             const nextMessages = applyToolResultToLocalAssistantMessages(previousMessages, event);
             return typeof rawPendingPermissionRequestId === 'string' &&
@@ -1886,31 +2733,33 @@ export default function ChatPage() {
         if (event.type === 'task_update') {
           setSessionTasks((previous) => {
             const existingTask = previous.find((task) => task.id === event.taskId);
-            const nextTask: SessionTask = {
-              assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
-              blockedBy: existingTask?.blockedBy ?? [],
-              completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
-              createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
-              depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
-              errorMessage: event.errorMessage ?? existingTask?.errorMessage,
-              id: event.taskId,
-              parentTaskId: event.parentTaskId,
-              priority: existingTask?.priority ?? 'medium',
-              readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
-              result: event.result ?? existingTask?.result,
-              sessionId: event.sessionId ?? existingTask?.sessionId,
-              status:
-                event.status === 'in_progress'
-                  ? 'running'
-                  : event.status === 'done'
-                    ? 'completed'
-                    : event.status,
-              subtaskCount: existingTask?.subtaskCount ?? 0,
-              tags: existingTask?.tags ?? [],
-              title: event.label,
-              unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
-              updatedAt: event.occurredAt ?? Date.now(),
-            };
+              const nextTask: SessionTask = {
+                assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
+                blockedBy: existingTask?.blockedBy ?? [],
+                completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
+                createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
+                depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
+                errorMessage: event.errorMessage ?? existingTask?.errorMessage,
+                id: event.taskId,
+                parentTaskId: event.parentTaskId,
+                priority: existingTask?.priority ?? 'medium',
+                readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
+                result: event.result ?? existingTask?.result,
+                sessionId: event.sessionId ?? existingTask?.sessionId,
+                status:
+                  event.status === 'in_progress'
+                    ? 'running'
+                    : event.status === 'done'
+                      ? 'completed'
+                      : event.status,
+                subtaskCount: existingTask?.subtaskCount ?? 0,
+                tags: existingTask?.tags ?? [],
+                terminalReason: event.reason ?? existingTask?.terminalReason,
+                timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
+                title: event.label,
+                unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
+                updatedAt: event.occurredAt ?? Date.now(),
+              };
 
             const existingIndex = previous.findIndex((task) => task.id === event.taskId);
             if (existingIndex === -1) {
@@ -1994,7 +2843,12 @@ export default function ChatPage() {
         }
 
         setRightPanelState((prev) => {
-          if (event.type === 'tool_call_delta' || event.type === 'done' || event.type === 'error') {
+          if (
+            event.type === 'tool_call_delta' ||
+            event.type === 'tool_search' ||
+            event.type === 'done' ||
+            event.type === 'error'
+          ) {
             return applyChatRightPanelChunk(prev, event);
           }
           return applyChatRightPanelEvent(prev, event);
@@ -2017,6 +2871,13 @@ export default function ChatPage() {
           setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
         }
         accumulated += delta;
+        // Mirror the delta into the ordered segment list so the live render
+        // reflects the true wire-arrival order. Coalesces consecutive text
+        // deltas into a single trailing text segment if no other segment
+        // (reasoning / tool) was recorded between them.
+        const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+        accumulatedSegments = appendStreamingTextDelta(accumulatedSegments, delta, messageId);
+        scheduleSegmentsFlush();
         streamRevealTargetRef.current = accumulated;
         streamRevealTargetCodePointsRef.current.push(...Array.from(delta));
         const shouldRevealStructuredContentImmediately =
@@ -2039,10 +2900,46 @@ export default function ChatPage() {
           return;
         }
 
+        if (liveToolCalls.size > 0) {
+          closeCurrentStreamingRoundIntoMessage(Date.now());
+        }
+
         accumulatedThinkingBlocks = appendStreamingThinkingChunk(accumulatedThinkingBlocks, chunk);
         accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
-        setStreamThinkingBlocks(accumulatedThinkingBlocks);
-        setStreamThinkingBuffer(accumulatedThinking);
+        // Mirror reasoning chunks into the ordered segment list. Each
+        // reasoning block has a stable identity (itemId/outputIndex/...) so
+        // late deltas of the same block extend the existing segment in place
+        // even if text/tool segments arrived between two reasoning chunks.
+        const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+        accumulatedSegments = appendStreamingThinkingDelta(
+          accumulatedSegments,
+          reasoningSegmentMeta,
+          chunk,
+          messageId,
+        );
+        scheduleSegmentsFlush();
+        // Coalesce per-chunk setState into one React commit per animation frame
+        // — SSE `EventSource.onmessage` runs outside React's batching scope, so
+        // an unthrottled setState here would force a synchronous render (incl.
+        // markdown / rehype-highlight) for every reasoning delta, blocking the
+        // main thread for 100–400ms on dense streams.
+        scheduleThinkingFlush();
+      },
+      onThinkingEnd: (chunk) => {
+        if (activeSessionRef.current !== sid || stoppingStreamRef.current) {
+          return;
+        }
+        accumulatedThinkingBlocks = markStreamingThinkingChunkEnded(
+          accumulatedThinkingBlocks,
+          chunk,
+        );
+        accumulatedSegments = markStreamingReasoningSegmentEnded(
+          accumulatedSegments,
+          reasoningSegmentMeta,
+          chunk,
+        );
+        scheduleSegmentsFlush();
+        scheduleThinkingFlush();
       },
       onToolCall: (chunk) => {
         if (activeSessionRef.current !== sid) {
@@ -2085,11 +2982,24 @@ export default function ChatPage() {
           toolCallIds.size > 0;
         if (hasRenderableAssistantReply || !wasCancelled) {
           const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const { content, parts } = buildAssistantTraceMessage(
-            msgId,
-            finalAccumulatedText,
-            traceFinalStatus,
-          );
+          const {
+            content,
+            parts: legacyParts,
+            reasoningBlocksEndedFlags,
+            reasoningBlocksDurationsMs,
+          } = buildAssistantTraceMessage(msgId, finalAccumulatedText, traceFinalStatus);
+          // Prefer the ordered segment list as the canonical parts source so
+          // the final committed message reflects the wire-arrival order. The
+          // legacy `partsFromAssistantTrace`-built parts are kept as a
+          // fallback for paths that don't accumulate segments (e.g. pre-flush
+          // races where text arrived but no segment was opened yet).
+          const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
+          // After round-boundary commits, only the final round's tool calls are
+          // attached to this message; earlier rounds were already persisted as
+          // independent assistant messages by closeCurrentStreamingRoundIntoMessage.
+          const finalRoundToolCallIds = new Set(liveToolCalls.keys());
+          const shouldAttachFirstTokenLatency =
+            firstTokenObservedAt !== null && !firstTokenLatencyAttached;
           setMessages((prev) =>
             replaceOrAppendStreamedAssistantMessage(
               prev,
@@ -2098,30 +3008,47 @@ export default function ChatPage() {
                 role: 'assistant',
                 content,
                 parts,
+                ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+                ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
                 createdAt: finishedAt,
-                durationMs: finishedAt - requestStartedAt,
+                durationMs: finishedAt - currentRoundStartedAt,
                 stopReason: resolvedStopReason,
                 tokenEstimate: estimateTokenCount(
                   [accumulatedThinking, finalAccumulatedText]
                     .filter((item) => item.trim().length > 0)
                     .join('\n\n'),
                 ),
-                toolCallCount: toolCallIds.size,
+                toolCallCount: finalRoundToolCallIds.size,
                 providerId: requestProviderId,
                 model: requestModelLabel,
                 agentId: streamAgentId || requestAgentId,
-                firstTokenLatencyMs:
-                  firstTokenObservedAt !== null
-                    ? firstTokenObservedAt - requestStartedAt
-                    : undefined,
+                ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+                  ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                  : {}),
                 status: 'completed',
               },
-              toolCallIds,
+              finalRoundToolCallIds,
             ),
           );
+          if (shouldAttachFirstTokenLatency) {
+            firstTokenLatencyAttached = true;
+          }
         } else if (wasCancelled) {
           const msgId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const { content, parts } = buildAssistantTraceMessage(msgId, '已停止', traceFinalStatus);
+          const {
+            content,
+            parts: legacyParts,
+            reasoningBlocksEndedFlags,
+            reasoningBlocksDurationsMs,
+          } = buildAssistantTraceMessage(msgId, '已停止', traceFinalStatus);
+          // Prefer the wire-ordered segments collected so far; only fall back
+          // to the legacy reasoning → text → tool flattening when no segments
+          // were captured (e.g. cancellation before any chunk arrived).
+          const parts =
+            accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
+          const finalRoundToolCallIds = new Set(liveToolCalls.keys());
+          const shouldAttachFirstTokenLatency =
+            firstTokenObservedAt !== null && !firstTokenLatencyAttached;
           setMessages((prev) =>
             replaceOrAppendStreamedAssistantMessage(
               prev,
@@ -2130,33 +3057,39 @@ export default function ChatPage() {
                 role: 'assistant',
                 content,
                 parts,
+                ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+                ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
                 createdAt: finishedAt,
-                durationMs: finishedAt - requestStartedAt,
+                durationMs: finishedAt - currentRoundStartedAt,
                 stopReason: resolvedStopReason,
                 tokenEstimate: estimateTokenCount(
                   [accumulatedThinking, '已停止']
                     .filter((item) => item.trim().length > 0)
                     .join('\n\n'),
                 ),
-                toolCallCount: toolCallIds.size,
+                toolCallCount: finalRoundToolCallIds.size,
                 providerId: requestProviderId,
                 model: requestModelLabel,
                 agentId: streamAgentId || requestAgentId,
-                firstTokenLatencyMs:
-                  firstTokenObservedAt !== null
-                    ? firstTokenObservedAt - requestStartedAt
-                    : undefined,
+                ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+                  ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                  : {}),
                 status: 'completed',
               },
-              toolCallIds,
+              finalRoundToolCallIds,
             ),
           );
+          if (shouldAttachFirstTokenLatency) {
+            firstTokenLatencyAttached = true;
+          }
         }
         setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
         resetStreamState();
         window.setTimeout(() => {
-          void loadCurrentSessionSnapshot(sid).catch(() => undefined);
-        }, 0);
+          void loadCurrentSessionSnapshot(sid, {
+            messageLimit: INITIAL_TURN_LIMIT,
+          }).catch(() => undefined);
+        }, 500);
         requestSessionListRefresh();
       },
       onError: (code: string, message?: string) => {
@@ -2177,6 +3110,9 @@ export default function ChatPage() {
           errorContent,
           'error',
         );
+        const errorRoundToolCallIds = new Set(liveToolCalls.keys());
+        const shouldAttachFirstTokenLatency =
+          firstTokenObservedAt !== null && !firstTokenLatencyAttached;
         setMessages((prev) => [
           ...prev,
           {
@@ -2185,22 +3121,26 @@ export default function ChatPage() {
             content: errorTraceContent,
             parts: errorParts,
             createdAt: finishedAt,
-            durationMs: finishedAt - requestStartedAt,
+            durationMs: finishedAt - currentRoundStartedAt,
             stopReason: 'error',
             tokenEstimate: estimateTokenCount(
               [accumulatedThinking, errorContent]
                 .filter((item) => item.trim().length > 0)
                 .join('\n\n'),
             ),
-            toolCallCount: toolCallIds.size,
+            toolCallCount: errorRoundToolCallIds.size,
             providerId: requestProviderId,
             model: requestModelLabel,
             agentId: requestAgentId,
-            firstTokenLatencyMs:
-              firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
+            ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+              ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+              : {}),
             status: 'error',
           },
         ]);
+        if (shouldAttachFirstTokenLatency) {
+          firstTokenLatencyAttached = true;
+        }
         setSessionStateStatus('idle');
         resetStreamState();
         setStreamError(message ? `${code}: ${message}` : code);
@@ -2415,11 +3355,31 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
-    const shouldAttemptAttach =
-      Boolean(currentSessionId) && sessionStateStatus === 'running' && isPageActive && !streaming;
+    const attachEligibility = {
+      activeGatewayStreamSessionId,
+      currentSessionId,
+      isPageActive,
+      isSessionSnapshotReady,
+      recoveryActiveStreamPresent: recoveryActiveStream !== null,
+      sessionModesHydrated,
+      sessionStateStatus,
+      streaming,
+    };
+    const shouldAttemptAttach = shouldAttemptAttachToSession(attachEligibility);
+    // The effect re-runs on every token delta because `streaming` /
+    // `sessionStateStatus` mutate frequently, so log only when the decision
+    // surface actually changes — otherwise the console becomes unreadable
+    // during normal streams. Track the last signature on the ref attached
+    // earlier in this component instead of allocating a new ref per render.
+    const eligibilitySignature = `${currentSessionId ?? 'none'}|${shouldAttemptAttach ? 1 : 0}|${attachEligibility.sessionStateStatus ?? 'null'}|${attachEligibility.streaming ? 1 : 0}|${attachEligibility.recoveryActiveStreamPresent ? 1 : 0}|${attachEligibility.activeGatewayStreamSessionId ?? 'null'}|${attachEligibility.isSessionSnapshotReady ? 1 : 0}|${attachEligibility.sessionModesHydrated ? 1 : 0}|${attachEligibility.isPageActive ? 1 : 0}|${attachAttemptedSessionRef.current ?? 'none'}`;
+    if (attachEligibilitySignatureRef.current !== eligibilitySignature) {
+      attachEligibilitySignatureRef.current = eligibilitySignature;
+      console.log('[ATTACH_ELIGIBILITY]', currentSessionId, { shouldAttemptAttach, ...attachEligibility, attachAttempted: attachAttemptedSessionRef.current });
+    }
 
     if (!shouldAttemptAttach || !currentSessionId) {
-      if (!currentSessionId || sessionStateStatus !== 'running' || !isPageActive) {
+      cancelAttachRetry();
+      if (shouldResetAttachAttempt(attachEligibility)) {
         attachAttemptedSessionRef.current = null;
       }
       return;
@@ -2429,6 +3389,7 @@ export default function ChatPage() {
       return;
     }
     attachAttemptedSessionRef.current = currentSessionId;
+    console.log('[ATTACH_ELIGIBILITY] proceeding with attach for', currentSessionId);
 
     const sid = currentSessionId;
     const attachSessionViewEpoch = currentSessionViewRef.current.epoch;
@@ -2446,78 +3407,325 @@ export default function ChatPage() {
     let accumulated = initialText;
     let accumulatedThinking = initialThinking;
     let accumulatedThinkingBlocks = initialThinkingBlocks;
+    let accumulatedUsage = initialUsage;
+    // Mirror the live-stream path: keep a wire-faithful ordered segment list
+    // so attach-rendered messages preserve the same reasoning/text/tool
+    // interleaving as the gateway recorded. Initial value is empty because
+    // the recovery snapshot's reasoning/text/toolCalls are reconstructed via
+    // ensureAttachStateInitialized below.
+    let accumulatedSegments: ChatMessagePart[] = [];
+    const reasoningSegmentMeta = new Map<string, { blockKey: string }>();
+    let pendingThinkingFlushFrame: number | null = null;
+    let pendingSegmentsFlushFrame: number | null = null;
+    const flushThinkingState = () => {
+      pendingThinkingFlushFrame = null;
+      // Late RAF after attach was torn down (session switch / cancel /
+      // round-close) must not overwrite the cleared buffer with stale text.
+      if (
+        !streamingRef.current ||
+        !isCurrentSessionRequest(sid, attachSessionViewEpoch)
+      ) {
+        return;
+      }
+      setStreamThinkingBlocks(accumulatedThinkingBlocks);
+      setStreamThinkingBuffer(accumulatedThinking);
+    };
+    const scheduleThinkingFlush = () => {
+      if (pendingThinkingFlushFrame !== null) return;
+      pendingThinkingFlushFrame = window.requestAnimationFrame(flushThinkingState);
+    };
+    const cancelThinkingFlush = () => {
+      if (pendingThinkingFlushFrame !== null) {
+        window.cancelAnimationFrame(pendingThinkingFlushFrame);
+        pendingThinkingFlushFrame = null;
+      }
+    };
+    const flushSegmentsState = () => {
+      pendingSegmentsFlushFrame = null;
+      if (
+        !streamingRef.current ||
+        !isCurrentSessionRequest(sid, attachSessionViewEpoch)
+      ) {
+        return;
+      }
+      setStreamingSegments(accumulatedSegments);
+    };
+    const scheduleSegmentsFlush = () => {
+      if (pendingSegmentsFlushFrame !== null) return;
+      pendingSegmentsFlushFrame = window.requestAnimationFrame(flushSegmentsState);
+    };
+    const cancelSegmentsFlush = () => {
+      if (pendingSegmentsFlushFrame !== null) {
+        window.cancelAnimationFrame(pendingSegmentsFlushFrame);
+        pendingSegmentsFlushFrame = null;
+      }
+    };
     let firstTokenObservedAt: number | null = null;
     let pausedForPermission = false;
     let pausedForQuestion = false;
+    let currentRoundStartedAt = requestStartedAt;
+    let firstTokenLatencyAttached = false;
     const toolCallIds = new Set<string>();
     const liveToolCalls = new Map<string, LiveToolCallState>();
-    const buildAttachTraceMessage = (
-      messageId: string,
-      textContent: string,
-      finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
-    ): { content: string; parts: ChatMessagePart[] } => {
-      const toolCalls = Array.from(liveToolCalls.values()).map((toolCallState) => {
-        const nextToolState =
-          finalStatus === 'error' && toolCallState.status === 'streaming'
-            ? { ...toolCallState, isError: true, status: 'error' as const }
-            : finalStatus === 'completed' && toolCallState.status === 'streaming'
-              ? { ...toolCallState, status: 'completed' as const }
-              : (finalStatus === 'cancelled' || finalStatus === 'paused') &&
-                  toolCallState.status === 'streaming'
-                ? { ...toolCallState, status: 'paused' as const }
-                : toolCallState;
+    const buildAttachToolCalls = (): AssistantTraceToolCall[] => {
+      return Array.from(liveToolCalls.values()).map((toolCallState) => {
         const hasPendingPermission = hasActivePendingPermissionRequest({
-          isError: nextToolState.isError,
-          pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
-          resumedAfterApproval: nextToolState.resumedAfterApproval,
-          status: nextToolState.status,
+          isError: toolCallState.isError,
+          pendingPermissionRequestId: toolCallState.pendingPermissionRequestId,
+          resumedAfterApproval: toolCallState.resumedAfterApproval,
+          status: toolCallState.status,
         });
         const status: 'running' | 'paused' | 'completed' | 'failed' =
-          nextToolState.status === 'error'
+          toolCallState.status === 'error'
             ? 'failed'
-            : nextToolState.status === 'paused'
+            : toolCallState.status === 'paused'
               ? 'paused'
-              : nextToolState.status === 'completed'
+              : toolCallState.status === 'completed'
                 ? 'completed'
                 : 'running';
 
         const durationMs =
-          nextToolState.completedAt && nextToolState.createdAt
-            ? nextToolState.completedAt - nextToolState.createdAt
+          toolCallState.completedAt && toolCallState.createdAt
+            ? toolCallState.completedAt - toolCallState.createdAt
             : undefined;
 
         return {
-          kind: resolveAssistantCapabilityKind(nextToolState.toolName),
-          toolCallId: nextToolState.toolCallId,
-          toolName: nextToolState.toolName,
-          input: parseToolCallInputText(nextToolState.inputText),
-          output: nextToolState.output,
-          isError: nextToolState.isError,
+          kind: resolveAssistantCapabilityKind(toolCallState.toolName),
+          toolCallId: toolCallState.toolCallId,
+          toolName: toolCallState.toolName,
+          input: {
+            ...parseToolCallInputText(toolCallState.inputText),
+            ...(toolCallState.batchProgress ? { _batchProgress: toolCallState.batchProgress } : {}),
+          },
+          output: toolCallState.output,
+          isError: toolCallState.isError,
           ...(hasPendingPermission
-            ? { pendingPermissionRequestId: nextToolState.pendingPermissionRequestId }
+            ? { pendingPermissionRequestId: toolCallState.pendingPermissionRequestId }
             : {}),
-          resumedAfterApproval: nextToolState.resumedAfterApproval,
+          resumedAfterApproval: toolCallState.resumedAfterApproval,
           status,
           ...(durationMs !== undefined ? { durationMs } : {}),
-        };
+        } satisfies AssistantTraceToolCall;
+      });
+    };
+    const buildAttachTraceMessage = (
+      messageId: string,
+      textContent: string,
+      finalStatus?: 'completed' | 'error' | 'cancelled' | 'paused',
+    ): {
+      content: string;
+      parts: ChatMessagePart[];
+      reasoningBlocksEndedFlags?: boolean[];
+      reasoningBlocksDurationsMs?: number[];
+    } => {
+      const toolCalls = buildAttachToolCalls().map((toolCallState) => {
+        if (finalStatus === 'error' && toolCallState.status === 'running') {
+          return { ...toolCallState, isError: true, status: 'failed' as const };
+        }
+
+        if (finalStatus === 'completed' && toolCallState.status === 'running') {
+          return { ...toolCallState, status: 'completed' as const };
+        }
+
+        if (
+          (finalStatus === 'cancelled' || finalStatus === 'paused') &&
+          toolCallState.status === 'running'
+        ) {
+          return { ...toolCallState, status: 'paused' as const };
+        }
+
+        return toolCallState;
       });
 
-      const reasoningBlocks = accumulatedThinking.trim().length > 0 ? [accumulatedThinking] : [];
+      const reasoningBlocks = extractStreamingThinkingTexts(accumulatedThinkingBlocks);
+      const reasoningBlocksEndedFlags =
+        reasoningBlocks.length > 0
+          ? extractStreamingThinkingEndedFlags(accumulatedThinkingBlocks)
+          : undefined;
+      const reasoningBlocksDurationsMs =
+        reasoningBlocks.length > 0
+          ? extractStreamingThinkingDurations(accumulatedThinkingBlocks)
+          : undefined;
+      const reasoningBlocksTimings =
+        reasoningBlocks.length > 0
+          ? accumulatedThinkingBlocks
+              .filter((block) => block.text.trim().length > 0)
+              .map((block) => ({
+                ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
+                ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
+              }))
+          : undefined;
+      const hasPersistableTiming =
+        reasoningBlocksTimings?.some(
+          (entry) => typeof entry.startedAt === 'number' || typeof entry.endedAt === 'number',
+        ) ?? false;
       const tracePayload = {
         ...(recoveredModifiedFilesSummary
           ? { modifiedFilesSummary: recoveredModifiedFilesSummary }
           : {}),
         ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
+        ...(hasPersistableTiming && reasoningBlocksTimings
+          ? { reasoningBlocksTimings }
+          : {}),
         text: textContent,
         toolCalls,
       };
-      const content =
-        reasoningBlocks.length === 0 && toolCalls.length === 0
-          ? textContent
-          : createAssistantTraceContent(tracePayload);
+      const content = textContent;
       const parts = partsFromAssistantTrace(messageId, tracePayload);
-      return { content, parts };
+      return {
+        content,
+        parts,
+        ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+        ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
+      };
     };
+
+    // Mirror the main stream handler's round-boundary commit logic so attach
+    // (session-recovery) keeps the same per-round assistant-message structure
+    // the gateway persists.
+    const closeCurrentAttachRoundIntoMessage = (timestamp: number) => {
+      const closingMessageId = currentAssistantStreamMessageIdRef.current;
+      if (!closingMessageId) return;
+      if (
+        liveToolCalls.size === 0 &&
+        accumulatedThinking.trim().length === 0 &&
+        accumulated.trim().length === 0
+      ) {
+        return;
+      }
+      // Cancel pending RAF before resetting thinking buffers below.
+      cancelThinkingFlush();
+      cancelSegmentsFlush();
+      const {
+        content,
+        parts: legacyParts,
+        reasoningBlocksEndedFlags,
+        reasoningBlocksDurationsMs,
+      } = buildAttachTraceMessage(closingMessageId, accumulated, 'completed');
+      // Prefer ordered segments so the committed attach round mirrors the
+      // gateway's wire ordering. Fall back to the legacy reordered parts
+      // only when no segments accumulated (defensive — should not happen on
+      // normal paths since `ensureAttachStateInitialized` has run by now).
+      const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
+      const roundToolCallIds = new Set(liveToolCalls.keys());
+      const shouldAttachFirstTokenLatency =
+        firstTokenObservedAt !== null && !firstTokenLatencyAttached;
+      setMessages((prev) =>
+        replaceOrAppendStreamedAssistantMessage(
+          prev,
+          {
+            id: closingMessageId,
+            role: 'assistant',
+            content,
+            parts,
+            ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+            ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
+            createdAt: timestamp,
+            durationMs: timestamp - currentRoundStartedAt,
+            tokenEstimate: estimateTokenCount(
+              [accumulatedThinking, accumulated]
+                .filter((item) => item.trim().length > 0)
+                .join('\n\n'),
+            ),
+            toolCallCount: roundToolCallIds.size,
+            providerId: requestProviderId,
+            model: requestModelLabel,
+            agentId: requestAgentId,
+            ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+              ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+              : {}),
+            status: 'completed',
+          },
+          roundToolCallIds,
+        ),
+      );
+      if (shouldAttachFirstTokenLatency) {
+        firstTokenLatencyAttached = true;
+      }
+
+      accumulated = '';
+      accumulatedThinking = '';
+      accumulatedThinkingBlocks = [];
+      accumulatedSegments = [];
+      reasoningSegmentMeta.clear();
+      liveToolCalls.clear();
+      streamRevealTargetRef.current = '';
+      streamRevealVisibleRef.current = '';
+      streamRevealTargetCodePointsRef.current = [];
+      streamRevealVisibleCodePointCountRef.current = 0;
+      streamRevealNextAllowedAtRef.current = 0;
+      setStreamBuffer('');
+      setStreamThinkingBuffer('');
+      setStreamingSegments([]);
+      setStreamThinkingBlocks([]);
+      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+      currentRoundStartedAt = timestamp;
+    };
+
+    const handleAttachReconnect = () => {
+      handleInterruptedAttachStream({
+        actions: {
+          cancelPendingRevealAnimation: () => {
+            if (pendingStreamRevealFrameRef.current !== null) {
+              cancelAnimationFrame(pendingStreamRevealFrameRef.current);
+              pendingStreamRevealFrameRef.current = null;
+            }
+          },
+          clearCurrentAssistantStreamMessageId: () => {
+            currentAssistantStreamMessageIdRef.current = null;
+          },
+          clearStreamingBuffers: () => {
+            setStreamBuffer('');
+            setStreamThinkingBuffer('');
+            setStreamThinkingBlocks([]);
+            setStreamingSegments([]);
+          },
+          isCurrentSessionRequest,
+          loadCurrentSessionSnapshot,
+          requestSessionListRefresh,
+          resetAttachAttempt: () => {
+            attachAttemptedSessionRef.current = null;
+          },
+          resetRevealState: () => {
+            stoppingStreamRef.current = false;
+            streamRevealTargetRef.current = '';
+            streamRevealVisibleRef.current = '';
+            streamRevealTargetCodePointsRef.current = [];
+            streamRevealVisibleCodePointCountRef.current = 0;
+            streamRevealNextAllowedAtRef.current = 0;
+            streamingRef.current = false;
+          },
+          scheduleAttachRetry,
+          setActiveStreamFirstTokenLatencyMs,
+          setActiveStreamStartedAt,
+          setRecoveredStreamSnapshot,
+          setSessionStateStatus,
+          setStoppingStream,
+          setStreaming,
+        },
+        attachSessionViewEpoch,
+        sessionId: sid,
+        state: {
+          accumulatedText: accumulated,
+          accumulatedThinkingBlocks,
+          accumulatedUsage,
+          attachStateInitialized,
+          currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
+          ...(recoveredModifiedFilesSummary
+            ? { recoveredModifiedFilesSummary }
+            : {}),
+          requestStartedAt,
+          toolCalls: buildAttachToolCalls(),
+        },
+      });
+    };
+    const attachReconnectWiring = createAttachStreamReconnectWiring({
+      attachSessionViewEpoch,
+      handleAttachReconnect,
+      isCurrentSessionRequest,
+      requestSessionListRefresh,
+      sessionId: sid,
+    });
 
     const ensureAttachStateInitialized = () => {
       if (attachStateInitialized) {
@@ -2563,6 +3771,75 @@ export default function ChatPage() {
           toolName: recoveredToolCall.toolName,
         });
       }
+      // Seed accumulatedSegments from the recovery snapshot. The snapshot
+      // schema (text / thinkingBlocks / toolCalls) does not preserve true
+      // event order, so we reconstruct using the legacy reasoning → text →
+      // tool ordering. New stream events arriving after this point will
+      // append in true wire order. After the attach round eventually closes,
+      // `loadCurrentSessionSnapshot` reloads from DB which uses
+      // `partsFromOrderedAssistantContent` and thus shows the gateway's
+      // authoritative ordering.
+      const seededMessageId = currentAssistantStreamMessageIdRef.current ?? 'recovered-stream';
+      const seededSegments: ChatMessagePart[] = [];
+      for (const [index, block] of initialThinkingBlocks.entries()) {
+        if (block.text.trim().length === 0) continue;
+        const partId = `${seededMessageId}:reasoning:${index}`;
+        reasoningSegmentMeta.set(partId, { blockKey: block.key });
+        seededSegments.push({
+          id: partId,
+          type: 'reasoning',
+          text: block.text,
+          ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
+          ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
+        });
+      }
+      if (initialText.trim().length > 0) {
+        seededSegments.push({
+          id: `${seededMessageId}:text`,
+          type: 'text',
+          text: initialText,
+        });
+      }
+      for (const [, toolCallState] of liveToolCalls.entries()) {
+        const inputText = toolCallState.inputText.trim();
+        let parsedInput: Record<string, unknown> = {};
+        if (inputText.length > 0) {
+          try {
+            parsedInput = JSON.parse(inputText) as Record<string, unknown>;
+          } catch {
+            parsedInput = {};
+          }
+        }
+        const status: 'running' | 'paused' | 'completed' | 'failed' =
+          toolCallState.status === 'error'
+            ? 'failed'
+            : toolCallState.status === 'paused'
+              ? 'paused'
+              : toolCallState.status === 'completed'
+                ? 'completed'
+                : 'running';
+        seededSegments.push({
+          id: toolCallState.toolCallId,
+          type: 'tool',
+          toolCallId: toolCallState.toolCallId,
+          toolName: toolCallState.toolName,
+          input: parsedInput,
+          status,
+          ...(toolCallState.output !== undefined ? { output: toolCallState.output } : {}),
+          ...(toolCallState.isError !== undefined ? { isError: toolCallState.isError } : {}),
+          ...(toolCallState.pendingPermissionRequestId
+            ? { pendingPermissionRequestId: toolCallState.pendingPermissionRequestId }
+            : {}),
+          ...(toolCallState.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+          kind: resolveAssistantCapabilityKind(toolCallState.toolName) as
+            | 'agent'
+            | 'mcp'
+            | 'skill'
+            | 'tool'
+            | undefined,
+        });
+      }
+      accumulatedSegments = seededSegments;
       stoppingStreamRef.current = false;
       streamingRef.current = true;
       setStreaming(true);
@@ -2574,6 +3851,7 @@ export default function ChatPage() {
       setStreamBuffer(initialText);
       setStreamThinkingBuffer(initialThinking);
       setStreamThinkingBlocks(initialThinkingBlocks);
+      setStreamingSegments(seededSegments);
       setRecoveredStreamSnapshot(null);
       streamRevealTargetRef.current = initialText;
       streamRevealVisibleRef.current = initialText;
@@ -2590,21 +3868,60 @@ export default function ChatPage() {
           }
           ensureAttachStateInitialized();
 
-          if (event.type === 'tool_call_delta' || event.type === 'tool_result') {
+          if (
+            event.type === 'tool_call_delta' ||
+            event.type === 'tool_result' ||
+            event.type === 'tool_progress'
+          ) {
             toolCallIds.add(event.toolCallId);
           }
 
           if (event.type === 'tool_call_delta') {
             const previous = liveToolCalls.get(event.toolCallId);
+            const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
             liveToolCalls.set(event.toolCallId, {
               createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
-              inputText: `${previous?.inputText ?? ''}${event.inputDelta}`,
+              inputText: nextInputText,
               output: previous?.output,
               isError: previous?.isError,
               resumedAfterApproval: previous?.resumedAfterApproval,
               toolCallId: event.toolCallId,
               status: 'streaming',
               toolName: event.toolName,
+            });
+            // Mirror into the attach segment list so re-rendered messages
+            // preserve the gateway's wire ordering. First delta opens a new
+            // tool segment at the current end; later deltas update its input.
+            accumulatedSegments = upsertStreamingToolSegment(accumulatedSegments, {
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              input: parseToolCallInputText(nextInputText),
+              status: 'running',
+              kind: resolveAssistantCapabilityKind(event.toolName) as
+                | 'agent'
+                | 'mcp'
+                | 'skill'
+                | 'tool'
+                | undefined,
+            });
+            scheduleSegmentsFlush();
+          }
+
+          if (event.type === 'tool_progress') {
+            const previous = liveToolCalls.get(event.toolCallId);
+            liveToolCalls.set(event.toolCallId, {
+              createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
+              inputText: previous?.inputText ?? '',
+              output: previous?.output,
+              isError: previous?.isError,
+              toolCallId: event.toolCallId,
+              status: 'streaming',
+              toolName: event.toolName,
+              batchProgress: {
+                subTools: event.subTools,
+                completedCount: event.completedCount,
+                totalCount: event.totalCount,
+              },
             });
           }
 
@@ -2626,6 +3943,17 @@ export default function ChatPage() {
               status: hasPendingPermission ? 'paused' : event.isError ? 'error' : 'completed',
               toolName: event.toolName,
             });
+            accumulatedSegments = applyToolResultToStreamingSegment(accumulatedSegments, {
+              toolCallId: event.toolCallId,
+              output: event.output,
+              isError: hasPendingPermission ? false : event.isError,
+              status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
+              ...(hasPendingPermission && rawPendingPermissionRequestId
+                ? { pendingPermissionRequestId: rawPendingPermissionRequestId }
+                : {}),
+              ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+            });
+            scheduleSegmentsFlush();
             setMessages((previousMessages) => {
               const nextMessages = applyToolResultToLocalAssistantMessages(previousMessages, event);
               return typeof rawPendingPermissionRequestId === 'string' &&
@@ -2648,6 +3976,7 @@ export default function ChatPage() {
           }
 
           if (event.type === 'usage') {
+            accumulatedUsage = mergeChatBackendUsageSnapshot(accumulatedUsage, event);
             setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
           }
 
@@ -2695,6 +4024,8 @@ export default function ChatPage() {
                       : event.status,
                 subtaskCount: existingTask?.subtaskCount ?? 0,
                 tags: existingTask?.tags ?? [],
+                terminalReason: event.reason ?? existingTask?.terminalReason,
+                timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
                 title: event.label,
                 unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
                 updatedAt: event.occurredAt ?? Date.now(),
@@ -2779,6 +4110,7 @@ export default function ChatPage() {
           setRightPanelState((prev) => {
             if (
               event.type === 'tool_call_delta' ||
+              event.type === 'tool_search' ||
               event.type === 'done' ||
               event.type === 'error'
             ) {
@@ -2810,6 +4142,13 @@ export default function ChatPage() {
             setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
           }
           accumulated += delta;
+          // Mirror into the ordered attach segment list so live re-attach
+          // renders preserve wire-arrival order. Coalesces consecutive text
+          // deltas with the trailing text segment when no other segment was
+          // recorded between them.
+          const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+          accumulatedSegments = appendStreamingTextDelta(accumulatedSegments, delta, messageId);
+          scheduleSegmentsFlush();
           streamRevealTargetRef.current = accumulated;
           streamRevealTargetCodePointsRef.current.push(...Array.from(delta));
           const shouldRevealStructuredContentImmediately =
@@ -2832,13 +4171,41 @@ export default function ChatPage() {
             return;
           }
           ensureAttachStateInitialized();
+          if (liveToolCalls.size > 0) {
+            closeCurrentAttachRoundIntoMessage(Date.now());
+          }
           accumulatedThinkingBlocks = appendStreamingThinkingChunk(
             accumulatedThinkingBlocks,
             chunk,
           );
           accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
-          setStreamThinkingBlocks(accumulatedThinkingBlocks);
-          setStreamThinkingBuffer(accumulatedThinking);
+          const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
+          accumulatedSegments = appendStreamingThinkingDelta(
+            accumulatedSegments,
+            reasoningSegmentMeta,
+            chunk,
+            messageId,
+          );
+          scheduleSegmentsFlush();
+          // RAF-batched: see comment in main stream handler.
+          scheduleThinkingFlush();
+        },
+        onThinkingEnd: (chunk) => {
+          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch) || stoppingStreamRef.current) {
+            return;
+          }
+          ensureAttachStateInitialized();
+          accumulatedThinkingBlocks = markStreamingThinkingChunkEnded(
+            accumulatedThinkingBlocks,
+            chunk,
+          );
+          accumulatedSegments = markStreamingReasoningSegmentEnded(
+            accumulatedSegments,
+            reasoningSegmentMeta,
+            chunk,
+          );
+          scheduleSegmentsFlush();
+          scheduleThinkingFlush();
         },
         onToolCall: (chunk) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
@@ -2881,11 +4248,22 @@ export default function ChatPage() {
           if (hasRenderableAssistantReply || !wasCancelled) {
             const attachMsgId =
               currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-            const { content, parts } = buildAttachTraceMessage(
-              attachMsgId,
-              finalAccumulatedText,
-              traceFinalStatus,
-            );
+            const {
+              content,
+              parts: legacyParts,
+              reasoningBlocksEndedFlags,
+              reasoningBlocksDurationsMs,
+            } = buildAttachTraceMessage(attachMsgId, finalAccumulatedText, traceFinalStatus);
+            // Prefer ordered segments so the final attach-committed message
+            // mirrors gateway wire ordering. legacyParts is the fallback for
+            // edge cases where no segments accumulated.
+            const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
+            // After round-boundary commits, only the final round's tool calls are
+            // attached to this message; earlier rounds were already persisted as
+            // independent assistant messages by closeCurrentAttachRoundIntoMessage.
+            const finalRoundToolCallIds = new Set(liveToolCalls.keys());
+            const shouldAttachFirstTokenLatency =
+              firstTokenObservedAt !== null && !firstTokenLatencyAttached;
             setMessages((prev) =>
               replaceOrAppendStreamedAssistantMessage(
                 prev,
@@ -2894,40 +4272,44 @@ export default function ChatPage() {
                   role: 'assistant',
                   content,
                   parts,
+                  ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+                  ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
                   createdAt: finishedAt,
-                  durationMs: finishedAt - requestStartedAt,
+                  durationMs: finishedAt - currentRoundStartedAt,
                   stopReason: resolvedStopReason,
                   tokenEstimate: estimateTokenCount(
                     [accumulatedThinking, finalAccumulatedText]
                       .filter((item) => item.trim().length > 0)
                       .join('\n\n'),
                   ),
-                  toolCallCount: toolCallIds.size,
+                  toolCallCount: finalRoundToolCallIds.size,
                   providerId: requestProviderId,
                   model: requestModelLabel,
                   agentId: streamAgentId || requestAgentId,
-                  firstTokenLatencyMs:
-                    firstTokenObservedAt !== null
-                      ? firstTokenObservedAt - requestStartedAt
-                      : undefined,
+                  ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+                    ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                    : {}),
                   status: 'completed',
                 },
-                toolCallIds,
+                finalRoundToolCallIds,
               ),
             );
+            if (shouldAttachFirstTokenLatency) {
+              firstTokenLatencyAttached = true;
+            }
           }
           setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
           resetStreamState();
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
+              messageLimit: INITIAL_TURN_LIMIT,
             }).catch(() => undefined);
-          }, 0);
+          }, 500);
           requestSessionListRefresh();
         },
         onError: (code, message) => {
-          if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
-            requestSessionListRefresh();
+          if (attachReconnectWiring.handleAttachDisconnectError(code) === 'handled') {
             return;
           }
           ensureAttachStateInitialized();
@@ -2940,11 +4322,15 @@ export default function ChatPage() {
           logger.error('attach stream error', message ? `${code}: ${message}` : code);
           const attachErrorMsgId =
             currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-          const { content: attachErrorContent, parts: attachErrorParts } = buildAttachTraceMessage(
-            attachErrorMsgId,
-            errorContent,
-            'error',
-          );
+          const {
+            content: attachErrorContent,
+            parts: attachErrorParts,
+            reasoningBlocksEndedFlags: attachErrorEndedFlags,
+            reasoningBlocksDurationsMs: attachErrorDurationsMs,
+          } = buildAttachTraceMessage(attachErrorMsgId, errorContent, 'error');
+          const errorRoundToolCallIds = new Set(liveToolCalls.keys());
+          const shouldAttachFirstTokenLatency =
+            firstTokenObservedAt !== null && !firstTokenLatencyAttached;
           setMessages((prev) => [
             ...prev,
             {
@@ -2952,33 +4338,47 @@ export default function ChatPage() {
               role: 'assistant',
               content: attachErrorContent,
               parts: attachErrorParts,
+              ...(attachErrorEndedFlags
+                ? { reasoningBlocksEndedFlags: attachErrorEndedFlags }
+                : {}),
+              ...(attachErrorDurationsMs
+                ? { reasoningBlocksDurationsMs: attachErrorDurationsMs }
+                : {}),
               createdAt: finishedAt,
-              durationMs: finishedAt - requestStartedAt,
+              durationMs: finishedAt - currentRoundStartedAt,
               stopReason: 'error',
               tokenEstimate: estimateTokenCount(
                 [accumulatedThinking, errorContent]
                   .filter((item) => item.trim().length > 0)
                   .join('\n\n'),
               ),
-              toolCallCount: toolCallIds.size,
+              toolCallCount: errorRoundToolCallIds.size,
               providerId: requestProviderId,
               model: requestModelLabel,
               agentId: requestAgentId,
-              firstTokenLatencyMs:
-                firstTokenObservedAt !== null ? firstTokenObservedAt - requestStartedAt : undefined,
+              ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
+                ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                : {}),
               status: 'error',
             },
           ]);
+          if (shouldAttachFirstTokenLatency) {
+            firstTokenLatencyAttached = true;
+          }
           setSessionStateStatus('idle');
           resetStreamState();
           setStreamError(message ? `${code}: ${message}` : code);
           window.setTimeout(() => {
             void loadCurrentSessionSnapshot(sid, {
               expectedSessionViewEpoch: attachSessionViewEpoch,
+              messageLimit: INITIAL_TURN_LIMIT,
               replaceMessages: true,
             }).catch(() => undefined);
-          }, 0);
+          }, 500);
           requestSessionListRefresh();
+        },
+        onReconnectRequired: () => {
+          attachReconnectWiring.handleReconnectRequired();
         },
       })
       .then((attached) => {
@@ -2986,35 +4386,47 @@ export default function ChatPage() {
           return;
         }
         if (attached) {
+          cancelAttachRetry();
           return;
         }
 
-        // Allow retry if session is still running (e.g. permission-approved resume hasn't started yet)
-        // Delay the retry to give the backend time to start the resume runtime thread
-        window.setTimeout(() => {
-          attachAttemptedSessionRef.current = null;
-        }, 1500);
+        scheduleAttachRetry({
+          delayMs: 1500,
+          beforeRetry: () => {
+            if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
+              return false;
+            }
+            attachAttemptedSessionRef.current = null;
+          },
+        });
 
-        resetStreamState();
         void loadCurrentSessionSnapshot(sid, {
           expectedSessionViewEpoch: attachSessionViewEpoch,
+          messageLimit: INITIAL_TURN_LIMIT,
         }).catch(() => undefined);
       });
   }, [
+    activeGatewayStreamSessionId,
     activeModelId,
     activeProviderId,
+    attachRetryNonce,
     client,
+    cancelAttachRetry,
     currentSessionId,
     isCurrentSessionRequest,
     isPageActive,
+    isSessionSnapshotReady,
     loadCurrentSessionSnapshot,
     prefersReducedMotion,
     appendAssistantEventMessages,
+    recoveryActiveStream,
     recoveredStreamSnapshot,
     resetStreamState,
     resolveAssistantCapabilityKind,
     scheduleStreamReveal,
+    scheduleAttachRetry,
     sessionStateStatus,
+    sessionModesHydrated,
     streaming,
   ]);
 
@@ -3024,34 +4436,87 @@ export default function ChatPage() {
     const remainingMessages = await truncateSessionMessagesInPlace(
       currentSessionId,
       retryPrompt.sourceMessageId,
+      retryPrompt.text,
     );
     const normalizedRemainingMessages = filterTranscriptMessages(
       normalizeChatMessages(remainingMessages),
     );
     const fallbackMessages = trimMessagesFromSource(messages, retryPrompt.sourceMessageId);
-    const truncateRemovedSource =
-      normalizedRemainingMessages.findIndex(
-        (message) => message.id === retryPrompt.sourceMessageId,
-      ) === -1;
-    const nextMessages =
-      normalizedRemainingMessages.length > 0 && truncateRemovedSource
+    const sourceFoundLocally =
+      messages.findIndex((message) => message.id === retryPrompt.sourceMessageId) >= 0;
+    // When the source message is found in the local messages array, prefer
+    // fallbackMessages (local truncation) because the backend truncation may
+    // silently fail: the frontend user message ID (makeOrderedMessageId) differs
+    // from the backend user message ID (makeMessageId), so the backend
+    // findIndex returns -1 and no messages are actually deleted. The previous
+    // heuristic (truncateRemovedSource) was always true in this case because
+    // the frontend ID was never present in the backend response, causing the
+    // error message to persist in normalizedRemainingMessages.
+    const nextMessages = sourceFoundLocally
+      ? fallbackMessages
+      : normalizedRemainingMessages.length > 0
         ? normalizedRemainingMessages
         : fallbackMessages;
     setMessages(nextMessages);
     resetStreamState();
     setStreamError(null);
-    await sendMessage(retryPrompt.text);
+    await sendMessage(retryPrompt.text, {
+      ...(retryPrompt.inputParts ? { existingInputParts: retryPrompt.inputParts } : {}),
+    });
     setRetryPrompt(null);
+  }
+
+  async function handleEditResendInCurrentSession(
+    text: string,
+    sourceMessageId: string,
+    editedInputParts?: InputImageContent[],
+  ) {
+    if (!currentSessionId || !token) return;
+    const sourceMessage = messages.find((message) => message.id === sourceMessageId);
+    const remainingMessages = await truncateSessionMessagesInPlace(
+      currentSessionId,
+      sourceMessageId,
+      sourceMessage?.content,
+    );
+    const normalizedRemainingMessages = filterTranscriptMessages(
+      normalizeChatMessages(remainingMessages),
+    );
+    const fallbackMessages = trimMessagesFromSource(messages, sourceMessageId);
+    const sourceFoundLocally =
+      messages.findIndex((message) => message.id === sourceMessageId) >= 0;
+    // Same rationale as handleRetryInCurrentSession: prefer local truncation
+    // when the source message is present in the local state, because backend
+    // truncation may silently fail due to frontend/backend message ID mismatch.
+    const nextMessages = sourceFoundLocally
+      ? fallbackMessages
+      : normalizedRemainingMessages.length > 0
+        ? normalizedRemainingMessages
+        : fallbackMessages;
+    setMessages(nextMessages);
+    resetStreamState();
+    setStreamError(null);
+    const effectiveInputParts = editedInputParts ?? historyEditPrompt?.inputParts;
+    await sendMessage(text, {
+      ...(effectiveInputParts ? { existingInputParts: effectiveInputParts } : {}),
+    });
   }
 
   async function handleRetryInNewSession() {
     if (!retryPrompt) return;
-    const branchSessionId = await createBranchSessionFromMessage(
-      retryPrompt.text,
-      retryPrompt.sourceMessageId,
-    );
-    if (!branchSessionId) return;
-    await sendMessage(retryPrompt.text, { forcedSessionId: branchSessionId });
+    if (retryPrompt.inputParts && retryPrompt.inputParts.length > 0) {
+      await createBranchSessionFromMessage(
+        retryPrompt.text,
+        retryPrompt.sourceMessageId,
+        retryPrompt.inputParts,
+      );
+    } else {
+      const branchSessionId = await createBranchSessionFromMessage(
+        retryPrompt.text,
+        retryPrompt.sourceMessageId,
+      );
+      if (!branchSessionId) return;
+      await sendMessage(retryPrompt.text, { forcedSessionId: branchSessionId });
+    }
     setRetryPrompt(null);
   }
 
@@ -3088,6 +4553,7 @@ export default function ChatPage() {
         void (currentSessionId
           ? loadCurrentSessionSnapshot(currentSessionId, {
               expectedSessionViewEpoch: stopSessionViewEpoch,
+              messageLimit: INITIAL_TURN_LIMIT,
             }).catch(() => undefined)
           : Promise.resolve());
         if (stopCapability === 'best_effort') {
@@ -3104,6 +4570,7 @@ export default function ChatPage() {
         void (currentSessionId
           ? loadCurrentSessionSnapshot(currentSessionId, {
               expectedSessionViewEpoch: stopSessionViewEpoch,
+              messageLimit: INITIAL_TURN_LIMIT,
             }).catch(() => undefined)
           : Promise.resolve());
         requestSessionListRefresh();
@@ -3243,6 +4710,7 @@ export default function ChatPage() {
     streamingUsageDetails,
     contextUsageSnapshot,
     sanitizedHistoricalMessages,
+    hiddenMessageCount,
     historicalRenderedMessageEntries,
     streamingRenderedMessageEntry,
     historicalGroupedMessageEntries,
@@ -3263,6 +4731,7 @@ export default function ChatPage() {
     activeStreamFirstTokenLatencyMs,
     activeStreamMessageId,
     toolCallCards,
+    streamingOrderedParts: visibleStreamingSegments,
     resolveAssistantCapabilityKind,
     resolveInlinePermissionActions,
     buildMessageActions,
@@ -3270,6 +4739,8 @@ export default function ChatPage() {
     openChildSessionInspector,
     selectedChildSessionId,
     taskToolRuntimeLookup,
+    visibleMessageCount,
+    serverTotalTurnCount,
   });
 
   const showSessionSwitchSkeleton = currentSessionId !== null && isSessionLoading && !streaming;
@@ -3383,14 +4854,32 @@ export default function ChatPage() {
           <HistoryEditDialog
             open={historyEditPrompt !== null}
             initialText={historyEditPrompt?.text ?? ''}
+            inputParts={historyEditPrompt?.inputParts}
             onClose={() => setHistoryEditPrompt(null)}
-            onContinueCurrent={(text) => {
-              focusComposerWithText(text);
+            onResendCurrent={(text, editedInputParts) => {
+              if (!historyEditPrompt) return;
+              void handleEditResendInCurrentSession(
+                text,
+                historyEditPrompt.messageId,
+                editedInputParts,
+              );
               setHistoryEditPrompt(null);
             }}
-            onCreateBranch={(text) => {
+            onContinueCurrent={(text, editedInputParts) => {
+              if (editedInputParts && editedInputParts.length > 0) {
+                void sendMessage(text, { existingInputParts: editedInputParts });
+              } else {
+                focusComposerWithText(text);
+              }
+              setHistoryEditPrompt(null);
+            }}
+            onCreateBranch={(text, editedInputParts) => {
               if (!historyEditPrompt) return;
-              void createBranchSessionFromMessage(text, historyEditPrompt.messageId);
+              void createBranchSessionFromMessage(
+                text,
+                historyEditPrompt.messageId,
+                editedInputParts,
+              );
               setHistoryEditPrompt(null);
             }}
           />
@@ -3411,8 +4900,14 @@ export default function ChatPage() {
               flex: 1,
               minHeight: 0,
               overflow: 'hidden',
+              position: 'relative',
             }}
           >
+            <SubAgentRunList
+              items={subAgentRunItems}
+              selectedSessionId={selectedChildSessionId}
+              onSelectSession={openChildSessionInspector}
+            />
             <div
               style={{
                 display: 'flex',
@@ -3465,24 +4960,88 @@ export default function ChatPage() {
                       onSelectMode={handleDialogueModeChange}
                     />
                   ) : null}
-                  {!showSessionSwitchSkeleton ? (
-                    <ChatMessageGroupList
-                      activeModelId={activeModelId}
-                      activeModelLabel={activeModelOption?.label}
-                      activeProviderId={activeProviderId}
-                      bottomRef={bottomRef}
-                      currentUserEmail={currentUserEmail}
-                      groups={groupedMessageEntries}
-                      pendingPermissions={pendingPermissions}
-                      providerCatalog={providerCatalog}
-                      resolveInlinePermissionActions={resolveInlinePermissionActions}
-                      scrollRegionRef={scrollRegionRef}
-                    />
-                  ) : (
+                  {showSessionSwitchSkeleton ? (
                     <div
                       ref={bottomRef}
                       style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }}
                     />
+                  ) : messages.length > 0 || visibleStreaming || remoteSessionBusyState ? (
+                    <>
+                      {hiddenMessageCount > 0 && (
+                        <button
+                          type="button"
+                          data-testid="chat-load-earlier"
+                          onClick={() => {
+                            const localHidden = sanitizedHistoricalMessages.length - (visibleMessageCount ?? sanitizedHistoricalMessages.length);
+                            if (localHidden > 0) {
+                              setVisibleMessageCount((prev) =>
+                                prev + LOAD_MORE_MESSAGE_INCREMENT,
+                              );
+                            } else if (currentSessionId) {
+                              void loadCurrentSessionSnapshot(currentSessionId, {
+                                replaceMessages: true,
+                              }).then(() => {
+                                setServerTotalTurnCount(null);
+                                setVisibleMessageCount(
+                                  (prev) => prev + LOAD_MORE_MESSAGE_INCREMENT,
+                                );
+                              }).catch(() => undefined);
+                            }
+                          }}
+                          style={{
+                            alignSelf: 'center',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            minHeight: 32,
+                            padding: '0 14px',
+                            borderRadius: 999,
+                            border: '1px solid var(--border)',
+                            background:
+                              'color-mix(in oklch, var(--surface) 90%, transparent)',
+                            color: 'var(--text-2)',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            marginBottom: 4,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <svg
+                            aria-hidden="true"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M12 19V5" />
+                            <path d="m5 12 7-7 7 7" />
+                          </svg>
+                          加载更早的 {Math.min(hiddenMessageCount, LOAD_MORE_MESSAGE_INCREMENT)} 条消息（共 {hiddenMessageCount} 条隐藏）
+                        </button>
+                      )}
+                      <ChatMessageGroupList
+                        activeModelId={activeModelId}
+                        activeModelLabel={activeModelOption?.label}
+                        activeProviderId={activeProviderId}
+                        bottomRef={bottomRef}
+                        currentUserEmail={currentUserEmail}
+                        groups={groupedMessageEntries}
+                        pendingPermissions={pendingPermissions}
+                        providerCatalog={providerCatalog}
+                        resolveInlinePermissionActions={resolveInlinePermissionActions}
+                        scrollRegionRef={scrollRegionRef}
+                      />
+                      {!visibleStreaming && remoteSessionBusyState ? (
+                        <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
+                      ) : null}
+                    </>
+                  ) : (
+                    <div ref={bottomRef} style={{ flexShrink: 0 }} />
                   )}
                 </div>
               </div>
@@ -3513,12 +5072,6 @@ export default function ChatPage() {
             />
           )}
 
-          <SubAgentRunList
-            items={subAgentRunItems}
-            selectedSessionId={selectedChildSessionId}
-            onSelectSession={openChildSessionInspector}
-          />
-
           <ChatTodoBar sessionTodos={sessionTodos} editorMode={editorMode} rightOpen={rightOpen} />
 
           <CompanionStage
@@ -3539,6 +5092,29 @@ export default function ChatPage() {
             todoCount={sessionTodos.length}
           />
 
+          {activePendingQuestion && (
+            <InlineQuestionPanel
+              answers={inlineQuestionAnswers}
+              customInputs={inlineQuestionCustomInputs}
+              editorMode={editorMode}
+              errorMessage={inlineQuestionReplyError ?? undefined}
+              pendingAction={inlineQuestionReplyStatus}
+              request={activePendingQuestion}
+              onDismiss={() => void replyInlineQuestion('dismissed')}
+              onSubmit={() => void replyInlineQuestion('answered')}
+              onToggleOption={toggleInlineQuestionOption}
+              onCustomInputChange={handleInlineQuestionCustomInput}
+            />
+          )}
+
+          {latestGeneratedImageResult && artifactsWorkspaceHref && (
+            <ChatImageGenerationResultStrip
+              artifactTitle={latestGeneratedImageResult.artifactTitle}
+              modelLabel={latestGeneratedImageResult.modelLabel}
+              onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
+            />
+          )}
+
           <ChatComposer
             variant={composerVariant}
             editorMode={editorMode}
@@ -3551,6 +5127,12 @@ export default function ChatPage() {
             showModelPicker={showModelPicker}
             showModelSettings={showModelSettings}
             activeModelSupportsThinking={activeModelOption?.supportsThinking === true}
+            hasConfiguredImageModel={hasConfiguredImageModel}
+            imageGenerationBusy={imageGenerationBusy}
+            imageGenerationDefaults={imageGenerationDefaults}
+            imageGenerationMode={imageGenerationMode}
+            imageModelLabel={imageModelLabel}
+            imagePluginEnabled={imagePluginEnabled}
             webSearchEnabled={webSearchEnabled}
             thinkingEnabled={thinkingEnabled}
             input={input}
@@ -3591,7 +5173,9 @@ export default function ChatPage() {
             onRequestFiles={() => fileInputRef.current?.click()}
             onToggleModelPicker={() => setShowModelPicker((v) => !v)}
             onToggleModelSettings={() => setShowModelSettings((v) => !v)}
+            onToggleImageGenerationMode={toggleImageGenerationMode}
             onToggleWebSearch={handleToggleWebSearch}
+            onUpdateImageGenerationDefaults={updateImageGenerationDefaults}
             agentOptions={agentOptions}
             manualAgentId={manualAgentId}
             defaultAgentLabel={defaultAgentLabel}
@@ -3610,6 +5194,7 @@ export default function ChatPage() {
                   }
                 : undefined
             }
+            onDropFiles={appendFiles}
             onReplaceInput={(nextValue: string) => setInput(nextValue)}
           />
         </div>

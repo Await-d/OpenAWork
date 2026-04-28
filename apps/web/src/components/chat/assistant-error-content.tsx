@@ -1,5 +1,5 @@
 export function looksLikeAssistantErrorContent(content: string): boolean {
-  return /^\[错误:\s*[A-Z0-9_]+\]/.test(content.trim());
+  return /^\[错误:\s*[A-Za-z0-9_]+\]/.test(content.trim());
 }
 
 function parseAssistantErrorContent(content: string): {
@@ -8,7 +8,7 @@ function parseAssistantErrorContent(content: string): {
   headline: string;
 } {
   const normalized = content.trim();
-  const bracketMatch = normalized.match(/^\[错误:\s*([A-Z0-9_]+)\]\s*(.*)$/s);
+  const bracketMatch = normalized.match(/^\[错误:\s*([A-Za-z0-9_]+)\]\s*(.*)$/s);
   const baseMessage = bracketMatch?.[2]?.trim() || normalized;
   const code = bracketMatch?.[1]?.trim() || undefined;
   const separatorIndex = baseMessage.indexOf(': ');

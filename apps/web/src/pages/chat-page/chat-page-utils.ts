@@ -43,6 +43,11 @@ export interface LiveToolCallState {
   status: 'streaming' | 'paused' | 'completed' | 'error';
   toolCallId: string;
   toolName: string;
+  batchProgress?: {
+    subTools: import('@openAwork/shared').BatchSubToolProgress[];
+    completedCount: number;
+    totalCount: number;
+  };
 }
 
 export type SessionsClientWithActiveStop = ReturnType<typeof createSessionsClient> & {
@@ -81,7 +86,7 @@ export function createSessionMetadataSnapshot(metadata: {
   const snapshot: Record<string, unknown> = {
     dialogueMode: metadata.dialogueMode ?? 'clarify',
     yoloMode: metadata.yoloMode === true,
-    webSearchEnabled: metadata.webSearchEnabled === true,
+    webSearchEnabled: metadata.webSearchEnabled !== false,
     thinkingEnabled: metadata.thinkingEnabled === true,
     reasoningEffort: metadata.reasoningEffort ?? 'medium',
   };

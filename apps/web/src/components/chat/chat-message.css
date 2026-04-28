@@ -156,8 +156,6 @@
 
 .chat-message-content-shell[data-status='error'] {
   margin-top: 2px;
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in oklch, var(--danger) 72%, transparent);
 }
 
 .chat-message-content {
@@ -554,8 +552,6 @@
 }
 
 .chat-todo-item[data-active='true'] {
-  border-left: 2px solid var(--accent);
-  padding-left: 7px;
 }
 
 .chat-todo-item[data-done='true'] {
@@ -680,8 +676,7 @@
 .chat-task-inline {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  gap: 8px;
   min-width: 0;
   padding: 0;
   border: none;
@@ -691,15 +686,7 @@
 }
 
 .chat-task-inline-rail {
-  width: 2px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    var(--accent) 0%,
-    color-mix(in oklch, var(--accent) 42%, transparent) 100%
-  );
-  opacity: 0.72;
+  display: none;
 }
 
 .chat-task-inline-main {
@@ -734,13 +721,8 @@
   opacity: 1;
 }
 
-.chat-task-inline[data-clickable='true'][data-selected='true'] .chat-task-inline-rail {
-  opacity: 1;
-  background: linear-gradient(
-    180deg,
-    var(--accent) 0%,
-    color-mix(in oklch, var(--accent) 72%, transparent) 100%
-  );
+.chat-task-inline[data-clickable='true'][data-selected='true'] {
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
 }
 
 .chat-task-inline[data-clickable='true']:focus-visible {
@@ -829,6 +811,17 @@
   color: color-mix(in oklch, var(--text) 78%, var(--accent) 22%);
   font-size: 10px;
   line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+
+.chat-task-inline-timeout {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fbbf24;
+  font-size: 10px;
+  line-height: 1.45;
   letter-spacing: 0.01em;
 }
 
@@ -962,8 +955,6 @@
 }
 
 .chat-markdown-blockquote {
-  border-left: 2px solid var(--border);
-  padding-left: 11px;
   color: var(--text-2);
   font-size: 12.8px;
   line-height: 1.7;
@@ -1021,6 +1012,16 @@
   line-height: 1.6;
 }
 
+.assistant-reasoning-block[data-collapsed='true'] .assistant-rich-content-body {
+  display: block !important;
+}
+
+.assistant-reasoning-block[data-collapsed='true'] .assistant-reasoning-body {
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--surface) 60%, transparent);
+  padding-right: 8px;
+}
+
 .assistant-reasoning-body .chat-markdown-streaming {
   color: var(--text-2);
 }
@@ -1052,61 +1053,65 @@
   color: var(--text-2);
 }
 
+.tool-call-inline[data-tool-status='paused'] {
+  color: color-mix(in oklch, var(--warning) 82%, var(--text) 18%);
+}
+
 .tool-call-inline[data-tool-status='failed'] {
   color: var(--danger);
 }
 
-/* ── Tool status dot (OpenCowork-style) ── */
+/* ── Tool icon (SVG per-tool icons with status color) ── */
 
-.tool-status-dot {
+.tool-icon {
   position: relative;
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  color: var(--text-3);
+  transition: color 0.15s ease;
 }
 
-.tool-status-dot-core {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-3);
+.tool-icon svg {
+  display: block;
 }
 
-.tool-status-dot[data-state='completed'] .tool-status-dot-core {
-  background: #22c55e;
+.tool-icon[data-state='completed'] {
+  color: var(--success, #22c55e);
 }
 
-.tool-status-dot[data-state='running'] .tool-status-dot-core {
-  background: var(--accent);
+.tool-icon[data-state='running'] {
+  color: var(--accent);
 }
 
-.tool-status-dot[data-state='failed'] .tool-status-dot-core {
-  background: var(--danger);
+.tool-icon[data-state='paused'] {
+  color: var(--warning);
 }
 
-.tool-status-dot-ping {
+.tool-icon[data-state='failed'] {
+  color: var(--danger);
+}
+
+.tool-icon-ping {
   position: absolute;
-  width: 8px;
-  height: 8px;
+  inset: 0;
   border-radius: 50%;
   background: var(--accent);
-  opacity: 0.4;
-  animation: tool-status-ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  opacity: 0.15;
+  animation: tool-icon-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-@keyframes tool-status-ping {
-  0% { transform: scale(1); opacity: 0.4; }
-  75% { transform: scale(2); opacity: 0; }
-  100% { transform: scale(2); opacity: 0; }
+@keyframes tool-icon-ping {
+  0% { transform: scale(0.8); opacity: 0.2; }
+  75% { transform: scale(1.8); opacity: 0; }
+  100% { transform: scale(1.8); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tool-status-dot-ping {
+  .tool-icon-ping {
     animation: none;
-    opacity: 0.3;
+    opacity: 0.1;
   }
 }
 
@@ -1126,27 +1131,114 @@
   text-overflow: ellipsis;
 }
 
+.tool-call-inline-chevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-3);
+  margin-left: 2px;
+}
+
+.tool-call-inline-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-call-inline-output {
+  margin-left: 20px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.tool-call-approval-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  margin-left: 20px;
+}
+
+.tool-call-approval-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-call-approval-button {
+  appearance: none;
+  border: 1px solid color-mix(in oklch, var(--border) 82%, transparent);
+  background: color-mix(in oklch, var(--surface) 90%, transparent);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.tool-call-approval-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.tool-call-approval-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 36%, transparent);
+}
+
+.tool-call-approval-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tool-call-approval-button[data-variant='primary'] {
+  border-color: color-mix(in oklch, var(--accent) 48%, var(--border) 52%);
+  background: color-mix(in oklch, var(--accent) 16%, var(--surface) 84%);
+  color: color-mix(in oklch, var(--accent) 82%, white 18%);
+}
+
+.tool-call-approval-button[data-variant='danger'] {
+  border-color: color-mix(in oklch, var(--danger) 40%, var(--border) 60%);
+  background: color-mix(in oklch, var(--danger) 12%, var(--surface) 88%);
+  color: color-mix(in oklch, var(--danger) 82%, white 18%);
+}
+
+.tool-call-approval-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-call-approval-note {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tool-call-approval-note[data-tone='warning'] {
+  color: color-mix(in oklch, var(--warning) 82%, var(--text) 18%);
+}
+
+.tool-call-approval-note[data-tone='muted'] {
+  color: var(--text-3);
+}
+
+.tool-call-approval-note[data-tone='danger'] {
+  color: var(--danger);
+}
+
 /* ── Tool call block display (write/edit/bash/apply_patch) ── */
 
 .tool-call-block {
   display: flex;
   flex-direction: column;
   margin: 4px 0;
-  border-left: 2px solid color-mix(in oklch, var(--accent) 30%, var(--border) 70%);
-  padding-left: 12px;
 }
 
-.tool-call-block[data-tool-status='running'] {
-  border-left-color: var(--accent);
-}
-
-.tool-call-block[data-tool-status='failed'] {
-  border-left-color: var(--danger);
-}
-
-.tool-call-block[data-tool-status='completed'] {
-  border-left-color: color-mix(in oklch, var(--accent) 30%, var(--border) 70%);
-}
 
 .tool-call-block-header {
   display: flex;
@@ -1566,10 +1658,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tool-status-dot-ping {
-    animation: none;
-    opacity: 0.3;
-  }
   .tool-call-block-running-hint {
     animation: none;
     opacity: 0.8;

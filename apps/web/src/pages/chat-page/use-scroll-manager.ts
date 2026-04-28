@@ -125,8 +125,16 @@ export function useScrollManager(
       setHasPendingFollowContent(false);
       if (pendingScrollFrameRef.current !== null)
         cancelAnimationFrame(pendingScrollFrameRef.current);
-      ignoreScrollEventsUntilRef.current =
-        behavior === 'smooth' ? performance.now() + CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS : 0;
+      const nextIgnore =
+        behavior === 'smooth'
+          ? performance.now() + CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS
+          : behavior === 'auto'
+            ? performance.now() + 80
+            : 0;
+      ignoreScrollEventsUntilRef.current = Math.max(
+        ignoreScrollEventsUntilRef.current,
+        nextIgnore,
+      );
       pendingScrollFrameRef.current = requestAnimationFrame(() => {
         if (sr) {
           const maxST = Math.max(0, sr.scrollHeight - sr.clientHeight);

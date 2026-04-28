@@ -19,11 +19,38 @@ interface TaskToolInlineProps {
 }
 
 interface TaskInlineDetailItem {
-  kind: 'footer' | 'hint' | 'summary';
+  kind: 'footer' | 'hint' | 'summary' | 'timeout';
   text: string;
 }
 
 type TaskInlineMetaTone = 'danger' | 'info' | 'muted' | 'success' | 'warning';
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function readTaskTimeoutSource(
+  value: unknown,
+): TaskToolRuntimeSnapshot['timeoutSource'] | undefined {
+  const record = asRecord(value);
+  const timeoutSource = record?.['timeoutSource'];
+  switch (timeoutSource) {
+    case 'first_response':
+      return timeoutSource;
+    default:
+      return undefined;
+  }
+}
+
+function formatTaskTimeoutSourceLabel(
+  timeoutSource: TaskToolRuntimeSnapshot['timeoutSource'],
+): string {
+  return timeoutSource === 'first_response' ? '首响应未到' : '执行超时';
+}
 
 function resolveTaskStatusBadge(status: string | undefined): {
   color: 'danger' | 'info' | 'muted' | 'success' | 'warning';
@@ -141,6 +168,7 @@ function buildDetailItems(input: {
   hintText: string | null;
   metaText: string | null;
   runtimeSummary: string | null;
+  timeoutText: string | null;
 }): TaskInlineDetailItem[] {
   const items: TaskInlineDetailItem[] = [];
 
@@ -150,6 +178,10 @@ function buildDetailItems(input: {
 
   if (input.runtimeSummary) {
     items.push({ kind: 'summary', text: input.runtimeSummary });
+  }
+
+  if (input.timeoutText) {
+    items.push({ kind: 'timeout', text: input.timeoutText });
   }
 
   if (input.hintText) {
@@ -232,6 +264,7 @@ export function TaskToolInline(props: TaskToolInlineProps) {
       metaText: readTaskFallbackFooter(props.output),
       runtimeSummary: null,
       hintText: null,
+      timeoutText: null,
     });
 
     return (
@@ -265,14 +298,30 @@ export function TaskToolInline(props: TaskToolInlineProps) {
   const ContainerTag = isClickable ? 'button' : 'div';
   const titleText = displayData.taskSummary.subtitle ?? displayData.taskSummary.title;
   const runtimeSummary = summarizeRuntimeState(props.runtimeSnapshot);
+  const runtimeTerminalReason = props.runtimeSnapshot?.terminalReason;
+  const outputReason = (() => {
+    const record = asRecord(props.output);
+    return typeof record?.['reason'] === 'string' ? record['reason'] : undefined;
+  })();
+  const timeoutSource =
+    props.runtimeSnapshot?.timeoutSource ??
+    readTaskTimeoutSource(props.output) ??
+    readTaskTimeoutSource(displayData.taskMeta.extraOutput);
   const metaText = childSessionId
     ? `会话 ${compactIdentifier(childSessionId)}`
     : (extraOutputText ?? displayData.summary);
   const hintText = isClickable ? (isSelected ? '正在查看' : '点击查看') : null;
+  const timeoutText =
+    runtimeTerminalReason === 'timeout' || outputReason === 'timeout'
+      ? timeoutSource
+        ? `超时原因：${formatTaskTimeoutSourceLabel(timeoutSource)}`
+        : '超时原因：执行超时'
+      : null;
   const detailItems = buildDetailItems({
     metaText,
     runtimeSummary,
     hintText,
+    timeoutText,
   });
 
   return (

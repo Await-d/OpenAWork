@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import './chat-message.css';
 import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
@@ -13,6 +13,7 @@ import {
 } from './chat-provider-display.js';
 import { TaskToolInline } from './task-tool-inline.js';
 import { ToolCallDisplay } from './tool-call-inline.js';
+import { ImageLightbox } from './image-lightbox.js';
 import {
   resolveTaskToolRuntimeSnapshot,
   type TaskToolRuntimeLookup,
@@ -22,18 +23,25 @@ import {
   looksLikeAssistantErrorContent,
 } from './assistant-error-content.js';
 import { AssistantReasoningBlock, buildReasoningBlockKey } from './assistant-reasoning-block.js';
+import { shouldStreamLocalReasoningBlock } from './assistant-reasoning-block.helpers.js';
+import { resolveAgentAccentColor } from './agent-color-map.js';
 import { ModifiedFilesSummaryCard } from './modified-files-summary-card.js';
 import StreamingMarkdownContent from './streaming-markdown-content.js';
 import {
   type AssistantTracePayload,
+  type ChatMessagePart,
+  type ChatReasoningPart,
+  type ChatToolPart,
   type ChatUsageDetails,
   estimateTokenCount,
+  extractInputImages,
   formatDurationLabel,
   formatShortTime,
   formatStopReasonLabel,
   parseCopiedToolCardContent,
   parseAssistantEventContent,
   parseAssistantTraceContent,
+  readAssistantTracePayload,
   type ChatMessage,
 } from '../../pages/chat-page/support.js';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion.js';
@@ -115,6 +123,14 @@ export function MessageRow({
   const showMeta =
     !isUser && (tokenCount > 0 || durationLabel || toolLabel || stopReasonLabel || statusLabel);
   const avatarProviderId = resolvedProviderId || 'assistant';
+  const agentAccent = !isUser ? resolveAgentAccentColor(message.agentId) : undefined;
+  const agentPillStyle: React.CSSProperties | undefined = agentAccent
+    ? {
+        borderColor: `color-mix(in oklch, ${agentAccent} 40%, var(--border) 60%)`,
+        background: `linear-gradient(135deg, color-mix(in oklch, ${agentAccent} 18%, var(--surface) 82%), color-mix(in oklch, var(--surface) 92%, var(--bg-2) 8%))`,
+        color: `color-mix(in oklch, ${agentAccent} 82%, white 18%)`,
+      }
+    : undefined;
   const metaItems: Array<{ label: string; tone?: 'default' | 'accent' | 'danger' }> = [];
 
   if (!isUser) {
@@ -126,15 +142,19 @@ export function MessageRow({
       if (usageDetails.estimatedCostUsd !== undefined) {
         metaItems.push({ label: formatUsdCost(usageDetails.estimatedCostUsd) });
       }
-      if (durationLabel) metaItems.push({ label: durationLabel });
-      if (usageDetails.firstTokenLatencyMs && usageDetails.firstTokenLatencyMs > 0) {
-        metaItems.push({
-          label: `首 token ${formatDurationLabel(usageDetails.firstTokenLatencyMs)}`,
-        });
-      }
-      if (usageDetails.tokensPerSecond && Number.isFinite(usageDetails.tokensPerSecond)) {
-        metaItems.push({ label: `TPS ${usageDetails.tokensPerSecond.toFixed(1)}` });
-      }
+      metaItems.push({ label: durationLabel ?? '耗时 --' });
+      metaItems.push({
+        label:
+          usageDetails.firstTokenLatencyMs && usageDetails.firstTokenLatencyMs > 0
+            ? `首 token ${formatDurationLabel(usageDetails.firstTokenLatencyMs)}`
+            : '首 token --',
+      });
+      metaItems.push({
+        label:
+          usageDetails.tokensPerSecond && Number.isFinite(usageDetails.tokensPerSecond)
+            ? `TPS ${usageDetails.tokensPerSecond.toFixed(1)}`
+            : 'TPS --',
+      });
     } else if (tokenCount > 0) {
       metaItems.push({ label: `~${tokenCount} tok` });
       if (durationLabel) metaItems.push({ label: durationLabel });
@@ -143,6 +163,9 @@ export function MessageRow({
     }
 
     if (toolLabel) metaItems.push({ label: toolLabel });
+    if (message.modifiedFilesSummary && message.modifiedFilesSummary.files.length > 0) {
+      metaItems.push({ label: `修改 ${message.modifiedFilesSummary.files.length} 文件` });
+    }
     if (stopReasonLabel) {
       metaItems.push({
         label: stopReasonLabel,
@@ -159,15 +182,22 @@ export function MessageRow({
 
   return (
     <article
-      className={`chat-message-row${groupedWithPrevious ? ' is-grouped' : ''}`}
+      className={`chat-message-row${groupedWithPrevious ? ' is-grouped' : ''}${agentAccent ? ' has-agent-accent' : ''}`}
       data-role={message.role}
       data-grouped={groupedWithPrevious ? 'true' : 'false'}
       data-status={message.status ?? 'completed'}
+      data-agent-id={message.agentId || undefined}
+      style={agentAccent ? ({ '--agent-accent': agentAccent } as React.CSSProperties) : undefined}
     >
       <div
         className="chat-message-avatar-frame"
         data-role={message.role}
         data-grouped={groupedWithPrevious ? 'true' : 'false'}
+        style={
+          agentAccent
+            ? { boxShadow: `0 0 0 2px var(--surface), 0 0 0 3.5px ${agentAccent}` }
+            : undefined
+        }
       >
         {isUser ? (
           <UserAvatar email={email} size={28} />
@@ -184,8 +214,17 @@ export function MessageRow({
         {!groupedWithPrevious && (
           <div className="chat-message-header">
             <div className="chat-message-title-group">
-              <div className="chat-message-display-name">{displayName}</div>
-              {providerLabel && <span className="chat-message-provider-pill">{providerLabel}</span>}
+              <div
+                className="chat-message-display-name"
+                style={agentAccent ? { color: agentAccent } : undefined}
+              >
+                {displayName}
+              </div>
+              {providerLabel && (
+                <span className="chat-message-provider-pill" style={agentPillStyle}>
+                  {providerLabel}
+                </span>
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {actions && actions.length > 0 && (
@@ -313,19 +352,166 @@ export interface ChatToolRenderOptions {
   taskRuntimeLookup?: TaskToolRuntimeLookup;
 }
 
+function UserAttachedImagesGallery({
+  images,
+}: {
+  images: ReturnType<typeof extractInputImages>;
+}) {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  const activeImage = openIndex !== null ? images[openIndex] : undefined;
+  const activeSrc = activeImage?.imageUrl;
+  const activeLabel = activeImage?.fileName ?? (openIndex !== null ? `图片 ${openIndex + 1}` : '图片');
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+      {images.map((image, index) => {
+        const label = image.fileName ?? `图片 ${index + 1}`;
+        const src = image.imageUrl;
+        const isHovered = hoverIndex === index;
+        const clickable = Boolean(src);
+
+        return (
+          <div
+            key={`${src ?? image.artifactId ?? image.fileId ?? 'image'}-${index}`}
+            style={{ display: 'grid', gap: 6, width: 180 }}
+          >
+            {src ? (
+              <button
+                type="button"
+                onClick={() => setOpenIndex(index)}
+                onMouseEnter={() => setHoverIndex(index)}
+                onMouseLeave={() => setHoverIndex((value) => (value === index ? null : value))}
+                title="点击放大查看"
+                style={{
+                  position: 'relative',
+                  padding: 0,
+                  width: '100%',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 12,
+                  background: 'var(--surface)',
+                  cursor: 'zoom-in',
+                  overflow: 'hidden',
+                  lineHeight: 0,
+                }}
+              >
+                <img
+                  src={src}
+                  alt={label}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    maxHeight: 180,
+                    objectFit: 'cover',
+                  }}
+                />
+                {/* Hover overlay */}
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background:
+                      'linear-gradient(180deg, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.18) 100%)',
+                    opacity: isHovered ? 1 : 0,
+                    transition: 'opacity 150ms ease',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 999,
+                      background: 'rgba(0,0,0,0.55)',
+                      backdropFilter: 'blur(6px)',
+                      color: '#fff',
+                      fontSize: 16,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    ⤢
+                  </span>
+                </div>
+              </button>
+            ) : (
+              <div
+                style={{
+                  minHeight: 120,
+                  borderRadius: 12,
+                  border: '1px dashed var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-3)',
+                  fontSize: 11,
+                  background: 'var(--surface)',
+                }}
+              >
+                图片已附加
+              </div>
+            )}
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--text-3)',
+                lineHeight: 1.4,
+                cursor: clickable ? 'zoom-in' : 'default',
+              }}
+              onClick={clickable ? () => setOpenIndex(index) : undefined}
+              title={label}
+            >
+              {label}
+            </span>
+          </div>
+        );
+      })}
+
+      {activeSrc && (
+        <ImageLightbox
+          src={activeSrc}
+          open={openIndex !== null}
+          onClose={() => setOpenIndex(null)}
+          alt={activeLabel}
+          caption={activeLabel}
+          fileName={activeImage?.fileName ?? 'image.png'}
+        />
+      )}
+    </div>
+  );
+}
+
 export function renderChatMessageContentWithOptions(
   m: ChatMessage,
   options?: Omit<ChatToolRenderOptions, 'streaming'>,
 ) {
-  if (m.role !== 'assistant') return m.content;
-  return renderAssistantMessageContentValue(m.content, { ...options, messageId: m.id });
+  if (m.role !== 'assistant') {
+    const inputImages = m.rawContent ? extractInputImages(m.rawContent) : [];
+    if (inputImages.length === 0) {
+      return m.content;
+    }
+
+    return (
+      <div style={{ display: 'grid', gap: 10 }}>
+        {m.content ? <span>{m.content}</span> : null}
+        <UserAttachedImagesGallery images={inputImages} />
+      </div>
+    );
+  }
+  return renderAssistantMessageContentValue(m, { ...options, messageId: m.id });
 }
 
 export function renderStreamingChatMessageContentWithOptions(
-  content: string,
+  contentOrMessage: ChatMessage | string,
   options?: Omit<ChatToolRenderOptions, 'streaming'>,
 ) {
-  return renderAssistantMessageContentValue(content, { ...options, streaming: true });
+  return renderAssistantMessageContentValue(contentOrMessage, { ...options, streaming: true });
 }
 
 function renderToolCallContent(input: {
@@ -377,6 +563,7 @@ function renderToolCallContent(input: {
 
   return (
     <ToolCallDisplay
+      approvalActions={input.approvalActions}
       key={input.reactKey}
       input={input.toolInput}
       isError={input.isError}
@@ -391,7 +578,27 @@ function renderToolCallContent(input: {
   );
 }
 
-function renderAssistantMessageContentValue(content: string, options?: ChatToolRenderOptions) {
+function renderAssistantMessageContentValue(
+  contentOrMessage: ChatMessage | string,
+  options?: ChatToolRenderOptions,
+) {
+  // Parts-first path: when the message carries structured parts that
+  // include any reasoning / tool / event segment, render them in their
+  // original order. This is the only way to faithfully show the wire
+  // arrival sequence (e.g. tool → text → tool, reasoning interleaved with
+  // tool output). Plain text-only parts fall through to the trace path so
+  // copied-tool-card / generative-UI / companion-block detection still work.
+  if (
+    typeof contentOrMessage !== 'string' &&
+    Array.isArray(contentOrMessage.parts) &&
+    contentOrMessage.parts.length > 0 &&
+    contentOrMessage.parts.some(
+      (part) => part.type === 'reasoning' || part.type === 'tool' || part.type === 'event',
+    )
+  ) {
+    return <AssistantPartsContent message={contentOrMessage} options={options} />;
+  }
+  const content = typeof contentOrMessage === 'string' ? contentOrMessage : contentOrMessage.content;
   const copiedToolCard = parseCopiedToolCardContent(content);
   if (copiedToolCard) {
     return renderToolCallContent({
@@ -434,12 +641,25 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
     return <AssistantRichContent content={content} streaming={options?.streaming} />;
   }
 
-  const assistantTrace = parseAssistantTraceContent(content);
+  const assistantTrace =
+    typeof contentOrMessage === 'string'
+      ? parseAssistantTraceContent(content)
+      : readAssistantTracePayload(contentOrMessage);
   if (assistantTrace) {
+    const reasoningBlocksEndedFlags =
+      typeof contentOrMessage === 'string'
+        ? undefined
+        : contentOrMessage.reasoningBlocksEndedFlags;
+    const reasoningBlocksDurationsMs =
+      typeof contentOrMessage === 'string'
+        ? undefined
+        : contentOrMessage.reasoningBlocksDurationsMs;
     return (
       <AssistantTraceContent
         messageId={options?.messageId}
         payload={assistantTrace}
+        reasoningBlocksEndedFlags={reasoningBlocksEndedFlags}
+        reasoningBlocksDurationsMs={reasoningBlocksDurationsMs}
         resolveInlinePermissionActions={options?.resolveInlinePermissionActions}
         streaming={options?.streaming}
         onOpenChildSession={options?.onOpenChildSession}
@@ -525,10 +745,127 @@ function renderAssistantMessageContentValue(content: string, options?: ChatToolR
   return <AssistantRichContent content={content} streaming={options?.streaming} />;
 }
 
+function AssistantPartsContent({
+  message,
+  options,
+}: {
+  message: ChatMessage;
+  options?: ChatToolRenderOptions;
+}) {
+  const parts = message.parts ?? [];
+  const streaming = options?.streaming === true;
+  const reasoningParts = parts.filter(
+    (part): part is ChatReasoningPart => part.type === 'reasoning',
+  );
+  const totalReasoning = reasoningParts.length;
+  const reasoningEndedFlags = message.reasoningBlocksEndedFlags;
+  const reasoningDurations = message.reasoningBlocksDurationsMs;
+  const hasActiveToolCall = parts.some(
+    (part): part is ChatToolPart =>
+      part.type === 'tool' && (part.status === 'running' || part.status === 'paused'),
+  );
+  const hasAssistantText = parts.some(
+    (part) => part.type === 'text' && part.text.trim().length > 0,
+  );
+
+  let reasoningCursor = 0;
+  let toolCursor = 0;
+
+  return (
+    <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
+      {parts.map((part) => {
+        if (part.type === 'reasoning') {
+          const myIndex = reasoningCursor++;
+          // Default to "ended" when no streaming flag list is supplied
+          // (i.e. message is finalized / loaded from history). While
+          // streaming, prefer the per-block flag, then fall back to
+          // segment-level endedAt set by `markStreamingReasoningSegmentEnded`.
+          const ended = reasoningEndedFlags
+            ? reasoningEndedFlags[myIndex] === true
+            : !streaming || part.endedAt !== undefined;
+          const rawDuration = reasoningDurations?.[myIndex];
+          const persistedDuration =
+            typeof part.startedAt === 'number' &&
+            typeof part.endedAt === 'number' &&
+            part.endedAt >= part.startedAt
+              ? part.endedAt - part.startedAt
+              : undefined;
+          const durationMs =
+            typeof rawDuration === 'number' && rawDuration >= 0
+              ? rawDuration
+              : persistedDuration;
+          return (
+            <AssistantReasoningBlock
+              key={part.id}
+              content={part.text}
+              durationMs={durationMs}
+              ended={ended}
+              index={myIndex}
+              messageStreaming={streaming}
+              renderBody={renderReasoningRichBody}
+              streaming={shouldStreamLocalReasoningBlock({
+                hasActiveToolCall,
+                hasAssistantText,
+                index: myIndex,
+                streaming,
+                total: totalReasoning,
+              })}
+              total={totalReasoning}
+            />
+          );
+        }
+        if (part.type === 'text') {
+          if (part.text.length === 0) return null;
+          return (
+            <AssistantRichContentBody
+              key={part.id}
+              content={part.text}
+              streaming={streaming}
+            />
+          );
+        }
+        if (part.type === 'tool') {
+          const myIndex = toolCursor++;
+          return renderToolCallContent({
+            reactKey: part.id,
+            kind: part.kind,
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            toolInput: part.input,
+            output: part.output,
+            isError: part.isError,
+            onOpenChildSession: options?.onOpenChildSession,
+            pendingPermissionRequestId: part.pendingPermissionRequestId,
+            approvalActions:
+              part.pendingPermissionRequestId && options?.resolveInlinePermissionActions
+                ? options.resolveInlinePermissionActions(part.pendingPermissionRequestId)
+                : undefined,
+            durationMs: part.durationMs,
+            resumedAfterApproval: part.resumedAfterApproval,
+            selectedChildSessionId: options?.selectedChildSessionId,
+            status: part.status,
+            taskRuntimeLookup: options?.taskRuntimeLookup,
+          });
+          // Note: myIndex used only as a stable counter; reactKey prefers part.id
+        }
+        if (part.type === 'event') {
+          return <AssistantEventRow key={part.id} payload={part.payload} />;
+        }
+        return null;
+      })}
+      {message.modifiedFilesSummary && (
+        <ModifiedFilesSummaryCard summary={message.modifiedFilesSummary} />
+      )}
+    </div>
+  );
+}
+
 function AssistantTraceContent({
   messageId,
   onOpenChildSession,
   payload,
+  reasoningBlocksEndedFlags,
+  reasoningBlocksDurationsMs,
   resolveInlinePermissionActions,
   selectedChildSessionId,
   streaming = false,
@@ -537,27 +874,68 @@ function AssistantTraceContent({
   messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
   payload: AssistantTracePayload;
+  reasoningBlocksEndedFlags?: boolean[];
+  reasoningBlocksDurationsMs?: number[];
   resolveInlinePermissionActions?: ChatToolRenderOptions['resolveInlinePermissionActions'];
   selectedChildSessionId?: string | null;
   streaming?: boolean;
   taskRuntimeLookup?: TaskToolRuntimeLookup;
 }) {
+  const hasActiveToolCall = payload.toolCalls.some(
+    (toolCall) => toolCall.status === 'running' || toolCall.status === 'paused',
+  );
+  const hasAssistantText = payload.text.trim().length > 0;
+
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
-      {(payload.reasoningBlocks ?? []).map((reasoning, index) => (
-        <AssistantReasoningBlock
-          key={
-            streaming ? `streaming-reasoning-${index}` : buildReasoningBlockKey(reasoning, index)
-          }
-          content={reasoning}
-          index={index}
-          renderBody={(reasoningContent, isStreaming) => (
-            <AssistantRichContentBody content={reasoningContent} streaming={isStreaming} />
-          )}
-          streaming={streaming}
-          total={payload.reasoningBlocks?.length ?? 0}
-        />
-      ))}
+      {(payload.reasoningBlocks ?? []).map((reasoning, index) => {
+        // Default: when no explicit ended-flag list is supplied (i.e. the
+        // message is finalized / loaded from history), treat every reasoning
+        // block as ended. While streaming, use the per-block flag from the
+        // upstream `thinking_end` event.
+        const ended = reasoningBlocksEndedFlags
+          ? reasoningBlocksEndedFlags[index] === true
+          : !streaming;
+        const rawDuration = reasoningBlocksDurationsMs?.[index];
+        const persistedTiming = payload.reasoningBlocksTimings?.[index];
+        const persistedDuration =
+          persistedTiming &&
+          typeof persistedTiming.startedAt === 'number' &&
+          typeof persistedTiming.endedAt === 'number' &&
+          persistedTiming.endedAt >= persistedTiming.startedAt
+            ? persistedTiming.endedAt - persistedTiming.startedAt
+            : undefined;
+        const durationMs =
+          typeof rawDuration === 'number' && rawDuration >= 0
+            ? rawDuration
+            : typeof persistedDuration === 'number'
+              ? persistedDuration
+              : undefined;
+        return (
+          <AssistantReasoningBlock
+            key={
+              streaming ? `streaming-reasoning-${index}` : buildReasoningBlockKey(reasoning, index)
+            }
+            content={reasoning}
+            durationMs={durationMs}
+            ended={ended}
+            index={index}
+            messageStreaming={streaming}
+            renderBody={renderReasoningRichBody}
+            streaming={shouldStreamLocalReasoningBlock({
+              hasActiveToolCall,
+              hasAssistantText,
+              index,
+              streaming,
+              total: payload.reasoningBlocks?.length ?? 0,
+            })}
+            total={payload.reasoningBlocks?.length ?? 0}
+          />
+        );
+      })}
+      {payload.text.length > 0 && (
+        <AssistantRichContentBody content={payload.text} streaming={streaming} />
+      )}
       {payload.toolCalls.map((toolCall, index) =>
         renderToolCallContent({
           reactKey: `${toolCall.toolName}-${index}`,
@@ -583,9 +961,6 @@ function AssistantTraceContent({
       {payload.modifiedFilesSummary && (
         <ModifiedFilesSummaryCard summary={payload.modifiedFilesSummary} />
       )}
-      {payload.text.length > 0 && (
-        <AssistantRichContentBody content={payload.text} streaming={streaming} />
-      )}
     </div>
   );
 }
@@ -603,6 +978,15 @@ function AssistantRichContent({
     </div>
   );
 }
+
+// Stable module-level reference for AssistantReasoningBlock.renderBody.
+// Must be defined AFTER AssistantRichContentBody to avoid TDZ when read.
+// React components reference it at render time (post module-eval), so safe.
+// eslint-disable-next-line @typescript-eslint/no-use-before-define
+const renderReasoningRichBody = (reasoningContent: string, isStreaming: boolean) => (
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+  <AssistantRichContentBody content={reasoningContent} streaming={isStreaming} />
+);
 
 function AssistantRichContentBody({
   content,
@@ -717,6 +1101,18 @@ const MODE_ACCENTS: Record<DialogueMode, { bg: string; color: string; icon: stri
   },
 };
 
+const WELCOME_KEYFRAMES = `
+@keyframes ws-fade-up{0%{opacity:0;transform:translateY(18px)}100%{opacity:1;transform:translateY(0)}}
+@keyframes ws-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes ws-glow-pulse{0%,100%{box-shadow:0 0 0 1px var(--glow),0 2px 16px color-mix(in srgb,var(--glow) 18%,transparent)}50%{box-shadow:0 0 0 1.5px var(--glow),0 4px 24px color-mix(in srgb,var(--glow) 30%,transparent)}}
+@keyframes ws-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.ws-card{transition:border-color .22s,background .22s,box-shadow .22s,transform .22s}
+.ws-card:hover{transform:translateY(-3px);box-shadow:0 6px 24px rgba(0,0,0,.08)!important}
+.ws-pill{transition:transform .18s,box-shadow .18s}
+.ws-pill:hover{transform:translateY(-1px);box-shadow:0 3px 12px rgba(0,0,0,.1)}
+.ws-pill:active{transform:scale(.97)}
+`;
+
 export function WelcomeScreen({
   hasWorkspace,
   dialogueMode,
@@ -730,49 +1126,10 @@ export function WelcomeScreen({
   onOpenWorkspace: () => void;
   onSelectMode: (mode: DialogueMode) => void;
 }) {
-  const actions = [
-    {
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-      ),
-      label: '新建会话',
-      description: hasWorkspace ? '在当前工作区中开始新对话' : '开始一个空白会话',
-      action: onNewSession,
-      accent: true,
-    },
-    {
-      icon: (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-        </svg>
-      ),
-      label: hasWorkspace ? '切换工作区' : '打开工作区文件夹',
-      description: hasWorkspace ? '选择另一个项目文件夹' : '选择本地项目文件夹作为 Agent 工作区',
-      action: onOpenWorkspace,
-      accent: false,
-    },
+  const tips = [
+    { key: '/', text: '输入 / 查看命令' },
+    { key: '@', text: '输入 @ 引用文件' },
+    { key: '⌥', text: '编辑器模式浏览代码' },
   ];
 
   return (
@@ -782,210 +1139,434 @@ export function WelcomeScreen({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '40px 32px 32px',
-        gap: 28,
-        maxWidth: 560,
+        justifyContent: 'center',
+        padding: '16px 24px 12px',
+        gap: 18,
+        maxWidth: 700,
         width: '100%',
       }}
     >
-      <div style={{ textAlign: 'center' }}>
+      <style>{WELCOME_KEYFRAMES}</style>
+
+      {/* Hero */}
+      <div
+        style={{
+          textAlign: 'center',
+          animation: 'ws-fade-up .5s ease both',
+        }}
+      >
         <div
-          style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.02em' }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 42,
+            height: 42,
+            borderRadius: 13,
+            background: 'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, #a855f7))',
+            marginBottom: 10,
+            boxShadow: '0 4px 24px color-mix(in srgb, var(--accent) 28%, transparent)',
+            animation: 'ws-float 3s ease-in-out infinite',
+          }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div
+          style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.03em' }}
         >
           OpenAWork
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6, marginTop: 4 }}>
-          AI Agent 工作台
+        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5, marginTop: 4 }}>
+          选择一个对话模式，然后在下方输入框开始对话
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--text-3)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            marginBottom: 2,
-          }}
-        >
-          快速开始
-        </div>
-        {actions.map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            onClick={item.action}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 14,
-              width: '100%',
-              padding: '14px 16px',
-              borderRadius: 12,
-              border: item.accent ? 'none' : '1px solid var(--border)',
-              background: item.accent ? 'var(--accent)' : 'var(--surface)',
-              color: item.accent ? 'var(--accent-text)' : 'var(--text)',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <span
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 9,
-                background: item.accent
-                  ? 'oklch(from var(--accent) calc(l + 0.08) c h / 0.3)'
-                  : 'var(--accent-muted)',
-                color: item.accent ? 'var(--accent-text)' : 'var(--accent)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              {item.icon}
-            </span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</span>
-              <span style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
-                {item.description}
-              </span>
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--text-3)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            marginBottom: 2,
-          }}
-        >
-          对话模式
-        </div>
-        {DIALOGUE_MODE_OPTIONS.map((mode) => {
+      {/* Mode cards – horizontal grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 12,
+          width: '100%',
+        }}
+      >
+        {DIALOGUE_MODE_OPTIONS.map((mode, idx) => {
           const accent = MODE_ACCENTS[mode.value];
           const isActive = dialogueMode === mode.value;
           return (
             <button
               key={mode.value}
+              className="ws-card"
               type="button"
               onClick={() => onSelectMode(mode.value)}
               style={{
+                '--glow': accent.color,
+                position: 'relative',
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'flex-start',
-                gap: 12,
-                width: '100%',
-                padding: '12px 14px',
-                borderRadius: 10,
+                gap: 8,
+                padding: '14px 13px 12px',
+                borderRadius: 12,
                 border: isActive ? `1.5px solid ${accent.color}` : '1px solid var(--border)',
                 background: isActive ? accent.bg : 'var(--surface)',
                 color: 'var(--text)',
                 cursor: 'pointer',
                 textAlign: 'left',
-                transition: 'border-color 0.15s, background 0.15s',
-              }}
+                animation: `ws-fade-up .5s ease both ${0.1 + idx * 0.08}s${isActive ? ', ws-glow-pulse 2.5s ease-in-out infinite .6s' : ''}`,
+                overflow: 'hidden',
+              } as React.CSSProperties}
             >
+              {/* Shimmer overlay on active card */}
+              {isActive && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: 'inherit',
+                    background: `linear-gradient(110deg, transparent 30%, color-mix(in srgb, ${accent.color} 8%, transparent) 50%, transparent 70%)`,
+                    backgroundSize: '200% 100%',
+                    animation: 'ws-shimmer 3s linear infinite',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+              {/* Icon badge */}
               <span
                 style={{
                   width: 32,
                   height: 32,
-                  borderRadius: 8,
-                  background: accent.bg,
+                  borderRadius: 9,
+                  background: isActive
+                    ? `linear-gradient(135deg, ${accent.bg}, color-mix(in srgb, ${accent.color} 18%, transparent))`
+                    : accent.bg,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: 16,
                   flexShrink: 0,
+                  transition: 'transform .2s',
+                  transform: isActive ? 'scale(1.08)' : 'scale(1)',
                 }}
               >
                 {accent.icon}
               </span>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'relative' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: 5 }}>
                   {mode.label}
                   {isActive && (
                     <span
                       style={{
-                        marginLeft: 8,
-                        fontSize: 10,
-                        fontWeight: 500,
-                        color: accent.color,
-                        background: accent.bg,
-                        padding: '1px 6px',
-                        borderRadius: 4,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        background: accent.color,
+                        color: '#fff',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        flexShrink: 0,
                       }}
                     >
-                      当前
+                      ✓
                     </span>
                   )}
                 </span>
-                <span style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4 }}>
                   {mode.description}
                 </span>
-                {isActive && (
-                  <ol
+              </span>
+              {/* Details – always visible */}
+              <ul
+                style={{
+                  margin: '1px 0 0',
+                  padding: '0 0 0 12px',
+                  fontSize: 10,
+                  color: isActive ? 'var(--text-2)' : 'var(--text-3)',
+                  lineHeight: 1.5,
+                  listStyle: 'none',
+                  transition: 'color .2s',
+                }}
+              >
+                {mode.details.slice(0, 2).map((detail) => (
+                  <li
+                    key={detail}
                     style={{
-                      margin: '4px 0 0',
-                      padding: '0 0 0 16px',
-                      fontSize: 11,
-                      color: 'var(--text-3)',
-                      lineHeight: 1.5,
+                      position: 'relative',
+                      paddingLeft: 2,
                     }}
                   >
-                    {mode.details.map((detail) => (
-                      <li key={detail}>{detail}</li>
-                    ))}
-                  </ol>
-                )}
-              </span>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: -10,
+                        color: isActive ? accent.color : 'var(--text-3)',
+                        transition: 'color .2s',
+                      }}
+                    >
+                      ·
+                    </span>
+                    {detail}
+                  </li>
+                ))}
+              </ul>
             </button>
           );
         })}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-        <div
+      {/* Quick-actions row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          width: '100%',
+          justifyContent: 'center',
+          animation: 'ws-fade-up .5s ease both .38s',
+        }}
+      >
+        <button
+          className="ws-pill"
+          type="button"
+          onClick={onNewSession}
           style={{
-            fontSize: 11,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 16px',
+            borderRadius: 999,
+            border: 'none',
+            background: 'var(--accent)',
+            color: 'var(--accent-text)',
+            fontSize: 11.5,
             fontWeight: 600,
-            color: 'var(--text-3)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            marginBottom: 2,
+            cursor: 'pointer',
           }}
         >
-          提示
-        </div>
-        {[
-          '在对话框输入 / 可以查看所有 slash 命令',
-          '输入 @ 可以引用工作区文件作为上下文',
-          '打开编辑器模式可以同时浏览代码和对话',
-        ].map((tip) => (
-          <div
-            key={tip}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          新建会话
+        </button>
+        <button
+          className="ws-pill"
+          type="button"
+          onClick={onOpenWorkspace}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 16px',
+            borderRadius: 999,
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            color: 'var(--text-2)',
+            fontSize: 11.5,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          {hasWorkspace ? '切换工作区' : '打开工作区'}
+        </button>
+      </div>
+
+      {/* Tips row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+          justifyContent: 'center',
+          flexWrap: 'wrap',
+          animation: 'ws-fade-up .5s ease both .46s',
+        }}
+      >
+        {tips.map((tip) => (
+          <span
+            key={tip.key}
             style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-              fontSize: 12,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 11,
               color: 'var(--text-3)',
-              lineHeight: 1.5,
             }}
           >
-            <span style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }}>›</span>
-            <span>{tip}</span>
-          </div>
+            <kbd
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minWidth: 20,
+                height: 20,
+                padding: '0 5px',
+                borderRadius: 5,
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                color: 'var(--text-2)',
+                lineHeight: 1,
+              }}
+            >
+              {tip.key}
+            </kbd>
+            {tip.text}
+          </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+export type ResolveInlinePermissionActionsFn = (requestId: string) =>
+  | {
+      errorMessage?: string;
+      helperMessage?: string;
+      items: Array<{
+        danger?: boolean;
+        disabled?: boolean;
+        hint?: string;
+        id: string;
+        label: string;
+        onClick: () => void;
+        primary?: boolean;
+      }>;
+      pendingLabel?: string;
+    }
+  | undefined;
+
+export interface InlinePermissionQuickBarProps {
+  permissions: Array<{
+    requestId: string;
+    toolName: string;
+    reason: string;
+    scope: string;
+    riskLevel: string;
+    previewAction?: string;
+  }>;
+  resolveActions: ResolveInlinePermissionActionsFn;
+}
+
+export function InlinePermissionQuickBar({
+  permissions,
+  resolveActions,
+}: InlinePermissionQuickBarProps) {
+  if (permissions.length === 0) return null;
+
+  return (
+    <div
+      data-testid="inline-permission-quick-bar"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 5,
+        paddingLeft: 40,
+      }}
+    >
+      {permissions.map((permission) => {
+        const actions = resolveActions(permission.requestId);
+        return (
+          <div
+            key={permission.requestId}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              fontSize: 10,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: '#f59e0b',
+                  flexShrink: 0,
+                }}
+              />
+              <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{permission.toolName}</span>
+              <span
+                style={{
+                  color: 'var(--text-2)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                }}
+              >
+                {permission.reason}
+              </span>
+              {actions &&
+                actions.items.length > 0 &&
+                actions.items.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    disabled={action.disabled}
+                    onClick={action.onClick}
+                    title={action.hint}
+                    style={{
+                      appearance: 'none',
+                      height: 20,
+                      padding: '0 7px',
+                      borderRadius: 999,
+                      border: 'none',
+                      background: action.primary
+                        ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+                        : action.danger
+                          ? 'color-mix(in srgb, var(--danger) 14%, transparent)'
+                          : 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                      color: action.danger ? 'var(--danger)' : 'var(--accent)',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      cursor: action.disabled ? 'not-allowed' : 'pointer',
+                      opacity: action.disabled ? 0.55 : 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              {actions?.errorMessage && (
+                <span style={{ color: 'var(--danger)' }}>{actions.errorMessage}</span>
+              )}
+            </div>
+            {permission.previewAction && (
+              <div
+                style={{
+                  marginLeft: 11,
+                  color: 'var(--text-3)',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  fontSize: 10,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+                title={permission.previewAction}
+              >
+                {permission.previewAction}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

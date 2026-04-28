@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatUsageDetails } from '../../pages/chat-page/support.js';
 import type { ChatMessage } from '../../pages/chat-page/support.js';
-import { parseAssistantTraceContent } from '../../pages/chat-page/support.js';
+import { readAssistantTracePayload } from '../../pages/chat-page/support.js';
 import { MessageRow, sharedUiThemeVars } from './ChatPageSections.js';
 
 export interface ChatRenderAction {
@@ -320,7 +320,7 @@ function estimateGroupHeight(group: ChatRenderGroup): number {
       extraHeaderHeight += 28;
     }
 
-    const trace = parseAssistantTraceContent(message.content);
+    const trace = readAssistantTracePayload(message);
     if (trace) {
       const textChars = trace.text.length;
       estimatedContentHeight += Math.min(360, Math.max(48, Math.ceil(textChars / 90) * 18));

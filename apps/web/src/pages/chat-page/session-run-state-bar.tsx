@@ -100,11 +100,11 @@ function StatusBadge({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        height: 22,
-        padding: '0 8px',
+        height: 20,
+        padding: '0 7px',
         borderRadius: 999,
         fontSize: 10,
-        fontWeight: 700,
+        fontWeight: 600,
         color,
         border,
         background,
@@ -135,11 +135,16 @@ export function SessionRunStateBar({
   const capabilityCopy = getStopCapabilityCopy(stopCapability);
   const capabilityTone = getStopCapabilityTone(stopCapability);
 
+  const counterParts: string[] = [];
+  if (checkpointCount > 0) counterParts.push(`检查点 ${checkpointCount}`);
+  if (pendingPermissionsCount > 0) counterParts.push(`审批 ${pendingPermissionsCount}`);
+  if (pendingQuestionsCount > 0) counterParts.push(`问题 ${pendingQuestionsCount}`);
+
   return (
     <div
       data-testid="chat-session-runtime-status"
       style={{
-        padding: '0 10px 6px',
+        padding: '0 10px 4px',
         background: 'var(--bg)',
         flexShrink: 0,
       }}
@@ -152,92 +157,79 @@ export function SessionRunStateBar({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 10,
-          borderRadius: 12,
-          padding: '8px 10px',
+          gap: 8,
+          borderRadius: 8,
+          padding: '4px 8px',
           background: meta.panelBackground,
           border: meta.panelBorder,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
           <span
             aria-hidden="true"
             style={{
-              width: 8,
-              height: 8,
+              width: 6,
+              height: 6,
               borderRadius: '50%',
               background: meta.dotColor,
               boxShadow:
                 status === 'running'
-                  ? '0 0 0 4px color-mix(in oklch, var(--accent) 14%, transparent)'
+                  ? '0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent)'
                   : 'none',
               flexShrink: 0,
             }}
           />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--text)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            会话{meta.badge}
+          </span>
+          {capabilityCopy && (
+            <span
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: 'var(--text)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              会话{meta.badge}
-            </div>
-            <div
-              style={{
-                marginTop: 2,
                 fontSize: 10,
-                lineHeight: 1.35,
-                color: 'var(--text-3)',
+                color: capabilityTone.color,
+                whiteSpace: 'nowrap',
               }}
             >
-              <div
-                style={{
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {meta.description}
-              </div>
-              {capabilityCopy && (
-                <div
-                  style={{
-                    marginTop: 3,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    color: capabilityTone.color,
-                  }}
-                >
-                  {capabilityCopy.description}
-                </div>
-              )}
-            </div>
-          </div>
+              · {capabilityCopy.badge}
+            </span>
+          )}
+          {counterParts.length > 0 && (
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--text-3)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              · {counterParts.join(' / ')}
+            </span>
+          )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
           {onOpenRecovery ? (
             <button
               type="button"
               onClick={onOpenRecovery}
               style={{
-                height: 24,
-                padding: '0 8px',
+                height: 20,
+                padding: '0 7px',
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
                 background: 'color-mix(in oklch, var(--surface) 82%, transparent)',
-                color: 'var(--text)',
+                color: 'var(--text-2)',
                 fontSize: 10,
-                fontWeight: 700,
+                fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              查看恢复策略
+              恢复策略
             </button>
           ) : null}
           <StatusBadge
@@ -254,15 +246,6 @@ export function SessionRunStateBar({
             color={status === 'paused' ? '#fcd34d' : 'var(--accent)'}
             label={meta.badge}
           />
-          {capabilityCopy && <StatusBadge {...capabilityTone} label={capabilityCopy.badge} />}
-          {(checkpointCount > 0 || pendingPermissionsCount > 0 || pendingQuestionsCount > 0) && (
-            <StatusBadge
-              background="color-mix(in oklch, var(--surface) 82%, transparent)"
-              border="1px solid var(--border-subtle)"
-              color="var(--text-2)"
-              label={`检查点 ${checkpointCount} · 审批 ${pendingPermissionsCount} · 问题 ${pendingQuestionsCount}`}
-            />
-          )}
         </div>
       </div>
     </div>
