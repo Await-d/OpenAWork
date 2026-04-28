@@ -73,7 +73,6 @@ async function main(): Promise<void> {
               parentSessionId: sessionId,
               createdByTool: 'task',
               subagentType: 'explore',
-              deadlineMs: Date.now() - 1_000,
             }),
             '过期子代理会话',
           ],
@@ -141,12 +140,10 @@ async function main(): Promise<void> {
         });
         await taskManager.save(childGraph);
 
-        const effectiveDeadline = Date.now() + 60_000;
         dbModule.sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
           JSON.stringify({
             parentSessionId: sessionId,
             terminalReason: 'timeout',
-            deadlineMs: effectiveDeadline,
           }),
           childSessionId,
           userId,
@@ -211,7 +208,7 @@ async function main(): Promise<void> {
             blockedBy: string[];
             sessionId?: string;
             terminalReason?: string;
-            effectiveDeadline?: number;
+            timeoutSource?: string;
           }>;
         };
 
@@ -253,18 +250,23 @@ async function main(): Promise<void> {
           'delegated child-session task should expose terminalReason from child session metadata',
         );
         assert(
-          (delegatedProjectedTask as { effectiveDeadline?: number } | undefined)
-            ?.effectiveDeadline === effectiveDeadline,
-          'delegated child-session task should expose effectiveDeadline from child session metadata',
+          (delegatedProjectedTask as { timeoutSource?: string } | undefined)?.timeoutSource ===
+            undefined,
+          'tasks route should no longer expose removed legacy timeoutSource values',
         );
         assert(
           staleTimeoutProjectedTask?.status === 'failed',
-          'session tasks route should reconcile stale expired child sessions into failed tasks on the same response',
+          'session tasks route should still reconcile child tasks without active runtime threads to failed',
         );
         assert(
           (staleTimeoutProjectedTask as { terminalReason?: string } | undefined)?.terminalReason ===
-            'timeout',
-          'session tasks route should expose terminalReason=timeout immediately after reconcile',
+            undefined,
+          '取消总 deadline 语义后，session tasks route 不应再把 stale child task 投影为 timeout',
+        );
+        assert(
+          (staleTimeoutProjectedTask as { timeoutSource?: string } | undefined)?.timeoutSource ===
+            undefined,
+          '取消总 deadline 语义后，session tasks route 不应再暴露 timeoutSource=deadline',
         );
         assert(
           grandchildProjectedTask?.sessionId === grandchildSessionId,

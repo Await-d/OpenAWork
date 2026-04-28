@@ -29,7 +29,6 @@ interface ActiveLoopRuntime {
 
 interface SessionRow {
   id: string;
-  messages_json: string;
   metadata_json: string;
   user_id: string;
 }
@@ -398,7 +397,6 @@ async function executeLoopIteration(
   const messages = listSessionMessages({
     sessionId: input.sessionId,
     userId: input.userId,
-    legacyMessagesJson: session.messages_json,
   });
   const effectiveState =
     persistedState.session_id && persistedState.session_id !== input.sessionId
@@ -454,7 +452,6 @@ async function executeLoopIteration(
     userId: input.userId,
     role: 'assistant',
     content: [{ type: 'text', text: loopOutput }],
-    legacyMessagesJson: session.messages_json,
     clientRequestId: `loop:${input.kind}:${input.taskId}:iteration:${input.iteration}`,
   });
 
@@ -555,7 +552,6 @@ async function finalizeLoopExecution(
       userId: config.userId,
       role: 'assistant',
       content: [{ type: 'text', text: verificationPrompt }],
-      legacyMessagesJson: session.messages_json,
       clientRequestId: `loop:${config.kind}:${config.taskId}:verification-pending`,
     });
     return;
@@ -606,7 +602,6 @@ async function finalizeLoopExecution(
         text: `[${config.kind === 'ulw' ? 'ULW Loop' : 'Ralph Loop'}] 已结束：${translateLoopTermination(result)}\n${truncateText(result.finalOutput, 600)}`,
       },
     ],
-    legacyMessagesJson: session.messages_json,
     clientRequestId: `loop:${config.kind}:${config.taskId}:final`,
   });
 }
@@ -614,7 +609,7 @@ async function finalizeLoopExecution(
 function readSessionRecord(sessionId: string, userId: string): SessionRow | null {
   return (
     sqliteGet<SessionRow>(
-      'SELECT id, user_id, messages_json, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      'SELECT id, user_id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
       [sessionId, userId],
     ) ?? null
   );
@@ -787,8 +782,7 @@ function parseSimpleFrontmatter(frontmatter: string): Record<string, string> {
 function readCurrentMessageCount(sessionId: string, userId: string): number {
   const session = readSessionRecord(sessionId, userId);
   if (!session) return 0;
-  return listSessionMessages({ sessionId, userId, legacyMessagesJson: session.messages_json })
-    .length;
+  return listSessionMessages({ sessionId, userId }).length;
 }
 
 function buildContinuationPrompt(input: {

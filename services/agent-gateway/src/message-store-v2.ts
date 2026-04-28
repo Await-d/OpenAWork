@@ -24,6 +24,7 @@ import {
   type ToolStateCompleted,
   type ToolStateError,
   type AssistantMessage,
+  type AssistantErrorObject,
   makePartId,
   messageInfoFromRow,
   messageInfoToRowData,
@@ -32,6 +33,18 @@ import {
   type PageResult,
   type MessageCursor,
 } from './message-v2-schema.js';
+import { buildUiToolPartReadState } from './tool-state-read-model.js';
+import {
+  normalizeToolResultOutputForStorage,
+  stringifyToolResultOutput,
+} from './tool-result-contract.js';
+import { emitEvent, MessageEvents } from './sync-event.js';
+import { appendSessionEvent } from './session-entry-store.js';
+import { makeSessionEventId, type SessionEventID } from './session-event.js';
+// Side-effect import: registers the message/part projectors that translate
+// the events emitted below into INSERT/UPDATE/DELETE on message_v2/part_v2.
+// Without this the unified SyncEvent write path would silently no-op.
+import './message-v2-projectors.js';
 
 // ─── Message CRUD ───
 
@@ -40,13 +53,14 @@ export function insertMessage(input: {
   userId: string;
   info: MessageInfo;
 }): void {
-  const dataJson = messageInfoToRowData(input.info);
-  sqliteRun(
-    `INSERT INTO message_v2 (id, session_id, user_id, time_created, data)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')`,
-    [input.info.id, input.sessionId, input.userId, input.info.time.created, dataJson],
-  );
+  // Phase 2.1 — single write path: every V2 mutation flows through
+  // emitEvent → projector (see message-v2-projectors.ts) so the
+  // event_log captures it and downstream subscribers stay in sync.
+  emitEvent({
+    definition: MessageEvents.Created,
+    aggregateID: input.sessionId,
+    data: { sessionID: input.sessionId, info: input.info },
+  });
 }
 
 export function updateMessage(input: {
@@ -54,13 +68,11 @@ export function updateMessage(input: {
   userId: string;
   info: MessageInfo;
 }): void {
-  const dataJson = messageInfoToRowData(input.info);
-  sqliteRun(
-    `INSERT INTO message_v2 (id, session_id, user_id, time_created, data)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')`,
-    [input.info.id, input.sessionId, input.userId, input.info.time.created, dataJson],
-  );
+  emitEvent({
+    definition: MessageEvents.Updated,
+    aggregateID: input.sessionId,
+    data: { sessionID: input.sessionId, info: input.info },
+  });
 }
 
 export function deleteMessage(input: {
@@ -68,11 +80,11 @@ export function deleteMessage(input: {
   userId: string;
   messageId: MessageID;
 }): void {
-  // Parts cascade delete via FK
-  sqliteRun('DELETE FROM message_v2 WHERE id = ? AND session_id = ?', [
-    input.messageId,
-    input.sessionId,
-  ]);
+  emitEvent({
+    definition: MessageEvents.Removed,
+    aggregateID: input.sessionId,
+    data: { sessionID: input.sessionId, messageID: input.messageId },
+  });
 }
 
 export function getMessage(input: {
@@ -93,17 +105,77 @@ export function listMessages(input: {
   limit?: number;
 }): MessageInfo[] {
   const limit = input.limit ?? 100;
+  const limitClause = limit > 0 ? `LIMIT ${limit}` : '';
+
   const rows =
     input.afterTime !== undefined
       ? sqliteAll<MessageV2Row>(
-          'SELECT * FROM message_v2 WHERE session_id = ? AND user_id = ? AND time_created > ? ORDER BY time_created ASC, id ASC LIMIT ?',
-          [input.sessionId, input.userId, input.afterTime, limit],
+          `SELECT * FROM message_v2 WHERE session_id = ? AND user_id = ? AND time_created > ? ORDER BY time_created ASC, id ASC ${limitClause}`,
+          [input.sessionId, input.userId, input.afterTime],
         )
       : sqliteAll<MessageV2Row>(
-          'SELECT * FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC LIMIT ?',
-          [input.sessionId, input.userId, limit],
+          `SELECT * FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC ${limitClause}`,
+          [input.sessionId, input.userId],
         );
   return rows.map((row) => messageInfoFromRow(row));
+}
+
+/**
+ * Return the last N conversation turns (measured by user-message count) and all
+ * messages that follow each turn boundary.  This guarantees complete assistant
+ * responses regardless of how many raw messages they span.
+ *
+ * Algorithm:
+ *   1. Find the Nth-from-last user message (ORDER BY time_created DESC LIMIT 1 OFFSET N-1).
+ *   2. Return every message whose time_created >= that boundary, in chronological order.
+ */
+export function listMessagesByTurnLimit(input: {
+  sessionId: string;
+  userId: string;
+  turnLimit: number;
+}): MessageInfo[] {
+  const boundary = sqliteGet<Pick<MessageV2Row, 'time_created'>>(
+    `SELECT time_created FROM message_v2
+     WHERE session_id = ? AND user_id = ? AND data LIKE '%"role":"user"%'
+     ORDER BY time_created DESC, id DESC
+     LIMIT 1 OFFSET ?`,
+    [input.sessionId, input.userId, input.turnLimit - 1],
+  );
+
+  if (!boundary) {
+    // Fewer turns than requested — return everything
+    return listMessages({ sessionId: input.sessionId, userId: input.userId, limit: -1 });
+  }
+
+  const rows = sqliteAll<MessageV2Row>(
+    `SELECT * FROM message_v2
+     WHERE session_id = ? AND user_id = ? AND time_created >= ?
+     ORDER BY time_created ASC, id ASC`,
+    [input.sessionId, input.userId, boundary.time_created],
+  );
+  return rows.map((row) => messageInfoFromRow(row));
+}
+
+export function countMessages(input: {
+  sessionId: string;
+  userId: string;
+}): number {
+  const row = sqliteGet<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM message_v2 WHERE session_id = ? AND user_id = ?',
+    [input.sessionId, input.userId],
+  );
+  return row?.cnt ?? 0;
+}
+
+export function countUserMessages(input: {
+  sessionId: string;
+  userId: string;
+}): number {
+  const row = sqliteGet<{ cnt: number }>(
+    `SELECT COUNT(*) AS cnt FROM message_v2 WHERE session_id = ? AND user_id = ? AND data LIKE '%"role":"user"%'`,
+    [input.sessionId, input.userId],
+  );
+  return row?.cnt ?? 0;
 }
 
 // ─── Part CRUD ───
@@ -116,29 +188,46 @@ function getPartTimeCreated(part: MessagePart): number {
 }
 
 export function insertPart(input: { sessionId: string; userId: string; part: MessagePart }): void {
-  const dataJson = partToRowData(input.part);
-  const timeCreated = getPartTimeCreated(input.part);
-  sqliteRun(
-    `INSERT INTO part_v2 (id, message_id, session_id, user_id, time_created, data)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')`,
-    [input.part.id, input.part.messageID, input.sessionId, input.userId, timeCreated, dataJson],
-  );
+  emitEvent({
+    definition: MessageEvents.PartCreated,
+    aggregateID: input.sessionId,
+    data: {
+      sessionID: input.sessionId,
+      part: input.part,
+      time: getPartTimeCreated(input.part),
+    } as { sessionID: string; part: unknown; time?: number },
+  });
 }
 
 export function updatePart(input: { sessionId: string; userId: string; part: MessagePart }): void {
-  const dataJson = partToRowData(input.part);
-  const timeCreated = getPartTimeCreated(input.part);
-  sqliteRun(
-    `INSERT INTO part_v2 (id, message_id, session_id, user_id, time_created, data)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')`,
-    [input.part.id, input.part.messageID, input.sessionId, input.userId, timeCreated, dataJson],
-  );
+  emitEvent({
+    definition: MessageEvents.PartUpdated,
+    aggregateID: input.sessionId,
+    data: {
+      sessionID: input.sessionId,
+      part: input.part,
+      time: getPartTimeCreated(input.part),
+    } as { sessionID: string; part: unknown; time: number },
+  });
 }
 
 export function deletePart(input: { sessionId: string; partId: PartID }): void {
-  sqliteRun('DELETE FROM part_v2 WHERE id = ? AND session_id = ?', [input.partId, input.sessionId]);
+  // Resolve the messageId so the projector payload stays well-formed —
+  // the partRemoved projector deletes by (id, message_id, session_id).
+  const row = sqliteGet<{ message_id: string }>(
+    'SELECT message_id FROM part_v2 WHERE id = ? AND session_id = ?',
+    [input.partId, input.sessionId],
+  );
+  if (!row) return;
+  emitEvent({
+    definition: MessageEvents.PartRemoved,
+    aggregateID: input.sessionId,
+    data: {
+      sessionID: input.sessionId,
+      messageID: row.message_id,
+      partID: input.partId,
+    },
+  });
 }
 
 export function getPart(input: {
@@ -190,20 +279,17 @@ export function updatePartDelta(input: {
   field: string;
   delta: string;
 }): void {
-  const row = sqliteGet<PartV2Row>(
-    'SELECT * FROM part_v2 WHERE id = ? AND message_id = ? AND session_id = ?',
-    [input.partId, input.messageId, input.sessionId],
-  );
-  if (!row) return;
-
-  const data = JSON.parse(row.data) as Record<string, unknown>;
-  const existing = typeof data[input.field] === 'string' ? (data[input.field] as string) : '';
-  data[input.field] = existing + input.delta;
-
-  sqliteRun("UPDATE part_v2 SET data = ?, updated_at = datetime('now') WHERE id = ?", [
-    JSON.stringify(data),
-    input.partId,
-  ]);
+  emitEvent({
+    definition: MessageEvents.PartDelta,
+    aggregateID: input.sessionId,
+    data: {
+      sessionID: input.sessionId,
+      messageID: input.messageId,
+      partID: input.partId,
+      field: input.field,
+      delta: input.delta,
+    },
+  });
 }
 
 // ─── Read Model: MessageWithParts ───
@@ -213,14 +299,31 @@ export function listMessagesWithParts(input: {
   userId: string;
   limit?: number;
 }): MessageWithParts[] {
-  const messages = listMessages({ ...input, limit: input.limit });
+  // Default to unlimited — filterCompacted() handles the actual boundary,
+  // matching opencode's pattern where stream() reads all messages and
+  // filterCompacted() trims pre-compaction history.
+  const limit = input.limit ?? -1;
+  const messages = listMessages({ ...input, limit });
+  return attachPartsToMessages(input.sessionId, messages);
+}
+
+export function listMessagesWithPartsByTurnLimit(input: {
+  sessionId: string;
+  userId: string;
+  turnLimit: number;
+}): MessageWithParts[] {
+  const messages = listMessagesByTurnLimit(input);
+  return attachPartsToMessages(input.sessionId, messages);
+}
+
+function attachPartsToMessages(sessionId: string, messages: MessageInfo[]): MessageWithParts[] {
   if (messages.length === 0) return [];
 
   const messageIds = messages.map((m) => m.id);
   const placeholders = messageIds.map(() => '?').join(',');
   const partRows = sqliteAll<PartV2Row>(
     `SELECT * FROM part_v2 WHERE session_id = ? AND message_id IN (${placeholders}) ORDER BY message_id, id ASC`,
-    [input.sessionId, ...messageIds],
+    [sessionId, ...messageIds],
   );
 
   const partsByMessage = new Map<string, MessagePart[]>();
@@ -277,6 +380,31 @@ export function transitionToolToRunning(input: {
 
   const updated: ToolPart = { ...part, state: nextState };
   updatePart({ sessionId: input.sessionId, userId: input.userId, part: updated });
+
+  // Phase 2.2 — mirror the dispatch as a typed `tool.called` SessionEvent so
+  // `replaySessionEntries` can transition the aggregator's ToolPart from
+  // `pending` to `running` (matches opencode's tool.called → tool.success
+  // / tool.error pipeline). Failures are swallowed: the tool transition
+  // itself is the source of truth.
+  try {
+    const ts = nextState.time.start;
+    appendSessionEvent({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      event: {
+        id: makeSessionEventId(ts) as SessionEventID,
+        type: 'tool.called',
+        timestamp: ts,
+        callID: input.callID,
+        tool: part.tool,
+        input: pending.input,
+        provider: { executed: true, ...(input.metadata ? { metadata: input.metadata } : {}) },
+      },
+    });
+  } catch {
+    // best-effort persistence; never fail the tool dispatch because of it.
+  }
+
   return updated;
 }
 
@@ -293,10 +421,11 @@ export function transitionToolToCompleted(input: {
   if (!part || part.type !== 'tool') return undefined;
 
   const running = part.state as ToolStateRunning;
+  const output = stringifyToolResultOutput(normalizeToolResultOutputForStorage(input.output));
   const nextState: ToolStateCompleted = {
     status: 'completed',
     input: running.input,
-    output: input.output,
+    output,
     title: input.title,
     metadata: input.metadata,
     time: { start: input.startTime, end: Date.now() },
@@ -318,10 +447,11 @@ export function transitionToolToError(input: {
   if (!part || part.type !== 'tool') return undefined;
 
   const running = part.state as ToolStateRunning;
+  const error = stringifyToolResultOutput(normalizeToolResultOutputForStorage(input.error));
   const nextState: ToolStateError = {
     status: 'error',
     input: running.input,
-    error: input.error,
+    error,
     time: { start: input.startTime, end: Date.now() },
   };
 
@@ -343,7 +473,21 @@ export function truncateMessagesAfter(input: {
   );
 
   const ids = rows.map((r) => r.id);
-  // Delete parts first (though FK cascade should handle it)
+  // Phase 2.1 — emit a Removed event per truncated message; the projector
+  // takes care of cascading the part_v2 cleanup. We keep the bulk SQL for
+  // backward compatibility just below in case some message rows are not
+  // covered by the projector (e.g. when sessions row is missing).
+  for (const id of ids) {
+    emitEvent({
+      definition: MessageEvents.Removed,
+      aggregateID: input.sessionId,
+      data: { sessionID: input.sessionId, messageID: id },
+    });
+  }
+  // Defensive sweep — if any rows survived projector deletion (e.g. due to
+  // FK constraints during a partially-migrated session), purge them with
+  // explicit SQL so the caller's invariant ``no messages after messageId
+  // remain'' still holds.
   for (const id of ids) {
     sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [id, input.sessionId]);
   }
@@ -355,161 +499,6 @@ export function truncateMessagesAfter(input: {
   );
 
   return ids as MessageID[];
-}
-
-// ─── V1 → V2 Migration ───
-
-export async function migrateV1ToV2(input: { sessionId: string; userId: string }): Promise<number> {
-  // Import V1 store lazily to avoid circular deps
-  const { listSessionMessages } = await import('./session-message-store.js');
-  const v1Messages = listSessionMessages({
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-
-  let migrated = 0;
-  for (const v1Msg of v1Messages) {
-    const msgId = v1Msg.id as MessageID;
-    const timeCreated = v1Msg.createdAt;
-
-    // Create message row
-    const info: MessageInfo =
-      v1Msg.role === 'user'
-        ? { id: msgId, sessionID: input.sessionId, role: 'user', time: { created: timeCreated } }
-        : v1Msg.role === 'assistant'
-          ? {
-              id: msgId,
-              sessionID: input.sessionId,
-              role: 'assistant',
-              time: { created: timeCreated },
-              cost: 0,
-              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            }
-          : v1Msg.role === 'tool'
-            ? {
-                id: msgId,
-                sessionID: input.sessionId,
-                role: 'tool',
-                time: { created: timeCreated },
-              }
-            : {
-                id: msgId,
-                sessionID: input.sessionId,
-                role: 'system',
-                time: { created: timeCreated },
-              };
-
-    insertMessage({ sessionId: input.sessionId, userId: input.userId, info });
-
-    // Create part rows from content
-    for (const content of v1Msg.content) {
-      const partId = makePartId();
-      let part: MessagePart;
-
-      if (content.type === 'text') {
-        part = {
-          id: partId,
-          sessionID: input.sessionId,
-          messageID: msgId,
-          type: 'text',
-          text: content.text,
-        };
-      } else if (content.type === 'tool_call') {
-        part = {
-          id: partId,
-          sessionID: input.sessionId,
-          messageID: msgId,
-          type: 'tool',
-          callID: content.toolCallId,
-          tool: content.toolName,
-          state: {
-            status: 'pending',
-            input: content.input,
-            raw: content.rawArguments ?? JSON.stringify(content.input),
-          },
-        };
-      } else if (content.type === 'tool_result') {
-        // Tool result → transition the existing ToolPart to completed/error
-        const toolPart = findToolPartByCallID({
-          sessionId: input.sessionId,
-          callID: content.toolCallId,
-        });
-        if (toolPart) {
-          const pending = toolPart.state as ToolStatePending;
-          const nextState: ToolStateCompleted | ToolStateError = content.isError
-            ? {
-                status: 'error',
-                input: pending.input,
-                error:
-                  typeof content.output === 'string'
-                    ? content.output
-                    : JSON.stringify(content.output),
-                time: { start: timeCreated, end: timeCreated },
-              }
-            : {
-                status: 'completed',
-                input: pending.input,
-                output:
-                  typeof content.output === 'string'
-                    ? content.output
-                    : JSON.stringify(content.output),
-                title: content.toolName ?? content.toolCallId,
-                metadata: {},
-                time: { start: timeCreated, end: timeCreated },
-              };
-          const updated: ToolPart = { ...toolPart, state: nextState };
-          updatePart({ sessionId: input.sessionId, userId: input.userId, part: updated });
-        }
-        continue; // Don't create a separate part for tool_result
-      } else if (content.type === 'modified_files_summary') {
-        part = {
-          id: partId,
-          sessionID: input.sessionId,
-          messageID: msgId,
-          type: 'modified_files_summary',
-          title: content.title,
-          summary: content.summary,
-          files: content.files,
-        };
-      } else {
-        continue; // Skip unknown content types
-      }
-
-      insertPart({ sessionId: input.sessionId, userId: input.userId, part });
-      migrated++;
-    }
-
-    migrated++;
-  }
-
-  return migrated;
-}
-
-// ─── filterCompacted (opencode pattern) ───
-// When an assistant message has summary=true + finish + no error,
-// its parentID is considered "compacted" (superseded by the summary).
-// Also breaks on user messages with compaction part that are already completed.
-
-export function filterCompacted(messages: Iterable<MessageWithParts>): MessageWithParts[] {
-  const result: MessageWithParts[] = [];
-  const completed = new Set<string>();
-
-  for (const msg of messages) {
-    result.push(msg);
-    if (
-      msg.info.role === 'user' &&
-      completed.has(msg.info.id) &&
-      msg.parts.some((part) => part.type === 'compaction')
-    ) {
-      break;
-    }
-    if (msg.info.role === 'assistant' && msg.info.summary && msg.info.finish && !msg.info.error) {
-      completed.add(msg.info.parentID ?? '');
-    }
-  }
-
-  result.reverse();
-  return result;
 }
 
 // ─── Cursor-based Pagination (opencode pattern) ───
@@ -636,9 +625,11 @@ export function getMessageWithParts(input: {
   };
 }
 
-// ─── toModelMessages (opencode pattern) ───
+// ─── toUIMessages (opencode pattern) ───
 // Converts V2 MessageWithParts[] into AI SDK compatible UIMessage[] format
-// for sending to upstream providers.
+// for frontend UI projection. Distinct from toModelMessages() in
+// message-to-model-messages.ts, which produces UnifiedMessage[] for
+// upstream LLM requests.
 
 export interface UIMessagePart {
   type: string;
@@ -662,7 +653,7 @@ export interface UIMessage {
   parts: UIMessagePart[];
 }
 
-export function toModelMessages(input: MessageWithParts[]): UIMessage[] {
+export function toUIMessages(input: MessageWithParts[]): UIMessage[] {
   const result: UIMessage[] = [];
 
   for (const msg of input) {
@@ -731,60 +722,24 @@ export function toModelMessages(input: MessageWithParts[]): UIMessage[] {
         }
         if (part.type === 'tool') {
           const toolType = `tool-${part.tool}` as const;
-          if (part.state.status === 'completed') {
-            const outputText = part.state.time.compacted
-              ? '[Old tool result content cleared]'
-              : part.state.output;
-            assistantMessage.parts.push({
-              type: toolType,
-              state: 'output-available',
-              toolCallId: part.callID,
-              input: part.state.input,
-              output:
-                part.state.attachments && part.state.attachments.length > 0
-                  ? { text: outputText, attachments: part.state.attachments }
-                  : outputText,
-              ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-              callProviderMetadata: part.metadata,
-            });
-          }
-          if (part.state.status === 'error') {
-            const interruptedOutput =
-              part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined;
-            if (typeof interruptedOutput === 'string') {
-              assistantMessage.parts.push({
-                type: toolType,
-                state: 'output-available',
-                toolCallId: part.callID,
-                input: part.state.input,
-                output: interruptedOutput,
-                ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-                callProviderMetadata: part.metadata,
-              });
-            } else {
-              assistantMessage.parts.push({
-                type: toolType,
-                state: 'output-error',
-                toolCallId: part.callID,
-                input: part.state.input,
-                errorText: part.state.error,
-                ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-                callProviderMetadata: part.metadata,
-              });
-            }
-          }
-          // Handle pending/running tool calls — treat as interrupted
-          if (part.state.status === 'pending' || part.state.status === 'running') {
-            assistantMessage.parts.push({
-              type: toolType,
-              state: 'output-error',
-              toolCallId: part.callID,
-              input: part.state.input,
-              errorText: '[Tool execution was interrupted]',
-              ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
-              callProviderMetadata: part.metadata,
-            });
-          }
+          const readState = buildUiToolPartReadState(part);
+          assistantMessage.parts.push({
+            type: toolType,
+            state: readState.state,
+            toolCallId: part.callID,
+            input: part.state.input,
+            ...(readState.output
+              ? {
+                  output:
+                    'attachments' in part.state && part.state.attachments && part.state.attachments.length > 0
+                      ? { text: readState.output, attachments: part.state.attachments }
+                      : readState.output,
+                }
+              : {}),
+            ...(readState.errorText ? { errorText: readState.errorText } : {}),
+            ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
+            callProviderMetadata: part.metadata,
+          });
         }
       }
 
@@ -799,38 +754,133 @@ export function toModelMessages(input: MessageWithParts[]): UIMessage[] {
 
 // ─── fromError (opencode pattern) ───
 // Converts an error into the structured AssistantMessage.error format.
+// Modelled after opencode's MessageV2.fromError but expressed as a plain
+// TypeScript discriminated union (no Effect-TS NamedError dependency).
+
+const AUTH_ERROR_PATTERNS: RegExp[] = [
+  /api[\s_-]?key/i,
+  /unauthorized/i,
+  /\b401\b/,
+  /\b403\b/,
+  /forbidden/i,
+  /authenticat(?:ion|ed)/i,
+  /invalid token/i,
+];
+
+const CONTEXT_OVERFLOW_PATTERNS: RegExp[] = [
+  /context[\s_-]?length[\s_-]?exceeded/i,
+  /context window/i,
+  /maximum context length/i,
+  /max(?:imum)?\s+(?:input|prompt)?\s*tokens?/i,
+  /too many input tokens/i,
+  /token limit/i,
+  /prompt(?:\s+is)?\s+too long/i,
+  /input(?:\s+is)?\s+too long/i,
+  /exceeds.*context/i,
+];
+
+const OUTPUT_LENGTH_PATTERNS: RegExp[] = [
+  /output[\s_-]+too long/i,
+  /max[\s_-]?(?:completion|output)[\s_-]?tokens?/i,
+  /max_tokens.*reached/i,
+  /completion.*too long/i,
+  /content_length_exceeded/i,
+  /response.*too long/i,
+];
+
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EAI_AGAIN',
+]);
+
+function matchesAny(value: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
+function readErrorCode(e: unknown): string | undefined {
+  if (typeof e !== 'object' || e === null) return undefined;
+  const code = (e as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function readErrorStatusCode(e: unknown): number | undefined {
+  if (typeof e !== 'object' || e === null) return undefined;
+  const candidates = ['statusCode', 'status', 'httpStatus'] as const;
+  for (const key of candidates) {
+    const value = (e as Record<string, unknown>)[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
 
 export function fromError(
   e: unknown,
   ctx: { providerID?: string; aborted?: boolean },
-): NonNullable<AssistantMessage['error']> {
+): AssistantErrorObject {
+  // 1. Aborted flows take precedence — DOM AbortError or explicit ctx.aborted
   if (e instanceof DOMException && e.name === 'AbortError') {
     return { name: 'AbortedError', message: e.message };
   }
+
   if (e instanceof Error) {
     const message = e.message || String(e);
-    // Check for auth/key errors
-    if (message.includes('API key') || message.includes('api_key') || message.includes('apiKey')) {
-      return { name: 'AuthError', message: `Provider ${ctx.providerID ?? 'unknown'}: ${message}` };
+    const code = readErrorCode(e);
+    const statusCode = readErrorStatusCode(e);
+
+    // 2. Network / decompression errors (always retryable)
+    if (code && RETRYABLE_NETWORK_CODES.has(code)) {
+      return {
+        name: 'APIError',
+        message: code === 'ECONNRESET' ? 'Connection reset by server' : message,
+        isRetryable: true,
+        code,
+      };
     }
-    // Check for context overflow / token limit
-    if (
-      message.includes('context_length_exceeded') ||
-      message.includes('max_tokens') ||
-      message.includes('token limit')
-    ) {
-      return { name: 'ContextOverflowError', message };
-    }
-    // Check for connection errors
-    if ((e as NodeJS.ErrnoException).code === 'ECONNRESET') {
-      return { name: 'APIError', message: 'Connection reset by server' };
-    }
-    // Check for abort during stream
+
+    // 3. Aborted during stream
     if (ctx.aborted) {
       return { name: 'AbortedError', message };
     }
-    // Generic API error
-    return { name: 'APIError', message };
+
+    // 4. Auth — auth issues should not be retried
+    if (matchesAny(message, AUTH_ERROR_PATTERNS)) {
+      return {
+        name: 'AuthError',
+        message: ctx.providerID ? `Provider ${ctx.providerID}: ${message}` : message,
+        ...(ctx.providerID ? { providerID: ctx.providerID } : {}),
+      };
+    }
+
+    // 5. Output length
+    if (matchesAny(message, OUTPUT_LENGTH_PATTERNS)) {
+      return { name: 'OutputLengthError', message };
+    }
+
+    // 6. Context overflow
+    if (matchesAny(message, CONTEXT_OVERFLOW_PATTERNS)) {
+      return {
+        name: 'ContextOverflowError',
+        message,
+        ...(statusCode !== undefined ? { statusCode } : {}),
+      };
+    }
+
+    // 7. Generic API error — retryable when 5xx is reported on the cause
+    const isRetryable =
+      statusCode !== undefined && statusCode >= 500 && statusCode <= 599 ? true : undefined;
+    return {
+      name: 'APIError',
+      message,
+      ...(statusCode !== undefined ? { statusCode } : {}),
+      ...(isRetryable !== undefined ? { isRetryable } : {}),
+      ...(code !== undefined ? { code } : {}),
+    };
   }
+
   return { name: 'UnknownError', message: JSON.stringify(e) };
 }

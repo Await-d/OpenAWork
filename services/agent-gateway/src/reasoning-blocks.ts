@@ -11,7 +11,7 @@ export interface ReasoningBlock {
 
 const LEGACY_REASONING_BLOCK_KEY = 'legacy:0';
 
-function buildReasoningBlockKey(
+export function buildReasoningBlockKey(
   chunk: Pick<StreamThinkingChunk, 'itemId' | 'outputIndex' | 'summaryIndex'>,
 ): string {
   if (typeof chunk.itemId === 'string' && chunk.itemId.trim().length > 0) {

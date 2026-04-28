@@ -60,7 +60,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 > = {
   name: 'read_tool_output',
   description:
-    'Read a previously produced tool result from the current session. Prefer toolCallId when known; if the context only says [tool_output_reference] and you need the most recent referenced large output, set useLatestReferenced=true. Supports line-based text reading and jsonPath/item pagination for structured data so you can recover only the detail needed for the next reasoning step.',
+    'Read a previously produced tool result from the current session. When a toolCallId is available in current-session history, use it. Set useLatestReferenced=true only as a fallback when the history contains [tool_output_reference] but no toolCallId is available; pasted UI text or copied commands are not enough. Supports line-based text reading and jsonPath/item pagination for structured data so you can recover only the detail needed for the next reasoning step.',
   inputSchema: readToolOutputInputSchema,
   outputSchema: readToolOutputOutputSchema,
   timeout: 30000,
@@ -70,7 +70,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 };
 
 export function buildReadToolOutputHint(toolCallId: string): string {
-  return `如需继续查看完整细节，请调用 read_tool_output，优先传入 toolCallId="${toolCallId}"；如果你只想快速读取最近一次被引用的大输出，也可传 useLatestReferenced=true。文本结果建议配合 lineStart/lineCount，结构化结果建议配合 jsonPath 或 itemStart/itemCount。`;
+  return `如需继续查看完整细节，请优先调用 read_tool_output 并传入 toolCallId="${toolCallId}"；只有在当前会话历史里出现了 [tool_output_reference] 且拿不到 toolCallId 时，才使用 useLatestReferenced=true。文本结果建议配合 lineStart/lineCount，结构化结果建议配合 jsonPath 或 itemStart/itemCount。`;
 }
 
 export function buildReadToolOutputResponse(input: {

@@ -39,7 +39,7 @@ function unwrap(text: string) {
 
 function compactCn(text: string) {
   const next = text.replace(leadCn, '').replace(tailCn, '').replace(/\s+/g, '');
-  return cut(next || text.replace(/\s+/g, ''), 7);
+  return cut(next || text.replace(/\s+/g, ''), 12);
 }
 
 function capitalize(text: string) {
@@ -58,7 +58,7 @@ function compactEn(text: string) {
     .filter((item) => !drop.has(item.toLowerCase()))
     .slice(0, 4)
     .join(' ');
-  return cut(capitalize(clean || text.trim()), 32);
+  return cut(capitalize(clean || text.trim()), 12);
 }
 
 export function buildSessionTitle(text: string): string | null {
@@ -73,8 +73,8 @@ export function maybeAutoTitle(input: { sessionId: string; userId: string; text:
 
   const count =
     sqliteGet<{ count: number }>(
-      'SELECT COUNT(1) AS count FROM session_messages WHERE session_id = ? AND user_id = ? AND role = ?',
-      [input.sessionId, input.userId, 'user'],
+      "SELECT COUNT(1) AS count FROM message_v2 WHERE session_id = ? AND user_id = ? AND json_extract(data, '$.role') = 'user'",
+      [input.sessionId, input.userId],
     )?.count ?? 0;
   if (count !== 1) return;
 

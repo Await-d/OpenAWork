@@ -43,7 +43,7 @@ async function main(): Promise<void> {
           url: `/sessions/${sessionId}/permissions/requests`,
           headers: { authorization: `Bearer ${accessToken}` },
           payload: {
-            toolName: 'file_write',
+            toolName: 'write',
             scope: '/tmp/demo.txt',
             reason: '需要写入测试文件',
             riskLevel: 'medium',
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
           };
         };
         assert(
-          created.request.toolName === 'file_write',
+          created.request.toolName === 'write',
           'created permission should keep tool name',
         );
         assert(
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
           'pending list should expose created request id',
         );
         assert(
-          listed.requests[0]?.toolName === 'file_write',
+          listed.requests[0]?.toolName === 'write',
           'pending list should expose created tool name',
         );
 

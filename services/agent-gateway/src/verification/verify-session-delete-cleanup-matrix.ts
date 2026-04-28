@@ -213,6 +213,24 @@ async function main(): Promise<void> {
                 'SELECT COUNT(*) as count FROM session_file_backups WHERE session_id IN (?, ?)',
                 [parentSessionId, childSessionId],
               )?.count ?? 0,
+            // V2 event-sourced storage — these tables CASCADE off
+            // sessions(id) too, so a healthy delete should empty them
+            // alongside the v1 mirrors.
+            messageV2:
+              sqliteGet<{ count: number }>(
+                'SELECT COUNT(*) as count FROM message_v2 WHERE session_id IN (?, ?)',
+                [parentSessionId, childSessionId],
+              )?.count ?? 0,
+            partV2:
+              sqliteGet<{ count: number }>(
+                'SELECT COUNT(*) as count FROM part_v2 WHERE session_id IN (?, ?)',
+                [parentSessionId, childSessionId],
+              )?.count ?? 0,
+            sessionEntry:
+              sqliteGet<{ count: number }>(
+                'SELECT COUNT(*) as count FROM session_entry WHERE session_id IN (?, ?)',
+                [parentSessionId, childSessionId],
+              )?.count ?? 0,
           };
           assert(counts.sessions === 0, 'deleted sessions should be removed');
           assert(counts.messages === 0, 'session_messages should cascade delete');
@@ -220,6 +238,9 @@ async function main(): Promise<void> {
           assert(counts.snapshots === 0, 'session_snapshots should cascade delete');
           assert(counts.runEvents === 0, 'session_run_events should cascade delete');
           assert(counts.backups === 0, 'session_file_backups rows should be removed');
+          assert(counts.messageV2 === 0, 'message_v2 should cascade delete');
+          assert(counts.partV2 === 0, 'part_v2 should cascade delete');
+          assert(counts.sessionEntry === 0, 'session_entry should cascade delete');
 
           const auditSessionId = sqliteGet<{ session_id: string | null }>(
             'SELECT session_id FROM audit_logs WHERE request_id = ? LIMIT 1',

@@ -1,4 +1,9 @@
 import type { InteractionRecord, RunEvent } from '@openAwork/shared';
+import type {
+  PermissionDecision,
+  PermissionRequestStatus,
+  PermissionRiskLevel,
+} from './permission-contract.js';
 import { sqliteAll } from './db.js';
 
 interface PermissionRequestEventRow {
@@ -7,10 +12,10 @@ interface PermissionRequestEventRow {
   tool_name: string;
   scope: string;
   reason: string;
-  risk_level: 'low' | 'medium' | 'high';
+  risk_level: PermissionRiskLevel;
   preview_action: string | null;
-  status: 'pending' | 'approved' | 'rejected' | 'consumed';
-  decision: 'once' | 'session' | 'permanent' | 'reject' | null;
+  status: PermissionRequestStatus | 'consumed';
+  decision: PermissionDecision | null;
   created_at: string;
   updated_at: string;
 }
@@ -20,7 +25,7 @@ export function createPermissionAskedEvent(input: {
   previewAction?: string;
   reason: string;
   requestId: string;
-  riskLevel: 'low' | 'medium' | 'high';
+  riskLevel: PermissionRiskLevel;
   scope: string;
   toolName: string;
 }): Extract<RunEvent, { type: 'permission_asked' }> {
@@ -39,7 +44,8 @@ export function createPermissionAskedEvent(input: {
 }
 
 export function createPermissionRepliedEvent(input: {
-  decision: 'once' | 'session' | 'permanent' | 'reject';
+  decision: PermissionDecision;
+  feedback?: string;
   occurredAt?: number;
   requestId: string;
 }): Extract<RunEvent, { type: 'permission_replied' }> {
@@ -47,6 +53,7 @@ export function createPermissionRepliedEvent(input: {
     type: 'permission_replied',
     requestId: input.requestId,
     decision: input.decision,
+    ...(input.feedback ? { feedback: input.feedback } : {}),
     eventId: `permission:${input.requestId}:replied`,
     runId: `permission:${input.requestId}`,
     occurredAt: input.occurredAt ?? Date.now(),
@@ -64,7 +71,7 @@ export function createPermissionInteractionRecord(input: {
   toolCallRef?: string;
   toolName: string;
   reason: string;
-  riskLevel: 'low' | 'medium' | 'high';
+  riskLevel: PermissionRiskLevel;
   scope: string;
   previewAction?: string;
 }): InteractionRecord {

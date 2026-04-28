@@ -2,7 +2,6 @@ import type { Message } from '@openAwork/shared';
 import { callCompactionLlm } from './compaction-llm.js';
 import {
   mergeCompactionMetadata,
-  readLastCompactionLlmSummary,
   readPersistedCompactionMemory,
   type CompactionTrigger,
 } from './compaction-metadata.js';
@@ -12,10 +11,10 @@ import {
   buildDurableCompactionSummary,
   buildPreparedUpstreamConversation,
   buildStructuredCompactionSummary,
-  hasCompactionMarker,
   type DurableCompactionSummary,
 } from './session-message-store.js';
 import { appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage } from './message-v2-adapter.js';
+import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
 
 /** Maximum consecutive auto-compaction failures before circuit-breaker trips. */
 export const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3;
@@ -23,7 +22,6 @@ export const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3;
 const PRUNED_TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared by compaction prune]';
 
 export interface ExecuteSessionCompactionInput {
-  legacyMessagesJson?: string;
   metadataJson: string;
   messages: Message[];
   prune?: boolean;
@@ -154,14 +152,12 @@ function adjustBoundaryForToolPairing(messages: Message[], boundary: number): nu
   // that assistant message (and its tool_call) in the summarized section.
   for (let index = adjusted; index < messages.length; index += 1) {
     const message = messages[index];
-    if (!message || message.role !== 'tool') continue;
-    for (const content of message.content) {
-      if (content.type === 'tool_result' && summarizedToolCallIds.has(content.toolCallId)) {
-        // This tool_result belongs to a summarized tool_call — keep it together
-        // by moving boundary forward past this tool message
+    if (!message) continue;
+    extractToolResultContentsFromMessage(message).forEach((content) => {
+      if (summarizedToolCallIds.has(content.toolCallId)) {
         adjusted = Math.min(adjusted + 1, messages.length);
       }
-    }
+    });
   }
 
   // Check tool_call messages in the kept section: if any have their
@@ -176,8 +172,7 @@ function adjustBoundaryForToolPairing(messages: Message[], boundary: number): nu
         !messages.some(
           (m, mIdx) =>
             mIdx >= adjusted &&
-            m.role === 'tool' &&
-            m.content.some((c) => c.type === 'tool_result' && c.toolCallId === content.toolCallId),
+            extractToolResultContentsFromMessage(m).some((c) => c.toolCallId === content.toolCallId),
         )
       ) {
         // tool_result is in summarized section — move boundary backward
@@ -257,25 +252,21 @@ export async function executeSessionCompaction(
     trigger: input.trigger,
   });
 
-  let llmSummary: string | undefined;
-  let llmErrorMessage: string | undefined;
-  if (input.route) {
-    const prunedMessages =
-      input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
-    const markerPresent = hasCompactionMarker(prunedMessages);
-    const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
-      contextWindow: 1,
-      ...(markerPresent
-        ? {}
-        : {
-            llmCompactionSummary: readLastCompactionLlmSummary(input.metadataJson),
-            persistedMemory: existingMemory,
-          }),
-    }).messages;
+    let llmSummary: string | undefined;
+    let llmErrorMessage: string | undefined;
+    if (input.route) {
+      const prunedMessages =
+        input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
+      const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
+        contextWindow: 1,
+        metadataJson: input.metadataJson,
+        persistedMemory: existingMemory,
+      }).normalizedMessages;
     try {
       const result = await callCompactionLlm({
         conversationMessages,
         route: input.route,
+        sessionId: input.sessionId,
         signal: input.signal,
       });
       llmSummary = result.summary;
@@ -319,7 +310,6 @@ export async function executeSessionCompaction(
   appendCompactionMarkerMessage({
     sessionId: input.sessionId,
     userId: input.userId,
-    legacyMessagesJson: input.legacyMessagesJson,
     persistedMemory: durableSummary?.persistedMemory,
     signature: durableSummary?.signature,
     summary,

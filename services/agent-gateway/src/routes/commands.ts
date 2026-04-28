@@ -24,6 +24,7 @@ import {
 } from '../message-v2-adapter.js';
 import { executeSessionCompaction } from '../session-compaction.js';
 import { startRequestWorkflow } from '../request-workflow.js';
+import { stringifyToolResultOutput } from '../tool-result-contract.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
 import {
@@ -80,10 +81,11 @@ const executeCommandSchema = z.object({
   rawInput: z.string().trim().min(1).optional(),
 });
 
+const MAX_EXTRACTED_TOOL_TEXT_CHARS = 8_000;
+
 interface SessionRow {
   id: string;
   user_id: string;
-  messages_json: string;
   metadata_json: string;
 }
 
@@ -153,7 +155,7 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const session = sqliteGet<SessionRow>(
-        'SELECT id, user_id, messages_json, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        'SELECT id, user_id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
 
@@ -186,7 +188,6 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
         graph,
         messages,
         metadataJson: session.metadata_json,
-        messagesJson: session.messages_json,
         rawInput: body.data.rawInput,
         sessionId,
         userId: user.sub,
@@ -241,7 +242,6 @@ async function executeCompactCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -280,16 +280,15 @@ async function executeCompactCommand(params: {
     summary: compaction.summary,
     trigger: 'manual' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
 
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), params.sessionId, params.userId],
+    "UPDATE sessions SET updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [params.sessionId, params.userId],
   );
   taskManager.completeTask(params.graph, task.id, compaction.summary);
   await taskManager.save(params.graph);
@@ -360,7 +359,6 @@ async function executeHandoffCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -413,16 +411,15 @@ async function executeHandoffCommand(params: {
     message: markdown,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
 
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
 
   return {
@@ -446,7 +443,6 @@ async function executeInitDeepCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -471,15 +467,14 @@ async function executeInitDeepCommand(params: {
     message: `${summary}\n\nInstructions 摘要（前 300 字符）：\n${injectionBlock.slice(0, 300)}${injectionBlock.length > 300 ? '…' : ''}`,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
   return {
     sessionId: params.sessionId,
@@ -502,7 +497,6 @@ async function executeRalphLoopCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -557,15 +551,14 @@ async function executeRalphLoopCommand(params: {
     message: `Ralph Loop 已按参考语义登记。\n任务：${target}\n完成信号：<promise>${completionPromise}</promise>\n最大迭代：${maxIterations}\n策略：${strategy}\n当前状态：${status.running ? '运行中' : '待启动'}\n任务 ID：${task.id}`,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
   scheduleLoopExecution({
     completionPromise,
@@ -608,7 +601,6 @@ async function executeUlwLoopCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -661,15 +653,14 @@ async function executeUlwLoopCommand(params: {
     message: `UltraWork Loop 已按参考语义登记。\n任务：${target}\n阶段一完成信号：<promise>${completionPromise}</promise>\n阶段二验证信号：<promise>VERIFIED</promise>\n策略：${strategy}\n迭代上限：参考语义为 unbounded\n任务 ID：${task.id}`,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
   scheduleLoopExecution({
     completionPromise,
@@ -712,7 +703,6 @@ async function executeCancelRalphCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -774,15 +764,14 @@ async function executeCancelRalphCommand(params: {
     message: cardMessage,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
 
   return {
@@ -813,7 +802,6 @@ async function executeStopContinuationCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -851,15 +839,14 @@ async function executeStopContinuationCommand(params: {
     message: '已停止当前 continuation 机制（当前覆盖 Ralph/ULW loop），并清理相关状态。',
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
 
   return {
@@ -875,7 +862,6 @@ async function executeUlwVerifyCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -970,7 +956,6 @@ async function executeUlwVerifyCommand(params: {
           text: `ULW verify recovered task selection. persisted=${persistedTaskId ?? 'none'}, metadata=${activeTaskId ?? 'none'}.`,
         },
       ],
-      legacyMessagesJson: params.messagesJson,
       clientRequestId: `ulw-verify:${params.sessionId}:recovered-task-id`,
     });
   }
@@ -1068,16 +1053,15 @@ async function executeUlwVerifyCommand(params: {
       : [];
   }
 
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   clearPersistedLoopState(WORKSPACE_ROOT, params.sessionId);
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
 
   return {
@@ -1190,7 +1174,6 @@ async function executeRefactorCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -1223,15 +1206,14 @@ async function executeRefactorCommand(params: {
     message: `重构工作流已创建。\n目标：${target}\n范围：${scope}\n策略：${strategy}\n下一步：分析目标 → 建立影响面 → 执行并验证。\n任务：${task.title}\n任务 ID：${task.id}`,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
   return {
     sessionId: params.sessionId,
@@ -1258,7 +1240,6 @@ async function executeStartWorkCommand(params: {
   graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
   messages: Message[];
   metadataJson: string;
-  messagesJson: string;
   rawInput?: string;
   sessionId: string;
   userId: string;
@@ -1349,15 +1330,14 @@ async function executeStartWorkCommand(params: {
     message: `工作流已从任务图启动。\n${planRef}${reusableTask ? `\n已复用现有计划任务：${task.id}` : ''}${subtasks.length > 0 ? `\n已同步子任务：${subtasks.length} 项` : ''}${createdSubtasks.length > 0 ? `\n本次新增子任务：${createdSubtasks.length} 项` : ''}${worktree.note ? `\n${worktree.note}` : ''}\n\n任务 ID：${task.id}`,
     tone: 'info' as const,
   };
-  const storedMessages = appendCommandCardArtifacts({
+  appendCommandCardArtifacts({
     sessionId: params.sessionId,
     userId: params.userId,
-    messagesJson: params.messagesJson,
     card,
   });
   sqliteRun(
-    "UPDATE sessions SET messages_json = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [JSON.stringify(storedMessages), JSON.stringify(metadata), params.sessionId, params.userId],
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
   );
   return {
     sessionId: params.sessionId,
@@ -1394,34 +1374,16 @@ function mergeMetadata(
   }
 }
 
-function appendStoredCardMessage(
-  messagesJson: string,
-  card: CommandExecutionResult['card'],
-): Array<Record<string, unknown>> {
-  const existing = readStoredChatMessages(messagesJson);
-  if (!card) return existing;
-
-  return [
-    ...existing,
-    {
-      id: `command-card-${Date.now()}`,
-      role: 'assistant',
-      content: JSON.stringify({ type: card.type, payload: card }),
-      createdAt: Date.now(),
-      status: 'completed',
-    },
-  ];
-}
-
 function appendCommandCardArtifacts(input: {
   sessionId: string;
   userId: string;
-  messagesJson: string;
   card: CommandExecutionResult['card'];
-}): Array<Record<string, unknown>> {
-  const storedMessages = appendStoredCardMessage(input.messagesJson, input.card);
-  if (!input.card) return storedMessages;
+}): void {
+  if (!input.card) return;
 
+  // V2 single-write path: emit MessageEvents.Created → projector writes
+  // `message_v2` and the search index helper upserts FTS. The legacy
+  // `sessions.messages_json` column is no longer maintained.
   appendSessionMessage({
     sessionId: input.sessionId,
     userId: input.userId,
@@ -1429,24 +1391,8 @@ function appendCommandCardArtifacts(input: {
     content: [
       { type: 'text', text: JSON.stringify({ type: input.card.type, payload: input.card }) },
     ],
-    legacyMessagesJson: input.messagesJson,
     clientRequestId: `command-card:${randomUUID()}`,
   });
-
-  return storedMessages;
-}
-
-function readStoredChatMessages(messagesJson: string): Array<Record<string, unknown>> {
-  try {
-    const parsed = JSON.parse(messagesJson) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (item): item is Record<string, unknown> => typeof item === 'object' && item !== null,
-        )
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 function normalizeMessageSnapshots(
@@ -1480,14 +1426,28 @@ function extractMessageText(message: Message | undefined): string {
     .map((content) => {
       if (content.type === 'text') return content.text;
       if (content.type === 'tool_call')
-        return `${content.toolName}: ${JSON.stringify(content.input)}`;
+        return `${content.toolName}: ${normalizeExtractedToolText(content.input)}`;
       if (content.type === 'tool_result') {
-        return JSON.stringify(content.output);
+        return normalizeExtractedToolText(content.output);
       }
-      return `${content.title}: ${content.summary}`;
+      if (content.type === 'reasoning') {
+        return content.text;
+      }
+      if (content.type === 'modified_files_summary') {
+        return `${content.title}: ${content.summary}`;
+      }
+      return '';
     })
     .join('\n')
     .trim();
+}
+
+function normalizeExtractedToolText(output: unknown): string {
+  const serialized = stringifyToolResultOutput(output);
+  if (serialized.length <= MAX_EXTRACTED_TOOL_TEXT_CHARS) {
+    return serialized;
+  }
+  return `${serialized.slice(0, MAX_EXTRACTED_TOOL_TEXT_CHARS - 1)}…`;
 }
 
 function summarizeMessages(messages: Message[]): string {

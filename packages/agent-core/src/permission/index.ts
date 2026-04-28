@@ -1,9 +1,14 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import {
+  listEffectiveWorkspacePermissionRules,
+  hasWorkspacePersistentPermission,
+  loadWorkspacePermissionConfig,
+  resolveWorkspacePermissionAction,
+  upsertWorkspacePermanentPermission,
+  writeWorkspacePermissionConfig,
+  type WorkspacePermissionConfig,
+} from './workspace-permission-config.js';
 
 export type PermissionDecision = 'once' | 'session' | 'permanent' | 'reject';
-
-const WORKSPACE_PERMISSION_FILE = '.openawork.permissions.json';
 
 export interface PermissionRequest {
   requestId: string;
@@ -42,6 +47,7 @@ export interface PermissionManager {
 export class PermissionManagerImpl implements PermissionManager {
   private sessionGrants = new Map<string, GrantedPermission[]>();
   private permanentGrants = new Map<string, GrantedPermission>();
+  private workspaceConfigs = new Map<string, WorkspacePermissionConfig>();
   private loadedWorkspaceRoots = new Set<string>();
   private disabledTools = new Set<string>();
   private pendingRequests = new Map<
@@ -67,6 +73,20 @@ export class PermissionManagerImpl implements PermissionManager {
 
     if (workspaceRoot) {
       await this.loadWorkspacePermissions(workspaceRoot);
+      const workspaceConfig = this.workspaceConfigs.get(workspaceRoot);
+      if (workspaceConfig) {
+        const workspaceAction = resolveWorkspacePermissionAction(
+          toolName,
+          scope,
+          listEffectiveWorkspacePermissionRules(workspaceConfig),
+        );
+        if (workspaceAction === 'deny') {
+          return 'reject';
+        }
+        if (workspaceAction === 'allow') {
+          return 'permanent';
+        }
+      }
     }
 
     const permKey = `${toolName}:${scope}`;
@@ -99,7 +119,7 @@ export class PermissionManagerImpl implements PermissionManager {
       };
       this.permanentGrants.set(permKey, grant);
       if (request.workspaceRoot) {
-        await this.saveWorkspacePermissions(request.workspaceRoot);
+        await this.saveWorkspacePermission(request.workspaceRoot, grant);
       }
     } else if (decision === 'session') {
       const existing = this.sessionGrants.get(request.sessionId) ?? [];
@@ -164,23 +184,25 @@ export class PermissionManagerImpl implements PermissionManager {
     }
 
     this.loadedWorkspaceRoots.add(workspaceRoot);
-    try {
-      const raw = await readFile(join(workspaceRoot, WORKSPACE_PERMISSION_FILE), 'utf-8');
-      const parsed = JSON.parse(raw) as { permanentGrants?: GrantedPermission[] };
-      for (const grant of parsed.permanentGrants ?? []) {
-        this.permanentGrants.set(`${grant.toolName}:${grant.scope}`, grant);
-      }
-    } catch {
-      return;
+    const parsed = loadWorkspacePermissionConfig(workspaceRoot);
+    this.workspaceConfigs.set(workspaceRoot, parsed);
+    for (const grant of parsed.permanentGrants ?? []) {
+      this.permanentGrants.set(`${grant.toolName}:${grant.scope}`, grant);
     }
   }
 
-  private async saveWorkspacePermissions(workspaceRoot: string): Promise<void> {
-    const permanentGrants = [...this.permanentGrants.values()];
-    await writeFile(
-      join(workspaceRoot, WORKSPACE_PERMISSION_FILE),
-      JSON.stringify({ permanentGrants }, null, 2),
-      'utf-8',
-    );
+  private async saveWorkspacePermission(
+    workspaceRoot: string,
+    grant: GrantedPermission,
+  ): Promise<void> {
+    const current =
+      this.workspaceConfigs.get(workspaceRoot) ?? loadWorkspacePermissionConfig(workspaceRoot);
+    const next = upsertWorkspacePermanentPermission(current, {
+      toolName: grant.toolName,
+      scope: grant.scope,
+      grantedAt: grant.grantedAt,
+    });
+    this.workspaceConfigs.set(workspaceRoot, next);
+    writeWorkspacePermissionConfig(workspaceRoot, next);
   }
 }

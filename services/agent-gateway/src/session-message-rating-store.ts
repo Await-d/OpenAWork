@@ -117,8 +117,18 @@ export function hasSessionMessage(input: {
 }): boolean {
   return Boolean(
     sqliteGet<{ id: string }>(
-      'SELECT id FROM session_messages WHERE session_id = ? AND user_id = ? AND id = ? LIMIT 1',
-      [input.sessionId, input.userId, input.messageId],
+      `SELECT id FROM session_messages WHERE session_id = ? AND user_id = ? AND id = ?
+       UNION ALL
+       SELECT id FROM message_v2 WHERE session_id = ? AND user_id = ? AND id = ?
+       LIMIT 1`,
+      [
+        input.sessionId,
+        input.userId,
+        input.messageId,
+        input.sessionId,
+        input.userId,
+        input.messageId,
+      ],
     )?.id,
   );
 }

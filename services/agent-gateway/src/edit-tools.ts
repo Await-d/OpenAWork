@@ -8,6 +8,15 @@ import { lspManager } from './lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { captureBeforeWriteBackup } from './session-file-backup-store.js';
 import { validateWorkspacePath } from './workspace-paths.js';
+import {
+  fuzzyReplace,
+  normalizeLineEndings,
+  detectLineEnding,
+  convertToLineEnding,
+} from './edit-replacers.js';
+import { formatFileAfterWrite } from './post-write-formatter.js';
+import { getSessionWorkspaceRoot } from './workspace-safety.js';
+import { getProjectWideDiagnostics, type ProjectDiagnostic } from './project-diagnostics.js';
 
 // Edit error recovery suffix (oh-my-opencode editErrorRecovery pattern)
 // Injected into edit tool error messages to guide the LLM to read the file
@@ -31,6 +40,16 @@ const editOutputSchema = z.object({
   replacements: z.number().int().min(1),
   created: z.boolean(),
   diagnostics: z.array(postWriteDiagnosticSchema).optional(),
+  projectDiagnostics: z
+    .array(
+      z.object({
+        file: z.string(),
+        severity: z.string(),
+        line: z.number().int(),
+        message: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 interface AuditLogRow {
@@ -74,7 +93,7 @@ function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
      FROM audit_logs
      WHERE session_id = ?
        AND is_error = 0
-       AND tool_name IN ('read', 'workspace_read_file', 'file_read', 'read_file')
+       AND tool_name IN ('read', 'workspace_read_file')
      ORDER BY id DESC
      LIMIT 50`,
     [sessionId],
@@ -152,8 +171,13 @@ export function createEditTool(
             })
           : undefined;
         await fsp.writeFile(safePath, input.newString, 'utf8');
+        try {
+          const wsRoot = getSessionWorkspaceRoot(sessionId);
+          if (wsRoot) await formatFileAfterWrite(safePath, wsRoot);
+        } catch { /* best-effort formatting */ }
         await touchEditedFile(safePath);
         const diagnostics = await getPostWriteDiagnostics([safePath]);
+        const projDiags = await getProjectWideDiagnostics(true, [safePath]);
         return {
           before: currentContent,
           after: input.newString,
@@ -170,6 +194,7 @@ export function createEditTool(
           replacements: 1,
           created: !exists,
           diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+          projectDiagnostics: projDiags.length > 0 ? projDiags : undefined,
         };
       }
 
@@ -181,20 +206,25 @@ export function createEditTool(
         throw new Error(`You must read file "${safePath}" before editing it`);
       }
 
-      const occurrences = countOccurrences(currentContent, input.oldString);
-      if (occurrences === 0) {
-        throw new Error('oldString not found in file. ' + EDIT_ERROR_RECOVERY_SUFFIX);
-      }
-      if (occurrences > 1 && input.replaceAll !== true) {
+      // Use fuzzy replacer chain (ported from opencode) to handle minor whitespace,
+      // indentation, escape, and boundary mismatches from the LLM.
+      const ending = detectLineEnding(currentContent);
+      const normalizedOld = convertToLineEnding(normalizeLineEndings(input.oldString), ending);
+      const normalizedNew = convertToLineEnding(normalizeLineEndings(input.newString), ending);
+
+      let nextContent: string;
+      try {
+        nextContent = fuzzyReplace(
+          currentContent,
+          normalizedOld,
+          normalizedNew,
+          input.replaceAll,
+        );
+      } catch (err) {
         throw new Error(
-          'oldString appears multiple times in the file; provide more context or set replaceAll to true. ' +
-            EDIT_ERROR_RECOVERY_SUFFIX,
+          (err instanceof Error ? err.message : String(err)) + ' ' + EDIT_ERROR_RECOVERY_SUFFIX,
         );
       }
-
-      const nextContent = input.replaceAll
-        ? currentContent.split(input.oldString).join(input.newString)
-        : currentContent.replace(input.oldString, input.newString);
 
       const backupBeforeRef = await captureBeforeWriteBackup({
         sessionId,
@@ -207,8 +237,13 @@ export function createEditTool(
         kind: 'before_write',
       });
       await fsp.writeFile(safePath, nextContent, 'utf8');
+      try {
+        const wsRoot = getSessionWorkspaceRoot(sessionId);
+        if (wsRoot) await formatFileAfterWrite(safePath, wsRoot);
+      } catch { /* best-effort formatting */ }
       await touchEditedFile(safePath);
       const diagnostics = await getPostWriteDiagnostics([safePath]);
+      const projDiags = await getProjectWideDiagnostics(true, [safePath]);
 
       return {
         before: currentContent,
@@ -219,9 +254,12 @@ export function createEditTool(
         },
         success: true,
         path: safePath,
-        replacements: input.replaceAll ? occurrences : 1,
+        replacements: input.replaceAll
+          ? countOccurrences(currentContent, normalizedOld) || 1
+          : 1,
         created: false,
         diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
+        projectDiagnostics: projDiags.length > 0 ? projDiags : undefined,
       };
     },
   };

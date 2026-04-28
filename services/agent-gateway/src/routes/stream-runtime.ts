@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FileDiffContent, RunEvent } from '@openAwork/shared';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
@@ -9,7 +10,7 @@ import {
   rejectToolPermission,
 } from '../message-v2-adapter.js';
 import {
-  persistSessionRunEventForRequest,
+  publishSessionRunEvent,
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
@@ -90,8 +91,13 @@ async function continueFromApprovedToolResult(input: {
 
   const runId = randomUUID();
   const eventSequence = { value: 1 };
+  // Permission-approval resume runs without an open WS/SSE — clients consume
+  // events through the /stream/attach endpoint instead. Use publish (persist
+  // + broadcast) so attach subscribers receive live events; the local
+  // session-run-events subscription below only reacts to interaction-state
+  // event types, so broadcasting other chunks here is a no-op for it.
   const writeChunk = (chunk: RunEvent) => {
-    persistSessionRunEventForRequest(input.sessionId, chunk, {
+    publishSessionRunEvent(input.sessionId, chunk, {
       clientRequestId: input.payload.clientRequestId,
     });
   };
@@ -123,10 +129,19 @@ async function continueFromApprovedToolResult(input: {
   const yoloModePrompt = requestData.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);
-  const enabledTools = filterEnabledGatewayToolsForSession(
+  const filteredTools = filterEnabledGatewayToolsForSession(
     getEnabledTools(webSearchEnabled),
     sessionContext.metadataJson,
   );
+  const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
+  const shouldDeferToolLoading =
+    route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
+  const enabledTools = shouldDeferToolLoading
+    ? filteredTools.map((tool) => ({
+        ...tool,
+        function: { ...tool.function, deferLoading: true },
+      }))
+    : filteredTools;
   const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
   const turnFileDiffs = new Map<string, FileDiffContent>();
   const abortController = new AbortController();
@@ -218,7 +233,6 @@ async function continueFromApprovedToolResult(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       messageId: toolResultMessage.id,
-      legacyMessagesJson: sessionContext.legacyMessagesJson,
       inclusive: false,
     });
 
@@ -500,7 +514,62 @@ export async function resumeApprovedPermissionRequest(input: {
   }
 }
 
+/**
+ * Resume session after a rejected permission request by feeding the rejection
+ * as a tool error result, allowing the LLM to try a different approach.
+ * Mirrors opencode's `continue_loop_on_deny` behavior.
+ */
+export async function resumeRejectedPermissionRequest(input: {
+  payload: ApprovedPermissionResumePayload;
+  feedback?: string;
+  sessionId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    // V2: Transition ToolPart to error state for the rejection
+    rejectToolPermission({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      callID: input.payload.toolCallId,
+      error: input.feedback
+        ? `权限已拒绝。用户反馈: ${input.feedback}`
+        : '权限已拒绝，工具未执行。',
+    });
+
+    // Continue the stream loop with the rejection as a tool error
+    const resumeResult = await continueFromApprovedToolResult({
+      initialToolResult: {
+        isError: true,
+        output: input.feedback
+          ? `权限已拒绝。用户反馈: ${input.feedback}。请尝试其他方法。`
+          : '权限已拒绝，工具未执行。请尝试其他方法。',
+        toolCallId: input.payload.toolCallId,
+        toolName: input.payload.toolName,
+      },
+      payload: input.payload,
+      resumedAfterApproval: false,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    await reconcileResumedTaskChildSession({
+      childSessionId: input.sessionId,
+      pendingInteraction: resumeResult.pendingInteraction,
+      statusCode: resumeResult.statusCode,
+      userId: input.userId,
+    });
+  } catch (error) {
+    await reconcileResumedTaskChildSession({
+      childSessionId: input.sessionId,
+      pendingInteraction: false,
+      statusCode: 500,
+      userId: input.userId,
+    });
+    throw error;
+  }
+}
+
 export async function runSessionInBackground(input: {
+  onStarted?: () => void;
   requestData: Record<string, unknown>;
   sessionId: string;
   userId: string;
@@ -527,6 +596,7 @@ export async function runSessionInBackground(input: {
     transport: 'SSE',
     user,
     writeChunk: input.writeChunk ?? (() => undefined),
+    onStarted: input.onStarted,
   });
 }
 

@@ -3,11 +3,13 @@ import type {
   SessionImportInput,
   SessionImportResult,
   SessionTask,
+  SharedSessionPermissionReplyInput,
   SharedSessionCommentRecord,
   SharedSessionDetailRecord,
   SharedSessionPresenceRecord,
   SharedSessionSummaryRecord,
 } from './sessions.js';
+import { replySharedSessionPermissionRequest } from './sessions.js';
 
 export type TeamWorkspaceVisibility = 'open' | 'closed' | 'private';
 
@@ -226,7 +228,7 @@ export interface TeamClient {
   replySharedSessionPermission(
     token: string,
     sessionId: string,
-    input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+    input: SharedSessionPermissionReplyInput,
   ): Promise<void>;
   replySharedSessionQuestion(
     token: string,
@@ -448,22 +450,14 @@ export function createTeamClient(baseUrl: string): TeamClient {
     async replySharedSessionPermission(
       token: string,
       sessionId: string,
-      input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+      input: SharedSessionPermissionReplyInput,
     ): Promise<void> {
-      const response = await fetch(
-        `${baseUrl}/sessions/shared-with-me/${sessionId}/permissions/reply`,
-        {
-          method: 'POST',
-          headers: {
-            ...buildAuthHeaders(token),
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(input),
-        },
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to reply shared permission: ${response.status}`);
-      }
+      await replySharedSessionPermissionRequest({
+        gatewayUrl: baseUrl,
+        payload: input,
+        sessionId,
+        token,
+      });
     },
 
     async replySharedSessionQuestion(

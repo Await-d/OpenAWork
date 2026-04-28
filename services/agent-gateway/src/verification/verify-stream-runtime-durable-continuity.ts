@@ -6,6 +6,7 @@ import { closeDb, connectDb, migrate, sqliteAll, sqliteRun } from '../db.js';
 import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
 import { listSessionSnapshots } from '../session-snapshot-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
+import { listStoredToolResults } from '../tool-result-contract.js';
 import { withTempEnv } from './task-verification-helpers.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -19,32 +20,57 @@ function writeSse(res: ServerResponse, event: string, payload: unknown): void {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function writeChatToolCall(res: ServerResponse, filePath: string): void {
+  res.write(
+    `data: ${JSON.stringify({
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call-write-1',
+                function: {
+                  name: 'write',
+                  arguments: JSON.stringify({ path: filePath, content: 'export const value = 2;\n' }),
+                },
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    })}\n\n`,
+  );
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+
 function hasFunctionCallOutput(body: Record<string, unknown>): boolean {
-  const input = body['input'];
-  return Array.isArray(input)
-    ? input.some(
+  const messages = body['messages'];
+  return Array.isArray(messages)
+    ? messages.some(
         (item) =>
           item &&
           typeof item === 'object' &&
           !Array.isArray(item) &&
-          item['type'] === 'function_call_output',
+          item['role'] === 'tool',
       )
     : false;
 }
 
 function writeTextCompletion(res: ServerResponse, text: string): void {
-  writeSse(res, 'response.output_text.delta', {
-    output_index: 0,
-    content_index: 0,
-    item_id: 'msg_done',
-    delta: text,
-  });
-  writeSse(res, 'response.completed', {
-    response: {
-      output: [{ id: 'msg_done', type: 'message' }],
-      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-    },
-  });
+  res.write(
+    `data: ${JSON.stringify({
+      choices: [
+        {
+          delta: { content: text },
+          finish_reason: 'stop',
+        },
+      ],
+    })}\n\n`,
+  );
+  res.write('data: [DONE]\n\n');
   res.end();
 }
 
@@ -68,49 +94,7 @@ async function main(): Promise<void> {
           const body = JSON.parse(chunks.join('')) as Record<string, unknown>;
           res.writeHead(200, { 'Content-Type': 'text/event-stream' });
           if (!hasFunctionCallOutput(body)) {
-            writeSse(res, 'response.output_item.added', {
-              output_index: 0,
-              item: {
-                id: 'tool-call-1',
-                type: 'function_call',
-                call_id: 'call-write-1',
-                name: 'write',
-                arguments: JSON.stringify({
-                  path: path.join(workspaceRoot, 'tracked.ts'),
-                  content: 'export const value = 2;\n',
-                }),
-              },
-            });
-            writeSse(res, 'response.output_item.done', {
-              output_index: 0,
-              item: {
-                id: 'tool-call-1',
-                type: 'function_call',
-                call_id: 'call-write-1',
-                name: 'write',
-                arguments: JSON.stringify({
-                  path: path.join(workspaceRoot, 'tracked.ts'),
-                  content: 'export const value = 2;\n',
-                }),
-              },
-            });
-            writeSse(res, 'response.completed', {
-              response: {
-                output: [
-                  {
-                    id: 'tool-call-1',
-                    type: 'function_call',
-                    call_id: 'call-write-1',
-                    name: 'write',
-                    arguments: JSON.stringify({
-                      path: path.join(workspaceRoot, 'tracked.ts'),
-                      content: 'export const value = 2;\n',
-                    }),
-                  },
-                ],
-              },
-            });
-            res.end();
+            writeChatToolCall(res, path.join(workspaceRoot, 'tracked.ts'));
             return;
           }
 
@@ -226,10 +210,10 @@ async function main(): Promise<void> {
           'background write should persist snapshot backup refs',
         );
 
-        const toolMessages = listSessionMessages({ sessionId, userId: adminId }).filter(
-          (message) => message.role === 'tool',
+        const toolResults = listStoredToolResults(
+          listSessionMessages({ sessionId, userId: adminId }),
         );
-        assert(toolMessages.length >= 1, 'background write should persist tool messages');
+        assert(toolResults.length >= 1, 'background write should persist tool results');
 
         console.log('verify-stream-runtime-durable-continuity: ok');
       } finally {

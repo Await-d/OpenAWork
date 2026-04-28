@@ -22,12 +22,38 @@ export interface JwtPayload {
   email: string;
 }
 
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: string;
+}
+
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
 function generateRefreshToken(): string {
   return randomBytes(48).toString('base64url');
+}
+
+export function issueTokenPair(
+  app: FastifyInstance,
+  user: { id: string; email: string },
+): TokenPair {
+  const payload: JwtPayload = { sub: user.id, email: user.email };
+  const accessToken = app.jwt.sign(payload);
+
+  const refreshToken = generateRefreshToken();
+  const tokenHash = hashToken(refreshToken);
+  const expiresAt = new Date(Date.now() + REFRESH_EXPIRES_DAYS * 86400 * 1000).toISOString();
+
+  sqliteRun(
+    'INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)',
+    [randomUUID(), user.id, tokenHash, expiresAt],
+  );
+
+  redis.setex(`session:${user.id}:active`, 900, '1');
+  return { accessToken, refreshToken, expiresIn: JWT_EXPIRES_IN };
 }
 
 async function authPlugin(app: FastifyInstance): Promise<void> {
@@ -64,24 +90,12 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
 
-    const payload: JwtPayload = { sub: user.id, email: user.email };
-    const accessToken = app.jwt.sign(payload);
-
-    const refreshToken = generateRefreshToken();
-    const tokenHash = hashToken(refreshToken);
-    const expiresAt = new Date(Date.now() + REFRESH_EXPIRES_DAYS * 86400 * 1000).toISOString();
-
     const issueTokenStep = child('issue-tokens', undefined, { userId: user.id });
-    sqliteRun(
-      'INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)',
-      [randomUUID(), user.id, tokenHash, expiresAt],
-    );
-
-    redis.setex(`session:${user.id}:active`, 900, '1');
+    const tokenPair = issueTokenPair(app, user);
     issueTokenStep.succeed();
     step.succeed(undefined, { userId: user.id });
 
-    return reply.send({ accessToken, refreshToken, expiresIn: JWT_EXPIRES_IN });
+    return reply.send(tokenPair);
   });
 
   app.post('/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {

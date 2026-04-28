@@ -5,11 +5,17 @@ import type {
   FileDiffContent,
   Message,
   RunEvent,
+  TaskTimeoutSource,
 } from '@openAwork/shared';
-import type { PendingPermissionRequest } from './permissions.js';
+import type { PendingPermissionRequest, PermissionDecision } from './permissions.js';
 import type { PendingQuestionRequest } from './questions.js';
 
 export type SessionSnapshotScopeKind = 'request' | 'backup' | 'scope' | 'unknown';
+
+export interface SharedSessionPermissionReplyInput {
+  decision: PermissionDecision;
+  requestId: string;
+}
 
 export interface SessionFileDiffEntry extends Omit<FileDiffContent, 'before' | 'after'> {
   before?: string;
@@ -351,6 +357,17 @@ export interface SessionRecoveryReadModel {
   session: Session;
   tasks: SessionTask[];
   todoLanes: SessionTodoLanes;
+  totalMessageCount?: number;
+  totalTurnCount?: number | null;
+}
+
+export interface SessionStatusReadModel {
+  activeStream: SessionActiveStream | null;
+  children: Session[];
+  pendingPermissions: PendingPermissionRequest[];
+  pendingQuestions: PendingQuestionRequest[];
+  tasks: SessionTask[];
+  todoLanes: SessionTodoLanes;
 }
 
 export interface SessionTask {
@@ -373,10 +390,10 @@ export interface SessionTask {
   depth: number;
   subtaskCount: number;
   unmetDependencyCount: number;
-  effectiveDeadline?: number;
   result?: string;
   errorMessage?: string;
   terminalReason?: string;
+  timeoutSource?: TaskTimeoutSource;
 }
 
 export interface DeleteSessionResult {
@@ -414,10 +431,10 @@ export interface SessionsClient {
     input: { content: string },
   ): Promise<SharedSessionCommentRecord>;
   touchSharedPresence(token: string, sessionId: string): Promise<SharedSessionPresenceRecord[]>;
-  replySharedPermission(
+  replySharedSessionPermission(
     token: string,
     sessionId: string,
-    input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
+    input: SharedSessionPermissionReplyInput,
   ): Promise<void>;
   replySharedQuestion(
     token: string,
@@ -427,8 +444,13 @@ export interface SessionsClient {
   getRecovery(
     token: string,
     sessionId: string,
-    options?: { signal?: AbortSignal },
+    options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
   ): Promise<SessionRecoveryReadModel>;
+  getStatus(
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionStatusReadModel>;
   getActiveStream(token: string, sessionId: string): Promise<SessionActiveStream | null>;
   getFileChangesReadModel(
     token: string,
@@ -552,6 +574,32 @@ async function readJsonErrorData<T>(response: Response): Promise<T | undefined> 
   return data ?? undefined;
 }
 
+export async function replySharedSessionPermissionRequest(input: {
+  gatewayUrl: string;
+  payload: SharedSessionPermissionReplyInput;
+  sessionId: string;
+  token: string;
+}): Promise<void> {
+  const res = await fetch(
+    `${input.gatewayUrl}/sessions/shared-with-me/${input.sessionId}/permissions/reply`,
+    {
+      method: 'POST',
+      headers: {
+        ...authHeader(input.token),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input.payload),
+    },
+  );
+  if (!res.ok) {
+    throw new HttpError(
+      `Failed to reply shared permission: ${res.status}`,
+      res.status,
+      await readJsonErrorData(res),
+    );
+  }
+}
+
 function appendBooleanQuery(
   params: URLSearchParams,
   key: string,
@@ -672,25 +720,13 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       return data.presence ?? [];
     },
 
-    async replySharedPermission(token, sessionId, input) {
-      const res = await fetch(
-        `${gatewayUrl}/sessions/shared-with-me/${sessionId}/permissions/reply`,
-        {
-          method: 'POST',
-          headers: {
-            ...authHeader(token),
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(input),
-        },
-      );
-      if (!res.ok) {
-        throw new HttpError(
-          `Failed to reply shared permission: ${res.status}`,
-          res.status,
-          await readJsonErrorData(res),
-        );
-      }
+    async replySharedSessionPermission(token, sessionId, input) {
+      await replySharedSessionPermissionRequest({
+        gatewayUrl,
+        payload: input,
+        sessionId,
+        token,
+      });
     },
 
     async replySharedQuestion(token, sessionId, input) {
@@ -715,15 +751,38 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async getRecovery(token, sessionId, options) {
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/recovery`, {
-        headers: authHeader(token),
-        signal: options?.signal,
-      });
+      const params = new URLSearchParams();
+      if (typeof options?.messageLimit === 'number') {
+        params.set('messageLimit', String(options.messageLimit));
+      }
+      if (typeof options?.since === 'number') {
+        params.set('since', String(options.since));
+      }
+      const qs = params.toString();
+      const res = await fetch(
+        `${gatewayUrl}/sessions/${sessionId}/recovery${qs ? `?${qs}` : ''}`,
+        {
+          headers: authHeader(token),
+          signal: options?.signal,
+        },
+      );
       if (!res.ok) {
         throw new HttpError(`Failed to get session recovery: ${res.status}`, res.status);
       }
       const data = (await res.json()) as { recovery: SessionRecoveryReadModel };
       return data.recovery;
+    },
+
+    async getStatus(token, sessionId, options) {
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/status`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!res.ok) {
+        throw new HttpError(`Failed to get session status: ${res.status}`, res.status);
+      }
+      const data = (await res.json()) as { status: SessionStatusReadModel };
+      return data.status;
     },
 
     async search(token, query, options) {

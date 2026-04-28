@@ -1,0 +1,166 @@
+/**
+ * AI SDK provider factory — translates OpenAWork's `AIProvider` config
+ * (the wire-format the gateway already stores per channel/agent) into
+ * Vercel AI SDK provider instances that emit `LanguageModelV1`s suitable
+ * for `streamText`.
+ *
+ * Phase 4 entry point: not wired into the runtime stream path yet — the
+ * legacy `routes/stream-model-round.ts` still drives all production
+ * traffic. The factory exists so Phase 4 / Phase 5 work can build new
+ * stream runners against AI SDK without first having to re-implement
+ * provider plumbing.
+ *
+ * Coverage today:
+ *   - `anthropic`            → @ai-sdk/anthropic
+ *   - `openai`-compatible    → @ai-sdk/openai-compatible (covers OpenAI,
+ *                              Azure, Moonshot, DeepSeek, OpenRouter,
+ *                              Qwen, ...; everything that talks the
+ *                              OpenAI Chat Completions API).
+ *   - other vendor-specific protocols (Gemini native, Bedrock, Vertex)
+ *     fall back to OpenAI-compatible when the upstream URL exposes one.
+ *
+ * Each provider is a small, dependency-injected factory rather than a
+ * singleton so callers can hot-swap api keys, base URLs, and headers
+ * without leaking state across users.
+ */
+
+import {
+  createOpenAICompatible,
+  type OpenAICompatibleProviderSettings,
+} from '@ai-sdk/openai-compatible';
+import { createAnthropic, type AnthropicProviderSettings } from '@ai-sdk/anthropic';
+import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../../anthropic-betas.js';
+
+/**
+ * Cross-version `LanguageModel` alias.
+ *
+ * `ai@5.x` still pins its top-level `LanguageModel` to `LanguageModelV2`,
+ * while `@ai-sdk/openai-compatible@2.x` now returns the newer V3 shape.
+ * Until the AI SDK unifies the type surface we infer the return type
+ * directly from the adapter so callers see a future-proof handle without
+ * having to chase upstream type bumps.
+ */
+type AnthropicLanguageModel = ReturnType<ReturnType<typeof createAnthropic>['languageModel']>;
+type OpenAICompatibleLanguageModel = ReturnType<
+  ReturnType<typeof createOpenAICompatible>['languageModel']
+>;
+export type V2LanguageModel = AnthropicLanguageModel | OpenAICompatibleLanguageModel;
+
+export type UpstreamProtocolKind = 'anthropic_messages' | 'chat_completions' | 'responses';
+
+/**
+ * Minimal config the v2 stack needs to build an AI SDK provider. Sourced
+ * from the legacy `AIProvider` config one-to-one — the field names match
+ * `agent-core`'s shape so adapters can pass values straight through.
+ */
+export interface AISdkProviderConfig {
+  /** OpenAWork-side provider type (used to pick the right SDK). */
+  providerType: string;
+  /** Upstream API key, when applicable. */
+  apiKey?: string;
+  /** Upstream base URL (for OpenAI-compatible vendors / proxies). */
+  baseURL?: string;
+  /** Optional headers (e.g. `anthropic-beta`, `OpenAI-Project`). */
+  headers?: Record<string, string>;
+  /** Free-form short label used by AI SDK telemetry & errors. */
+  name?: string;
+  /**
+   * Optional model id used to compute provider-specific headers
+   * (e.g. `anthropic-beta` membership depends on whether the model
+   * supports thinking / interleaved-thinking). When omitted the
+   * factory falls back to baseline beta headers only.
+   */
+  model?: string;
+  /**
+   * Whether the upstream model supports extended thinking. Forwarded
+   * to `buildAnthropicBetas` to opt-into `interleaved-thinking-*` /
+   * `fine-grained-tool-streaming-*` headers.
+   */
+  supportsThinking?: boolean;
+}
+
+export interface BuiltAISdkProvider {
+  /** The protocol the legacy config expects this provider to speak. */
+  protocol: UpstreamProtocolKind;
+  /** Resolve an AI SDK language model handle for the requested model id. */
+  languageModel(modelId: string): V2LanguageModel;
+}
+
+/**
+ * Compose the `anthropic-beta` header value for a given model.
+ *
+ * Mirrors `getAllModelBetas` in claude-code: emits the baseline
+ * `prompt-caching-scope` header for every request, opts into
+ * `interleaved-thinking` / `fine-grained-tool-streaming` for thinking
+ * models that aren't Haiku, and appends user-provided overrides from
+ * `process.env.ANTHROPIC_BETAS`. The merged value replaces any
+ * caller-provided `anthropic-beta` so we always end up with a
+ * canonical, deduplicated list.
+ */
+function composeAnthropicHeaders(config: AISdkProviderConfig): Record<string, string> {
+  const headers = { ...(config.headers ?? {}) };
+  // Drop any case-variant the caller may have set; we will rewrite.
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === 'anthropic-beta') {
+      delete headers[key];
+    }
+  }
+
+  const betas = buildAnthropicBetas({
+    model: config.model ?? '',
+    ...(typeof config.supportsThinking === 'boolean'
+      ? { supportsThinking: config.supportsThinking }
+      : {}),
+  });
+  if (betas.length > 0) {
+    headers['anthropic-beta'] = formatAnthropicBetaHeader(betas);
+  }
+  return headers;
+}
+
+function buildAnthropic(config: AISdkProviderConfig): BuiltAISdkProvider {
+  const headers = composeAnthropicHeaders(config);
+  const settings: AnthropicProviderSettings = {
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(config.name ? { name: config.name } : {}),
+  };
+  const provider = createAnthropic(settings);
+  return {
+    protocol: 'anthropic_messages',
+    languageModel: (modelId) => provider.languageModel(modelId),
+  };
+}
+
+function buildOpenAICompatible(config: AISdkProviderConfig): BuiltAISdkProvider {
+  const settings: OpenAICompatibleProviderSettings = {
+    name: config.name ?? config.providerType,
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    ...(config.baseURL ? { baseURL: config.baseURL } : { baseURL: 'https://api.openai.com/v1' }),
+    ...(config.headers ? { headers: config.headers } : {}),
+  };
+  const provider = createOpenAICompatible(settings);
+  return {
+    protocol: 'chat_completions',
+    languageModel: (modelId) => provider.languageModel(modelId),
+  };
+}
+
+/**
+ * Build an AI SDK provider from an OpenAWork `AIProvider` config.
+ *
+ * The factory is intentionally forgiving: any unrecognised
+ * `providerType` falls back to OpenAI-compatible, which covers every
+ * vendor in OpenAWork's catalogue today (they all expose a Chat
+ * Completions surface). Vendor-specific quirks (thinking budgets,
+ * `previous_response_id`, cache breakpoints) are layered on at the
+ * stream-runner level via AI SDK middleware, not here.
+ */
+export function buildAISdkProvider(config: AISdkProviderConfig): BuiltAISdkProvider {
+  const kind = config.providerType.toLowerCase();
+  if (kind === 'anthropic' || kind === 'claude') {
+    return buildAnthropic(config);
+  }
+  return buildOpenAICompatible(config);
+}

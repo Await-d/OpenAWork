@@ -246,7 +246,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Params: { sessionId: string }; Body: unknown }>(
     '/sessions/:sessionId/artifacts',
-    { preHandler: requireAuth },
+    { preHandler: requireAuth, bodyLimit: 40 * 1024 * 1024 },
     async (request, reply) => {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params;

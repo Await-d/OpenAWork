@@ -1,4 +1,4 @@
-export type UpstreamProtocol = 'chat_completions' | 'responses';
+export type UpstreamProtocol = 'chat_completions' | 'responses' | 'anthropic_messages';
 
 function isOpenAIModelId(modelId: string): boolean {
   return /^(gpt-|o[134]|codex-?)/i.test(modelId);
@@ -23,6 +23,11 @@ export function resolveUpstreamProtocol(input: {
   // Explicit provider-level override wins over everything.
   if (input.explicitOverride) {
     return input.explicitOverride;
+  }
+
+  // Anthropic native Messages API — supports cache_control for prompt caching
+  if (input.providerType === 'anthropic') {
+    return 'anthropic_messages';
   }
 
   if (input.providerType === 'openai') {

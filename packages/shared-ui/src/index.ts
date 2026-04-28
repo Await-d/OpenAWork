@@ -7,7 +7,17 @@ export type { ToolCallCardDisplayData, ToolCallCardProps, ToolKind } from './Too
 export { resolveToolCallCardDisplayData } from './ToolCallCard.js';
 export { BashTerminalCard } from './tool-call-card-bash-terminal.js';
 export type { BashTerminalView } from './tool-call-card-bash-terminal.js';
+export { BatchTerminalCard } from './tool-call-card-batch-terminal.js';
+export type { BatchTerminalView } from './tool-call-card-batch-terminal.js';
 export { ToolKindIcon } from './tool-call-card-meta.js';
+export {
+  resolveToolIconKey,
+  resolveToolKind,
+  resolveToolStatusMeta,
+  resolveToolVisualStatus,
+  ToolGlyph,
+} from './tool-visual-meta.js';
+export type { ToolIconKey, ToolVisualStatus } from './tool-visual-meta.js';
 export { PlanPanel } from './PlanPanel.js';
 export type { PlanPanelProps, PlanTask } from './PlanPanel.js';
 export { WorkflowModeToggle } from './WorkflowModeToggle.js';
@@ -52,6 +62,7 @@ export type {
   AIProviderRef,
   AIModelConfigRef,
   ActiveSelectionRef,
+  ImageGenerationDefaultsRef,
   ThinkingDefaultsRef,
   ThinkingModeRef,
   ReasoningEffortRef,
@@ -87,6 +98,13 @@ export type {
 } from './FileTreePanel.js';
 export { PermissionHistory } from './PermissionHistory.js';
 export type { PermissionHistoryProps, PermissionDecisionRecord } from './PermissionHistory.js';
+export { PermissionRulesEditor } from './PermissionRulesEditor.js';
+export type {
+  PermissionRulesEditorProps,
+  PermissionRuleEntry,
+  PermissionAction as PermissionRuleAction,
+  PermissionCategoryMeta,
+} from './PermissionRulesEditor.js';
 export { ArtifactList } from './ArtifactList.js';
 export type { ArtifactListProps, ArtifactItem, ArtifactType } from './ArtifactList.js';
 export { ArtifactPreview } from './ArtifactPreview.js';

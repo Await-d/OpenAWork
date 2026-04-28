@@ -6,6 +6,7 @@ export type {
   FileChangeGuaranteeLevel,
   FileChangeSourceKind,
   FileDiffContent,
+  InputImageContent,
   Message,
   MessageContent,
   MessageRole,
@@ -15,6 +16,42 @@ export type {
   ToolCallObservabilityAnnotation,
   ToolResultContent,
 } from './message-schema.js';
+export type {
+  ImageGenerationBackground,
+  ImageGenerationOutputFormat,
+  ImageGenerationQuality,
+  ImageGenerationSizeAspect,
+  ImageGenerationSizePreset,
+  ImageGenerationSizePresetId,
+  ImageGenerationSizePresetGroup,
+  ImageGenerationSizePresetTier,
+} from './image-generation.js';
+export {
+  DEFAULT_IMAGE_GENERATION_SIZE,
+  IMAGE_GENERATION_SIZE_PRESETS,
+  IMAGE_GENERATION_SIZE_PRESET_GROUPS,
+  normalizeImageGenerationSize,
+  parseImageGenerationSize,
+  resolveImageGenerationSizePresetId,
+  sizeForPreset,
+  validateImageGenerationSize,
+} from './image-generation.js';
+export type {
+  AssistantReasoningBlockTiming,
+  AssistantTracePart,
+  AssistantTracePayload,
+  AssistantTraceReasoningPart,
+  AssistantTraceTextPart,
+  AssistantTraceToolCall,
+  AssistantTraceToolPart,
+} from './assistant-trace.js';
+export {
+  contentFromAssistantTraceParts,
+  createAssistantTraceContent,
+  parseAssistantTraceContent,
+  partsFromAssistantTrace,
+  readAssistantTracePayloadFromParts,
+} from './assistant-trace.js';
 
 export type DialogueMode = 'clarify' | 'coding' | 'programmer';
 
@@ -305,7 +342,11 @@ export interface ManagedAgentBody {
   variant?: string;
   fallbackModels?: string[];
   systemPrompt?: string;
+  /** Hex accent color for this agent (e.g. "#FF6347"). Ported from oh-my-opencode agent color system. */
+  color?: string;
   note?: string;
+  /** When true, tools are sent with defer_loading and tool_search is enabled (Responses API only). */
+  deferToolLoading?: boolean;
 }
 
 export interface ManagedAgentRecord extends ManagedAgentBody {
@@ -334,8 +375,10 @@ export interface UpdateManagedAgentInput {
   variant?: string;
   fallbackModels?: string[];
   systemPrompt?: string;
+  color?: string;
   note?: string;
   enabled?: boolean;
+  deferToolLoading?: boolean;
 }
 
 export interface AgentPreferenceRecord {
@@ -551,9 +594,49 @@ export interface SessionContextRecord {
   updatedAt: number;
 }
 
+export type PermissionRiskLevel = 'low' | 'medium' | 'high';
+
+export type PermissionDecision = 'once' | 'session' | 'permanent' | 'reject';
+
+export type PermissionRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface PermissionRequestBase {
+  requestId: string;
+  toolName: string;
+  scope: string;
+  reason: string;
+  riskLevel: PermissionRiskLevel;
+  previewAction?: string;
+}
+
+export interface PendingPermissionRequest extends PermissionRequestBase {
+  sessionId: string;
+  status: PermissionRequestStatus;
+  decision?: PermissionDecision;
+  createdAt: string;
+}
+
+export interface PermissionReplyPayload {
+  requestId: string;
+  decision: PermissionDecision;
+  feedback?: string;
+}
+
 export interface StreamTextChunk {
   type: 'text_delta';
   delta: string;
+  eventId?: string;
+  runId?: string;
+  /** Agent ID that generated this text (for per-agent color rendering). */
+  agentId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamThinkingStartChunk {
+  type: 'thinking_start';
+  itemId?: string;
+  outputIndex?: number;
+  summaryIndex?: number;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -570,6 +653,27 @@ export interface StreamThinkingChunk {
   occurredAt?: number;
 }
 
+export interface StreamThinkingEndChunk {
+  type: 'thinking_end';
+  itemId?: string;
+  outputIndex?: number;
+  summaryIndex?: number;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+  /**
+   * Provider-specific opaque payload bound to this reasoning block. Currently
+   * used to carry per-block multi-turn data such as Responses API
+   * `encrypted_content` so subsequent turns can replay reasoning on the
+   * upstream side without leaking decrypted content to the client.
+   */
+  providerMetadata?: {
+    encryptedContent?: string;
+    summary?: string;
+    responseId?: string;
+  };
+}
+
 export interface StreamToolCallChunk {
   type: 'tool_call_delta';
   toolCallId: string;
@@ -580,11 +684,23 @@ export interface StreamToolCallChunk {
   occurredAt?: number;
 }
 
+export type ToolSearchStatus = 'in_progress' | 'searching' | 'completed';
+
+export interface StreamToolSearchChunk {
+  type: 'tool_search';
+  status: ToolSearchStatus;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
 export interface StreamDoneChunk {
   type: 'done';
   stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | 'cancelled' | 'tool_permission';
   eventId?: string;
   runId?: string;
+  /** Agent ID that generated this response round (for per-agent color rendering). */
+  agentId?: string;
   occurredAt?: number;
 }
 
@@ -614,14 +730,32 @@ export interface StreamToolResultChunk {
   occurredAt?: number;
 }
 
-export interface StreamPermissionAskedChunk {
-  type: 'permission_asked';
-  requestId: string;
+export type BatchSubToolStatus = 'running' | 'completed' | 'error' | 'skipped';
+
+export interface BatchSubToolProgress {
+  index: number;
+  tool: string;
+  status: BatchSubToolStatus;
+  output?: unknown;
+  isError?: boolean;
+  durationMs?: number;
+}
+
+export interface StreamToolProgressChunk {
+  type: 'tool_progress';
+  toolCallId: string;
   toolName: string;
-  scope: string;
-  reason: string;
-  riskLevel: 'low' | 'medium' | 'high';
-  previewAction?: string;
+  subTools: BatchSubToolProgress[];
+  completedCount: number;
+  totalCount: number;
+  clientRequestId?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamPermissionAskedChunk extends PermissionRequestBase {
+  type: 'permission_asked';
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -630,7 +764,8 @@ export interface StreamPermissionAskedChunk {
 export interface StreamPermissionRepliedChunk {
   type: 'permission_replied';
   requestId: string;
-  decision: 'once' | 'session' | 'permanent' | 'reject';
+  decision: PermissionDecision;
+  feedback?: string;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -655,6 +790,9 @@ export interface StreamQuestionRepliedChunk {
   occurredAt?: number;
 }
 
+/** The only timeout source still produced automatically by the current runtime. */
+export type TaskTimeoutSource = 'first_response';
+
 export interface StreamTaskUpdateChunk {
   type: 'task_update';
   taskId: string;
@@ -666,7 +804,7 @@ export interface StreamTaskUpdateChunk {
   result?: string;
   errorMessage?: string;
   reason?: string;
-  effectiveDeadline?: number;
+  timeoutSource?: TaskTimeoutSource;
   sessionId?: string;
   parentTaskId?: string;
   parentSessionId?: string;
@@ -721,8 +859,11 @@ export interface StreamAuditRefChunk {
 
 export type StreamChunk =
   | StreamTextChunk
+  | StreamThinkingStartChunk
   | StreamThinkingChunk
+  | StreamThinkingEndChunk
   | StreamToolCallChunk
+  | StreamToolSearchChunk
   | StreamDoneChunk
   | StreamErrorChunk;
 
@@ -737,7 +878,8 @@ export type RunEvent =
   | StreamSessionChildChunk
   | StreamCompactionChunk
   | StreamUsageChunk
-  | StreamAuditRefChunk;
+  | StreamAuditRefChunk
+  | StreamToolProgressChunk;
 
 export interface RunEventCursor {
   clientRequestId: string;

@@ -2,6 +2,8 @@ export { GatewayWebSocketClient } from './gateway-ws.js';
 export { GatewaySSEClient } from './gateway-sse.js';
 export { login, refreshAccessToken, logout } from './auth.js';
 export type { TokenPair } from './auth.js';
+export { getPairingQr, loginWithPairingToken } from './pairing.js';
+export type { PairingQrResponse } from './pairing.js';
 export type {
   GatewayStreamEvent,
   StreamChunkHandler,
@@ -55,6 +57,9 @@ export type {
   OptimizePromptInput,
   PromptCandidate,
   PromptOptimizerResult,
+  TranslationResult,
+  TranslationTaskInput,
+  UpdateWorkflowTemplateInput,
   WorkflowTemplateMetadata,
   WorkflowTeamTemplateMetadata,
   WorkflowTemplateRequiredRole,
@@ -66,9 +71,19 @@ export type {
 } from './workflows.js';
 export { createPermissionsClient } from './permissions.js';
 export type {
+  CreatePermissionRequestPayload,
   PendingPermissionRequest,
   PermissionDecision,
+  PermissionReplyPayload,
+  PermissionRequestBase,
   PermissionsClient,
+} from './permissions.js';
+export {
+  createPendingPermissionRequestSnapshot,
+  dedupePendingPermissionRequests,
+  findFirstPendingPermission,
+  isPendingPermissionRequest,
+  toPendingPermissionRequests,
 } from './permissions.js';
 export { createQuestionsClient } from './questions.js';
 export type {
@@ -95,6 +110,7 @@ export type {
   SessionMessageRatingRecord,
   SessionMessageRatingValue,
   SessionRecoveryReadModel,
+  SessionStatusReadModel,
   SessionRestoreApplyInput,
   SessionRestoreApplyResult,
   SessionSearchResult,

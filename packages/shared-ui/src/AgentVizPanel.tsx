@@ -4,6 +4,7 @@ export type AgentVizEventType =
   | 'agent_started'
   | 'agent_thinking'
   | 'tool_call'
+  | 'tool_search'
   | 'tool_done'
   | 'agent_done'
   | 'agent_error';
@@ -28,6 +29,7 @@ const EVENT_COLOR: Record<AgentVizEventType, string> = {
   agent_started: '#60a5fa',
   agent_thinking: '#a78bfa',
   tool_call: '#fbbf24',
+  tool_search: '#38bdf8',
   tool_done: '#34d399',
   agent_done: '#34d399',
   agent_error: '#f87171',
@@ -37,6 +39,7 @@ const EVENT_ICON: Record<AgentVizEventType, string> = {
   agent_started: '▶',
   agent_thinking: '…',
   tool_call: '⚙',
+  tool_search: '🔍',
   tool_done: '✓',
   agent_done: '✓',
   agent_error: '✕',

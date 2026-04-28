@@ -3,6 +3,7 @@ import { makeOrderedMessageId } from '../ordered-id.js';
 import { promises as fsp } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { RunEvent } from '@openAwork/shared';
 import {
   AgentTaskManagerImpl,
   AgentTaskStoreImpl,
@@ -35,6 +36,7 @@ import { buildFileDiff } from '../file-diff-format.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import {
+  slimMessagesForRecovery,
   toPublicSessionResponse,
   validateImportedMessagesPayload,
 } from './session-route-helpers.js';
@@ -50,11 +52,12 @@ import {
   validateSessionMetadataPatch,
 } from '../session-workspace-metadata.js';
 import { listSessionTodoLanes, listSessionTodos } from '../todo-tools.js';
-import { terminateChildSession, terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
+import { terminateChildSession } from '../tool-sandbox.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
 import {
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEvents,
+  listSessionRunEventsByRequest,
 } from '../session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
@@ -87,13 +90,12 @@ import {
   hasFreshSessionRuntimeThread,
 } from '../session-runtime-thread-store.js';
 import { hasPendingSessionInteraction } from '../session-runtime-state.js';
-import { expirePendingPermissionRequests } from './permissions.js';
-import { expirePendingQuestionRequests } from './questions.js';
 import {
   listSessionMessagesV2,
   listRuntimeSafeSessionMessagesV2,
   truncateSessionMessagesAfterV2 as truncateSessionMessagesAfter,
 } from '../message-v2-adapter.js';
+import { countUserMessages } from '../message-store-v2.js';
 import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
 
 const createSessionSchema = z.object({
@@ -863,15 +865,13 @@ export async function buildMergedSessionTaskProjection(input: {
 
       const taskSessionMetadata = parseSessionMetadataJson(taskSession.metadata_json);
       const terminalReason = taskSessionMetadata['terminalReason'];
-      const effectiveDeadline = taskSessionMetadata['deadlineMs'];
+      const timeoutSource = taskSessionMetadata['timeoutSource'];
       return {
         ...task,
         ...(typeof terminalReason === 'string' && terminalReason.length > 0
           ? { terminalReason }
           : {}),
-        ...(typeof effectiveDeadline === 'number' && Number.isFinite(effectiveDeadline)
-          ? { effectiveDeadline }
-          : {}),
+        ...(timeoutSource === 'first_response' ? { timeoutSource } : {}),
       };
     }),
     updatedAt: graphs.reduce(
@@ -1019,7 +1019,104 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
   ).map(mapRecoveryQuestionRequestRow);
 }
 
-async function buildSessionRecoveryReadModel(input: { session: SessionRow; userId: string }) {
+async function buildSessionStatusReadModel(input: { session: SessionRow; userId: string }) {
+  const sessionId = input.session.id;
+
+  // Optimization 1: Only query descendant sessions instead of ALL user sessions.
+  // Use a BFS approach: iteratively fetch sessions whose parent is in the known set.
+  const descendantRows: SessionRow[] = [];
+  const visitedIds = new Set<string>([sessionId]);
+  let frontier = [sessionId];
+
+  while (frontier.length > 0) {
+    // Find sessions whose metadata_json contains a parentSessionId matching any frontier ID
+    const candidates = sqliteAll<SessionRow>(
+      `SELECT id, user_id, messages_json, state_status, metadata_json, title, created_at, updated_at
+       FROM sessions
+       WHERE user_id = ?
+         AND id NOT IN (${[...visitedIds].map(() => '?').join(', ')})
+         AND (${frontier.map(() => `metadata_json LIKE ?`).join(' OR ')})
+       LIMIT 200`,
+      [
+        input.userId,
+        ...visitedIds,
+        ...frontier.map((parentId) => `%"parentSessionId":"${parentId}"%`),
+      ],
+    );
+
+    const nextFrontier: string[] = [];
+    for (const candidate of candidates) {
+      const parentId = parseParentSessionId(candidate.metadata_json);
+      if (parentId && visitedIds.has(parentId) && !visitedIds.has(candidate.id)) {
+        visitedIds.add(candidate.id);
+        descendantRows.push(candidate);
+        nextFrontier.push(candidate.id);
+      }
+    }
+    frontier = nextFrontier;
+  }
+
+  // Optimization 2: Single reconcile pass for all descendant rows
+  const reconciledDescendants = await reconcileSessionRuntimeRowsForResponse(
+    descendantRows,
+    input.userId,
+  );
+
+  const children = reconciledDescendants.map((session) =>
+    toPublicSessionResponse(
+      {
+        ...session,
+        metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
+      },
+      [], // Skip message queries for status endpoint
+    ),
+  );
+
+  const relevantSessionIds = [sessionId, ...children.map((child) => child.id)];
+
+  // Optimization 3: Skip task projection when there are no descendants
+  let tasks: SessionTaskResponse[] = [];
+  if (descendantRows.length > 0) {
+    // Build a minimal sessions array for task projection (root + descendants only)
+    const allRows = [input.session, ...reconciledDescendants];
+    const includedSessionIds = new Set(allRows.map((s) => s.id));
+    const projection = await buildMergedSessionTaskProjection({
+      includedSessionIds,
+      sessions: allRows,
+      sessionId,
+    });
+    tasks = projection.tasks;
+  }
+
+  const activeThread = getFreshSessionRuntimeThread({ sessionId, userId: input.userId });
+
+  return {
+    activeStream: activeThread
+      ? {
+          clientRequestId: activeThread.clientRequestId,
+          heartbeatAtMs: activeThread.heartbeatAtMs,
+          lastSeq: getLatestSessionRunEventSeqByRequest({
+            sessionId,
+            clientRequestId: activeThread.clientRequestId,
+          }),
+          sessionId,
+          startedAtMs: activeThread.startedAtMs,
+        }
+      : null,
+    children,
+    pendingPermissions: listRecoveryPermissionRequests(relevantSessionIds),
+    pendingQuestions: listRecoveryQuestionRequests(relevantSessionIds),
+    tasks,
+    todoLanes: listSessionTodoLanes(sessionId),
+  };
+}
+
+async function buildSessionRecoveryReadModel(input: {
+  session: SessionRow;
+  userId: string;
+  messageLimit?: number;
+  since?: number;
+}) {
   const reconciledSession = await reconcileSessionRuntimeForResponse(input.session, input.userId);
   const sessionId = input.session.id;
   const sessions = sqliteAll<SessionRow>(
@@ -1057,22 +1154,6 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
   );
 
   const relevantSessionIds = [sessionId, ...children.map((child) => child.id)];
-  for (const relevantSessionId of relevantSessionIds) {
-    const expiredPermissionCount = expirePendingPermissionRequests({
-      nowMs: Date.now(),
-      sessionId: relevantSessionId,
-    });
-    const expiredQuestionCount = expirePendingQuestionRequests({
-      nowMs: Date.now(),
-      sessionId: relevantSessionId,
-    });
-    if (expiredPermissionCount > 0 || expiredQuestionCount > 0) {
-      await terminateTaskChildSessionAsTimeout({
-        childSessionId: relevantSessionId,
-        userId: input.userId,
-      });
-    }
-  }
 
   const sessionsById = new Map(sessions.map((candidate) => [candidate.id, candidate] as const));
   const visibleSessionIds = new Set<string>([
@@ -1098,25 +1179,64 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
 
   const activeThread = getFreshSessionRuntimeThread({ sessionId, userId: input.userId });
 
+  // Resolve messages with optional turn limit — when messageLimit is set, treat
+  // it as a conversation-turn limit (counted by user messages) so that complete
+  // assistant responses are always included regardless of how many raw messages
+  // they span.
+  const hasTurnLimit = typeof input.messageLimit === 'number' && input.messageLimit > 0;
+  const allVisibleMessages = filterVisibleSessionMessages(
+    mergeRuntimeSafeSessionMessages({
+      legacyMessages: listSessionMessagesV2({
+        sessionId,
+        userId: input.userId,
+        turnLimit: hasTurnLimit ? input.messageLimit : undefined,
+      }),
+      runtimeMessages: listRuntimeSafeSessionMessagesV2({
+        sessionId,
+        userId: input.userId,
+      }),
+    }),
+  );
+  const totalTurnCount = hasTurnLimit
+    ? countUserMessages({ sessionId, userId: input.userId })
+    : undefined;
+  const totalMessageCount = totalTurnCount ?? allVisibleMessages.length;
+
+  // Resolve runEvents — when loading with turnLimit, only fetch events for the
+  // active stream (if any) so the frontend can resume in-progress tool calls.
+  // Historical runEvents are redundant — completed messages already contain the
+  // full tool results.
+  let filteredRunEvents: RunEvent[];
+  if (hasTurnLimit) {
+    filteredRunEvents = activeThread
+      ? listSessionRunEventsByRequest({
+          sessionId,
+          clientRequestId: activeThread.clientRequestId,
+        })
+      : [];
+  } else {
+    const allRunEvents = listSessionRunEvents(sessionId);
+    filteredRunEvents =
+      typeof input.since === 'number'
+        ? allRunEvents.filter(
+            (event) =>
+              typeof event.occurredAt !== 'number' || event.occurredAt >= input.since!,
+          )
+        : allRunEvents;
+  }
+
+  const slimmedMessages = hasTurnLimit
+    ? slimMessagesForRecovery(allVisibleMessages)
+    : allVisibleMessages;
+
   const sessionResponse = toPublicSessionResponse(
     {
       ...reconciledSession,
       metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
     },
-    filterVisibleSessionMessages(
-      mergeRuntimeSafeSessionMessages({
-        legacyMessages: listSessionMessagesV2({
-          sessionId,
-          userId: input.userId,
-        }),
-        runtimeMessages: listRuntimeSafeSessionMessagesV2({
-          sessionId,
-          userId: input.userId,
-        }),
-      }),
-    ),
+    slimmedMessages,
     listSessionTodos(sessionId),
-    listSessionRunEvents(sessionId),
+    filteredRunEvents,
   );
 
   return {
@@ -1142,6 +1262,8 @@ async function buildSessionRecoveryReadModel(input: { session: SessionRow; userI
     },
     tasks,
     todoLanes: listSessionTodoLanes(sessionId),
+    totalMessageCount,
+    totalTurnCount: totalTurnCount ?? null,
   };
 }
 
@@ -1389,6 +1511,39 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get(
+    '/sessions/:sessionId/status',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'session.status.get', undefined, {
+        sessionId,
+      });
+
+      const session = sqliteGet<SessionRow>(
+        'SELECT id, messages_json, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+
+      if (!session) {
+        step.fail('not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const status = await buildSessionStatusReadModel({ session, userId: user.sub });
+      step.succeed(undefined, {
+        childCount: status.children.length,
+        pendingPermissionCount: status.pendingPermissions.length,
+        pendingQuestionCount: status.pendingQuestions.length,
+        sessionId,
+        taskCount: status.tasks.length,
+      });
+
+      return reply.send({ status });
+    },
+  );
+
+  app.get(
     '/sessions/:sessionId/recovery',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -1408,7 +1563,22 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const recovery = await buildSessionRecoveryReadModel({ session, userId: user.sub });
+      const query = request.query as Record<string, string | undefined>;
+      const messageLimit =
+        typeof query.messageLimit === 'string' && /^\d+$/u.test(query.messageLimit)
+          ? Number(query.messageLimit)
+          : undefined;
+      const since =
+        typeof query.since === 'string' && /^\d+$/u.test(query.since)
+          ? Number(query.since)
+          : undefined;
+
+      const recovery = await buildSessionRecoveryReadModel({
+        session,
+        userId: user.sub,
+        messageLimit,
+        since,
+      });
       step.succeed(undefined, {
         childCount: recovery.children.length,
         pendingPermissionCount: recovery.pendingPermissions.length,
@@ -2018,6 +2188,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
   const truncateMessagesSchema = z.object({
     messageId: z.string().min(1),
     inclusive: z.boolean().optional().default(true),
+    messageText: z.string().optional(),
   });
 
   app.post(
@@ -2035,8 +2206,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
       }
 
-      const session = sqliteGet<SessionRow>(
-        'SELECT id, messages_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
         [sessionId, user.sub],
       );
       if (!session) {
@@ -2048,8 +2219,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
         messageId: body.data.messageId,
-        legacyMessagesJson: session.messages_json,
         inclusive: body.data.inclusive,
+        messageText: body.data.messageText,
       });
       step.succeed(undefined, { count: messages.length });
       return reply.send({ messages });

@@ -5,6 +5,16 @@ export interface TextContent {
   text: string;
 }
 
+export interface InputImageContent {
+  type: 'input_image';
+  artifactId?: string;
+  detail?: 'auto' | 'high' | 'low' | 'original';
+  fileId?: string;
+  fileName?: string;
+  imageUrl?: string;
+  mimeType?: string;
+}
+
 export interface ToolCallContent {
   type: 'tool_call';
   toolCallId: string;
@@ -78,8 +88,25 @@ export interface ModifiedFilesSummaryContent {
   files: FileDiffContent[];
 }
 
+export interface ReasoningContent {
+  type: 'reasoning';
+  text: string;
+  /** For Responses API: the encrypted_content from the upstream response, needed for multi-turn. */
+  encryptedContent?: string;
+  /** For Responses API: the reasoning summary from the upstream response. */
+  summary?: string;
+  /** For Responses API: the response.id, used as previous_response_id for prompt caching. */
+  responseId?: string;
+  /** UNIX millis when the upstream first emitted thinking delta for this block. */
+  startedAt?: number;
+  /** UNIX millis when the upstream signalled (or fail-safe inferred) the block was complete. */
+  endedAt?: number;
+}
+
 export type MessageContent =
   | TextContent
+  | InputImageContent
+  | ReasoningContent
   | ToolCallContent
   | ToolResultContent
   | ModifiedFilesSummaryContent;

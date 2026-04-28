@@ -62,7 +62,7 @@ async function main(): Promise<void> {
             { sessionsRoutes },
             dbModule,
             { createDefaultSandbox },
-            { listSessionMessages },
+            { listSessionMessagesV2: listSessionMessages },
           ] = await Promise.all([
             import('fastify'),
             import('../auth.js'),
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
             import('../routes/sessions.js'),
             import('../db.js'),
             import('../tool-sandbox.js'),
-            import('../session-message-store.js'),
+            import('../message-v2-adapter.js'),
           ]);
 
           await dbModule.connectDb();

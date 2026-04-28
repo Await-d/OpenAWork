@@ -1,5 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import {
+  mapPermissionRequestRow,
+  parseApprovedPermissionResumePayload,
+  permissionDecisionSchema,
+  type PermissionDecision,
+  type PermissionRequestStatus,
+  type PermissionRiskLevel,
+} from '../permission-contract.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
@@ -33,19 +41,15 @@ import { listSessionTodos } from '../todo-tools.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../question-tools.js';
 import { shouldExitPlanModeFromAnswers } from '../plan-mode-tools.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
-import { expirePendingPermissionRequests } from './permissions.js';
-import { expirePendingQuestionRequests } from './questions.js';
 import {
   resumeAnsweredQuestionRequest,
   resumeApprovedPermissionRequest,
 } from './stream-runtime.js';
-import {
-  type ApprovedPermissionResumePayload,
-  streamRequestSchema as permissionResumeRequestSchema,
-} from './stream.js';
+import { type ApprovedPermissionResumePayload } from './stream.js';
+import { expirePendingPermissionRequests } from './permissions.js';
+import { expirePendingQuestionRequests } from './questions.js';
 import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
 import { logTeamAudit } from '../team-audit-store.js';
-import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../runtime-safe-message-merge.js';
 
@@ -62,16 +66,16 @@ interface SessionRow {
 
 interface PermissionRequestRow {
   created_at: string;
-  decision: 'once' | 'session' | 'permanent' | 'reject' | null;
+  decision: PermissionDecision | null;
   expires_at: number | null;
   id: string;
   preview_action: string | null;
   reason: string;
   request_payload_json: string | null;
-  risk_level: 'low' | 'medium' | 'high';
+  risk_level: PermissionRiskLevel;
   scope: string;
   session_id: string;
-  status: 'pending' | 'approved' | 'rejected' | 'consumed';
+  status: PermissionRequestStatus | 'consumed';
   tool_name: string;
 }
 
@@ -100,7 +104,7 @@ const sharedSessionCommentSchema = z.object({
 
 const replyPermissionSchema = z.object({
   requestId: z.string().min(1),
-  decision: z.enum(['once', 'session', 'permanent', 'reject']),
+  decision: permissionDecisionSchema,
 });
 
 const replyQuestionSchema = z.object({
@@ -117,21 +121,6 @@ function canOperateSharedSession(permission: 'view' | 'comment' | 'operate'): bo
   return permission === 'operate';
 }
 
-function mapPermissionRequestRow(row: PermissionRequestRow) {
-  return {
-    requestId: row.id,
-    sessionId: row.session_id,
-    toolName: row.tool_name,
-    scope: row.scope,
-    reason: row.reason,
-    riskLevel: row.risk_level,
-    previewAction: row.preview_action ?? undefined,
-    status: row.status,
-    decision: row.decision ?? undefined,
-    createdAt: row.created_at,
-  };
-}
-
 function mapQuestionRequestRow(row: QuestionRequestRow) {
   return {
     requestId: row.id,
@@ -142,73 +131,6 @@ function mapQuestionRequestRow(row: QuestionRequestRow) {
     status: row.status,
     createdAt: row.created_at,
   };
-}
-
-function parseApprovedPermissionResumePayload(
-  payloadJson: string | null,
-): Omit<ApprovedPermissionResumePayload, 'toolName'> | null {
-  if (!payloadJson) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    const clientRequestId =
-      typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-    const toolCallId = typeof parsed['toolCallId'] === 'string' ? parsed['toolCallId'] : null;
-    const nextRound = typeof parsed['nextRound'] === 'number' ? parsed['nextRound'] : null;
-    const rawInput =
-      parsed['rawInput'] && typeof parsed['rawInput'] === 'object'
-        ? (parsed['rawInput'] as Record<string, unknown>)
-        : null;
-    const requestDataCandidate =
-      parsed['requestData'] && typeof parsed['requestData'] === 'object'
-        ? (parsed['requestData'] as Record<string, unknown>)
-        : null;
-
-    if (
-      !clientRequestId ||
-      !toolCallId ||
-      nextRound === null ||
-      !rawInput ||
-      !requestDataCandidate
-    ) {
-      return null;
-    }
-
-    const requestData = permissionResumeRequestSchema.parse(requestDataCandidate);
-    const observabilityCandidate =
-      parsed['observability'] && typeof parsed['observability'] === 'object'
-        ? (parsed['observability'] as Record<string, unknown>)
-        : null;
-    return {
-      clientRequestId,
-      nextRound,
-      requestData,
-      toolCallId,
-      rawInput,
-      ...(observabilityCandidate
-        ? {
-            observability: {
-              presentedToolName:
-                typeof observabilityCandidate['presentedToolName'] === 'string'
-                  ? observabilityCandidate['presentedToolName']
-                  : 'unknown',
-              canonicalToolName:
-                typeof observabilityCandidate['canonicalToolName'] === 'string'
-                  ? observabilityCandidate['canonicalToolName']
-                  : 'unknown',
-              adapterVersion:
-                typeof observabilityCandidate['adapterVersion'] === 'string'
-                  ? observabilityCandidate['adapterVersion']
-                  : '1.0.0',
-            },
-          }
-        : {}),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function parseQuestionResumePayload(
@@ -310,7 +232,10 @@ function listSharedPendingPermissionRequests(input: { sessionId: string }) {
      WHERE session_id = ? AND status = 'pending'
      ORDER BY created_at ASC`,
     [input.sessionId],
-  ).map(mapPermissionRequestRow);
+  ).flatMap((row) => {
+    const mapped = mapPermissionRequestRow(row);
+    return mapped ? [mapped] : [];
+  });
 }
 
 function listSharedPendingQuestionRequests(input: { sessionId: string }) {
@@ -446,20 +371,9 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         listSessionRunEvents(sessionId),
       );
       if (canOperateSharedSession(sharedAccess.permission)) {
-        const expiredPermissionCount = expirePendingPermissionRequests({
-          nowMs: Date.now(),
-          sessionId,
-        });
-        const expiredQuestionCount = expirePendingQuestionRequests({
-          nowMs: Date.now(),
-          sessionId,
-        });
-        if (expiredPermissionCount > 0 || expiredQuestionCount > 0) {
-          await terminateTaskChildSessionAsTimeout({
-            childSessionId: sessionId,
-            userId: sharedAccess.ownerUserId,
-          });
-        }
+        const nowMs = Date.now();
+        expirePendingPermissionRequests({ nowMs, sessionId });
+        expirePendingQuestionRequests({ nowMs, sessionId });
       }
       const pendingPermissions = canOperateSharedSession(sharedAccess.permission)
         ? listSharedPendingPermissionRequests({ sessionId })
@@ -615,19 +529,6 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         step.fail('permission request not found');
         return reply.status(404).send({ error: 'Permission request not found' });
       }
-      if (
-        permissionRequest.status === 'pending' &&
-        typeof permissionRequest.expires_at === 'number' &&
-        permissionRequest.expires_at <= Date.now()
-      ) {
-        expirePendingPermissionRequests({ nowMs: Date.now(), sessionId });
-        await terminateTaskChildSessionAsTimeout({
-          childSessionId: sessionId,
-          userId: sharedAccess.ownerUserId,
-        });
-        step.fail('permission request expired');
-        return reply.status(409).send({ error: 'Permission request expired' });
-      }
       if (permissionRequest.status !== 'pending') {
         step.fail('permission request already resolved');
         return reply.status(409).send({ error: 'Permission request already resolved' });
@@ -757,19 +658,6 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       if (!questionRequest) {
         step.fail('question request not found');
         return reply.status(404).send({ error: 'Question request not found' });
-      }
-      if (
-        questionRequest.status === 'pending' &&
-        typeof questionRequest.expires_at === 'number' &&
-        questionRequest.expires_at <= Date.now()
-      ) {
-        expirePendingQuestionRequests({ nowMs: Date.now(), sessionId });
-        await terminateTaskChildSessionAsTimeout({
-          childSessionId: sessionId,
-          userId: sharedAccess.ownerUserId,
-        });
-        step.fail('question request expired');
-        return reply.status(409).send({ error: 'Question request expired' });
       }
       if (questionRequest.status !== 'pending') {
         step.fail('question request already resolved');

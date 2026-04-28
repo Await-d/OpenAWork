@@ -2,7 +2,7 @@ import { KeywordDetectorImpl } from '@openAwork/agent-core';
 import type { DialogueMode } from '@openAwork/shared';
 
 export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
-  '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量用 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。';
+  '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量直接传 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。只有在当前会话历史里确实出现了 [tool_output_reference] 且拿不到 toolCallId 时，才允许使用 useLatestReferenced=true。单纯复制/粘贴 UI 上的提示、命令或片段，不等于拥有当前会话里的引用依据。';
 
 export const DIALOGUE_MODE_SYSTEM_PROMPTS: Record<DialogueMode, string> = {
   clarify: [
@@ -26,6 +26,13 @@ export const DIALOGUE_MODE_SYSTEM_PROMPTS: Record<DialogueMode, string> = {
     '- 由浅入深，每轮只推进一个层级，不一次性回答完毕。',
     '- 当某个方向存在多种选择时，给出 2-4 个可选方向及各自利弊，让用户选择后再深入。',
     '- 每次提问聚焦一个维度，不要在一轮中堆叠过多问题。',
+    '',
+    '【使用 AskUserQuestion 工具提问】',
+    '- 当需要用户在多个选项中做选择时，必须调用 AskUserQuestion 工具，不要在文本中列选项让用户手动回复。',
+    '- AskUserQuestion 会生成结构化的交互式问题卡片，用户可以直接点选，体验更好。',
+    '- 典型场景：技术栈选择、方案对比、功能取舍、优先级确认等需要用户明确选择的环节。',
+    '- 仅在开放性问题（如"你想实现什么功能？"）时才使用纯文本提问。',
+    '- 每次调用 AskUserQuestion 聚焦一个决策点，不要把所有问题塞进一次调用。',
     '',
     '【浅层需求的展开路径】',
     '当用户只给出一句话需求（如"帮我创建一个XX应用"），按以下层级逐步展开：',
@@ -292,6 +299,68 @@ export interface RoundSystemMessagesInput {
   thinkingLanguagePrompt?: string | null;
   /** Dynamic agent prompt sections (delegation table, tool selection, etc.) for orchestrator agents */
   dynamicAgentPrompt?: string | null;
+  /** Start-work context injected when ultrawork keyword is detected (plan info + boulder state) */
+  startWorkContext?: string | null;
+  /** Command template context injected when an active slash command is detected */
+  commandContext?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Declarative system prompt chain (opencode pattern)
+//
+// Each element has a fixed position in the chain. No conditional array
+// concatenation — all slots are always present, empty ones use placeholders
+// for prompt cache stability.
+// ---------------------------------------------------------------------------
+
+export interface SystemPromptChainInput {
+  workspaceCtx: string | null;
+  routeSystemPrompt?: string | null;
+  lspGuidance?: string | null;
+  dialogueModePrompt?: string | null;
+  yoloModePrompt?: string | null;
+  memoryBlock?: string | null;
+  thinkingLanguagePrompt?: string | null;
+  dynamicAgentPrompt?: string | null;
+  startWorkContext?: string | null;
+  commandContext?: string | null;
+}
+
+/**
+ * Build a declarative system prompt chain.
+ * Each element has a fixed position — no conditional array concatenation.
+ * Returns string[] that can be mapped to UnifiedMessage system messages.
+ *
+ * Modeled after opencode's system[] array pattern where prompts are
+ * composed declaratively and then joined or kept separate for caching.
+ */
+export function buildSystemPromptChain(input: SystemPromptChainInput): string[] {
+  // Fixed-order chain: each slot is always present
+  const chain: string[] = [
+    // Slot 1: Route-level system prompt (highest priority, rarely changes)
+    input.routeSystemPrompt ?? ROUTE_SYSTEM_PROMPT_PLACEHOLDER,
+    // Slot 2: Workspace context (file tree, rules, AGENTS.md, README)
+    input.workspaceCtx ?? WORKSPACE_CTX_PLACEHOLDER,
+    // Slot 3: Dynamic agent prompt (orchestrator delegation tables)
+    input.dynamicAgentPrompt ?? '',
+    // Slot 4: Start-work context (ultrawork plan + boulder state)
+    input.startWorkContext ?? '',
+    // Slot 5: Command template context
+    input.commandContext ?? '',
+    // Slot 6: LSP tool guidance
+    input.lspGuidance ?? LSP_GUIDANCE_PLACEHOLDER,
+    // Slot 7: Dialogue mode prompt
+    input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
+    // Slot 8: YOLO mode prompt
+    input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
+    // Slot 9: Tool output reference strategy
+    TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    // Slot 10: Thinking language hint
+    input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
+  ];
+
+  // Filter out empty strings (slots with no content and no placeholder)
+  return chain.filter((s) => s.length > 0);
 }
 
 /**
@@ -316,6 +385,8 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     input.dynamicAgentPrompt,
+    input.startWorkContext,
+    input.commandContext,
   ].filter((part): part is string => typeof part === 'string' && part.length > 0);
 
   // Part 2: Dynamic suffix — changes per round

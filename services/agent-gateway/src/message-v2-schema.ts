@@ -81,6 +81,8 @@ export interface ReasoningPart extends PartBase {
   text: string;
   metadata?: Record<string, unknown>;
   time: { start: number; end?: number };
+  /** Response ID from Responses API, used as previous_response_id for caching. */
+  responseId?: string;
 }
 
 export interface ToolPart extends PartBase {
@@ -114,6 +116,13 @@ export interface CompactionPart extends PartBase {
   type: 'compaction';
   auto: boolean;
   overflow?: boolean;
+  /**
+   * Earliest message ID to retain after this compaction boundary.
+   * When present, `filterCompacted` keeps messages from this ID forward
+   * (inclusive) instead of cutting strictly at the compaction marker.
+   * Mirrors opencode's `CompactionPart.tail_start_id`.
+   */
+  tailStartID?: MessageID;
 }
 
 export interface SubtaskPart extends PartBase {
@@ -127,6 +136,10 @@ export interface SubtaskPart extends PartBase {
 
 export interface FilePart extends PartBase {
   type: 'file';
+  artifactId?: string;
+  detail?: 'auto' | 'high' | 'low' | 'original';
+  fileId?: string;
+  inputType?: 'generic' | 'input_image';
   mime: string;
   filename?: string;
   url: string;
@@ -222,10 +235,66 @@ export interface UserMessage extends MessageBase {
   tools?: Record<string, boolean>;
 }
 
+/**
+ * Structured error attached to an assistant message.
+ *
+ * Modelled after opencode's NamedError discriminated union
+ * (`AbortedError | AuthError | ContextOverflowError | OutputLengthError
+ *  | APIError | UnknownError`). Every variant keeps the legacy
+ * `{ name; message }` shape so existing truthy checks and bus payloads
+ * remain wire-compatible while new code can narrow on `name` for
+ * retry / compaction / surfacing decisions.
+ */
+export type AssistantErrorObject =
+  | AssistantAbortedError
+  | AssistantAuthError
+  | AssistantContextOverflowError
+  | AssistantOutputLengthError
+  | AssistantAPIError
+  | AssistantUnknownError;
+
+export interface AssistantAbortedError {
+  name: 'AbortedError';
+  message: string;
+}
+
+export interface AssistantAuthError {
+  name: 'AuthError';
+  message: string;
+  providerID?: string;
+}
+
+export interface AssistantContextOverflowError {
+  name: 'ContextOverflowError';
+  message: string;
+  statusCode?: number;
+}
+
+export interface AssistantOutputLengthError {
+  name: 'OutputLengthError';
+  message: string;
+}
+
+export interface AssistantAPIError {
+  name: 'APIError';
+  message: string;
+  /** HTTP status from the upstream when available (e.g. 429, 500). */
+  statusCode?: number;
+  /** True for transient classes (5xx, network resets, decompression errors). */
+  isRetryable?: boolean;
+  /** SystemError-style code such as `ECONNRESET`, `ETIMEDOUT`, `ZlibError`. */
+  code?: string;
+}
+
+export interface AssistantUnknownError {
+  name: 'UnknownError';
+  message: string;
+}
+
 export interface AssistantMessage extends MessageBase {
   role: 'assistant';
   time: { created: number; completed?: number };
-  error?: { name: string; message: string };
+  error?: AssistantErrorObject;
   parentID?: MessageID;
   modelID?: string;
   providerID?: string;

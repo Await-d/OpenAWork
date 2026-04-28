@@ -3,7 +3,9 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { WorkflowLogger } from '@openAwork/logger';
 import authPlugin from './auth.js';
-import { connectDb, closeDb, migrate, sqliteGet, sqliteRun } from './db.js';
+import { connectDb, closeDb, db, migrate, sqliteGet, sqliteRun } from './db.js';
+import { bootV2Runtime, getRuntimeFlags, shutdownV2Runtime } from './v2-runtime/index.js';
+import { skillMcpPool } from './skill-mcp-connection-pool.js';
 import { ensureDefaultInstalledSkillsForAllUsers } from './default-skills.js';
 import { ensureDefaultWorkflowTemplatesForAllUsers } from './default-workflow-templates.js';
 import { createHash, randomUUID } from 'crypto';
@@ -40,7 +42,8 @@ import { workflowRoutes } from './routes/workflows.js';
 import webStaticPlugin from './web-static.js';
 import { lspRoutes, lspManager } from './lsp/router.js';
 import { autoStartConfiguredChannels, channelRoutes } from './channels/router.js';
-import { cronRoutes } from './cron/router.js';
+import { channelManager } from './channels/manager.js';
+import { cronRoutes, cronScheduler } from './cron/router.js';
 import { githubRoutes, restoreGitHubTriggers } from './github/router.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { desktopAutomationRoutes } from './routes/desktop-automation.js';
@@ -52,6 +55,7 @@ import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
 import { notificationsRoutes } from './routes/notifications.js';
+import { sessionImagesRoutes } from './routes/session-images.js';
 
 const app = Fastify({ logger: true, disableRequestLogging: true });
 
@@ -88,6 +92,7 @@ await app.register(capabilitiesRoutes);
 await app.register(pairingRoutes);
 await app.register(memoriesRoutes);
 await app.register(notificationsRoutes);
+await app.register(sessionImagesRoutes);
 
 app.get('/health', (request, reply) => {
   const { step } = startRequestWorkflow(request, 'gateway.health');
@@ -96,7 +101,30 @@ app.get('/health', (request, reply) => {
 });
 
 app.addHook('onClose', async () => {
+  // Cron timers + messaging-channel websockets first — both wrap
+  // setInterval / external connections that would otherwise leak
+  // across hot-restart cycles. Each branch is isolated so a single
+  // failure can't block the rest of shutdown.
+  try {
+    cronScheduler.stopAll();
+  } catch (err) {
+    app.log.error({ err }, 'cronScheduler.stopAll failed');
+  }
+  try {
+    await channelManager.stopAll();
+  } catch (err) {
+    app.log.error({ err }, 'channelManager.stopAll failed');
+  }
   await lspManager.shutdown();
+  try {
+    await skillMcpPool.disconnectAll();
+  } catch (err) {
+    app.log.error({ err }, 'skillMcpPool.disconnectAll failed');
+  }
+  // Invalidate the cached v2-runtime drizzle handle BEFORE closing the
+  // legacy connection — once `closeDb()` runs the handle would be a
+  // dangling reference to a closed `node:sqlite` connection.
+  shutdownV2Runtime();
   await closeDb();
 });
 
@@ -116,6 +144,21 @@ try {
   step = bootLogger.start('gateway.migrate');
   await migrate();
   bootLogger.succeed(step);
+
+  // v2-runtime boot — only initialises the drizzle handle + Effect
+  // service layer when `OPENAWORK_RUNTIME[_STORAGE]=v2` is set. When
+  // the flags are off this is a no-op, so the legacy stack keeps
+  // running unchanged.
+  step = bootLogger.start('gateway.boot-v2-runtime');
+  const runtimeFlags = getRuntimeFlags();
+  const v2Booted = bootV2Runtime({ connection: db });
+  bootLogger.succeed(step, undefined, {
+    runtime: runtimeFlags.global,
+    storage: runtimeFlags.storage,
+    upstream: runtimeFlags.upstream,
+    services: runtimeFlags.services,
+    booted: v2Booted !== null,
+  });
 
   step = bootLogger.start('gateway.seed-default-admin', undefined, { email: ADMIN_EMAIL });
   await seedDefaultAdmin();

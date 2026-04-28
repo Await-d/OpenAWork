@@ -43,20 +43,20 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
   {
     presentedName: 'Read',
     canonicalName: 'read',
-    compatLevel: 'low',
-    note: 'Read requires richer file_path/offset/pages semantics than the current gateway read tool.',
+    compatLevel: 'medium',
+    note: 'Read normalizes file_path to path for the canonical read tool.',
   },
   {
     presentedName: 'WebFetch',
     canonicalName: 'webfetch',
-    compatLevel: 'low',
-    note: 'WebFetch is intentionally kept on the OpenCode/local contract and is not migrated to the Claude-first prompt-driven variant.',
+    compatLevel: 'medium',
+    note: 'WebFetch maps to the canonical webfetch tool.',
   },
   {
     presentedName: 'WebSearch',
     canonicalName: 'websearch',
-    compatLevel: 'low',
-    note: 'WebSearch is intentionally kept on the OpenCode/local contract and is not migrated to the Claude-first search semantics.',
+    compatLevel: 'medium',
+    note: 'WebSearch maps to the canonical websearch tool.',
   },
   {
     presentedName: 'Skill',
@@ -351,6 +351,30 @@ export function normalizeInputForCanonical(
         remapped: true,
       };
     }
+    case 'Read': {
+      const { file_path, offset, limit } = rawInput;
+      return {
+        canonicalName: 'read',
+        normalizedFields: {
+          ...(file_path !== undefined ? { path: file_path } : {}),
+          ...(offset !== undefined ? { offset } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        },
+        remapped: true,
+      };
+    }
+    case 'WebFetch':
+      return {
+        canonicalName: 'webfetch',
+        normalizedFields: rawInput,
+        remapped: false,
+      };
+    case 'WebSearch':
+      return {
+        canonicalName: 'websearch',
+        normalizedFields: rawInput,
+        remapped: false,
+      };
     case 'Agent': {
       const { description, prompt, subagent_type, run_in_background, session_id } = rawInput;
       return {

@@ -12,6 +12,7 @@ export interface AIModelConfigItem {
   inputPricePerMillion?: number;
   maxOutputTokens?: number;
   outputPricePerMillion?: number;
+  supportsImageGeneration?: boolean;
   supportsThinking?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
@@ -436,6 +437,7 @@ export function ModelManager({
                       {model.id}
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                      {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
                       {model.supportsTools ? <CapabilityDot label="工具" /> : null}
                       {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
                       {model.supportsThinking ? <CapabilityDot label="思考" /> : null}

@@ -104,12 +104,25 @@ export { webSearchTool, WEB_SEARCH_TOOLS } from './tools/web-search.js';
 export * from './tools/hash-edit.js';
 
 export type {
-  PermissionDecision,
-  PermissionRequest,
-  GrantedPermission,
-  PermissionManager,
-} from './permission/index.js';
-export { PermissionManagerImpl } from './permission/index.js';
+  WorkspacePermissionAction,
+  PermissionCategoryMeta,
+  WorkspacePermissionConfig,
+  WorkspacePermissionRule,
+} from './permission/workspace-permission-config.js';
+export {
+  WORKSPACE_PERMISSION_FILE,
+  evaluateWorkspacePermissionRules,
+  hasWorkspacePersistentPermission,
+  listEffectiveWorkspacePermissionRules,
+  loadWorkspacePermissionConfig,
+  loadWorkspacePermissionRules,
+  resolveWorkspacePermissionAction,
+  upsertWorkspacePermanentPermission,
+  wildcardMatch,
+  PERMISSION_CATEGORIES,
+  resolvePermissionCategory,
+  writeWorkspacePermissionConfig,
+} from './permission/workspace-permission-config.js';
 
 export type {
   BrowserPermissionLevel,

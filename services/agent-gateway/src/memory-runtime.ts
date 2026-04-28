@@ -63,7 +63,6 @@ export function buildMemoryExtractionTextForRequest(input: {
 }
 
 export function buildMemoryExtractionTextForSession(input: {
-  legacyMessagesJson?: string;
   sessionId: string;
   userId: string;
 }): string {

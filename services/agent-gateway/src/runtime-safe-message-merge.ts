@@ -16,5 +16,9 @@ export function mergeRuntimeSafeSessionMessages(input: {
     }
   }
 
-  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+  return [...byId.values()].sort((left, right) => {
+    const timeDiff = (left.createdAt ?? 0) - (right.createdAt ?? 0);
+    if (timeDiff !== 0) return timeDiff;
+    return left.id.localeCompare(right.id);
+  });
 }

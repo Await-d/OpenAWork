@@ -53,6 +53,7 @@ export interface AIModelConfig {
   autoCompactTargetRatio?: number;
   supportsTools?: boolean;
   supportsVision?: boolean;
+  supportsImageGeneration?: boolean;
   supportsThinking?: boolean;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
@@ -74,8 +75,9 @@ export interface AIProvider {
    *  When set, this takes priority over model-id and base-URL heuristics.
    *  - 'responses':     Use OpenAI Responses API (/v1/responses)
    *  - 'chat_completions': Use OpenAI Chat Completions API (/v1/chat/completions)
+   *  - 'anthropic_messages': Use Anthropic native Messages API (/v1/messages)
    */
-  upstreamProtocol?: 'chat_completions' | 'responses';
+  upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
   defaultModels: AIModelConfig[];
   createdAt: string;
   updatedAt: string;
@@ -87,6 +89,10 @@ export interface ActiveSelection {
     modelId: string;
   };
   fast: {
+    providerId: string;
+    modelId: string;
+  };
+  image?: {
     providerId: string;
     modelId: string;
   };

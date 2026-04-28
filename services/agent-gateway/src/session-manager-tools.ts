@@ -8,8 +8,12 @@ import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { listSessionTodoLanes } from './todo-tools.js';
 import { listSessionFileDiffs } from './session-file-diff-store.js';
 import { buildSessionFileChangesProjection } from './session-file-changes-projection.js';
-import { listSessionRunEvents } from './session-run-events.js';
+import { getRunEventRunId, listSessionRunEvents } from './session-run-events.js';
 import { listSessionSnapshots } from './session-snapshot-store.js';
+import {
+  normalizeToolArgumentsForStorage,
+  stringifyToolResultOutput,
+} from './tool-result-contract.js';
 
 interface SessionRow {
   id: string;
@@ -27,6 +31,8 @@ interface SessionTranscriptRow {
   duration_ms: number | null;
   created_at: string;
 }
+
+const MAX_FORMATTED_TOOL_PART_CHARS = 8_000;
 
 const sessionListInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
@@ -117,16 +123,38 @@ function formatDate(value: string | number | undefined): string {
 function formatMessageParts(message: Message): string {
   return message.content
     .map((content: MessageContent) => {
-      if (content.type === 'text') {
-        return content.text;
+      const contentType = Reflect.get(content as object, 'type');
+      if (contentType === 'text') {
+        const text = Reflect.get(content as object, 'text');
+        return typeof text === 'string' ? text : '';
       }
-      if (content.type === 'tool_call') {
-        return `[tool_call] ${content.toolName} ${JSON.stringify(content.input)}`;
+      if (contentType === 'tool_call') {
+        const toolName = Reflect.get(content as object, 'toolName');
+        const toolInput = Reflect.get(content as object, 'input');
+        const normalizedInput = truncateText(
+          normalizeToolArgumentsForStorage(toolInput ?? {}),
+          MAX_FORMATTED_TOOL_PART_CHARS,
+        );
+        return `[tool_call] ${typeof toolName === 'string' ? toolName : ''} ${normalizedInput}`;
       }
-      if (content.type === 'tool_result') {
-        return `[tool_result] ${JSON.stringify(content.output)}`;
+      if (contentType === 'tool_result') {
+        const output = Reflect.get(content as object, 'output');
+        const normalizedOutput = truncateText(
+          stringifyToolResultOutput(output),
+          MAX_FORMATTED_TOOL_PART_CHARS,
+        );
+        return `[tool_result] ${normalizedOutput}`;
       }
-      return `${content.title}: ${content.summary}`;
+      if (contentType === 'reasoning') {
+        const text = Reflect.get(content as object, 'text');
+        return typeof text === 'string' ? text : '';
+      }
+      if (contentType === 'modified_files_summary') {
+        const title = Reflect.get(content as object, 'title');
+        const summary = Reflect.get(content as object, 'summary');
+        return `${typeof title === 'string' ? title : ''}: ${typeof summary === 'string' ? summary : ''}`;
+      }
+      return '';
     })
     .join('\n')
     .trim();
@@ -290,8 +318,9 @@ export function runSessionReadTool(
     if (runEvents.length > 0) {
       lines.push('Run Events:');
       runEvents.slice(0, 50).forEach((event, index) => {
+        const runId = getRunEventRunId(event);
         lines.push(
-          `${index + 1}. [${formatDate(event.occurredAt)}] ${event.type}${event.runId ? ` · ${event.runId}` : ''}${event.eventId ? ` · ${event.eventId}` : ''}`,
+          `${index + 1}. [${formatDate(event.occurredAt)}] ${event.type}${runId ? ` · ${runId}` : ''}${event.eventId ? ` · ${event.eventId}` : ''}`,
         );
       });
     }

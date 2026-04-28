@@ -9,6 +9,11 @@ import {
   parseWorkspaceAccessMode,
 } from './workspace-config.js';
 import { resolveGatewayDatabasePath } from './storage-paths.js';
+import {
+  normalizeToolArgumentsForStorage,
+  normalizeToolResultOutputForStorage,
+  stringifyToolResultOutput,
+} from './tool-result-contract.js';
 
 function resolveDbPath(): string {
   return resolveGatewayDatabasePath();
@@ -306,6 +311,7 @@ export async function migrate(): Promise<void> {
   ensureColumn('session_file_diffs', 'backup_after_ref_json', 'TEXT');
   ensureColumn('session_file_diffs', 'before_backup_id', 'TEXT');
   ensureColumn('session_file_diffs', 'after_backup_id', 'TEXT');
+  migrateSessionFileDiffsDropLegacyTextColumns();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS permission_decision_logs (
@@ -467,6 +473,7 @@ export async function migrate(): Promise<void> {
   `);
   ensureColumn('permission_requests', 'request_payload_json', 'TEXT');
   ensureColumn('permission_requests', 'expires_at', 'INTEGER');
+  ensureColumn('permission_requests', 'always_json', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS question_requests (
@@ -779,7 +786,30 @@ export async function migrate(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_event_log_aggregate_seq ON event_log(aggregate_id, seq)');
+
+  // ─── SessionEvent (opencode-aligned typed stream events) ───
+  // Distinct from session_run_events: this table stores the lower-level
+  // typed event taxonomy (text.delta, tool.input.*, tool.success, etc.)
+  // mirroring opencode's session_entry table, and powers replaySessionEntries.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_entry (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT,
+      seq INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_entry_session_seq ON session_entry(session_id, seq, timestamp)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_entry_session_request ON session_entry(session_id, client_request_id, seq)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS event_sequences (
@@ -787,6 +817,8 @@ export async function migrate(): Promise<void> {
       seq INTEGER NOT NULL DEFAULT 0
     )
   `);
+
+  migrateSyncEventTables();
 
   // ─── V1 → V2 Data Migration ───
   migrateV1MessagesToV2();
@@ -812,6 +844,77 @@ function ensureColumn(table: string, column: string, definition: string): void {
   if (!exists) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+function migrateSessionFileDiffsDropLegacyTextColumns(): void {
+  const cols = db.prepare('PRAGMA table_info(session_file_diffs)').all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const hasBeforeText = cols.some((c) => c.name === 'before_text');
+  if (!hasBeforeText) return;
+
+  db.exec(`
+    CREATE TABLE session_file_diffs_new (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id TEXT,
+      request_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      tool_call_id TEXT,
+      file_path TEXT NOT NULL,
+      before_backup_id TEXT,
+      after_backup_id TEXT,
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      status TEXT,
+      source_kind TEXT,
+      guarantee_level TEXT,
+      observability_json TEXT,
+      backup_before_ref_json TEXT,
+      backup_after_ref_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, request_id, file_path)
+    )
+  `);
+  db.exec(`
+    INSERT INTO session_file_diffs_new
+      (session_id, user_id, client_request_id, request_id, tool_name, tool_call_id,
+       file_path, before_backup_id, after_backup_id, additions, deletions,
+       status, source_kind, guarantee_level, observability_json,
+       backup_before_ref_json, backup_after_ref_json, created_at)
+    SELECT
+      session_id, user_id, client_request_id, request_id, tool_name, tool_call_id,
+      file_path, before_backup_id, after_backup_id, additions, deletions,
+      status, source_kind, guarantee_level, observability_json,
+      backup_before_ref_json, backup_after_ref_json, created_at
+    FROM session_file_diffs
+  `);
+  db.exec('DROP TABLE session_file_diffs');
+  db.exec('ALTER TABLE session_file_diffs_new RENAME TO session_file_diffs');
+}
+
+function migrateSyncEventTables(): void {
+  db.exec('DROP INDEX IF EXISTS idx_event_log_aggregate_seq');
+
+  db.exec(`
+    DELETE FROM event_log
+    WHERE rowid NOT IN (
+      SELECT MIN(rowid)
+      FROM event_log
+      GROUP BY aggregate_id, seq
+    )
+  `);
+
+  db.exec('DELETE FROM event_sequences');
+  db.exec(`
+    INSERT INTO event_sequences (aggregate_id, seq)
+    SELECT aggregate_id, MAX(seq)
+    FROM event_log
+    GROUP BY aggregate_id
+  `);
+
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_event_log_aggregate_seq ON event_log(aggregate_id, seq)');
 }
 
 function migrateSessionTodosTable(): void {
@@ -931,7 +1034,11 @@ function migrateV1MessagesToV2(): void {
           type: 'tool',
           callID: part['toolCallId'] ?? '',
           tool: part['toolName'] ?? '',
-          state: { status: 'pending', input, raw: part['rawArguments'] ?? JSON.stringify(input) },
+          state: {
+            status: 'pending',
+            input,
+            raw: normalizeToolArgumentsForStorage(part['rawArguments'] ?? input),
+          },
         };
       } else if (part['type'] === 'tool_result') {
         // Don't create a separate part for tool_result — find and update the ToolPart
@@ -946,7 +1053,9 @@ function migrateV1MessagesToV2(): void {
             if (pd['type'] === 'tool' && pd['callID'] === callID) {
               const isError = part['isError'] === true;
               const output = part['output'];
-              const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
+              const outputStr = stringifyToolResultOutput(
+                normalizeToolResultOutputForStorage(output),
+              );
               if (isError) {
                 pd['state'] = {
                   status: 'error',
@@ -1019,7 +1128,7 @@ export function sqliteAll<T>(query: string, params: SQLValue[] = []): T[] {
 }
 
 export function sqliteTransaction<T>(fn: () => T): T {
-  db.exec('BEGIN');
+  db.exec('BEGIN IMMEDIATE');
   try {
     const result = fn();
     db.exec('COMMIT');

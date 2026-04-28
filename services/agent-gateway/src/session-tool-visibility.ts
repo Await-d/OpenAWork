@@ -51,8 +51,6 @@ function resolveChannelToolKey(toolName: string): string | null {
       return 'web_search';
     case 'list':
     case 'read':
-    case 'file_read':
-    case 'read_file':
     case 'glob':
     case 'grep':
     case 'lsp_diagnostics':
@@ -72,8 +70,6 @@ function resolveChannelToolKey(toolName: string): string | null {
       return 'read';
     case 'edit':
     case 'write':
-    case 'file_write':
-    case 'write_file':
     case 'apply_patch':
     case 'lsp_rename':
     case 'workspace_write_file':

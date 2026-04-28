@@ -27,8 +27,7 @@ src/
 ├── catwalk/                # 模型评测与对比模块
 ├── crush-ignore/           # Agent 上下文的文件排除规则（类 .gitignore）
 ├── context/                # 上下文管理
-├── permission/             # 权限确认提示
-├── permissions/            # 权限历史与存储
+├── permission/             # 运行时权限确认主链（审批、grant、workspace 权限配置）
 ├── oauth/                  # OAuth 流程辅助
 ├── onboarding/             # 引导向导状态
 ├── slash-command/          # 斜杠命令注册
@@ -72,6 +71,7 @@ src/
 - **路由分级**：R0=只读/回答，R1=本地单文件，R2=多文件，R3=架构级/高风险。由 `routing.ts` 中 5 个维度计算得出。
 - **SessionStore 接口**：`sqlite-session-store.ts` 为生产实现；`InMemorySessionStore` 用于测试。
 - **Provider 类型**：`ProviderType` 联合类型——`anthropic | openai | deepseek | gemini | ollama | openrouter | qwen | moonshot | custom`。
+- **权限主链**：统一位于 `src/permission/`；历史 `src/permissions/` 兼容层已退役，不再作为可用目录。
 
 ## 约定
 

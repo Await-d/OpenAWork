@@ -136,6 +136,12 @@ const BUILTIN_PRESETS: Record<BuiltinProviderType, ProviderPreset> = {
         inputPricePerMillion: 0.15,
         outputPricePerMillion: 0.6,
       },
+      {
+        id: 'gpt-image-2',
+        label: 'GPT Image 2',
+        enabled: true,
+        supportsImageGeneration: true,
+      },
     ],
   },
   deepseek: {

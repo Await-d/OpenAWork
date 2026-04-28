@@ -33,12 +33,12 @@ export interface WorkflowTeamTemplateMetadata {
   >;
   defaultProvider?: string | null;
   optionalAgentIds?: string[];
-  recommendedDefault?: boolean;
+  recommendedDefault?: boolean | null;
   requiredRoles?: WorkflowTemplateRequiredRole[];
-  templateFocus?: string;
-  templatePriority?: number;
-  templateScale?: WorkflowTemplateScale;
-  recommendedFor?: string;
+  templateFocus?: string | null;
+  templatePriority?: number | null;
+  templateScale?: WorkflowTemplateScale | null;
+  recommendedFor?: string | null;
 }
 
 export interface WorkflowTemplateMetadata {
@@ -69,6 +69,14 @@ export interface CreateWorkflowTemplateInput {
   edges: WorkflowEdgeRecord[];
 }
 
+export interface UpdateWorkflowTemplateInput {
+  name?: string;
+  description?: string | null;
+  metadata?: WorkflowTemplateMetadata;
+  nodes?: WorkflowNodeRecord[];
+  edges?: WorkflowEdgeRecord[];
+}
+
 export interface PromptCandidate {
   id: string;
   text: string;
@@ -92,14 +100,36 @@ export interface OptimizePromptInput {
   candidateCount?: number;
 }
 
+export interface TranslationTaskInput {
+  id: string;
+  content: string;
+  fileName: string;
+  sourceLanguage?: string;
+  targetLanguage: string;
+}
+
+export interface TranslationResult {
+  taskId: string;
+  translatedContent: string;
+  glossaryMatches?: number | null;
+  status: 'pending' | 'running' | 'completed' | 'failed' | string;
+  completedAt: number;
+}
+
 export interface WorkflowsClient {
   listTemplates(token: string): Promise<WorkflowTemplateRecord[]>;
   createTemplate(
     token: string,
     input: CreateWorkflowTemplateInput,
   ): Promise<WorkflowTemplateRecord>;
+  updateTemplate(
+    token: string,
+    templateId: string,
+    input: UpdateWorkflowTemplateInput,
+  ): Promise<WorkflowTemplateRecord>;
   removeTemplate(token: string, templateId: string): Promise<void>;
   optimizePrompt(token: string, input: OptimizePromptInput): Promise<PromptOptimizerResult>;
+  translate(token: string, tasks: TranslationTaskInput[]): Promise<TranslationResult[]>;
 }
 
 function buildAuthHeaders(token: string): HeadersInit {
@@ -136,6 +166,28 @@ export function createWorkflowsClient(baseUrl: string): WorkflowsClient {
       return (await response.json()) as WorkflowTemplateRecord;
     },
 
+    async updateTemplate(
+      token: string,
+      templateId: string,
+      input: UpdateWorkflowTemplateInput,
+    ): Promise<WorkflowTemplateRecord> {
+      const response = await fetch(
+        `${baseUrl}/workflows/templates/${encodeURIComponent(templateId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            ...buildAuthHeaders(token),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to update workflow template: ${response.status}`);
+      }
+      return (await response.json()) as WorkflowTemplateRecord;
+    },
+
     async removeTemplate(token: string, templateId: string): Promise<void> {
       const response = await fetch(
         `${baseUrl}/workflows/templates/${encodeURIComponent(templateId)}`,
@@ -165,6 +217,22 @@ export function createWorkflowsClient(baseUrl: string): WorkflowsClient {
         throw new Error(`Failed to optimize prompt: ${response.status}`);
       }
       return (await response.json()) as PromptOptimizerResult;
+    },
+
+    async translate(token: string, tasks: TranslationTaskInput[]): Promise<TranslationResult[]> {
+      const response = await fetch(`${baseUrl}/workflows/translate`, {
+        method: 'POST',
+        headers: {
+          ...buildAuthHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tasks }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to translate workflow tasks: ${response.status}`);
+      }
+      const data = (await response.json()) as { results?: TranslationResult[] };
+      return data.results ?? [];
     },
   };
 }

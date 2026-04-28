@@ -84,6 +84,16 @@ registerProjector(MessageEvents.Removed.type, (event) => {
     data.messageID,
     data.sessionID,
   ]);
+  // Clean the v1 search mirror in lock-step. `appendSessionMessageV2`
+  // populates `session_messages` + `session_messages_fts` outside the
+  // projector pipeline (legacy FTS read path still queries those
+  // tables). If we only drop the v2 rows, retry / truncate flows leave
+  // ghost rows that surface in session search and the rating-store
+  // UNION lookup. The DELETE is keyed by `id` only because the v1
+  // schema's PRIMARY KEY is `id`; FTS is keyed by `message_id` (per
+  // session-search-store.ts).
+  sqliteRun('DELETE FROM session_messages WHERE id = ?', [data.messageID]);
+  sqliteRun('DELETE FROM session_messages_fts WHERE message_id = ?', [data.messageID]);
 });
 
 // ─── Part Projectors ───

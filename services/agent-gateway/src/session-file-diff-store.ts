@@ -58,7 +58,7 @@ export async function persistSessionFileDiffs(input: {
             toolName: diff.toolName ?? input.toolName,
             requestId: input.requestId,
             toolCallId: diff.toolCallId ?? input.toolCallId,
-          }).catch(() => undefined)
+          })
         : undefined);
     const afterBackupRef =
       diff.backupAfterRef ??
@@ -72,7 +72,7 @@ export async function persistSessionFileDiffs(input: {
             toolName: diff.toolName ?? input.toolName,
             requestId: input.requestId,
             toolCallId: diff.toolCallId ?? input.toolCallId,
-          }).catch(() => undefined)
+          })
         : undefined);
 
     sqliteRun(

@@ -1,5 +1,6 @@
 import type { Message } from '@openAwork/shared';
 import { buildTaskToolTerminalMessage } from './delegated-task-display.js';
+import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
 
 export function buildDelegatedChildClientRequestId(input: {
   childSessionId: string;
@@ -63,29 +64,24 @@ function collectRelevantMessageText(messages: Message[]): string {
   return [...messages]
     .sort((left, right) => left.id.localeCompare(right.id))
     .flatMap((message) => {
+      const toolResultTexts = extractToolResultContentsFromMessage(message)
+        .map((part) => stringifyToolOutput(part.output))
+        .filter((text) => text.length > 0);
+
       if (message.role === 'assistant') {
-        return message.content.flatMap((part) => {
-          if (part.type !== 'text') {
-            return [];
-          }
+        return message.content
+          .flatMap((part) => {
+            if (part.type !== 'text') {
+              return [];
+            }
 
-          const text = part.text.trim();
-          return text.length > 0 && !isAssistantEventText(text) ? [text] : [];
-        });
+            const text = part.text.trim();
+            return text.length > 0 && !isAssistantEventText(text) ? [text] : [];
+          })
+          .concat(toolResultTexts);
       }
 
-      if (message.role === 'tool') {
-        return message.content.flatMap((part) => {
-          if (part.type !== 'tool_result') {
-            return [];
-          }
-
-          const text = stringifyToolOutput(part.output);
-          return text.length > 0 ? [text] : [];
-        });
-      }
-
-      return [];
+      return toolResultTexts;
     })
     .join('\n\n')
     .trim();

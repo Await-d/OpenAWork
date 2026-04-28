@@ -16,13 +16,14 @@ export class GatewaySSEClient {
     const clientRequestId = options.clientRequestId ?? crypto.randomUUID();
     const agentId = options.agentId?.trim() || undefined;
 
-    const params = new URLSearchParams({
-      ...(agentId ? { agentId } : {}),
-      clientRequestId,
-      ...(options.dialogueMode ? { dialogueMode: options.dialogueMode } : {}),
-      message,
-      model: options.model ?? 'default',
-      token: this.token,
+      const params = new URLSearchParams({
+        ...(agentId ? { agentId } : {}),
+        clientRequestId,
+        ...(options.dialogueMode ? { dialogueMode: options.dialogueMode } : {}),
+        ...(options.inputParts ? { inputParts: JSON.stringify(options.inputParts) } : {}),
+        message,
+        model: options.model ?? 'default',
+        token: this.token,
       ...(options.temperature !== undefined ? { temperature: String(options.temperature) } : {}),
       ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode ? '1' : '0' } : {}),
     });

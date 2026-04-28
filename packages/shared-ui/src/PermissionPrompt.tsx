@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react';
-export type PermissionDecision = 'once' | 'session' | 'permanent' | 'reject';
+import type { PermissionDecision, PermissionRiskLevel } from '@openAwork/shared';
+
+export type { PermissionDecision } from '@openAwork/shared';
 
 interface PermissionDecisionOption {
   decision: PermissionDecision;
@@ -12,7 +14,7 @@ export interface PermissionPromptProps {
   toolName: string;
   scope: string;
   reason: string;
-  riskLevel: 'low' | 'medium' | 'high';
+  riskLevel: PermissionRiskLevel;
   previewAction?: string;
   pendingDecision?: PermissionDecision | null;
   errorMessage?: string;
@@ -156,7 +158,7 @@ export function PermissionPrompt({
 }
 
 export function getPermissionDecisionOptions(
-  _riskLevel: 'low' | 'medium' | 'high',
+  _riskLevel: PermissionRiskLevel,
 ): PermissionDecisionOption[] {
   return [
     { decision: 'once', label: '同意本次', color: '#6366f1' },

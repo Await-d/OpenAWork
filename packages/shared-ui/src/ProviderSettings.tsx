@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { CSSProperties, SyntheticEvent } from 'react';
 import {
+  IMAGE_GENERATION_SIZE_PRESET_GROUPS,
+  resolveImageGenerationSizePresetId,
+  sizeForPreset,
+  validateImageGenerationSize,
+} from '@openAwork/shared';
+import {
   canConfigureThinkingForModel,
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
@@ -79,6 +85,7 @@ export interface AIModelConfigRef {
   inputPricePerMillion?: number;
   maxOutputTokens?: number;
   outputPricePerMillion?: number;
+  supportsImageGeneration?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
@@ -96,13 +103,22 @@ export interface AIProviderRef {
    *  - 'chat_completions': Use OpenAI Chat Completions API (/v1/chat/completions)
    *  - undefined:          Auto-detect based on provider type and base URL
    */
-  upstreamProtocol?: 'chat_completions' | 'responses';
+  upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
   defaultModels: AIModelConfigRef[];
 }
 
 export interface ActiveSelectionRef {
   chat: { providerId: string; modelId: string };
   fast: { providerId: string; modelId: string };
+  image?: { providerId: string; modelId: string };
+  compaction?: { providerId: string; modelId: string };
+}
+
+export interface ImageGenerationDefaultsRef {
+  size: string;
+  quality: 'low' | 'medium' | 'high';
+  outputFormat: 'png' | 'jpeg' | 'webp';
+  background: 'auto' | 'opaque';
 }
 
 export type ReasoningEffortRef = SupportedReasoningEffort;
@@ -123,19 +139,22 @@ export interface ProviderEditData {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
-  upstreamProtocol?: 'chat_completions' | 'responses';
+  upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
 }
 
 export interface ProviderSettingsProps {
   providers: AIProviderRef[];
   active: ActiveSelectionRef;
   defaultThinking?: ThinkingDefaultsRef;
+  imageDefaults?: ImageGenerationDefaultsRef;
   hasUnsavedDefaultChanges?: boolean;
   isSavingDefaultChanges?: boolean;
   onSetActiveChat: (providerId: string, modelId: string) => void;
   onSetActiveFast?: (providerId: string, modelId: string) => void;
+  onSetActiveImage?: (providerId: string, modelId: string) => void;
   onSaveDefaultChanges?: () => void;
   onSetThinkingMode?: (mode: keyof ThinkingDefaultsRef, value: ThinkingModeRef) => void;
+  onSetImageDefaults?: (updates: Partial<ImageGenerationDefaultsRef>) => void;
   onToggleProvider?: (id: string) => void;
   onEditProvider: (id: string, data: ProviderEditData) => void;
   onAddProvider: (data: ProviderEditData) => void;
@@ -332,6 +351,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             <option value="">Auto-detect</option>
             <option value="chat_completions">Chat Completions (/v1/chat/completions)</option>
             <option value="responses">Responses (/v1/responses)</option>
+            <option value="anthropic_messages">Anthropic Messages (/v1/messages)</option>
           </select>
         </div>
       </div>
@@ -391,12 +411,15 @@ export function ProviderSettings({
   providers,
   active,
   defaultThinking,
+  imageDefaults,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   onSetActiveChat,
   onSetActiveFast,
+  onSetActiveImage,
   onSaveDefaultChanges,
   onSetThinkingMode,
+  onSetImageDefaults,
   onToggleProvider,
   onEditProvider,
   onAddProvider,
@@ -408,9 +431,11 @@ export function ProviderSettings({
 }: ProviderSettingsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
-  const [modelSearch, setModelSearch] = useState<{ chat: string; fast: string }>({
+  const [forceCustomImageSize, setForceCustomImageSize] = useState(false);
+  const [modelSearch, setModelSearch] = useState<{ chat: string; fast: string; image: string }>({
     chat: '',
     fast: '',
+    image: '',
   });
 
   const enabledProviders = useMemo(
@@ -425,8 +450,11 @@ export function ProviderSettings({
     [providers],
   );
 
-  function findSelectedModel(selected: { providerId: string; modelId: string }) {
-    const provider = enabledProviders.find((item) => item.id === selected.providerId);
+  function findSelectedModel(
+    selected: { providerId: string; modelId: string },
+    candidateProviders: AIProviderRef[] = enabledProviders,
+  ) {
+    const provider = candidateProviders.find((item) => item.id === selected.providerId);
     const model = provider?.defaultModels.find((item) => item.id === selected.modelId);
     return { provider, model };
   }
@@ -554,20 +582,32 @@ export function ProviderSettings({
   }
 
   function renderModelSelect(
-    mode: 'chat' | 'fast',
+    mode: 'chat' | 'fast' | 'image',
     label: string,
     selected: { providerId: string; modelId: string },
     onChange: (providerId: string, modelId: string) => void,
   ) {
+    const candidateProviders = enabledProviders
+      .map((provider) => ({
+        ...provider,
+        defaultModels: provider.defaultModels.filter((model) =>
+          mode === 'image' ? model.supportsImageGeneration === true : true,
+        ),
+      }))
+      .filter((provider) => provider.defaultModels.length > 0);
     const search = modelSearch[mode].trim();
-    const { provider: selectedProvider, model: selectedModel } = findSelectedModel(selected);
-    const visibleProvider = selectedProvider ?? enabledProviders[0];
+    const { provider: selectedProvider, model: selectedModel } = findSelectedModel(
+      selected,
+      candidateProviders,
+    );
+    const visibleProvider = selectedProvider ?? candidateProviders[0];
     const showingSearchResults = search.length > 0;
     const searchGroups = showingSearchResults
       ? buildFilteredModelGroups(visibleProvider ? [visibleProvider] : [], search)
       : [];
     const visibleModels = showingSearchResults ? [] : (visibleProvider?.defaultModels ?? []);
     const contextLabel = formatContextWindow(selectedModel?.contextWindow);
+    const thinkingMode: keyof ThinkingDefaultsRef | null = mode === 'image' ? null : mode;
 
     const applySelection = (providerId: string, modelId: string) => {
       onChange(providerId, modelId);
@@ -581,7 +621,12 @@ export function ProviderSettings({
       provider: Pick<AIProviderRef, 'id' | 'name' | 'type'>,
       model: Pick<
         AIModelConfigRef,
-        'id' | 'contextWindow' | 'supportsTools' | 'supportsVision' | 'supportsThinking'
+        | 'id'
+        | 'contextWindow'
+        | 'supportsTools'
+        | 'supportsVision'
+        | 'supportsImageGeneration'
+        | 'supportsThinking'
       > & {
         label: string;
       },
@@ -592,6 +637,7 @@ export function ProviderSettings({
       const modelContext = formatContextWindow(model.contextWindow);
       const capabilitySummary = [
         model.supportsVision ? '视觉' : null,
+        model.supportsImageGeneration ? '生图' : null,
         model.supportsTools ? '工具' : null,
         model.supportsThinking ? '思考' : null,
         modelContext,
@@ -756,6 +802,10 @@ export function ProviderSettings({
           display: 'flex',
           flexDirection: 'column',
           gap: 10,
+          background: 'var(--color-surface, #1e293b)',
+          border: '1px solid var(--color-border, #334155)',
+          borderRadius: 12,
+          padding: '0.85rem 1rem',
         }}
       >
         <div
@@ -800,15 +850,18 @@ export function ProviderSettings({
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {selectedModel?.supportsVision && <CapabilityPill label="视觉" tone="emerald" />}
+            {selectedModel?.supportsImageGeneration && (
+              <CapabilityPill label="生图" tone="accent" />
+            )}
             {selectedModel?.supportsTools && <CapabilityPill label="工具" tone="accent" />}
             {selectedModel?.supportsThinking && <CapabilityPill label="思考" tone="violet" />}
             {contextLabel && <CapabilityPill label={contextLabel} />}
           </div>
         </div>
 
-        {enabledProviders.length > 1 ? (
+        {candidateProviders.length > 1 ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {enabledProviders.map((provider) => {
+            {candidateProviders.map((provider) => {
               const isActiveProvider = provider.id === visibleProvider?.id;
               return (
                 <button
@@ -917,7 +970,7 @@ export function ProviderSettings({
                 fontSize: 12,
               }}
             >
-              当前提供商没有可用模型。
+              {mode === 'image' ? '当前没有支持图片生成的模型。' : '当前提供商没有可用模型。'}
             </div>
           ) : (
             visibleModels.map((model, index) =>
@@ -934,7 +987,204 @@ export function ProviderSettings({
           )}
         </div>
 
-        {renderThinkingControls(mode, selectedProvider?.type, selectedModel)}
+        {thinkingMode ? renderThinkingControls(thinkingMode, selectedProvider?.type, selectedModel) : null}
+        {mode === 'image' ? renderImageDefaultsControls() : null}
+      </div>
+    );
+  }
+
+  function renderImageDefaultsControls() {
+    if (!imageDefaults || !onSetImageDefaults) {
+      return null;
+    }
+
+    const sizePresetId = resolveImageGenerationSizePresetId(imageDefaults.size);
+    const sizeValidation = validateImageGenerationSize(imageDefaults.size);
+    const isCustomSize = forceCustomImageSize || sizePresetId === 'custom';
+
+    const chipBase: CSSProperties = {
+      borderRadius: 999,
+      border: '1px solid var(--color-border, #334155)',
+      padding: '3px 10px',
+      fontSize: 11,
+      fontWeight: 500,
+      cursor: 'pointer',
+      transition: 'background 120ms, color 120ms, border-color 120ms',
+    };
+    const chipInactive: CSSProperties = {
+      ...chipBase,
+      background: 'transparent',
+      color: 'var(--color-muted, #94a3b8)',
+    };
+    const chipActive: CSSProperties = {
+      ...chipBase,
+      background: 'color-mix(in oklch, var(--color-accent, #6366f1) 14%, transparent)',
+      color: 'var(--color-accent, #6366f1)',
+      borderColor: 'color-mix(in oklch, var(--color-accent, #6366f1) 40%, var(--color-border, #334155))',
+      fontWeight: 600,
+    };
+
+    const selectFieldStyle: CSSProperties = {
+      appearance: 'none',
+      WebkitAppearance: 'none',
+      background: 'var(--color-surface, #1e293b)',
+      border: '1px solid var(--color-border, #334155)',
+      borderRadius: 8,
+      color: 'var(--color-text, #e2e8f0)',
+      fontSize: 12,
+      padding: '6px 28px 6px 10px',
+      width: '100%',
+      boxSizing: 'border-box' as const,
+      cursor: 'pointer',
+      backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'right 10px center',
+    };
+
+    const fieldInputStyle: CSSProperties = {
+      background: 'var(--color-surface, #1e293b)',
+      border: '1px solid var(--color-border, #334155)',
+      borderRadius: 8,
+      color: 'var(--color-text, #e2e8f0)',
+      fontSize: 12,
+      padding: '6px 10px',
+      width: '100%',
+      boxSizing: 'border-box' as const,
+    };
+
+    return (
+      <div
+        style={{
+          borderTop: '1px solid var(--color-border-subtle, var(--color-border, #334155))',
+          paddingTop: 12,
+          display: 'grid',
+          gap: 12,
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em' }}>
+          图片默认参数
+        </div>
+
+        {/* Size presets */}
+        <div style={{ display: 'grid', gap: 8 }}>
+          {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
+            <div key={group.tier} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span
+                style={{ fontSize: 10, color: 'var(--color-muted, #94a3b8)', fontWeight: 600, minWidth: 24 }}
+                title={group.description}
+              >
+                {group.label}
+              </span>
+              {group.presets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => { setForceCustomImageSize(false); onSetImageDefaults({ size: preset.size }); }}
+                  title={preset.description}
+                  style={sizePresetId === preset.id && !forceCustomImageSize ? chipActive : chipInactive}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              {group.tier === '2k' && (
+                <span style={{ fontSize: 9, color: 'var(--color-muted, #94a3b8)', fontStyle: 'italic' }}>
+                  ~4MP
+                </span>
+              )}
+              {group.tier === '4k' && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    color: 'var(--color-danger, #f87171)',
+                    borderRadius: 4,
+                    padding: '1px 5px',
+                    background: 'color-mix(in oklch, var(--color-danger, #f87171) 10%, transparent)',
+                  }}
+                >
+                  ~8MP · 实验性
+                </span>
+              )}
+            </div>
+          ))}
+
+          {/* Custom size */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isCustomSize) {
+                  setForceCustomImageSize(true);
+                }
+              }}
+              style={isCustomSize ? chipActive : chipInactive}
+            >
+              自定义
+            </button>
+            {isCustomSize && (
+              <input
+                value={imageDefaults.size}
+                onChange={(event) => onSetImageDefaults({ size: event.target.value })}
+                placeholder="WxH, 如 2560x1440"
+                style={{ ...fieldInputStyle, width: 140, padding: '4px 10px' }}
+              />
+            )}
+            {isCustomSize && !sizeValidation.valid && (
+              <span style={{ fontSize: 10, color: 'var(--color-danger, #f87171)' }}>
+                {sizeValidation.message}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Quality / Format / Background */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--color-muted, #94a3b8)' }}>质量</span>
+            <select
+              value={imageDefaults.quality}
+              onChange={(event) =>
+                onSetImageDefaults({ quality: event.target.value as ImageGenerationDefaultsRef['quality'] })
+              }
+              style={selectFieldStyle}
+            >
+              <option value="low">速度优先</option>
+              <option value="medium">平衡</option>
+              <option value="high">细节优先</option>
+            </select>
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--color-muted, #94a3b8)' }}>格式</span>
+            <select
+              value={imageDefaults.outputFormat}
+              onChange={(event) =>
+                onSetImageDefaults({
+                  outputFormat: event.target.value as ImageGenerationDefaultsRef['outputFormat'],
+                })
+              }
+              style={selectFieldStyle}
+            >
+              <option value="png">PNG</option>
+              <option value="jpeg">JPEG</option>
+              <option value="webp">WebP</option>
+            </select>
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--color-muted, #94a3b8)' }}>背景</span>
+            <select
+              value={imageDefaults.background}
+              onChange={(event) =>
+                onSetImageDefaults({
+                  background: event.target.value as ImageGenerationDefaultsRef['background'],
+                })
+              }
+              style={selectFieldStyle}
+            >
+              <option value="auto">自动</option>
+              <option value="opaque">不透明</option>
+            </select>
+          </label>
+        </div>
       </div>
     );
   }
@@ -944,7 +1194,7 @@ export function ProviderSettings({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 18,
+        gap: 24,
         fontFamily: 'system-ui, sans-serif',
         color: 'var(--color-text, #e2e8f0)',
         ...style,
@@ -953,7 +1203,9 @@ export function ProviderSettings({
       <section>
         <div
           style={{
-            marginBottom: 10,
+            marginBottom: 12,
+            paddingBottom: 10,
+            borderBottom: '1px solid var(--color-border-subtle, var(--color-border, #334155))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -1015,14 +1267,19 @@ export function ProviderSettings({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: 16,
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: 12,
           }}
         >
           {renderModelSelect('chat', '主对话', active.chat, onSetActiveChat)}
           {onSetActiveFast &&
             renderModelSelect('fast', '快速 / 内联', active.fast, onSetActiveFast)}
         </div>
+        {onSetActiveImage && active.image
+          ? <div style={{ marginTop: 12 }}>
+              {renderModelSelect('image', '图片生成', active.image, onSetActiveImage)}
+            </div>
+          : null}
       </section>
 
       <section
@@ -1084,80 +1341,79 @@ export function ProviderSettings({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 12,
-                    padding: '0.7rem 1rem',
+                    padding: '0.75rem 1rem',
                     borderBottom: '1px solid var(--color-border, #334155)',
                   }}
                 >
-                  <ProviderLogo type={provider.type} size={28} />
+                  <ProviderLogo type={provider.type} size={32} />
 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 12 }}>{provider.name}</div>
                     <div
-                      style={{ fontSize: 12, color: 'var(--color-muted, #94a3b8)', marginTop: 2 }}
+                      style={{ fontSize: 11, color: 'var(--color-muted, #94a3b8)', marginTop: 2 }}
                     >
                       {provider.type} &nbsp;·&nbsp; {provider.defaultModels.length} 个模型
+                      {provider.baseUrl ? (
+                        <>
+                          &nbsp;·&nbsp;
+                          <span style={{ fontFamily: 'monospace', fontSize: 10 }}>
+                            {provider.baseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')}
+                          </span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      color: 'var(--color-muted, #94a3b8)',
-                      minWidth: 120,
-                    }}
-                  >
-                    {maskApiKey(provider.apiKey)}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(provider.id);
-                      setAddingNew(false);
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid var(--color-border, #334155)',
-                      borderRadius: 6,
-                      color: 'var(--color-text, #e2e8f0)',
-                      padding: '0.25rem 0.65rem',
-                      fontSize: 12,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    编辑
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => onToggleProvider?.(provider.id)}
-                    style={{
-                      background: provider.enabled ? 'var(--color-accent, #6366f1)' : '#334155',
-                      border: 'none',
-                      borderRadius: 12,
-                      width: 40,
-                      height: 22,
-                      cursor: 'pointer',
-                      position: 'relative',
-                      flexShrink: 0,
-                      transition: 'background 0.2s',
-                    }}
-                    title={provider.enabled ? '禁用提供商' : '启用提供商'}
-                  >
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: 3,
-                        left: provider.enabled ? 21 : 3,
-                        width: 16,
-                        height: 16,
-                        borderRadius: '50%',
-                        background: '#fff',
-                        transition: 'left 0.2s',
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(provider.id);
+                        setAddingNew(false);
                       }}
-                    />
-                  </button>
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--color-border, #334155)',
+                        borderRadius: 6,
+                        color: 'var(--color-text, #e2e8f0)',
+                        padding: '0.25rem 0.65rem',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      编辑
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onToggleProvider?.(provider.id)}
+                      style={{
+                        background: provider.enabled ? 'var(--color-accent, #6366f1)' : '#334155',
+                        border: 'none',
+                        borderRadius: 12,
+                        width: 40,
+                        height: 22,
+                        cursor: 'pointer',
+                        position: 'relative',
+                        flexShrink: 0,
+                        transition: 'background 0.2s',
+                      }}
+                      title={provider.enabled ? '禁用提供商' : '启用提供商'}
+                    >
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: 3,
+                          left: provider.enabled ? 21 : 3,
+                          width: 16,
+                          height: 16,
+                          borderRadius: '50%',
+                          background: '#fff',
+                          transition: 'left 0.2s',
+                        }}
+                      />
+                    </button>
+                  </div>
                 </div>
 
                 {editingId === provider.id && (

@@ -18,9 +18,6 @@ import {
 import {
   buildToolCopyText,
   iconForToolKind,
-  inferToolKind,
-  resolveStatusMeta,
-  ToolKindIcon,
 } from './tool-call-card-meta.js';
 import type {
   PillTone,
@@ -29,6 +26,13 @@ import type {
   ToolCardStatus,
   ToolKind,
 } from './tool-call-card-shared.js';
+import {
+  resolveToolKind,
+  resolveToolStatusMeta,
+  resolveToolVisualStatus,
+  ToolGlyph,
+  type ToolVisualStatus,
+} from './tool-visual-meta.js';
 
 export interface ToolCallCardProps {
   approvalActions?: {
@@ -123,6 +127,7 @@ const TOOL_DISPLAY_NAME_MAP: Record<string, string> = {
   call_omo_agent: '代理委派',
   enterplanmode: '进入规划模式',
   exitplanmode: '退出规划模式',
+  generate_image: '生成图片',
 };
 
 function normalizeSummaryText(value: string): string {
@@ -369,33 +374,33 @@ function buildOutputReadHints(
 
   if (typeof output === 'string') {
     const lineCount = output.split(/\r?\n/).length;
-    const hints = ['read_tool_output {"useLatestReferenced":true,"lineStart":1,"lineCount":200}'];
     if (toolCallId) {
-      hints.push(`read_tool_output {"toolCallId":"${toolCallId}","lineStart":1,"lineCount":200}`);
-    }
-    if (lineCount > 200) {
-      if (toolCallId) {
-        hints.push(
-          `read_tool_output {"toolCallId":"${toolCallId}","lineStart":201,"lineCount":200}`,
-        );
-      } else {
-        hints.push('read_tool_output {"useLatestReferenced":true,"lineStart":201,"lineCount":200}');
+      const hints = [`read_tool_output {"toolCallId":"${toolCallId}","lineStart":1,"lineCount":200}`];
+      if (lineCount > 200) {
+        hints.push(`read_tool_output {"toolCallId":"${toolCallId}","lineStart":201,"lineCount":200}`);
       }
+      return hints;
+    }
+
+    const hints = ['read_tool_output {"useLatestReferenced":true,"lineStart":1,"lineCount":200}'];
+    if (lineCount > 200) {
+      hints.push('read_tool_output {"useLatestReferenced":true,"lineStart":201,"lineCount":200}');
     }
     return hints;
   }
 
   if (Array.isArray(output)) {
-    const hints = ['read_tool_output {"useLatestReferenced":true,"itemStart":0,"itemCount":50}'];
     if (toolCallId) {
-      hints.push(`read_tool_output {"toolCallId":"${toolCallId}","itemStart":0,"itemCount":50}`);
-    }
-    if (output.length > 50) {
-      if (toolCallId) {
+      const hints = [`read_tool_output {"toolCallId":"${toolCallId}","itemStart":0,"itemCount":50}`];
+      if (output.length > 50) {
         hints.push(`read_tool_output {"toolCallId":"${toolCallId}","itemStart":50,"itemCount":50}`);
-      } else {
-        hints.push('read_tool_output {"useLatestReferenced":true,"itemStart":50,"itemCount":50}');
       }
+      return hints;
+    }
+
+    const hints = ['read_tool_output {"useLatestReferenced":true,"itemStart":0,"itemCount":50}'];
+    if (output.length > 50) {
+      hints.push('read_tool_output {"useLatestReferenced":true,"itemStart":50,"itemCount":50}');
     }
     return hints;
   }
@@ -403,25 +408,23 @@ function buildOutputReadHints(
   const record = asRecord(output);
   if (record) {
     const keys = Object.keys(record).slice(0, 3);
-    const hints = ['read_tool_output {"useLatestReferenced":true}'];
     if (toolCallId) {
-      hints.push(`read_tool_output {"toolCallId":"${toolCallId}"}`);
-    }
-    keys.forEach((key) => {
-      if (toolCallId) {
+      const hints = [`read_tool_output {"toolCallId":"${toolCallId}"}`];
+      keys.forEach((key) => {
         hints.push(`read_tool_output {"toolCallId":"${toolCallId}","jsonPath":"${key}"}`);
-      } else {
-        hints.push(`read_tool_output {"useLatestReferenced":true,"jsonPath":"${key}"}`);
-      }
+      });
+      return hints;
+    }
+
+    const hints = ['read_tool_output {"useLatestReferenced":true}'];
+    keys.forEach((key) => {
+      hints.push(`read_tool_output {"useLatestReferenced":true,"jsonPath":"${key}"}`);
     });
     return hints;
   }
 
   return toolCallId
-    ? [
-        'read_tool_output {"useLatestReferenced":true}',
-        `read_tool_output {"toolCallId":"${toolCallId}"}`,
-      ]
+    ? [`read_tool_output {"toolCallId":"${toolCallId}"}`]
     : ['read_tool_output {"useLatestReferenced":true}'];
 }
 
@@ -916,6 +919,7 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
 export function resolveToolCallCardDisplayData(input: {
   includeOutputDetails?: boolean;
   input: Record<string, unknown>;
+  kind?: ToolKind;
   output?: unknown;
   toolCallId?: string;
   toolName: string;
@@ -956,7 +960,7 @@ export function resolveToolCallCardDisplayData(input: {
     hasDetails,
     taskMeta,
     taskSummary: taskMeta ? buildTaskSummaryData(taskMeta) : undefined,
-    toolKind: inferToolKind(input.toolName),
+    toolKind: resolveToolKind(input.toolName, input.kind),
   };
 }
 
@@ -974,21 +978,13 @@ export function ToolCallCard({
 }: ToolCallCardProps) {
   const [open, setOpen] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const normalizedStatus = useMemo<ToolCardStatus>(() => {
-    if (status) {
-      return status;
-    }
-    if (isError === true) {
-      return 'failed';
-    }
-    if (output !== undefined) {
-      return 'completed';
-    }
-    return 'running';
-  }, [isError, output, status]);
+  const normalizedStatus = useMemo<ToolVisualStatus>(
+    () => resolveToolVisualStatus({ defaultStatus: 'running', isError, output, status }),
+    [isError, output, status],
+  );
 
   const statusMeta = useMemo(
-    () => resolveStatusMeta(normalizedStatus, toolName),
+    () => resolveToolStatusMeta(normalizedStatus, toolName),
     [normalizedStatus, toolName],
   );
   const effectiveStatusLabel =
@@ -1001,14 +997,15 @@ export function ToolCallCard({
         : undefined;
   const displayData = useMemo(
     () =>
-      resolveToolCallCardDisplayData({
-        toolCallId,
-        toolName,
-        input,
-        output,
-        includeOutputDetails: open,
-      }),
-    [input, open, output, toolCallId, toolName],
+        resolveToolCallCardDisplayData({
+          kind,
+          toolCallId,
+          toolName,
+          input,
+          output,
+          includeOutputDetails: open,
+        }),
+    [input, kind, open, output, toolCallId, toolName],
   );
   const taskMetaDetails = useMemo(
     () => (displayData.taskMeta ? formatTaskMetaDetails(displayData.taskMeta) : undefined),
@@ -1034,6 +1031,7 @@ export function ToolCallCard({
         input,
         isError,
         output,
+        outputReadHints,
         resumedAfterApproval,
         statusLabel: effectiveStatusLabel,
         stringifyValue,
@@ -1046,6 +1044,7 @@ export function ToolCallCard({
       input,
       isError,
       output,
+      outputReadHints,
       resumedAfterApproval,
       effectiveStatusLabel,
       summary,
@@ -1168,7 +1167,7 @@ export function ToolCallCard({
                 flexShrink: 0,
               }}
             >
-              <ToolKindIcon kind={toolKind} />
+              <ToolGlyph kind={toolKind} size={12} toolName={toolName} />
             </span>
             <span
               style={{
@@ -1284,7 +1283,7 @@ export function ToolCallCard({
                 flexShrink: 0,
               }}
             >
-              <ToolKindIcon kind={toolKind} />
+              <ToolGlyph kind={toolKind} size={12} toolName={toolName} />
             </span>
             <span
               style={{

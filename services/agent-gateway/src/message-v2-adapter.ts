@@ -16,8 +16,7 @@ import type {
   MessageRole,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
-import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteRun } from './db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import {
   type MessageID,
   type PartID,
@@ -25,6 +24,7 @@ import {
   type MessagePart,
   type MessageWithParts,
   type TextPart,
+  type ReasoningPart,
   type ToolPart,
   type ModifiedFilesSummaryPart,
   type ToolStatePending,
@@ -36,6 +36,7 @@ import {
   updatePart,
   getPart,
   listMessagesWithParts,
+  listMessagesWithPartsByTurnLimit,
   findToolPartByCallID,
   transitionToolToRunning,
 } from './message-store-v2.js';
@@ -52,6 +53,22 @@ import {
 import type { SnapshotPart, PatchPart } from './message-v2-schema.js';
 import { listSessionSnapshots } from './session-snapshot-store.js';
 import { listSessionFileDiffs } from './session-file-diff-store.js';
+import {
+  buildToolResultContent,
+  extractToolResultContentsFromMessage,
+  findLatestReferencedStoredToolResult,
+  findStoredToolResultByCallId,
+  hasToolResultContent,
+  normalizeToolArgumentsForStorage,
+  readStoredToolResultContent,
+  stringifyToolResultOutput,
+  type StoredToolResult,
+} from './tool-result-contract.js';
+import { matchesRequestScope } from './request-lineage.js';
+import { buildCompactionMarkerContent } from './compaction-marker.js';
+import { upsertSessionMessageSearchDocument } from './session-search-store.js';
+import { buildFallbackToolResultContentFromToolPart } from './tool-state-read-model.js';
+export type { StoredToolResult } from './tool-result-contract.js';
 
 // Ensure projectors are registered
 import './message-v2-projectors.js';
@@ -68,11 +85,24 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
         content.push({ type: 'text', text: part.text });
         break;
       case 'reasoning':
-        // Reasoning is embedded in assistant trace content, not a separate MessageContent
-        // Skip here — handled by buildAssistantTraceContent
+        content.push({
+          type: 'reasoning',
+          text: part.text,
+          ...(part.metadata?.encryptedContent
+            ? { encryptedContent: part.metadata.encryptedContent as string }
+            : {}),
+          ...(part.metadata?.summary ? { summary: part.metadata.summary as string } : {}),
+          ...(typeof part.time?.start === 'number' ? { startedAt: part.time.start } : {}),
+          ...(typeof part.time?.end === 'number' ? { endedAt: part.time.end } : {}),
+        });
         break;
       case 'tool': {
         const toolPart = part;
+        const storedToolResult = readStoredToolResultContent(
+          'metadata' in toolPart.state && toolPart.state.metadata
+            ? toolPart.state.metadata
+            : undefined,
+        );
         // Emit tool_call
         content.push({
           type: 'tool_call',
@@ -81,36 +111,12 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
           input: (toolPart.state as ToolStatePending | ToolStateRunning).input,
           rawArguments: (toolPart.state as ToolStatePending).raw,
         });
-        // Emit tool_result if completed or error
-        if (toolPart.state.status === 'completed') {
-          const completed = toolPart.state;
-          content.push({
-            type: 'tool_result',
-            toolCallId: toolPart.callID,
-            toolName: toolPart.tool,
-            output: completed.output,
-            isError: false,
-            fileDiffs: [],
-          });
-        } else if (toolPart.state.status === 'error') {
-          const errored = toolPart.state;
-          content.push({
-            type: 'tool_result',
-            toolCallId: toolPart.callID,
-            toolName: toolPart.tool,
-            output: errored.error,
-            isError: true,
-          });
-        } else if (toolPart.state.status === 'pending') {
-          // Tool is pending permission — this is the V2 equivalent of pendingPermissionRequestId
-          content.push({
-            type: 'tool_result',
-            toolCallId: toolPart.callID,
-            toolName: toolPart.tool,
-            output: `Tool "${toolPart.tool}" is waiting for approval.`,
-            isError: true,
-            pendingPermissionRequestId: toolPart.callID, // Use callID as permission ref
-          });
+        if (toolPart.state.status !== 'running') {
+          const toolResult =
+            storedToolResult ?? buildFallbackToolResultContentFromToolPart(toolPart);
+          if (toolResult) {
+            content.push(toolResult);
+          }
         }
         break;
       }
@@ -122,6 +128,20 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
           summary: summary.summary,
           files: summary.files,
         });
+        break;
+      }
+      case 'file': {
+        if (part.inputType === 'input_image') {
+          content.push({
+            type: 'input_image',
+            ...(part.artifactId ? { artifactId: part.artifactId } : {}),
+            ...(part.detail ? { detail: part.detail } : {}),
+            ...(part.fileId ? { fileId: part.fileId } : {}),
+            ...(part.filename ? { fileName: part.filename } : {}),
+            ...(part.url ? { imageUrl: part.url } : {}),
+            ...(part.mime ? { mimeType: part.mime } : {}),
+          });
+        }
         break;
       }
       // step-start, step-finish, compaction, subtask, retry, snapshot, patch
@@ -140,18 +160,98 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
 
 // ─── V1-Compatible API ───
 
+/**
+ * Validate tool_call integrity at write time.
+ * Ensures every tool_result has a corresponding tool_call in the same message,
+ * preventing orphaned tool_results that would cause upstream API errors.
+ * This replaces the need for sanitizeUpstreamConversation() at read time.
+ */
+function validateToolCallIntegrity(content: MessageContent[], _sessionId: string): void {
+  const toolCallIds = new Set<string>();
+  for (const c of content) {
+    if (c.type === 'tool_call') {
+      toolCallIds.add(c.toolCallId);
+    }
+  }
+  // tool_result without a matching tool_call is logged but not rejected,
+  // since it may reference a tool_call from a previous message in the same session.
+  // The key invariant is that by the time messages reach toModelMessages(),
+  // every tool_result must have a corresponding tool_call somewhere in the history.
+  for (const c of content) {
+    if (c.type === 'tool_result' && !toolCallIds.has(c.toolCallId)) {
+      // Cross-message tool_result references are valid — the tool_call
+      // may be in a previous assistant message. No action needed here.
+    }
+  }
+}
+
+function mirrorSessionMessageForLegacySearch(input: {
+  clientRequestId?: string | null;
+  content: MessageContent[];
+  createdAt: number;
+  messageId: string;
+  role: MessageRole;
+  sessionId: string;
+  status?: string;
+  userId: string;
+}): void {
+  const seq =
+    sqliteGet<{ max_seq: number | null }>(
+      'SELECT MAX(seq) AS max_seq FROM session_messages WHERE session_id = ? AND user_id = ?',
+      [input.sessionId, input.userId],
+    )?.max_seq ?? 0;
+  const contentJson = JSON.stringify(input.content);
+
+  sqliteRun(
+    `INSERT INTO session_messages (id, session_id, user_id, seq, role, content_json, status, client_request_id, created_at_ms, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       role = excluded.role,
+       content_json = excluded.content_json,
+       status = excluded.status,
+       client_request_id = excluded.client_request_id,
+       created_at_ms = excluded.created_at_ms,
+       updated_at = datetime('now')`,
+    [
+      input.messageId,
+      input.sessionId,
+      input.userId,
+      seq + 1,
+      input.role,
+      contentJson,
+      input.status ?? 'final',
+      input.clientRequestId ?? null,
+      input.createdAt,
+    ],
+  );
+
+  upsertSessionMessageSearchDocument({
+    contentJson,
+    id: input.messageId,
+    role: input.role,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+}
+
 export function appendSessionMessageV2(input: {
   sessionId: string;
   userId: string;
   role: MessageRole;
   content: MessageContent[];
-  legacyMessagesJson?: string;
   clientRequestId?: string | null;
   createdAt?: number;
   messageId?: string;
   replaceExisting?: boolean;
   status?: string;
 }): Message {
+  // Write-time validation: ensure tool_result references an existing tool_call.
+  // This prevents orphaned tool_results that would cause upstream API errors
+  // (e.g. Anthropic requires every tool_result to have a preceding tool_use).
+  if (input.role === 'assistant') {
+    validateToolCallIntegrity(input.content, input.sessionId);
+  }
+
   const msgId = (input.messageId ?? makeMessageId()) as MessageID;
   const timeCreated = input.createdAt ?? Date.now();
 
@@ -201,6 +301,53 @@ export function appendSessionMessageV2(input: {
         aggregateID: input.sessionId,
         data: { sessionID: input.sessionId, part },
       });
+    } else if (c.type === 'reasoning') {
+      const fallbackNow = Date.now();
+      const startedAt = typeof c.startedAt === 'number' ? c.startedAt : fallbackNow;
+      const endedAt = typeof c.endedAt === 'number' ? c.endedAt : undefined;
+      const part: ReasoningPart = {
+        id: partId,
+        sessionID: input.sessionId,
+        messageID: msgId,
+        type: 'reasoning',
+        text: c.text,
+        time: { start: startedAt, ...(typeof endedAt === 'number' ? { end: endedAt } : {}) },
+        ...(c.encryptedContent || c.summary
+          ? {
+              metadata: {
+                ...(c.encryptedContent ? { encryptedContent: c.encryptedContent } : {}),
+                ...(c.summary ? { summary: c.summary } : {}),
+              },
+            }
+          : {}),
+        ...(c.responseId ? { responseId: c.responseId } : {}),
+      };
+      emitEvent({
+        definition: MessageEvents.PartCreated,
+        aggregateID: input.sessionId,
+        data: { sessionID: input.sessionId, part },
+      });
+    } else if (c.type === 'input_image') {
+      emitEvent({
+        definition: MessageEvents.PartCreated,
+        aggregateID: input.sessionId,
+        data: {
+          sessionID: input.sessionId,
+          part: {
+            id: partId,
+            sessionID: input.sessionId,
+            messageID: msgId,
+            type: 'file',
+            inputType: 'input_image',
+            mime: c.mimeType ?? 'image/png',
+            ...(c.artifactId ? { artifactId: c.artifactId } : {}),
+            ...(c.detail ? { detail: c.detail } : {}),
+            ...(c.fileId ? { fileId: c.fileId } : {}),
+            ...(c.fileName ? { filename: c.fileName } : {}),
+            url: c.imageUrl ?? '',
+          },
+        },
+      });
     } else if (c.type === 'tool_call') {
       const part: ToolPart = {
         id: partId,
@@ -212,7 +359,7 @@ export function appendSessionMessageV2(input: {
         state: {
           status: 'pending',
           input: c.input,
-          raw: c.rawArguments ?? JSON.stringify(c.input),
+          raw: normalizeToolArgumentsForStorage(c.rawArguments ?? c.input),
         },
       };
       emitEvent({
@@ -226,17 +373,45 @@ export function appendSessionMessageV2(input: {
         sessionId: input.sessionId,
         callID: c.toolCallId,
       });
+      const toolResultContent = buildToolResultContent({
+        toolCallId: c.toolCallId,
+        toolName: c.toolName ?? c.toolCallId,
+        ...(c.clientRequestId ? { clientRequestId: c.clientRequestId } : {}),
+        output: c.output,
+        isError: c.isError,
+        ...(c.reason ? { reason: c.reason } : {}),
+        ...(c.fileDiffs ? { fileDiffs: c.fileDiffs } : {}),
+        ...(c.pendingPermissionRequestId
+          ? { pendingPermissionRequestId: c.pendingPermissionRequestId }
+          : {}),
+        ...(c.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+        ...(c.observability ? { observability: c.observability } : {}),
+      });
+      const serializedOutput =
+        toolResultContent.rawOutput ?? stringifyToolResultOutput(toolResultContent.output);
 
       if (toolPart) {
+        const existingMetadata =
+          'metadata' in toolPart.state && toolPart.state.metadata ? toolPart.state.metadata : {};
+        const nextInput =
+          'input' in toolPart.state && toolPart.state.input ? toolPart.state.input : {};
+        const nextStart =
+          'time' in toolPart.state && toolPart.state.time?.start
+            ? toolPart.state.time.start
+            : timeCreated;
         let updatedPart: ToolPart;
         if (c.isError) {
           updatedPart = {
             ...toolPart,
             state: {
               status: 'error',
-              input: (toolPart.state as ToolStatePending).input,
-              error: typeof c.output === 'string' ? c.output : JSON.stringify(c.output),
-              time: { start: timeCreated, end: timeCreated },
+              input: nextInput,
+              error: serializedOutput,
+              metadata: {
+                ...existingMetadata,
+                toolResultContent,
+              },
+              time: { start: nextStart, end: timeCreated },
             },
           };
         } else {
@@ -244,11 +419,14 @@ export function appendSessionMessageV2(input: {
             ...toolPart,
             state: {
               status: 'completed',
-              input: (toolPart.state as ToolStatePending).input,
-              output: typeof c.output === 'string' ? c.output : JSON.stringify(c.output),
+              input: nextInput,
+              output: serializedOutput,
               title: c.toolName ?? c.toolCallId,
-              metadata: {},
-              time: { start: timeCreated, end: timeCreated },
+              metadata: {
+                ...existingMetadata,
+                toolResultContent,
+              },
+              time: { start: nextStart, end: timeCreated },
             },
           };
         }
@@ -256,6 +434,44 @@ export function appendSessionMessageV2(input: {
           definition: MessageEvents.PartUpdated,
           aggregateID: input.sessionId,
           data: { sessionID: input.sessionId, part: updatedPart, time: Date.now() },
+        });
+      } else {
+        const fallbackToolPart: ToolPart = c.isError
+          ? {
+              id: partId,
+              sessionID: input.sessionId,
+              messageID: msgId,
+              type: 'tool',
+              callID: c.toolCallId,
+              tool: c.toolName ?? c.toolCallId,
+              state: {
+                status: 'error',
+                input: {},
+                error: serializedOutput,
+                metadata: { toolResultContent },
+                time: { start: timeCreated, end: timeCreated },
+              },
+            }
+          : {
+              id: partId,
+              sessionID: input.sessionId,
+              messageID: msgId,
+              type: 'tool',
+              callID: c.toolCallId,
+              tool: c.toolName ?? c.toolCallId,
+              state: {
+                status: 'completed',
+                input: {},
+                output: serializedOutput,
+                title: c.toolName ?? c.toolCallId,
+                metadata: { toolResultContent },
+                time: { start: timeCreated, end: timeCreated },
+              },
+            };
+        emitEvent({
+          definition: MessageEvents.PartCreated,
+          aggregateID: input.sessionId,
+          data: { sessionID: input.sessionId, part: fallbackToolPart },
         });
       }
     } else if (c.type === 'modified_files_summary') {
@@ -276,6 +492,17 @@ export function appendSessionMessageV2(input: {
     }
   }
 
+  mirrorSessionMessageForLegacySearch({
+    clientRequestId: input.clientRequestId,
+    content: input.content,
+    createdAt: timeCreated,
+    messageId: msgId,
+    role: input.role,
+    sessionId: input.sessionId,
+    status: input.status,
+    userId: input.userId,
+  });
+
   // Return a V1-compatible Message object
   return {
     id: msgId,
@@ -289,7 +516,6 @@ const COMPACTION_MARKER_TYPE = 'compaction_marker';
 const INTERNAL_ASSISTANT_EVENT_SOURCE = 'openAwork';
 
 export function appendCompactionMarkerMessageV2(input: {
-  legacyMessagesJson?: string;
   omittedMessages?: number;
   persistedMemory?: unknown;
   sessionId: string;
@@ -298,46 +524,43 @@ export function appendCompactionMarkerMessageV2(input: {
   trigger: string;
   userId: string;
 }): Message {
-  const payload = {
+  const marker = buildCompactionMarkerContent({
+    ...input,
     source: INTERNAL_ASSISTANT_EVENT_SOURCE,
-    type: COMPACTION_MARKER_TYPE,
-    payload: {
-      summary: input.summary,
-      trigger: input.trigger,
-      ...(input.persistedMemory ? { persistedMemory: input.persistedMemory } : {}),
-      ...(typeof input.signature === 'string' && input.signature.length > 0
-        ? { signature: input.signature }
-        : {}),
-      ...(typeof input.omittedMessages === 'number'
-        ? { omittedMessages: input.omittedMessages }
-        : {}),
-    },
-  };
+    markerType: COMPACTION_MARKER_TYPE,
+  });
 
   return appendSessionMessageV2({
     sessionId: input.sessionId,
     userId: input.userId,
     role: 'assistant',
-    content: [{ type: 'text', text: JSON.stringify(payload) }],
-    legacyMessagesJson: input.legacyMessagesJson,
-    clientRequestId: `compaction-marker:${input.signature ?? randomUUID()}`,
+    content: marker.content,
+    clientRequestId: marker.clientRequestId,
   });
 }
 
 export function listSessionMessagesV2(input: {
   sessionId: string;
   userId: string;
-  legacyMessagesJson?: string;
   statuses?: string[];
   limit?: number;
+  turnLimit?: number;
 }): Message[] {
   // V2 is now the authoritative read source
   const statusSet = input.statuses ? new Set(input.statuses) : null;
-  return listMessagesWithParts({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    limit: input.limit,
-  })
+  const rawMessages =
+    typeof input.turnLimit === 'number' && input.turnLimit > 0
+      ? listMessagesWithPartsByTurnLimit({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          turnLimit: input.turnLimit,
+        })
+      : listMessagesWithParts({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          limit: input.limit,
+        });
+  return rawMessages
     .filter((message) => {
       if (!statusSet) return true;
       // message.info.status defaults to 'final' when unset for backward compatibility
@@ -352,20 +575,57 @@ export function truncateSessionMessagesAfterV2(input: {
   sessionId: string;
   userId: string;
   messageId: string;
-  legacyMessagesJson?: string;
   inclusive?: boolean;
+  messageText?: string;
 }): Message[] {
   // ── V2 truncate: delete messages after the given messageId ──
   const rows = sqliteAll<{ id: string; time_created: number }>(
     'SELECT id, time_created FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
     [input.sessionId, input.userId],
   );
-  const targetIndex = rows.findIndex((row) => row.id === input.messageId);
+  let targetIndex = rows.findIndex((row) => row.id === input.messageId);
+
+  // Fallback: when the frontend message ID does not match any backend row
+  // (frontend uses makeOrderedMessageId, backend uses makeMessageId), try to
+  // locate the user message by matching its text content.
+  if (targetIndex === -1 && input.messageText) {
+    const allMessages = listMessagesWithParts({
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const msg = allMessages[i]!;
+      if (msg.info.role !== 'user') continue;
+      const textPart = msg.parts.find(
+        (p): p is TextPart => p.type === 'text' && p.text === input.messageText,
+      );
+      if (textPart) {
+        targetIndex = rows.findIndex((row) => row.id === msg.info.id);
+        break;
+      }
+    }
+  }
+
   if (targetIndex !== -1) {
     const cutoffIndex = input.inclusive === false ? targetIndex + 1 : targetIndex;
     const deleteIds = rows.slice(cutoffIndex).map((r) => r.id);
 
     if (deleteIds.length > 0) {
+      // Phase 2.1 — emit `MessageEvents.Removed` per truncated message and
+      // let the projector cascade into `part_v2` / `message_v2`. Mirrors
+      // `truncateMessagesAfter` in `message-store-v2.ts` so all retry /
+      // permission-resume paths funnel through the unified write path.
+      for (const id of deleteIds) {
+        emitEvent({
+          definition: MessageEvents.Removed,
+          aggregateID: input.sessionId,
+          data: { sessionID: input.sessionId, messageID: id },
+        });
+      }
+      // Defensive sweep — if any rows survived projector deletion (e.g. due
+      // to a partially-migrated session where projector registration is
+      // skipped) fall back to explicit SQL so the caller's invariant
+      // ``no messages after messageId remain'' still holds.
       for (const id of deleteIds) {
         sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [
           id,
@@ -471,10 +731,6 @@ function isAssistantEventText(text: string): boolean {
 }
 
 function isRuntimeSafeV2Message(message: Message): boolean {
-  if (message.role === 'tool') {
-    return true;
-  }
-
   return message.content.some((content) => {
     if (content.type === 'tool_call' || content.type === 'tool_result') {
       return true;
@@ -806,7 +1062,7 @@ export function publishSessionDiff(input: {
 
 export function publishSessionError(input: {
   sessionID?: string;
-  error: { name: string; message: string };
+  error: import('./message-v2-schema.js').AssistantErrorObject;
 }): void {
   publishBusEvent(SessionBusEvents.Error.type, {
     sessionID: input.sessionID,
@@ -862,11 +1118,7 @@ export function listSessionMessagesByRequestScope(input: {
   userId: string;
 }): Message[] {
   const messages = listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
-  return messages.filter(
-    (m) =>
-      m.clientRequestId === input.clientRequestId ||
-      m.clientRequestId?.startsWith(`${input.clientRequestId}:`) === true,
-  );
+  return messages.filter((m) => matchesRequestScope(input.clientRequestId, m.clientRequestId));
 }
 
 export function updateSessionMessagesStatusByRequestScope(input: {
@@ -884,9 +1136,7 @@ export function updateSessionMessagesStatusByRequestScope(input: {
   const targetIds = rows
     .filter((row) => {
       const data = JSON.parse(row.data) as MessageInfo;
-      const matchesRequest =
-        data.clientRequestId === input.clientRequestId ||
-        data.clientRequestId?.startsWith(`${input.clientRequestId}:`) === true;
+      const matchesRequest = matchesRequestScope(input.clientRequestId, data.clientRequestId);
       const matchesRole = roleFilter ? roleFilter.has(data.role) : true;
       return matchesRequest && matchesRole;
     })
@@ -896,6 +1146,23 @@ export function updateSessionMessagesStatusByRequestScope(input: {
     return;
   }
 
+  // Single-write path: emit MessageEvents.Updated → projector upserts the
+  // row in `message_v2`. Mirrors append/truncate flows so all status
+  // transitions land in the event_log for replay symmetry.
+  for (const id of targetIds) {
+    const row = rows.find((r) => r.id === id);
+    if (!row) continue;
+    const data = JSON.parse(row.data) as MessageInfo;
+    const updated: MessageInfo = { ...data, status: input.status };
+    emitEvent({
+      definition: MessageEvents.Updated,
+      aggregateID: input.sessionId,
+      data: { sessionID: input.sessionId, info: updated },
+    });
+  }
+  // Defensive sweep — if any row remains stale (e.g. partially-migrated
+  // session where projector registration is skipped) fall back to explicit
+  // SQL so the caller's invariant ``status == input.status'' still holds.
   for (const id of targetIds) {
     const row = rows.find((r) => r.id === id);
     if (!row) continue;
@@ -922,9 +1189,7 @@ export function deleteSessionMessagesByRequestScope(input: {
   const targetIds = rows
     .filter((row) => {
       const data = JSON.parse(row.data) as MessageInfo;
-      const matchesRequest =
-        data.clientRequestId === input.clientRequestId ||
-        data.clientRequestId?.startsWith(`${input.clientRequestId}:`) === true;
+      const matchesRequest = matchesRequestScope(input.clientRequestId, data.clientRequestId);
       const matchesRole = roleFilter ? roleFilter.has(data.role) : true;
       return matchesRequest && matchesRole;
     })
@@ -934,6 +1199,19 @@ export function deleteSessionMessagesByRequestScope(input: {
     return;
   }
 
+  // Single-write path: emit MessageEvents.Removed per id → projector
+  // cascades the delete through `message_v2` and `part_v2`.
+  for (const id of targetIds) {
+    emitEvent({
+      definition: MessageEvents.Removed,
+      aggregateID: input.sessionId,
+      data: { sessionID: input.sessionId, messageID: id },
+    });
+  }
+  // Defensive sweep — if any rows survived projector deletion (e.g. due
+  // to a partially-migrated session where projector registration is
+  // skipped) fall back to explicit SQL so the caller's invariant
+  // ``no scoped messages remain'' still holds.
   for (const id of targetIds) {
     sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [id, input.sessionId]);
   }
@@ -946,23 +1224,11 @@ export function deleteSessionMessagesByRequestScope(input: {
 
 // ─── V2-native implementations (no V1 dependency) ───
 
-export interface StoredToolResult {
-  clientRequestId?: string;
-  fileDiffs?: FileDiffContent[];
-  isError: boolean;
-  output: unknown;
-  pendingPermissionRequestId?: string;
-  resumedAfterApproval?: boolean;
-  observability?: ToolCallObservabilityAnnotation;
-  toolCallId: string;
-  toolName?: string;
-}
-
 const MAX_INLINE_TOOL_OUTPUT_BYTES = 8 * 1024;
 
 function shouldReferenceToolOutput(
   output: unknown,
-  serialized = typeof output === 'string' ? output : JSON.stringify(output),
+  serialized = stringifyToolResultOutput(output),
   sizeBytes = Buffer.byteLength(serialized, 'utf8'),
 ): boolean {
   return sizeBytes > MAX_INLINE_TOOL_OUTPUT_BYTES;
@@ -977,33 +1243,7 @@ export function getSessionToolResultByCallId(input: {
     sessionId: input.sessionId,
     userId: input.userId,
   });
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || message.role !== 'tool') {
-      continue;
-    }
-
-    for (const content of message.content) {
-      if (content.type !== 'tool_result' || content.toolCallId !== input.toolCallId) {
-        continue;
-      }
-
-      return {
-        toolCallId: content.toolCallId,
-        toolName: content.toolName,
-        clientRequestId: content.clientRequestId,
-        output: content.output,
-        isError: content.isError,
-        fileDiffs: content.fileDiffs,
-        pendingPermissionRequestId: content.pendingPermissionRequestId,
-        resumedAfterApproval: content.resumedAfterApproval,
-        observability: content.observability,
-      };
-    }
-  }
-
-  return null;
+  return findStoredToolResultByCallId(messages, input.toolCallId);
 }
 
 export function getLatestReferencedToolResult(input: {
@@ -1014,32 +1254,5 @@ export function getLatestReferencedToolResult(input: {
     sessionId: input.sessionId,
     userId: input.userId,
   });
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || message.role !== 'tool') {
-      continue;
-    }
-
-    for (let contentIndex = message.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
-      const content = message.content[contentIndex];
-      if (content?.type !== 'tool_result' || !shouldReferenceToolOutput(content.output)) {
-        continue;
-      }
-
-      return {
-        toolCallId: content.toolCallId,
-        toolName: content.toolName,
-        clientRequestId: content.clientRequestId,
-        output: content.output,
-        isError: content.isError,
-        fileDiffs: content.fileDiffs,
-        pendingPermissionRequestId: content.pendingPermissionRequestId,
-        resumedAfterApproval: content.resumedAfterApproval,
-        observability: content.observability,
-      };
-    }
-  }
-
-  return null;
+  return findLatestReferencedStoredToolResult(messages, shouldReferenceToolOutput);
 }

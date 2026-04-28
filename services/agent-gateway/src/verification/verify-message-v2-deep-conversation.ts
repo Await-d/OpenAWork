@@ -17,10 +17,10 @@ import {
   listPartsForMessage,
   listMessagesWithParts,
   getMessageWithParts,
-  toModelMessages,
-  filterCompacted,
+  toUIMessages,
   findToolPartByCallID,
 } from '../message-store-v2.js';
+import { filterCompacted } from '../message-to-model-messages.js';
 import { replayEventsForAggregate } from '../sync-event.js';
 import type { TextPart } from '../message-v2-schema.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from '../model-router.js';
@@ -242,7 +242,12 @@ async function callUpstreamWithTools(
   tools: UpstreamFunctionToolDefinition[] = [],
 ): Promise<AgenticCallResult> {
   const protocol = route.upstreamProtocol;
-  const upstreamPath = protocol === 'responses' ? '/responses' : '/chat/completions';
+  const upstreamPath =
+    protocol === 'responses'
+      ? '/responses'
+      : protocol === 'anthropic_messages'
+        ? '/messages'
+        : '/chat/completions';
   const url = `${route.apiBaseUrl}${upstreamPath}`;
 
   // Build headers — same logic as compaction-llm.ts and stream-model-round.ts
@@ -528,8 +533,12 @@ async function main(): Promise<void> {
       const customBaseUrl = process.env.DEEP_CONVERSATION_API_BASE;
       const customApiKey = process.env.DEEP_CONVERSATION_API_KEY;
       const customModel = process.env.DEEP_CONVERSATION_MODEL ?? 'gpt-5.4';
-      assert(customBaseUrl, 'DEEP_CONVERSATION_API_BASE env var is required for real API test');
-      assert(customApiKey, 'DEEP_CONVERSATION_API_KEY env var is required for real API test');
+      if (!customBaseUrl || !customApiKey) {
+        console.log(
+          'verify-message-v2-deep-conversation: skipped (set DEEP_CONVERSATION_API_BASE and DEEP_CONVERSATION_API_KEY to enable real API validation)',
+        );
+        return;
+      }
       const route = buildCustomRoute(customBaseUrl, customApiKey, customModel);
       console.log(
         `  [Phase 1] Route: provider=${route.providerType} model=${route.model} baseUrl=${route.apiBaseUrl} protocol=${route.upstreamProtocol}`,
@@ -989,14 +998,14 @@ async function main(): Promise<void> {
         `  [Phase 5b] All ${USER_TURNS.length} turns content verified against original input`,
       );
 
-      // ─── Phase 6: toModelMessages produces valid upstream format ───
+      // ─── Phase 6: toUIMessages produces valid UI projection ───
 
-      const uiMessages = toModelMessages(history);
-      // toModelMessages skips tool-role messages but includes assistant messages with tool parts
+      const uiMessages = toUIMessages(history);
+      // toUIMessages skips tool-role messages but includes assistant messages with tool parts
       const expectedUIMessageCount = USER_TURNS.length + asstMessages.length;
       assert(
         uiMessages.length === expectedUIMessageCount,
-        `toModelMessages should produce ${expectedUIMessageCount} UIMessages, got ${uiMessages.length}`,
+        `toUIMessages should produce ${expectedUIMessageCount} UIMessages, got ${uiMessages.length}`,
       );
       // Verify roles — user messages should be user, assistant should be assistant
       // (Not strictly alternating since tool messages are skipped)
@@ -1004,11 +1013,11 @@ async function main(): Promise<void> {
       const uiAsstMsgs = uiMessages.filter((m) => m.role === 'assistant');
       assert(
         uiUserMsgs.length === USER_TURNS.length,
-        `toModelMessages should have ${USER_TURNS.length} user UIMessages, got ${uiUserMsgs.length}`,
+        `toUIMessages should have ${USER_TURNS.length} user UIMessages, got ${uiUserMsgs.length}`,
       );
       assert(
         uiAsstMsgs.length === asstMessages.length,
-        `toModelMessages should have ${asstMessages.length} assistant UIMessages, got ${uiAsstMsgs.length}`,
+        `toUIMessages should have ${asstMessages.length} assistant UIMessages, got ${uiAsstMsgs.length}`,
       );
       // Verify first user message content matches
       const firstUserPart = uiMessages[0]?.parts.find((p) => p.type === 'text');
@@ -1017,7 +1026,7 @@ async function main(): Promise<void> {
         `First UIMessage text should match original user input`,
       );
 
-      // ─── Phase 6b: toModelMessages structural consistency ───
+      // ─── Phase 6b: toUIMessages structural consistency ───
       // Verify same-role UIMessages have identical part structure across all turns
 
       const userUIMessages = uiMessages.filter((m) => m.role === 'user');

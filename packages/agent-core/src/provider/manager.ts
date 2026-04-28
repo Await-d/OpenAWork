@@ -78,6 +78,8 @@ export class ProviderManagerImpl implements ProviderManager {
         chat: { providerId: '', modelId: '' },
         fast: { providerId: '', modelId: '' },
       };
+
+    this.ensureActiveSelectionValid();
   }
 
   public listProviders(): AIProvider[] {
@@ -458,6 +460,16 @@ export class ProviderManagerImpl implements ProviderManager {
     const chatValid = this.isSelectionValid(this.active.chat);
     const fastValid = this.isSelectionValid(this.active.fast);
     const fallback = this.pickFirstAvailableSelection();
+    const modelFallback = this.pickFirstAvailableModelSelection();
+    const imageFallback = this.pickFirstAvailableModelSelection({
+      capability: 'supportsImageGeneration',
+    });
+    const compactionValid = this.active.compaction
+      ? this.isSelectionValid(this.active.compaction)
+      : false;
+    const imageValid = this.active.image
+      ? this.isSelectionValid(this.active.image, { capability: 'supportsImageGeneration' })
+      : false;
 
     if (!fallback) {
       this.active = {
@@ -470,25 +482,45 @@ export class ProviderManagerImpl implements ProviderManager {
     this.active = {
       chat: chatValid ? this.active.chat : fallback.chat,
       fast: fastValid ? this.active.fast : fallback.fast,
+      ...(this.active.compaction
+        ? compactionValid
+          ? { compaction: this.active.compaction }
+          : modelFallback
+            ? { compaction: modelFallback }
+            : {}
+        : {}),
+      ...(this.active.image
+        ? imageValid
+          ? { image: this.active.image }
+          : imageFallback
+            ? { image: imageFallback }
+            : {}
+        : imageFallback
+          ? { image: imageFallback }
+          : {}),
     };
   }
 
-  private isSelectionValid(selection: { providerId: string; modelId: string }): boolean {
+  private isSelectionValid(
+    selection: { providerId: string; modelId: string },
+    options?: { capability?: 'supportsImageGeneration' },
+  ): boolean {
     const provider = this.providerMap.get(selection.providerId);
     if (!provider || !provider.enabled) {
       return false;
     }
 
-    return provider.defaultModels.some((model) => model.id === selection.modelId && model.enabled);
+    return provider.defaultModels.some(
+      (model) =>
+        model.id === selection.modelId &&
+        model.enabled &&
+        (options?.capability ? model[options.capability] === true : true),
+    );
   }
 
   private pickFirstAvailableSelection(): ActiveSelection | undefined {
     const candidates = Array.from(this.providerMap.values())
-      .filter((provider) => provider.enabled)
-      .map((provider) => {
-        const model = provider.defaultModels.find((item) => item.enabled);
-        return model ? { providerId: provider.id, modelId: model.id } : undefined;
-      })
+      .map((provider) => this.pickFirstAvailableModelSelectionForProvider(provider))
       .filter((item): item is { providerId: string; modelId: string } => item !== undefined);
 
     const first = candidates[0];
@@ -502,10 +534,34 @@ export class ProviderManagerImpl implements ProviderManager {
     };
   }
 
+  private pickFirstAvailableModelSelection(options?: {
+    capability?: 'supportsImageGeneration';
+  }): { providerId: string; modelId: string } | undefined {
+    return Array.from(this.providerMap.values())
+      .map((provider) => this.pickFirstAvailableModelSelectionForProvider(provider, options))
+      .find((selection) => selection !== undefined);
+  }
+
+  private pickFirstAvailableModelSelectionForProvider(
+    provider: AIProvider,
+    options?: { capability?: 'supportsImageGeneration' },
+  ): { providerId: string; modelId: string } | undefined {
+    if (!provider.enabled) {
+      return undefined;
+    }
+
+    const model = provider.defaultModels.find(
+      (item) => item.enabled && (options?.capability ? item[options.capability] === true : true),
+    );
+    return model ? { providerId: provider.id, modelId: model.id } : undefined;
+  }
+
   private getActiveSelection(): ActiveSelection {
     return {
       chat: { ...this.active.chat },
       fast: { ...this.active.fast },
+      ...(this.active.compaction ? { compaction: { ...this.active.compaction } } : {}),
+      ...(this.active.image ? { image: { ...this.active.image } } : {}),
     };
   }
 }

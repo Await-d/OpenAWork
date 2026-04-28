@@ -3,13 +3,7 @@ import {
   reconcileSessionStateStatus,
   type SessionRuntimeReconciliationResult,
 } from './session-runtime-state.js';
-import { expirePendingPermissionRequests } from './routes/permissions.js';
-import { expirePendingQuestionRequests } from './routes/questions.js';
-import {
-  reconcileResumedTaskChildSession,
-  reconcileTimedOutTaskChildSessionIfExpired,
-  terminateTaskChildSessionAsTimeout,
-} from './tool-sandbox.js';
+import { reconcileResumedTaskChildSession } from './tool-sandbox.js';
 
 interface SessionRuntimeCandidateRow {
   id: string;
@@ -28,36 +22,14 @@ export async function reconcileSessionRuntime(input: {
   sessionId: string;
   userId: string;
 }): Promise<SessionRuntimeReconciliationResult> {
-  const expiredPermissionCount = expirePendingPermissionRequests({
-    nowMs: input.nowMs,
-    sessionId: input.sessionId,
-  });
-  const expiredQuestionCount = expirePendingQuestionRequests({
-    nowMs: input.nowMs,
-    sessionId: input.sessionId,
-  });
-  if (expiredPermissionCount > 0 || expiredQuestionCount > 0) {
-    await terminateTaskChildSessionAsTimeout({
-      childSessionId: input.sessionId,
-      userId: input.userId,
-    });
-  }
-
   const reconciliation = reconcileSessionStateStatus(input);
   if (reconciliation.wasReset) {
-    const reconciledAsTimeout = await reconcileTimedOutTaskChildSessionIfExpired({
+    await reconcileResumedTaskChildSession({
       childSessionId: input.sessionId,
-      nowMs: input.nowMs,
+      pendingInteraction: false,
+      statusCode: 500,
       userId: input.userId,
     });
-    if (!reconciledAsTimeout) {
-      await reconcileResumedTaskChildSession({
-        childSessionId: input.sessionId,
-        pendingInteraction: false,
-        statusCode: 500,
-        userId: input.userId,
-      });
-    }
   }
 
   return reconciliation;

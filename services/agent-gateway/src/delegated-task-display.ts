@@ -1,4 +1,5 @@
 import type { Message } from '@openAwork/shared';
+import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
 
 export function collectDelegatedSessionText(messages: Message[]): string {
   return getSortedMessages(messages)
@@ -260,29 +261,24 @@ function getSortedMessages(messages: Message[]): Message[] {
 }
 
 function extractMessageTexts(message: Message): string[] {
+  const toolResultTexts = extractToolResultContentsFromMessage(message)
+    .map((part) => stringifyToolOutput(part.output))
+    .filter((text) => text.length > 0);
+
   if (message.role === 'assistant') {
-    return message.content.flatMap((part) => {
-      if (part.type !== 'text') {
-        return [];
-      }
+    return message.content
+      .flatMap((part) => {
+        if (part.type !== 'text') {
+          return [];
+        }
 
-      const text = part.text.trim();
-      return text.length > 0 && !isAssistantEventText(text) ? [text] : [];
-    });
+        const text = part.text.trim();
+        return text.length > 0 && !isAssistantEventText(text) ? [text] : [];
+      })
+      .concat(toolResultTexts);
   }
 
-  if (message.role === 'tool') {
-    return message.content.flatMap((part) => {
-      if (part.type !== 'tool_result') {
-        return [];
-      }
-
-      const text = stringifyToolOutput(part.output);
-      return text.length > 0 ? [text] : [];
-    });
-  }
-
-  return [];
+  return toolResultTexts;
 }
 
 function isAssistantEventText(value: string): boolean {

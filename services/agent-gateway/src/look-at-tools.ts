@@ -10,8 +10,8 @@ import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-ada
 import { validateWorkspacePath } from './workspace-paths.js';
 import { getProviderConfigForSelection } from './provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from './model-router.js';
-import { applyRequestOverridesToBody } from './routes/upstream-request.js';
-import { extractWorkflowLlmText } from './routes/workflow-llm.js';
+import { runUpstreamGenerate } from './v2-runtime/upstream/index.js';
+import type { UserContent } from 'ai';
 import { listManagedAgentsForUser } from './agent-catalog.js';
 import {
   getReferenceAgentModelEntries,
@@ -182,83 +182,43 @@ async function requestLookAtText(input: {
   imageDataUrl?: string;
   mimeType: string;
   model: string;
-  protocol: 'chat_completions' | 'responses';
+  providerType?: string;
   prompt: string;
   requestOverrides: RequestOverrides;
   systemPrompt?: string;
   textContent?: string;
 }): Promise<string> {
-  const bodyBase =
-    input.protocol === 'responses'
-      ? {
-          model: input.model,
-          input: [
-            ...(input.systemPrompt
-              ? [
-                  {
-                    role: 'system',
-                    content: [{ type: 'input_text', text: input.systemPrompt }],
-                  },
-                ]
-              : []),
+  const userContent: UserContent = [
+    { type: 'text', text: input.prompt },
+    ...(input.textContent
+      ? ([{ type: 'text', text: input.textContent }] as const)
+      : input.imageDataUrl
+        ? ([
             {
-              role: 'user',
-              content: [
-                { type: 'input_text', text: input.prompt },
-                ...(input.textContent
-                  ? [{ type: 'input_text', text: input.textContent }]
-                  : input.imageDataUrl
-                    ? [{ type: 'input_image', image_url: input.imageDataUrl }]
-                    : []),
-              ],
+              type: 'image',
+              image: input.imageDataUrl,
+              mediaType: input.mimeType,
             },
-          ],
-          max_output_tokens: 2048,
-          temperature: 0.2,
-          stream: false,
-        }
-      : {
-          model: input.model,
-          messages: [
-            ...(input.systemPrompt ? [{ role: 'system', content: input.systemPrompt }] : []),
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: input.prompt },
-                ...(input.textContent
-                  ? [{ type: 'text', text: input.textContent }]
-                  : input.imageDataUrl
-                    ? [{ type: 'image_url', image_url: { url: input.imageDataUrl } }]
-                    : []),
-              ],
-            },
-          ],
-          max_tokens: 2048,
-          temperature: 0.2,
-          stream: false,
-        };
+          ] as const)
+        : []),
+  ];
 
-  const body = applyRequestOverridesToBody(
-    bodyBase as Record<string, unknown>,
-    input.requestOverrides,
-    input.protocol,
-  );
-  const response = await fetch(
-    `${input.apiBaseUrl}${input.protocol === 'responses' ? '/responses' : '/chat/completions'}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {}),
-      },
-      body: JSON.stringify(body),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  const payload = (await response.json()) as unknown;
-  const text = extractWorkflowLlmText(payload).trim();
+  const result = await runUpstreamGenerate({
+    providerType: input.providerType ?? 'openai',
+    ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+    ...(input.apiBaseUrl ? { baseURL: input.apiBaseUrl } : {}),
+    ...(input.requestOverrides.headers && Object.keys(input.requestOverrides.headers).length > 0
+      ? { headers: input.requestOverrides.headers }
+      : {}),
+    model: input.model,
+    ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
+    messages: [{ role: 'user', content: userContent }],
+    maxOutputTokens: 2048,
+    temperature: 0.2,
+    requestOverrides: input.requestOverrides,
+  });
+
+  const text = result.text.trim();
   if (!text) {
     throw new Error('No multimodal response text returned');
   }
@@ -327,10 +287,14 @@ export async function runLookAtTool(input: {
       imageDataUrl,
       mimeType,
       model: routeConfig.route.model,
-      protocol: routeConfig.route.upstreamProtocol,
+      ...(routeConfig.route.providerType
+        ? { providerType: routeConfig.route.providerType }
+        : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
-      systemPrompt: routeConfig.route.systemPrompt,
+      ...(routeConfig.route.systemPrompt
+        ? { systemPrompt: routeConfig.route.systemPrompt }
+        : {}),
     });
   } else if (filePath && ['text/plain', 'text/markdown', 'application/json'].includes(mimeType)) {
     const textContent = (await readFileAsText(filePath)).slice(0, 16000);
@@ -339,10 +303,14 @@ export async function runLookAtTool(input: {
       apiKey: routeConfig.route.apiKey,
       mimeType,
       model: routeConfig.route.model,
-      protocol: routeConfig.route.upstreamProtocol,
+      ...(routeConfig.route.providerType
+        ? { providerType: routeConfig.route.providerType }
+        : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
-      systemPrompt: routeConfig.route.systemPrompt,
+      ...(routeConfig.route.systemPrompt
+        ? { systemPrompt: routeConfig.route.systemPrompt }
+        : {}),
       textContent: `File content:\n${textContent}`,
     });
   } else if (filePath && mimeType === 'application/pdf') {
@@ -352,10 +320,14 @@ export async function runLookAtTool(input: {
       apiKey: routeConfig.route.apiKey,
       mimeType,
       model: routeConfig.route.model,
-      protocol: routeConfig.route.upstreamProtocol,
+      ...(routeConfig.route.providerType
+        ? { providerType: routeConfig.route.providerType }
+        : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
-      systemPrompt: routeConfig.route.systemPrompt,
+      ...(routeConfig.route.systemPrompt
+        ? { systemPrompt: routeConfig.route.systemPrompt }
+        : {}),
       textContent: `PDF text:\n${textContent}`,
     });
   } else {

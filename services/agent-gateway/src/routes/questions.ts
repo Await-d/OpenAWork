@@ -9,8 +9,7 @@ import { parseSessionMetadataJson } from '../session-workspace-metadata.js';
 import { createQuestionRepliedEvent } from '../session-question-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
 import { shouldExitPlanModeFromAnswers } from '../plan-mode-tools.js';
-import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
-import { type ApprovedPermissionResumePayload } from './stream.js';
+import { setPersistedSessionStateStatus, type ApprovedPermissionResumePayload } from './stream.js';
 import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
 
 const replyQuestionSchema = z.object({
@@ -87,11 +86,6 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const expiredCount = expirePendingQuestionRequests({ nowMs: Date.now(), sessionId });
-      if (expiredCount > 0) {
-        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
-      }
-
       const requests = sqliteAll<QuestionRequestRow>(
         `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
          FROM question_requests
@@ -144,16 +138,6 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         step.fail('question request not found');
         return reply.status(404).send({ error: 'Question request not found' });
       }
-      if (
-        questionRequest.status === 'pending' &&
-        typeof questionRequest.expires_at === 'number' &&
-        questionRequest.expires_at <= Date.now()
-      ) {
-        expirePendingQuestionRequests({ nowMs: Date.now(), sessionId });
-        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
-        step.fail('question request expired');
-        return reply.status(409).send({ error: 'Question request expired' });
-      }
       if (questionRequest.status !== 'pending') {
         step.fail('question request already resolved');
         return reply.status(409).send({ error: 'Question request already resolved' });
@@ -183,6 +167,24 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
 
+      const resumePayload =
+        body.data.status === 'answered'
+          ? parseQuestionResumePayload(questionRequest.request_payload_json)
+          : null;
+
+      // Synchronously transition the persisted session state BEFORE returning
+      // the HTTP response. The frontend immediately re-fetches the recovery
+      // snapshot after a successful reply; without this update the row still
+      // says 'paused' while the question_request is no longer pending, which
+      // causes reconcileSessionStateStatus to forcibly reset the session to
+      // 'idle' and prevents the SSE attach loop from kicking in even when a
+      // resume is on its way. Mirrors permissions.ts:366-370.
+      setPersistedSessionStateStatus({
+        sessionId,
+        status: resumePayload ? 'running' : 'idle',
+        userId: user.sub,
+      });
+
       if (body.data.status === 'answered') {
         if (questionRequest.tool_name === 'ExitPlanMode') {
           updateSessionPlanModeForExitDecision({
@@ -190,8 +192,7 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
             sessionId,
           });
         }
-        const payload = parseQuestionResumePayload(questionRequest.request_payload_json);
-        if (payload) {
+        if (resumePayload) {
           const questions = JSON.parse(
             questionRequest.questions_json,
           ) as QuestionToolInput['questions'];
@@ -201,7 +202,7 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
           });
           void resumeAnsweredQuestionRequest({
             payload: {
-              ...payload,
+              ...resumePayload,
               toolName: questionRequest.tool_name,
             },
             answerOutput,

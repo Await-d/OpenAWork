@@ -18,6 +18,38 @@ interface PendingPermissionRow {
   request_payload_json: string | null;
 }
 
+function extractToolResultPart(
+  message: { content?: Array<{ type: string; output?: unknown }> } | undefined,
+): { type: 'tool_result'; output?: unknown } | undefined {
+  if (!Array.isArray(message?.content)) {
+    return undefined;
+  }
+
+  const part = message.content.find((item) => item.type === 'tool_result');
+  return part && part.type === 'tool_result'
+    ? (part as { type: 'tool_result'; output?: unknown })
+    : undefined;
+}
+
+function extractStructuredToolResultOutput(
+  part: { type: 'tool_result'; output?: unknown } | undefined,
+): Record<string, unknown> | null {
+  if (!part?.output) {
+    return null;
+  }
+
+  if (typeof part.output === 'string') {
+    try {
+      const parsed = JSON.parse(part.output) as unknown;
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof part.output === 'object' ? (part.output as Record<string, unknown>) : null;
+}
+
 function isTaskToolOutput(value: unknown): value is {
   assignedAgent: string;
   sessionId: string;
@@ -269,12 +301,9 @@ async function main(): Promise<void> {
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const parentToolMessage = parentMessages.find((message) => message.role === 'tool');
-            const toolPart = parentToolMessage?.content[0];
+            const toolPart = extractToolResultPart(parentToolMessage);
             assert(toolPart && toolPart.type === 'tool_result', 'parent tool message should exist');
-            const toolOutput =
-              toolPart.output && typeof toolPart.output === 'object'
-                ? (toolPart.output as Record<string, unknown>)
-                : null;
+            const toolOutput = extractStructuredToolResultOutput(toolPart);
             assert(toolOutput?.['status'] === 'done', 'parent tool_result should converge to done');
             assert(
               toolOutput?.['result'] === '审批恢复后的子代理结论',

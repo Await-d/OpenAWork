@@ -1,14 +1,16 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import type { GrantedPermission } from '@openAwork/agent-core';
+import { resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
+import {
+  hasWorkspacePersistentPermission,
+  loadWorkspacePermissionConfig,
+  upsertWorkspacePermanentPermission,
+  writeWorkspacePermissionConfig,
+} from '@openAwork/agent-core';
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from './db.js';
 import {
   extractSessionWorkingDirectory,
   parseSessionMetadataJson,
 } from './session-workspace-metadata.js';
-
-const WORKSPACE_PERMISSION_FILE = '.openawork.permissions.json';
 
 interface SessionMetadataRow {
   metadata_json: string;
@@ -27,32 +29,7 @@ function resolveWorkspaceRootForPath(path: string | null | undefined): string {
   return matched ?? WORKSPACE_ROOT;
 }
 
-function loadWorkspacePermissionFile(workspaceRoot: string): {
-  permanentGrants?: GrantedPermission[];
-} {
-  const filePath = join(workspaceRoot, WORKSPACE_PERMISSION_FILE);
-  if (!existsSync(filePath)) {
-    return {};
-  }
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf8')) as { permanentGrants?: GrantedPermission[] };
-  } catch {
-    return {};
-  }
-}
-
-function writeWorkspacePermissionFile(
-  workspaceRoot: string,
-  value: { permanentGrants?: GrantedPermission[] },
-): void {
-  writeFileSync(
-    join(workspaceRoot, WORKSPACE_PERMISSION_FILE),
-    JSON.stringify(value, null, 2),
-    'utf8',
-  );
-}
-
-function getSessionWorkspaceRoot(sessionId: string): string | null {
+export function getSessionWorkspaceRoot(sessionId: string): string | null {
   const row = sqliteGet<SessionMetadataRow>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
     [sessionId],
@@ -85,10 +62,10 @@ export function hasWorkspacePermanentPermission(
   if (!workspaceRoot) {
     return false;
   }
-  const grants = loadWorkspacePermissionFile(workspaceRoot).permanentGrants ?? [];
-  return grants.some(
-    (grant) =>
-      grant.toolName === toolName && grant.scope === scope && grant.decision === 'permanent',
+  return hasWorkspacePersistentPermission(
+    loadWorkspacePermissionConfig(workspaceRoot),
+    toolName,
+    scope,
   );
 }
 
@@ -101,21 +78,9 @@ export function persistWorkspacePermanentPermission(input: {
   if (!workspaceRoot) {
     return;
   }
-  const current = loadWorkspacePermissionFile(workspaceRoot);
-  const permanentGrants = current.permanentGrants ?? [];
-  if (
-    permanentGrants.some(
-      (grant) => grant.toolName === input.toolName && grant.scope === input.scope,
-    )
-  ) {
-    return;
-  }
-  permanentGrants.push({
-    id: `${input.toolName}:${input.scope}:${Date.now()}`,
+  const next = upsertWorkspacePermanentPermission(loadWorkspacePermissionConfig(workspaceRoot), {
     toolName: input.toolName,
     scope: input.scope,
-    grantedAt: Date.now(),
-    decision: 'permanent',
   });
-  writeWorkspacePermissionFile(workspaceRoot, { permanentGrants });
+  writeWorkspacePermissionConfig(workspaceRoot, next);
 }

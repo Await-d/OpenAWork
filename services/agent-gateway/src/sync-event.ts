@@ -66,19 +66,25 @@ export function registerProjector(eventType: string, projector: ProjectorFunc): 
 
 // ─── Sequence Tracking ───
 
-function getNextSeq(aggregateID: string): number {
+function peekNextSeq(aggregateID: string): number {
   const row = sqliteGet<{ seq: number }>('SELECT seq FROM event_sequences WHERE aggregate_id = ?', [
     aggregateID,
   ]);
   return (row?.seq ?? 0) + 1;
 }
 
-function updateSeq(aggregateID: string, seq: number): void {
-  sqliteRun(
-    `INSERT INTO event_sequences (aggregate_id, seq) VALUES (?, ?)
-     ON CONFLICT (aggregate_id) DO UPDATE SET seq = excluded.seq`,
-    [aggregateID, seq],
+function allocateNextSeq(aggregateID: string): number {
+  const row = sqliteGet<{ seq: number }>(
+    `INSERT INTO event_sequences (aggregate_id, seq)
+       VALUES (?, 1)
+       ON CONFLICT (aggregate_id) DO UPDATE SET seq = event_sequences.seq + 1
+       RETURNING seq`,
+    [aggregateID],
   );
+  if (!row) {
+    throw new Error(`Failed to allocate seq for aggregate ${aggregateID}`);
+  }
+  return row.seq;
 }
 
 function isEventProcessed(eventId: string): boolean {
@@ -95,28 +101,39 @@ export function emitEvent<T>(input: {
   persist?: boolean;
 }): SyncEventInstance<T> {
   const eventId = randomUUID();
-  const seq = getNextSeq(input.aggregateID);
+  let seq = 0;
+  const shouldPersist = input.persist !== false;
+  const projector = projectorRegistry.get(input.definition.type);
 
-  const event: SyncEventInstance<T> = {
+  if (!shouldPersist) {
+    seq = peekNextSeq(input.aggregateID);
+  }
+
+  const timestamp = Date.now();
+  let event: SyncEventInstance<T> = {
     id: eventId,
     seq,
     aggregateID: input.aggregateID,
     type: input.definition.type,
     version: input.definition.version,
     data: input.data,
-    timestamp: Date.now(),
+    timestamp,
   };
-
-  // Idempotency check
-  if (isEventProcessed(eventId)) {
-    return event;
-  }
-
-  const shouldPersist = input.persist !== false;
-  const projector = projectorRegistry.get(input.definition.type);
 
   // Run projector + event persist in a single transaction (atomic)
   sqliteTransaction(() => {
+    if (shouldPersist) {
+      if (isEventProcessed(eventId)) {
+        return;
+      }
+
+      seq = allocateNextSeq(input.aggregateID);
+      event = {
+        ...event,
+        seq,
+      };
+    }
+
     if (projector) {
       projector(event);
     }
@@ -135,7 +152,6 @@ export function emitEvent<T>(input: {
           event.timestamp,
         ],
       );
-      updateSeq(input.aggregateID, seq);
     }
   });
 

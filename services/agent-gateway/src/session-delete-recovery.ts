@@ -1,65 +1,18 @@
+/**
+ * Recovery path for malformed sessions: with `PRAGMA foreign_keys=OFF`
+ * we manually purge every table that references the session, then
+ * delete the `sessions` row itself. The statement list lives in
+ * `./session-delete-recovery-statements.ts` so it can be unit-tested
+ * in isolation (no SQLite driver dependency).
+ */
+
 import { db, sqliteRun } from './db.js';
-const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<{
-  params: (input: { sessionId: string; userId: string }) => [string] | [string, string];
-  sql: string;
-}> = [
-  {
-    sql: 'UPDATE audit_logs SET session_id = NULL WHERE session_id = ?',
-    params: ({ sessionId }) => [sessionId],
-  },
-  {
-    sql: 'DELETE FROM session_messages WHERE session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM session_file_diffs WHERE session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM permission_decision_logs WHERE session_id = ?',
-    params: ({ sessionId }) => [sessionId],
-  },
-  {
-    sql: 'DELETE FROM session_run_events WHERE session_id = ?',
-    params: ({ sessionId }) => [sessionId],
-  },
-  {
-    sql: 'DELETE FROM session_runtime_threads WHERE session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM session_snapshots WHERE session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM session_file_backups WHERE session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM permission_requests WHERE session_id = ?',
-    params: ({ sessionId }) => [sessionId],
-  },
-  {
-    sql: 'DELETE FROM question_requests WHERE session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM session_todos WHERE session_id = ?',
-    params: ({ sessionId }) => [sessionId],
-  },
-  {
-    sql: 'DELETE FROM task_parent_auto_resume_contexts WHERE child_session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM task_parent_auto_resume_contexts WHERE parent_session_id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-  {
-    sql: 'DELETE FROM sessions WHERE id = ? AND user_id = ?',
-    params: ({ sessionId, userId }) => [sessionId, userId],
-  },
-];
+import { SESSION_DELETE_RECOVERY_STATEMENTS } from './session-delete-recovery-statements.js';
+
+export {
+  SESSION_DELETE_RECOVERY_STATEMENTS,
+  type SessionDeleteRecoveryStatement,
+} from './session-delete-recovery-statements.js';
 
 export function deleteSessionWithMalformedRecovery(input: {
   sessionId: string;

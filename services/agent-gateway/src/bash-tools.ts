@@ -8,10 +8,30 @@ import {
   collectWorkspaceReconcileDiffs,
 } from './workspace-reconcile.js';
 import { validateWorkspacePath } from './workspace-paths.js';
+import { bashCommandScope } from './bash-arity.js';
+import { truncateBashOutput } from './bash-output-truncator.js';
 import { z } from 'zod';
 
 const MAX_BASH_TIMEOUT_MS = 120000;
 const DEFAULT_BASH_TIMEOUT_MS = 30000;
+
+const MAX_DIFFS_COUNT = 20;
+const MAX_DIFF_CONTENT_CHARS = 10_000;
+
+function slimDiffsForOutput(diffs: FileDiffContent[]): FileDiffContent[] {
+  const sliced = diffs.length > MAX_DIFFS_COUNT ? diffs.slice(0, MAX_DIFFS_COUNT) : diffs;
+  return sliced.map((d) => ({
+    ...d,
+    before:
+      d.before.length > MAX_DIFF_CONTENT_CHARS
+        ? d.before.slice(0, MAX_DIFF_CONTENT_CHARS) + '\n...[truncated]'
+        : d.before,
+    after:
+      d.after.length > MAX_DIFF_CONTENT_CHARS
+        ? d.after.slice(0, MAX_DIFF_CONTENT_CHARS) + '\n...[truncated]'
+        : d.after,
+  }));
+}
 
 const bashInputSchema = z.object({
   command: z.string().min(1),
@@ -64,8 +84,9 @@ const DISALLOWED_PATTERNS: Array<{ pattern: RegExp; message: string }> = [
 ];
 
 function buildBashPermissionScope(command: string, cwd: string): string {
+  const scope = bashCommandScope(command);
   const digest = createHash('sha256').update(`${cwd}\n${command}`).digest('hex').slice(0, 12);
-  return `bash:${cwd}:${digest}`;
+  return `bash:${scope}:${digest}`;
 }
 
 function assertSafeBashCommand(command: string): string {
@@ -104,6 +125,8 @@ export interface BashExecutionResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** When stdout was truncated, this holds the path to the full output file */
+  stdoutOutputPath?: string;
 }
 
 export async function runBashCommand(
@@ -122,17 +145,20 @@ export async function runBashCommand(
       timeout: input.timeout,
       maxBuffer: 4 * 1024 * 1024,
     })) as { stdout: string; stderr: string };
+    const truncated = await truncateBashOutput(result.stdout);
+    const rawDiffs = await collectWorkspaceReconcileDiffs({
+      workspaceRoot: cwd,
+      before: beforeSnapshot,
+      after: await captureWorkspaceReconcileSnapshot(cwd),
+    });
     return {
       command,
       cwd,
-      diffs: await collectWorkspaceReconcileDiffs({
-        workspaceRoot: cwd,
-        before: beforeSnapshot,
-        after: await captureWorkspaceReconcileSnapshot(cwd),
-      }),
+      diffs: slimDiffsForOutput(rawDiffs),
       exitCode: 0,
-      stdout: result.stdout,
+      stdout: truncated.content,
       stderr: result.stderr,
+      stdoutOutputPath: truncated.outputPath,
     };
   } catch (error) {
     const execError = error as NodeJS.ErrnoException & {
@@ -140,17 +166,21 @@ export async function runBashCommand(
       stdout?: string;
       stderr?: string;
     };
+    const rawStdout = execError.stdout ?? '';
+    const truncated = rawStdout.length > 0 ? await truncateBashOutput(rawStdout) : { content: rawStdout, truncated: false };
+    const rawDiffs = await collectWorkspaceReconcileDiffs({
+      workspaceRoot: cwd,
+      before: beforeSnapshot,
+      after: await captureWorkspaceReconcileSnapshot(cwd),
+    });
     return {
       command,
       cwd,
-      diffs: await collectWorkspaceReconcileDiffs({
-        workspaceRoot: cwd,
-        before: beforeSnapshot,
-        after: await captureWorkspaceReconcileSnapshot(cwd),
-      }),
+      diffs: slimDiffsForOutput(rawDiffs),
       exitCode: typeof execError.code === 'number' ? execError.code : 1,
-      stdout: execError.stdout ?? '',
+      stdout: truncated.content,
       stderr: execError.stderr ?? (execError.message || String(error)),
+      stdoutOutputPath: 'outputPath' in truncated ? truncated.outputPath : undefined,
     };
   }
 }

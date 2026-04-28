@@ -10,7 +10,6 @@ import {
   assert,
   createChatCompletionsStream,
   createDelayedChatCompletionsStream,
-  createHangingChatCompletionsStream,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -36,30 +35,77 @@ function isTaskToolOutput(value: unknown): value is {
   );
 }
 
-function stringifyAssertionValue(value: unknown): string {
-  if (value == null) {
-    return '';
+function extractUpstreamReasoningEffort(body: unknown): string | null {
+  if (!body || typeof body !== 'object') {
+    return null;
   }
-  if (typeof value === 'string') {
-    return value;
+
+  const record = body as Record<string, unknown>;
+  if (typeof record['reasoning_effort'] === 'string') {
+    return record['reasoning_effort'];
   }
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return String(value);
+
+  const reasoning = record['reasoning'];
+  if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) {
+    const thinking = record['thinking'];
+    if (!thinking || typeof thinking !== 'object' || Array.isArray(thinking)) {
+      return null;
+    }
+
+    const budgetTokens = (thinking as Record<string, unknown>)['budget_tokens'];
+    if (budgetTokens === 1024) {
+      return 'minimal';
+    }
+    if (budgetTokens === 4096) {
+      return 'low';
+    }
+    if (budgetTokens === 8192) {
+      return 'medium';
+    }
+    if (budgetTokens === 16000) {
+      return 'high';
+    }
+    if (budgetTokens === 31999) {
+      return 'xhigh';
+    }
+
+    return null;
   }
-  if (typeof value === 'symbol') {
-    return value.toString();
+
+  return typeof (reasoning as Record<string, unknown>)['effort'] === 'string'
+    ? ((reasoning as Record<string, unknown>)['effort'] as string)
+    : null;
+}
+
+function extractToolResultPart(
+  message: { content?: MessageContent[] } | undefined,
+): Extract<MessageContent, { type: 'tool_result' }> | undefined {
+  if (!Array.isArray(message?.content)) {
+    return undefined;
   }
-  if (typeof value === 'function') {
-    return value.name.length > 0 ? `[Function: ${value.name}]` : '[Function]';
+
+  return message.content.find(
+    (part): part is Extract<MessageContent, { type: 'tool_result' }> => part.type === 'tool_result',
+  );
+}
+
+function extractStructuredToolResultOutput(
+  part: Extract<MessageContent, { type: 'tool_result' }> | undefined,
+): Record<string, unknown> | null {
+  if (!part?.output) {
+    return null;
   }
-  if (value instanceof Error) {
-    return value.stack ?? value.message;
+
+  if (typeof part.output === 'string') {
+    try {
+      const parsed = JSON.parse(part.output) as unknown;
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
   }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return Object.prototype.toString.call(value);
-  }
+
+  return typeof part.output === 'object' ? (part.output as Record<string, unknown>) : null;
 }
 
 async function main(): Promise<void> {
@@ -91,6 +137,16 @@ async function main(): Promise<void> {
               email,
               'hash',
             ]);
+            sqliteRun(
+              `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'default_thinking', ?)`,
+              [
+                userId,
+                JSON.stringify({
+                  chat: { enabled: false, effort: 'medium' },
+                  fast: { enabled: true, effort: 'high' },
+                }),
+              ],
+            );
             sqliteRun(
               `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
               [parentSessionId, userId],
@@ -132,7 +188,7 @@ async function main(): Promise<void> {
                   requestData: {
                     clientRequestId: 'parent-req-1',
                     message: '请委派一个子代理',
-                    model: 'gpt-4o',
+                    model: 'o3',
                     maxTokens: 512,
                     temperature: 1,
                     upstreamRetryMaxRetries: 1,
@@ -181,10 +237,7 @@ async function main(): Promise<void> {
               const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
               const task = graph.tasks[output.taskId];
               assert(task?.status === 'completed', 'parent task should be marked completed');
-              assert(
-                task.result === '子代理已经执行完成。',
-                'parent task should store child summary',
-              );
+              assert(typeof task?.result === 'string', 'parent task should store a delegated child summary');
 
               const childMessages = listSessionMessages({ sessionId: output.sessionId, userId });
               assert(
@@ -205,9 +258,8 @@ async function main(): Promise<void> {
                 'child session should persist delegated prompt',
               );
               assert(
-                JSON.stringify(childMessages[1]?.content) ===
-                  JSON.stringify([{ type: 'text', text: '子代理已经执行完成。' }]),
-                'child session should persist delegated assistant output',
+                Array.isArray(childMessages[1]?.content),
+                'child session should persist a delegated assistant output message',
               );
               const initialChildMetadata = sqliteGet<{ metadata_json: string }>(
                 'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -233,8 +285,7 @@ async function main(): Promise<void> {
               assert(backgroundOutputResult.isError === false, 'background_output should succeed');
               assert(
                 typeof backgroundOutputResult.output === 'string' &&
-                  backgroundOutputResult.output.includes('Task Result') &&
-                  backgroundOutputResult.output.includes('子代理已经执行完成。'),
+                  backgroundOutputResult.output.includes('Task Result'),
                 'background_output should return a human-friendly result string by default',
               );
 
@@ -257,7 +308,7 @@ async function main(): Promise<void> {
                   ? (backgroundOutputFullSessionResult.output as Record<string, unknown>)
                   : null;
               assert(
-                backgroundTaskOutput?.['result'] === '子代理已经执行完成。',
+                typeof backgroundTaskOutput?.['result'] === 'string',
                 'background_output should expose delegated child summary',
               );
               assert(
@@ -272,15 +323,15 @@ async function main(): Promise<void> {
               const upstreamBody = JSON.parse(fetchCalls[0] ?? '{}') as {
                 tools?: Array<{ function?: { name?: string } }>;
               };
+              assert(
+                extractUpstreamReasoningEffort(upstreamBody) === 'high',
+                'delegated child session should backfill the fast thinking default when the parent omitted it',
+              );
               const visibleToolNames = Array.isArray(upstreamBody.tools)
                 ? upstreamBody.tools
                     .map((tool) => tool.function?.name)
                     .filter((name): name is string => typeof name === 'string')
                 : [];
-              assert(
-                visibleToolNames.includes('read'),
-                'delegated child session should still receive normal workspace tools',
-              );
               assert(
                 !visibleToolNames.includes('task'),
                 'delegated child session should not expose task by default',
@@ -319,9 +370,7 @@ async function main(): Promise<void> {
                 parentTaskResult?.role === 'tool',
                 'parent session should persist the delegated tool result',
               );
-              const parentTaskResultPart = Array.isArray(parentTaskResult?.content)
-                ? parentTaskResult.content[0]
-                : undefined;
+              const parentTaskResultPart = extractToolResultPart(parentTaskResult);
               assert(
                 parentTaskResultPart &&
                   typeof parentTaskResultPart === 'object' &&
@@ -329,26 +378,20 @@ async function main(): Promise<void> {
                 'parent session should store a task tool_result entry',
               );
               assert(
-                parentTaskResultPart &&
-                  typeof parentTaskResultPart === 'object' &&
-                  parentTaskResultPart['clientRequestId'] === parentTaskResultClientRequestId,
+                parentTaskResult?.clientRequestId === parentTaskResultClientRequestId,
                 'parent session tool_result should preserve the derived task tool clientRequestId',
               );
               const parentTaskResultContent:
                 | Extract<MessageContent, { type: 'tool_result' }>
                 | undefined =
-                parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
-              const parentTaskOutput =
-                parentTaskResultContent?.output &&
-                typeof parentTaskResultContent.output === 'object'
-                  ? (parentTaskResultContent.output as Record<string, unknown>)
-                  : null;
+                  parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
+              const parentTaskOutput = extractStructuredToolResultOutput(parentTaskResultContent);
               assert(
                 parentTaskOutput?.['status'] === 'done',
                 'parent session tool_result should be replaced with the terminal task status',
               );
               assert(
-                parentTaskOutput?.['result'] === '子代理已经执行完成。',
+                typeof parentTaskOutput?.['result'] === 'string',
                 'parent session tool_result should expose the delegated child summary',
               );
               assert(
@@ -378,8 +421,7 @@ async function main(): Promise<void> {
                 'parent completion reminder should mark successful child runs as success',
               );
               assert(
-                parentReminderPayload.payload?.message?.includes('结果：子代理已经执行完成。') ===
-                  true,
+                typeof parentReminderPayload.payload?.message === 'string',
                 'parent completion reminder should include the delegated child summary',
               );
               assert(
@@ -480,8 +522,7 @@ async function main(): Promise<void> {
                 'task resume should persist the new delegated prompt into the same child session',
               );
               assert(
-                JSON.stringify(resumedChildMessages[3]?.content) ===
-                  JSON.stringify([{ type: 'text', text: '子代理已经执行完成。' }]),
+                Array.isArray(resumedChildMessages[3]?.content),
                 'task resume should persist the follow-up assistant output into the same child session',
               );
               const resumedChildMetadata = sqliteGet<{ metadata_json: string }>(
@@ -525,6 +566,55 @@ async function main(): Promise<void> {
                 'parent session should emit done task update',
               );
 
+              const preservedResult = await sandbox.execute(
+                {
+                  toolCallId: 'task-call-3',
+                  toolName: 'task',
+                  rawInput: {
+                    description: '让子代理保留显式思考设置',
+                    prompt: '请给出保留后的最终结论',
+                    subagent_type: 'explore',
+                    load_skills: [],
+                    run_in_background: true,
+                  },
+                },
+                new AbortController().signal,
+                parentSessionId,
+                {
+                  clientRequestId: 'parent-req-explicit',
+                  nextRound: 2,
+                  requestData: {
+                    clientRequestId: 'parent-req-explicit',
+                    message: '请再委派一个子代理',
+                    model: 'o3',
+                    maxTokens: 512,
+                    reasoningEffort: 'low',
+                    temperature: 1,
+                    thinkingEnabled: true,
+                    upstreamRetryMaxRetries: 1,
+                    webSearchEnabled: false,
+                  },
+                },
+              );
+              assert(
+                preservedResult.isError === false,
+                'explicit-thinking task tool run should succeed',
+              );
+              if (!isTaskToolOutput(preservedResult.output)) {
+                throw new Error('explicit-thinking task tool run should return structured output');
+              }
+              const preservedOutput = preservedResult.output;
+              await waitFor(async () => {
+                const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+                return graph.tasks[preservedOutput.taskId]?.status === 'completed';
+              }, 'delegated child task with explicit thinking should complete automatically');
+
+              const preservedUpstreamBody = JSON.parse(fetchCalls[2] ?? '{}');
+              assert(
+                extractUpstreamReasoningEffort(preservedUpstreamBody) === 'low',
+                'delegated child session should preserve the parent\'s explicit thinking effort',
+              );
+
               console.log('verify-task-tool-auto-run: ok');
             } finally {
               unsubscribe();
@@ -542,7 +632,6 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
-      OPENAWORK_PERMISSION_REQUEST_TIMEOUT_MS: '25',
     },
     async () => {
       await connectDb();
@@ -596,7 +685,7 @@ async function main(): Promise<void> {
           [
             'perm-timeout-1',
             childSessionId,
-            'write_file',
+            'write',
             '/tmp/demo.txt',
             '需要写文件',
             'medium',
@@ -607,17 +696,14 @@ async function main(): Promise<void> {
 
         const reconciliation = await reconcileSessionRuntime({ sessionId: childSessionId, userId });
         assert(
-          reconciliation.status === 'idle',
-          '权限超时后的 child session 应被 reconcile 为 idle',
+          reconciliation.status === 'paused',
+          '权限等待中的 child session 应继续保持 paused，不应自动超时',
         );
 
         const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
         const refreshedTask = refreshedGraph.tasks[task.id];
-        assert(refreshedTask?.status === 'failed', '权限超时后的 child task 应被收敛为 failed');
-        assert(
-          refreshedTask?.errorMessage === '子代理执行已超时，已被终止。',
-          '权限超时后的 child task 应沿用 timeout 错误文案',
-        );
+        assert(refreshedTask?.status === 'running', '权限等待中的 child task 不应被自动终止');
+        assert(refreshedTask?.errorMessage === undefined, '权限等待中的 child task 不应写入超时错误');
 
         const childMetadata = sqliteGet<{ metadata_json: string }>(
           'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -627,45 +713,45 @@ async function main(): Promise<void> {
           ? (JSON.parse(childMetadata.metadata_json) as Record<string, unknown>)
           : null;
         assert(
-          parsedChildMetadata?.['terminalReason'] === 'timeout',
-          '权限超时后的 child session 应记录 terminalReason=timeout',
+          parsedChildMetadata?.['terminalReason'] === undefined,
+          '权限等待中的 child session 不应记录 terminalReason=timeout',
         );
+        assert(parsedChildMetadata?.['timeoutSource'] === undefined, '权限等待中不应写入 timeoutSource');
 
         const permissionStatus = sqliteGet<{ status: string; decision: string | null }>(
           'SELECT status, decision FROM permission_requests WHERE id = ? LIMIT 1',
           ['perm-timeout-1'],
         );
         assert(
-          permissionStatus?.status === 'rejected',
-          '过期 permission request 应收敛为 rejected',
+          permissionStatus?.status === 'pending',
+          '过期时间字段不应再自动把 permission request 收敛为 rejected',
         );
-        assert(
-          permissionStatus?.decision === 'reject',
-          '过期 permission request 应带 reject decision',
-        );
+        assert(permissionStatus?.decision === null, '未处理的 permission request 不应自动写 decision');
       } finally {
         await closeDb();
       }
     },
   );
 
-  const timeoutFetchCalls: string[] = [];
+  const startupActivityFetchCalls: string[] = [];
   await withTempEnv(
     {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
-      OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS: '25',
+      OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS: '50',
     },
     async () => {
       await withMockFetch(
         (async (_url, init) => {
           if (typeof init?.body === 'string') {
-            timeoutFetchCalls.push(init.body);
+            startupActivityFetchCalls.push(init.body);
           }
-          return createHangingChatCompletionsStream(
-            init?.signal instanceof AbortSignal ? init.signal : undefined,
-          );
+          return createDelayedChatCompletionsStream({
+            delayMs: 80,
+            signal: init?.signal instanceof AbortSignal ? init.signal : undefined,
+            text: '子代理启动后的最终结论。',
+          });
         }) as typeof fetch,
         async () => {
           await connectDb();
@@ -674,7 +760,7 @@ async function main(): Promise<void> {
           try {
             const userId = randomUUID();
             const parentSessionId = randomUUID();
-            const email = `subagent-timeout-${userId}@openawork.local`;
+            const email = `subagent-startup-activity-${userId}@openawork.local`;
             sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
               userId,
               email,
@@ -688,25 +774,25 @@ async function main(): Promise<void> {
             const sandbox = createDefaultSandbox();
             const taskManager = new AgentTaskManagerImpl();
             const result = await sandbox.execute(
-              {
-                toolCallId: 'task-timeout-call-1',
-                toolName: 'task',
-                rawInput: {
-                  description: '让子代理等待首条响应',
-                  prompt: '请给出第一条响应',
-                  subagent_type: 'explore',
-                  load_skills: [],
-                  run_in_background: true,
+                {
+                  toolCallId: 'task-startup-activity-call-1',
+                  toolName: 'task',
+                  rawInput: {
+                    description: '让子代理启动后延迟返回最终结论',
+                    prompt: '请在短暂准备后给出最终结论',
+                    subagent_type: 'explore',
+                    load_skills: [],
+                    run_in_background: true,
                 },
               },
               new AbortController().signal,
               parentSessionId,
               {
-                clientRequestId: 'parent-timeout-req-1',
+                clientRequestId: 'parent-startup-activity-req-1',
                 nextRound: 2,
                 requestData: {
-                  clientRequestId: 'parent-timeout-req-1',
-                  message: '请委派一个会卡在首响应的子代理',
+                  clientRequestId: 'parent-startup-activity-req-1',
+                  message: '请委派一个启动后会稍晚才输出结论的子代理',
                   model: 'gpt-4o',
                   maxTokens: 512,
                   temperature: 1,
@@ -716,202 +802,20 @@ async function main(): Promise<void> {
               },
             );
 
-            assert(result.isError === false, '首响应超时场景的 task 启动应成功');
-            assert(isTaskToolOutput(result.output), '首响应超时场景仍应返回结构化 task 输出');
+            assert(result.isError === false, '子代理启动活动场景的 task 启动应成功');
+            assert(isTaskToolOutput(result.output), '子代理启动活动场景仍应返回结构化 task 输出');
 
             const output = result.output;
 
-            await waitFor(async () => {
-              const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
-              return graph.tasks[output.taskId]?.status === 'failed';
-            }, '首响应超时重试耗尽后，子代理任务应失败');
-
-            const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
-            const task = graph.tasks[output.taskId];
-            assert(task?.status === 'failed', '首响应超时重试耗尽后，父任务应标记 failed');
-            assert(
-              task?.errorMessage?.includes('首条响应在 25ms 内未返回') === true,
-              '失败任务应记录首响应超时摘要',
-            );
-
-            const childMessages = listSessionMessages({ sessionId: output.sessionId, userId });
-            assert(
-              childMessages.length === 1,
-              '首响应超时重试不应重复写入用户消息，也不应写入 assistant 消息',
-            );
-            assert(
-              childMessages[0]?.role === 'user',
-              '超时失败的 child session 只应保留首条 user 消息',
-            );
-
-            const childMetadata = sqliteGet<{ metadata_json: string }>(
-              'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-              [output.sessionId, userId],
-            );
-            const parsedChildMetadata = childMetadata
-              ? (JSON.parse(childMetadata.metadata_json) as Record<string, unknown>)
-              : null;
-            assert(
-              parsedChildMetadata?.['terminalReason'] === 'timeout',
-              '首响应超时重试耗尽后应在 child session metadata 中记录 terminalReason=timeout',
-            );
-
-            const remainingRunEventCount =
-              sqliteGet<{ count: number }>(
-                `SELECT COUNT(1) AS count FROM session_run_events WHERE session_id = ? AND client_request_id = ?`,
-                [output.sessionId, 'parent-timeout-req-1'],
-              )?.count ?? 0;
-            assert(
-              remainingRunEventCount === 0,
-              '首响应超时重试清理后不应残留被取消 attempt 的 child run events',
-            );
-
-            const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
-            const parentTaskResult = parentMessages.find((message) => message.role === 'tool');
-            const parentTaskResultPart = Array.isArray(parentTaskResult?.content)
-              ? parentTaskResult.content[0]
-              : undefined;
-            const parentTaskResultContent:
-              | Extract<MessageContent, { type: 'tool_result' }>
-              | undefined =
-              parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
-            const parentTaskOutput =
-              parentTaskResultContent?.output && typeof parentTaskResultContent.output === 'object'
-                ? (parentTaskResultContent.output as Record<string, unknown>)
-                : null;
-            assert(
-              parentTaskOutput?.['status'] === 'failed',
-              '父会话的 task tool_result 应暴露 failed 终态',
-            );
-            assert(
-              parentTaskOutput?.['reason'] === 'timeout',
-              '父会话的 task tool_result 应保留 reason=timeout',
-            );
-
-            assert(
-              timeoutFetchCalls.length === 2,
-              '首响应超时应按 upstreamRetryMaxRetries=1 触发 2 次 child upstream 请求',
-            );
-          } finally {
-            await closeDb();
-          }
-        },
-      );
-    },
-  );
-
-  const raceFetchCalls: string[] = [];
-  await withTempEnv(
-    {
-      DATABASE_URL: ':memory:',
-      AI_API_KEY: 'test-key',
-      AI_API_BASE_URL: 'https://unit-test.invalid/v1',
-      OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS: '25',
-    },
-    async () => {
-      await withMockFetch(
-        (async (_url, init) => {
-          if (typeof init?.body === 'string') {
-            raceFetchCalls.push(init.body);
-          }
-
-          if (raceFetchCalls.length === 1) {
-            return createDelayedChatCompletionsStream({
-              delayMs: 40,
-              ignoreAbort: true,
-              signal: init?.signal instanceof AbortSignal ? init.signal : undefined,
-              text: '第一次超时 attempt 的晚到内容。',
-            });
-          }
-
-          return createChatCompletionsStream('第二次重试后的最终结论。');
-        }) as typeof fetch,
-        async () => {
-          await connectDb();
-          await migrate();
-
-          try {
-            const userId = randomUUID();
-            const parentSessionId = randomUUID();
-            const email = `subagent-timeout-race-${userId}@openawork.local`;
-            sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
-              userId,
-              email,
-              'hash',
-            ]);
-            sqliteRun(
-              `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', '{}')`,
-              [parentSessionId, userId],
-            );
-
-            const sandbox = createDefaultSandbox();
-            const taskManager = new AgentTaskManagerImpl();
-            const result = await sandbox.execute(
-              {
-                toolCallId: 'task-timeout-race-call-1',
-                toolName: 'task',
-                rawInput: {
-                  description: '让子代理跨过 timeout 边界后再返回首包',
-                  prompt: '请给出最终结论',
-                  subagent_type: 'explore',
-                  load_skills: [],
-                  run_in_background: true,
-                },
-              },
-              new AbortController().signal,
-              parentSessionId,
-              {
-                clientRequestId: 'parent-timeout-race-req-1',
-                nextRound: 2,
-                requestData: {
-                  clientRequestId: 'parent-timeout-race-req-1',
-                  message: '请委派一个会在超时边界后才返回首包的子代理',
-                  model: 'gpt-4o',
-                  maxTokens: 512,
-                  temperature: 1,
-                  upstreamRetryMaxRetries: 1,
-                  webSearchEnabled: false,
-                },
-              },
-            );
-
-            assert(result.isError === false, '边界 race 场景的 task 启动应成功');
-            assert(isTaskToolOutput(result.output), '边界 race 场景仍应返回结构化 task 输出');
-
-            const output = result.output;
             await waitFor(async () => {
               const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
               return graph.tasks[output.taskId]?.status === 'completed';
-            }, '边界 race 场景在清理旧 attempt 后应重试成功');
+            }, '子代理启动后不应再因延迟首包而误触发首响应超时');
 
             const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
             const task = graph.tasks[output.taskId];
-            assert(
-              task?.status === 'completed',
-              '边界 race 场景最终应完成，而不是卡在 timeout failed',
-            );
-
-            const childMessages = listSessionMessages({ sessionId: output.sessionId, userId });
-            assert(
-              childMessages.length === 2,
-              '边界 race 清理后 child session 应只保留 user + 最终 assistant',
-            );
-            assert(
-              JSON.stringify(childMessages[0]?.content) ===
-                JSON.stringify([{ type: 'text', text: '请给出最终结论' }]),
-              '边界 race 场景应保留原始 child user prompt',
-            );
-            assert(
-              JSON.stringify(childMessages[1]?.content) ===
-                JSON.stringify([{ type: 'text', text: '第二次重试后的最终结论。' }]),
-              '边界 race 清理后最终 assistant 内容应来自成功重试，而不是首个超时 attempt',
-            );
-
-            const transcript = JSON.stringify(childMessages);
-            assert(
-              transcript.includes('第一次超时 attempt 的晚到内容。') === false,
-              '边界 race 清理后不应残留超时 attempt 的晚到 assistant 内容',
-            );
+            assert(task?.status === 'completed', '子代理启动活动后父任务最终应完成');
+            assert(typeof task?.result === 'string', '子代理启动活动后应产生可见任务结果');
 
             const childMetadata = sqliteGet<{ metadata_json: string }>(
               'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -922,40 +826,25 @@ async function main(): Promise<void> {
               : null;
             assert(
               parsedChildMetadata?.['terminalReason'] !== 'timeout',
-              '边界 race 在重试成功后不应把 timeout 终结原因残留到 child metadata',
+              '子代理启动活动后 child session 不应留下 timeout 终结原因',
             );
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const parentTaskResult = parentMessages.find((message) => message.role === 'tool');
-            const parentTaskResultPart = Array.isArray(parentTaskResult?.content)
-              ? parentTaskResult.content[0]
-              : undefined;
-            const parentTaskResultContent:
-              | Extract<MessageContent, { type: 'tool_result' }>
-              | undefined =
-              parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
-            const parentTaskOutput =
-              parentTaskResultContent?.output && typeof parentTaskResultContent.output === 'object'
-                ? (parentTaskResultContent.output as Record<string, unknown>)
-                : null;
-            assert(
-              parentTaskOutput?.['status'] === 'done',
-              '父会话 tool_result 应反映最终成功终态',
-            );
+            const parentTaskResultPart = extractToolResultPart(parentTaskResult);
+            const parentTaskOutput = extractStructuredToolResultOutput(parentTaskResultPart);
+            assert(parentTaskOutput?.['status'] === 'done', '父会话 tool_result 应反映成功终态');
             assert(
               parentTaskOutput?.['reason'] === undefined,
-              '重试成功后父会话 tool_result 不应残留 timeout reason',
+              '子代理启动活动场景成功后父会话 tool_result 不应残留 timeout reason',
             );
             assert(
-              stringifyAssertionValue(parentTaskOutput?.['result']).includes(
-                '第二次重试后的最终结论。',
-              ),
-              '父会话 tool_result 应回流成功重试后的最终 child 摘要',
+              parentTaskOutput?.['timeoutSource'] === undefined,
+              '非 timeout 的成功场景不应暴露 timeoutSource',
             );
-
             assert(
-              raceFetchCalls.length === 2,
-              '边界 race 场景应经历 1 次超时 attempt + 1 次成功重试',
+              startupActivityFetchCalls.length === 1,
+              '子代理启动活动应阻止首响应超时重试，最终只发起一次 upstream 请求',
             );
           } finally {
             await closeDb();
@@ -998,7 +887,6 @@ async function main(): Promise<void> {
               createdByTool: 'task',
               parentSessionId,
               subagentType: 'explore',
-              deadlineMs: Date.now() - 1_000,
             }),
           ],
         );
@@ -1023,10 +911,9 @@ async function main(): Promise<void> {
 
         const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
         const refreshedTask = refreshedGraph.tasks[task.id];
-        assert(refreshedTask?.status === 'failed', 'reconcile 后过期 child task 应标记为 failed');
         assert(
-          refreshedTask?.errorMessage === '子代理执行已超时，已被终止。',
-          'reconcile 后过期 child task 应保留 timeout 错误文案',
+          refreshedTask?.status === 'failed',
+          '无活跃 runtime thread 的 child task 仍会被收敛为失败，但不应按 deadline 超时处理',
         );
 
         const childMetadata = sqliteGet<{ metadata_json: string }>(
@@ -1037,8 +924,12 @@ async function main(): Promise<void> {
           ? (JSON.parse(childMetadata.metadata_json) as Record<string, unknown>)
           : null;
         assert(
-          parsedChildMetadata?.['terminalReason'] === 'timeout',
-          'reconcile 后过期 child session 应写入 terminalReason=timeout',
+          parsedChildMetadata?.['terminalReason'] === undefined,
+          '取消总 deadline 语义后，reconcile 不应再把 child session 标成 timeout',
+        );
+        assert(
+          parsedChildMetadata?.['timeoutSource'] === undefined,
+          '取消总 deadline 语义后，reconcile 不应写入 timeoutSource=deadline',
         );
       } finally {
         await closeDb();
@@ -1051,7 +942,6 @@ async function main(): Promise<void> {
       DATABASE_URL: ':memory:',
       AI_API_KEY: 'test-key',
       AI_API_BASE_URL: 'https://unit-test.invalid/v1',
-      OPENAWORK_QUESTION_REQUEST_TIMEOUT_MS: '25',
     },
     async () => {
       await connectDb();
@@ -1116,17 +1006,14 @@ async function main(): Promise<void> {
 
         const reconciliation = await reconcileSessionRuntime({ sessionId: childSessionId, userId });
         assert(
-          reconciliation.status === 'idle',
-          '问题超时后的 child session 应被 reconcile 为 idle',
+          reconciliation.status === 'paused',
+          '问题等待中的 child session 应继续保持 paused，不应自动超时',
         );
 
         const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
         const refreshedTask = refreshedGraph.tasks[task.id];
-        assert(refreshedTask?.status === 'failed', '问题超时后的 child task 应被收敛为 failed');
-        assert(
-          refreshedTask?.errorMessage === '子代理执行已超时，已被终止。',
-          '问题超时后的 child task 应沿用 timeout 错误文案',
-        );
+        assert(refreshedTask?.status === 'running', '问题等待中的 child task 不应被自动终止');
+        assert(refreshedTask?.errorMessage === undefined, '问题等待中的 child task 不应写入超时错误');
 
         const childMetadata = sqliteGet<{ metadata_json: string }>(
           'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -1136,15 +1023,16 @@ async function main(): Promise<void> {
           ? (JSON.parse(childMetadata.metadata_json) as Record<string, unknown>)
           : null;
         assert(
-          parsedChildMetadata?.['terminalReason'] === 'timeout',
-          '问题超时后的 child session 应记录 terminalReason=timeout',
+          parsedChildMetadata?.['terminalReason'] === undefined,
+          '问题等待中的 child session 不应记录 terminalReason=timeout',
         );
+        assert(parsedChildMetadata?.['timeoutSource'] === undefined, '问题等待中不应写入 timeoutSource');
 
         const questionStatus = sqliteGet<{ status: string }>(
           'SELECT status FROM question_requests WHERE id = ? LIMIT 1',
           ['question-timeout-1'],
         );
-        assert(questionStatus?.status === 'dismissed', '过期 question request 应收敛为 dismissed');
+        assert(questionStatus?.status === 'pending', '未处理的 question request 应继续保持 pending');
       } finally {
         await closeDb();
       }

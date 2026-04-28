@@ -255,6 +255,131 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.patch(
+    '/workflows/templates/:id',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'workflow.template.update');
+      const user = request.user as JwtPayload;
+      const { id } = request.params as { id: string };
+
+      const lookupStep = child('lookup', undefined, { templateId: id });
+      const existing = sqliteGet<TemplateRow>(
+        `SELECT id, name, description, category, metadata_json, nodes_json, edges_json, created_at, updated_at
+         FROM workflow_templates WHERE id = ? AND user_id = ?`,
+        [id, user.sub],
+      );
+      if (!existing) {
+        lookupStep.fail('template not found');
+        step.fail('template not found');
+        return reply.status(404).send({ error: 'Template not found' });
+      }
+      lookupStep.succeed();
+
+      const patchSchema = z.object({
+        name: z.string().min(1).optional(),
+        description: z.string().nullable().optional(),
+        metadata: z
+          .object({
+            teamTemplate: z
+              .object({
+                defaultBindings: z
+                  .object({
+                    leader: z.union([z.string().min(1), roleBindingSchema]).optional(),
+                    planner: z.union([z.string().min(1), roleBindingSchema]).optional(),
+                    researcher: z.union([z.string().min(1), roleBindingSchema]).optional(),
+                    executor: z.union([z.string().min(1), roleBindingSchema]).optional(),
+                    reviewer: z.union([z.string().min(1), roleBindingSchema]).optional(),
+                  })
+                  .optional(),
+                defaultProvider: z.string().nullable().optional(),
+                optionalAgentIds: z.array(z.string().min(1)).optional(),
+                requiredRoles: z
+                  .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
+                  .optional(),
+                templateScale: z
+                  .enum(['small', 'medium', 'large', 'full'])
+                  .nullable()
+                  .optional(),
+                templateFocus: z.string().nullable().optional(),
+                recommendedFor: z.string().nullable().optional(),
+                recommendedDefault: z.boolean().nullable().optional(),
+                templatePriority: z.number().nullable().optional(),
+              })
+              .optional(),
+          })
+          .optional(),
+        nodes: z.array(z.record(z.unknown())).optional(),
+        edges: z.array(z.record(z.unknown())).optional(),
+      });
+
+      const parseStep = child('parse-body');
+      const body = patchSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      const existingMetadata = JSON.parse(existing.metadata_json || '{}') as Record<string, unknown>;
+      const mergedMetadata = body.data.metadata
+        ? { ...existingMetadata, ...body.data.metadata }
+        : existingMetadata;
+
+      if (body.data.metadata?.teamTemplate && existing.category === 'team-playbook') {
+        const existingTeamTemplate = (existingMetadata as { teamTemplate?: Record<string, unknown> })
+          ?.teamTemplate;
+        mergedMetadata.teamTemplate = {
+          ...(existingTeamTemplate ?? {}),
+          ...body.data.metadata.teamTemplate,
+          ...(body.data.metadata.teamTemplate.defaultBindings
+            ? {
+                defaultBindings: {
+                  ...((existingTeamTemplate as { defaultBindings?: Record<string, unknown> })
+                    ?.defaultBindings ?? {}),
+                  ...body.data.metadata.teamTemplate.defaultBindings,
+                },
+              }
+            : {}),
+        };
+      }
+
+      const newName = body.data.name ?? existing.name;
+      const newDescription = body.data.description !== undefined ? body.data.description : existing.description;
+      const newNodes = body.data.nodes ?? (JSON.parse(existing.nodes_json) as unknown[]);
+      const newEdges = body.data.edges ?? (JSON.parse(existing.edges_json) as unknown[]);
+
+      const updateStep = child('update', undefined, { templateId: id });
+      sqliteRun(
+        `UPDATE workflow_templates SET name = ?, description = ?, metadata_json = ?, nodes_json = ?, edges_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+        [
+          newName,
+          newDescription,
+          JSON.stringify(mergedMetadata),
+          JSON.stringify(newNodes),
+          JSON.stringify(newEdges),
+          id,
+          user.sub,
+        ],
+      );
+      updateStep.succeed();
+      step.succeed(undefined, { templateId: id });
+
+      return reply.send({
+        id,
+        name: newName,
+        description: newDescription,
+        category: existing.category,
+        metadata: mergedMetadata,
+        nodes: newNodes,
+        edges: newEdges,
+        createdAt: existing.created_at,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+  );
+
   app.delete(
     '/workflows/templates/:id',
     { onRequest: [requireAuth] },

@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import {
+  mapPermissionRequestRow,
+  parseApprovedPermissionResumePayload,
+  parsePermissionRequestClientRequestId,
+  permissionDecisionSchema,
+  permissionRiskLevelSchema,
+  type PermissionDecision,
+  type PermissionRequestStatus,
+  type PermissionRiskLevel,
+} from '../permission-contract.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
@@ -10,27 +20,27 @@ import {
 } from '../session-permission-events.js';
 import { publishSessionRunEvent } from '../session-run-events.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { terminateTaskChildSessionAsTimeout } from '../tool-sandbox.js';
+import { setPersistedSessionStateStatus } from './stream.js';
 import {
-  type ApprovedPermissionResumePayload,
-  setPersistedSessionStateStatus,
-  streamRequestSchema as permissionResumeRequestSchema,
-} from './stream.js';
-import { resumeApprovedPermissionRequest } from './stream-runtime.js';
+  resumeApprovedPermissionRequest,
+  resumeRejectedPermissionRequest,
+} from './stream-runtime.js';
 import { persistWorkspacePermanentPermission } from '../workspace-safety.js';
+import { resolvePermissionCategory } from '@openAwork/agent-core';
 
 const createPermissionRequestSchema = z.object({
   toolName: z.string().min(1),
   scope: z.string().min(1),
   reason: z.string().min(1),
-  riskLevel: z.enum(['low', 'medium', 'high']),
+  riskLevel: permissionRiskLevelSchema,
   previewAction: z.string().optional(),
   clientRequestId: z.string().min(1).max(128).optional(),
 });
 
 const replyPermissionSchema = z.object({
   requestId: z.string().min(1),
-  decision: z.enum(['once', 'session', 'permanent', 'reject']),
+  decision: permissionDecisionSchema,
+  feedback: z.string().max(2000).optional(),
 });
 
 interface SessionOwnershipRow {
@@ -44,13 +54,27 @@ interface PermissionRequestRow {
   tool_name: string;
   scope: string;
   reason: string;
-  risk_level: 'low' | 'medium' | 'high';
+  risk_level: PermissionRiskLevel;
   preview_action: string | null;
-  status: 'pending' | 'approved' | 'rejected' | 'consumed';
-  decision: 'once' | 'session' | 'permanent' | 'reject' | null;
+  status: PermissionRequestStatus | 'consumed';
+  decision: PermissionDecision | null;
   request_payload_json: string | null;
   expires_at: number | null;
+  always_json: string | null;
   created_at: string;
+}
+
+function parseAlwaysJson(raw: string | null): string[] {
+  if (!raw) return ['*'];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((v): v is string => typeof v === 'string' && v.length > 0);
+    }
+  } catch {
+    // fall through
+  }
+  return ['*'];
 }
 
 export function expirePendingPermissionRequests(input: {
@@ -102,18 +126,16 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const expiredCount = expirePendingPermissionRequests({ nowMs: Date.now(), sessionId });
-      if (expiredCount > 0) {
-        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
-      }
-
       const requests = sqliteAll<PermissionRequestRow>(
         `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
          FROM permission_requests
          WHERE session_id = ? AND status = 'pending'
          ORDER BY created_at ASC`,
         [sessionId],
-      ).map(mapPermissionRequestRow);
+      ).flatMap((row) => {
+        const mapped = mapPermissionRequestRow(row);
+        return mapped ? [mapped] : [];
+      });
 
       step.succeed(undefined, { count: requests.length });
       return reply.send({ requests });
@@ -143,10 +165,6 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
 
       const requestId = randomUUID();
       const clientRequestId = body.data.clientRequestId ?? `permission:${requestId}`;
-      const expiresAt = (() => {
-        const timeoutMs = getPermissionRequestTimeoutMs();
-        return typeof timeoutMs === 'number' ? Date.now() + timeoutMs : null;
-      })();
       sqliteRun(
         `INSERT INTO permission_requests
          (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, status)
@@ -160,7 +178,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           body.data.riskLevel,
           body.data.previewAction ?? null,
           JSON.stringify({ clientRequestId }),
-          expiresAt,
+          null,
         ],
       );
 
@@ -188,7 +206,17 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { requestId });
       return reply.status(201).send({
         request: createdRequest
-          ? mapPermissionRequestRow(createdRequest)
+          ? (mapPermissionRequestRow(createdRequest) ?? {
+              requestId,
+              sessionId,
+              toolName: body.data.toolName,
+              scope: body.data.scope,
+              reason: body.data.reason,
+              riskLevel: body.data.riskLevel,
+              previewAction: body.data.previewAction,
+              status: 'pending',
+              createdAt: new Date().toISOString(),
+            })
           : {
               requestId,
               sessionId,
@@ -226,7 +254,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const permissionRequest = sqliteGet<PermissionRequestRow>(
-        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
          FROM permission_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
@@ -235,16 +263,6 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       if (!permissionRequest) {
         step.fail('permission request not found');
         return reply.status(404).send({ error: 'Permission request not found' });
-      }
-      if (
-        permissionRequest.status === 'pending' &&
-        typeof permissionRequest.expires_at === 'number' &&
-        permissionRequest.expires_at <= Date.now()
-      ) {
-        expirePendingPermissionRequests({ nowMs: Date.now(), sessionId });
-        await terminateTaskChildSessionAsTimeout({ childSessionId: sessionId, userId: user.sub });
-        step.fail('permission request expired');
-        return reply.status(409).send({ error: 'Permission request expired' });
       }
       if (permissionRequest.status !== 'pending') {
         step.fail('permission request already resolved');
@@ -277,34 +295,81 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (body.data.decision === 'permanent') {
-        persistWorkspacePermanentPermission({
-          sessionId,
-          toolName: permissionRequest.tool_name,
-          scope: permissionRequest.scope,
-        });
+        // Use always patterns (from opencode ctx.ask always) for broad approval.
+        // e.g. approving edit with always:["*"] → write rule { permission: "edit", pattern: "*" }
+        const category = resolvePermissionCategory(permissionRequest.tool_name);
+        const alwaysPatterns = parseAlwaysJson(permissionRequest.always_json);
+        for (const pattern of alwaysPatterns) {
+          persistWorkspacePermanentPermission({
+            sessionId,
+            toolName: category,
+            scope: pattern,
+          });
+        }
+      }
+
+      // Cascade reject: when rejecting, also reject all other pending requests in the same session.
+      // This mirrors opencode's behavior where rejecting one permission cascades to all pending.
+      const cascadedRequestIds: string[] = [];
+      if (body.data.decision === 'reject') {
+        const otherPending = sqliteAll<PermissionRequestRow>(
+          `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+           FROM permission_requests
+           WHERE session_id = ? AND status = 'pending' AND id != ?
+           ORDER BY created_at ASC`,
+          [sessionId, body.data.requestId],
+        );
+        for (const pending of otherPending) {
+          sqliteRun(
+            `UPDATE permission_requests
+             SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
+             WHERE id = ? AND session_id = ? AND status = 'pending'`,
+            [pending.id, sessionId],
+          );
+          const pendingClientRequestId = parsePermissionRequestClientRequestId(
+            pending.request_payload_json,
+          );
+          publishSessionRunEvent(
+            sessionId,
+            createPermissionRepliedEvent({ requestId: pending.id, decision: 'reject' }),
+            pendingClientRequestId ? { clientRequestId: pendingClientRequestId } : undefined,
+          );
+          cascadedRequestIds.push(pending.id);
+        }
       }
 
       const requestClientRequestId = parsePermissionRequestClientRequestId(
         permissionRequest.request_payload_json,
       );
-      const resumePayload =
-        body.data.decision === 'reject'
-          ? null
-          : parseApprovedPermissionResumePayload(permissionRequest.request_payload_json);
+      const resumePayload = parseApprovedPermissionResumePayload(
+        permissionRequest.request_payload_json,
+      );
       publishSessionRunEvent(
         sessionId,
         createPermissionRepliedEvent({
           requestId: body.data.requestId,
           decision: body.data.decision,
+          ...(body.data.decision === 'reject' && body.data.feedback
+            ? { feedback: body.data.feedback }
+            : {}),
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
+
+      // Continue-on-deny: when enabled, feed the rejection as a tool error and
+      // resume the LLM loop so it can try a different approach.
+      const continueOnDeny =
+        body.data.decision === 'reject' &&
+        resumePayload &&
+        process.env['OPENAWORK_CONTINUE_ON_DENY'] === 'true';
+
       setPersistedSessionStateStatus({
         sessionId,
-        status: body.data.decision === 'reject' ? 'idle' : 'running',
+        status: body.data.decision === 'reject' && !continueOnDeny ? 'idle' : 'running',
         userId: user.sub,
       });
-      if (resumePayload) {
+
+      if (body.data.decision !== 'reject' && resumePayload) {
         void resumeApprovedPermissionRequest({
           payload: {
             ...resumePayload,
@@ -318,26 +383,31 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
             'failed to auto-resume approved permission request',
           );
         });
+      } else if (continueOnDeny && resumePayload) {
+        void resumeRejectedPermissionRequest({
+          payload: {
+            ...resumePayload,
+            toolName: permissionRequest.tool_name,
+          },
+          feedback: body.data.feedback,
+          sessionId,
+          userId: user.sub,
+        }).catch((error) => {
+          request.log.error(
+            { err: error, requestId: body.data.requestId, sessionId },
+            'failed to resume after rejected permission (continue-on-deny)',
+          );
+        });
       }
 
-      step.succeed(undefined, { requestId: body.data.requestId, decision: body.data.decision });
+      step.succeed(undefined, {
+        requestId: body.data.requestId,
+        decision: body.data.decision,
+        ...(cascadedRequestIds.length > 0 ? { cascadedCount: cascadedRequestIds.length } : {}),
+      });
       return reply.send({ ok: true });
     },
   );
-}
-
-function getPermissionRequestTimeoutMs(): number | undefined {
-  const raw = process.env['OPENAWORK_PERMISSION_REQUEST_TIMEOUT_MS'];
-  if (!raw) {
-    return undefined;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return undefined;
-  }
-
-  return Math.floor(parsed);
 }
 
 function ownsSession(sessionId: string, userId: string): boolean {
@@ -346,99 +416,4 @@ function ownsSession(sessionId: string, userId: string): boolean {
     [sessionId, userId],
   );
   return session !== undefined;
-}
-
-function mapPermissionRequestRow(row: PermissionRequestRow) {
-  return {
-    requestId: row.id,
-    sessionId: row.session_id,
-    toolName: row.tool_name,
-    scope: row.scope,
-    reason: row.reason,
-    riskLevel: row.risk_level,
-    previewAction: row.preview_action ?? undefined,
-    status: row.status,
-    decision: row.decision ?? undefined,
-    createdAt: row.created_at,
-  };
-}
-
-function parseApprovedPermissionResumePayload(
-  payloadJson: string | null,
-): Omit<ApprovedPermissionResumePayload, 'toolName'> | null {
-  if (!payloadJson) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    const clientRequestId =
-      typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-    const toolCallId = typeof parsed['toolCallId'] === 'string' ? parsed['toolCallId'] : null;
-    const nextRound = typeof parsed['nextRound'] === 'number' ? parsed['nextRound'] : null;
-    const rawInput =
-      parsed['rawInput'] && typeof parsed['rawInput'] === 'object'
-        ? (parsed['rawInput'] as Record<string, unknown>)
-        : null;
-    const requestDataCandidate =
-      parsed['requestData'] && typeof parsed['requestData'] === 'object'
-        ? (parsed['requestData'] as Record<string, unknown>)
-        : null;
-
-    if (
-      !clientRequestId ||
-      !toolCallId ||
-      nextRound === null ||
-      !rawInput ||
-      !requestDataCandidate
-    ) {
-      return null;
-    }
-
-    const requestData = permissionResumeRequestSchema.parse(requestDataCandidate);
-    const observabilityCandidate =
-      parsed['observability'] && typeof parsed['observability'] === 'object'
-        ? (parsed['observability'] as Record<string, unknown>)
-        : null;
-    return {
-      clientRequestId,
-      nextRound,
-      requestData,
-      toolCallId,
-      rawInput,
-      ...(observabilityCandidate
-        ? {
-            observability: {
-              presentedToolName:
-                typeof observabilityCandidate['presentedToolName'] === 'string'
-                  ? observabilityCandidate['presentedToolName']
-                  : 'unknown',
-              canonicalToolName:
-                typeof observabilityCandidate['canonicalToolName'] === 'string'
-                  ? observabilityCandidate['canonicalToolName']
-                  : 'unknown',
-              adapterVersion:
-                typeof observabilityCandidate['adapterVersion'] === 'string'
-                  ? observabilityCandidate['adapterVersion']
-                  : '1.0.0',
-            },
-          }
-        : {}),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parsePermissionRequestClientRequestId(payloadJson: string | null): string | null {
-  if (!payloadJson) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    return typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-  } catch {
-    return null;
-  }
 }

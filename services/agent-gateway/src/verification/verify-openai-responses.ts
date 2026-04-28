@@ -14,6 +14,8 @@ import { withTempEnv } from './task-verification-helpers.js';
 type ScenarioName =
   | 'text'
   | 'tool'
+  | 'tool_plain_reasoning'
+  | 'tool_metadata_reasoning'
   | 'tool_error'
   | 'tool_error_recovery'
   | 'tool_empty_args'
@@ -88,6 +90,18 @@ async function main(): Promise<void> {
             return;
           }
 
+          // These scenarios assert round-2 replay invariants and may need to
+          // respond with 502 — they manage their own writeHead so the early
+          // 200 below would otherwise corrupt the response (ERR_HTTP_HEADERS_SENT).
+          if (scenario === 'tool_metadata_reasoning') {
+            handleToolMetadataReasoningScenario(body, res);
+            return;
+          }
+          if (scenario === 'tool_plain_reasoning') {
+            handleToolPlainReasoningScenario(body, res);
+            return;
+          }
+
           res.writeHead(200, { 'Content-Type': 'text/event-stream' });
 
           switch (scenario) {
@@ -157,6 +171,18 @@ async function main(): Promise<void> {
 
         await verifyTextScenario({ accessToken, app, capturedRequests, userId: adminId });
         await verifyToolScenario({ accessToken, app, capturedRequests, userId: adminId });
+        await verifyToolPlainReasoningScenario({
+          accessToken,
+          app,
+          capturedRequests,
+          userId: adminId,
+        });
+        await verifyToolMetadataReasoningScenario({
+          accessToken,
+          app,
+          capturedRequests,
+          userId: adminId,
+        });
         await verifyToolEmptyArgsScenario({ accessToken, app, capturedRequests, userId: adminId });
         await verifyResponsesToolEofScenario({
           accessToken,
@@ -202,6 +228,7 @@ function configureOpenAIProvider(userId: string): void {
       enabled: true,
       baseUrl: `http://127.0.0.1:${RESPONSES_PORT}`,
       apiKey: 'test-key',
+      upstreamProtocol: 'responses',
       defaultModels: [{ id: OPENAI_ALIAS_MODEL, label: 'Team Alias', enabled: true }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -351,6 +378,130 @@ async function verifyToolScenario(input: VerificationContext): Promise<void> {
   assertResponsesPayloadShape(toolRequests[1]!.body, 'provider alias responses 工具验证');
   if (!hasFunctionCallOutput(toolRequests[1]!.body)) {
     throw new Error('expected second tool scenario request to include function_call_output');
+  }
+}
+
+async function verifyToolPlainReasoningScenario(input: VerificationContext): Promise<void> {
+  const sessionId = await createSession(input.app, input.accessToken);
+  const response = await streamScenario({
+    app: input.app,
+    accessToken: input.accessToken,
+    sessionId,
+    message: 'provider alias responses 本地推理工具验证',
+    clientRequestId: 'req-responses-tool-plain-reasoning',
+  });
+
+  assertStatus(response.statusCode, 200, 'tool plain reasoning scenario status');
+  const events = parseSseChunks(response.body);
+  assertEvent(
+    events,
+    (event) => event['type'] === 'thinking_delta' && event['delta'] === '先分析项目结构。',
+    'tool plain reasoning scenario emits thinking delta',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'tool_call_delta' && event['toolName'] === DISABLED_TOOL_NAME,
+    'tool plain reasoning scenario emits tool_call_delta',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'tool_result' && event['toolName'] === DISABLED_TOOL_NAME,
+    'tool plain reasoning scenario emits tool_result',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'text_delta' && event['delta'] === '本地推理工具链路完成',
+    'tool plain reasoning scenario final text',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+    'tool plain reasoning scenario final done',
+  );
+
+  const requests = scenarioRequests(input.capturedRequests, 'tool_plain_reasoning');
+  if (requests.length < 2) {
+    throw new Error(
+      `expected plain reasoning tool scenario to issue at least 2 upstream requests, got ${requests.length}`,
+    );
+  }
+  assertRequestsPath(requests, '/responses', 'tool plain reasoning scenario path');
+  assertResponsesPayloadShape(requests[0]!.body, 'provider alias responses 本地推理工具验证');
+  assertResponsesPayloadShape(requests[1]!.body, 'provider alias responses 本地推理工具验证');
+  if (!hasFunctionCallOutput(requests[1]!.body)) {
+    throw new Error('expected plain reasoning second request to include function_call_output');
+  }
+  if (hasResponsesReasoningItem(requests[1]!.body)) {
+    throw new Error('plain reasoning second request should not replay a Responses reasoning item');
+  }
+}
+
+async function verifyToolMetadataReasoningScenario(input: VerificationContext): Promise<void> {
+  const sessionId = await createSession(input.app, input.accessToken);
+  const response = await streamScenario({
+    app: input.app,
+    accessToken: input.accessToken,
+    sessionId,
+    message: 'provider alias responses 元数据推理工具验证',
+    clientRequestId: 'req-responses-tool-metadata-reasoning',
+  });
+
+  assertStatus(response.statusCode, 200, 'tool metadata reasoning scenario status');
+  const events = parseSseChunks(response.body);
+  assertNoEvent(
+    events,
+    (event) => event['type'] === 'thinking_delta',
+    'tool metadata reasoning scenario should not emit thinking delta',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'tool_call_delta' && event['toolName'] === DISABLED_TOOL_NAME,
+    'tool metadata reasoning scenario emits tool_call_delta',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'tool_result' && event['toolName'] === DISABLED_TOOL_NAME,
+    'tool metadata reasoning scenario emits tool_result',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'text_delta' && event['delta'] === '元数据推理工具链路完成',
+    'tool metadata reasoning scenario final text',
+  );
+  assertEvent(
+    events,
+    (event) => event['type'] === 'done' && event['stopReason'] === 'end_turn',
+    'tool metadata reasoning scenario final done',
+  );
+
+  const requests = scenarioRequests(input.capturedRequests, 'tool_metadata_reasoning');
+  if (requests.length < 2) {
+    throw new Error(
+      `expected metadata reasoning tool scenario to issue at least 2 upstream requests, got ${requests.length}`,
+    );
+  }
+  assertRequestsPath(requests, '/responses', 'tool metadata reasoning scenario path');
+  assertResponsesPayloadShape(requests[0]!.body, 'provider alias responses 元数据推理工具验证');
+  assertResponsesPayloadShape(requests[1]!.body, 'provider alias responses 元数据推理工具验证');
+  if (!hasFunctionCallOutput(requests[1]!.body)) {
+    throw new Error('expected metadata reasoning second request to include function_call_output');
+  }
+  const reasoningItem = getResponsesReasoningItem(requests[1]!.body);
+  if (!reasoningItem) {
+    throw new Error('metadata reasoning second request should replay a Responses reasoning item');
+  }
+  if (reasoningItem['encrypted_content'] !== 'enc_meta_1') {
+    throw new Error('metadata reasoning second request should preserve encrypted_content');
+  }
+  const summary = reasoningItem['summary'];
+  if (
+    !Array.isArray(summary) ||
+    summary[0] === undefined ||
+    typeof summary[0] !== 'object' ||
+    Array.isArray(summary[0]) ||
+    summary[0]['text'] !== '读取仓库结构后再决定是否调用工具。'
+  ) {
+    throw new Error('metadata reasoning second request should preserve summary_text');
   }
 }
 
@@ -556,7 +707,7 @@ async function verifyErrorScenario(input: VerificationContext): Promise<void> {
       event['type'] === 'error' &&
       event['code'] === 'MODEL_ERROR' &&
       event['status'] === 502 &&
-      event['message'] === 'Upstream request failed (502): simulated upstream failure',
+      String(event['message']).includes('simulated upstream failure'),
     'error scenario emits MODEL_ERROR',
   );
   assertSingleEvent(events, (event) => event['type'] === 'error', 'error scenario error count');
@@ -580,7 +731,7 @@ async function verifyRecoveryAfterErrorScenario(input: VerificationContext): Pro
     (event) =>
       event['type'] === 'error' &&
       event['code'] === 'MODEL_ERROR' &&
-      event['message'] === 'Upstream request failed (502): simulated upstream failure',
+      String(event['message']).includes('simulated upstream failure'),
     'error then recover first request emits MODEL_ERROR',
   );
   assertSessionStateStatus(sessionId, 'idle', 'error then recover state after failure');
@@ -642,7 +793,7 @@ async function verifyRecoveryAfterToolErrorScenario(input: VerificationContext):
     (event) =>
       event['type'] === 'error' &&
       event['code'] === 'MODEL_ERROR' &&
-      event['message'] === 'Upstream request failed (502): simulated tool recovery failure',
+      String(event['message']).includes('simulated tool recovery failure'),
     'tool error then recover first request emits MODEL_ERROR',
   );
   assertNoEvent(
@@ -734,6 +885,109 @@ function handleToolScenario(body: Record<string, unknown>, res: ServerResponse):
   }
 
   writeTextCompletion(res, '工具链路完成');
+}
+
+function handleToolPlainReasoningScenario(
+  body: Record<string, unknown>,
+  res: ServerResponse,
+): void {
+  if (!hasFunctionCallOutput(body)) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    writeResponseEvent(res, 'response.reasoning_text.delta', {
+      item_id: 'rs_plain_1',
+      output_index: 0,
+      delta: '先分析项目结构。',
+    });
+    writeResponseEvent(res, 'response.output_item.added', {
+      output_index: 0,
+      item: {
+        id: 'fc_plain_reasoning',
+        type: 'function_call',
+        call_id: 'call_plain_reasoning',
+        name: DISABLED_TOOL_NAME,
+        arguments: '{}',
+      },
+    });
+    writeResponseEvent(res, 'response.completed', {
+      response: {
+        output: [
+          {
+            id: 'fc_plain_reasoning',
+            type: 'function_call',
+            call_id: 'call_plain_reasoning',
+            name: DISABLED_TOOL_NAME,
+            arguments: '{}',
+          },
+        ],
+      },
+    });
+    res.end();
+    return;
+  }
+
+  if (hasResponsesReasoningItem(body)) {
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({ error: { message: 'plain reasoning replay leaked into round 2 request' } }),
+    );
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+  writeTextCompletion(res, '本地推理工具链路完成');
+}
+
+function handleToolMetadataReasoningScenario(
+  body: Record<string, unknown>,
+  res: ServerResponse,
+): void {
+  if (!hasFunctionCallOutput(body)) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    writeResponseEvent(res, 'response.output_item.added', {
+      output_index: 0,
+      item: {
+        id: 'fc_metadata_reasoning',
+        type: 'function_call',
+        call_id: 'call_metadata_reasoning',
+        name: DISABLED_TOOL_NAME,
+        arguments: '{}',
+      },
+    });
+    writeResponseEvent(res, 'response.completed', {
+      response: {
+        output: [
+          {
+            id: 'rs_metadata_reasoning',
+            type: 'reasoning',
+            encrypted_content: 'enc_meta_1',
+            summary: [{ type: 'summary_text', text: '读取仓库结构后再决定是否调用工具。' }],
+          },
+          {
+            id: 'fc_metadata_reasoning',
+            type: 'function_call',
+            call_id: 'call_metadata_reasoning',
+            name: DISABLED_TOOL_NAME,
+            arguments: '{}',
+          },
+        ],
+      },
+    });
+    res.end();
+    return;
+  }
+
+  if (!hasResponsesReasoningItem(body)) {
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        error: { message: 'metadata-only reasoning replay was missing from round 2 request' },
+      }),
+    );
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+  writeTextCompletion(res, '元数据推理工具链路完成');
 }
 
 function handleToolErrorScenario(body: Record<string, unknown>, res: ServerResponse): void {
@@ -894,6 +1148,8 @@ function resolveScenario(body: Record<string, unknown>): ScenarioName {
   const latestUserText = extractLatestUserRequestText(body);
   const matches = (needle: string) => latestUserText.includes(needle);
 
+  if (matches('元数据推理工具验证')) return 'tool_metadata_reasoning';
+  if (matches('本地推理工具验证')) return 'tool_plain_reasoning';
   if (matches('工具错误后恢复成功')) return 'tool_error_recovery';
   if (matches('工具错误验证')) return 'tool_error';
   if (matches('provider alias chat EOF工具验证')) return 'chat_tool_eof';
@@ -997,7 +1253,9 @@ function scenarioRequests(
   capturedRequests: ScenarioRequestCapture[],
   scenario: ScenarioName,
 ): ScenarioRequestCapture[] {
-  return capturedRequests.filter((entry) => entry.scenario === scenario);
+  return capturedRequests.filter(
+    (entry) => entry.scenario === scenario && entry.body['stream'] === true,
+  );
 }
 
 function lastScenarioRequest(
@@ -1150,6 +1408,25 @@ function hasFunctionCall(body: Record<string, unknown>): boolean {
           item['type'] === 'function_call',
       )
     : false;
+}
+
+function hasResponsesReasoningItem(body: Record<string, unknown>): boolean {
+  return getResponsesReasoningItem(body) !== null;
+}
+
+function getResponsesReasoningItem(body: Record<string, unknown>): Record<string, unknown> | null {
+  const input = body['input'];
+  if (!Array.isArray(input)) {
+    return null;
+  }
+
+  const item = input.find(
+    (entry) =>
+      entry && typeof entry === 'object' && !Array.isArray(entry) && entry['type'] === 'reasoning',
+  );
+  return item && typeof item === 'object' && !Array.isArray(item)
+    ? (item as Record<string, unknown>)
+    : null;
 }
 
 function hasChatToolResult(body: Record<string, unknown>): boolean {

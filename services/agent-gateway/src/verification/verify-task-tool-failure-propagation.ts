@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
+import type { MessageContent } from '@openAwork/shared';
 import { closeDb, connectDb, migrate, sqliteRun, WORKSPACE_ROOT } from '../db.js';
 import { listSessionMessagesV2 as listSessionMessages } from '../message-v2-adapter.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
@@ -13,6 +14,7 @@ import {
 } from './task-verification-helpers.js';
 
 const EXPECTED_ERROR_SUMMARY = 'Upstream request failed (500): 子代理上游失败';
+const EXPECTED_USER_FACING_ERROR = '模型服务内部错误，请稍后重试';
 
 function readSingleTextMessage(message: {
   content: Array<{ type: string; text?: string }>;
@@ -40,6 +42,37 @@ function isTaskToolOutput(value: unknown): value is {
     typeof candidate['sessionId'] === 'string' &&
     (candidate['status'] === 'pending' || candidate['status'] === 'running')
   );
+}
+
+function extractToolResultPart(message: {
+  content?: MessageContent[];
+} | undefined): Extract<MessageContent, { type: 'tool_result' }> | undefined {
+  if (!Array.isArray(message?.content)) {
+    return undefined;
+  }
+
+  return message.content.find(
+    (part): part is Extract<MessageContent, { type: 'tool_result' }> => part.type === 'tool_result',
+  );
+}
+
+function extractStructuredToolResultOutput(
+  part: Extract<MessageContent, { type: 'tool_result' }> | undefined,
+): Record<string, unknown> | null {
+  if (!part?.output) {
+    return null;
+  }
+
+  if (typeof part.output === 'string') {
+    try {
+      const parsed = JSON.parse(part.output) as unknown;
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof part.output === 'object' ? (part.output as Record<string, unknown>) : null;
 }
 
 async function main(): Promise<void> {
@@ -131,8 +164,9 @@ async function main(): Promise<void> {
             const task = graph.tasks[taskOutput.taskId];
             assert(task?.status === 'failed', 'parent task should become failed');
             assert(
-              task.errorMessage === EXPECTED_ERROR_SUMMARY,
-              'parent task should store the extracted child error summary',
+              task.errorMessage?.includes(EXPECTED_USER_FACING_ERROR) === true &&
+                task.errorMessage?.includes(EXPECTED_ERROR_SUMMARY) === true,
+              'parent task should store the user-facing child error summary with technical detail',
             );
 
             const childMessages = listSessionMessages({
@@ -145,9 +179,12 @@ async function main(): Promise<void> {
                   message.role === 'assistant' &&
                   readSingleTextMessage(
                     message as { content: Array<{ type: string; text?: string }> },
-                  ) === `[错误: MODEL_ERROR] ${EXPECTED_ERROR_SUMMARY}`,
+                  ).includes(EXPECTED_USER_FACING_ERROR) &&
+                  readSingleTextMessage(
+                    message as { content: Array<{ type: string; text?: string }> },
+                  ).includes(EXPECTED_ERROR_SUMMARY),
               ),
-              'child session should persist the upstream failure as an assistant error message',
+              'child session should persist the user-facing upstream failure with technical detail',
             );
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
@@ -165,22 +202,20 @@ async function main(): Promise<void> {
               parentToolMessage?.role === 'tool',
               'parent session should persist a tool_result',
             );
-            const toolPart = parentToolMessage?.content[0];
+            const toolPart = extractToolResultPart(parentToolMessage);
             assert(
               toolPart && toolPart.type === 'tool_result',
               'parent tool message should be tool_result',
             );
-            const toolOutput =
-              toolPart.output && typeof toolPart.output === 'object'
-                ? (toolPart.output as Record<string, unknown>)
-                : null;
+            const toolOutput = extractStructuredToolResultOutput(toolPart);
             assert(
               toolOutput?.['status'] === 'failed',
               'parent tool_result should mark failed status',
             );
             assert(
-              toolOutput?.['errorMessage'] === EXPECTED_ERROR_SUMMARY,
-              'parent tool_result should expose the extracted child error summary',
+              String(toolOutput?.['errorMessage'] ?? '').includes(EXPECTED_USER_FACING_ERROR) &&
+                String(toolOutput?.['errorMessage'] ?? '').includes(EXPECTED_ERROR_SUMMARY),
+              'parent tool_result should expose the user-facing child error summary with technical detail',
             );
 
             const reminderText = readSingleTextMessage(
@@ -199,9 +234,10 @@ async function main(): Promise<void> {
               'failure reminder should be marked error',
             );
             assert(
-              reminderPayload.payload?.message?.includes(`错误：${EXPECTED_ERROR_SUMMARY}`) ===
-                true,
-              'failure reminder should include the extracted error summary',
+              reminderPayload.payload?.message?.includes(`错误：${EXPECTED_USER_FACING_ERROR}`) ===
+                true &&
+                reminderPayload.payload?.message?.includes(EXPECTED_ERROR_SUMMARY) === true,
+              'failure reminder should include the user-facing error summary with technical detail',
             );
 
             console.log('verify-task-tool-failure-propagation: ok');

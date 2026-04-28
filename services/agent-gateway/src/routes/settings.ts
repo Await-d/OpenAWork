@@ -10,9 +10,12 @@ import {
   readCompactionSettings,
 } from '../compaction-policy.js';
 import {
+  activeSelectionSchema,
   filterEnabledProviderConfig,
+  imageGenerationDefaultsSchema,
   materializeProviderConfig,
   parseStoredDefaultThinking,
+  parseStoredImageGenerationDefaults,
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
 } from '../provider-config.js';
@@ -30,6 +33,12 @@ import {
   getCompanionSettingsKey,
   loadCompanionSettingsForUser,
 } from '../companion-settings.js';
+import {
+  loadWorkspacePermissionConfig,
+  writeWorkspacePermissionConfig,
+  PERMISSION_CATEGORIES,
+} from '@openAwork/agent-core';
+import { WORKSPACE_ROOT } from '../db.js';
 import { z } from 'zod';
 
 interface RootPackageJson {
@@ -122,6 +131,45 @@ const parseStoredJson = (value: string | undefined): unknown => {
     return null;
   }
 };
+
+function mergeActiveSelectionPreservingStored(input: {
+  incoming: unknown;
+  stored: unknown;
+}): unknown {
+  const incomingParsed = activeSelectionSchema.safeParse(input.incoming);
+  if (!incomingParsed.success) {
+    return input.stored;
+  }
+
+  const storedParsed = activeSelectionSchema.safeParse(input.stored);
+  if (!storedParsed.success) {
+    return incomingParsed.data;
+  }
+
+  return {
+    ...storedParsed.data,
+    ...incomingParsed.data,
+    chat: incomingParsed.data.chat,
+    fast: incomingParsed.data.fast,
+    compaction: incomingParsed.data.compaction ?? storedParsed.data.compaction,
+    image: incomingParsed.data.image ?? storedParsed.data.image,
+  };
+}
+
+function mergeImageGenerationDefaultsPreservingStored(input: {
+  incoming: unknown;
+  stored: unknown;
+}) {
+  const incomingParsed = imageGenerationDefaultsSchema.safeParse(input.incoming);
+  if (!incomingParsed.success) {
+    return parseStoredImageGenerationDefaults(input.stored);
+  }
+
+  return {
+    ...parseStoredImageGenerationDefaults(input.stored),
+    ...incomingParsed.data,
+  };
+}
 
 function extractAuditSummary(payload: unknown): string | null {
   if (typeof payload === 'string') {
@@ -413,6 +461,45 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get(
+    '/settings/permission-rules',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.permission-rules.list');
+      const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
+      const rules = config.rules ?? [];
+      step.succeed(undefined, { count: rules.length });
+      return reply.send({ rules, categories: PERMISSION_CATEGORIES });
+    },
+  );
+
+  app.put(
+    '/settings/permission-rules',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.permission-rules.update');
+      const bodySchema = z.object({
+        rules: z.array(
+          z.object({
+            permission: z.string().min(1),
+            pattern: z.string().min(1),
+            action: z.enum(['allow', 'deny', 'ask']),
+          }),
+        ),
+      });
+      const parsed = bodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: parsed.error.issues });
+      }
+      const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
+      const next = { ...config, rules: parsed.data.rules };
+      writeWorkspacePermissionConfig(WORKSPACE_ROOT, next);
+      step.succeed(undefined, { count: parsed.data.rules.length });
+      return reply.send({ ok: true, rules: parsed.data.rules });
+    },
+  );
+
+  app.get(
     '/settings/diagnostics',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
@@ -576,6 +663,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
         [user.sub],
       );
+      const imageDefaultsRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'image_generation_defaults'`,
+        [user.sub],
+      );
       loadStep.succeed();
 
       const materializeStep = child('materialize');
@@ -587,6 +678,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         ? filterEnabledProviderConfig(materialized)
         : materialized;
       const defaultThinking = parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
+      const imageGenerationDefaults = parseStoredImageGenerationDefaults(
+        parseStoredJson(imageDefaultsRow?.value),
+      );
       materializeStep.succeed(undefined, { providers: providers.length });
       step.succeed(undefined, { providers: providers.length });
 
@@ -594,6 +688,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         providers,
         activeSelection,
         defaultThinking,
+        imageGenerationDefaults,
       });
     },
   );
@@ -614,6 +709,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         `SELECT value FROM user_settings WHERE user_id = ? AND key = 'default_thinking'`,
         [user.sub],
       );
+      const imageDefaultsRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'image_generation_defaults'`,
+        [user.sub],
+      );
       loadSelectionStep.succeed(undefined, { found: selectionRow !== undefined });
 
       const parseStep = child('parse-body');
@@ -628,13 +727,21 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       parseStep.succeed();
 
       const materializeStep = child('materialize');
+      const mergedActiveSelection = mergeActiveSelectionPreservingStored({
+        incoming: parsed.data.activeSelection,
+        stored: parseStoredJson(selectionRow?.value),
+      });
       const { providers, activeSelection } = await materializeProviderConfig(
         parsed.data.providers,
-        parsed.data.activeSelection ?? parseStoredJson(selectionRow?.value),
+        mergedActiveSelection,
       );
       const defaultThinking = parsed.data.defaultThinking
         ? parsed.data.defaultThinking
         : parseStoredDefaultThinking(parseStoredJson(thinkingRow?.value));
+      const imageGenerationDefaults = mergeImageGenerationDefaultsPreservingStored({
+        incoming: parsed.data.imageGenerationDefaults,
+        stored: parseStoredJson(imageDefaultsRow?.value),
+      });
       materializeStep.succeed(undefined, { providers: providers.length });
 
       const saveProvidersStep = child('save-providers');
@@ -659,12 +766,20 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, JSON.stringify(defaultThinking)],
       );
       saveThinkingStep.succeed();
+      const saveImageDefaultsStep = child('save-image-generation-defaults');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'image_generation_defaults', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(imageGenerationDefaults)],
+      );
+      saveImageDefaultsStep.succeed();
       step.succeed(undefined, { providers: providers.length });
 
       return reply.send({
         providers,
         activeSelection,
         defaultThinking,
+        imageGenerationDefaults,
       });
     },
   );
@@ -708,6 +823,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({
         chat: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
         fast: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
+        image: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
         compaction: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
       });
       const parsed = schema.safeParse(request.body);
@@ -715,11 +831,34 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         step.fail('invalid body');
         return reply.status(400).send({ error: 'Invalid body' });
       }
+      const loadStep = child('load-existing');
+      const selectionRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+        [user.sub],
+      );
+      loadStep.succeed(undefined, { found: selectionRow !== undefined });
+
+      const mergedSelection = (() => {
+        const stored = parseStoredJson(selectionRow?.value);
+        const storedParsed = activeSelectionSchema.safeParse(stored);
+        const storedSelection = storedParsed.success ? storedParsed.data : undefined;
+
+        return {
+          ...(storedSelection?.chat ? { chat: storedSelection.chat } : {}),
+          ...(storedSelection?.fast ? { fast: storedSelection.fast } : {}),
+          ...(storedSelection?.image ? { image: storedSelection.image } : {}),
+          ...(storedSelection?.compaction ? { compaction: storedSelection.compaction } : {}),
+          ...(parsed.data.chat ? { chat: parsed.data.chat } : {}),
+          ...(parsed.data.fast ? { fast: parsed.data.fast } : {}),
+          ...(parsed.data.image ? { image: parsed.data.image } : {}),
+          ...(parsed.data.compaction ? { compaction: parsed.data.compaction } : {}),
+        };
+      })();
       const saveStep = child('save');
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'active_selection', ?)
          ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value`,
-        [user.sub, JSON.stringify(parsed.data)],
+        [user.sub, JSON.stringify(mergedSelection)],
       );
       saveStep.succeed();
       step.succeed();
@@ -821,6 +960,73 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         prune: parsed.data.prune,
         ...(typeof parsed.data.reserved === 'number' ? { reserved: parsed.data.reserved } : {}),
       });
+      step.succeed(undefined, { saved: true });
+
+      return reply.send(parsed.data);
+    },
+  );
+
+  // ── Plugin settings ──────────────────────────────────────────
+
+  const pluginSettingsSchema = z.object({
+    imageGeneration: z
+      .object({
+        enabled: z.boolean(),
+        modelSource: z.enum(['global', 'dedicated']).optional(),
+        dedicatedProviderId: z.string().optional(),
+        dedicatedModelId: z.string().optional(),
+      })
+      .optional(),
+  });
+
+  app.get(
+    '/settings/plugins',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.plugins.get');
+      const user = request.user as JwtPayload;
+
+      const loadStep = child('load');
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'plugin_settings'`,
+        [user.sub],
+      );
+      loadStep.succeed(undefined, { found: row !== undefined });
+
+      let settings: Record<string, unknown> = {};
+      if (row?.value) {
+        try {
+          settings = JSON.parse(row.value) as Record<string, unknown>;
+        } catch {
+          /* ignore corrupted data */
+        }
+      }
+
+      step.succeed();
+      return reply.send(settings);
+    },
+  );
+
+  app.put(
+    '/settings/plugins',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.plugins.put');
+      const user = request.user as JwtPayload;
+
+      const parsed = pluginSettingsSchema.safeParse(request.body);
+      if (!parsed.success) {
+        step.fail('invalid body');
+        return reply.status(400).send({ error: 'Invalid plugin settings', issues: parsed.error.issues });
+      }
+
+      const saveStep = child('save');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'plugin_settings', ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, JSON.stringify(parsed.data)],
+      );
+      saveStep.succeed();
       step.succeed(undefined, { saved: true });
 
       return reply.send(parsed.data);

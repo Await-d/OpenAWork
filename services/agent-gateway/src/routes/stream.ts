@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import type {
   DialogueMode,
   FileDiffContent,
+  InputImageContent,
   ManagedAgentRecord,
   MessageContent,
   RunEvent,
@@ -21,11 +22,12 @@ import {
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../model-router.js';
-import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
+import { getCompactionProviderConfig, getFastProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { isContextNearOverflow, isContextOverflow } from '../session-message-store.js';
 import {
   appendSessionMessageV2,
+  deleteSessionMessagesByRequestScope,
   getSessionMessageByRequestId,
   listSessionMessagesByRequestScope,
   listSessionMessagesV2,
@@ -47,7 +49,6 @@ import {
   deleteSessionRunEventsByRequest,
   hasPersistedRunEvent,
   listSessionRunEventsByRequest,
-  persistSessionRunEventForRequest,
   publishSessionRunEvent,
   subscribeSessionRunEvents,
 } from '../session-run-events.js';
@@ -58,10 +59,18 @@ import {
   traceFileDiffs,
 } from '../modified-files-summary.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
-import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
+import {
+  buildToolResultContent,
+  buildToolResultRunEvent,
+} from '../tool-result-contract.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tool-sandbox.js';
 import { buildGatewayToolDefinitions } from './stream-protocol.js';
+import {
+  loadDynamicToolsForWorkspace,
+  buildDynamicGatewayToolDefinitions,
+  type DynamicToolEntry,
+} from '../dynamic-tool-loader.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { isEnabledToolName } from './tool-name-compat.js';
 import { sanitizeSessionMetadataJson } from '../session-workspace-metadata.js';
@@ -89,12 +98,18 @@ import {
   type RecoveryResult,
 } from '../session-recovery.js';
 import { detectDelegateTaskError, buildRetryGuidance } from '../delegate-task-retry.js';
-import { truncateToolOutput } from '../tool-output-truncator.js';
+import { truncateToolOutputUniversal } from '../tool-output-truncator.js';
+import { normalizeToolArgumentsForStorage } from '../tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../empty-task-response-detector.js';
 import { buildDynamicOrchestratorPrompt } from '../dynamic-agent-prompt-builder.js';
 import { appendTaskResumeInfo } from '../task-resume-info.js';
 import { checkAiComments } from '../comment-checker.js';
 import { checkNonInteractiveBash, buildBannedCommandWarning } from '../non-interactive-env.js';
+import { checkAtlasGuard, buildAtlasPostProcessReminder, SINGLE_TASK_DIRECTIVE, ORCHESTRATOR_DELEGATION_REQUIRED } from '../atlas-guard.js';
+import { checkRalphLoopContinuation } from '../ralph-loop.js';
+import { detectStartWorkKeyword as detectUltraworkKeyword, processStartWork } from '../start-work.js';
+import { readBoulderState, getPlanProgress } from '../boulder-state.js';
+import { detectActiveCommandContext } from '../command-templates.js';
 import {
   checkPrometheusToolGuard,
   PLANNING_CONSULT_WARNING,
@@ -121,6 +136,7 @@ import {
 } from '../upstream-retry-policy.js';
 import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
 import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../companion-settings.js';
+import { checkDoomLoop, resetDoomLoopHistory } from '../doom-loop-detector.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -341,11 +357,41 @@ export function isWebSearchEnabled(metadataJson: string): boolean {
 
 const reasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
 
+const inputImagePartSchema = z.object({
+  type: z.literal('input_image'),
+  artifactId: z.string().trim().min(1).max(200).optional(),
+  detail: z.enum(['auto', 'high', 'low', 'original']).optional(),
+  fileId: z.string().trim().min(1).max(200).optional(),
+  fileName: z.string().trim().min(1).max(255).optional(),
+  imageUrl: z.string().trim().min(1).max(500_000).optional(),
+  mimeType: z.string().trim().min(1).max(255).optional(),
+}).superRefine((value, context) => {
+  if (!value.artifactId && !value.fileId && !value.imageUrl) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'input_image part must include artifactId, fileId, or imageUrl',
+      path: ['artifactId'],
+    });
+  }
+});
+
 export const streamRequestSchema = modelRequestSchema.omit({ model: true }).extend({
   agentId: z.string().trim().min(1).max(120).optional(),
   displayMessage: z.string().min(1).max(32768).optional(),
   dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
-  message: z.string().min(1).max(32768),
+  inputParts: z
+    .preprocess((value) => {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }, z.array(inputImagePartSchema))
+    .optional(),
+  message: z.string().max(32768),
   model: z.string().min(1).max(200).optional(),
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
@@ -391,6 +437,24 @@ export const stopStreamSchema = z.object({
 });
 
 export type StreamRequest = z.infer<typeof streamRequestSchema>;
+
+export function buildStreamUserContent(input: {
+  inputParts?: InputImageContent[];
+  message: string;
+}): MessageContent[] {
+  return [
+    ...(input.message.trim().length > 0 ? [{ type: 'text', text: input.message } satisfies MessageContent] : []),
+    ...((input.inputParts ?? []).map((part) => ({
+      type: 'input_image' as const,
+      ...(part.artifactId ? { artifactId: part.artifactId } : {}),
+      ...(part.detail ? { detail: part.detail } : {}),
+      ...(part.fileId ? { fileId: part.fileId } : {}),
+      ...(part.fileName ? { fileName: part.fileName } : {}),
+      ...(part.imageUrl ? { imageUrl: part.imageUrl } : {}),
+      ...(part.mimeType ? { mimeType: part.mimeType } : {}),
+    })) as InputImageContent[]),
+  ];
+}
 
 export function resolveStreamRequestUpstreamRetry(input: {
   metadataJson: string;
@@ -451,7 +515,6 @@ export function buildStreamToolObservability(input: {
 }
 
 export interface SessionStreamContext {
-  legacyMessagesJson: string;
   metadataJson: string;
 }
 
@@ -475,6 +538,7 @@ interface StreamInteractionModes {
 type StreamAgentDowngradeReason = 'agent_disabled' | 'agent_model_unavailable' | 'agent_not_found';
 
 interface StreamAgentSelection {
+  deferToolLoading?: boolean;
   downgradeReason?: StreamAgentDowngradeReason;
   effectiveAgentId?: string;
   modelId?: string;
@@ -582,15 +646,6 @@ function isMissingRequiredToolArguments(
   return Object.keys(rawInput).length === 0;
 }
 
-function hasReplayableLatestBookend(events: RunEvent[]): boolean {
-  const latestEvent = events.at(-1);
-  if (!latestEvent) {
-    return false;
-  }
-
-  return deriveRunEventBookend(latestEvent)?.replayable === true;
-}
-
 export function replayPersistedAssistantResponse(input: {
   clientRequestId: string;
   runId: string;
@@ -602,11 +657,22 @@ export function replayPersistedAssistantResponse(input: {
     sessionId: input.sessionId,
     clientRequestId: input.clientRequestId,
   });
-  if (durableEvents.length > 0 && hasReplayableLatestBookend(durableEvents)) {
-    durableEvents.forEach((event) => {
-      input.writeChunk(event);
-    });
-    return true;
+  if (durableEvents.length > 0) {
+    const latestBookend = deriveRunEventBookend(durableEvents.at(-1)!);
+    if (latestBookend?.kind === 'run_failed') {
+      return false;
+    }
+
+    if (latestBookend?.replayable === true) {
+      durableEvents.forEach((event) => {
+        input.writeChunk(event);
+      });
+      return true;
+    }
+
+    if (latestBookend?.replayable === false) {
+      return false;
+    }
   }
 
   const stored = getSessionMessageByRequestId({
@@ -623,10 +689,8 @@ export function replayPersistedAssistantResponse(input: {
     clientRequestId: input.clientRequestId,
   });
   const toolNames = new Map<string, string>();
+  const replayedToolResultIds = new Set<string>();
   scopedMessages.forEach((message) => {
-    if (message.role !== 'assistant' && message.role !== 'tool') {
-      return;
-    }
     message.content.forEach((content) => {
       if (content.type === 'tool_call') {
         toolNames.set(content.toolCallId, content.toolName);
@@ -635,13 +699,31 @@ export function replayPersistedAssistantResponse(input: {
   });
   let sequence = 1;
   scopedMessages.forEach((message) => {
-    if (message.role !== 'assistant' && message.role !== 'tool') {
-      return;
-    }
+    message.content.forEach((content) => {
+      const meta = {
+        eventId: `${input.runId}:replay:${sequence++}`,
+        runId: input.runId,
+        occurredAt: Date.now(),
+      };
 
-    if (message.role === 'tool') {
-      message.content.forEach((content) => {
-        if (content.type !== 'tool_result') return;
+      if (message.role === 'assistant' && content.type === 'text' && content.text.length > 0) {
+        input.writeChunk({ type: 'text_delta', delta: content.text, ...meta });
+        return;
+      }
+
+      if (message.role === 'assistant' && content.type === 'tool_call') {
+        input.writeChunk({
+          type: 'tool_call_delta',
+          toolCallId: content.toolCallId,
+          toolName: content.toolName,
+          inputDelta: normalizeToolArgumentsForStorage(content.rawArguments ?? content.input),
+          ...meta,
+        });
+        return;
+      }
+
+      if (content.type === 'tool_result' && !replayedToolResultIds.has(content.toolCallId)) {
+        replayedToolResultIds.add(content.toolCallId);
         input.writeChunk(
           buildToolResultRunEvent({
             toolCallId: content.toolCallId,
@@ -652,37 +734,10 @@ export function replayPersistedAssistantResponse(input: {
             fileDiffs: content.fileDiffs,
             pendingPermissionRequestId: content.pendingPermissionRequestId,
             observability: content.observability,
-            eventMeta: {
-              eventId: `${input.runId}:replay:${sequence++}`,
-              runId: input.runId,
-              occurredAt: Date.now(),
-            },
+            ...(content.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+            eventMeta: meta,
           }),
         );
-      });
-      return;
-    }
-
-    message.content.forEach((content) => {
-      const meta = {
-        eventId: `${input.runId}:replay:${sequence++}`,
-        runId: input.runId,
-        occurredAt: Date.now(),
-      };
-
-      if (content.type === 'text' && content.text.length > 0) {
-        input.writeChunk({ type: 'text_delta', delta: content.text, ...meta });
-        return;
-      }
-
-      if (content.type === 'tool_call') {
-        input.writeChunk({
-          type: 'tool_call_delta',
-          toolCallId: content.toolCallId,
-          toolName: content.toolName,
-          inputDelta: JSON.stringify(content.input),
-          ...meta,
-        });
       }
     });
   });
@@ -731,6 +786,13 @@ function clearRetryableFailedRequestArtifacts(input: {
       clientRequestId: input.clientRequestId,
     });
   }
+
+  deleteSessionMessagesByRequestScope({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    clientRequestId: input.clientRequestId,
+    roles: ['assistant', 'tool'],
+  });
 }
 
 function parseToolInput(raw: string): Record<string, unknown> {
@@ -756,14 +818,13 @@ function buildErrorContent(code: string, message: string): MessageContent[] {
 }
 
 export function loadSessionContext(sessionId: string, userId: string): SessionStreamContext | null {
-  const session = sqliteGet<{ metadata_json: string; messages_json: string }>(
-    'SELECT metadata_json, messages_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+  const session = sqliteGet<{ metadata_json: string }>(
+    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [sessionId, userId],
   );
   if (!session) return null;
   return {
     metadataJson: sanitizeSessionMetadataJson(session.metadata_json),
-    legacyMessagesJson: session.messages_json,
   };
 }
 
@@ -911,6 +972,7 @@ function resolveStreamAgentSelection(input: {
     ...(modelCandidates.length > 0 && !delegatedModel?.providerId
       ? { downgradeReason: 'agent_model_unavailable' as const }
       : {}),
+    deferToolLoading: matchedAgent.deferToolLoading === true ? true : undefined,
     effectiveAgentId: matchedAgent.id,
     modelId: delegatedModel?.modelId,
     providerId: delegatedModel?.providerId,
@@ -1035,6 +1097,8 @@ const SEARCH_READ_TOOLS = new Set([
 
 const AGENT_DELEGATION_TOOLS = new Set(['task_create', 'task', 'call_omo_agent', 'delegate_task']);
 
+const ORCHESTRATOR_AGENT_IDS = new Set(['sisyphus', 'atlas', 'zeus']);
+
 const AGENT_USAGE_REMINDER_SUFFIX = `
 
 [Agent Usage Reminder]
@@ -1067,6 +1131,28 @@ export async function executeToolCalls(input: {
     typeof sessionMetadata['workingDirectory'] === 'string'
       ? sessionMetadata['workingDirectory']
       : undefined;
+
+  // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
+  const effectiveWorkspaceRoot = input.workspaceRoot ?? workingDirectory;
+  if (effectiveWorkspaceRoot) {
+    try {
+      const dynamicTools = await loadDynamicToolsForWorkspace(
+        effectiveWorkspaceRoot,
+        input.sessionId,
+      );
+      if (dynamicTools.length > 0) {
+        sandbox.registerDynamicTools(dynamicTools);
+        for (const dt of dynamicTools) {
+          input.enabledToolNames.add(dt.name);
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[stream] Failed to load dynamic tools for ${effectiveWorkspaceRoot}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   let hasPendingPermission = false;
 
   // Agent usage reminder state (oh-my-opencode agentUsageReminder pattern)
@@ -1114,6 +1200,25 @@ export async function executeToolCalls(input: {
         parsedInput['prompt'] = PLANNING_CONSULT_WARNING + parsedInput['prompt'];
       }
 
+      // Atlas guard (oh-my-opencode atlas pattern):
+      // Orchestrator agents must delegate, not implement directly.
+      const atlasGuard = checkAtlasGuard({
+        agentId: currentAgentId,
+        toolName: toolCall.toolName,
+        filePath: (parsedInput['filePath'] ?? parsedInput['path'] ?? parsedInput['file'] ?? '') as string,
+        prompt: (parsedInput['prompt'] ?? '') as string,
+      });
+
+      // Inject single-task directive for delegate_task from orchestrators
+      if (atlasGuard.injectSingleTaskDirective && typeof parsedInput['prompt'] === 'string') {
+        parsedInput['prompt'] = SINGLE_TASK_DIRECTIVE + parsedInput['prompt'];
+      }
+
+      // Inject delegation-required warning for write/edit outside .sisyphus/ by orchestrators
+      if (atlasGuard.injectDelegationWarning && atlasGuard.delegationWarningFilePath) {
+        // This is a soft warning (not a block) — the tool still executes but a reminder is appended post-execution
+      }
+
       // Sisyphus Junior notepad directive (oh-my-opencode sisyphus-junior-notepad pattern):
       // When orchestrator delegates tasks, inject notepad location and plan read-only directive.
       if (
@@ -1137,7 +1242,26 @@ export async function executeToolCalls(input: {
       }
     }
 
-    const result = prometheusGuard.blocked
+    // Doom loop detection (mirrors opencode processor.ts):
+    // If the same tool is called with the same arguments N consecutive times,
+    // emit a synthetic error result to break the loop and warn the LLM.
+    // Only check for doom loop when the tool would otherwise execute normally
+    // (not blocked by guards or missing args).
+    const isDoomLoop =
+      !prometheusGuard.blocked &&
+      !isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput) &&
+      isEnabledToolName(toolCall.toolName, input.enabledToolNames) &&
+      checkDoomLoop(input.sessionId, toolCall.toolName, parsedInput);
+
+    const result = isDoomLoop
+      ? {
+          toolCallId,
+          toolName: toolCall.toolName,
+          output: `⚠️ Doom loop detected: Tool "${toolCall.toolName}" has been called with identical arguments 3 consecutive times. You may be stuck in a loop. Please try a different approach or different arguments.`,
+          isError: true,
+          durationMs: 0,
+        }
+      : prometheusGuard.blocked
       ? {
           toolCallId,
           toolName: toolCall.toolName,
@@ -1154,7 +1278,21 @@ export async function executeToolCalls(input: {
             durationMs: 0,
           }
         : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
-          ? await sandbox.execute(request, input.signal, input.sessionId, input.executionContext)
+          ? await sandbox.execute(request, input.signal, input.sessionId, {
+              ...input.executionContext,
+              onBatchProgress: (subTools, completedCount, totalCount) => {
+                input.writeChunk({
+                  type: 'tool_progress',
+                  toolCallId,
+                  toolName: toolCall.toolName,
+                  subTools,
+                  completedCount,
+                  totalCount,
+                  clientRequestId: input.clientRequestId,
+                  occurredAt: Date.now(),
+                });
+              },
+            })
           : {
               toolCallId,
               toolName: toolCall.toolName,
@@ -1203,10 +1341,19 @@ export async function executeToolCalls(input: {
       }
     }
 
-    // Tool output truncator (oh-my-opencode tool-output-truncator pattern):
-    // Truncate excessively long tool outputs to prevent context window overflow.
-    if (typeof result.output === 'string') {
-      result.output = truncateToolOutput(toolCall.toolName, result.output);
+    // Atlas guard post-processing (oh-my-opencode atlas pattern):
+    // Append verification reminder + boulder progress after delegate_task for orchestrators.
+    // Append delegation-required warning after write/edit outside .sisyphus/ for orchestrators.
+    if (typeof result.output === 'string' && ORCHESTRATOR_AGENT_IDS.has(currentAgentId)) {
+      const atlasReminder = await buildAtlasPostProcessReminder({
+        agentId: currentAgentId,
+        toolName: toolCall.toolName,
+        sessionId: input.sessionId,
+        workspaceRoot,
+      });
+      if (atlasReminder) {
+        result.output += atlasReminder;
+      }
     }
 
     // Prometheus workflow reminder (oh-my-opencode prometheus-md-only pattern):
@@ -1264,6 +1411,8 @@ export async function executeToolCalls(input: {
         })
       : [];
 
+    result.output = truncateToolOutputUniversal(toolCall.toolName, result.output);
+
     appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -1280,7 +1429,6 @@ export async function executeToolCalls(input: {
           observability,
         }),
       ],
-      legacyMessagesJson: input.sessionContext.legacyMessagesJson,
       clientRequestId: createToolResultRequestId(input.clientRequestId, toolCallId),
     });
 
@@ -1348,10 +1496,20 @@ export async function handleStreamRequest(input: {
   headers: Record<string, string | string[] | undefined>;
   ip: string;
   method: string;
+  onStarted?: () => void;
   path: string;
   requestData: StreamRequest;
   sessionContext: SessionStreamContext;
   sessionId: string;
+  /**
+   * Optional external abort signal. When the caller's transport (e.g. an SSE
+   * connection) drops, aborting this signal will propagate to the internal
+   * abortController and cancel the in-flight model run. This prevents the
+   * in-flight slot from being held forever when the client disconnects, which
+   * otherwise causes EventSource auto-reconnects to deadlock waiting for the
+   * stale execution to finish.
+   */
+  signal?: AbortSignal;
   transport: 'SSE' | 'WS';
   user: JwtPayload;
   writeChunk: (chunk: RunEvent) => void;
@@ -1410,19 +1568,39 @@ export async function handleStreamRequest(input: {
   // For orchestrator agents (sisyphus, atlas, zeus), inject delegation table,
   // tool selection table, key triggers, and agent-specific sections.
   const effectiveAgentId = route.effectiveAgentId ?? requestData.agentId ?? '';
-  const ORCHESTRATOR_AGENT_IDS = new Set(['sisyphus', 'atlas', 'zeus']);
   const dynamicAgentPrompt = ORCHESTRATOR_AGENT_IDS.has(effectiveAgentId)
     ? buildDynamicOrchestratorPrompt()
     : null;
   const detector = new KeywordDetectorImpl();
   const detection = detector.detect(requestData.message);
   const injectedPrompt = detection.injectedPrompt ?? null;
+
+  // Start-work (oh-my-opencode start-work pattern):
+  // Detect "ultrawork/ulw" keyword and inject plan context + create boulder state.
+  let startWorkContext: string | null = null;
+  const sessionMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
+  const workspaceRootForStartWork =
+    typeof sessionMeta['workingDirectory'] === 'string'
+      ? sessionMeta['workingDirectory']
+      : process.cwd();
+  if (detectUltraworkKeyword(requestData.message)) {
+    startWorkContext = await processStartWork(
+      workspaceRootForStartWork,
+      input.sessionId,
+      requestData.message,
+    );
+  }
+
+  // Command templates (oh-my-opencode builtin-commands pattern):
+  // Detect active command context from session metadata and inject workflow instructions.
+  const commandContext = detectActiveCommandContext(input.sessionContext.metadataJson);
   const lspGuidance =
     interactionModes.dialogueMode === 'clarify'
       ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
       : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT;
+  const hasExplicitAgent = !!route.effectiveAgentId;
   const dialogueModePrompt =
-    interactionModes.dialogueMode !== undefined
+    !hasExplicitAgent && interactionModes.dialogueMode !== undefined
       ? DIALOGUE_MODE_SYSTEM_PROMPTS[interactionModes.dialogueMode]
       : null;
   const yoloModePrompt = interactionModes.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
@@ -1507,10 +1685,29 @@ export async function handleStreamRequest(input: {
   }
 
   const abortController = new AbortController();
+  if (input.signal) {
+    if (input.signal.aborted) {
+      abortController.abort();
+    } else {
+      input.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+    }
+  }
   const eventSequence = { value: 1 };
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(input.sessionContext.metadataJson);
+  // Tracks events emitted by this stream's own emitChunk so the
+  // session-run-events subscription below can skip its own broadcasts
+  // (which already wrote to the WS/SSE client directly) without echoing
+  // them back as duplicates. WeakSet keeps the bookkeeping garbage-collected
+  // automatically once the chunk leaves scope.
+  const selfEmittedRunEvents = new WeakSet<object>();
   const emitChunk = (chunk: RunEvent) => {
-    persistSessionRunEventForRequest(input.sessionId, chunk, {
+    selfEmittedRunEvents.add(chunk);
+    // publishSessionRunEvent persists + broadcasts to all subscribers,
+    // including the /sessions/:id/stream/attach endpoint which forwards
+    // events to reconnected clients. Previously this used the persist-only
+    // helper, so attach-mode SSE replayed historical events but never
+    // received the live ones — clients fell back to polling /recovery.
+    publishSessionRunEvent(input.sessionId, chunk, {
       clientRequestId: requestData.clientRequestId,
     });
     input.writeChunk(chunk);
@@ -1538,6 +1735,15 @@ export async function handleStreamRequest(input: {
       });
     }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
     const unsubscribeSessionEvents = subscribeSessionRunEvents(input.sessionId, (event) => {
+      // Skip events this stream's emitChunk already wrote — those reach the
+      // primary WS/SSE client through input.writeChunk() inside emitChunk and
+      // are broadcast on this same channel only so the attach endpoint can
+      // mirror them to reconnected clients. Without this guard we'd duplicate
+      // every live chunk on the original transport.
+      if (selfEmittedRunEvents.has(event)) {
+        return;
+      }
+
       if (
         event.type === 'question_asked' ||
         event.type === 'permission_asked' ||
@@ -1565,19 +1771,74 @@ export async function handleStreamRequest(input: {
         throw createAbortError();
       }
 
+      input.onStarted?.();
+
+      // Reset doom loop history at the start of each new user message stream
+      resetDoomLoopHistory(input.sessionId);
+
+      // Resolve fast model route for LLM title generation (falls back to chat route)
+      const titleProviderRow = sqliteGet<{ value: string }>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [input.user.sub],
+      );
+      const titleSelectionRow = sqliteGet<{ value: string }>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+        [input.user.sub],
+      );
+      const fastProviderConfig = await getFastProviderConfig(
+        parseStoredJson(titleProviderRow?.value),
+        parseStoredJson(titleSelectionRow?.value),
+      );
+      const titleRoute = fastProviderConfig
+        ? resolveModelRouteFromProvider(fastProviderConfig.provider, fastProviderConfig.modelId, {
+            maxTokens: 100,
+            temperature: 0.5,
+          })
+        : undefined;
+
       persistStreamUserMessage({
+        content: buildStreamUserContent({
+          inputParts: requestData.inputParts,
+          message: requestData.message,
+        }),
         clientRequestId: requestData.clientRequestId,
         displayMessage: requestData.displayMessage,
-        legacyMessagesJson: input.sessionContext.legacyMessagesJson,
         message: requestData.message,
         sessionId: input.sessionId,
         userId: input.user.sub,
+        route,
+        titleRoute,
       });
 
-      const enabledTools = filterEnabledGatewayToolsForSession(
-        getEnabledTools(webSearchEnabled),
+      // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
+      let dynamicToolDefs: DynamicToolEntry[] = [];
+      try {
+        dynamicToolDefs = await loadDynamicToolsForWorkspace(
+          workspaceRootForStartWork,
+          input.sessionId,
+        );
+      } catch (err) {
+        console.warn(
+          `[stream] Failed to load dynamic tools: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      const baseTools = getEnabledTools(webSearchEnabled);
+      const allTools = dynamicToolDefs.length > 0
+        ? [...baseTools, ...buildDynamicGatewayToolDefinitions(dynamicToolDefs)]
+        : baseTools;
+      const filteredTools = filterEnabledGatewayToolsForSession(
+        allTools,
         input.sessionContext.metadataJson,
       );
+      const shouldDeferToolLoading =
+        route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
+      const enabledTools = shouldDeferToolLoading
+        ? filteredTools.map((tool) => ({
+            ...tool,
+            function: { ...tool.function, deferLoading: true },
+          }))
+        : filteredTools;
       const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
       const turnFileDiffs = new Map<string, FileDiffContent>();
       const memoryBlock = buildMemoryBlockForSession(
@@ -1647,7 +1908,6 @@ export async function handleStreamRequest(input: {
               { clientRequestId: requestData.clientRequestId },
             );
             const compactionResult = await executeSessionCompaction({
-              legacyMessagesJson: input.sessionContext.legacyMessagesJson,
               metadataJson: input.sessionContext.metadataJson,
               messages: allMessages,
               prune: compactionSettings.prune,
@@ -1729,8 +1989,11 @@ export async function handleStreamRequest(input: {
           yoloModePrompt,
           companionPrompt,
           dynamicAgentPrompt,
+          startWorkContext,
+          commandContext: commandContext?.instruction ?? null,
           syntheticContinuationPrompt,
           memoryBlock,
+          agentId: route.effectiveAgentId ?? requestData.agentId,
           writeChunk: emitChunk,
         });
         syntheticContinuationPrompt = undefined;
@@ -1822,7 +2085,6 @@ export async function handleStreamRequest(input: {
               { clientRequestId: requestData.clientRequestId },
             );
             const compactionResult = await executeSessionCompaction({
-              legacyMessagesJson: input.sessionContext.legacyMessagesJson,
               metadataJson: input.sessionContext.metadataJson,
               messages: messagesForCompaction,
               prune: compactionSettings.prune,
@@ -1927,6 +2189,21 @@ export async function handleStreamRequest(input: {
             }
           }
 
+          // Ralph loop continuation (oh-my-opencode ralph-loop pattern):
+          // When a Ralph loop is active and the assistant stops without completing
+          // the promise, inject a continuation prompt to keep iterating.
+          if (result.stopReason !== 'error' && result.shouldStop) {
+            const lastAssistantText = result.state?.assistantText ?? '';
+            const ralphContinuation = await checkRalphLoopContinuation(
+              workspaceRootForStartWork,
+              lastAssistantText,
+            );
+            if (ralphContinuation) {
+              syntheticContinuationPrompt = ralphContinuation;
+              continue;
+            }
+          }
+
           // Session recovery (oh-my-opencode sessionRecovery pattern):
           // When the LLM returns a recoverable error (tool_result_missing,
           // thinking_block_order, thinking_disabled_violation), attempt to
@@ -1977,6 +2254,7 @@ export async function handleStreamRequest(input: {
           if (result.stopReason !== 'error') {
             wl.flush(ctx, 200);
           }
+          console.log('[STREAM_DONE] session', input.sessionId, 'stopReason:', result.stopReason, 'keepPaused:', shouldKeepPausedState);
           if (!shouldKeepPausedState) {
             setPersistedSessionStateStatus({
               sessionId: input.sessionId,
@@ -2053,6 +2331,7 @@ export async function handleStreamRequest(input: {
     }
   })().catch((err) => {
     if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      console.log('[STREAM_ABORT] session', input.sessionId, 'stream aborted —', String(err));
       emitChunk({
         type: 'done',
         stopReason: 'cancelled',
@@ -2067,6 +2346,7 @@ export async function handleStreamRequest(input: {
       return { statusCode: 200 };
     }
 
+    console.log('[STREAM_ERROR] session', input.sessionId, 'stream errored —', String(err));
     setPersistedSessionStateStatus({
       sessionId: input.sessionId,
       status: 'idle',
@@ -2084,7 +2364,6 @@ export async function handleStreamRequest(input: {
       userId: input.user.sub,
       role: 'assistant',
       content: buildErrorContent('STREAM_ERROR', String(err)),
-      legacyMessagesJson: input.sessionContext.legacyMessagesJson,
       clientRequestId: requestData.clientRequestId,
       status: 'error',
     });

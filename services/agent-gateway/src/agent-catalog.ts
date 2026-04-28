@@ -395,6 +395,7 @@ function defaultBodyForBuiltin(id: string): ManagedAgentBody {
     variant: undefined,
     fallbackModels: modelCandidates.slice(1),
     systemPrompt: reference?.systemPrompt ?? BUILTIN_AGENT_FALLBACK_PROMPTS[id],
+    color: reference?.color,
     note: undefined,
   };
 }

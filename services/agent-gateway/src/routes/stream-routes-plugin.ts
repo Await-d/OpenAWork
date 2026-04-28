@@ -17,6 +17,7 @@ import {
 } from './stream.js';
 import { buildRunEventEnvelope, deriveRunEventBookend } from '../run-event-envelope.js';
 import {
+  getRunEventRunId,
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEventsByRequest,
   listSessionRunEventsByRequestAfterSeq,
@@ -71,7 +72,7 @@ function writeSseRunEnvelope(
 
 function buildAttachRunEnvelope(input: { clientRequestId: string; event: RunEvent; seq: number }) {
   return buildRunEventEnvelope({
-    aggregateId: input.event.runId ?? input.clientRequestId,
+    aggregateId: getRunEventRunId(input.event) ?? input.clientRequestId,
     aggregateType: 'run',
     clientRequestId: input.clientRequestId,
     cursor: {
@@ -191,10 +192,16 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       const connectionStep = connectionLogger.start('stream.socket.connect');
       const authStep = connectionLogger.startChild(connectionStep, 'stream.socket.auth');
       const queryToken = (request.query as Record<string, string>)['token'];
+      const authHeader = request.headers['authorization'];
+      const headerToken =
+        typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+          ? authHeader.slice('Bearer '.length).trim()
+          : undefined;
+      const authToken = headerToken || queryToken;
       let user: JwtPayload | null = null;
-      if (queryToken) {
+      if (authToken) {
         try {
-          user = request.server.jwt.verify<JwtPayload>(queryToken);
+          user = request.server.jwt.verify<JwtPayload>(authToken);
         } catch {
           connectionLogger.fail(authStep, 'unauthorized');
           connectionLogger.fail(connectionStep, 'unauthorized');
@@ -245,6 +252,17 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       connectionLogger.succeed(sessionStep);
       connectionLogger.succeed(connectionStep, undefined, { sessionId });
       connectionLogger.flush(connectionContext, 101);
+
+      // Track socket close state so safeWriteChunk stops writing to the
+      // closed socket. We intentionally do NOT abort in-flight stream
+      // executions — they continue running in the background so all events
+      // are persisted. The client can reconnect via the attach endpoint.
+      let socketClosed = false;
+      socket.on('close', () => {
+        if (socketClosed) return;
+        socketClosed = true;
+        console.log('[WS_CLOSE] socket closed for session', sessionId, '— stream continues in background');
+      });
 
       socket.on('message', (raw: Buffer | string) => {
         void (async () => {
@@ -308,6 +326,22 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           }
           wl.succeed(stepSession);
 
+          if (socketClosed) {
+            return;
+          }
+
+          // ws library: readyState 1 === OPEN. Skip writes once the socket has
+          // started closing so we don't throw and bring down the message handler.
+          const safeWriteChunk = (chunk: RunEvent) => {
+            if (socketClosed || socket.readyState !== 1) return;
+            try {
+              socket.send(JSON.stringify(chunk));
+            } catch {
+              // Mark socket as gone so subsequent writes are skipped.
+              socketClosed = true;
+            }
+          };
+
           try {
             const streamResult = await handleStreamRequest({
               method: 'WS',
@@ -319,9 +353,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
               sessionId,
               transport: 'WS',
               user,
-              writeChunk: (chunk) => {
-                socket.send(JSON.stringify(chunk));
-              },
+              writeChunk: safeWriteChunk,
             });
             if (streamResult.statusCode >= 400) {
               wl.fail(stepRoute, 'stream request completed with error status', {
@@ -406,6 +438,29 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     }
     wl.succeed(stepSession);
 
+    // Track client disconnect so safeWriteChunk stops writing to the
+    // closed socket. We intentionally do NOT abort the in-flight stream
+    // execution — it continues running in the background so all events
+    // are persisted. The client can reconnect via the attach endpoint
+    // after a page refresh or session switch. Explicit stop requests
+    // still work through stopInFlightStreamRequest.
+    let clientClosed = false;
+    let streamingStarted = false;
+    const onClientClose = () => {
+      if (clientClosed) return;
+      clientClosed = true;
+      if (streamingStarted) {
+        writeAuditLog({
+          sessionId,
+          category: 'route',
+          sourceName: 'SSE_CLIENT_DISCONNECTED',
+          requestId: query.data.clientRequestId,
+          output: { code: 'SSE_CLIENT_DISCONNECTED', message: 'client closed SSE mid-stream' },
+        });
+      }
+    };
+    request.raw.on('close', onClientClose);
+
     const requestOrigin = request.headers['origin'] ?? '*';
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -416,6 +471,29 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       'Access-Control-Allow-Credentials': 'true',
       Vary: 'Origin',
     });
+    streamingStarted = true;
+
+    // Heartbeat keeps proxies (nginx/Cloudflare/dev) from silently dropping the
+    // connection during long thinking phases where no chunks are emitted.
+    const heartbeat = setInterval(() => {
+      if (clientClosed) return;
+      try {
+        reply.raw.write(': keepalive\n\n');
+      } catch {
+        // socket already half-closed; cleanup will run from the close handler.
+      }
+    }, 10_000);
+
+    const safeWriteChunk = (chunk: RunEvent) => {
+      if (clientClosed) return;
+      try {
+        reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      } catch {
+        // Mark client as gone so subsequent writes are skipped.
+        onClientClose();
+      }
+    };
+
     try {
       const streamResult = await handleStreamRequest({
         method: request.method,
@@ -427,9 +505,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         transport: 'SSE',
         user,
-        writeChunk: (chunk) => {
-          reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        },
+        writeChunk: safeWriteChunk,
       });
       if (streamResult.statusCode >= 400) {
         wl.fail(routeStep, 'stream request completed with error status', {
@@ -464,7 +540,13 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       wl.flush(ctx, 500);
       throw error;
     } finally {
-      reply.raw.end();
+      clearInterval(heartbeat);
+      request.raw.off('close', onClientClose);
+      try {
+        reply.raw.end();
+      } catch {
+        // socket already closed by client; nothing to do.
+      }
     }
   });
 

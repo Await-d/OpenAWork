@@ -99,7 +99,7 @@ async function main(): Promise<void> {
       mkdirSync(path.dirname(restoreTargetPath), { recursive: true });
       writeFileSync(restoreTargetPath, 'current\n', 'utf8');
 
-      persistSessionFileDiffs({
+      await persistSessionFileDiffs({
         sessionId,
         userId: currentAdmin.id,
         clientRequestId: 'req-route-1',

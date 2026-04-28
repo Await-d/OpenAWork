@@ -353,13 +353,13 @@ function splitLineAtCharacter(
 function renderSegments(segments: TerminalSegment[], keyPrefix: string): ReactNode[] {
   let segmentOffset = 0;
 
-  return segments.map((segment) => {
+  return segments.map((segment, segmentIndex) => {
     const hasAnsiStyle = Boolean(
       segment.style.color || segment.style.backgroundColor || segment.style.fontWeight,
     );
     const color = segment.style.color;
     const inlineTokens = splitTerminalInlineTokens(segment.text);
-    const segmentKey = `${keyPrefix}-segment-${segmentOffset}`;
+    const segmentKey = `${keyPrefix}-segment-${segmentIndex}-${segmentOffset}`;
     segmentOffset += segment.text.length;
     return (
       <span
@@ -373,11 +373,12 @@ function renderSegments(segments: TerminalSegment[], keyPrefix: string): ReactNo
           ...(segment.style.fontWeight ? { fontWeight: segment.style.fontWeight } : {}),
         }}
       >
-        {inlineTokens.map((token) => {
+        {inlineTokens.map((token, tokenIndex) => {
+          const tokenKey = `${segmentKey}-${tokenIndex}-${token.key}`;
           if (token.kind === 'url') {
             return (
               <a
-                key={`${segmentKey}-${token.key}`}
+                key={tokenKey}
                 data-tool-card-terminal-url="true"
                 href={token.value}
                 rel="noreferrer noopener"
@@ -396,7 +397,7 @@ function renderSegments(segments: TerminalSegment[], keyPrefix: string): ReactNo
           if (token.kind === 'path') {
             return (
               <span
-                key={`${segmentKey}-${token.key}`}
+                key={tokenKey}
                 data-tool-card-terminal-path="true"
                 style={{
                   color: color ?? tokens.color.text,
@@ -412,7 +413,7 @@ function renderSegments(segments: TerminalSegment[], keyPrefix: string): ReactNo
             );
           }
 
-          return <span key={`${segmentKey}-${token.key}`}>{token.value}</span>;
+          return <span key={tokenKey}>{token.value}</span>;
         })}
       </span>
     );

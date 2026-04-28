@@ -8,7 +8,12 @@ import { sessionsRoutes } from '../routes/sessions.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message-v2-adapter.js';
 import { persistSessionRunEventForRequest } from '../session-run-events.js';
-import { assert, withMockFetch, withTempEnv } from './task-verification-helpers.js';
+import {
+  assert,
+  createChatCompletionsStream,
+  withMockFetch,
+  withTempEnv,
+} from './task-verification-helpers.js';
 
 const OPENAI_PROVIDER_ID = 'openai';
 const OPENAI_ALIAS_MODEL = 'team-model-alias';
@@ -24,9 +29,29 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        (async () => {
-          upstreamCallCount += 1;
-          return createResponsesTextStream('bookend fallback reached upstream');
+        (async (_input, init) => {
+          const body = typeof init?.body === 'string' ? init.body : '';
+          const isStreamingRequest = body.includes('"stream":true');
+          if (isStreamingRequest) {
+            upstreamCallCount += 1;
+            return createChatCompletionsStream('bookend fallback reached upstream');
+          }
+
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: '"会话标题"',
+                  },
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
         }) as typeof fetch,
         async () => {
           await connectDb();
@@ -228,30 +253,6 @@ async function main(): Promise<void> {
         },
       );
     },
-  );
-}
-
-function createResponsesTextStream(text: string): Response {
-  const encoder = new TextEncoder();
-  return new Response(
-    new ReadableStream({
-      start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            [
-              'event: response.output_text.delta',
-              `data: ${JSON.stringify({ output_index: 0, content_index: 0, item_id: 'msg_replay', delta: text })}`,
-              '',
-              'event: response.completed',
-              `data: ${JSON.stringify({ response: { output: [{ id: 'msg_replay', type: 'message' }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } })}`,
-              '',
-            ].join('\n'),
-          ),
-        );
-        controller.close();
-      },
-    }),
-    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
   );
 }
 

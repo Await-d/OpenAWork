@@ -45,5 +45,19 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    server: {
+      deps: {
+        // `node:sqlite` is a Node 22+ built-in but vite tries to bundle the
+        // bare `sqlite` specifier and fails. Mark it external so the runtime
+        // import goes through Node's resolver instead of vite's.
+        external: ['node:sqlite'],
+      },
+    },
+    deps: {
+      optimizer: {
+        ssr: { exclude: ['node:sqlite'] },
+        web: { exclude: ['node:sqlite'] },
+      },
+    },
   },
 });

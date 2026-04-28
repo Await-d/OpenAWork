@@ -1,13 +1,6 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
-import { MCPClientAdapterImpl } from '@openAwork/mcp-client';
-import type { MCPServerRef, SkillManifest } from '@openAwork/skill-types';
 import { z } from 'zod';
-import { sqliteAll } from './db.js';
-
-interface InstalledSkillRow {
-  skill_id: string;
-  manifest_json: string;
-}
+import { findSkillMcpServer, skillMcpPool } from './skill-mcp-connection-pool.js';
 
 const skillMcpInputSchema = z
   .object({
@@ -45,10 +38,6 @@ export const skillMcpToolDefinition: ToolDefinition<typeof skillMcpInputSchema, 
   },
 };
 
-function normalizeName(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 function parseArguments(value: SkillMcpInput['arguments']): Record<string, unknown> {
   if (!value) {
     return {};
@@ -77,55 +66,34 @@ function applyGrepFilter(output: string, pattern: string | undefined): string {
   }
 }
 
-function findSkillMcpServer(
-  userId: string,
-  mcpName: string,
-): { manifest: SkillManifest; mcp: MCPServerRef } | null {
-  const rows = sqliteAll<InstalledSkillRow>(
-    `SELECT skill_id, manifest_json FROM installed_skills WHERE user_id = ? AND enabled = 1 ORDER BY updated_at DESC`,
-    [userId],
-  );
-  const normalized = normalizeName(mcpName);
-  for (const row of rows) {
-    const manifest = JSON.parse(row.manifest_json) as SkillManifest;
-    if (!manifest.mcp) {
-      continue;
-    }
-    const candidates = [manifest.mcp.id, manifest.id, manifest.name, manifest.displayName]
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .map(normalizeName);
-    if (candidates.includes(normalized)) {
-      return { manifest, mcp: manifest.mcp };
-    }
-  }
-  return null;
-}
-
 export async function runSkillMcpTool(userId: string, input: SkillMcpInput): Promise<string> {
   const found = findSkillMcpServer(userId, input.mcp_name);
   if (!found) {
     throw new Error(`MCP server "${input.mcp_name}" not found in enabled installed skills`);
   }
 
-  const client = new MCPClientAdapterImpl();
-  await client.connect(found.mcp);
-  try {
-    const parsedArgs = parseArguments(input.arguments);
-    let result: unknown;
-    if (input.tool_name) {
-      result = await client.callTool(found.mcp.id, input.tool_name, parsedArgs);
-    } else if (input.resource_name) {
-      result = await client.readResource(found.mcp.id, input.resource_name);
-    } else if (input.prompt_name) {
-      const promptArgs = Object.fromEntries(
-        Object.entries(parsedArgs).map(([key, value]) => [key, String(value)]),
-      );
-      result = await client.getPrompt(found.mcp.id, input.prompt_name, promptArgs);
-    } else {
+  // Use connection pool with operation retry (oh-my-opencode skill-mcp-manager pattern):
+  // - Lazy loading: connection created on first use, reused after
+  // - Idle cleanup: disconnected after 5 min inactivity
+  // - Auto-reconnect: up to 3 retries on connection errors
+  const parsedArgs = parseArguments(input.arguments);
+  const result = await skillMcpPool.withOperationRetry(
+    userId,
+    input.mcp_name,
+    found.mcp,
+    async (adapter, serverId) => {
+      if (input.tool_name) {
+        return await adapter.callTool(serverId, input.tool_name, parsedArgs);
+      } else if (input.resource_name) {
+        return await adapter.readResource(serverId, input.resource_name);
+      } else if (input.prompt_name) {
+        const promptArgs = Object.fromEntries(
+          Object.entries(parsedArgs).map(([key, value]) => [key, String(value)]),
+        );
+        return await adapter.getPrompt(serverId, input.prompt_name, promptArgs);
+      }
       throw new Error('No skill_mcp operation specified');
-    }
-    return applyGrepFilter(JSON.stringify(result, null, 2), input.grep);
-  } finally {
-    await client.disconnect(found.mcp.id).catch(() => undefined);
-  }
+    },
+  );
+  return applyGrepFilter(JSON.stringify(result, null, 2), input.grep);
 }

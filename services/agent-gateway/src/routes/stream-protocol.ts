@@ -1,4 +1,4 @@
-import type { StreamChunk, StreamDoneChunk } from '@openAwork/shared';
+import type { StreamChunk, StreamDoneChunk, ToolSearchStatus } from '@openAwork/shared';
 import { buildGatewayToolDefinitions as buildDefaultGatewayToolDefinitions } from '../tool-definitions.js';
 import type { UpstreamProtocol } from './upstream-protocol.js';
 
@@ -36,6 +36,8 @@ interface ResponsesOutputItem {
   call_id?: string;
   name?: string;
   arguments?: string;
+  encrypted_content?: string;
+  summary?: unknown;
 }
 
 interface ResponsesOutputItemEvent {
@@ -66,6 +68,7 @@ interface ResponsesErrorEvent {
 
 interface ResponsesCompletedEvent {
   response?: {
+    id?: string;
     output?: ResponsesOutputItem[];
     usage?: unknown;
     incomplete_details?: {
@@ -93,6 +96,31 @@ export interface StreamParseState {
   stopReason: StopReason;
   toolCalls: Map<number, ToolCallState>;
   usage?: StreamUsageSummary;
+  /** Encrypted reasoning content from Responses API, needed for multi-turn. */
+  reasoningEncryptedContent?: string;
+  /** Reasoning summary text from Responses API. */
+  reasoningSummary?: string;
+  /** Response ID from Responses API, used as previous_response_id for caching. */
+  responseId?: string;
+  /** Agent ID for the current stream round (for per-agent color rendering). */
+  agentId?: string;
+  /**
+   * OpenAI Chat Completions / DeepSeek-style providers emit a single ongoing
+   * thinking stream (no per-item metadata). We keep a flag here to know when
+   * to emit `thinking_end` at the boundary into text/tool/finish.
+   */
+  hasActiveThinking?: boolean;
+  /**
+   * Anthropic Messages: which content_block indices are thinking blocks, so
+   * we can emit `thinking_end` at the matching `content_block_stop`.
+   */
+  anthropicThinkingBlockIndices?: Set<number>;
+  /**
+   * Composite block keys for which `thinking_start` has already been emitted
+   * in the current upstream connection. Mirrors `appendReasoningChunk`'s key
+   * scheme so Anthropic / Responses API per-block start events can be deduped.
+   */
+  thinkingStartedKeys?: Set<string>;
 }
 
 export class ResponsesUpstreamEventError extends Error {
@@ -109,11 +137,65 @@ export function createStreamParseState(runId = 'run-local'): StreamParseState {
   return {
     runId,
     nextEventSequence: 1,
+    reasoningEncryptedContent: undefined,
+    reasoningSummary: undefined,
+    responseId: undefined,
     sawFinishReason: false,
     stopReason: 'end_turn',
     toolCalls: new Map(),
     usage: undefined,
+    hasActiveThinking: false,
+    anthropicThinkingBlockIndices: new Set(),
+    thinkingStartedKeys: new Set(),
   };
+}
+
+/**
+ * Build the composite key used to deduplicate `thinking_start` events for
+ * per-block streams (Anthropic, OpenAI Responses API). Mirrors the key scheme
+ * used by `appendReasoningChunk`, falling back to `legacy:0` when no identity
+ * fields are present (e.g. OpenAI Chat Completions).
+ */
+function buildThinkingStartKey(input: {
+  itemId?: string;
+  outputIndex?: number;
+  summaryIndex?: number;
+}): string {
+  if (typeof input.itemId === 'string' && input.itemId.trim().length > 0) {
+    return `item:${input.itemId}:output:${input.outputIndex ?? -1}:summary:${input.summaryIndex ?? -1}`;
+  }
+  if (typeof input.outputIndex === 'number' || typeof input.summaryIndex === 'number') {
+    return `indexed:${input.outputIndex ?? -1}:summary:${input.summaryIndex ?? -1}`;
+  }
+  return 'legacy:0';
+}
+
+/**
+ * Conditionally emit a `thinking_start` chunk if this is the first delta we've
+ * seen for the resolved block key. Returns the chunks the caller should prepend
+ * to its outgoing batch (empty when the start was already announced).
+ */
+function maybeEmitThinkingStart(
+  state: StreamParseState,
+  identity: { itemId?: string; outputIndex?: number; summaryIndex?: number },
+): StreamChunk[] {
+  if (!state.thinkingStartedKeys) {
+    state.thinkingStartedKeys = new Set();
+  }
+  const key = buildThinkingStartKey(identity);
+  if (state.thinkingStartedKeys.has(key)) {
+    return [];
+  }
+  state.thinkingStartedKeys.add(key);
+  return [
+    {
+      type: 'thinking_start',
+      ...(identity.itemId ? { itemId: identity.itemId } : {}),
+      ...(typeof identity.outputIndex === 'number' ? { outputIndex: identity.outputIndex } : {}),
+      ...(typeof identity.summaryIndex === 'number' ? { summaryIndex: identity.summaryIndex } : {}),
+      ...createChunkMeta(state),
+    },
+  ];
 }
 
 export function buildGatewayToolDefinitions() {
@@ -125,6 +207,9 @@ export function parseUpstreamFrame(
   protocol: UpstreamProtocol,
   state: StreamParseState,
 ): StreamChunk[] {
+  if (protocol === 'anthropic_messages') {
+    return parseAnthropicMessagesFrame(frame, state);
+  }
   if (protocol === 'responses') {
     return parseResponsesFrame(frame, state);
   }
@@ -141,13 +226,17 @@ export function parseUpstreamDataLine(data: string, state: StreamParseState): St
     if (state.stopReason === 'end_turn' && state.toolCalls.size > 0) {
       state.stopReason = 'tool_use';
     }
-    return [
-      {
-        type: 'done',
-        stopReason: state.stopReason,
-        ...createChunkMeta(state),
-      },
-    ];
+    const chunks: StreamChunk[] = [];
+    if (state.hasActiveThinking) {
+      chunks.push({ type: 'thinking_end', ...createChunkMeta(state) });
+      state.hasActiveThinking = false;
+    }
+    chunks.push({
+      type: 'done',
+      stopReason: state.stopReason,
+      ...createChunkMeta(state),
+    });
+    return chunks;
   }
 
   const event = JSON.parse(data) as UpstreamEvent;
@@ -168,20 +257,35 @@ export function parseUpstreamDataLine(data: string, state: StreamParseState): St
 
     const { text: textDelta, thinking: contentThinkingDelta } =
       extractUpstreamTextAndThinkingDeltas(delta.content);
+    const reasoningDelta = extractUpstreamReasoningContentDelta(delta.reasoning_content);
+    const hasIncomingThinking = contentThinkingDelta.length > 0 || reasoningDelta.length > 0;
+    const willStartTextOrTool =
+      textDelta.length > 0 ||
+      Boolean(delta.function_call) ||
+      (delta.tool_calls?.length ?? 0) > 0;
+
+    if (state.hasActiveThinking && !hasIncomingThinking && willStartTextOrTool) {
+      chunks.push({ type: 'thinking_end', ...createChunkMeta(state) });
+      state.hasActiveThinking = false;
+    }
+
     if (textDelta.length > 0) {
       chunks.push({ type: 'text_delta', delta: textDelta, ...createChunkMeta(state) });
     }
     if (contentThinkingDelta.length > 0) {
+      chunks.push(...maybeEmitThinkingStart(state, {}));
       chunks.push({
         type: 'thinking_delta',
         delta: contentThinkingDelta,
         ...createChunkMeta(state),
       });
+      state.hasActiveThinking = true;
     }
 
-    const reasoningDelta = extractUpstreamReasoningContentDelta(delta.reasoning_content);
     if (reasoningDelta.length > 0) {
+      chunks.push(...maybeEmitThinkingStart(state, {}));
       chunks.push({ type: 'thinking_delta', delta: reasoningDelta, ...createChunkMeta(state) });
+      state.hasActiveThinking = true;
     }
 
     if (delta.function_call) {
@@ -340,6 +444,213 @@ function extractUpstreamReasoningContentDelta(value: unknown): string {
   return '';
 }
 
+// ─── Anthropic Messages API SSE Parser ───
+
+interface AnthropicContentBlock {
+  type?: string;
+  id?: string;
+  name?: string;
+  text?: string;
+  partial_json?: string;
+}
+
+interface AnthropicMessageStartEvent {
+  type?: string;
+  message?: {
+    id?: string;
+    usage?: unknown;
+  };
+}
+
+interface AnthropicMessageDeltaEvent {
+  type?: string;
+  delta?: {
+    stop_reason?: string;
+  };
+  usage?: unknown;
+}
+
+function parseAnthropicMessagesFrame(frame: string, state: StreamParseState): StreamChunk[] {
+  const lines = frame.split('\n');
+  const eventName = lines
+    .find((line) => line.startsWith('event:'))
+    ?.slice(6)
+    .trim();
+  const data = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n')
+    .trim();
+
+  if (!eventName || data.length === 0) {
+    return [];
+  }
+
+  if (data === '[DONE]') {
+    state.sawFinishReason = true;
+    return [
+      {
+        type: 'done',
+        stopReason: state.stopReason,
+        ...createChunkMeta(state),
+      },
+    ];
+  }
+
+  switch (eventName) {
+    case 'message_start': {
+      const payload = JSON.parse(data) as AnthropicMessageStartEvent;
+      const usage = parseStreamUsage(payload.message?.usage);
+      if (usage) {
+        state.usage = usage;
+      }
+      return [];
+    }
+    case 'content_block_start': {
+      const payload = JSON.parse(data) as { index?: number; content_block?: AnthropicContentBlock };
+      const block = payload.content_block;
+      if (block?.type === 'tool_use' && block.id && block.name) {
+        const index = payload.index ?? 0;
+        state.toolCalls.set(index, {
+          toolCallId: block.id,
+          toolName: block.name,
+          inputText: '',
+        });
+        state.stopReason = 'tool_use';
+        return [
+          {
+            type: 'tool_call_delta',
+            toolCallId: block.id,
+            toolName: block.name,
+            inputDelta: '',
+            ...createChunkMeta(state),
+          },
+        ];
+      }
+      if (block?.type === 'thinking') {
+        const index = payload.index ?? 0;
+        state.anthropicThinkingBlockIndices?.add(index);
+        // Announce per-block start eagerly so downstream UIs can render the
+        // empty thinking placeholder before the first delta arrives.
+        return maybeEmitThinkingStart(state, { outputIndex: index });
+      }
+      return [];
+    }
+    case 'content_block_delta': {
+      const payload = JSON.parse(data) as {
+        index?: number;
+        delta?: { type?: string; text?: string; partial_json?: string; thinking?: string };
+      };
+      const delta = payload.delta;
+      if (!delta) return [];
+
+      if (delta.type === 'text_delta' && delta.text) {
+        return [{ type: 'text_delta', delta: delta.text, ...createChunkMeta(state) }];
+      }
+
+      if (delta.type === 'thinking_delta' && delta.thinking) {
+        const index = payload.index ?? 0;
+        return [
+          ...maybeEmitThinkingStart(state, { outputIndex: index }),
+          {
+            type: 'thinking_delta',
+            delta: delta.thinking,
+            outputIndex: index,
+            ...createChunkMeta(state),
+          },
+        ];
+      }
+
+      if (delta.type === 'input_json_delta' && delta.partial_json) {
+        const index = payload.index ?? 0;
+        const existing = state.toolCalls.get(index) ?? { inputText: '' };
+        const next: ToolCallState = {
+          toolCallId: existing.toolCallId,
+          toolName: existing.toolName,
+          inputText: `${existing.inputText}${delta.partial_json}`,
+        };
+        state.toolCalls.set(index, next);
+        if (next.toolCallId && next.toolName) {
+          return [
+            {
+              type: 'tool_call_delta',
+              toolCallId: next.toolCallId,
+              toolName: next.toolName,
+              inputDelta: delta.partial_json,
+              ...createChunkMeta(state),
+            },
+          ];
+        }
+      }
+      return [];
+    }
+    case 'content_block_stop': {
+      const payload = JSON.parse(data) as { index?: number };
+      const index = payload.index ?? 0;
+      if (state.anthropicThinkingBlockIndices?.has(index)) {
+        state.anthropicThinkingBlockIndices.delete(index);
+        return [
+          {
+            type: 'thinking_end',
+            outputIndex: index,
+            ...createChunkMeta(state),
+          },
+        ];
+      }
+      return [];
+    }
+    case 'message_delta': {
+      const payload = JSON.parse(data) as AnthropicMessageDeltaEvent;
+      const usage = parseStreamUsage(payload.usage);
+      if (usage) {
+        state.usage = usage;
+      }
+      if (payload.delta?.stop_reason) {
+        state.sawFinishReason = true;
+        state.stopReason = mapStopReason(payload.delta.stop_reason);
+        if (state.stopReason === 'end_turn' && state.toolCalls.size > 0) {
+          state.stopReason = 'tool_use';
+        }
+      }
+      return [];
+    }
+    case 'message_stop': {
+      state.sawFinishReason = true;
+      const chunks: StreamChunk[] = [];
+      if (state.anthropicThinkingBlockIndices && state.anthropicThinkingBlockIndices.size > 0) {
+        for (const pendingIndex of Array.from(state.anthropicThinkingBlockIndices).sort(
+          (a, b) => a - b,
+        )) {
+          chunks.push({
+            type: 'thinking_end',
+            outputIndex: pendingIndex,
+            ...createChunkMeta(state),
+          });
+        }
+        state.anthropicThinkingBlockIndices.clear();
+      }
+      chunks.push({
+        type: 'done',
+        stopReason: state.stopReason,
+        ...createChunkMeta(state),
+      });
+      return chunks;
+    }
+    case 'ping': {
+      return [];
+    }
+    case 'error': {
+      const payload = JSON.parse(data) as { error?: { type?: string; message?: string } };
+      throw new ResponsesUpstreamEventError(
+        payload.error?.type ?? 'MODEL_ERROR',
+        payload.error?.message ?? 'Anthropic upstream error',
+      );
+    }
+    default:
+      return [];
+  }
+}
+
 function parseResponsesFrame(frame: string, state: StreamParseState): StreamChunk[] {
   const lines = frame.split('\n');
   const eventName = lines
@@ -368,6 +679,13 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
   }
 
   switch (eventName) {
+    case 'response.created': {
+      const payload = JSON.parse(data) as { response?: { id?: string } };
+      if (payload.response?.id) {
+        state.responseId = payload.response.id;
+      }
+      return [];
+    }
     case 'response.output_text.delta': {
       const payload = JSON.parse(data) as { delta?: string };
       return typeof payload.delta === 'string' && payload.delta.length > 0
@@ -376,33 +694,52 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
     }
     case 'response.reasoning_summary_text.delta': {
       const payload = JSON.parse(data) as ResponsesReasoningSummaryDeltaEvent;
-      return typeof payload.delta === 'string' && payload.delta.length > 0
-        ? [
-            {
-              type: 'thinking_delta',
-              delta: payload.delta,
-              itemId: payload.item_id ?? payload.itemID,
-              outputIndex: payload.output_index,
-              summaryIndex: payload.summary_index,
-              ...createChunkMeta(state),
-            },
-          ]
-        : [];
+      if (typeof payload.delta !== 'string' || payload.delta.length === 0) return [];
+      const identity = {
+        itemId: payload.item_id ?? payload.itemID,
+        outputIndex: payload.output_index,
+        summaryIndex: payload.summary_index,
+      };
+      return [
+        ...maybeEmitThinkingStart(state, identity),
+        {
+          type: 'thinking_delta',
+          delta: payload.delta,
+          ...identity,
+          ...createChunkMeta(state),
+        },
+      ];
+    }
+    case 'response.reasoning_summary_text.done':
+    case 'response.reasoning_text.done': {
+      const payload = JSON.parse(data) as ResponsesReasoningSummaryDeltaEvent;
+      return [
+        {
+          type: 'thinking_end',
+          itemId: payload.item_id ?? payload.itemID,
+          outputIndex: payload.output_index,
+          summaryIndex: payload.summary_index,
+          ...createChunkMeta(state),
+        },
+      ];
     }
     case 'response.reasoning_text.delta': {
       const payload = JSON.parse(data) as ResponsesReasoningSummaryDeltaEvent;
-      return typeof payload.delta === 'string' && payload.delta.length > 0
-        ? [
-            {
-              type: 'thinking_delta',
-              delta: payload.delta,
-              itemId: payload.item_id ?? payload.itemID,
-              outputIndex: payload.output_index,
-              summaryIndex: payload.summary_index,
-              ...createChunkMeta(state),
-            },
-          ]
-        : [];
+      if (typeof payload.delta !== 'string' || payload.delta.length === 0) return [];
+      const identity = {
+        itemId: payload.item_id ?? payload.itemID,
+        outputIndex: payload.output_index,
+        summaryIndex: payload.summary_index,
+      };
+      return [
+        ...maybeEmitThinkingStart(state, identity),
+        {
+          type: 'thinking_delta',
+          delta: payload.delta,
+          ...identity,
+          ...createChunkMeta(state),
+        },
+      ];
     }
     case 'response.output_item.added':
     case 'response.output_item.done': {
@@ -419,6 +756,29 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
       const usage = parseStreamUsage(payload.response?.usage);
       if (usage) {
         state.usage = usage;
+      }
+      // Capture response.id if not already set by response.created event.
+      if (payload.response?.id && !state.responseId) {
+        state.responseId = payload.response.id;
+      }
+      // Extract encrypted reasoning content from output items for multi-turn.
+      const reasoningItem = payload.response?.output?.find(
+        (item) => item.type === 'reasoning',
+      );
+      if (reasoningItem) {
+        if (reasoningItem.encrypted_content) {
+          state.reasoningEncryptedContent = reasoningItem.encrypted_content;
+        }
+        // Extract summary text if available
+        const summaryArr = reasoningItem.summary;
+        if (Array.isArray(summaryArr)) {
+          const textParts = summaryArr
+            .filter((s: unknown) => typeof s === 'object' && s !== null && 'text' in (s as Record<string, unknown>))
+            .map((s: Record<string, unknown>) => (s as { text: string }).text);
+          if (textParts.length > 0) {
+            state.reasoningSummary = textParts.join('\n');
+          }
+        }
       }
       state.sawFinishReason = true;
       if (state.stopReason !== 'tool_use' && responseContainsFunctionCall(payload)) {
@@ -438,6 +798,28 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
         responseContainsFunctionCall(payload) || state.stopReason === 'tool_use',
       );
       return [{ type: 'done', stopReason: state.stopReason, ...createChunkMeta(state) }];
+    }
+    case 'response.failed': {
+      const payload = JSON.parse(data) as ResponsesCompletedEvent;
+      const usage = parseStreamUsage(payload.response?.usage);
+      if (usage) {
+        state.usage = usage;
+      }
+      state.sawFinishReason = true;
+      state.stopReason = 'error';
+      return [{ type: 'done', stopReason: state.stopReason, ...createChunkMeta(state) }];
+    }
+    case 'response.tool_search_call.in_progress':
+    case 'response.tool_search_call.searching':
+    case 'response.tool_search_call.completed': {
+      const toolSearchStatus = eventName.split('.').pop() as ToolSearchStatus;
+      return [
+        {
+          type: 'tool_search',
+          status: toolSearchStatus,
+          ...createChunkMeta(state),
+        },
+      ];
     }
     case 'response.error':
     case 'error': {
@@ -595,6 +977,7 @@ function readNonNegativeInteger(value: unknown): number | undefined {
 function createChunkMeta(state: StreamParseState): {
   eventId: string;
   runId: string;
+  agentId?: string;
   occurredAt: number;
 } {
   const eventId = `${state.runId}:evt:${state.nextEventSequence}`;
@@ -602,6 +985,7 @@ function createChunkMeta(state: StreamParseState): {
   return {
     eventId,
     runId: state.runId,
+    ...(state.agentId ? { agentId: state.agentId } : {}),
     occurredAt: Date.now(),
   };
 }

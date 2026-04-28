@@ -3,6 +3,10 @@ import { buildAssistantEventMessageContent } from './assistant-event-message.js'
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-adapter.js';
+import {
+  appendSessionEvent,
+  translateRunEventToSessionEvent,
+} from './session-entry-store.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
@@ -30,6 +34,11 @@ export interface PublishRunEventMeta {
 
 const PERSISTED_RUN_EVENT = Symbol('persistedRunEvent');
 
+export function getRunEventRunId(event: RunEvent): string | null {
+  const runId = Reflect.get(event as object, 'runId');
+  return typeof runId === 'string' && runId.length > 0 ? runId : null;
+}
+
 function computeNextSeq(sessionId: string, clientRequestId: string): number {
   const row = sqliteGet<SessionRunEventSeqRow>(
     `SELECT MAX(seq) AS max_seq FROM session_run_events WHERE session_id = ? AND client_request_id = ?`,
@@ -50,9 +59,14 @@ export function hasPersistedRunEvent(event: RunEvent): boolean {
   return Boolean((event as unknown as Record<PropertyKey, unknown>)[PERSISTED_RUN_EVENT]);
 }
 
-function persistRunEventRow(sessionId: string, event: RunEvent, meta?: PublishRunEventMeta): void {
+function persistRunEventRow(
+  sessionId: string,
+  event: RunEvent,
+  meta?: PublishRunEventMeta,
+): { seq: number | null } {
   const userId = getSessionOwnerUserId(sessionId);
   const occurredAt = event.occurredAt ?? Date.now();
+  const runId = getRunEventRunId(event);
   const seq =
     meta?.seq ??
     (typeof meta?.clientRequestId === 'string' && meta.clientRequestId.length > 0
@@ -69,22 +83,46 @@ function persistRunEventRow(sessionId: string, event: RunEvent, meta?: PublishRu
       seq,
       event.type,
       event.eventId ?? null,
-      event.runId ?? null,
+      runId,
       occurredAt,
       JSON.stringify(event),
     ],
   );
   mirrorDisplayableRunEventAsMessage({ sessionId, userId, event, meta, occurredAt, seq });
   if (userId) {
-    const notificationScope = meta?.clientRequestId ?? event.eventId ?? event.runId ?? event.type;
+    const notificationScope = meta?.clientRequestId ?? event.eventId ?? runId ?? event.type;
     buildNotificationFromRunEvent({
       event,
       id: `notification:${sessionId}:${event.type}:${notificationScope}:${seq ?? occurredAt}`,
       sessionId,
       userId,
     });
+
+    // Phase 2.2: dual-write into the session_entry typed event log so
+    // replaySessionEntries can reconstruct the conversation in opencode's
+    // SessionEntry shape. Translation is opt-in per RunEvent type and
+    // never throws — failures are isolated to keep the legacy run-event
+    // pipeline's invariants untouched.
+    try {
+      const sessionEvent = translateRunEventToSessionEvent({
+        event,
+        fallbackEventId: event.eventId ?? null,
+        fallbackTimestamp: occurredAt,
+      });
+      if (sessionEvent) {
+        appendSessionEvent({
+          sessionId,
+          userId,
+          clientRequestId: meta?.clientRequestId ?? null,
+          event: sessionEvent,
+        });
+      }
+    } catch {
+      // Swallow — SessionEvent persistence is a best-effort mirror.
+    }
   }
   markPersisted(event);
+  return { seq };
 }
 
 function mirrorDisplayableRunEventAsMessage(input: {
@@ -120,6 +158,7 @@ function buildMirroredAssistantEventClientRequestId(input: {
   occurredAt: number;
   seq: number | null;
 }): string {
+  const runId = getRunEventRunId(input.event);
   if (typeof input.event.eventId === 'string' && input.event.eventId.length > 0) {
     return `assistant_event:${input.event.eventId}`;
   }
@@ -128,14 +167,14 @@ function buildMirroredAssistantEventClientRequestId(input: {
     const suffix =
       typeof input.seq === 'number'
         ? `seq:${input.seq}`
-        : typeof input.event.runId === 'string' && input.event.runId.length > 0
-          ? `run:${input.event.runId}`
+        : runId
+          ? `run:${runId}`
           : `at:${input.occurredAt}`;
     return `assistant_event:${input.meta.clientRequestId}:${suffix}:${input.event.type}`;
   }
 
-  if (typeof input.event.runId === 'string' && input.event.runId.length > 0) {
-    return `assistant_event:${input.event.runId}:${input.event.type}:${input.occurredAt}`;
+  if (runId) {
+    return `assistant_event:${runId}:${input.event.type}:${input.occurredAt}`;
   }
 
   return `assistant_event:${input.event.type}:${input.occurredAt}`;
@@ -168,11 +207,18 @@ export function publishSessionRunEvent(
   event: RunEvent,
   meta?: PublishRunEventMeta,
 ): void {
-  persistRunEventRow(sessionId, event, meta);
+  const persisted = persistRunEventRow(sessionId, event, meta);
   const handlers = sessionHandlers.get(sessionId);
   if (!handlers) return;
+  // Forward the DB-assigned seq into the broadcast meta so subscribers
+  // (notably the /stream/attach endpoint) can filter and order live events
+  // even when the caller didn't provide a seq.
+  const broadcastMeta: PublishRunEventMeta | undefined =
+    meta?.seq !== undefined || persisted.seq === null
+      ? meta
+      : { ...(meta ?? {}), seq: persisted.seq };
   handlers.forEach((handler) => {
-    handler(event, meta);
+    handler(event, broadcastMeta);
   });
 }
 

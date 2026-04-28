@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 const execFileAsync = promisify(execFile);
 
-const AST_GREP_LANGUAGES = [
+export const AST_GREP_LANGUAGES = [
   'bash',
   'c',
   'cpp',

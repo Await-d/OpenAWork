@@ -12,6 +12,7 @@
 
 import type { Message, MessageContent } from '@openAwork/shared';
 import { appendSessionMessageV2 } from './message-v2-adapter.js';
+import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
 
 // ---------------------------------------------------------------------------
 // Error type detection
@@ -138,13 +139,9 @@ export function recoverToolResultMissing(
   // Check which tool_call IDs already have tool_results
   const existingResultIds = new Set<string>();
   for (const msg of messages) {
-    if (msg.role === 'tool' && Array.isArray(msg.content)) {
-      for (const block of msg.content) {
-        if (block.type === 'tool_result') {
-          existingResultIds.add((block as { toolCallId: string }).toolCallId);
-        }
-      }
-    }
+    extractToolResultContentsFromMessage(msg).forEach((block) => {
+      existingResultIds.add(block.toolCallId);
+    });
   }
 
   const missingIds = toolCallIds.filter((t) => !existingResultIds.has(t.id));
@@ -167,7 +164,6 @@ export function recoverToolResultMissing(
     userId,
     role: 'tool',
     content: toolResultContent,
-    legacyMessagesJson: undefined,
     clientRequestId: `${clientRequestId}:session-recovery:tool-result`,
   });
 
@@ -198,7 +194,6 @@ export function recoverThinkingDisabledViolation(
         text: '[Session Recovery] Thinking blocks were present when thinking mode is disabled. The conversation history has been adjusted to strip thinking blocks. Continuing...',
       },
     ],
-    legacyMessagesJson: undefined,
     clientRequestId: `${clientRequestId}:session-recovery:thinking-strip`,
   });
 
@@ -229,7 +224,6 @@ export function recoverThinkingBlockOrder(
         text: '[Session Recovery] Thinking block order was incorrect. The conversation history has been adjusted. Continuing...',
       },
     ],
-    legacyMessagesJson: undefined,
     clientRequestId: `${clientRequestId}:session-recovery:thinking-order`,
   });
 

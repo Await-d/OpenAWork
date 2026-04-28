@@ -61,10 +61,9 @@ async function main(): Promise<void> {
       persistSessionRunEventForRequest(
         sessionId,
         {
-          type: 'text_delta',
-          delta: '已恢复',
+          type: 'thinking_delta',
+          delta: '先恢复上下文',
           eventId: 'run-attach-verify:evt:4',
-          runId: 'run-attach-verify',
           occurredAt: startedAtMs + 10,
         },
         { clientRequestId, seq: 4 },
@@ -101,13 +100,43 @@ async function main(): Promise<void> {
         publishSessionRunEvent(
           sessionId,
           {
-            type: 'done',
-            stopReason: 'end_turn',
+            type: 'tool_result',
+            toolCallId: 'call-attach-verify-1',
+            toolName: 'write',
+            clientRequestId,
+            output: { ok: true },
+            isError: false,
+            fileDiffs: [
+              {
+                file: '/repo/a.ts',
+                before: 'a',
+                after: 'b',
+                additions: 1,
+                deletions: 1,
+                status: 'modified',
+                clientRequestId,
+                toolCallId: 'call-attach-verify-1',
+                toolName: 'write',
+              },
+            ],
+            observability: {
+              presentedToolName: 'Write',
+              canonicalToolName: 'write',
+            },
             eventId: 'run-attach-verify:evt:5',
-            runId: 'run-attach-verify',
             occurredAt: Date.now(),
           },
           { clientRequestId, seq: 5 },
+        );
+        publishSessionRunEvent(
+          sessionId,
+          {
+            type: 'done',
+            stopReason: 'end_turn',
+            eventId: 'run-attach-verify:evt:6',
+            occurredAt: Date.now(),
+          },
+          { clientRequestId, seq: 6 },
         );
       }, 20);
 
@@ -116,18 +145,33 @@ async function main(): Promise<void> {
       const envelopes = parseSseEnvelopes(attachResponse.body);
       const seqs = envelopes.map((envelope) => envelope['seq']);
       assert(
-        JSON.stringify(seqs) === JSON.stringify([4, 5]),
+        JSON.stringify(seqs) === JSON.stringify([4, 5, 6]),
         'attach should replay then continue live in order',
       );
 
-      const outputs = envelopes.map((envelope) => {
+      const events = envelopes.map((envelope) => {
         const payload = envelope['payload'] as Record<string, unknown> | undefined;
-        const event = payload?.['event'] as Record<string, unknown> | undefined;
-        return event?.['type'] === 'text_delta' ? event['delta'] : event?.['stopReason'];
+        return (payload?.['event'] as Record<string, unknown> | undefined) ?? {};
       });
       assert(
-        JSON.stringify(outputs) === JSON.stringify(['已恢复', 'end_turn']),
-        'attach should emit the replayed text delta followed by the live terminal event',
+        JSON.stringify(events.map((event) => event['type'])) ===
+          JSON.stringify(['thinking_delta', 'tool_result', 'done']),
+        'attach should replay richer events before the live terminal event',
+      );
+      const toolResultEvent = events[1] as Record<string, unknown>;
+      assert(
+        toolResultEvent['toolCallId'] === 'call-attach-verify-1',
+        'attach should preserve tool_result call id',
+      );
+      assert(toolResultEvent['toolName'] === 'write', 'attach should preserve tool_result name');
+      assert(
+        Array.isArray(toolResultEvent['fileDiffs']) && toolResultEvent['fileDiffs'].length === 1,
+        'attach should preserve tool_result file diffs',
+      );
+      const observability = toolResultEvent['observability'] as Record<string, unknown> | undefined;
+      assert(
+        observability?.['canonicalToolName'] === 'write',
+        'attach should preserve tool_result observability',
       );
 
       console.log('verify-stream-attach-recovery: ok');

@@ -15,17 +15,12 @@ import {
   workspaceWriteFileTool,
   writeTool,
 } from './workspace-tools.js';
-import {
-  fileReadTool,
-  fileWriteTool,
-  readFileTool,
-  websearchTool,
-  writeFileTool,
-} from './tool-aliases.js';
+import { websearchTool } from './tool-aliases.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
 import { subTodoReadTool, subTodoWriteTool, todoReadTool, todoWriteTool } from './todo-tools.js';
 import { webfetchTool } from './web-tools.js';
 import { createEditTool } from './edit-tools.js';
+import { createMultiEditTool } from './multi-edit-tool.js';
 import { batchToolDefinition } from './batch-tools.js';
 import { createSkillTool } from './skill-tools.js';
 import { bashToolDefinition } from './bash-tools.js';
@@ -44,11 +39,16 @@ import {
   sessionReadToolDefinition,
   sessionSearchToolDefinition,
 } from './session-manager-tools.js';
-import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
+import {
+  AST_GREP_LANGUAGES,
+  astGrepReplaceToolDefinition,
+  astGrepSearchToolDefinition,
+} from './ast-grep-tools.js';
 import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from './skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
+import { generateImageToolDefinition } from './image-generation-tool.js';
 import { desktopAutomationToolDefinition } from './desktop-automation.js';
 import {
   lspCallHierarchyToolDefinition,
@@ -110,10 +110,16 @@ export interface GatewayToolDefinition {
       additionalProperties: boolean;
     };
     strict: boolean;
+    deferLoading?: boolean;
   };
 }
 
 const editTool = createEditTool(
+  '__tool-definitions__',
+  '__tool-definitions__',
+  '__tool-definitions__',
+);
+const multiEditTool = createMultiEditTool(
   '__tool-definitions__',
   '__tool-definitions__',
   '__tool-definitions__',
@@ -142,6 +148,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   globTool,
   grepTool,
   editTool,
+  multiEditTool,
   skillTool,
   batchToolDefinition,
   bashToolDefinition,
@@ -175,19 +182,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   subTodoReadTool,
   MCP_LIST_TOOLS_DEFINITION,
   MCP_CALL_DEFINITION,
-] as const;
-
-const LEGACY_COMPATIBILITY_TOOLS = [
-  webSearchTool,
-  fileReadTool,
-  readFileTool,
-  fileWriteTool,
-  writeFileTool,
-  workspaceTreeTool,
-  workspaceReadFileTool,
-  workspaceSearchTool,
-  workspaceWriteFileTool,
-  workspaceCreateFileTool,
+  generateImageToolDefinition,
 ] as const;
 
 export function buildGatewayToolDefinitions(): GatewayToolDefinition[] {
@@ -206,14 +201,6 @@ export function forEachDefaultGatewayTool(
   register: (tool: (typeof MODEL_VISIBLE_GATEWAY_TOOLS)[number]) => void,
 ): void {
   for (const tool of MODEL_VISIBLE_GATEWAY_TOOLS) {
-    register(tool);
-  }
-}
-
-export function forEachLegacyCompatibilityTool(
-  register: (tool: (typeof LEGACY_COMPATIBILITY_TOOLS)[number]) => void,
-): void {
-  for (const tool of LEGACY_COMPATIBILITY_TOOLS) {
     register(tool);
   }
 }
@@ -276,10 +263,6 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         type: 'object',
         properties: {
           skill: { type: 'string', description: 'Installed skill name to execute' },
-          args: {
-            type: 'string',
-            description: 'Optional freeform args string passed by the model',
-          },
         },
         required: ['skill'],
         additionalProperties: false,
@@ -483,14 +466,38 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          subject: { type: 'string' },
+          title: {
+            type: 'string',
+            description: 'Task title. Provide either title or subject (mutually equivalent).',
+          },
+          subject: {
+            type: 'string',
+            description: 'Legacy alias for title. Provide either title or subject.',
+          },
+          kind: {
+            type: 'string',
+            description: 'Task kind label, defaults to "task".',
+          },
           description: { type: 'string' },
           blockedBy: { type: 'array', items: { type: 'string' } },
           blocks: { type: 'array', items: { type: 'string' } },
+          parentTaskId: {
+            type: 'string',
+            description: 'Parent task id for nested tasks.',
+          },
+          parentID: { type: 'string', description: 'Legacy alias for parentTaskId.' },
+          assignedAgent: { type: 'string' },
+          owner: { type: 'string', description: 'Legacy alias for assignedAgent.' },
+          priority: {
+            type: 'string',
+            enum: ['low', 'medium', 'high'],
+          },
+          tags: { type: 'array', items: { type: 'string' } },
+          idempotencyKey: { type: 'string' },
+          causationId: { type: 'string' },
           metadata: { type: 'object' },
-          parentID: { type: 'string' },
         },
-        required: ['subject'],
+        required: [],
         additionalProperties: false,
       };
     case 'task_get':
@@ -514,13 +521,42 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         type: 'object',
         properties: {
           id: { type: 'string' },
-          subject: { type: 'string' },
+          title: { type: 'string' },
+          subject: { type: 'string', description: 'Legacy alias for title.' },
+          kind: { type: 'string' },
           description: { type: 'string' },
-          status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'deleted'] },
+          status: {
+            type: 'string',
+            enum: [
+              'pending',
+              'running',
+              'blocked',
+              'completed',
+              'failed',
+              'cancelled',
+              'in_progress',
+              'deleted',
+            ],
+          },
+          parentTaskId: { type: 'string' },
+          parentID: { type: 'string', description: 'Legacy alias for parentTaskId.' },
           addBlocks: { type: 'array', items: { type: 'string' } },
           addBlockedBy: { type: 'array', items: { type: 'string' } },
-          owner: { type: 'string' },
+          assignedAgent: { type: 'string' },
+          owner: { type: 'string', description: 'Legacy alias for assignedAgent.' },
           metadata: { type: 'object' },
+          expectedRevision: {
+            type: 'integer',
+            minimum: 0,
+            description: 'Optimistic concurrency: required revision before update.',
+          },
+          conflictPolicy: {
+            type: 'string',
+            enum: ['reject', 'merge', 'overwrite'],
+            description: 'Action when expectedRevision mismatches the current task revision.',
+          },
+          idempotencyKey: { type: 'string' },
+          causationId: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -561,6 +597,19 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         properties: {
           path: { type: 'string', description: 'Absolute workspace file path to read' },
           filePath: { type: 'string', description: 'Legacy alias for path' },
+          offset: {
+            type: 'integer',
+            minimum: 1,
+            description:
+              'Optional 1-based starting line. Use this to skip ahead in large files; pair with limit to paginate.',
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 2000,
+            description:
+              'Optional maximum number of lines to return. Defaults to 2000. Lines longer than 2000 characters are truncated; check totalLines/lineEnd in the result to decide whether to read further with a larger offset.',
+          },
         },
         required: [],
         additionalProperties: false,
@@ -592,6 +641,35 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['filePath', 'oldString', 'newString'],
+        additionalProperties: false,
+      };
+    case 'multi_edit':
+      return {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: 'Absolute workspace file path to edit' },
+          edits: {
+            type: 'array',
+            description: 'Array of edit operations to perform sequentially on the file',
+            items: {
+              type: 'object',
+              properties: {
+                oldString: { type: 'string', description: 'The text to replace' },
+                newString: {
+                  type: 'string',
+                  description: 'The text to replace it with (must be different from oldString)',
+                },
+                replaceAll: {
+                  type: 'boolean',
+                  description: 'Replace all occurrences of oldString (default false)',
+                },
+              },
+              required: ['oldString', 'newString'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['filePath', 'edits'],
         additionalProperties: false,
       };
     case 'batch':
@@ -697,12 +775,12 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           toolCallId: {
             type: 'string',
             description:
-              'Optional explicit toolCallId from a previous tool_result reference in the current session',
+              'Optional explicit toolCallId from a previous tool_result reference in the current session; prefer this whenever it is available',
           },
           useLatestReferenced: {
             type: 'boolean',
             description:
-              'When true and toolCallId is omitted, read the most recent large output that was replaced by a [tool_output_reference] in this session',
+              'Fallback only: when true and toolCallId is omitted, read the most recent large output that was replaced by a [tool_output_reference] in this session',
           },
           jsonPath: {
             type: 'string',
@@ -787,7 +865,13 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          task_id: { type: 'string', description: 'Background task id to inspect' },
+          task_id: {
+            type: 'string',
+            description:
+              'Background task id to inspect. Provide one of task_id, taskId, or runId.',
+          },
+          taskId: { type: 'string', description: 'Alias for task_id.' },
+          runId: { type: 'string', description: 'Run id alias for the background task.' },
           block: {
             type: 'boolean',
             description: 'Wait until the task finishes before returning',
@@ -827,7 +911,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             description: 'Maximum wait time in milliseconds when block=true',
           },
         },
-        required: ['task_id'],
+        required: [],
         additionalProperties: false,
       };
     case 'background_cancel':
@@ -836,8 +920,11 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         properties: {
           taskId: {
             type: 'string',
-            description: 'Task id to cancel. Required when all=false.',
+            description:
+              'Task id to cancel. Provide one of taskId, task_id, or runId when all=false.',
           },
+          task_id: { type: 'string', description: 'Alias for taskId.' },
+          runId: { type: 'string', description: 'Run id alias for the background task.' },
           all: {
             type: 'boolean',
             description:
@@ -897,7 +984,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         type: 'object',
         properties: {
           pattern: { type: 'string' },
-          lang: { type: 'string' },
+          lang: { type: 'string', enum: [...AST_GREP_LANGUAGES] },
           paths: { type: 'array', items: { type: 'string' } },
           globs: { type: 'array', items: { type: 'string' } },
           context: { type: 'integer', minimum: 0, maximum: 20 },
@@ -911,7 +998,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         properties: {
           pattern: { type: 'string' },
           rewrite: { type: 'string' },
-          lang: { type: 'string' },
+          lang: { type: 'string', enum: [...AST_GREP_LANGUAGES] },
           paths: { type: 'array', items: { type: 'string' } },
           globs: { type: 'array', items: { type: 'string' } },
           dryRun: { type: 'boolean' },
@@ -961,11 +1048,45 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
       return {
         type: 'object',
         properties: {
-          file_path: { type: 'string' },
-          image_data: { type: 'string' },
-          goal: { type: 'string' },
+          file_path: {
+            type: 'string',
+            description:
+              'Absolute workspace path to the local file to inspect. Provide exactly one of file_path or image_data.',
+          },
+          image_data: {
+            type: 'string',
+            description:
+              'Base64 image bytes (optionally as data:URL). Provide exactly one of file_path or image_data.',
+          },
+          goal: {
+            type: 'string',
+            description: 'Concise objective describing what to extract from the input.',
+          },
         },
         required: ['goal'],
+        additionalProperties: false,
+      };
+    case 'generate_image':
+      return {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description: 'The text prompt describing the image to generate.',
+          },
+          size: {
+            type: 'string',
+            description:
+              'Image size in WxH format, e.g. "1024x1024", "1536x1024". Defaults to the user\'s configured default size.',
+          },
+          quality: {
+            type: 'string',
+            enum: ['low', 'medium', 'high'],
+            description:
+              'Image quality: "low" for speed, "medium" for balance, "high" for detail. Defaults to user setting.',
+          },
+        },
+        required: ['prompt'],
         additionalProperties: false,
       };
     case 'grep':
@@ -978,8 +1099,19 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             type: 'string',
             description: 'Optional glob pattern to include matching files',
           },
-          output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] },
-          head_limit: { type: 'integer', minimum: 0, maximum: 500 },
+          output_mode: {
+            type: 'string',
+            enum: ['content', 'files_with_matches', 'count'],
+            description:
+              'Defaults to "files_with_matches". Use "content" only with a tight head_limit to avoid oversized output.',
+          },
+          head_limit: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 500,
+            description:
+              'Maximum number of matches to return. Use a positive value (e.g., 50) when output_mode="content" to keep results bounded; 0 disables the limit.',
+          },
         },
         required: ['pattern'],
         additionalProperties: false,
@@ -1120,8 +1252,9 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             description: 'MCP tool name exposed by the configured server',
           },
           arguments: {
-            type: 'object',
-            description: 'JSON object of arguments to send to the MCP tool',
+            anyOf: [{ type: 'object' }, { type: 'string' }],
+            description:
+              'Arguments forwarded to the MCP tool. Either a JSON object or a JSON-encoded object string.',
           },
         },
         required: ['serverId', 'toolName', 'arguments'],

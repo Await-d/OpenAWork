@@ -5,6 +5,7 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import type { FileBackupRef } from '@openAwork/shared';
 import { z } from 'zod';
 import { WORKSPACE_ROOT } from './db.js';
+import { formatFileAfterWrite } from './post-write-formatter.js';
 import { ensureIgnoreRulesLoadedForPath } from './workspace-safety.js';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import {
@@ -38,7 +39,11 @@ const IGNORED_NAMES = new Set([
 ]);
 const MAX_TREE_ENTRIES = 500;
 const MAX_TREE_DEPTH = 4;
-const MAX_FILE_BYTES = 100 * 1024;
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_READ_LINE_LIMIT = 2000;
+const MAX_READ_LINE_LIMIT = 2000;
+const MAX_READ_LINE_CHARS = 2000;
+const READ_LINE_TRUNCATION_NOTICE = '...[line truncated]';
 const MAX_GLOB_MATCHES = 100;
 const MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
@@ -59,6 +64,8 @@ const workspaceReadFileInputSchema = z
   .object({
     path: z.string().min(1).optional(),
     filePath: z.string().min(1).optional(),
+    offset: z.number().int().min(1).optional(),
+    limit: z.number().int().min(1).max(MAX_READ_LINE_LIMIT).optional(),
   })
   .superRefine((value, context) => {
     if (!value.path && !value.filePath) {
@@ -74,6 +81,10 @@ const workspaceReadFileOutputSchema = z.object({
   path: z.string(),
   content: z.string(),
   truncated: z.boolean(),
+  lineStart: z.number().int().min(1).optional(),
+  lineEnd: z.number().int().min(0).optional(),
+  totalLines: z.number().int().min(0).optional(),
+  byteLimitReached: z.boolean().optional(),
 });
 
 const globInputSchema = z.object({
@@ -272,6 +283,21 @@ async function assertFile(path: string): Promise<Stats> {
   }
 
   return stat;
+}
+
+async function readDirectoryListing(path: string): Promise<string> {
+  const entries = await fsp.readdir(path, { withFileTypes: true });
+  return entries
+    .filter((entry) => !IGNORED_NAMES.has(entry.name))
+    .filter((entry) => !defaultIgnoreManager.shouldIgnore(join(path, entry.name)))
+    .sort((left, right) => {
+      if (left.isDirectory() === right.isDirectory()) {
+        return left.name.localeCompare(right.name);
+      }
+      return left.isDirectory() ? -1 : 1;
+    })
+    .map((entry) => `${entry.isDirectory() ? 'dir' : 'file'} ${entry.name}`)
+    .join('\n');
 }
 
 async function readTree(
@@ -676,47 +702,119 @@ export const listTool: ToolDefinition<
   execute: async (input, signal) => workspaceTreeTool.execute(input, signal),
 };
 
+function applyLineWindow(
+  rawContent: string,
+  byteLimitReached: boolean,
+  input: { offset?: number; limit?: number },
+): {
+  content: string;
+  truncated: boolean;
+  lineStart: number;
+  lineEnd: number;
+  totalLines: number;
+  byteLimitReached: boolean;
+} {
+  const lines = rawContent.split(/\r?\n/);
+  const totalLines = lines.length;
+  const offset = input.offset ?? 1;
+  const limit = input.limit ?? DEFAULT_READ_LINE_LIMIT;
+  const sliceStart = Math.max(0, offset - 1);
+  const sliceEnd = Math.min(totalLines, sliceStart + limit);
+  const selected = lines.slice(sliceStart, sliceEnd).map((line) => {
+    if (line.length <= MAX_READ_LINE_CHARS) {
+      return line;
+    }
+    return line.slice(0, MAX_READ_LINE_CHARS) + READ_LINE_TRUNCATION_NOTICE;
+  });
+  const lineStart =
+    selected.length > 0 ? sliceStart + 1 : totalLines === 0 ? 1 : Math.min(offset, totalLines);
+  const lineEnd =
+    selected.length > 0 ? sliceStart + selected.length : totalLines === 0 ? 0 : totalLines;
+  const truncated = byteLimitReached || sliceEnd < totalLines || sliceStart > 0;
+  return {
+    content: selected.join('\n'),
+    truncated,
+    lineStart,
+    lineEnd,
+    totalLines,
+    byteLimitReached,
+  };
+}
+
+async function readWorkspaceFileWithWindow(
+  safePath: string,
+  input: { offset?: number; limit?: number },
+): Promise<z.infer<typeof workspaceReadFileOutputSchema>> {
+  const stat = await assertFile(safePath);
+  const byteLimitReached = stat.size > MAX_FILE_BYTES;
+  const fd = await fsp.open(safePath, 'r');
+  let raw: string;
+  try {
+    const buffer = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
+    if (buffer.length > 0) {
+      await fd.read(buffer, 0, buffer.length, 0);
+    }
+    raw = buffer.toString('utf8');
+  } finally {
+    await fd.close();
+  }
+
+  const window = applyLineWindow(raw, byteLimitReached, input);
+  lspManager.touchFile(safePath, false).catch((_e: unknown) => undefined);
+  return {
+    path: safePath,
+    content: window.content,
+    truncated: window.truncated,
+    lineStart: window.lineStart,
+    lineEnd: window.lineEnd,
+    totalLines: window.totalLines,
+    byteLimitReached: window.byteLimitReached,
+  };
+}
+
 export const workspaceReadFileTool: ToolDefinition<
   typeof workspaceReadFileInputSchema,
   typeof workspaceReadFileOutputSchema
 > = {
   name: 'workspace_read_file',
   description:
-    'Read a UTF-8 text file from the workspace with size limits and agentignore protection.',
+    'Read a UTF-8 text file from the workspace with size limits and agentignore protection. Supports offset (1-based starting line) and limit (max lines, default 2000) for paginated reads of large files; lines longer than 2000 characters are truncated.',
   inputSchema: workspaceReadFileInputSchema,
   outputSchema: workspaceReadFileOutputSchema,
   timeout: 10000,
   execute: async (input) => {
     const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file');
     await ensureIgnoreRulesLoadedForPath(safePath);
-    const stat = await assertFile(safePath);
-    const truncated = stat.size > MAX_FILE_BYTES;
-    const fd = await fsp.open(safePath, 'r');
-
-    try {
-      const buffer = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
-      await fd.read(buffer, 0, buffer.length, 0);
-      const result = {
-        path: safePath,
-        content: buffer.toString('utf8'),
-        truncated,
-      };
-      lspManager.touchFile(safePath, false).catch((_e: unknown) => undefined);
-      return result;
-    } finally {
-      await fd.close();
-    }
+    return readWorkspaceFileWithWindow(safePath, input);
   },
 };
 
 export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputSchema> = {
   name: 'read',
   description:
-    'Read a UTF-8 text file from the workspace. Use list first when you need to inspect folders before choosing a file to read.',
+    'Read a UTF-8 text file (or list a directory) from the workspace. Supports offset (1-based starting line) and limit (max lines, default 2000) for paginated reads of large files; lines longer than 2000 characters are truncated. Use list first when you need to inspect folders before choosing a file to read.',
   inputSchema: readInputSchema,
   outputSchema: readOutputSchema,
   timeout: workspaceReadFileTool.timeout,
-  execute: async (input, signal) => workspaceReadFileTool.execute(input, signal),
+  execute: async (input) => {
+    const safePath = assertAccessibleWorkspacePath(pickPathInput(input), 'file');
+    await ensureIgnoreRulesLoadedForPath(safePath);
+    const stat = await fsp.stat(safePath);
+    if (stat.isDirectory()) {
+      const listing = await readDirectoryListing(safePath);
+      const window = applyLineWindow(listing, false, input);
+      return {
+        path: safePath,
+        content: window.content,
+        truncated: window.truncated,
+        lineStart: window.lineStart,
+        lineEnd: window.lineEnd,
+        totalLines: window.totalLines,
+        byteLimitReached: window.byteLimitReached,
+      };
+    }
+    return readWorkspaceFileWithWindow(safePath, input);
+  },
 };
 
 export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToolOutputSchema> = {
@@ -821,6 +919,7 @@ export async function executeWorkspaceWriteFile(
       content: string;
       filePath: string;
     }) => Promise<FileBackupRef | undefined>;
+    workspaceRoot?: string;
   },
 ): Promise<z.infer<typeof workspaceWriteFileOutputSchema>> {
   const safePath = assertWritableWorkspacePath(pickPathInput(input), 'file');
@@ -834,6 +933,10 @@ export async function executeWorkspaceWriteFile(
       })
     : undefined;
   await fsp.writeFile(safePath, input.content, 'utf8');
+  const effectiveRoot = options?.workspaceRoot ?? WORKSPACE_ROOT;
+  if (effectiveRoot) {
+    await formatFileAfterWrite(safePath, effectiveRoot).catch(() => {});
+  }
   lspManager.touchFile(safePath, true).catch((_e: unknown) => undefined);
   const diagnostics = await getPostWriteDiagnostics([safePath]);
   return {

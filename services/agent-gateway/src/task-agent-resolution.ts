@@ -1,4 +1,5 @@
 import type { ManagedAgentRecord } from '@openAwork/shared';
+import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listManagedAgentsForUser } from './agent-catalog.js';
 import {
   getTaskCategoryDescription,
@@ -43,6 +44,31 @@ function normalizeSkills(skills: string[] | undefined): string[] {
   return Array.from(
     new Set(skills.map((skill) => skill.trim()).filter((skill) => skill.length > 0)),
   );
+}
+
+/**
+ * For requested skills that match oh-my-opencode builtin skills,
+ * inject their descriptionForModel content directly into the delegated
+ * system prompt so the child session doesn't need to call the skill tool.
+ */
+function injectBuiltinSkillInstructions(requestedSkills: string[]): string | null {
+  const parts: string[] = [];
+  for (const skillName of requestedSkills) {
+    const normalizedName = skillName.trim().toLowerCase();
+    const entry = BUILTIN_SKILLS.find(({ manifest }) =>
+      [manifest.id, manifest.name, manifest.displayName]
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+        .some((v) => v.trim().toLowerCase() === normalizedName),
+    );
+    if (entry?.manifest.descriptionForModel) {
+      parts.push(
+        `<skill_content name="${entry.manifest.displayName ?? entry.manifest.name ?? skillName}">`,
+        entry.manifest.descriptionForModel,
+        '</skill_content>',
+      );
+    }
+  }
+  return parts.length > 0 ? parts.join('\n') : null;
 }
 
 function findManagedAgent(userId: string, identifier: string): ManagedAgentRecord | undefined {
@@ -134,11 +160,13 @@ function buildDelegatedSystemPrompt(input: {
   }
 
   if (input.requestedSkills.length > 0) {
+    const skillInstructions = injectBuiltinSkillInstructions(input.requestedSkills);
     sections.push(
       [
         'Requested skills:',
         `- ${input.requestedSkills.join(', ')}`,
         '- Load and use these skills proactively when they are relevant to the delegated task.',
+        ...(skillInstructions ? ['', skillInstructions] : []),
       ].join('\n'),
     );
   }

@@ -1,9 +1,6 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 
-const MIN_TASK_TIMEOUT_MS = 5_000;
-const MAX_TASK_TIMEOUT_MS = 30 * 60_000;
-
 const taskInputSchema = z
   .object({
     description: z.string().min(1),
@@ -15,7 +12,6 @@ const taskInputSchema = z
     session_id: z.string().min(1).optional(),
     task_id: z.string().min(1).optional(),
     command: z.string().min(1).optional(),
-    timeout_ms: z.number().int().min(MIN_TASK_TIMEOUT_MS).max(MAX_TASK_TIMEOUT_MS).optional(),
   })
   .superRefine((value, context) => {
     if (value.subagent_type && value.category) {
@@ -46,12 +42,13 @@ const taskOutputSchema = z.object({
   errorMessage: z.string().optional(),
   message: z.string().optional(),
   reason: z.string().optional(),
+  timeoutSource: z.enum(['first_response']).optional(),
 });
 
 export const taskToolDefinition: ToolDefinition<typeof taskInputSchema, typeof taskOutputSchema> = {
   name: 'task',
   description:
-    'Spawn agent task with category-based or direct agent selection. Provide exactly one of category or subagent_type. load_skills and run_in_background are required. Use run_in_background=false for sync task execution and true only for parallel background work. Optional timeout_ms (5000–1800000) sets a deadline for child session execution; on expiry the child is terminated with status=failed and reason=timeout.',
+    'Spawn agent task with category-based or direct agent selection. Provide exactly one of category or subagent_type. load_skills and run_in_background are required. Use run_in_background=false for sync task execution and true only for parallel background work. Child auto-timeout is driven by assistant first-activity timeout/retry behavior.',
   inputSchema: taskInputSchema,
   outputSchema: taskOutputSchema,
   timeout: 30000,

@@ -1,5 +1,13 @@
 import type { AIProvider, ActiveSelection, ProviderType } from '@openAwork/agent-core';
 import { ProviderManagerImpl } from '@openAwork/agent-core';
+import {
+  DEFAULT_IMAGE_GENERATION_SIZE,
+  normalizeImageGenerationSize,
+  type ImageGenerationBackground,
+  type ImageGenerationOutputFormat,
+  type ImageGenerationQuality,
+  validateImageGenerationSize,
+} from '@openAwork/shared';
 import { z } from 'zod';
 
 const PROVIDER_TYPE_VALUES = [
@@ -34,9 +42,38 @@ export const defaultThinkingSettingsSchema = z.object({
 
 export type DefaultThinkingSettings = z.infer<typeof defaultThinkingSettingsSchema>;
 
+const imageGenerationSizeSchema = z.string().trim().superRefine((value, context) => {
+  const validation = validateImageGenerationSize(value);
+  if (!validation.valid) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: validation.message ?? 'Invalid image generation size',
+    });
+  }
+});
+const imageGenerationQualitySchema = z.enum(['low', 'medium', 'high']) satisfies z.ZodType<ImageGenerationQuality>;
+const imageGenerationOutputFormatSchema = z.enum(['png', 'jpeg', 'webp']) satisfies z.ZodType<ImageGenerationOutputFormat>;
+const imageGenerationBackgroundSchema = z.enum(['auto', 'opaque']) satisfies z.ZodType<ImageGenerationBackground>;
+
+export const imageGenerationDefaultsSchema = z.object({
+  size: imageGenerationSizeSchema,
+  quality: imageGenerationQualitySchema,
+  outputFormat: imageGenerationOutputFormatSchema,
+  background: imageGenerationBackgroundSchema,
+});
+
+export type ImageGenerationDefaults = z.infer<typeof imageGenerationDefaultsSchema>;
+
 export const DEFAULT_THINKING_SETTINGS: DefaultThinkingSettings = {
   chat: { enabled: false, effort: 'medium' },
   fast: { enabled: false, effort: 'medium' },
+};
+
+export const DEFAULT_IMAGE_GENERATION_DEFAULTS: ImageGenerationDefaults = {
+  size: DEFAULT_IMAGE_GENERATION_SIZE,
+  quality: 'medium',
+  outputFormat: 'png',
+  background: 'auto',
 };
 
 const requestOverridesSchema = z.object({
@@ -73,6 +110,7 @@ export const aiModelConfigSchema = z.object({
   maxOutputTokens: nonNegativeIntegerMetadataSchema,
   supportsTools: z.boolean().optional(),
   supportsVision: z.boolean().optional(),
+  supportsImageGeneration: z.boolean().optional(),
   supportsThinking: z.boolean().optional(),
   inputPricePerMillion: z.number().min(0).optional(),
   outputPricePerMillion: z.number().min(0).optional(),
@@ -91,7 +129,7 @@ export const aiProviderSchema = z
     apiKeyEnv: z.string().optional(),
     oauth: oauthConfigSchema.optional(),
     requestOverrides: requestOverridesSchema.optional(),
-    upstreamProtocol: z.enum(['chat_completions', 'responses']).optional(),
+    upstreamProtocol: z.enum(['chat_completions', 'responses', 'anthropic_messages']).optional(),
     defaultModels: z.array(aiModelConfigSchema),
     createdAt: z.string().optional(),
     updatedAt: z.string().optional(),
@@ -114,6 +152,7 @@ const providerModelSelectionSchema = z.object({
 export const activeSelectionSchema = z.object({
   chat: providerModelSelectionSchema,
   fast: providerModelSelectionSchema,
+  image: providerModelSelectionSchema.optional(),
   compaction: providerModelSelectionSchema.optional(),
 });
 
@@ -121,6 +160,7 @@ export const providerSettingsBodySchema = z.object({
   providers: z.array(aiProviderSchema),
   activeSelection: activeSelectionSchema.optional(),
   defaultThinking: defaultThinkingSettingsSchema.optional(),
+  imageGenerationDefaults: imageGenerationDefaultsSchema.optional(),
 });
 
 export const providerSettingsQuerySchema = z.object({
@@ -200,6 +240,28 @@ export const parseStoredDefaultThinking = (
     chat: { ...DEFAULT_THINKING_SETTINGS.chat },
     fast: { ...DEFAULT_THINKING_SETTINGS.fast },
   };
+};
+
+export const parseStoredImageGenerationDefaults = (
+  rawImageGenerationDefaults: unknown,
+): ImageGenerationDefaults => {
+  const parsed = imageGenerationDefaultsSchema.safeParse(rawImageGenerationDefaults);
+  if (parsed.success) {
+    return {
+      ...parsed.data,
+      size: normalizeImageGenerationSize(parsed.data.size, DEFAULT_IMAGE_GENERATION_DEFAULTS.size),
+    };
+  }
+
+  return { ...DEFAULT_IMAGE_GENERATION_DEFAULTS };
+};
+
+export const resolveStoredDefaultThinkingMode = (
+  rawDefaultThinking: unknown,
+  mode: keyof DefaultThinkingSettings,
+): DefaultThinkingSettings['chat'] => {
+  const parsed = parseStoredDefaultThinking(rawDefaultThinking);
+  return { ...parsed[mode] };
 };
 
 const createProviderManager = async (
@@ -312,6 +374,44 @@ export const getCompactionProviderConfig = (
       );
       const model = provider?.defaultModels.find(
         (item) => item.id === selection.modelId && item.enabled,
+      );
+      if (!provider || !model) {
+        return null;
+      }
+
+      return { provider, modelId: model.id };
+    })
+    .catch(() => null);
+
+export const getFastProviderConfig = (
+  rawProviders: unknown,
+  rawActiveSelection: unknown,
+): Promise<{ provider: AIProvider; modelId: string } | null> =>
+  createProviderManager(rawProviders, rawActiveSelection)
+    .then((manager) => {
+      const { provider, model } = manager.getFastProviderConfig();
+      return { provider, modelId: model.id };
+    })
+    .catch(() => null);
+
+export const getImageProviderConfig = (
+  rawProviders: unknown,
+  rawActiveSelection: unknown,
+): Promise<{ provider: AIProvider; modelId: string } | null> =>
+  createProviderManager(rawProviders, rawActiveSelection)
+    .then((manager) => {
+      const config = manager.getConfig();
+      const selection = config.active.image;
+      if (!selection) {
+        return null;
+      }
+
+      const provider = config.providers.find(
+        (item) => item.id === selection.providerId && item.enabled,
+      );
+      const model = provider?.defaultModels.find(
+        (item) =>
+          item.id === selection.modelId && item.enabled && item.supportsImageGeneration === true,
       );
       if (!provider || !model) {
         return null;

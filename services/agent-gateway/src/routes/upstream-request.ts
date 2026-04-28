@@ -1,22 +1,16 @@
 import type { RequestOverrides } from '@openAwork/agent-core';
 import type { UpstreamProtocol } from './upstream-protocol.js';
+import type { PromptCacheConfig } from '../provider-adapter.js';
+import {
+  renderNormalizedConversationToUpstreamChatMessages,
+  type NormalizedConversationMessage,
+  type UpstreamChatMessage,
+} from '../normalized-conversation.js';
+
+export type { NormalizedConversationMessage, UpstreamChatMessage } from '../normalized-conversation.js';
 
 export type UpstreamRequestBody = Record<string, unknown>;
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-
-export interface UpstreamChatMessage {
-  role: 'assistant' | 'system' | 'tool' | 'user';
-  content: string | null;
-  tool_call_id?: string;
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: {
-      name: string;
-      arguments: string;
-    };
-  }>;
-}
 
 interface UpstreamFunctionToolDefinition {
   type: 'function';
@@ -25,6 +19,7 @@ interface UpstreamFunctionToolDefinition {
     description?: string;
     parameters?: Record<string, unknown>;
     strict?: boolean;
+    deferLoading?: boolean;
   };
 }
 
@@ -262,17 +257,31 @@ export function buildUpstreamRequestBody(input: {
   variant?: string;
   maxTokens: number;
   temperature: number;
-  messages: UpstreamChatMessage[];
+  messages?: UpstreamChatMessage[];
+  normalizedMessages?: NormalizedConversationMessage[];
   tools: UpstreamFunctionToolDefinition[];
   requestOverrides: RequestOverrides;
   thinking?: UpstreamThinkingConfig;
+  cache?: PromptCacheConfig;
 }): UpstreamRequestBody {
+  const renderedMessages = input.normalizedMessages
+    ? renderNormalizedConversationToUpstreamChatMessages(input.normalizedMessages)
+    : (input.messages ?? []);
+
+  // Apply cache_control breakpoints for Anthropic/OpenRouter on chat messages
+  const annotatedMessages = applyCacheBreakpoints(
+    renderedMessages.map(({ reasoning: _reasoning, ...rest }) => rest),
+    input.cache?.providerType,
+  );
+
+  const previousResponseId = findLastResponseId(input.normalizedMessages);
+
   const baseBody: UpstreamRequestBody =
     input.protocol === 'responses'
       ? {
           model: input.model,
           ...(input.variant ? { variant: input.variant } : {}),
-          input: convertConversationToResponsesInput(input.messages, input.model),
+          input: convertConversationToResponsesInput(renderedMessages, input.model),
           max_output_tokens: input.maxTokens,
           temperature: input.temperature,
           stream: true,
@@ -282,11 +291,15 @@ export function buildUpstreamRequestBody(input: {
                 tool_choice: 'auto' as const,
               }
             : {}),
+          ...buildResponsesCacheKeyFields(input.cache),
+          ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
         }
-      : {
+      : input.protocol === 'anthropic_messages'
+        ? buildAnthropicMessagesBody(renderedMessages, input)
+        : {
           model: input.model,
           ...(input.variant ? { variant: input.variant } : {}),
-          messages: input.messages,
+          messages: annotatedMessages,
           max_tokens: input.maxTokens,
           temperature: input.temperature,
           stream: true,
@@ -294,6 +307,7 @@ export function buildUpstreamRequestBody(input: {
             include_usage: true,
           },
           ...(input.tools.length > 0 ? { tools: input.tools, tool_choice: 'auto' as const } : {}),
+          ...buildCacheKeyFields(input.cache),
         };
 
   const overriddenBody = applyRequestOverridesToBody(
@@ -324,6 +338,22 @@ function convertConversationToResponsesInput(
     }
 
     if (message.role === 'assistant') {
+      // Include reasoning item for Responses API multi-turn support, but only
+      // when we have replayable metadata. Purely local reasoning text is not a
+      // valid Responses input item and can break tool continuation requests.
+      if (message.reasoning?.encryptedContent || message.reasoning?.summary) {
+        const reasoningItem: Record<string, unknown> = {
+          type: 'reasoning',
+        };
+        if (message.reasoning.encryptedContent) {
+          reasoningItem['encrypted_content'] = message.reasoning.encryptedContent;
+        }
+        if (message.reasoning.summary) {
+          reasoningItem['summary'] = [{ type: 'summary_text', text: message.reasoning.summary }];
+        }
+        input.push(reasoningItem);
+      }
+
       if (message.content) {
         input.push({
           role: 'assistant',
@@ -355,13 +385,21 @@ function convertConversationToResponsesInput(
 }
 
 function convertToolsToResponsesTools(tools: UpstreamFunctionToolDefinition[]): unknown[] {
-  return tools.map((tool) => ({
+  const hasDeferredTools = tools.some((tool) => tool.function.deferLoading);
+  const result: unknown[] = tools.map((tool) => ({
     type: 'function',
     name: tool.function.name,
     description: tool.function.description,
     parameters: tool.function.parameters ?? { type: 'object', properties: {} },
     strict: tool.function.strict ?? false,
+    ...(tool.function.deferLoading ? { defer_loading: true } : {}),
   }));
+
+  if (hasDeferredTools) {
+    result.push({ type: 'tool_search' });
+  }
+
+  return result;
 }
 
 /**
@@ -455,4 +493,207 @@ export function sanitizeUpstreamConversation(
 
 function isReasoningModel(model: string): boolean {
   return /^(gpt-5|o[134]|codex-?)/i.test(model);
+}
+
+// ─── Prompt Cache Helpers ───
+
+type AnnotatedMessage = Record<string, unknown>;
+
+function applyCacheBreakpoints(
+  messages: AnnotatedMessage[],
+  providerType?: string,
+): AnnotatedMessage[] {
+  if (providerType !== 'anthropic' && providerType !== 'openrouter') {
+    return messages;
+  }
+
+  const cacheControl = { type: 'ephemeral' as const };
+
+  let systemCount = 0;
+  for (const msg of messages) {
+    if (msg['role'] === 'system' && systemCount < 2) {
+      msg['cache_control'] = cacheControl;
+      systemCount++;
+    }
+  }
+
+  const nonSystemIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]!['role'] !== 'system') {
+      nonSystemIndices.push(i);
+    }
+  }
+  const tailIndices = nonSystemIndices.slice(-2);
+  for (const idx of tailIndices) {
+    messages[idx]!['cache_control'] = cacheControl;
+  }
+
+  return messages;
+}
+
+function buildCacheKeyFields(cache?: PromptCacheConfig): Record<string, unknown> {
+  if (!cache?.sessionId) return {};
+
+  if (cache.providerType === 'openai') {
+    return { store: false, prompt_cache_key: cache.sessionId };
+  }
+  if (cache.providerType === 'openrouter') {
+    return { prompt_cache_key: cache.sessionId };
+  }
+
+  return {};
+}
+
+/**
+ * Build cache key fields for the Responses API endpoint.
+ * The Responses API uses snake_case `prompt_cache_key` and requires `store: false`
+ * for OpenAI to enable prompt cache routing without persisting responses.
+ */
+function buildResponsesCacheKeyFields(cache?: PromptCacheConfig): Record<string, unknown> {
+  if (!cache?.sessionId) return {};
+
+  if (cache.providerType === 'openai') {
+    return { store: false, prompt_cache_key: cache.sessionId };
+  }
+  if (cache.providerType === 'openrouter') {
+    return { prompt_cache_key: cache.sessionId };
+  }
+
+  return {};
+}
+
+/**
+ * Find the response ID from the last assistant message that has one.
+ * Used to set `previous_response_id` for the next Responses API request,
+ * enabling OpenAI to reuse cached KV state including reasoning tokens.
+ */
+function findLastResponseId(
+  messages?: NormalizedConversationMessage[],
+): string | undefined {
+  if (!messages) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!;
+    if (msg.role === 'assistant' && msg.reasoning?.responseId) {
+      return msg.reasoning.responseId;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Build Anthropic native Messages API request body.
+ * Used by the legacy buildUpstreamRequestBody path (compaction-llm, etc.).
+ * The primary stream path uses ProviderAdapter.render instead.
+ */
+function buildAnthropicMessagesBody(
+  messages: UpstreamChatMessage[],
+  input: {
+    model: string;
+    variant?: string;
+    maxTokens: number;
+    temperature: number;
+    tools: UpstreamFunctionToolDefinition[];
+    cache?: PromptCacheConfig;
+  },
+): UpstreamRequestBody {
+  const systemBlocks: Array<Record<string, unknown>> = [];
+  const anthropicMessages: Array<Record<string, unknown>> = [];
+  let cacheBreakpointCount = 0;
+  const MAX_CACHE_BREAKPOINTS = 4;
+  const maybeCacheControl = (): Record<string, unknown> | undefined =>
+    cacheBreakpointCount < MAX_CACHE_BREAKPOINTS
+      ? (() => {
+          cacheBreakpointCount++;
+          return { cache_control: { type: 'ephemeral' as const } };
+        })()
+      : undefined;
+
+  let systemIndex = 0;
+  for (const msg of messages) {
+    if (msg.role !== 'system' || !msg.content) continue;
+    const block: Record<string, unknown> = { type: 'text', text: msg.content };
+    if (systemIndex < 2) {
+      Object.assign(block, maybeCacheControl());
+    }
+    systemBlocks.push(block);
+    systemIndex++;
+  }
+
+  const nonSystemMessages = messages.filter((m) => m.role !== 'system');
+  const lastTwoIndices = new Set<number>();
+  for (let i = nonSystemMessages.length - 1, count = 0; i >= 0 && count < 2; i--) {
+    lastTwoIndices.add(i);
+    count++;
+  }
+
+  for (let i = 0; i < nonSystemMessages.length; i++) {
+    const msg = nonSystemMessages[i]!;
+    const isTail = lastTwoIndices.has(i);
+
+    if (msg.role === 'user') {
+      const contentBlocks: Array<Record<string, unknown>> = [{ type: 'text', text: msg.content ?? '' }];
+      if (isTail) {
+        Object.assign(contentBlocks[0]!, maybeCacheControl());
+      }
+      anthropicMessages.push({ role: 'user', content: contentBlocks });
+      continue;
+    }
+
+    if (msg.role === 'assistant') {
+      const contentBlocks: Array<Record<string, unknown>> = [];
+      if (msg.content) {
+        const textBlock: Record<string, unknown> = { type: 'text', text: msg.content };
+        if (isTail) {
+          Object.assign(textBlock, maybeCacheControl());
+        }
+        contentBlocks.push(textBlock);
+      }
+      for (const tc of msg.tool_calls ?? []) {
+        contentBlocks.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.function.name,
+          input: JSON.parse(tc.function.arguments),
+        });
+      }
+      if (contentBlocks.length === 0) {
+        contentBlocks.push({ type: 'text', text: '' });
+      }
+      anthropicMessages.push({ role: 'assistant', content: contentBlocks });
+      continue;
+    }
+
+    if (msg.role === 'tool') {
+      const toolResultBlock: Record<string, unknown> = {
+        type: 'tool_result',
+        tool_use_id: msg.tool_call_id,
+        content: msg.content ?? '',
+      };
+      if (isTail) {
+        Object.assign(toolResultBlock, maybeCacheControl());
+      }
+      anthropicMessages.push({ role: 'user', content: [toolResultBlock] });
+      continue;
+    }
+  }
+
+  return {
+    model: input.model,
+    ...(input.variant ? { variant: input.variant } : {}),
+    ...(systemBlocks.length > 0 ? { system: systemBlocks } : {}),
+    messages: anthropicMessages,
+    max_tokens: input.maxTokens,
+    temperature: input.temperature,
+    stream: true,
+    ...(input.tools.length > 0
+      ? {
+          tools: input.tools.map((tool) => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            input_schema: tool.function.parameters ?? { type: 'object', properties: {} },
+          })),
+        }
+      : {}),
+    ...buildCacheKeyFields(input.cache),
+  };
 }

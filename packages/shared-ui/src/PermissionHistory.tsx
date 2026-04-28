@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
+import type { PermissionDecision, PermissionRiskLevel } from '@openAwork/shared';
 
-export type PermissionDecision = 'once' | 'session' | 'permanent' | 'reject';
+export type { PermissionDecision } from '@openAwork/shared';
 
 export interface PermissionDecisionRecord {
   id: string;
@@ -8,7 +9,7 @@ export interface PermissionDecisionRecord {
   scope: string;
   decision: PermissionDecision;
   timestamp: number;
-  riskLevel: 'low' | 'medium' | 'high';
+  riskLevel: PermissionRiskLevel;
 }
 
 export interface PermissionHistoryProps {
