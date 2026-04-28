@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { login as apiLogin } from '@openAwork/web-client';
+import { getPairingQr, login as apiLogin, type PairingQrResponse } from '@openAwork/web-client';
 import { useNavigate } from 'react-router';
 import { useAuthStore } from '../../../web/src/stores/auth.js';
 
@@ -15,7 +15,7 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-type Step = 'connect' | 'login';
+type Step = 'connect' | 'login' | 'pairing';
 
 interface Props {
   onComplete?: () => void;
@@ -31,6 +31,9 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
+  const [pairingQr, setPairingQr] = useState<PairingQrResponse | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
 
   async function testConnection() {
     setTestStatus('testing');
@@ -46,6 +49,20 @@ export default function OnboardingWizard({ onComplete }: Props) {
   function saveAndContinue() {
     setGatewayUrl(urlInput.trim().replace(/\/$/, ''));
     setStep('login');
+  }
+
+  async function loadPairingQr() {
+    const url = urlInput.trim().replace(/\/$/, '');
+    setPairingLoading(true);
+    setPairingError(null);
+    try {
+      setPairingQr(await getPairingQr(url));
+      setStep('pairing');
+    } catch (error) {
+      setPairingError(error instanceof Error ? error.message : '无法加载配对二维码');
+    } finally {
+      setPairingLoading(false);
+    }
   }
 
   async function handleLogin(e: React.SyntheticEvent) {
@@ -162,7 +179,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
               </button>
             </div>
           </>
-        ) : (
+        ) : step === 'login' ? (
           <form
             onSubmit={(e) => {
               void handleLogin(e);
@@ -258,7 +275,64 @@ export default function OnboardingWizard({ onComplete }: Props) {
                 {logging ? '登录中…' : '登录'}
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => void loadPairingQr()}
+              disabled={pairingLoading}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'hsl(var(--muted-foreground))',
+                cursor: pairingLoading ? 'not-allowed' : 'pointer',
+                fontSize: 13,
+                textDecoration: 'underline',
+              }}
+            >
+              {pairingLoading ? '生成二维码中…' : '显示手机扫码登录二维码'}
+            </button>
+            {pairingError ? (
+              <p style={{ color: 'hsl(var(--destructive))', fontSize: 12 }}>{pairingError}</p>
+            ) : null}
           </form>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <p style={{ fontSize: 14, color: 'hsl(var(--muted-foreground))' }}>
+              使用手机 OpenAWork 扫描二维码即可登录此 Gateway。
+            </p>
+            {pairingQr ? (
+              <img
+                src={pairingQr.dataUrl}
+                alt="手机扫码登录二维码"
+                style={{ alignSelf: 'center', width: 220, height: 220, borderRadius: 12 }}
+              />
+            ) : null}
+            {pairingQr ? (
+              <code
+                style={{
+                  color: 'hsl(var(--muted-foreground))',
+                  fontSize: 11,
+                  wordBreak: 'break-all',
+                }}
+              >
+                {pairingQr.hostUrl}
+              </code>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setStep('login')}
+              style={{
+                background: 'transparent',
+                color: 'hsl(var(--muted-foreground))',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: 8,
+                padding: '0.6rem',
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              返回账号登录
+            </button>
+          </div>
         )}
       </div>
     </div>

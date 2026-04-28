@@ -25,6 +25,7 @@ export interface PairingManager {
 export type PairingStatus = 'idle' | 'waiting' | 'connecting' | 'connected' | 'expired' | 'failed';
 
 const PAIRING_PROTOCOL_VERSION = '1';
+const PAIRING_TTL_MS = 5 * 60 * 1000;
 
 function generateToken(): string {
   return createHash('sha256').update(randomBytes(32)).digest('hex').slice(0, 32);
@@ -62,21 +63,24 @@ export class PairingManagerImpl implements PairingManager {
   }
 
   async generatePairingCode(): Promise<PairingSession> {
-    if (this.activeSession) {
+    if (this.activeSession && this.activeSession.expiresAt > Date.now()) {
       return this.activeSession;
     }
     const token = generateToken();
     const hostUrl = `http://${detectLocalAddress()}:${this.port}`;
     const qrData = buildQRData(hostUrl, token);
-    this.activeSession = { token, qrData, hostUrl, expiresAt: Infinity };
+    this.activeSession = { token, qrData, hostUrl, expiresAt: Date.now() + PAIRING_TTL_MS };
     return this.activeSession;
   }
 
   verifyToken(token: string): boolean {
-    return this.activeSession?.token === token;
+    return this.activeSession?.token === token && this.activeSession.expiresAt > Date.now();
   }
 
   getActiveSession(): PairingSession | null {
+    if (this.activeSession && this.activeSession.expiresAt <= Date.now()) {
+      this.activeSession = null;
+    }
     return this.activeSession ? { ...this.activeSession } : null;
   }
 
@@ -97,6 +101,7 @@ export class PairingManagerImpl implements PairingManager {
       resolve(client);
     }
     this.pendingClients.delete(token);
+    this.activeSession = null;
     return true;
   }
 

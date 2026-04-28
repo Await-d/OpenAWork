@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useAuthStore } from '../store/auth';
+import { normalizeMobileGatewayUrl } from '../store/auth';
 
 function parseExpIn(expiresIn: string): number {
   const m = /^(\d+)(s|m|h)?$/.exec(expiresIn);
@@ -13,6 +15,8 @@ function parseExpIn(expiresIn: string): number {
 }
 import {
   ActivityIndicator,
+  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -51,6 +55,7 @@ interface StepProps {
   hostConfig: HostConfig;
   onNext: (data?: Partial<HostConfig>) => void;
   onBack: () => void;
+  onComplete: () => void;
 }
 
 const HOST_PROVIDERS = ['OpenAI', 'Anthropic', 'Gemini', 'Ollama（本地）'];
@@ -246,7 +251,7 @@ function HostWorkspaceStep({ step, hostConfig, onNext, onBack }: StepProps) {
 }
 
 function HostGatewayStep({ step, onNext, onBack }: StepProps) {
-  const [gatewayUrl, setGatewayUrlInput] = useState('http://');
+  const [gatewayUrl, setGatewayUrlInput] = useState('http://localhost:3000');
   const isDisabled = gatewayUrl.trim().length < 8;
 
   return (
@@ -269,7 +274,13 @@ function HostGatewayStep({ step, onNext, onBack }: StepProps) {
       <TouchableOpacity
         disabled={isDisabled}
         style={[styles.primaryButton, isDisabled && styles.disabledButton]}
-        onPress={() => onNext({ gatewayUrl: gatewayUrl.trim().replace(/\/$/, '') })}
+        onPress={() => {
+          try {
+            onNext({ gatewayUrl: normalizeMobileGatewayUrl(gatewayUrl) });
+          } catch (error) {
+            Alert.alert('网关地址无效', error instanceof Error ? error.message : '请输入有效地址');
+          }
+        }}
       >
         <Text style={styles.primaryButtonText}>下一步</Text>
       </TouchableOpacity>
@@ -360,9 +371,16 @@ function HostHealthStep({ step, hostConfig, onNext, onBack }: StepProps) {
 
   useEffect(() => {
     let cancelled = false;
-    const gatewayUrl =
-      (hostConfig.gatewayUrl || hostConfig.workspace).trim().replace(/\/$/, '') ||
-      'http://localhost:3000';
+    const gatewayUrl = (() => {
+      try {
+        return normalizeMobileGatewayUrl(
+          (hostConfig.gatewayUrl || hostConfig.workspace).trim().replace(/\/$/, '') ||
+            'http://localhost:3000',
+        );
+      } catch {
+        return 'http://localhost:3000';
+      }
+    })();
     void fetch(`${gatewayUrl}/health`, { signal: AbortSignal.timeout(5000) })
       .then((res) => {
         if (cancelled) return;
@@ -436,114 +454,138 @@ function HostDoneStep({ step, onNext, onBack }: StepProps) {
   );
 }
 
-function ClientScanStep({ step, onNext, onBack }: StepProps) {
+function ClientScanStep({ step, onNext, onBack, onComplete }: StepProps) {
+  const { setGatewayUrl, setTokens } = useAuthStore();
+  const [permission, requestPermission] = useCameraPermissions();
   const [pairingCode, setPairingCode] = useState('');
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scanned, setScanned] = useState(false);
   const isDisabled = loading || pairingCode.trim().length === 0;
-  const isConfirmDisabled = loading || !resolvedUrl || resolvedUrl.trim().length < 8;
 
-  async function handleVerify() {
+  async function completePairingLogin(rawCode: string) {
     setLoading(true);
     setError(null);
-    setResolvedUrl(null);
     try {
-      let parsed: { hostUrl?: string; token?: string };
+      let parsed: { hostUrl?: string; token?: string; version?: string };
       try {
-        parsed = JSON.parse(pairingCode.trim()) as { hostUrl?: string; token?: string };
+        parsed = JSON.parse(rawCode.trim()) as {
+          hostUrl?: string;
+          token?: string;
+          version?: string;
+        };
       } catch {
         throw new Error('JSON 格式错误，请检查粘贴内容');
       }
       const { hostUrl, token } = parsed;
       if (!hostUrl || !token) throw new Error('缺少 hostUrl 或 token 字段');
-      const url = hostUrl.trim().replace(/\/$/, '');
-      const res = await fetch(`${url}/pairing/connect`, {
+      const url = normalizeMobileGatewayUrl(hostUrl);
+      const res = await fetch(`${url}/pairing/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, deviceName: 'Mobile', platform: 'android' }),
+        body: JSON.stringify({
+          token,
+          deviceName: 'Mobile',
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+        }),
         signal: AbortSignal.timeout(8000),
       });
-      if (!res.ok) throw new Error(`配对验证失败 (${res.status})`);
-      setResolvedUrl(url);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `扫码登录失败 (${res.status})`);
+      }
+      const data = (await res.json()) as {
+        accessToken: string;
+        refreshToken: string;
+        expiresIn?: string;
+      };
+      await setGatewayUrl(url);
+      await setTokens(data.accessToken, data.refreshToken);
+      const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
+      await SecureStore.setItemAsync('openwork_token_expires_at', String(Date.now() + expiresMs));
+      onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : '连接失败，请重试');
+      setScanned(false);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleConfirm() {
-    if (!resolvedUrl) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${resolvedUrl}/health`, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) throw new Error(`Gateway 健康检查失败 (${res.status})`);
-      onNext({ workspace: resolvedUrl });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '地址不可达，请修改后重试');
-    } finally {
-      setLoading(false);
+  async function handleBarcodeScanned(result: BarcodeScanningResult) {
+    if (scanned || loading) {
+      return;
     }
+    setScanned(true);
+    setPairingCode(result.data);
+    await completePairingLogin(result.data);
   }
 
   return (
     <StepScreen step={step} onBack={onBack}>
       <Text style={styles.heading}>连接已有 Host</Text>
       <Text style={styles.subheading}>
-        粘贴终端二维码对应的 JSON 配对码，验证后可修正地址再确认。
+        扫描 Gateway 终端或 Web/Desktop 上显示的二维码，手机端会直接完成登录。
       </Text>
 
-      <Text style={styles.label}>Pairing JSON</Text>
+      <View style={styles.cameraCard}>
+        {permission?.granted ? (
+          <CameraView
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={
+              scanned || loading ? undefined : (event) => void handleBarcodeScanned(event)
+            }
+            style={styles.cameraPreview}
+          />
+        ) : (
+          <View style={styles.cameraPermissionBox}>
+            <Text style={styles.cameraPermissionText}>需要相机权限才能扫描二维码。</Text>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => {
+                void requestPermission();
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>授权相机</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {scanned && !loading ? (
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanned(false)}>
+          <Text style={styles.secondaryButtonText}>重新扫描</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      <Text style={styles.label}>手动粘贴 Pairing JSON</Text>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
         multiline
         numberOfLines={4}
-        placeholder='{"hostUrl":"http://192.168.1.100:3000","token":"abc123"}'
+        placeholder='{"hostUrl":"https://host.example.com","token":"abc123"}'
         placeholderTextColor={MUTED}
         style={[styles.input, styles.multilineInput]}
         value={pairingCode}
         onChangeText={(v) => {
           setPairingCode(v);
-          setResolvedUrl(null);
           setError(null);
+          setScanned(false);
         }}
       />
 
       <TouchableOpacity
         disabled={isDisabled}
         style={[styles.primaryButton, isDisabled && styles.disabledButton]}
-        onPress={() => void handleVerify()}
+        onPress={() => void completePairingLogin(pairingCode)}
       >
-        <Text style={styles.primaryButtonText}>
-          {loading && !resolvedUrl ? '验证中…' : '验证配对码'}
-        </Text>
+        <Text style={styles.primaryButtonText}>{loading ? '登录中…' : '使用配对码登录'}</Text>
       </TouchableOpacity>
 
-      {resolvedUrl !== null ? (
-        <View style={{ marginTop: 16, gap: 8 }}>
-          <Text style={styles.label}>Gateway 地址（可修改）</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            placeholderTextColor={MUTED}
-            style={styles.input}
-            value={resolvedUrl}
-            onChangeText={setResolvedUrl}
-          />
-          <TouchableOpacity
-            disabled={isConfirmDisabled}
-            style={[styles.primaryButton, isConfirmDisabled && styles.disabledButton]}
-            onPress={() => void handleConfirm()}
-          >
-            <Text style={styles.primaryButtonText}>
-              {loading && resolvedUrl ? '确认中…' : '确认并继续'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      <TouchableOpacity style={styles.linkButton} onPress={() => onNext()}>
+        <Text style={styles.linkButtonText}>改用账号密码登录</Text>
+      </TouchableOpacity>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </StepScreen>
@@ -629,7 +671,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
 
 function CloudLoginStep({ step, onNext, onBack }: StepProps) {
   const { setGatewayUrl, setTokens } = useAuthStore();
-  const [gatewayUrl, setGatewayUrlInput] = useState('http://');
+  const [gatewayUrl, setGatewayUrlInput] = useState('http://localhost:3000');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -643,7 +685,7 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
   async function handleLogin() {
     setLoading(true);
     setError(null);
-    const url = gatewayUrl.trim().replace(/\/$/, '');
+    const url = normalizeMobileGatewayUrl(gatewayUrl);
     try {
       const res = await fetch(`${url}/auth/login`, {
         method: 'POST',
@@ -795,6 +837,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     hostConfig,
     onNext: handleNext,
     onBack: handleBack,
+    onComplete,
   };
 
   return (
@@ -931,6 +974,29 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
   },
+  cameraCard: {
+    height: 260,
+    overflow: 'hidden',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: '#020617',
+  },
+  cameraPreview: {
+    flex: 1,
+  },
+  cameraPermissionBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 18,
+  },
+  cameraPermissionText: {
+    color: MUTED,
+    fontSize: 14,
+    textAlign: 'center',
+  },
   primaryButton: {
     alignItems: 'center',
     backgroundColor: ACCENT,
@@ -946,6 +1012,29 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginTop: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  secondaryButtonText: {
+    color: '#c7d2fe',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  linkButton: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+  },
+  linkButtonText: {
+    color: MUTED,
+    fontSize: 13,
+    textDecorationLine: 'underline',
   },
   centerContent: {
     flex: 1,

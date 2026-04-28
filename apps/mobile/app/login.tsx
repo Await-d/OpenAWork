@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
-import { useAuthStore } from '../src/store/auth';
+import { normalizeMobileGatewayUrl, useAuthStore } from '../src/store/auth';
 
 export default function LoginScreen() {
   const [gatewayUrl, setGatewayUrl] = useState('http://localhost:3000');
@@ -28,7 +28,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      const url = gatewayUrl.replace(/\/$/, '');
+      const url = normalizeMobileGatewayUrl(gatewayUrl);
       const data = await apiLogin(url, email, password);
       await saveGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/auth.js';
-import { login } from '@openAwork/web-client';
+import { getPairingQr, login, type PairingQrResponse } from '@openAwork/web-client';
 import { PairingPanel, OAuthButton } from '@openAwork/shared-ui';
 import { logger } from '../utils/logger.js';
 import type { PairingMode } from '@openAwork/shared-ui';
@@ -32,6 +32,40 @@ export default function OnboardingModal({ onComplete }: Props) {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
+  const [pairingQr, setPairingQr] = useState<PairingQrResponse | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+
+  useEffect(() => {
+    if (step !== 'pairing') {
+      return;
+    }
+
+    let cancelled = false;
+    const url = urlInput.trim().replace(/\/$/, '');
+    setPairingLoading(true);
+    setPairingError(null);
+    void getPairingQr(url)
+      .then((data) => {
+        if (!cancelled) {
+          setPairingQr(data);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setPairingError(error instanceof Error ? error.message : '无法加载配对二维码');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPairingLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, urlInput]);
 
   async function testConnection() {
     setTestStatus('testing');
@@ -355,8 +389,8 @@ export default function OnboardingModal({ onComplete }: Props) {
             <PairingPanel
               mode="host"
               host={{
-                qrData: 'openAwork-pair://localhost:3000?token=DEMO',
-                expiresAt: Date.now() + 30000,
+                qrData: pairingQr?.qrData ?? '',
+                expiresAt: pairingQr?.expiresAt ?? Date.now(),
                 pairedDevices: [],
                 onRefreshToken: () => {},
                 onDisconnect: () => {},
@@ -364,6 +398,15 @@ export default function OnboardingModal({ onComplete }: Props) {
               client={{ onScanned: () => {}, onManualCode: () => {} }}
               onModeChange={(_mode: PairingMode) => {}}
             />
+            {pairingLoading ? (
+              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>正在生成配对二维码…</p>
+            ) : null}
+            {pairingError ? (
+              <p style={{ fontSize: 12, color: 'var(--danger)' }}>{pairingError}</p>
+            ) : null}
+            {pairingQr ? (
+              <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Gateway: {pairingQr.hostUrl}</p>
+            ) : null}
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
