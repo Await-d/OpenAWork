@@ -1,0 +1,278 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * tool-call/css/batch.css
+ *
+ * BatchToolCallCard parent + collapsible child rows + per-call status
+ * styling, plus the shared ToolApprovalActions bar (approve/deny/pause)
+ * which renders beneath any tool — but currently only the batch + block
+ * cards expose it visually.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ── BatchToolCallCard (parent + collapsible children) ── */
+
+.tool-call-batch {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+	border-radius: 6px;
+	padding: 6px 8px;
+	background: color-mix(in oklch, var(--surface) 85%, transparent);
+}
+
+.tool-call-batch[data-tool-status="failed"] {
+	border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
+	background: color-mix(in oklch, var(--danger) 4%, var(--surface));
+}
+
+.tool-call-batch[data-tool-status="running"] {
+	border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+}
+
+.tool-call-batch-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 11px;
+	padding: 0 2px;
+}
+
+.tool-call-batch-name {
+	font-weight: 700;
+	color: var(--text-1);
+	letter-spacing: 0.02em;
+}
+
+.tool-call-batch-progress {
+	flex: 1;
+	font-size: 10.5px;
+	color: var(--text-3);
+	font-variant-numeric: tabular-nums;
+}
+
+.tool-call-batch-errors {
+	flex-shrink: 0;
+	font-size: 10px;
+	font-weight: 700;
+	padding: 1px 6px;
+	border-radius: 999px;
+	color: var(--danger);
+	background: color-mix(in oklch, var(--danger) 12%, transparent);
+}
+
+.tool-call-batch-elapsed {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-3);
+	font-variant-numeric: tabular-nums;
+}
+
+.tool-call-batch-children {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.tool-call-batch-child {
+	position: relative;
+	border-radius: 4px;
+}
+
+.tool-call-batch-child[data-batch-sub-status="failed"] {
+	background: color-mix(in oklch, var(--danger) 5%, transparent);
+}
+
+/* Disclosure row: compact one-line summary, click to expand. */
+.tool-call-batch-child-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 4px 6px;
+	border: 0;
+	background: transparent;
+	border-radius: 4px;
+	font-family: inherit;
+	font-size: 11.5px;
+	color: var(--text-1);
+	text-align: left;
+	cursor: pointer;
+	min-width: 0;
+	transition: background-color 120ms ease;
+}
+
+.tool-call-batch-child-row:hover {
+	background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+.tool-call-batch-child-row:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+
+.tool-call-batch-child-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	flex-shrink: 0;
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.tool-call-batch-child[data-batch-sub-status="completed"]
+	.tool-call-batch-child-status {
+	color: var(--success, #22c55e);
+}
+
+.tool-call-batch-child[data-batch-sub-status="failed"]
+	.tool-call-batch-child-status {
+	color: var(--danger);
+}
+
+.tool-call-batch-child[data-batch-sub-status="skipped"]
+	.tool-call-batch-child-status {
+	color: var(--text-3);
+}
+
+.tool-call-batch-spinner {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border: 1.5px solid color-mix(in oklch, var(--accent) 35%, transparent);
+	border-top-color: var(--accent);
+	border-radius: 50%;
+	animation: tool-call-batch-spin 0.7s linear infinite;
+}
+
+@keyframes tool-call-batch-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.tool-call-batch-child-tool {
+	font-weight: 600;
+	color: var(--text-1);
+	flex-shrink: 0;
+	letter-spacing: 0.01em;
+}
+
+.tool-call-batch-child-summary {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-2);
+	font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 11px;
+}
+
+.tool-call-batch-child-duration {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-3);
+	font-variant-numeric: tabular-nums;
+}
+
+.tool-call-batch-child-chevron {
+	flex-shrink: 0;
+	width: 12px;
+	text-align: center;
+	font-size: 10px;
+	color: var(--text-3);
+}
+
+/* Expanded panel: indent + left rail to make nested ToolCallDisplay
+   visually subordinate to the parent batch card. */
+.tool-call-batch-child-detail {
+	margin: 4px 0 6px 14px;
+	padding-left: 8px;
+	border-left: 2px solid color-mix(in oklch, var(--border) 50%, transparent);
+}
+
+/* ── ToolApprovalActions (shared by inline / block / batch cards) ── */
+
+.tool-call-approval-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 6px;
+	margin-left: 20px;
+}
+
+.tool-call-approval-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.tool-call-approval-button {
+	appearance: none;
+	border: 1px solid color-mix(in oklch, var(--border) 82%, transparent);
+	background: color-mix(in oklch, var(--surface) 90%, transparent);
+	color: var(--text-2);
+	border-radius: 999px;
+	padding: 4px 10px;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1.2;
+	cursor: pointer;
+	transition:
+		background 140ms ease,
+		border-color 140ms ease,
+		color 140ms ease,
+		transform 140ms ease,
+		box-shadow 140ms ease;
+}
+
+.tool-call-approval-button:hover:not(:disabled) {
+	transform: translateY(-1px);
+}
+
+.tool-call-approval-button:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 36%, transparent);
+}
+
+.tool-call-approval-button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.tool-call-approval-button[data-variant="primary"] {
+	border-color: color-mix(in oklch, var(--accent) 48%, var(--border) 52%);
+	background: color-mix(in oklch, var(--accent) 16%, var(--surface) 84%);
+	color: color-mix(in oklch, var(--accent) 82%, white 18%);
+}
+
+.tool-call-approval-button[data-variant="danger"] {
+	border-color: color-mix(in oklch, var(--danger) 40%, var(--border) 60%);
+	background: color-mix(in oklch, var(--danger) 12%, var(--surface) 88%);
+	color: color-mix(in oklch, var(--danger) 82%, white 18%);
+}
+
+.tool-call-approval-notes {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.tool-call-approval-note {
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.tool-call-approval-note[data-tone="warning"] {
+	color: color-mix(in oklch, var(--warning) 82%, var(--text) 18%);
+}
+
+.tool-call-approval-note[data-tone="muted"] {
+	color: var(--text-3);
+}
+
+.tool-call-approval-note[data-tone="danger"] {
+	color: var(--danger);
+}

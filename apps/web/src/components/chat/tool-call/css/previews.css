@@ -1,0 +1,843 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * tool-call/css/previews.css
+ *
+ * Specialised preview renderers used inside ToolOutputPreview /
+ * ToolInputPreview routing. Each section corresponds to one file under
+ * `tool-call/previews/`:
+ *
+ *   - todo-list-preview.tsx          → .tool-call-todo-*
+ *   - search-results-preview.tsx     → .tool-call-search-*
+ *   - tree-nodes-preview.tsx         → .tool-call-tree-*
+ *   - review-status-preview.tsx      → .tool-call-review-*
+ *   - diagnostics-preview.tsx        → .tool-call-diagnostic*
+ *   - success-confirm-preview.tsx    → .tool-call-confirm-*
+ *   - file-content-preview.tsx       → .file-content-*
+ *   - grep-content-hits-preview.tsx, grep-counts-preview.tsx,
+ *     file-path-list-preview.tsx     → .grep-hits-*, .grep-counts-*,
+ *                                       .path-list-*
+ *   - parameter-list-preview.tsx     → .param-list-*
+ *
+ * Also includes the `.tool-call-inline-empty` placeholder reused by
+ * many of the above when their data set is empty.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Todo list preview (todowrite/subtodowrite expand panel) ── */
+
+.tool-call-todo-list {
+	list-style: none;
+	margin: 0;
+	padding: 4px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.tool-call-todo-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 3px 6px;
+	border-radius: 4px;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.tool-call-todo-item[data-status="completed"] {
+	color: var(--text-3);
+}
+
+.tool-call-todo-item[data-status="completed"] .tool-call-todo-content {
+	text-decoration: line-through;
+	text-decoration-color: color-mix(in oklch, var(--text-3) 60%, transparent);
+}
+
+.tool-call-todo-item[data-status="in_progress"] {
+	background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+.tool-call-todo-item[data-status="cancelled"] {
+	color: var(--text-3);
+	opacity: 0.7;
+}
+
+.tool-call-todo-item[data-status="cancelled"] .tool-call-todo-content {
+	text-decoration: line-through;
+}
+
+.tool-call-todo-glyph {
+	flex-shrink: 0;
+	width: 14px;
+	text-align: center;
+	font-size: 12px;
+	color: var(--text-3);
+}
+
+.tool-call-todo-item[data-status="completed"] .tool-call-todo-glyph {
+	color: var(--success, color-mix(in oklch, var(--accent) 60%, var(--text-2)));
+}
+
+.tool-call-todo-item[data-status="in_progress"] .tool-call-todo-glyph {
+	color: var(--accent);
+}
+
+.tool-call-todo-content {
+	flex: 1;
+	min-width: 0;
+	word-break: break-word;
+}
+
+.tool-call-todo-priority {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	height: 16px;
+	padding: 0 6px;
+	border-radius: 999px;
+	font-size: 9px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	background: color-mix(in oklch, var(--text-3) 12%, transparent);
+	color: var(--text-3);
+}
+
+.tool-call-todo-priority[data-priority="high"] {
+	background: color-mix(in oklch, var(--danger) 14%, transparent);
+	color: color-mix(in oklch, var(--danger) 75%, var(--text-2));
+}
+
+.tool-call-todo-priority[data-priority="medium"] {
+	background: color-mix(
+		in oklch,
+		var(--warning, var(--accent)) 14%,
+		transparent
+	);
+	color: color-mix(in oklch, var(--warning, var(--accent)) 75%, var(--text-2));
+}
+
+.tool-call-inline-empty {
+	font-size: 12px;
+	color: var(--text-3);
+	font-style: italic;
+	padding: 4px 6px;
+}
+
+/* ── workspace_search results (grep-style) ── */
+
+.tool-call-search-results {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 11.5px;
+	line-height: 1.55;
+}
+
+.tool-call-search-row {
+	display: grid;
+	grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+	gap: 10px;
+	padding: 2px 6px;
+	border-radius: 3px;
+}
+
+.tool-call-search-row:hover {
+	background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+.tool-call-search-loc {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tool-call-search-path {
+	color: var(--text-2);
+}
+
+.tool-call-search-line {
+	color: var(--accent);
+	font-weight: 600;
+}
+
+.tool-call-search-text {
+	color: var(--text-1);
+	white-space: pre;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tool-call-search-meta {
+	margin-top: 6px;
+	padding: 2px 6px;
+	font-size: 10.5px;
+	color: var(--text-3);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+/* ── workspace_tree / list nodes ── */
+
+.tool-call-tree {
+	display: flex;
+	flex-direction: column;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.tool-call-tree-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 1px 0;
+	border-radius: 3px;
+}
+
+.tool-call-tree-row[data-expanded] {
+	transition: background-color 120ms ease;
+}
+
+.tool-call-tree-row[data-expanded]:hover {
+	background: color-mix(in oklch, var(--accent) 8%, transparent);
+}
+
+.tool-call-tree-row[data-expanded]:focus-visible {
+	outline: 1px solid color-mix(in oklch, var(--accent) 60%, transparent);
+	outline-offset: -1px;
+}
+
+.tool-call-tree-row[data-kind="dir"] .tool-call-tree-name {
+	color: var(--text-1);
+	font-weight: 600;
+}
+
+.tool-call-tree-row[data-kind="file"] .tool-call-tree-name {
+	color: var(--text-2);
+}
+
+.tool-call-tree-glyph {
+	flex-shrink: 0;
+	width: 12px;
+	text-align: center;
+	color: var(--text-3);
+	font-size: 10px;
+}
+
+.tool-call-tree-row[data-kind="dir"] .tool-call-tree-glyph {
+	color: var(--accent);
+}
+
+.tool-call-tree-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tool-call-tree-count {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-3);
+}
+
+/* ── workspace_review_status (git status) ── */
+
+.tool-call-review-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 12px;
+}
+
+.tool-call-review-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 2px 6px;
+	border-radius: 3px;
+}
+
+.tool-call-review-glyph {
+	flex-shrink: 0;
+	width: 14px;
+	text-align: center;
+	font-weight: 700;
+	font-size: 11px;
+}
+
+.tool-call-review-row[data-status="added"] .tool-call-review-glyph {
+	color: var(--success, #16a34a);
+}
+
+.tool-call-review-row[data-status="modified"] .tool-call-review-glyph {
+	color: var(--warning, #d97706);
+}
+
+.tool-call-review-row[data-status="deleted"] .tool-call-review-glyph {
+	color: var(--danger);
+}
+
+.tool-call-review-row[data-status="renamed"] .tool-call-review-glyph {
+	color: var(--accent);
+}
+
+.tool-call-review-path {
+	flex: 1;
+	min-width: 0;
+	color: var(--text-1);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tool-call-review-old {
+	color: var(--text-3);
+	text-decoration: line-through;
+	text-decoration-color: color-mix(in oklch, var(--text-3) 60%, transparent);
+}
+
+.tool-call-review-arrow {
+	color: var(--text-3);
+}
+
+.tool-call-review-stats {
+	flex-shrink: 0;
+	display: flex;
+	gap: 6px;
+	font-size: 10.5px;
+	font-variant-numeric: tabular-nums;
+}
+
+.tool-call-review-add {
+	color: var(--success, #16a34a);
+}
+
+.tool-call-review-del {
+	color: var(--danger);
+}
+
+/* ── Diagnostics list ── */
+
+.tool-call-diagnostics {
+	list-style: none;
+	margin: 6px 0 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 11.5px;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.tool-call-diagnostic {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 3px 6px;
+	border-radius: 3px;
+	border-left: 2px solid transparent;
+}
+
+.tool-call-diagnostic[data-severity="error"] {
+	border-left-color: var(--danger);
+	background: color-mix(in oklch, var(--danger) 5%, transparent);
+}
+
+.tool-call-diagnostic[data-severity="warning"],
+.tool-call-diagnostic[data-severity="warn"] {
+	border-left-color: var(--warning, var(--accent));
+	background: color-mix(
+		in oklch,
+		var(--warning, var(--accent)) 5%,
+		transparent
+	);
+}
+
+.tool-call-diagnostic[data-severity="info"],
+.tool-call-diagnostic[data-severity="hint"] {
+	border-left-color: var(--accent);
+	background: color-mix(in oklch, var(--accent) 5%, transparent);
+}
+
+.tool-call-diagnostic-sev {
+	flex-shrink: 0;
+	font-size: 9.5px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	padding: 1px 5px;
+	border-radius: 2px;
+	background: color-mix(in oklch, var(--text-3) 14%, transparent);
+	color: var(--text-2);
+}
+
+.tool-call-diagnostic[data-severity="error"] .tool-call-diagnostic-sev {
+	background: color-mix(in oklch, var(--danger) 18%, transparent);
+	color: var(--danger);
+}
+
+.tool-call-diagnostic[data-severity="warning"] .tool-call-diagnostic-sev,
+.tool-call-diagnostic[data-severity="warn"] .tool-call-diagnostic-sev {
+	background: color-mix(
+		in oklch,
+		var(--warning, var(--accent)) 18%,
+		transparent
+	);
+	color: var(--warning, var(--accent));
+}
+
+.tool-call-diagnostic-loc {
+	flex-shrink: 0;
+	color: var(--text-3);
+}
+
+.tool-call-diagnostic-msg {
+	flex: 1;
+	min-width: 0;
+	color: var(--text-1);
+	word-break: break-word;
+	white-space: normal;
+}
+
+/* ── Success confirmation ── */
+
+.tool-call-confirm {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: color-mix(
+		in oklch,
+		var(--success, var(--accent)) 8%,
+		transparent
+	);
+	font-size: 12px;
+}
+
+.tool-call-confirm-glyph {
+	flex-shrink: 0;
+	color: var(--success, var(--accent));
+	font-weight: 700;
+}
+
+.tool-call-confirm-text {
+	color: var(--text-1);
+}
+
+.tool-call-confirm-path {
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	color: var(--text-2);
+}
+
+/* ── FileContentPreview (read tool output) ── */
+
+.file-content-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.file-content-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	font-size: 10px;
+}
+
+.file-content-path {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 11px;
+	color: var(--text-2);
+	font-weight: 500;
+	word-break: break-all;
+}
+
+.file-content-range {
+	color: var(--text-3);
+	font-size: 10px;
+}
+
+.file-content-flag {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: color-mix(in oklch, var(--surface-2) 60%, transparent);
+	color: var(--text-3);
+	letter-spacing: 0.04em;
+}
+
+.file-content-flag[data-flag="truncated"] {
+	background: color-mix(in oklch, var(--warn, #d4a017) 22%, transparent);
+	color: var(--warn, #d4a017);
+}
+
+.file-content-flag[data-flag="oversize"] {
+	background: color-mix(in oklch, var(--danger, #c1432f) 18%, transparent);
+	color: var(--danger, #c1432f);
+}
+
+.file-content-pre {
+	margin: 0;
+	padding: 6px 0;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 11px;
+	line-height: 1.55;
+	background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+	border-radius: 4px;
+	max-height: 280px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.file-content-line {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 10px;
+	padding: 0 8px;
+}
+
+.file-content-line:hover {
+	background: color-mix(in oklch, var(--surface-3) 35%, transparent);
+}
+
+.file-content-line-num {
+	color: var(--text-3);
+	user-select: none;
+	text-align: right;
+	white-space: pre;
+	opacity: 0.7;
+}
+
+.file-content-line-text {
+	color: var(--text-2);
+	white-space: pre;
+	overflow-x: auto;
+}
+
+/* ── GrepContentHitsPreview / GrepCountsPreview / FilePathListPreview ── */
+
+.grep-hits-preview,
+.path-list-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.grep-hits-meta {
+	font-size: 10px;
+	color: var(--text-3);
+	letter-spacing: 0.04em;
+}
+
+.grep-hits-summary {
+	font-weight: 500;
+}
+
+.grep-hits-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-height: 320px;
+	overflow-y: auto;
+	background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+	border-radius: 4px;
+	padding: 6px 8px;
+}
+
+.grep-hits-group {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.grep-hits-path {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 11px;
+	color: var(--text-2);
+	font-weight: 500;
+	word-break: break-all;
+	padding-bottom: 2px;
+	border-bottom: 1px solid
+		color-mix(in oklch, var(--border-subtle, #e5e7eb) 50%, transparent);
+}
+
+.grep-hits-row {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 10px;
+	padding: 1px 0;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.grep-hits-row:hover {
+	background: color-mix(in oklch, var(--surface-3) 35%, transparent);
+}
+
+.grep-hits-line {
+	color: var(--text-3);
+	user-select: none;
+	text-align: right;
+	min-width: 3ch;
+	opacity: 0.7;
+}
+
+.grep-hits-text {
+	color: var(--text-2);
+	white-space: pre;
+	overflow-x: auto;
+}
+
+.grep-counts-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 2px 0;
+	font-size: 11px;
+}
+
+.grep-counts-path {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--text-2);
+	word-break: break-all;
+	flex: 1;
+	min-width: 0;
+}
+
+.grep-counts-num {
+	font-variant-numeric: tabular-nums;
+	color: var(--text-3);
+	font-weight: 500;
+}
+
+.path-list {
+	list-style: none;
+	margin: 0;
+	padding: 6px 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	max-height: 280px;
+	overflow-y: auto;
+	background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+	border-radius: 4px;
+}
+
+.path-list-item {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 11px;
+	color: var(--text-2);
+	word-break: break-all;
+	padding: 1px 0;
+}
+
+.path-list-item:hover {
+	background: color-mix(in oklch, var(--surface-3) 35%, transparent);
+}
+
+/* ── Shared path display (StyledPath + PathPrefixBadge) ──
+ * Used by every preview that lists file paths so the common ancestor
+ * directory is hoisted into a single header badge and each row only
+ * shows the relative tail with the filename emphasised. */
+
+.styled-path {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	word-break: break-all;
+	display: inline;
+}
+
+.styled-path-dir {
+	color: var(--text-3);
+	opacity: 0.85;
+}
+
+.styled-path-name {
+	color: var(--text-1);
+	font-weight: 500;
+}
+
+.styled-path-prefix {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin: 2px 0 4px;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: color-mix(in oklch, var(--accent) 8%, transparent);
+	border: 1px solid color-mix(in oklch, var(--accent) 18%, transparent);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 10.5px;
+	color: var(--text-2);
+	max-width: 100%;
+	overflow: hidden;
+	width: fit-content;
+}
+
+.styled-path-prefix-glyph {
+	font-size: 10px;
+	flex-shrink: 0;
+	opacity: 0.8;
+}
+
+.styled-path-prefix-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+/* ── ParameterListPreview ──
+ * Single-row inline layout: parameters are secondary context, so the whole
+ * panel collapses into one wrap-friendly line of `key value · key value`
+ * rather than a vertical table that takes one row per field. */
+
+.param-list {
+	margin: 0;
+	padding: 2px 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 8px;
+	font-size: 11px;
+	line-height: 1.55;
+	color: var(--text-3);
+}
+
+.param-list-row {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 4px;
+	min-width: 0;
+}
+
+.param-list-sep {
+	color: var(--text-3);
+	opacity: 0.5;
+	user-select: none;
+}
+
+.param-list-key {
+	color: var(--text-3);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-weight: 500;
+	opacity: 0.85;
+}
+
+.param-list-key::after {
+	content: "=";
+	margin-left: 1px;
+	opacity: 0.4;
+}
+
+.param-list-value {
+	color: var(--text-2);
+	min-width: 0;
+	word-break: break-word;
+}
+
+.param-list-empty {
+	font-size: 11px;
+	color: var(--text-3);
+	font-style: italic;
+	padding: 4px 0;
+}
+
+.param-list-null {
+	color: var(--text-3);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-style: italic;
+	opacity: 0.7;
+}
+
+.param-list-bool {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-weight: 500;
+}
+
+.param-list-bool[data-bool="true"] {
+	color: color-mix(in oklch, var(--success, #2f9e44) 80%, var(--text-1));
+}
+
+.param-list-bool[data-bool="false"] {
+	color: var(--text-3);
+}
+
+.param-list-num {
+	font-variant-numeric: tabular-nums;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: color-mix(in oklch, var(--brand, #4f46e5) 70%, var(--text-1));
+}
+
+.param-list-str {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--text-2);
+}
+
+.param-list-arr-inline {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--text-2);
+}
+
+.param-list-empty-arr {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--text-3);
+	opacity: 0.7;
+}
+
+.param-list-nested {
+	font-size: 11px;
+	display: inline;
+}
+
+.param-list-nested > summary {
+	cursor: pointer;
+	color: var(--text-3);
+	display: inline;
+	list-style: none;
+	padding: 0;
+}
+
+.param-list-nested > summary::-webkit-details-marker {
+	display: none;
+}
+
+.param-list-nested > summary::before {
+	content: "▸";
+	display: inline-block;
+	width: 10px;
+	color: var(--text-3);
+	opacity: 0.6;
+	transition: transform 0.15s ease;
+}
+
+.param-list-nested[open] > summary::before {
+	transform: rotate(90deg);
+}
+
+.param-list-nested[open] > .param-list-json {
+	margin-top: 4px;
+}
+
+.param-list-json {
+	margin: 0;
+	padding: 6px 8px;
+	font-size: 11px;
+	line-height: 1.5;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color: var(--text-2);
+	background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+	border-radius: 4px;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 200px;
+	overflow-y: auto;
+}

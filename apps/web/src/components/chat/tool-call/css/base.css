@@ -1,0 +1,461 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * tool-call/css/base.css
+ *
+ * Foundational tool-call card styles:
+ *   - InlineToolCall pill (.tool-call-inline*)
+ *   - ToolIcon (.tool-icon*) + ping animation
+ *   - BlockToolCall card container (.tool-call-block*)
+ *   - Header annotations: collapsed-summary, running-hint, elapsed,
+ *     exit-code, diff-summary
+ *
+ * Specialised previews live in `previews.css`; batch + approvals in
+ * `batch.css`; copy / search-badge / expandable / web-meta in `shared.css`.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Tool call inline display (read/grep/glob/webfetch etc.) ── */
+
+.tool-call-inline {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--text-3);
+}
+
+.tool-call-inline[data-tool-status="running"] {
+	color: var(--text-2);
+}
+
+.tool-call-inline[data-tool-status="paused"] {
+	color: color-mix(in oklch, var(--warning) 82%, var(--text) 18%);
+}
+
+.tool-call-inline[data-tool-status="failed"] {
+	color: var(--danger);
+}
+
+/* ── Tool icon (SVG per-tool icons with status color) ── */
+
+.tool-icon {
+	position: relative;
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-3);
+	transition: color 0.15s ease;
+}
+
+.tool-icon svg {
+	display: block;
+}
+
+.tool-icon[data-state="completed"] {
+	color: var(--success, #22c55e);
+}
+
+.tool-icon[data-state="running"] {
+	color: var(--accent);
+}
+
+.tool-icon[data-state="paused"] {
+	color: var(--warning);
+}
+
+.tool-icon[data-state="failed"] {
+	color: var(--danger);
+}
+
+.tool-icon-ping {
+	position: absolute;
+	inset: 0;
+	border-radius: 50%;
+	background: var(--accent);
+	opacity: 0.15;
+	animation: tool-icon-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes tool-icon-ping {
+	0% {
+		transform: scale(0.8);
+		opacity: 0.2;
+	}
+	75% {
+		transform: scale(1.8);
+		opacity: 0;
+	}
+	100% {
+		transform: scale(1.8);
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tool-icon-ping {
+		animation: none;
+		opacity: 0.1;
+	}
+}
+
+.tool-call-inline-name {
+	flex-shrink: 0;
+	font-weight: 600;
+	font-size: 11px;
+	letter-spacing: 0.02em;
+	color: var(--text-2);
+}
+
+.tool-call-inline-summary {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tool-call-inline-chevron {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-3);
+	margin-left: 2px;
+}
+
+.tool-call-inline-wrap {
+	display: flex;
+	flex-direction: column;
+}
+
+.tool-call-inline-output {
+	margin-left: 20px;
+	margin-top: 2px;
+	margin-bottom: 2px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.tool-call-inline-section {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+/* Inline-row variant: used by the params section so the label and the
+ * single-line ParameterListPreview share one row. Output stays as the
+ * default column flow so its children (file content, tree, search hits)
+ * can take full width. */
+.tool-call-inline-section[data-inline-row="true"] {
+	flex-direction: row;
+	flex-wrap: wrap;
+	gap: 6px 8px;
+	align-items: baseline;
+}
+
+.tool-call-inline-section[data-inline-row="true"]
+	> .tool-call-inline-section-label {
+	flex-shrink: 0;
+}
+
+.tool-call-inline-section-label {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-3);
+}
+
+/* ── Grouped consecutive tool-call pill (read/grep/glob runs) ── */
+
+.tool-call-grouped {
+	display: flex;
+	flex-direction: column;
+	margin: 4px 0;
+}
+
+.tool-call-grouped-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 3px 0;
+	background: transparent;
+	border: none;
+	color: inherit;
+	cursor: pointer;
+	text-align: left;
+	font-size: 12px;
+	line-height: 1.5;
+	appearance: none;
+}
+
+.tool-call-grouped-header:hover {
+	background: color-mix(in oklch, var(--surface-2) 40%, transparent);
+	border-radius: 3px;
+}
+
+.tool-call-grouped-name {
+	flex-shrink: 0;
+	font-weight: 600;
+	font-size: 11px;
+	letter-spacing: 0.02em;
+	color: var(--text-2);
+}
+
+/* Count chip — soft accent pill so the eye registers "this is a run
+ * of N" before reading the items. Uses tabular-nums so different
+ * counts don't reflow the row width. */
+.tool-call-grouped-count {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	height: 16px;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: color-mix(in oklch, var(--accent) 12%, transparent);
+	color: color-mix(in oklch, var(--accent) 78%, var(--text) 22%);
+	font-size: 10px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.tool-call-grouped-errors {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	height: 16px;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: color-mix(in oklch, var(--danger) 14%, transparent);
+	color: var(--danger);
+	font-size: 10px;
+	font-weight: 600;
+}
+
+.tool-call-grouped-summary {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--text-3);
+}
+
+.tool-call-grouped-chevron {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-3);
+	margin-left: 2px;
+}
+
+/* When expanded, the children render with the same padding as inline /
+ * block tool calls, so the visual rhythm stays consistent with an
+ * un-grouped session. The 18px left indent gives a subtle "child of"
+ * relationship without needing a tree connector. */
+.tool-call-grouped-children {
+	margin-top: 2px;
+	padding-left: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	border-left: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+	margin-left: 6px;
+}
+
+/* ── Tool call block display (write/edit/bash/apply_patch) ── */
+
+.tool-call-block {
+	display: flex;
+	flex-direction: column;
+	margin: 4px 0;
+}
+
+.tool-call-block-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 3px 0;
+	background: transparent;
+	border: none;
+	color: inherit;
+	cursor: pointer;
+	text-align: left;
+	font-size: 12px;
+	line-height: 1.5;
+	appearance: none;
+}
+
+.tool-call-block-header:hover {
+	background: color-mix(in oklch, var(--surface-2) 40%, transparent);
+	border-radius: 3px;
+}
+
+/* tool-call-block-icon removed — replaced by ToolStatusDot */
+
+.tool-call-block-title {
+	flex-shrink: 0;
+	font-weight: 600;
+	font-size: 12px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 50%;
+}
+
+.tool-call-block-diff-summary {
+	flex-shrink: 0;
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--text-3);
+	letter-spacing: 0.02em;
+}
+
+/* tool-call-block-spinner removed — replaced by ToolStatusDot ping animation */
+
+/* tool-call-block-status-failed removed — replaced by ToolStatusDot */
+
+.tool-call-block-chevron {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-3);
+	margin-left: auto;
+}
+
+/* ── Error summary banner (shared by inline + block tool calls) ──
+ * Displayed inline in the header when a tool call's visualState is
+ * "failed". Pulls the first useful line out of the failure payload
+ * via `extractErrorSummary` so users see *why* without having to
+ * expand the call. Truncates to a single line (CSS ellipsis); the
+ * `title` attribute carries the full message for hover. The full
+ * stack trace / stderr remains accessible inside the expanded body.
+ *
+ * Anchored after the summary/title and before chevron/duration so
+ * the eye lands on it at scan time. The red colour reuses
+ * `--danger`, with a soft tinted pill background that survives both
+ * light and dark themes via `color-mix`.
+ */
+.tool-call-error-summary {
+	min-width: 0;
+	flex-shrink: 1;
+	max-width: 60%;
+	padding: 1px 7px;
+	border-radius: 4px;
+	background: color-mix(in oklch, var(--danger) 12%, transparent);
+	color: var(--danger);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1.45;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	letter-spacing: 0.005em;
+}
+
+.tool-call-error-summary::before {
+	content: "✗";
+	display: inline-block;
+	margin-right: 5px;
+	font-weight: 700;
+	color: color-mix(in oklch, var(--danger) 86%, white 14%);
+}
+
+.tool-call-block-body {
+	margin-top: 4px;
+	padding-left: 4px;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.tool-call-block-diff {
+	margin-top: 4px;
+	padding-top: 4px;
+	border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+}
+
+.tool-call-block-output {
+	margin-top: 4px;
+	padding-top: 4px;
+	border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+}
+
+/* ── Collapsed summary (shown in header when not expanded) ── */
+
+.tool-call-block-collapsed-summary {
+	flex: 1;
+	min-width: 0;
+	max-width: 280px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 10px;
+	color: var(--text-3);
+}
+
+/* ── Running hint ── */
+
+.tool-call-block-running-hint {
+	font-size: 10px;
+	color: var(--accent);
+	animation: tool-call-pulse-text 1.5s ease-in-out infinite;
+}
+
+@keyframes tool-call-pulse-text {
+	0%,
+	100% {
+		opacity: 0.5;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tool-call-block-running-hint {
+		animation: none;
+		opacity: 0.8;
+	}
+}
+
+/* ── Elapsed time ── */
+
+.tool-call-block-elapsed {
+	flex-shrink: 0;
+	font-size: 10px;
+	font-weight: 500;
+	color: var(--text-3);
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.01em;
+}
+
+/* Duration tiers — surface slow tools so users can spot them at a glance.
+ * `fast` (<1s) inherits the muted default. `normal` (1-10s) bumps to body
+ * text colour. `slow` (>=10s) goes amber so a 30s grep doesn't blend in
+ * with a 200ms read in a long session. */
+.tool-call-block-elapsed[data-duration-tier="normal"] {
+	color: var(--text-2);
+}
+
+.tool-call-block-elapsed[data-duration-tier="slow"] {
+	color: var(--warning, color-mix(in oklch, var(--accent) 60%, #d4a017));
+	font-weight: 600;
+}
+
+/* ── Exit code badge ── */
+
+.tool-call-block-exit-code {
+	flex-shrink: 0;
+	font-size: 9px;
+	font-weight: 600;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	padding: 1px 5px;
+	border-radius: 3px;
+	color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.tool-call-block-exit-code[data-exit-ok="true"] {
+	color: #22c55e;
+	background: color-mix(in srgb, #22c55e 10%, transparent);
+}

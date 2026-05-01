@@ -1,0 +1,147 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * tool-call/css/tokens.css
+ *
+ * Per-token colour rules emitted by `colorizeSummary()`. The hue
+ * tokens themselves (`--tc-path`, `--tc-cmd`, …) are defined in
+ * `index.css` for both dark and light themes.
+ *
+ * Three layers:
+ *   1. `.tc-tok-<kind>`             — semantic colour for a token
+ *   2. `[data-tool-category=…]`     — tool-name pill by intent
+ *   3. `.tc-tok-path[data-ext=…]`   — per-language tint for paths
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Layer 1: semantic token colours ── */
+
+.tc-tok-path {
+	color: var(--tc-path);
+}
+
+.tc-tok-cmd {
+	color: var(--tc-cmd);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.tc-tok-string {
+	color: var(--tc-string);
+}
+
+.tc-tok-num {
+	color: var(--tc-num);
+	font-variant-numeric: tabular-nums;
+}
+
+.tc-tok-url {
+	color: var(--tc-url);
+	text-decoration: underline dotted;
+	text-underline-offset: 2px;
+}
+
+.tc-tok-keyword {
+	color: var(--tc-keyword);
+	font-weight: 600;
+}
+
+/* ── Layer 2: tool-name pill by category ──
+   Apply a category-specific colour to the pill / title prefix while
+   leaving the surrounding muted UI alone. The selectors target both
+   the inline pill name and the block card title since both render
+   the toolName at the same visual weight. */
+
+.tool-call-inline-name[data-tool-category="read"],
+.tool-call-block-title[data-tool-category="read"] {
+	color: var(--tc-cat-read);
+}
+
+.tool-call-inline-name[data-tool-category="edit"],
+.tool-call-block-title[data-tool-category="edit"] {
+	color: var(--tc-cat-edit);
+}
+
+.tool-call-inline-name[data-tool-category="shell"],
+.tool-call-block-title[data-tool-category="shell"] {
+	color: var(--tc-cat-shell);
+}
+
+.tool-call-inline-name[data-tool-category="think"],
+.tool-call-block-title[data-tool-category="think"] {
+	color: var(--tc-cat-think);
+}
+
+.tool-call-inline-name[data-tool-category="net"],
+.tool-call-block-title[data-tool-category="net"] {
+	color: var(--tc-cat-net);
+}
+
+.tool-call-inline-name[data-tool-category="state"],
+.tool-call-block-title[data-tool-category="state"] {
+	color: var(--tc-cat-state);
+}
+
+/* When a row is in the failed/paused state the danger / warning hue
+   on the parent `.tool-call-inline[data-tool-status]` should win, so
+   we override the category back to inherit. Otherwise category colour
+   would override the failure signal. */
+.tool-call-inline[data-tool-status="failed"] .tool-call-inline-name,
+.tool-call-inline[data-tool-status="paused"] .tool-call-inline-name {
+	color: inherit;
+}
+
+/* ── Layer 3: per-extension hue on path tokens ──
+   `[data-ext]` is set by the colorizer when it can confidently
+   identify a short alpha extension. Unknown / numeric "extensions"
+   leave the path in `--tc-path`. */
+
+.tc-tok-path[data-ext="ts"],
+.tc-tok-path[data-ext="tsx"] {
+	color: var(--tc-ext-ts);
+}
+
+.tc-tok-path[data-ext="py"] {
+	color: var(--tc-ext-py);
+}
+
+.tc-tok-path[data-ext="md"],
+.tc-tok-path[data-ext="mdx"] {
+	color: var(--tc-ext-md);
+}
+
+.tc-tok-path[data-ext="json"],
+.tc-tok-path[data-ext="jsonc"],
+.tc-tok-path[data-ext="yaml"],
+.tc-tok-path[data-ext="yml"],
+.tc-tok-path[data-ext="toml"] {
+	color: var(--tc-ext-json);
+}
+
+.tc-tok-path[data-ext="css"],
+.tc-tok-path[data-ext="scss"],
+.tc-tok-path[data-ext="less"] {
+	color: var(--tc-ext-css);
+}
+
+.tc-tok-path[data-ext="html"],
+.tc-tok-path[data-ext="htm"],
+.tc-tok-path[data-ext="vue"],
+.tc-tok-path[data-ext="svelte"] {
+	color: var(--tc-ext-html);
+}
+
+.tc-tok-path[data-ext="go"] {
+	color: var(--tc-ext-go);
+}
+
+.tc-tok-path[data-ext="rs"] {
+	color: var(--tc-ext-rs);
+}
+
+.tc-tok-path[data-ext="rb"] {
+	color: var(--tc-ext-rb);
+}
+
+.tc-tok-path[data-ext="sh"],
+.tc-tok-path[data-ext="bash"],
+.tc-tok-path[data-ext="zsh"],
+.tc-tok-path[data-ext="fish"] {
+	color: var(--tc-ext-sh);
+}
