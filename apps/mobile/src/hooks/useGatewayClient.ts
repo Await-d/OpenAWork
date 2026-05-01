@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react';
-import type { DialogueMode, RunEvent } from '@openAwork/shared';
+import type { DialogueMode, InputImageContent, RunEvent } from '@openAwork/shared';
 import { extractRuntimeTextDelta, extractRuntimeThinkingDelta } from '../chat-message-content.js';
 
 export type ActivityEvent =
@@ -34,7 +34,9 @@ export type StreamHandlers = {
 
 export type StreamOptions = {
   agentId?: string;
+  displayMessage?: string;
   dialogueMode?: DialogueMode;
+  inputParts?: InputImageContent[];
   yoloMode?: boolean;
 };
 
@@ -63,8 +65,16 @@ export class MobileGatewayClient {
   private openConnection(sessionId: string): void {
     const protocol = this.gatewayUrl.startsWith('https') ? 'wss' : 'ws';
     const base = this.gatewayUrl.replace(/^https?/, protocol);
-    const params = new URLSearchParams({ token: this.token });
-    this.ws = new WebSocket(`${base}/sessions/${sessionId}/stream?${params.toString()}`);
+    const WebSocketWithOptions = WebSocket as unknown as {
+      new (
+        url: string,
+        protocols?: string | string[],
+        options?: { headers?: Record<string, string> },
+      ): WebSocket;
+    };
+    this.ws = new WebSocketWithOptions(`${base}/sessions/${sessionId}/stream`, undefined, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
@@ -152,7 +162,9 @@ export class MobileGatewayClient {
     const payload = JSON.stringify({
       ...(agentId ? { agentId } : {}),
       clientRequestId: crypto.randomUUID(),
+      ...(options.displayMessage ? { displayMessage: options.displayMessage } : {}),
       ...(dialogueMode ? { dialogueMode } : {}),
+      ...(options.inputParts ? { inputParts: options.inputParts } : {}),
       message,
       ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode } : {}),
     });

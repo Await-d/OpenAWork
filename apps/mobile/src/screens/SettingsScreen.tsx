@@ -10,12 +10,22 @@ import {
   Alert,
 } from 'react-native';
 import { useAuthStore } from '../store/auth';
+import {
+  IMAGE_GENERATION_SIZE_PRESET_GROUPS,
+  resolveImageGenerationSizePresetId,
+  sizeForPreset,
+  validateImageGenerationSize,
+} from '@openAwork/shared';
 import { useOtaUpdate } from '../hooks/useOtaUpdate';
 import ExpoPersistenceAdapter, {
   buildMobileProviderConfig,
+  DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS,
+  loadImageGenerationDefaults,
   loadMcpServers,
   restoreMobileProviderSelection,
+  saveImageGenerationDefaults,
   saveMcpServers,
+  type MobileImageGenerationDefaults,
   type MobileMcpServer,
 } from '../store/providerPersistence';
 
@@ -28,6 +38,8 @@ const PRESET_PROVIDERS = [
   { id: 'custom', name: 'Custom' },
 ] as const;
 
+const IMAGE_PROVIDER_OPTIONS = PRESET_PROVIDERS.filter((provider) => provider.id === 'openai');
+
 type MobileProviderOption = (typeof PRESET_PROVIDERS)[number];
 
 const persistence = new ExpoPersistenceAdapter();
@@ -37,13 +49,19 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ onLogout }: SettingsScreenProps) {
-  const { gatewayUrl, setGatewayUrl, logout } = useAuthStore();
+  const { accessToken, gatewayUrl, setGatewayUrl, logout } = useAuthStore();
   const { state: otaState, checkAndApply, applyUpdate } = useOtaUpdate();
   const [gatewayInput, setGatewayInput] = useState(gatewayUrl);
   const [selectedProvider, setSelectedProvider] = useState<MobileProviderOption>(
     PRESET_PROVIDERS[0],
   );
   const [apiKey, setApiKey] = useState('');
+  const [selectedImageProvider, setSelectedImageProvider] = useState<MobileProviderOption>(
+    IMAGE_PROVIDER_OPTIONS[0] ?? PRESET_PROVIDERS[0],
+  );
+  const [imageDefaults, setImageDefaults] = useState<MobileImageGenerationDefaults>(
+    DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS,
+  );
   const [mcpServers, setMcpServers] = useState<MobileMcpServer[]>([]);
   const [mcpName, setMcpName] = useState('');
   const [mcpUrl, setMcpUrl] = useState('');
@@ -61,6 +79,7 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
       const storedApiKey = await persistence.loadApiKey(selectedProviderId);
       const restored = restoreMobileProviderSelection(config, storedApiKey);
       const storedMcpServers = await loadMcpServers();
+      const storedImageDefaults = await loadImageGenerationDefaults();
 
       if (cancelled) return;
 
@@ -68,7 +87,13 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
         PRESET_PROVIDERS.find((provider) => provider.id === restored.selectedProviderId) ??
           PRESET_PROVIDERS[0],
       );
+      setSelectedImageProvider(
+        IMAGE_PROVIDER_OPTIONS.find((provider) => provider.id === restored.imageProviderId) ??
+          IMAGE_PROVIDER_OPTIONS[0] ??
+          PRESET_PROVIDERS[0],
+      );
       setApiKey(restored.apiKey);
+      setImageDefaults(storedImageDefaults);
       setMcpServers(storedMcpServers);
     };
 
@@ -129,10 +154,59 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
   };
 
   const saveProvider = async () => {
-    const config = buildMobileProviderConfig(selectedProvider.id, apiKey.trim());
+    const sizeValidation = validateImageGenerationSize(imageDefaults.size);
+    if (!sizeValidation.valid) {
+      Alert.alert('图片尺寸无效', sizeValidation.message ?? '请输入合法的自定义尺寸');
+      return;
+    }
+
+    const apiKeysByProvider = Object.fromEntries(
+      await Promise.all(
+        PRESET_PROVIDERS.map(async (provider) => {
+          const stored =
+            provider.id === selectedProvider.id
+              ? apiKey.trim()
+              : ((await persistence.loadApiKey(provider.id)) ?? '').trim();
+          return [provider.id, stored] as const;
+        }),
+      ),
+    );
+    const config = buildMobileProviderConfig({
+      apiKeysByProvider,
+      imageProviderId: selectedImageProvider.id,
+      selectedProviderId: selectedProvider.id,
+    });
     await persistence.saveProviderConfig(config.providers, config.active);
     await persistence.saveApiKey(selectedProvider.id, apiKey.trim());
-    Alert.alert('已保存', `${selectedProvider.name} 的配置已保存`);
+    await saveImageGenerationDefaults(imageDefaults);
+
+    let syncedToGateway = false;
+    if (accessToken && gatewayUrl) {
+      try {
+        const response = await fetch(`${gatewayUrl}/settings/providers`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            providers: config.providers,
+            activeSelection: config.active,
+            imageGenerationDefaults: imageDefaults,
+          }),
+        });
+        syncedToGateway = response.ok;
+      } catch {
+        syncedToGateway = false;
+      }
+    }
+
+    Alert.alert(
+      '已保存',
+      syncedToGateway
+        ? `${selectedProvider.name} 与图片模式配置已同步到网关`
+        : `${selectedProvider.name} 与图片模式配置已保存到本机`,
+    );
   };
 
   const handleLogout = async () => {
@@ -192,6 +266,186 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
       >
         <Text style={styles.btnText}>保存 API 密钥</Text>
       </TouchableOpacity>
+
+      <Text style={styles.section}>图片生成</Text>
+      <Text style={styles.helperText}>
+        图片模式使用独立的 OpenAI / GPT Image 2 配置与默认参数。
+      </Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.providerRow}>
+        {IMAGE_PROVIDER_OPTIONS.map((provider) => (
+          <TouchableOpacity
+            key={provider.id}
+            style={[
+              styles.providerChip,
+              selectedImageProvider.id === provider.id && styles.providerChipActive,
+            ]}
+            onPress={() => setSelectedImageProvider(provider)}
+          >
+            <Text
+              style={[
+                styles.providerChipText,
+                selectedImageProvider.id === provider.id && styles.providerChipTextActive,
+              ]}
+            >
+              {provider.name}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+      <Text style={styles.subtleLabel}>模型：GPT Image 2</Text>
+      <View style={styles.imageDefaultsGrid}>
+        <View style={styles.imageField}>
+          <Text style={styles.fieldLabel}>尺寸（1K / 2K / 4K / 自定义）</Text>
+          <View style={styles.imagePresetGroups}>
+            {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
+              <View key={group.tier} style={styles.imagePresetGroup}>
+                <Text style={styles.imagePresetGroupTitle}>{group.label}</Text>
+                <Text style={styles.imagePresetGroupHint}>{group.description}</Text>
+                <View style={styles.optionRow}>
+                  {group.presets.map((preset) => (
+                    <TouchableOpacity
+                      key={preset.id}
+                      style={[
+                        styles.optionChip,
+                        resolveImageGenerationSizePresetId(imageDefaults.size) === preset.id &&
+                          styles.optionChipActive,
+                      ]}
+                      onPress={() => setImageDefaults((prev) => ({ ...prev, size: preset.size }))}
+                    >
+                      <Text
+                        style={[
+                          styles.optionChipText,
+                          resolveImageGenerationSizePresetId(imageDefaults.size) === preset.id &&
+                            styles.optionChipTextActive,
+                        ]}
+                      >
+                        {preset.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ))}
+            <TouchableOpacity
+              style={[
+                styles.optionChip,
+                resolveImageGenerationSizePresetId(imageDefaults.size) === 'custom' &&
+                  styles.optionChipActive,
+              ]}
+              onPress={() =>
+                setImageDefaults((prev) => ({
+                  ...prev,
+                  size:
+                    resolveImageGenerationSizePresetId(prev.size) === 'custom'
+                      ? prev.size
+                      : sizeForPreset('1k'),
+                }))
+              }
+            >
+              <Text
+                style={[
+                  styles.optionChipText,
+                  resolveImageGenerationSizePresetId(imageDefaults.size) === 'custom' &&
+                    styles.optionChipTextActive,
+                ]}
+              >
+                自定义尺寸
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <TextInput
+            style={styles.input}
+            value={imageDefaults.size}
+            onChangeText={(size) => setImageDefaults((prev) => ({ ...prev, size }))}
+            placeholder="例如 2560x1440"
+            placeholderTextColor="#64748b"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text
+            style={[
+              styles.helperText,
+              !validateImageGenerationSize(imageDefaults.size).valid && styles.helperTextDanger,
+            ]}
+          >
+            {validateImageGenerationSize(imageDefaults.size).valid
+              ? '合法范围：最长边 ≤ 3840、宽高为 16 的倍数、比例不超过 3:1。'
+              : validateImageGenerationSize(imageDefaults.size).message}
+          </Text>
+        </View>
+        <View style={styles.imageField}>
+          <Text style={styles.fieldLabel}>质量</Text>
+          <View style={styles.optionRow}>
+            {(['low', 'medium', 'high'] as const).map((quality) => (
+              <TouchableOpacity
+                key={quality}
+                style={[
+                  styles.optionChip,
+                  imageDefaults.quality === quality && styles.optionChipActive,
+                ]}
+                onPress={() => setImageDefaults((prev) => ({ ...prev, quality }))}
+              >
+                <Text
+                  style={[
+                    styles.optionChipText,
+                    imageDefaults.quality === quality && styles.optionChipTextActive,
+                  ]}
+                >
+                  {quality}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        <View style={styles.imageField}>
+          <Text style={styles.fieldLabel}>格式</Text>
+          <View style={styles.optionRow}>
+            {(['png', 'jpeg', 'webp'] as const).map((outputFormat) => (
+              <TouchableOpacity
+                key={outputFormat}
+                style={[
+                  styles.optionChip,
+                  imageDefaults.outputFormat === outputFormat && styles.optionChipActive,
+                ]}
+                onPress={() => setImageDefaults((prev) => ({ ...prev, outputFormat }))}
+              >
+                <Text
+                  style={[
+                    styles.optionChipText,
+                    imageDefaults.outputFormat === outputFormat && styles.optionChipTextActive,
+                  ]}
+                >
+                  {outputFormat.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        <View style={styles.imageField}>
+          <Text style={styles.fieldLabel}>背景</Text>
+          <View style={styles.optionRow}>
+            {(['auto', 'opaque'] as const).map((background) => (
+              <TouchableOpacity
+                key={background}
+                style={[
+                  styles.optionChip,
+                  imageDefaults.background === background && styles.optionChipActive,
+                ]}
+                onPress={() => setImageDefaults((prev) => ({ ...prev, background }))}
+              >
+                <Text
+                  style={[
+                    styles.optionChipText,
+                    imageDefaults.background === background && styles.optionChipTextActive,
+                  ]}
+                >
+                  {background === 'auto' ? '自动' : '不透明'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
 
       <Text style={styles.section}>MCP 服务器</Text>
       {mcpServers.map((s) => (
@@ -318,6 +572,28 @@ const styles = StyleSheet.create({
   providerChipActive: { borderColor: '#6366f1', backgroundColor: '#6366f122' },
   providerChipText: { color: '#94a3b8', fontSize: 13 },
   providerChipTextActive: { color: '#6366f1', fontWeight: '600' },
+  helperText: { color: '#94a3b8', fontSize: 12, lineHeight: 18, marginBottom: 8 },
+  helperTextDanger: { color: '#f87171' },
+  subtleLabel: { color: '#cbd5e1', fontSize: 12, marginBottom: 8, fontWeight: '600' },
+  imageDefaultsGrid: { gap: 10, marginBottom: 8 },
+  imageField: { gap: 6 },
+  imagePresetGroups: { gap: 10 },
+  imagePresetGroup: { gap: 6 },
+  imagePresetGroupTitle: { color: '#e2e8f0', fontSize: 12, fontWeight: '700' },
+  imagePresetGroupHint: { color: '#94a3b8', fontSize: 11, lineHeight: 16 },
+  fieldLabel: { color: '#cbd5e1', fontSize: 12, fontWeight: '600' },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#1e293b',
+  },
+  optionChipActive: { borderColor: '#6366f1', backgroundColor: '#6366f122' },
+  optionChipText: { color: '#94a3b8', fontSize: 12 },
+  optionChipTextActive: { color: '#6366f1', fontWeight: '600' },
   mcpRow: {
     flexDirection: 'row',
     alignItems: 'center',

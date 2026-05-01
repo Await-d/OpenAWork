@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import {
   buildReasoningBlockKey,
   extractReasoningHeading,
@@ -10,22 +10,34 @@ import {
   REASONING_UI_TOKENS,
 } from '@openAwork/shared';
 import type { MobileChatMessage } from '../chat-message-content.js';
+import {
+  parseMobileMessageSegments,
+  summarizeMobileCodeBlock,
+} from '../screens/chat-message-actions.js';
 
 export function ChatMessageBubble({
+  highlighted = false,
   isStreaming = false,
   message,
+  onLongPress,
 }: {
+  highlighted?: boolean;
   isStreaming?: boolean;
   message: MobileChatMessage;
+  onLongPress?: () => void;
 }) {
   const isUser = message.role === 'user';
+  const segments = useMemo(() => parseMobileMessageSegments(message.content), [message.content]);
 
   return (
-    <View
+    <Pressable
+      onLongPress={onLongPress}
+      delayLongPress={260}
       style={[
         styles.bubble,
         isUser ? styles.userBubble : styles.assistantBubble,
         isStreaming && styles.streamingBubble,
+        highlighted && styles.highlightedBubble,
       ]}
     >
       {!isUser &&
@@ -38,12 +50,78 @@ export function ChatMessageBubble({
             total={message.reasoningBlocks?.length ?? 0}
           />
         ))}
-      {message.content.length > 0 && (
-        <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
-          {message.content}
-          {isStreaming && <Text style={styles.cursor}>▋</Text>}
-        </Text>
+      {segments.map((segment, index) =>
+        segment.kind === 'code' ? (
+          <CodeBlock key={`code-${index}`} code={segment.code} language={segment.language} />
+        ) : segment.text.length > 0 ? (
+          <Text key={`text-${index}`} style={[styles.bubbleText, isUser && styles.userBubbleText]}>
+            {segment.text}
+            {isStreaming && index === segments.length - 1 ? (
+              <Text style={styles.cursor}>▋</Text>
+            ) : null}
+          </Text>
+        ) : null,
       )}
+      {(message.inputImages ?? []).map((image, index) => (
+        <View
+          key={`${image.imageUrl ?? image.artifactId ?? image.fileName ?? 'image'}-${index}`}
+          style={styles.imageWrap}
+        >
+          {image.imageUrl ? (
+            <Image
+              source={{ uri: image.imageUrl }}
+              style={styles.imagePreview}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Text style={styles.imagePlaceholderText}>图片已附加</Text>
+            </View>
+          )}
+          <Text style={[styles.imageLabel, isUser && styles.userBubbleText]}>
+            {image.fileName ?? `图片 ${index + 1}`}
+          </Text>
+        </View>
+      ))}
+    </Pressable>
+  );
+}
+
+function CodeBlock({ code, language }: { code: string; language?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = useMemo(() => summarizeMobileCodeBlock(code), [code]);
+  const visibleCode = expanded || !summary.shouldCollapse ? code.trimEnd() : summary.collapsedCode;
+  const shareCode = useCallback(async () => {
+    try {
+      await Share.share({ message: code.trimEnd() });
+    } catch (error) {
+      Alert.alert('分享失败', error instanceof Error ? error.message : '无法打开系统分享面板');
+    }
+  }, [code]);
+
+  return (
+    <View style={styles.codeBlock}>
+      <View style={styles.codeHeader}>
+        <Text style={styles.codeLanguage}>{language ?? 'code'}</Text>
+        <View style={styles.codeHeaderActions}>
+          <Pressable accessibilityRole="button" accessibilityLabel="分享代码块" onPress={shareCode}>
+            <Text style={styles.codeActionText}>分享</Text>
+          </Pressable>
+          {summary.shouldCollapse ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={expanded ? '收起代码块' : '展开代码块'}
+              onPress={() => setExpanded((previous) => !previous)}
+            >
+              <Text style={styles.codeActionText}>{expanded ? '收起' : '展开'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      <Text style={styles.codeText}>{visibleCode}</Text>
+      {summary.shouldCollapse && !expanded ? (
+        <Text style={styles.codeCollapsedHint}>已折叠，共 {summary.lineCount} 行</Text>
+      ) : null}
     </View>
   );
 }
@@ -110,6 +188,10 @@ const styles = StyleSheet.create({
   streamingBubble: {
     opacity: 0.92,
   },
+  highlightedBubble: {
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+  },
   bubbleText: {
     color: '#94a3b8',
     fontSize: 15,
@@ -117,6 +199,74 @@ const styles = StyleSheet.create({
   },
   userBubbleText: {
     color: '#fff',
+  },
+  codeBlock: {
+    minWidth: 220,
+    maxWidth: 300,
+    marginTop: 8,
+    marginBottom: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#475569',
+    backgroundColor: '#020617',
+    overflow: 'hidden',
+  },
+  codeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#0f172a',
+  },
+  codeLanguage: { color: '#94a3b8', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  codeHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  codeActionText: { color: '#93c5fd', fontSize: 10, fontWeight: '800' },
+  codeText: {
+    color: '#dbeafe',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
+    padding: 10,
+  },
+  codeCollapsedHint: {
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+    color: '#64748b',
+    fontSize: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  imageWrap: {
+    marginTop: 8,
+    gap: 6,
+  },
+  imagePreview: {
+    width: 180,
+    height: 180,
+    borderRadius: 12,
+    backgroundColor: '#0f172a',
+  },
+  imagePlaceholder: {
+    width: 180,
+    height: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+  },
+  imagePlaceholderText: {
+    color: '#94a3b8',
+    fontSize: 11,
+  },
+  imageLabel: {
+    color: '#94a3b8',
+    fontSize: 11,
   },
   cursor: {
     color: '#6366f1',

@@ -2,7 +2,15 @@ export interface MobileChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  inputImages?: MobileInputImage[];
   reasoningBlocks?: string[];
+}
+
+export interface MobileInputImage {
+  artifactId?: string;
+  fileName?: string;
+  imageUrl?: string;
+  mimeType?: string;
 }
 
 export function normalizeMobileChatMessages(rawMessages: unknown): MobileChatMessage[] {
@@ -47,6 +55,7 @@ function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | nu
   const normalizedContent = normalizeMobileMessageContent(record['content']);
   if (
     normalizedContent.content.length === 0 &&
+    (normalizedContent.inputImages?.length ?? 0) === 0 &&
     (normalizedContent.reasoningBlocks?.length ?? 0) === 0
   ) {
     return null;
@@ -56,6 +65,9 @@ function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | nu
     id,
     role: role === 'user' ? 'user' : 'assistant',
     content: normalizedContent.content,
+    ...(normalizedContent.inputImages && normalizedContent.inputImages.length > 0
+      ? { inputImages: normalizedContent.inputImages }
+      : {}),
     ...(normalizedContent.reasoningBlocks && normalizedContent.reasoningBlocks.length > 0
       ? { reasoningBlocks: normalizedContent.reasoningBlocks }
       : {}),
@@ -64,6 +76,7 @@ function normalizeMobileChatMessage(rawMessage: unknown): MobileChatMessage | nu
 
 function normalizeMobileMessageContent(content: unknown): {
   content: string;
+  inputImages?: MobileInputImage[];
   reasoningBlocks?: string[];
 } {
   if (typeof content === 'string') {
@@ -80,12 +93,14 @@ function normalizeMobileMessageContent(content: unknown): {
   }
 
   const text = collectTextFragments(content).join('\n').trim();
+  const inputImages = collectInputImages(content);
   const reasoningBlocks = collectReasoningFragments(content)
     .map((item) => normalizeReasoningText(item))
     .filter((item, index, items) => item.length > 0 && items.indexOf(item) === index);
 
   return {
     content: text,
+    ...(inputImages.length > 0 ? { inputImages } : {}),
     ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
   };
 }
@@ -111,6 +126,10 @@ function collectTextFragments(value: unknown): string[] {
     return [];
   }
 
+  if (record['type'] === 'input_image') {
+    return [];
+  }
+
   if (
     (type === 'text' || type === 'input_text' || type === 'output_text') &&
     typeof record['text'] === 'string'
@@ -133,6 +152,30 @@ function collectTextFragments(value: unknown): string[] {
 
   const fragments = candidateFields.flatMap((item) => collectTextFragments(item));
   return fragments;
+}
+
+function collectInputImages(value: unknown): MobileInputImage[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectInputImages(item));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record['type'] !== 'input_image') {
+    return [];
+  }
+
+  return [
+    {
+      ...(typeof record['artifactId'] === 'string' ? { artifactId: record['artifactId'] } : {}),
+      ...(typeof record['fileName'] === 'string' ? { fileName: record['fileName'] } : {}),
+      ...(typeof record['imageUrl'] === 'string' ? { imageUrl: record['imageUrl'] } : {}),
+      ...(typeof record['mimeType'] === 'string' ? { mimeType: record['mimeType'] } : {}),
+    },
+  ];
 }
 
 function collectReasoningFragments(value: unknown): string[] {

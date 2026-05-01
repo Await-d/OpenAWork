@@ -18,6 +18,7 @@ export interface ChatScreenStreamHandlerOptions<Message extends ChatScreenStream
   setActivities: (updater: (prev: AgentActivity[]) => AgentActivity[]) => void;
   setMessages: (updater: (prev: Message[]) => Message[]) => void;
   setSending: (next: boolean) => void;
+  setStreamError: (message: string | null) => void;
   syncTaskActivities: (requestSessionId: string) => Promise<void> | void;
 }
 
@@ -83,6 +84,7 @@ export function createChatScreenGuardedStreamHandlers<Message extends ChatScreen
         return;
       }
 
+      options.setStreamError(null);
       void options.syncTaskActivities(options.requestSessionId);
     },
     onDelta: (delta) => {
@@ -111,6 +113,7 @@ export function createChatScreenGuardedStreamHandlers<Message extends ChatScreen
           message.id === options.assistantId ? { ...message, streaming: false } : message,
         ),
       );
+      options.setStreamError(null);
       options.clearActiveStreamToken();
       options.setSending(false);
       options.scheduleScrollToBottom();
@@ -122,6 +125,7 @@ export function createChatScreenGuardedStreamHandlers<Message extends ChatScreen
 
       void options.syncTaskActivities(options.requestSessionId);
       options.setActivities((prev) => settleNonSubagentActivities(prev, 'error'));
+      options.setStreamError(message);
       options.setMessages((prev) =>
         prev.map((entry) =>
           entry.id === options.assistantId
