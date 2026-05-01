@@ -22,11 +22,6 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-function writeSse(res: ServerResponse, event: string, payload: unknown): void {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(payload)}\n\n`);
-}
-
 function writeChatToolCall(res: ServerResponse, filePath: string): void {
   res.write(
     `data: ${JSON.stringify({
@@ -39,7 +34,10 @@ function writeChatToolCall(res: ServerResponse, filePath: string): void {
                 id: 'call-write-1',
                 function: {
                   name: 'write',
-                  arguments: JSON.stringify({ path: filePath, content: 'export const value = 2;\n' }),
+                  arguments: JSON.stringify({
+                    path: filePath,
+                    content: 'export const value = 2;\n',
+                  }),
                 },
               },
             ],
@@ -218,9 +216,7 @@ async function main(): Promise<void> {
           assert(
             toolResult &&
               Array.isArray(toolResult.fileDiffs) &&
-              toolResult.fileDiffs.some(
-                (diff) => diff.backupBeforeRef,
-              ),
+              toolResult.fileDiffs.some((diff) => diff.backupBeforeRef),
             'stored tool_result should carry fileDiffs with backupBeforeRef',
           );
 
@@ -259,10 +255,7 @@ function hasFunctionCallOutput(body: Record<string, unknown>): boolean {
   return Array.isArray(messages)
     ? messages.some(
         (item) =>
-          item &&
-          typeof item === 'object' &&
-          !Array.isArray(item) &&
-          item['role'] === 'tool',
+          item && typeof item === 'object' && !Array.isArray(item) && item['role'] === 'tool',
       )
     : false;
 }

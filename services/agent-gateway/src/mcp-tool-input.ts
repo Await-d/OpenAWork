@@ -29,7 +29,9 @@ export interface McpCallParseFailure {
 
 export type McpCallParseResult = McpCallParseSuccess | McpCallParseFailure;
 
-export function parseMcpListToolsRawInput(rawInput: Record<string, unknown>): McpListToolsParseResult {
+export function parseMcpListToolsRawInput(
+  rawInput: Record<string, unknown>,
+): McpListToolsParseResult {
   const value = rawInput['serverId'];
   if (typeof value !== 'string') {
     return {};
@@ -97,8 +99,7 @@ export function parseMcpCallRawInput(rawInput: Record<string, unknown>): McpCall
   if (!argumentsObject) {
     return {
       ok: false,
-      reason:
-        'mcp_call requires `arguments` to be a JSON object (or a JSON-encoded object string)',
+      reason: 'mcp_call requires `arguments` to be a JSON object (or a JSON-encoded object string)',
     };
   }
 

@@ -23,7 +23,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z, type ZodTypeAny } from 'zod';
-import type { ToolDefinition, ToolCallRequest, ToolCallResult } from '@openAwork/agent-core';
+import type { ToolDefinition } from '@openAwork/agent-core';
 import { truncateToolOutput } from './tool-output-truncator.js';
 import type { GatewayToolDefinition } from './tool-definitions.js';
 
@@ -63,10 +63,7 @@ export interface DynamicToolEntry {
 }
 
 /** In-memory cache keyed by workspace root → loaded tools. */
-const workspaceToolCache = new Map<
-  string,
-  { entries: DynamicToolEntry[]; loadedAt: number }
->();
+const workspaceToolCache = new Map<string, { entries: DynamicToolEntry[]; loadedAt: number }>();
 
 /** Cache TTL in milliseconds (5 minutes). */
 const CACHE_TTL_MS = 5 * 60 * 1000;

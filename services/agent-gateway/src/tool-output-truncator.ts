@@ -100,10 +100,7 @@ export function truncateToolOutput(toolName: string, output: string): string {
  * serialized form is truncated and returned as a string.
  * This is the primary entry point for tool output truncation in executeToolCalls.
  */
-export function truncateToolOutputUniversal(
-  toolName: string,
-  output: unknown,
-): unknown {
+export function truncateToolOutputUniversal(toolName: string, output: unknown): unknown {
   if (typeof output === 'string') {
     return truncateToolOutput(toolName, output);
   }

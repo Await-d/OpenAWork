@@ -3,10 +3,7 @@ import {
   compareV1V2BridgeStructural,
   type BridgeDiffSummary,
 } from '../v2-runtime/upstream/index.js';
-import {
-  isV2UpstreamShadow,
-  refreshRuntimeFlagsForTesting,
-} from '../v2-runtime/runtime-flag.js';
+import { isV2UpstreamShadow, refreshRuntimeFlagsForTesting } from '../v2-runtime/runtime-flag.js';
 import type { ModelMessage } from 'ai';
 
 describe('compareV1V2BridgeStructural', () => {
@@ -14,7 +11,14 @@ describe('compareV1V2BridgeStructural', () => {
     if (role === 'tool') {
       return {
         role,
-        content: [{ type: 'tool-result', toolCallId: 'c', toolName: '', output: { type: 'text', value: text } }],
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'c',
+            toolName: '',
+            output: { type: 'text', value: text },
+          },
+        ],
       };
     }
     if (role === 'assistant') {
@@ -43,10 +47,7 @@ describe('compareV1V2BridgeStructural', () => {
 
   it('reports count mismatch as a single -1-indexed diff', () => {
     const v1 = [{ role: 'user', content: 'hi' }];
-    const v2 = [
-      modelMessage('user', 'hi'),
-      modelMessage('assistant', 'reply'),
-    ];
+    const v2 = [modelMessage('user', 'hi'), modelMessage('assistant', 'reply')];
     const summary = compareV1V2BridgeStructural(v1, v2);
     expect(summary.matched).toBe(false);
     expect(summary.diffs[0]).toMatchObject({ index: -1 });
@@ -59,10 +60,7 @@ describe('compareV1V2BridgeStructural', () => {
       { role: 'user', content: 'q' },
       { role: 'assistant', content: 'a' },
     ];
-    const v2 = [
-      modelMessage('user', 'q'),
-      modelMessage('user', 'a'),
-    ];
+    const v2 = [modelMessage('user', 'q'), modelMessage('user', 'a')];
     const summary = compareV1V2BridgeStructural(v1, v2);
     expect(summary.matched).toBe(false);
     expect(summary.diffs.some((d) => d.index === 1 && d.reason.includes('role'))).toBe(true);

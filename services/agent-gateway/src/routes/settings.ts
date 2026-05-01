@@ -1017,7 +1017,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const parsed = pluginSettingsSchema.safeParse(request.body);
       if (!parsed.success) {
         step.fail('invalid body');
-        return reply.status(400).send({ error: 'Invalid plugin settings', issues: parsed.error.issues });
+        return reply
+          .status(400)
+          .send({ error: 'Invalid plugin settings', issues: parsed.error.issues });
       }
 
       const saveStep = child('save');

@@ -13,7 +13,11 @@ import type {
   RenderOptions,
   PromptCacheConfig,
 } from './provider-adapter.js';
-import { applyRequestOverrides, isReasoningModel } from './render-shared.js';
+import {
+  applyRequestOverrides,
+  isReasoningModel,
+  applyOpenAIDefaultTextVerbosity,
+} from './render-shared.js';
 
 // ─── Responses API Renderer ───
 
@@ -48,10 +52,7 @@ export function renderResponsesApi(
 
 // ─── Input Conversion ───
 
-function convertToResponsesInput(
-  messages: UnifiedMessage[],
-  model: string,
-): unknown[] {
+function convertToResponsesInput(messages: UnifiedMessage[], model: string): unknown[] {
   const systemRole = isReasoningModel(model) ? 'developer' : 'system';
   const input: unknown[] = [];
 
@@ -105,9 +106,7 @@ function convertToResponsesInput(
           reasoningItem['encrypted_content'] = msg.reasoning.encryptedContent;
         }
         if (msg.reasoning.summary) {
-          reasoningItem['summary'] = [
-            { type: 'summary_text', text: msg.reasoning.summary },
-          ];
+          reasoningItem['summary'] = [{ type: 'summary_text', text: msg.reasoning.summary }];
         }
         input.push(reasoningItem);
       }
@@ -187,9 +186,7 @@ function findLastResponseId(messages: UnifiedMessage[]): string | undefined {
  * OpenAI also requires `store: false` to enable prompt cache routing
  * without persisting responses.
  */
-function buildResponsesCacheKeyFields(
-  cache?: PromptCacheConfig,
-): Record<string, unknown> {
+function buildResponsesCacheKeyFields(cache?: PromptCacheConfig): Record<string, unknown> {
   if (!cache?.sessionId) return {};
 
   const providerType = cache.providerType;
@@ -209,8 +206,18 @@ function applyOverridesAndThinking(
   body: UpstreamRequestBody,
   options: RenderOptions,
 ): UpstreamRequestBody {
-  let result = applyRequestOverrides(body, options.requestOverrides, { maxTokens: 'max_output_tokens' });
+  let result = applyRequestOverrides(body, options.requestOverrides, {
+    maxTokens: 'max_output_tokens',
+  });
   result = applyResponsesThinking(result, options.thinking);
+  // Default `text.verbosity = "low"` on gpt-5.x non-codex non-chat models
+  // (Responses API nests verbosity under `text`). Mirrors opencode.
+  result = applyOpenAIDefaultTextVerbosity(
+    result,
+    options.thinking?.providerType ?? options.cache?.providerType,
+    options.model,
+    'responses',
+  );
   return result;
 }
 

@@ -82,10 +82,9 @@ describe('SESSION_DELETE_RECOVERY_STATEMENTS', () => {
       if (!before) continue;
       const childIdx = indexOfStatementForTable(table);
       const parentIdx = indexOfStatementForTable(before);
-      expect(
-        childIdx,
-        `expected ${table} delete to precede ${before} delete`,
-      ).toBeLessThan(parentIdx);
+      expect(childIdx, `expected ${table} delete to precede ${before} delete`).toBeLessThan(
+        parentIdx,
+      );
     }
   });
 

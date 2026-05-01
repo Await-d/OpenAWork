@@ -42,18 +42,32 @@ export const defaultThinkingSettingsSchema = z.object({
 
 export type DefaultThinkingSettings = z.infer<typeof defaultThinkingSettingsSchema>;
 
-const imageGenerationSizeSchema = z.string().trim().superRefine((value, context) => {
-  const validation = validateImageGenerationSize(value);
-  if (!validation.valid) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: validation.message ?? 'Invalid image generation size',
-    });
-  }
-});
-const imageGenerationQualitySchema = z.enum(['low', 'medium', 'high']) satisfies z.ZodType<ImageGenerationQuality>;
-const imageGenerationOutputFormatSchema = z.enum(['png', 'jpeg', 'webp']) satisfies z.ZodType<ImageGenerationOutputFormat>;
-const imageGenerationBackgroundSchema = z.enum(['auto', 'opaque']) satisfies z.ZodType<ImageGenerationBackground>;
+const imageGenerationSizeSchema = z
+  .string()
+  .trim()
+  .superRefine((value, context) => {
+    const validation = validateImageGenerationSize(value);
+    if (!validation.valid) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: validation.message ?? 'Invalid image generation size',
+      });
+    }
+  });
+const imageGenerationQualitySchema = z.enum([
+  'low',
+  'medium',
+  'high',
+]) satisfies z.ZodType<ImageGenerationQuality>;
+const imageGenerationOutputFormatSchema = z.enum([
+  'png',
+  'jpeg',
+  'webp',
+]) satisfies z.ZodType<ImageGenerationOutputFormat>;
+const imageGenerationBackgroundSchema = z.enum([
+  'auto',
+  'opaque',
+]) satisfies z.ZodType<ImageGenerationBackground>;
 
 export const imageGenerationDefaultsSchema = z.object({
   size: imageGenerationSizeSchema,
@@ -111,6 +125,7 @@ export const aiModelConfigSchema = z.object({
   supportsTools: z.boolean().optional(),
   supportsVision: z.boolean().optional(),
   supportsImageGeneration: z.boolean().optional(),
+  supportsImageGeneration4K: z.boolean().optional(),
   supportsThinking: z.boolean().optional(),
   inputPricePerMillion: z.number().min(0).optional(),
   outputPricePerMillion: z.number().min(0).optional(),
@@ -397,7 +412,11 @@ export const getFastProviderConfig = (
 export const getImageProviderConfig = (
   rawProviders: unknown,
   rawActiveSelection: unknown,
-): Promise<{ provider: AIProvider; modelId: string } | null> =>
+): Promise<{
+  provider: AIProvider;
+  modelId: string;
+  model: AIProvider['defaultModels'][number];
+} | null> =>
   createProviderManager(rawProviders, rawActiveSelection)
     .then((manager) => {
       const config = manager.getConfig();
@@ -417,6 +436,6 @@ export const getImageProviderConfig = (
         return null;
       }
 
-      return { provider, modelId: model.id };
+      return { provider, modelId: model.id, model };
     })
     .catch(() => null);

@@ -14,6 +14,7 @@ import {
   normalizeToolResultOutputForStorage,
   stringifyToolResultOutput,
 } from './tool-result-contract.js';
+import { normalizeSqliteBindParams, type SqliteBindableValue } from './sqlite-bind-params.js';
 
 function resolveDbPath(): string {
   return resolveGatewayDatabasePath();
@@ -914,7 +915,9 @@ function migrateSyncEventTables(): void {
     GROUP BY aggregate_id
   `);
 
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_event_log_aggregate_seq ON event_log(aggregate_id, seq)');
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS uq_event_log_aggregate_seq ON event_log(aggregate_id, seq)',
+  );
 }
 
 function migrateSessionTodosTable(): void {
@@ -1110,21 +1113,22 @@ function migrateV1MessagesToV2(): void {
   );
 }
 
-type SQLValue = string | number | bigint | Uint8Array | null;
-
-export function sqliteRun(query: string, params: SQLValue[] = []): void {
+export function sqliteRun(query: string, params: readonly SqliteBindableValue[] = []): void {
   const stmt = db.prepare(query);
-  stmt.run(...params);
+  stmt.run(...normalizeSqliteBindParams(params));
 }
 
-export function sqliteGet<T>(query: string, params: SQLValue[] = []): T | undefined {
+export function sqliteGet<T>(
+  query: string,
+  params: readonly SqliteBindableValue[] = [],
+): T | undefined {
   const stmt = db.prepare(query);
-  return stmt.get(...params) as T | undefined;
+  return stmt.get(...normalizeSqliteBindParams(params)) as T | undefined;
 }
 
-export function sqliteAll<T>(query: string, params: SQLValue[] = []): T[] {
+export function sqliteAll<T>(query: string, params: readonly SqliteBindableValue[] = []): T[] {
   const stmt = db.prepare(query);
-  return stmt.all(...params) as T[];
+  return stmt.all(...normalizeSqliteBindParams(params)) as T[];
 }
 
 export function sqliteTransaction<T>(fn: () => T): T {

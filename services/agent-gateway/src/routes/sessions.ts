@@ -1219,8 +1219,7 @@ async function buildSessionRecoveryReadModel(input: {
     filteredRunEvents =
       typeof input.since === 'number'
         ? allRunEvents.filter(
-            (event) =>
-              typeof event.occurredAt !== 'number' || event.occurredAt >= input.since!,
+            (event) => typeof event.occurredAt !== 'number' || event.occurredAt >= input.since!,
           )
         : allRunEvents;
   }

@@ -158,10 +158,7 @@ describe('wrapToolsForAiSdkDeclarationsOnly', () => {
 });
 
 describe('wrapGatewayToolsForAiSdkDeclarationsOnly', () => {
-  function buildGatewayTool(
-    name: string,
-    description: string,
-  ): GatewayToolFunctionShape {
+  function buildGatewayTool(name: string, description: string): GatewayToolFunctionShape {
     return {
       type: 'function',
       function: {

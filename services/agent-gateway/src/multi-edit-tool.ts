@@ -145,10 +145,14 @@ export function createMultiEditTool(
       try {
         const wsRoot = getSessionWorkspaceRoot(sessionId);
         if (wsRoot) await formatFileAfterWrite(safePath, wsRoot);
-      } catch { /* best-effort formatting */ }
+      } catch {
+        /* best-effort formatting */
+      }
       try {
         await lspManager.touchFile(safePath, true);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       const diagnostics = await getPostWriteDiagnostics([safePath]);
       const projDiags = await getProjectWideDiagnostics(true, [safePath]);

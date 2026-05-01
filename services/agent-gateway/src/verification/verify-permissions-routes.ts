@@ -61,10 +61,7 @@ async function main(): Promise<void> {
             createdAt: string;
           };
         };
-        assert(
-          created.request.toolName === 'write',
-          'created permission should keep tool name',
-        );
+        assert(created.request.toolName === 'write', 'created permission should keep tool name');
         assert(
           created.request.sessionId === sessionId,
           'created permission should keep session id',

@@ -260,9 +260,7 @@ export function parseUpstreamDataLine(data: string, state: StreamParseState): St
     const reasoningDelta = extractUpstreamReasoningContentDelta(delta.reasoning_content);
     const hasIncomingThinking = contentThinkingDelta.length > 0 || reasoningDelta.length > 0;
     const willStartTextOrTool =
-      textDelta.length > 0 ||
-      Boolean(delta.function_call) ||
-      (delta.tool_calls?.length ?? 0) > 0;
+      textDelta.length > 0 || Boolean(delta.function_call) || (delta.tool_calls?.length ?? 0) > 0;
 
     if (state.hasActiveThinking && !hasIncomingThinking && willStartTextOrTool) {
       chunks.push({ type: 'thinking_end', ...createChunkMeta(state) });
@@ -762,9 +760,7 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
         state.responseId = payload.response.id;
       }
       // Extract encrypted reasoning content from output items for multi-turn.
-      const reasoningItem = payload.response?.output?.find(
-        (item) => item.type === 'reasoning',
-      );
+      const reasoningItem = payload.response?.output?.find((item) => item.type === 'reasoning');
       if (reasoningItem) {
         if (reasoningItem.encrypted_content) {
           state.reasoningEncryptedContent = reasoningItem.encrypted_content;
@@ -773,7 +769,10 @@ function parseResponsesFrame(frame: string, state: StreamParseState): StreamChun
         const summaryArr = reasoningItem.summary;
         if (Array.isArray(summaryArr)) {
           const textParts = summaryArr
-            .filter((s: unknown) => typeof s === 'object' && s !== null && 'text' in (s as Record<string, unknown>))
+            .filter(
+              (s: unknown) =>
+                typeof s === 'object' && s !== null && 'text' in (s as Record<string, unknown>),
+            )
             .map((s: Record<string, unknown>) => (s as { text: string }).text);
           if (textParts.length > 0) {
             state.reasoningSummary = textParts.join('\n');

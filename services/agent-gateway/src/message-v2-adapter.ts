@@ -9,15 +9,10 @@
  *   the pendingPermissionRequestId hack
  */
 
-import type {
-  FileDiffContent,
-  Message,
-  MessageContent,
-  MessageRole,
-  ToolCallObservabilityAnnotation,
-} from '@openAwork/shared';
+import type { Message, MessageContent, MessageRole } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import {
+  type AssistantErrorObject,
   type MessageID,
   type PartID,
   type MessageInfo,
@@ -55,10 +50,8 @@ import { listSessionSnapshots } from './session-snapshot-store.js';
 import { listSessionFileDiffs } from './session-file-diff-store.js';
 import {
   buildToolResultContent,
-  extractToolResultContentsFromMessage,
   findLatestReferencedStoredToolResult,
   findStoredToolResultByCallId,
-  hasToolResultContent,
   normalizeToolArgumentsForStorage,
   readStoredToolResultContent,
   stringifyToolResultOutput,
@@ -149,12 +142,24 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
     }
   }
 
+  const assistantTime = info.role === 'assistant' ? info.time : undefined;
+  const durationMs =
+    assistantTime?.completed != null ? assistantTime.completed - assistantTime.created : undefined;
+  const firstTokenLatencyMs =
+    assistantTime?.firstContent != null
+      ? assistantTime.firstContent - assistantTime.created
+      : undefined;
+
   return {
     id: info.id,
     role: info.role,
     createdAt: info.time.created,
     content,
     ...(info.clientRequestId ? { clientRequestId: info.clientRequestId } : {}),
+    ...(typeof durationMs === 'number' && durationMs > 0 ? { durationMs } : {}),
+    ...(typeof firstTokenLatencyMs === 'number' && firstTokenLatencyMs > 0
+      ? { firstTokenLatencyMs }
+      : {}),
   };
 }
 
@@ -234,6 +239,70 @@ function mirrorSessionMessageForLegacySearch(input: {
   });
 }
 
+function deleteLegacySessionMessagesByRequestRole(input: {
+  clientRequestId: string;
+  role: MessageRole;
+  sessionId: string;
+  userId: string;
+}): void {
+  const legacyRows = sqliteAll<{ id: string }>(
+    `SELECT id
+     FROM session_messages
+     WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND role = ?`,
+    [input.sessionId, input.userId, input.clientRequestId, input.role],
+  );
+
+  for (const row of legacyRows) {
+    sqliteRun('DELETE FROM session_messages_fts WHERE message_id = ?', [row.id]);
+  }
+
+  sqliteRun(
+    `DELETE FROM session_messages
+     WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND role = ?`,
+    [input.sessionId, input.userId, input.clientRequestId, input.role],
+  );
+}
+
+function deleteSessionMessagesByExactRequestRole(input: {
+  clientRequestId: string;
+  role: MessageRole;
+  sessionId: string;
+  userId: string;
+}): void {
+  const rows = sqliteAll<{ id: string; data: string }>(
+    'SELECT id, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
+    [input.sessionId, input.userId],
+  );
+  const targetIds = rows
+    .filter((row) => {
+      const data = JSON.parse(row.data) as MessageInfo;
+      return data.clientRequestId === input.clientRequestId && data.role === input.role;
+    })
+    .map((row) => row.id);
+
+  for (const id of targetIds) {
+    emitEvent({
+      definition: MessageEvents.Removed,
+      aggregateID: input.sessionId,
+      data: { sessionID: input.sessionId, messageID: id },
+    });
+  }
+
+  for (const id of targetIds) {
+    sqliteRun('DELETE FROM part_v2 WHERE message_id = ? AND session_id = ?', [id, input.sessionId]);
+  }
+
+  if (targetIds.length > 0) {
+    const placeholders = targetIds.map(() => '?').join(',');
+    sqliteRun(
+      `DELETE FROM message_v2 WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`,
+      [input.sessionId, input.userId, ...targetIds],
+    );
+  }
+
+  deleteLegacySessionMessagesByRequestRole(input);
+}
+
 export function appendSessionMessageV2(input: {
   sessionId: string;
   userId: string;
@@ -241,6 +310,8 @@ export function appendSessionMessageV2(input: {
   content: MessageContent[];
   clientRequestId?: string | null;
   createdAt?: number;
+  completedAt?: number;
+  firstContentAt?: number;
   messageId?: string;
   replaceExisting?: boolean;
   status?: string;
@@ -250,6 +321,15 @@ export function appendSessionMessageV2(input: {
   // (e.g. Anthropic requires every tool_result to have a preceding tool_use).
   if (input.role === 'assistant') {
     validateToolCallIntegrity(input.content, input.sessionId);
+  }
+
+  if (input.replaceExisting === true && input.clientRequestId) {
+    deleteSessionMessagesByExactRequestRole({
+      clientRequestId: input.clientRequestId,
+      role: input.role,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
   }
 
   const msgId = (input.messageId ?? makeMessageId()) as MessageID;
@@ -269,7 +349,11 @@ export function appendSessionMessageV2(input: {
         ? {
             ...baseInfo,
             role: 'assistant',
-            time: { created: timeCreated },
+            time: {
+              created: timeCreated,
+              ...(input.completedAt ? { completed: input.completedAt } : {}),
+              ...(input.firstContentAt ? { firstContent: input.firstContentAt } : {}),
+            },
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           }
@@ -1062,7 +1146,7 @@ export function publishSessionDiff(input: {
 
 export function publishSessionError(input: {
   sessionID?: string;
-  error: import('./message-v2-schema.js').AssistantErrorObject;
+  error: AssistantErrorObject;
 }): void {
   publishBusEvent(SessionBusEvents.Error.type, {
     sessionID: input.sessionID,

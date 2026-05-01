@@ -84,9 +84,7 @@ export function readRuntimeFlags(env: NodeJS.ProcessEnv = process.env): RuntimeF
     storage: parseRuntimeVariant(env['OPENAWORK_RUNTIME_STORAGE'], global),
     upstream: parseRuntimeVariant(env['OPENAWORK_RUNTIME_UPSTREAM'], global),
     services: parseRuntimeVariant(env['OPENAWORK_RUNTIME_SERVICES'], global),
-    upstreamProviderAllowlist: parseProviderAllowlist(
-      env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS'],
-    ),
+    upstreamProviderAllowlist: parseProviderAllowlist(env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS']),
   };
 }
 

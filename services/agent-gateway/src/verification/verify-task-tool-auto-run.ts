@@ -237,7 +237,10 @@ async function main(): Promise<void> {
               const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
               const task = graph.tasks[output.taskId];
               assert(task?.status === 'completed', 'parent task should be marked completed');
-              assert(typeof task?.result === 'string', 'parent task should store a delegated child summary');
+              assert(
+                typeof task?.result === 'string',
+                'parent task should store a delegated child summary',
+              );
 
               const childMessages = listSessionMessages({ sessionId: output.sessionId, userId });
               assert(
@@ -384,7 +387,7 @@ async function main(): Promise<void> {
               const parentTaskResultContent:
                 | Extract<MessageContent, { type: 'tool_result' }>
                 | undefined =
-                  parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
+                parentTaskResultPart?.type === 'tool_result' ? parentTaskResultPart : undefined;
               const parentTaskOutput = extractStructuredToolResultOutput(parentTaskResultContent);
               assert(
                 parentTaskOutput?.['status'] === 'done',
@@ -612,7 +615,7 @@ async function main(): Promise<void> {
               const preservedUpstreamBody = JSON.parse(fetchCalls[2] ?? '{}');
               assert(
                 extractUpstreamReasoningEffort(preservedUpstreamBody) === 'low',
-                'delegated child session should preserve the parent\'s explicit thinking effort',
+                "delegated child session should preserve the parent's explicit thinking effort",
               );
 
               console.log('verify-task-tool-auto-run: ok');
@@ -703,7 +706,10 @@ async function main(): Promise<void> {
         const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
         const refreshedTask = refreshedGraph.tasks[task.id];
         assert(refreshedTask?.status === 'running', '权限等待中的 child task 不应被自动终止');
-        assert(refreshedTask?.errorMessage === undefined, '权限等待中的 child task 不应写入超时错误');
+        assert(
+          refreshedTask?.errorMessage === undefined,
+          '权限等待中的 child task 不应写入超时错误',
+        );
 
         const childMetadata = sqliteGet<{ metadata_json: string }>(
           'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -716,7 +722,10 @@ async function main(): Promise<void> {
           parsedChildMetadata?.['terminalReason'] === undefined,
           '权限等待中的 child session 不应记录 terminalReason=timeout',
         );
-        assert(parsedChildMetadata?.['timeoutSource'] === undefined, '权限等待中不应写入 timeoutSource');
+        assert(
+          parsedChildMetadata?.['timeoutSource'] === undefined,
+          '权限等待中不应写入 timeoutSource',
+        );
 
         const permissionStatus = sqliteGet<{ status: string; decision: string | null }>(
           'SELECT status, decision FROM permission_requests WHERE id = ? LIMIT 1',
@@ -726,7 +735,10 @@ async function main(): Promise<void> {
           permissionStatus?.status === 'pending',
           '过期时间字段不应再自动把 permission request 收敛为 rejected',
         );
-        assert(permissionStatus?.decision === null, '未处理的 permission request 不应自动写 decision');
+        assert(
+          permissionStatus?.decision === null,
+          '未处理的 permission request 不应自动写 decision',
+        );
       } finally {
         await closeDb();
       }
@@ -774,15 +786,15 @@ async function main(): Promise<void> {
             const sandbox = createDefaultSandbox();
             const taskManager = new AgentTaskManagerImpl();
             const result = await sandbox.execute(
-                {
-                  toolCallId: 'task-startup-activity-call-1',
-                  toolName: 'task',
-                  rawInput: {
-                    description: '让子代理启动后延迟返回最终结论',
-                    prompt: '请在短暂准备后给出最终结论',
-                    subagent_type: 'explore',
-                    load_skills: [],
-                    run_in_background: true,
+              {
+                toolCallId: 'task-startup-activity-call-1',
+                toolName: 'task',
+                rawInput: {
+                  description: '让子代理启动后延迟返回最终结论',
+                  prompt: '请在短暂准备后给出最终结论',
+                  subagent_type: 'explore',
+                  load_skills: [],
+                  run_in_background: true,
                 },
               },
               new AbortController().signal,
@@ -1013,7 +1025,10 @@ async function main(): Promise<void> {
         const refreshedGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
         const refreshedTask = refreshedGraph.tasks[task.id];
         assert(refreshedTask?.status === 'running', '问题等待中的 child task 不应被自动终止');
-        assert(refreshedTask?.errorMessage === undefined, '问题等待中的 child task 不应写入超时错误');
+        assert(
+          refreshedTask?.errorMessage === undefined,
+          '问题等待中的 child task 不应写入超时错误',
+        );
 
         const childMetadata = sqliteGet<{ metadata_json: string }>(
           'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
@@ -1026,13 +1041,19 @@ async function main(): Promise<void> {
           parsedChildMetadata?.['terminalReason'] === undefined,
           '问题等待中的 child session 不应记录 terminalReason=timeout',
         );
-        assert(parsedChildMetadata?.['timeoutSource'] === undefined, '问题等待中不应写入 timeoutSource');
+        assert(
+          parsedChildMetadata?.['timeoutSource'] === undefined,
+          '问题等待中不应写入 timeoutSource',
+        );
 
         const questionStatus = sqliteGet<{ status: string }>(
           'SELECT status FROM question_requests WHERE id = ? LIMIT 1',
           ['question-timeout-1'],
         );
-        assert(questionStatus?.status === 'pending', '未处理的 question request 应继续保持 pending');
+        assert(
+          questionStatus?.status === 'pending',
+          '未处理的 question request 应继续保持 pending',
+        );
       } finally {
         await closeDb();
       }

@@ -14,11 +14,7 @@
  */
 
 import type { Layer } from 'effect';
-import {
-  V2Storage,
-  createDrizzleHandle,
-  type DrizzleHandle,
-} from './storage/index.js';
+import { V2Storage, createDrizzleHandle, type DrizzleHandle } from './storage/index.js';
 import { StorageService } from './services/storage-service.js';
 import { isV2Storage } from './runtime-flag.js';
 

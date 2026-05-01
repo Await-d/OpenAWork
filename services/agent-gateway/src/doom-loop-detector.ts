@@ -26,11 +26,7 @@ function hashInput(input: unknown): string {
  * Returns `true` if the last N consecutive tool calls are identical
  * (same toolName + same input), indicating the LLM is stuck.
  */
-export function checkDoomLoop(
-  sessionId: string,
-  toolName: string,
-  rawInput: unknown,
-): boolean {
+export function checkDoomLoop(sessionId: string, toolName: string, rawInput: unknown): boolean {
   const entry: ToolCallEntry = { toolName, inputHash: hashInput(rawInput) };
   let history = sessionHistory.get(sessionId);
   if (!history) {
@@ -50,9 +46,7 @@ export function checkDoomLoop(
   }
 
   // Check if all recent entries are identical
-  return history.every(
-    (h) => h.toolName === entry.toolName && h.inputHash === entry.inputHash,
-  );
+  return history.every((h) => h.toolName === entry.toolName && h.inputHash === entry.inputHash);
 }
 
 /**

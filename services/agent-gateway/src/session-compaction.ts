@@ -172,7 +172,9 @@ function adjustBoundaryForToolPairing(messages: Message[], boundary: number): nu
         !messages.some(
           (m, mIdx) =>
             mIdx >= adjusted &&
-            extractToolResultContentsFromMessage(m).some((c) => c.toolCallId === content.toolCallId),
+            extractToolResultContentsFromMessage(m).some(
+              (c) => c.toolCallId === content.toolCallId,
+            ),
         )
       ) {
         // tool_result is in summarized section — move boundary backward
@@ -252,16 +254,16 @@ export async function executeSessionCompaction(
     trigger: input.trigger,
   });
 
-    let llmSummary: string | undefined;
-    let llmErrorMessage: string | undefined;
-    if (input.route) {
-      const prunedMessages =
-        input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
-      const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
-        contextWindow: 1,
-        metadataJson: input.metadataJson,
-        persistedMemory: existingMemory,
-      }).normalizedMessages;
+  let llmSummary: string | undefined;
+  let llmErrorMessage: string | undefined;
+  if (input.route) {
+    const prunedMessages =
+      input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
+    const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
+      contextWindow: 1,
+      metadataJson: input.metadataJson,
+      persistedMemory: existingMemory,
+    }).normalizedMessages;
     try {
       const result = await callCompactionLlm({
         conversationMessages,

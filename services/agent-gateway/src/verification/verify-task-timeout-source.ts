@@ -97,7 +97,10 @@ async function main(): Promise<void> {
           permissionReconciliation.status === 'paused',
           '权限等待中的 child session 不应因过期时间字段自动超时',
         );
-        const refreshedPermissionGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+        const refreshedPermissionGraph = await taskManager.loadOrCreate(
+          WORKSPACE_ROOT,
+          parentSessionId,
+        );
         assert(
           refreshedPermissionGraph.tasks[permissionTask.id]?.status === 'running',
           '权限等待中的 child task 应继续保持 running',
@@ -109,8 +112,14 @@ async function main(): Promise<void> {
         const parsedPermissionMetadata = permissionMetadata
           ? (JSON.parse(permissionMetadata.metadata_json) as Record<string, unknown>)
           : null;
-        assert(parsedPermissionMetadata?.['terminalReason'] === undefined, '权限等待中不应写 terminalReason');
-        assert(parsedPermissionMetadata?.['timeoutSource'] === undefined, '权限等待中不应写 timeoutSource');
+        assert(
+          parsedPermissionMetadata?.['terminalReason'] === undefined,
+          '权限等待中不应写 terminalReason',
+        );
+        assert(
+          parsedPermissionMetadata?.['timeoutSource'] === undefined,
+          '权限等待中不应写 timeoutSource',
+        );
         const permissionStatus = sqliteGet<{ status: string; decision: string | null }>(
           'SELECT status, decision FROM permission_requests WHERE id = ? LIMIT 1',
           ['perm-timeout-source-1'],
@@ -127,7 +136,10 @@ async function main(): Promise<void> {
           parentSessionId,
         );
         const permissionOutput = extractToolOutput(permissionBackgroundOutput.output);
-        assert(permissionOutput?.['timeoutSource'] === undefined, 'background_output 不应暴露已移除的 legacy timeoutSource');
+        assert(
+          permissionOutput?.['timeoutSource'] === undefined,
+          'background_output 不应暴露已移除的 legacy timeoutSource',
+        );
 
         const questionChildSessionId = randomUUID();
         sqliteRun(
@@ -168,7 +180,10 @@ async function main(): Promise<void> {
           questionReconciliation.status === 'paused',
           '问题等待中的 child session 不应因过期时间字段自动超时',
         );
-        const refreshedQuestionGraph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+        const refreshedQuestionGraph = await taskManager.loadOrCreate(
+          WORKSPACE_ROOT,
+          parentSessionId,
+        );
         assert(
           refreshedQuestionGraph.tasks[questionTask.id]?.status === 'running',
           '问题等待中的 child task 应继续保持 running',
@@ -180,8 +195,14 @@ async function main(): Promise<void> {
         const parsedQuestionMetadata = questionMetadata
           ? (JSON.parse(questionMetadata.metadata_json) as Record<string, unknown>)
           : null;
-        assert(parsedQuestionMetadata?.['terminalReason'] === undefined, '问题等待中不应写 terminalReason');
-        assert(parsedQuestionMetadata?.['timeoutSource'] === undefined, '问题等待中不应写 timeoutSource');
+        assert(
+          parsedQuestionMetadata?.['terminalReason'] === undefined,
+          '问题等待中不应写 terminalReason',
+        );
+        assert(
+          parsedQuestionMetadata?.['timeoutSource'] === undefined,
+          '问题等待中不应写 timeoutSource',
+        );
         const questionStatus = sqliteGet<{ status: string }>(
           'SELECT status FROM question_requests WHERE id = ? LIMIT 1',
           ['question-timeout-source-1'],
@@ -197,7 +218,10 @@ async function main(): Promise<void> {
           parentSessionId,
         );
         const questionOutput = extractToolOutput(questionBackgroundOutput.output);
-        assert(questionOutput?.['timeoutSource'] === undefined, 'background_output 不应暴露已移除的 legacy timeoutSource');
+        assert(
+          questionOutput?.['timeoutSource'] === undefined,
+          'background_output 不应暴露已移除的 legacy timeoutSource',
+        );
 
         console.log('verify-task-timeout-source: ok');
       } finally {

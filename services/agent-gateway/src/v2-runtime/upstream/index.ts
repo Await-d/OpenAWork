@@ -57,7 +57,4 @@ export {
 
 export { applyAnthropicCacheBreakpoints } from './cache-breakpoints.js';
 
-export {
-  compareV1V2BridgeStructural,
-  type BridgeDiffSummary,
-} from './bridge-diff.js';
+export { compareV1V2BridgeStructural, type BridgeDiffSummary } from './bridge-diff.js';

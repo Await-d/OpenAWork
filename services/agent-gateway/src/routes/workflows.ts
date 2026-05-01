@@ -297,10 +297,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
                 requiredRoles: z
                   .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
                   .optional(),
-                templateScale: z
-                  .enum(['small', 'medium', 'large', 'full'])
-                  .nullable()
-                  .optional(),
+                templateScale: z.enum(['small', 'medium', 'large', 'full']).nullable().optional(),
                 templateFocus: z.string().nullable().optional(),
                 recommendedFor: z.string().nullable().optional(),
                 recommendedDefault: z.boolean().nullable().optional(),
@@ -322,14 +319,18 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
-      const existingMetadata = JSON.parse(existing.metadata_json || '{}') as Record<string, unknown>;
+      const existingMetadata = JSON.parse(existing.metadata_json || '{}') as Record<
+        string,
+        unknown
+      >;
       const mergedMetadata = body.data.metadata
         ? { ...existingMetadata, ...body.data.metadata }
         : existingMetadata;
 
       if (body.data.metadata?.teamTemplate && existing.category === 'team-playbook') {
-        const existingTeamTemplate = (existingMetadata as { teamTemplate?: Record<string, unknown> })
-          ?.teamTemplate;
+        const existingTeamTemplate = (
+          existingMetadata as { teamTemplate?: Record<string, unknown> }
+        )?.teamTemplate;
         mergedMetadata.teamTemplate = {
           ...(existingTeamTemplate ?? {}),
           ...body.data.metadata.teamTemplate,
@@ -346,7 +347,8 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const newName = body.data.name ?? existing.name;
-      const newDescription = body.data.description !== undefined ? body.data.description : existing.description;
+      const newDescription =
+        body.data.description !== undefined ? body.data.description : existing.description;
       const newNodes = body.data.nodes ?? (JSON.parse(existing.nodes_json) as unknown[]);
       const newEdges = body.data.edges ?? (JSON.parse(existing.edges_json) as unknown[]);
 

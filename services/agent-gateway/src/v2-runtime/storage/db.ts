@@ -24,6 +24,7 @@ interface NodeSqliteDatabase {
 
 import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema.js';
+import { normalizeUnknownSqliteBindParams } from '../../sqlite-bind-params.js';
 
 export type DrizzleHandle = SqliteRemoteDatabase<typeof schema>;
 
@@ -52,22 +53,22 @@ interface SqliteStatementLike {
 export function createDrizzleHandle(connection: NodeSqliteDatabase): DrizzleHandle {
   return drizzle(
     async (sqlText: string, params: unknown[], method: 'all' | 'run' | 'get' | 'values') => {
-      const stmt = connection.prepare(sqlText) as unknown as SqliteStatementLike;
-      const safeParams = params as unknown[];
+      const stmt = connection.prepare(sqlText) as SqliteStatementLike;
+      const safeParams = normalizeUnknownSqliteBindParams(params);
 
       if (method === 'run') {
-        stmt.run(...(safeParams as never[]));
+        stmt.run(...safeParams);
         return { rows: [] as unknown[] };
       }
 
-      const rows = stmt.all(...(safeParams as never[])) as SqliteRow[];
+      const rows = stmt.all(...safeParams) as SqliteRow[];
       // sqlite-proxy expects rows to be `unknown[][]` in column order. The
       // node:sqlite driver returns objects, so we project each row's values
       // into a tuple. Order is implementation-defined for `Object.values`,
       // but matches the column order returned by `node:sqlite.prepare(...)`
       // which itself follows the SELECT clause order.
       return {
-        rows: rows.map((row) => Object.values(row) as unknown[]),
+        rows: rows.map((row) => Object.values(row)),
       };
     },
     { schema, casing: 'snake_case' },

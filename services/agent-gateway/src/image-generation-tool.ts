@@ -2,14 +2,9 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { sqliteGet } from './db.js';
-import {
-  getImageProviderConfig,
-  parseStoredImageGenerationDefaults,
-} from './provider-config.js';
+import { getImageProviderConfig, parseStoredImageGenerationDefaults } from './provider-config.js';
 import { resolveModelRouteFromProvider } from './model-router.js';
-import {
-  resolveImageGenerationDefaults,
-} from './image-generation/image-generation-schema.js';
+import { resolveImageGenerationDefaults } from './image-generation/image-generation-schema.js';
 import {
   generateImageWithOpenAi,
   OpenAiImageGenerationError,
@@ -17,22 +12,36 @@ import {
 import { createArtifact } from './artifact-content-store.js';
 
 const generateImageInputSchema = z.object({
-  prompt: z
-    .string()
-    .min(1)
-    .max(4000)
-    .describe('The text prompt describing the image to generate.'),
+  prompt: z.string().min(1).max(4000).describe('The text prompt describing the image to generate.'),
   size: z
     .string()
     .optional()
     .describe(
-      'Image size in WxH format, e.g. "1024x1024", "1536x1024". Defaults to the user\'s configured default size.',
+      [
+        'Image size in WxH format. Pick a preset whenever possible:',
+        '• 1K (default tier): "1024x1024" (1:1), "1536x1024" (3:2), "1024x1536" (2:3).',
+        '• 2K (high detail; quality is auto-raised to "high"): "2048x2048" (1:1), "2048x1152" (16:9), "1152x2048" (9:16).',
+        '• 4K (experimental, relay-only, may take ~6 minutes): "3840x2160" (16:9), "2160x3840" (9:16).',
+        "Custom sizes are accepted but must satisfy ALL of: max edge ≤ 3840px, both width and height multiples of 16, aspect ratio ≤ 3:1, total pixels between 655,360 and 8,294,400. Defaults to the user's configured default size when omitted.",
+      ].join(' '),
     ),
   quality: z
     .enum(['low', 'medium', 'high'])
     .optional()
     .describe(
-      'Image quality: "low" for speed, "medium" for balance, "high" for detail. Defaults to user setting.',
+      'Image quality: "low" for speed, "medium" for balance, "high" for detail. 2K/4K sizes are auto-raised to "high" by the server. Defaults to user setting.',
+    ),
+  outputFormat: z
+    .enum(['png', 'jpeg', 'webp'])
+    .optional()
+    .describe(
+      'Output file format: "png" (default, lossless), "jpeg" (smaller file, no transparency), "webp" (modern, smaller). Defaults to user setting.',
+    ),
+  background: z
+    .enum(['auto', 'opaque'])
+    .optional()
+    .describe(
+      'Background handling: "auto" lets the model decide (may produce transparency on PNG/WebP); "opaque" forces a solid background. Defaults to user setting.',
     ),
 });
 
@@ -46,13 +55,13 @@ export const generateImageToolDefinition: ToolDefinition<
 > = {
   name: 'generate_image',
   description:
-    'Generate an image based on a text prompt using the configured image generation model. ' +
+    'Generate an image based on a text prompt using the configured image generation model (GPT Image 2 family). ' +
     'Use this tool when the user asks you to create, draw, design, or generate an image or picture. ' +
     'The generated image will be displayed inline in the conversation. ' +
-    'You do NOT need the user to toggle image mode — this tool works directly within normal chat.',
+    'You do NOT need the user to toggle image mode — this tool works directly within normal chat. ' +
+    'Pick the smallest size tier that satisfies the request (1K is fastest; 2K is for posters / detailed art; 4K is experimental and slow — only use 4K when the user explicitly asks for ultra-high resolution).',
   inputSchema: generateImageInputSchema,
   outputSchema: generateImageOutputSchema,
-  timeout: 120000,
   execute: async () => {
     throw new Error('generate_image must execute through the gateway-managed sandbox path');
   },
@@ -86,6 +95,7 @@ function buildImageFileName(prompt: string, extension: string): string {
 }
 
 export async function executeGenerateImageTool(input: {
+  signal?: AbortSignal;
   sessionId: string;
   userId: string;
   toolCallId: string;
@@ -106,8 +116,7 @@ export async function executeGenerateImageTool(input: {
     | undefined;
   if (!pluginSettings?.imageGeneration?.enabled) {
     return {
-      output:
-        '图片生成插件未启用。请在设置 → 插件中启用"图片插件"后再使用此工具。',
+      output: '图片生成插件未启用。请在设置 → 插件中启用"图片插件"后再使用此工具。',
       isError: true,
     };
   }
@@ -141,6 +150,8 @@ export async function executeGenerateImageTool(input: {
     {
       size: toolInput.size,
       quality: toolInput.quality,
+      outputFormat: toolInput.outputFormat,
+      background: toolInput.background,
     },
     storedDefaults,
   );
@@ -162,6 +173,7 @@ export async function executeGenerateImageTool(input: {
       providerType: route.providerType,
       quality: resolved.quality,
       requestOverrides: route.requestOverrides,
+      signal: input.signal,
       size: resolved.size,
     });
 
@@ -198,6 +210,14 @@ export async function executeGenerateImageTool(input: {
     });
 
     const resolvedFileName = buildImageFileName(toolInput.prompt, fileExtension);
+    const summaryParts = [
+      `✅ 已生成图片（${imageProviderConfig.modelId} · ${resolved.size} · ${resolved.outputFormat.toUpperCase()}）`,
+    ];
+    if (resolved.qualityAutoLifted) {
+      summaryParts.push(
+        `（已自动将 quality 从 ${resolved.requestedQuality} 提升到 high，因为 ${resolved.size} 属于 2K/4K 档位）`,
+      );
+    }
     const result = {
       success: true,
       artifactId: artifact.id,
@@ -207,9 +227,12 @@ export async function executeGenerateImageTool(input: {
       providerId: imageProviderConfig.provider.id,
       size: resolved.size,
       quality: resolved.quality,
+      requestedQuality: resolved.requestedQuality,
+      qualityAutoLifted: resolved.qualityAutoLifted,
       outputFormat: resolved.outputFormat,
+      background: resolved.background,
       revisedPrompt: generated.revisedPrompt ?? null,
-      summary: `✅ 已生成图片（${imageProviderConfig.modelId} · ${resolved.size} · ${resolved.outputFormat.toUpperCase()}）`,
+      summary: summaryParts.join(''),
     };
 
     return { output: JSON.stringify(result), isError: false };

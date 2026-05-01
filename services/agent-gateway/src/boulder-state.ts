@@ -65,7 +65,10 @@ export async function writeBoulderState(directory: string, state: BoulderState):
   }
 }
 
-export async function appendSessionId(directory: string, sessionId: string): Promise<BoulderState | null> {
+export async function appendSessionId(
+  directory: string,
+  sessionId: string,
+): Promise<BoulderState | null> {
   const state = await readBoulderState(directory);
   if (!state) return null;
 

@@ -31,6 +31,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MockLanguageModelV2 } from 'ai/test';
 import type { StreamChunk } from '@openAwork/shared';
+import type { V2LanguageModel } from '../v2-runtime/upstream/index.js';
 
 // `routes/stream-protocol.ts` re-exports `buildGatewayToolDefinitions`
 // from `../tool-definitions.js`, which transitively imports the full
@@ -42,11 +43,9 @@ vi.mock('../tool-definitions.js', () => ({
   getVisibleToolName: (name: string) => name,
 }));
 
-const { createStreamParseState, parseUpstreamDataLine } = await import(
-  '../routes/stream-protocol.js'
-);
+const { createStreamParseState, parseUpstreamDataLine } =
+  await import('../routes/stream-protocol.js');
 const { runUpstreamStream } = await import('../v2-runtime/upstream/index.js');
-type V2LanguageModel = import('../v2-runtime/upstream/index.js').V2LanguageModel;
 
 function buildMockModel(parts: ReadonlyArray<unknown>): V2LanguageModel {
   return new MockLanguageModelV2({

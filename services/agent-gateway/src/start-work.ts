@@ -101,15 +101,24 @@ export async function processStartWork(
         }
       }
     } else {
-      const incompletePlans = (await findPrometheusPlans(workspaceRoot))
-        .filter(async (p) => !(await getPlanProgress(p)).isComplete);
+      const planEntries = await Promise.all(
+        (await findPrometheusPlans(workspaceRoot)).map(async (path) => ({
+          path,
+          progress: await getPlanProgress(path),
+        })),
+      );
+      const incompletePlans = planEntries
+        .filter((entry) => !entry.progress.isComplete)
+        .map((entry) => entry.path);
       if (incompletePlans.length > 0) {
-        const planList = (await Promise.all(
-          incompletePlans.map(async (p, i) => {
-            const prog = await getPlanProgress(p);
-            return `${i + 1}. [${getPlanName(p)}] - 进度: ${prog.completed}/${prog.total}`;
-          }),
-        )).join('\n');
+        const planList = (
+          await Promise.all(
+            incompletePlans.map(async (p, i) => {
+              const prog = await getPlanProgress(p);
+              return `${i + 1}. [${getPlanName(p)}] - 进度: ${prog.completed}/${prog.total}`;
+            }),
+          )
+        ).join('\n');
 
         contextInfo = `## 未找到计划\n\n找不到匹配 "${explicitPlanName}" 的计划。\n\n可用的未完成计划：\n${planList}\n\n询问用户要处理哪个计划。`;
       } else {
@@ -129,7 +138,9 @@ export async function processStartWork(
 
   if (
     (!existingState && !explicitPlanName) ||
-    (existingState && !explicitPlanName && (await getPlanProgress(existingState.active_plan)).isComplete)
+    (existingState &&
+      !explicitPlanName &&
+      (await getPlanProgress(existingState.active_plan)).isComplete)
   ) {
     const plans = await findPrometheusPlans(workspaceRoot);
     const incompletePlansWithProgress = await Promise.all(
@@ -156,13 +167,15 @@ export async function processStartWork(
         });
       }
     } else {
-      const planList = (await Promise.all(
-        incompletePlans.map(async (p, i) => {
-          const stat = await import('node:fs').then((fs) => fs.promises.stat(p.path));
-          const modified = new Date(stat.mtimeMs).toISOString();
-          return `${i + 1}. [${getPlanName(p.path)}] - 修改: ${modified} - 进度: ${p.progress.completed}/${p.progress.total}`;
-        }),
-      )).join('\n');
+      const planList = (
+        await Promise.all(
+          incompletePlans.map(async (p, i) => {
+            const stat = await import('node:fs').then((fs) => fs.promises.stat(p.path));
+            const modified = new Date(stat.mtimeMs).toISOString();
+            return `${i + 1}. [${getPlanName(p.path)}] - 修改: ${modified} - 进度: ${p.progress.completed}/${p.progress.total}`;
+          }),
+        )
+      ).join('\n');
 
       contextInfo += `\n\n<system-reminder>\n## 找到多个计划\n\n当前时间: ${timestamp}\n会话 ID: ${sessionId}\n\n${planList}\n\n询问用户要处理哪个计划。展示上述选项并等待回复。\n</system-reminder>`;
     }

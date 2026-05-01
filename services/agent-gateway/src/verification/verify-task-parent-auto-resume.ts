@@ -98,14 +98,19 @@ async function main(): Promise<void> {
               );
             }, 'delegated child task should complete before auto-resume');
 
-            await waitFor(() => {
-              const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
-              return parentMessages.some(
-                (message) =>
-                  message.role === 'assistant' &&
-                  readTextMessage(message as never) === AUTO_RESUME_RESULT,
-              );
-            }, 'parent session should receive the auto-resumed assistant reply');
+            await waitFor(
+              () => {
+                const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
+                return parentMessages.some(
+                  (message) =>
+                    message.role === 'assistant' &&
+                    readTextMessage(message as never) === AUTO_RESUME_RESULT,
+                );
+              },
+              'parent session should receive the auto-resumed assistant reply',
+              240,
+              50,
+            );
 
             const parentMessages = listSessionMessages({ sessionId: parentSessionId, userId });
             const autoResumeReply = parentMessages.find(

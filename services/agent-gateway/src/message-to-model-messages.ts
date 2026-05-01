@@ -184,9 +184,7 @@ export function filterCompacted(
     // If this is a user message with a compaction part and its parent
     // has a completed summary, we've found the boundary.
     if (msg.info.role === 'user' && completedCompactionParentIds.has(msg.info.id)) {
-      const compactionPart = msg.parts.find(
-        (p): p is CompactionPart => p.type === 'compaction',
-      );
+      const compactionPart = msg.parts.find((p): p is CompactionPart => p.type === 'compaction');
       if (!compactionPart) continue;
       if (compactionPart.tailStartID) {
         retain = compactionPart.tailStartID;
@@ -217,11 +215,7 @@ export function toModelMessages(
   const now = options?.now ?? Date.now();
   const ageThreshold = options?.oldToolResultAgeMs ?? DEFAULT_OLD_TOOL_RESULT_AGE_MS;
 
-  const pushToolResult = (
-    toolCallId: string,
-    content: string,
-    attachments?: FilePart[],
-  ) => {
+  const pushToolResult = (toolCallId: string, content: string, attachments?: FilePart[]) => {
     if (emittedToolResultIds.has(toolCallId)) return;
     emittedToolResultIds.add(toolCallId);
     result.push({ role: 'tool', toolCallId, content });
@@ -254,10 +248,7 @@ export function toModelMessages(
 
     if (msg.info.role === 'assistant') {
       // Skip error messages with no valid content
-      if (
-        msg.info.error &&
-        !hasValidAssistantParts(msg.parts)
-      ) {
+      if (msg.info.error && !hasValidAssistantParts(msg.parts)) {
         continue;
       }
 
@@ -288,7 +279,10 @@ export function toModelMessages(
               attachments?: FilePart[];
             };
           };
-          const output = resolveToolOutput(completedPart, options?.stripOldToolResults === true ? { now, ageThreshold } : undefined);
+          const output = resolveToolOutput(
+            completedPart,
+            options?.stripOldToolResults === true ? { now, ageThreshold } : undefined,
+          );
           // Skip attachments when the tool result has been compacted to
           // a placeholder — replaying images alongside a stub provides no
           // value and only inflates the prompt.
@@ -298,7 +292,9 @@ export function toModelMessages(
               : completedPart.state.attachments;
           pushToolResult(part.callID, output, attachments);
         } else if (part.state.status === 'error') {
-          const errorPart = part as ToolPart & { state: { status: 'error'; error: string; metadata?: Record<string, unknown> } };
+          const errorPart = part as ToolPart & {
+            state: { status: 'error'; error: string; metadata?: Record<string, unknown> };
+          };
           const errorOutput = resolveToolErrorOutput(errorPart);
           if (errorOutput) {
             pushToolResult(part.callID, errorOutput);
@@ -340,9 +336,7 @@ type UnifiedImageBlock = NonNullable<UserMessageUnified['images']>[number];
  * images; richer mime types are surfaced through the textual tool
  * output instead.
  */
-function collectAttachmentImages(
-  attachments: FilePart[] | undefined,
-): UnifiedImageBlock[] {
+function collectAttachmentImages(attachments: FilePart[] | undefined): UnifiedImageBlock[] {
   const images: UnifiedImageBlock[] = [];
   if (!attachments || attachments.length === 0) {
     return images;
@@ -447,9 +441,7 @@ function buildAssistantParts(
     }));
 
   // Reasoning
-  const reasoningParts = parts.filter(
-    (p): p is ReasoningPart => p.type === 'reasoning',
-  );
+  const reasoningParts = parts.filter((p): p is ReasoningPart => p.type === 'reasoning');
   const trimmedReasoningText = reasoningParts
     .map((p) => p.text.trim())
     .filter((t) => t.length > 0)
@@ -498,7 +490,13 @@ function capModelString(value: string, maxChars: number, notice: string): string
 }
 
 function resolveToolOutput(
-  part: ToolPart & { state: { status: 'completed'; output: string; time: { start: number; end: number; compacted?: number } } },
+  part: ToolPart & {
+    state: {
+      status: 'completed';
+      output: string;
+      time: { start: number; end: number; compacted?: number };
+    };
+  },
   _stripOptions?: { now: number; ageThreshold: number },
 ): string {
   if (part.state.time.compacted) {
@@ -516,9 +514,7 @@ function resolveToolOutput(
   return capModelString(output, MAX_TOOL_OUTPUT_CHARS, TOOL_OUTPUT_TRUNCATION_NOTICE);
 }
 
-function resolveToolErrorOutput(
-  part: ToolPart & { state: { status: 'error' } },
-): string | null {
+function resolveToolErrorOutput(part: ToolPart & { state: { status: 'error' } }): string | null {
   // If the tool was interrupted, use the partial output if available
   const interrupted = part.state.metadata?.interrupted === true;
   if (interrupted) {

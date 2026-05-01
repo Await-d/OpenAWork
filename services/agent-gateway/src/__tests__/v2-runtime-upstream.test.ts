@@ -65,9 +65,7 @@ function buildMockModel(parts: ReadonlyArray<unknown>): V2LanguageModel {
   }) as unknown as V2LanguageModel;
 }
 
-async function collectChunks(
-  iter: AsyncIterable<StreamChunk>,
-): Promise<StreamChunk[]> {
+async function collectChunks(iter: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
   const out: StreamChunk[] = [];
   for await (const ev of iter) {
     out.push(ev);
@@ -119,7 +117,11 @@ describe('runUpstreamStream', () => {
       { type: 'reasoning-start', id: 'r1' },
       { type: 'reasoning-delta', id: 'r1', delta: 'plan' },
       { type: 'reasoning-end', id: 'r1' },
-      { type: 'finish', finishReason: 'stop', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      {
+        type: 'finish',
+        finishReason: 'stop',
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      },
     ]);
 
     const chunks = await collectChunks(
@@ -181,9 +183,7 @@ describe('runUpstreamStream', () => {
     expect(toolDeltas[0]!.inputDelta).toBe('');
     expect(toolDeltas.map((c) => c.inputDelta).join('')).toBe('{"path":"a.ts"}');
 
-    const done = chunks.find(
-      (c): c is Extract<StreamChunk, { type: 'done' }> => c.type === 'done',
-    );
+    const done = chunks.find((c): c is Extract<StreamChunk, { type: 'done' }> => c.type === 'done');
     expect(done?.stopReason).toBe('tool_use');
   });
 

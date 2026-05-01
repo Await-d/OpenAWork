@@ -16,7 +16,6 @@ import {
   readBoulderState,
   appendSessionId,
   getPlanProgress,
-  type BoulderState,
   type PlanProgress,
 } from './boulder-state.js';
 
@@ -143,10 +142,7 @@ const DIRECT_WORK_REMINDER = `
 ---
 `;
 
-function buildOrchestratorReminder(
-  planName: string,
-  progress: PlanProgress,
-): string {
+function buildOrchestratorReminder(planName: string, progress: PlanProgress): string {
   const remaining = progress.total - progress.completed;
   return `
 ---

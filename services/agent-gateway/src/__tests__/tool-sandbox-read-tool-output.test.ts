@@ -1,13 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StoredToolResult } from '../message-v2-adapter.js';
+import type * as MessageV2Adapter from '../message-v2-adapter.js';
 
 const mocks = vi.hoisted(() => ({
-  getLatestReferencedToolResultMock: vi.fn(
-    (): StoredToolResult | null => null,
-  ),
-  getSessionToolResultByCallIdMock: vi.fn(
-    (): StoredToolResult | null => null,
-  ),
+  getLatestReferencedToolResultMock: vi.fn((): StoredToolResult | null => null),
+  getSessionToolResultByCallIdMock: vi.fn((): StoredToolResult | null => null),
   sqliteAllMock: vi.fn(() => []),
   sqliteGetMock: vi.fn((query: string) => {
     if (query.includes('SELECT user_id FROM sessions')) {
@@ -31,9 +28,7 @@ vi.mock('../db.js', () => ({
 }));
 
 vi.mock('../message-v2-adapter.js', async () => {
-  const actual = await vi.importActual<typeof import('../message-v2-adapter.js')>(
-    '../message-v2-adapter.js',
-  );
+  const actual = await vi.importActual<typeof MessageV2Adapter>('../message-v2-adapter.js');
   return {
     ...actual,
     getLatestReferencedToolResult: mocks.getLatestReferencedToolResultMock,

@@ -22,9 +22,8 @@ function slimToolCallInput(input: Record<string, unknown>): Record<string, unkno
 }
 
 function slimDiffEntries(diffs: FileDiffContent[]): FileDiffContent[] {
-  const capped = diffs.length > SLIM_DIFFS_MAX_ENTRIES
-    ? diffs.slice(0, SLIM_DIFFS_MAX_ENTRIES)
-    : diffs;
+  const capped =
+    diffs.length > SLIM_DIFFS_MAX_ENTRIES ? diffs.slice(0, SLIM_DIFFS_MAX_ENTRIES) : diffs;
   return capped.map((diff) => ({
     ...diff,
     before: truncStr(diff.before, SLIM_DIFF_MAX),
@@ -35,18 +34,16 @@ function slimDiffEntries(diffs: FileDiffContent[]): FileDiffContent[] {
 const SLIM_OUTPUT_TOTAL_MAX = 4000;
 const SLIM_DIFFS_MAX_ENTRIES = 5;
 
-function slimDiffArray(
-  diffs: unknown[],
-): unknown[] {
-  const capped = diffs.length > SLIM_DIFFS_MAX_ENTRIES
-    ? diffs.slice(0, SLIM_DIFFS_MAX_ENTRIES)
-    : diffs;
+function slimDiffArray(diffs: unknown[]): unknown[] {
+  const capped =
+    diffs.length > SLIM_DIFFS_MAX_ENTRIES ? diffs.slice(0, SLIM_DIFFS_MAX_ENTRIES) : diffs;
   return capped.map((d) => {
     if (d && typeof d === 'object' && 'before' in d && 'after' in d) {
       const diff = d as Record<string, unknown>;
       return {
         ...diff,
-        before: typeof diff.before === 'string' ? truncStr(diff.before, SLIM_DIFF_MAX) : diff.before,
+        before:
+          typeof diff.before === 'string' ? truncStr(diff.before, SLIM_DIFF_MAX) : diff.before,
         after: typeof diff.after === 'string' ? truncStr(diff.after, SLIM_DIFF_MAX) : diff.after,
       };
     }
@@ -111,12 +108,11 @@ function slimOutputValue(output: unknown): unknown {
 function slimContentItem(item: MessageContent): MessageContent {
   if (item.type === 'tool_result') {
     const slimmedOutput = slimOutputValue(item.output);
-    const slimmedDiffs = item.fileDiffs
-      ? slimDiffEntries(item.fileDiffs)
-      : undefined;
-    const slimmedRaw = typeof item.rawOutput === 'string' && item.rawOutput.length > SLIM_STRING_MAX
-      ? truncStr(item.rawOutput, SLIM_STRING_MAX)
-      : item.rawOutput;
+    const slimmedDiffs = item.fileDiffs ? slimDiffEntries(item.fileDiffs) : undefined;
+    const slimmedRaw =
+      typeof item.rawOutput === 'string' && item.rawOutput.length > SLIM_STRING_MAX
+        ? truncStr(item.rawOutput, SLIM_STRING_MAX)
+        : item.rawOutput;
     return {
       ...item,
       output: slimmedOutput,

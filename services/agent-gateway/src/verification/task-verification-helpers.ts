@@ -62,21 +62,53 @@ export async function waitFor(
 
 export function createChatCompletionsStream(text: string): Response {
   const encoder = new TextEncoder();
+  const openAiFrames = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`,
+    '',
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}`,
+    '',
+    'data: [DONE]',
+    '',
+  ];
+  const anthropicFrames = [
+    'event: message_start',
+    `data: ${JSON.stringify({
+      type: 'message_start',
+      message: { id: 'msg_mock', usage: { input_tokens: 0, output_tokens: 0 } },
+    })}`,
+    '',
+    'event: content_block_start',
+    `data: ${JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' },
+    })}`,
+    '',
+    'event: content_block_delta',
+    `data: ${JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text },
+    })}`,
+    '',
+    'event: content_block_stop',
+    `data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}`,
+    '',
+    'event: message_delta',
+    `data: ${JSON.stringify({
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn' },
+      usage: { output_tokens: 1 },
+    })}`,
+    '',
+    'event: message_stop',
+    `data: ${JSON.stringify({ type: 'message_stop' })}`,
+    '',
+  ];
   return new Response(
     new ReadableStream({
       start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            [
-              `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`,
-              '',
-              `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}`,
-              '',
-              'data: [DONE]',
-              '',
-            ].join('\n'),
-          ),
-        );
+        controller.enqueue(encoder.encode([...openAiFrames, ...anthropicFrames].join('\n')));
         controller.close();
       },
     }),
@@ -160,13 +192,31 @@ export function createDelayedChatCompletionsStream(input: {
 export function readLastUserMessage(body: string): string {
   try {
     const parsed = JSON.parse(body) as {
-      messages?: Array<{ role?: string; content?: string }>;
+      messages?: Array<{
+        role?: string;
+        content?: string | Array<string | { text?: string }>;
+      }>;
     };
     const messages = parsed.messages ?? [];
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const entry = messages[index];
-      if (entry?.role === 'user' && typeof entry.content === 'string') {
+      if (entry?.role !== 'user') {
+        continue;
+      }
+
+      if (typeof entry.content === 'string') {
         return entry.content;
+      }
+
+      if (Array.isArray(entry.content)) {
+        return entry.content
+          .map((part) => {
+            if (typeof part === 'string') {
+              return part;
+            }
+            return typeof part.text === 'string' ? part.text : '';
+          })
+          .join('\n');
       }
     }
   } catch {

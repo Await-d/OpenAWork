@@ -1,7 +1,6 @@
 import type { Message, MessageContent } from '@openAwork/shared';
 import {
   mergePersistedCompactionMemory,
-  parsePersistedCompactionMemory,
   readLastCompactionLlmSummary,
   readPersistedCompactionMemory,
   renderPersistedCompactionMemory,
@@ -11,19 +10,15 @@ import {
 } from './compaction-metadata.js';
 import {
   extractToolResultContentsFromMessage,
-  findLatestReferencedStoredToolResult,
-  findStoredToolResultByCallId,
   listStoredToolResults,
   normalizeToolArgumentsForStorage,
   stringifyToolResultOutput,
-  type StoredToolResult,
 } from './tool-result-contract.js';
 import {
   renderNormalizedConversationToUpstreamChatMessages,
   type NormalizedConversationMessage,
   type UpstreamChatMessage,
 } from './normalized-conversation.js';
-import { listSessionMessagesV2 } from './message-v2-adapter.js';
 import {
   isCompactionMarkerMessageWithOptions,
   readLatestCompactionMarkerWithOptions,
@@ -171,23 +166,6 @@ function isAssistantUiEventTextForMessage(value: string, message: Message): bool
   }
 }
 
-function parseCompactionMarkerText(value: string): CompactionMarkerRecord | null {
-  return readLatestCompactionMarkerWithOptions(
-    [
-      {
-        id: 'tmp-compaction-marker',
-        role: 'assistant',
-        createdAt: 0,
-        content: [{ type: 'text', text: value }],
-      },
-    ],
-    {
-      source: INTERNAL_ASSISTANT_EVENT_SOURCE,
-      markerType: COMPACTION_MARKER_TYPE,
-    },
-  );
-}
-
 function isCompactionMarkerMessage(message: Message): boolean {
   return isCompactionMarkerMessageWithOptions(message, {
     source: INTERNAL_ASSISTANT_EVENT_SOURCE,
@@ -287,7 +265,6 @@ function isContextArtifactMessage(message: Message): boolean {
 export function filterVisibleSessionMessages(messages: Message[]): Message[] {
   return messages.filter((message) => !isCompactionMarkerMessage(message));
 }
-
 
 export function buildUpstreamConversation(
   messages: Message[],
@@ -1109,4 +1086,3 @@ function extractToolResultIds(message: Message): string[] {
     content.type === 'tool_result' ? [content.toolCallId] : [],
   );
 }
-

@@ -293,7 +293,7 @@ export interface AssistantUnknownError {
 
 export interface AssistantMessage extends MessageBase {
   role: 'assistant';
-  time: { created: number; completed?: number };
+  time: { created: number; completed?: number; firstContent?: number };
   error?: AssistantErrorObject;
   parentID?: MessageID;
   modelID?: string;

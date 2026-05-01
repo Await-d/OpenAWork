@@ -17,10 +17,7 @@ import {
   isSessionEventType,
   makeSessionEventId,
 } from './session-event.js';
-import {
-  aggregateSessionEntries,
-  type SessionEntry,
-} from './session-entry.js';
+import { aggregateSessionEntries, type SessionEntry } from './session-entry.js';
 
 interface SessionEntryRow {
   id: string;
@@ -65,7 +62,12 @@ function nextSeq(sessionId: string): number {
  * into `data` verbatim.
  */
 function encodeEventData(event: SessionEvent): string {
-  const { id: _id, type: _type, timestamp: _ts, ...rest } = event as {
+  const {
+    id: _id,
+    type: _type,
+    timestamp: _ts,
+    ...rest
+  } = event as {
     id: SessionEventID;
     type: SessionEventType;
     timestamp: number;
@@ -150,7 +152,8 @@ export function appendSessionEvent(input: AppendSessionEventInput): SessionEvent
 
 function isForeignKeyError(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
-  if ('code' in err && (err as { code: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY') return true;
+  if ('code' in err && (err as { code: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY')
+    return true;
   if ('message' in err && typeof (err as { message: string }).message === 'string') {
     return (err as { message: string }).message.includes('FOREIGN KEY constraint failed');
   }
@@ -228,7 +231,9 @@ export function translateRunEventToSessionEvent(input: {
 }): SessionEvent | null {
   const event = input.event;
   const timestamp = input.fallbackTimestamp ?? event.occurredAt ?? Date.now();
-  const id = (event.eventId ?? input.fallbackEventId ?? makeSessionEventId(timestamp)) as SessionEventID;
+  const id = (event.eventId ??
+    input.fallbackEventId ??
+    makeSessionEventId(timestamp)) as SessionEventID;
 
   switch (event.type) {
     case 'tool_result': {
@@ -251,8 +256,7 @@ export function translateRunEventToSessionEvent(input: {
         timestamp,
         callID: event.toolCallId,
         title: event.toolName,
-        output:
-          typeof event.output === 'string' ? event.output : safeStringify(event.output ?? ''),
+        output: typeof event.output === 'string' ? event.output : safeStringify(event.output ?? ''),
         provider: { executed: true },
       };
     }

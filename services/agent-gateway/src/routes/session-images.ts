@@ -16,10 +16,7 @@ import {
   OpenAiImageGenerationError,
 } from '../image-generation/openai-image-generation.js';
 import { resolveModelRouteFromProvider } from '../model-router.js';
-import {
-  getImageProviderConfig,
-  parseStoredImageGenerationDefaults,
-} from '../provider-config.js';
+import { getImageProviderConfig, parseStoredImageGenerationDefaults } from '../provider-config.js';
 import { resolveGatewayArtifactsIndexPath } from '../storage-paths.js';
 
 interface UserSettingRow {
@@ -82,10 +79,7 @@ function buildMessageSummary(input: {
   return base;
 }
 
-async function resolveInputArtifact(input: {
-  artifactId: string;
-  sessionId: string;
-}) {
+async function resolveInputArtifact(input: { artifactId: string; sessionId: string }) {
   const artifacts = await uploadedArtifactManager.list(input.sessionId);
   const artifact = artifacts.find((item) => item.id === input.artifactId);
   if (!artifact?.path) {
@@ -119,7 +113,9 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
 
       const parsed = imageGenerationRequestSchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply.status(400).send({ error: 'Invalid image generation payload', issues: parsed.error.issues });
+        return reply
+          .status(400)
+          .send({ error: 'Invalid image generation payload', issues: parsed.error.issues });
       }
 
       const providersRow = sqliteGet<UserSettingRow>(
@@ -217,10 +213,10 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
           sessionId,
           title: buildImageArtifactTitle(parsed.data.prompt),
           content,
-            type: 'image',
-            fileName: buildImageFileName(parsed.data.prompt, fileExtension),
-            mimeType: generated.mimeType,
-            metadata: {
+          type: 'image',
+          fileName: buildImageFileName(parsed.data.prompt, fileExtension),
+          mimeType: generated.mimeType,
+          metadata: {
             sourceKind: inputArtifact ? 'gpt_image_2_edit' : 'gpt_image_2_generation',
             ...(inputArtifact ? { sourceArtifactId: inputArtifact.artifact.id } : {}),
             providerId: imageProviderConfig.provider.id,

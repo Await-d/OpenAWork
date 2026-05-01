@@ -286,10 +286,10 @@ async function executeCompactCommand(params: {
     card,
   });
 
-  sqliteRun(
-    "UPDATE sessions SET updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [params.sessionId, params.userId],
-  );
+  sqliteRun("UPDATE sessions SET updated_at = datetime('now') WHERE id = ? AND user_id = ?", [
+    params.sessionId,
+    params.userId,
+  ]);
   taskManager.completeTask(params.graph, task.id, compaction.summary);
   await taskManager.save(params.graph);
 

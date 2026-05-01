@@ -1,111 +1,42 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { ToolCallRequest, ToolCallResult, ToolDefinition } from '@openAwork/agent-core';
-import type { ZodTypeAny } from 'zod';
 import {
-  ToolRegistry,
+  AgentTaskManagerImpl,
+  defaultIgnoreManager,
+  lspDiagnosticsTool,
+  lspTouchTool,
+  PERMISSION_CATEGORIES,
+  resolvePermissionCategory,
   ToolNotFoundError,
-  ToolValidationError,
+  ToolRegistry,
   ToolTimeoutError,
+  ToolValidationError,
 } from '@openAwork/agent-core';
-import { AgentTaskManagerImpl, defaultIgnoreManager } from '@openAwork/agent-core';
-import { lspDiagnosticsTool, lspTouchTool } from '@openAwork/agent-core';
-import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from './db.js';
-import { writeAuditLog } from './audit-log.js';
-import { lspManager } from './lsp/router.js';
-import {
-  executeWorkspaceCreateFile,
-  executeWorkspaceWriteFile,
-  executeWriteTool,
-  WORKSPACE_TOOL_NAMES,
-  globTool,
-  grepTool,
-  listTool,
-  readTool,
-  resolveWorkspaceReviewFilePath,
-  workspaceCreateDirectoryTool,
-  workspaceCreateFileTool,
-  workspaceReadFileTool,
-  workspaceReviewRevertTool,
-  workspaceReviewDiffTool,
-  workspaceReviewStatusTool,
-  workspaceSearchTool,
-  workspaceTreeTool,
-  workspaceWriteFileTool,
-  writeTool,
-} from './workspace-tools.js';
-import { BATCH_TOOL_DISALLOWED, BATCH_TOOL_MAX_CALLS } from './batch-tools.js';
+import type { BatchSubToolProgress, RunEvent } from '@openAwork/shared';
+import type { ZodTypeAny } from 'zod';
 import {
   applyPatchToolDefinition,
   buildApplyPatchPermissionScope,
   executeApplyPatch,
 } from './apply-patch-tools.js';
-import { bashToolDefinition, buildBashPermissionScope, runBashCommand } from './bash-tools.js';
-import { createEditTool } from './edit-tools.js';
-import { createMultiEditTool } from './multi-edit-tool.js';
-import { captureBeforeWriteBackup } from './session-file-backup-store.js';
-import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
-import {
-  buildExitPlanModeQuestionInput,
-  enterPlanModeToolDefinition,
-  exitPlanModeToolDefinition,
-} from './plan-mode-tools.js';
-import { createSkillTool } from './skill-tools.js';
-import { taskToolDefinition } from './task-tools.js';
-import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
-import { websearchTool } from './tool-aliases.js';
-import { webfetchTool } from './web-tools.js';
-import { resolveDelegatedAgent } from './task-agent-resolution.js';
+import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
+import { writeAuditLog } from './audit-log.js';
 import {
   backgroundCancelToolDefinition,
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
-import { selectDelegatedModelForUser } from './task-model-selection.js';
-import {
-  runSessionInfoTool,
-  runSessionListTool,
-  runSessionReadTool,
-  runSessionSearchTool,
-  sessionInfoToolDefinition,
-  sessionListToolDefinition,
-  sessionReadToolDefinition,
-  sessionSearchToolDefinition,
-} from './session-manager-tools.js';
-import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
-import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
-import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
-import { runSkillMcpTool, skillMcpToolDefinition } from './skill-mcp-tools.js';
-import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
-import { generateImageToolDefinition, executeGenerateImageTool } from './image-generation-tool.js';
-import { codesearchToolDefinition } from './codesearch-tools.js';
-import { desktopAutomationToolDefinition, runDesktopAutomationTool } from './desktop-automation.js';
-import { resolveStoredDefaultThinkingMode } from './provider-config.js';
-import {
-  ensureIgnoreRulesLoadedForPath,
-  getSessionWorkspaceRoot,
-  hasWorkspacePermanentPermission,
-} from './workspace-safety.js';
-import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
-import {
-  evaluatePermissionRules,
-  loadWorkspacePermissionRules,
-  type PermissionAction,
-  type PermissionRule,
-} from './permission-rules.js';
-import { PERMISSION_CATEGORIES, resolvePermissionCategory } from '@openAwork/agent-core';
-import {
-  resolvePermissionRequestTimeoutMs,
-  type PermissionDecision,
-  type PermissionRiskLevel,
-} from './permission-contract.js';
-import { dispatchClaudeCodeTool } from './claude-code-tool-dispatch.js';
-import type { DynamicToolEntry } from './dynamic-tool-loader.js';
-import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
+import { bashToolDefinition, runBashCommand } from './bash-tools.js';
+import { BATCH_TOOL_DISALLOWED, BATCH_TOOL_MAX_CALLS } from './batch-tools.js';
 import {
   buildCallOmoAgentBackgroundOutput,
   buildCallOmoAgentSyncOutput,
   buildDelegatedChildClientRequestId,
 } from './call-omo-agent-output.js';
+import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
+import { dispatchClaudeCodeTool } from './claude-code-tool-dispatch.js';
+import { codesearchToolDefinition } from './codesearch-tools.js';
+import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from './db.js';
 import {
   buildBackgroundCancelAllMessage,
   buildBackgroundCancelSingleMessage,
@@ -116,16 +47,86 @@ import {
   collectDelegatedSessionText,
   extractLatestDelegatedSessionMessage,
 } from './delegated-task-display.js';
+import { desktopAutomationToolDefinition, runDesktopAutomationTool } from './desktop-automation.js';
+import type { DynamicToolEntry } from './dynamic-tool-loader.js';
+import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
+import { createEditTool } from './edit-tools.js';
+import { executeGenerateImageTool, generateImageToolDefinition } from './image-generation-tool.js';
+import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
+import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
+import { lspManager } from './lsp/router.js';
 import {
+  lspCallHierarchyToolDefinition,
   lspFindReferencesToolDefinition,
   lspGotoDefinitionToolDefinition,
   lspGotoImplementationToolDefinition,
   lspHoverToolDefinition,
-  lspCallHierarchyToolDefinition,
   lspPrepareRenameToolDefinition,
   lspRenameToolDefinition,
   lspSymbolsToolDefinition,
 } from './lsp-tools.js';
+import {
+  callMcpToolForSession,
+  getConfiguredMcpServerForSession,
+  getMcpServerFingerprint,
+  listMcpToolsForSession,
+} from './mcp-runtime.js';
+import { parseMcpCallRawInput, parseMcpListToolsRawInput } from './mcp-tool-input.js';
+import { transitionToolToRunning } from './message-store-v2.js';
+import {
+  appendSessionMessageV2 as appendSessionMessage,
+  deleteSessionMessagesByRequestScope,
+  getLatestReferencedToolResult,
+  getSessionToolResultByCallId,
+  listSessionMessagesV2 as listSessionMessages,
+  listSessionMessagesByRequestScope,
+} from './message-v2-adapter.js';
+import { createMultiEditTool } from './multi-edit-tool.js';
+import {
+  type PermissionDecision,
+  type PermissionRiskLevel,
+  resolvePermissionRequestTimeoutMs,
+} from './permission-contract.js';
+import {
+  evaluatePermissionRules,
+  loadWorkspacePermissionRules,
+  type PermissionAction,
+  type PermissionRule,
+} from './permission-rules.js';
+import {
+  buildExitPlanModeQuestionInput,
+  enterPlanModeToolDefinition,
+  exitPlanModeToolDefinition,
+} from './plan-mode-tools.js';
+import { resolveStoredDefaultThinkingMode } from './provider-config.js';
+import { buildQuestionRequestTitle, questionToolDefinition } from './question-tools.js';
+import { stopAnyInFlightStreamRequestForSession } from './routes/stream-cancellation.js';
+import { captureBeforeWriteBackup } from './session-file-backup-store.js';
+import { deleteRequestFileDiffs } from './session-file-diff-store.js';
+import {
+  runSessionInfoTool,
+  runSessionListTool,
+  runSessionReadTool,
+  runSessionSearchTool,
+  sessionInfoToolDefinition,
+  sessionListToolDefinition,
+  sessionReadToolDefinition,
+  sessionSearchToolDefinition,
+} from './session-manager-tools.js';
+import { createPermissionAskedEvent } from './session-permission-events.js';
+import { createQuestionAskedEvent } from './session-question-events.js';
+import { deleteSessionRunEventsByRequest, publishSessionRunEvent } from './session-run-events.js';
+import { reconcileSessionStateStatus } from './session-runtime-state.js';
+import { deleteRequestSnapshots } from './session-snapshot-store.js';
+import {
+  isGatewayToolEnabledForSessionMetadata,
+  isPlanModeToolEnabledForSessionMetadata,
+  shouldAutoApproveToolForSessionMetadata,
+} from './session-tool-visibility.js';
+import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import { runSkillMcpTool, skillMcpToolDefinition } from './skill-mcp-tools.js';
+import { createSkillTool } from './skill-tools.js';
+import { resolveDelegatedAgent } from './task-agent-resolution.js';
 import {
   runTaskCreateTool,
   runTaskGetTool,
@@ -136,6 +137,15 @@ import {
   taskListToolDefinition,
   taskUpdateToolDefinition,
 } from './task-crud-tools.js';
+import { selectDelegatedModelForUser } from './task-model-selection.js';
+import {
+  clearTaskParentAutoResumeContext,
+  consumeTaskParentAutoResumeContext,
+  scheduleTaskParentAutoResume,
+  upsertTaskParentAutoResumeContext,
+} from './task-parent-auto-resume.js';
+import { extractLatestChildSessionSummary } from './task-result-extraction.js';
+import { taskToolDefinition } from './task-tools.js';
 import {
   formatSubTodoReadValidationError,
   formatSubTodoWriteValidationError,
@@ -143,64 +153,53 @@ import {
   formatTodoWriteValidationError,
   runSubTodoReadTool,
   runSubTodoWriteTool,
+  runTodoReadTool,
+  runTodoWriteTool,
   subTodoReadInputSchema,
   subTodoReadTool,
   subTodoWriteInputSchema,
   subTodoWriteTool,
-  runTodoReadTool,
-  runTodoWriteTool,
   todoReadInputSchema,
   todoReadTool,
   todoWriteInputSchema,
   todoWriteTool,
 } from './todo-tools.js';
-import { createPermissionAskedEvent } from './session-permission-events.js';
-import { createQuestionAskedEvent } from './session-question-events.js';
-import { deleteSessionRunEventsByRequest, publishSessionRunEvent } from './session-run-events.js';
-import { reconcileSessionStateStatus } from './session-runtime-state.js';
-import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import { websearchTool } from './tool-aliases.js';
+import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
+import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
 import {
   DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
   normalizeUpstreamRetryMaxRetries,
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
 } from './upstream-retry-policy.js';
-import {
-  isGatewayToolEnabledForSessionMetadata,
-  isPlanModeToolEnabledForSessionMetadata,
-  shouldAutoApproveToolForSessionMetadata,
-} from './session-tool-visibility.js';
-import {
-  appendSessionMessageV2 as appendSessionMessage,
-  deleteSessionMessagesByRequestScope,
-  getLatestReferencedToolResult,
-  getSessionToolResultByCallId,
-  listSessionMessagesByRequestScope,
-  listSessionMessagesV2 as listSessionMessages,
-} from './message-v2-adapter.js';
-import { transitionToolToRunning } from './message-store-v2.js';
-import { deleteRequestFileDiffs } from './session-file-diff-store.js';
-import { deleteRequestSnapshots } from './session-snapshot-store.js';
-import { extractLatestChildSessionSummary } from './task-result-extraction.js';
-import {
-  clearTaskParentAutoResumeContext,
-  consumeTaskParentAutoResumeContext,
-  scheduleTaskParentAutoResume,
-  upsertTaskParentAutoResumeContext,
-} from './task-parent-auto-resume.js';
+import { webfetchTool } from './web-tools.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 import {
-  callMcpToolForSession,
-  getConfiguredMcpServerForSession,
-  getConfiguredMcpServersForSession,
-  getMcpServerFingerprint,
-  listMcpToolsForSession,
-} from './mcp-runtime.js';
+  ensureIgnoreRulesLoadedForPath,
+  getSessionWorkspaceRoot,
+  hasWorkspacePermanentPermission,
+} from './workspace-safety.js';
 import {
-  parseMcpCallRawInput,
-  parseMcpListToolsRawInput,
-} from './mcp-tool-input.js';
-import { stopAnyInFlightStreamRequestForSession } from './routes/stream-cancellation.js';
-import type { BatchSubToolProgress, RunEvent } from '@openAwork/shared';
+  executeWorkspaceCreateFile,
+  executeWorkspaceWriteFile,
+  executeWriteTool,
+  globTool,
+  grepTool,
+  listTool,
+  readTool,
+  resolveWorkspaceReviewFilePath,
+  WORKSPACE_TOOL_NAMES,
+  workspaceCreateDirectoryTool,
+  workspaceCreateFileTool,
+  workspaceReadFileTool,
+  workspaceReviewDiffTool,
+  workspaceReviewRevertTool,
+  workspaceReviewStatusTool,
+  workspaceSearchTool,
+  workspaceTreeTool,
+  workspaceWriteFileTool,
+  writeTool,
+} from './workspace-tools.js';
 
 function formatToolInputValidationOutput(
   toolName: string,
@@ -233,9 +232,11 @@ const FILE_TOOLS = new Set([
 // tool names → category IDs at evaluation time.
 const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
   { permission: '*', pattern: '*', action: 'allow' },
-  ...PERMISSION_CATEGORIES
-    .filter((cat) => cat.defaultAction !== 'allow')
-    .map((cat) => ({ permission: cat.id, pattern: '*', action: cat.defaultAction })),
+  ...PERMISSION_CATEGORIES.filter((cat) => cat.defaultAction !== 'allow').map((cat) => ({
+    permission: cat.id,
+    pattern: '*',
+    action: cat.defaultAction,
+  })),
 ];
 
 const TOOL_WHITELIST = new Set<string>([
@@ -326,13 +327,26 @@ type PermissionState =
   | { kind: 'pending'; requestId: string; created: boolean }
   | { kind: 'not_needed' };
 
-export type BatchProgressCallback = (subTools: BatchSubToolProgress[], completedCount: number, totalCount: number) => void;
+export type BatchProgressCallback = (
+  subTools: BatchSubToolProgress[],
+  completedCount: number,
+  totalCount: number,
+) => void;
 
 export interface SandboxExecutionContext {
   clientRequestId?: string;
   nextRound?: number;
   requestData?: Record<string, unknown>;
   onBatchProgress?: BatchProgressCallback;
+  /**
+   * Optional partial-output callback that streaming-capable tool dispatchers
+   * (currently bash) may invoke as the underlying process emits stdout/stderr.
+   * The batch executor injects a per-sub-call wrapper that writes the chunk
+   * into `subToolStates[index].partialOutput` and triggers `onBatchProgress`,
+   * so the UI can render live terminal output for an in-flight sub-tool
+   * without waiting for the whole batch to finish.
+   */
+  onPartialOutput?: (text: string) => void;
 }
 
 interface PermissionRequestPayload {
@@ -430,7 +444,7 @@ function writeChildSessionTerminalReason(input: {
 }
 
 function getTaskChildFirstResponseTimeoutMs(): number {
-  const raw = process.env['OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS'];
+  const raw = process.env.OPENAWORK_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS;
   if (!raw) {
     return DEFAULT_TASK_CHILD_FIRST_RESPONSE_TIMEOUT_MS;
   }
@@ -537,7 +551,10 @@ export async function terminateChildSession(input: {
   };
   await taskManager.save(graph);
 
-  clearTaskParentAutoResumeContext({ childSessionId: input.childSessionId, userId: input.userId });
+  clearTaskParentAutoResumeContext({
+    childSessionId: input.childSessionId,
+    userId: input.userId,
+  });
   sqliteRun(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [input.childSessionId, input.userId],
@@ -568,9 +585,9 @@ export async function terminateChildSession(input: {
 
   const assignedAgent =
     taskEntry.assignedAgent ??
-    (typeof childMetadata['subagentType'] === 'string' ? childMetadata['subagentType'] : 'task');
+    (typeof childMetadata.subagentType === 'string' ? childMetadata.subagentType : 'task');
   const category =
-    typeof childMetadata['taskCategory'] === 'string' ? childMetadata['taskCategory'] : undefined;
+    typeof childMetadata.taskCategory === 'string' ? childMetadata.taskCategory : undefined;
   const requestedSkills = readTaskRequestedSkills(childMetadata);
   const parentToolReference = readTaskParentToolReference(childMetadata);
   const toolOutputStatus: TaskToolOutputStatus =
@@ -793,7 +810,7 @@ function appendParentTaskCompletionReminder(input: {
 }
 
 function isTaskCreatedSessionMetadata(metadata: Record<string, unknown>): boolean {
-  return metadata['createdByTool'] === 'task';
+  return metadata.createdByTool === 'task';
 }
 
 function listParsedTaskSessionsForUser(userId: string): ParsedTaskSessionRow[] {
@@ -803,7 +820,7 @@ function listParsedTaskSessionsForUser(userId: string): ParsedTaskSessionRow[] {
   ).map((row) => {
     const metadata = parseSessionMetadataJson(row.metadata_json);
     const parentSessionId =
-      typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : null;
+      typeof metadata.parentSessionId === 'string' ? metadata.parentSessionId : null;
     return {
       ...row,
       metadata,
@@ -938,9 +955,9 @@ function findTeamRoleBindingForAgent(
   sessionMetadata: Record<string, unknown>,
   agentId: string,
 ): TeamRoleBindingEntry | undefined {
-  const teamDefinition = sessionMetadata['teamDefinition'];
+  const teamDefinition = sessionMetadata.teamDefinition;
   if (typeof teamDefinition !== 'object' || teamDefinition === null) return undefined;
-  const requiredRoleBindings = (teamDefinition as Record<string, unknown>)['requiredRoleBindings'];
+  const requiredRoleBindings = (teamDefinition as Record<string, unknown>).requiredRoleBindings;
   if (!Array.isArray(requiredRoleBindings)) return undefined;
   return requiredRoleBindings.find(
     (binding: unknown) =>
@@ -998,22 +1015,16 @@ function buildDelegatedChildRequestData(input: {
     ...baseRequestData,
   };
 
-  const hasExplicitThinkingEnabled = Object.prototype.hasOwnProperty.call(
-    baseRequestData,
-    'thinkingEnabled',
-  );
-  const hasExplicitReasoningEffort = Object.prototype.hasOwnProperty.call(
-    baseRequestData,
-    'reasoningEffort',
-  );
+  const hasExplicitThinkingEnabled = Object.hasOwn(baseRequestData, 'thinkingEnabled');
+  const hasExplicitReasoningEffort = Object.hasOwn(baseRequestData, 'reasoningEffort');
 
   if (!hasExplicitThinkingEnabled || !hasExplicitReasoningEffort) {
     const defaultThinking = resolveDelegatedChildThinkingDefaults(input.userId);
     if (!hasExplicitThinkingEnabled) {
-      nextRequestData['thinkingEnabled'] = defaultThinking.enabled;
+      nextRequestData.thinkingEnabled = defaultThinking.enabled;
     }
     if (!hasExplicitReasoningEffort) {
-      nextRequestData['reasoningEffort'] = defaultThinking.effort;
+      nextRequestData.reasoningEffort = defaultThinking.effort;
     }
   }
 
@@ -1031,8 +1042,8 @@ function buildDelegatedChildRequestData(input: {
     ...(input.modelSelection?.variant ? { variant: input.modelSelection.variant } : {}),
     ...(input.systemPrompt
       ? { systemPrompt: input.systemPrompt }
-      : baseRequestData['systemPrompt'] !== undefined
-        ? { systemPrompt: baseRequestData['systemPrompt'] }
+      : baseRequestData.systemPrompt !== undefined
+        ? { systemPrompt: baseRequestData.systemPrompt }
         : {}),
   };
 }
@@ -1066,7 +1077,7 @@ export function clearTaskParentToolReference(
 }
 
 function readTaskRequestedSkills(metadata: Record<string, unknown>): string[] | undefined {
-  const candidate = metadata['requestedSkills'];
+  const candidate = metadata.requestedSkills;
   if (!Array.isArray(candidate)) {
     return undefined;
   }
@@ -1076,7 +1087,7 @@ function readTaskRequestedSkills(metadata: Record<string, unknown>): string[] | 
 }
 
 function readTaskCategory(metadata: Record<string, unknown>): string | undefined {
-  return typeof metadata['taskCategory'] === 'string' ? metadata['taskCategory'] : undefined;
+  return typeof metadata.taskCategory === 'string' ? metadata.taskCategory : undefined;
 }
 
 export async function reconcileResumedTaskChildSession(input: {
@@ -1099,7 +1110,7 @@ export async function reconcileResumedTaskChildSession(input: {
   }
 
   const parentSessionId =
-    typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : null;
+    typeof metadata.parentSessionId === 'string' ? metadata.parentSessionId : null;
   if (!parentSessionId) {
     return;
   }
@@ -1114,7 +1125,7 @@ export async function reconcileResumedTaskChildSession(input: {
   await finalizeChildTaskRun({
     assignedAgent:
       task.assignedAgent ??
-      (typeof metadata['subagentType'] === 'string' ? metadata['subagentType'] : 'task'),
+      (typeof metadata.subagentType === 'string' ? metadata.subagentType : 'task'),
     childSessionId: input.childSessionId,
     childTaskId: task.id,
     parentToolReference: readTaskParentToolReference(metadata),
@@ -1288,10 +1299,10 @@ function buildPermissionRequestContext(
 ): PermissionRequestContext | null {
   const rawInput = request.rawInput as Record<string, unknown>;
   const pathValue =
-    typeof rawInput['path'] === 'string'
-      ? rawInput['path']
-      : typeof rawInput['filePath'] === 'string'
-        ? rawInput['filePath']
+    typeof rawInput.path === 'string'
+      ? rawInput.path
+      : typeof rawInput.filePath === 'string'
+        ? rawInput.filePath
         : null;
 
   switch (request.toolName) {
@@ -1344,7 +1355,7 @@ function buildPermissionRequestContext(
       };
     }
     case 'task_create': {
-      const subject = typeof rawInput['subject'] === 'string' ? rawInput['subject'].trim() : '';
+      const subject = typeof rawInput.subject === 'string' ? rawInput.subject.trim() : '';
       return {
         scope: subject ? `task:${subject}` : 'task:*',
         reason: '需要创建子任务',
@@ -1354,7 +1365,7 @@ function buildPermissionRequestContext(
       };
     }
     case 'task_update': {
-      const id = typeof rawInput['id'] === 'string' ? rawInput['id'].trim() : '';
+      const id = typeof rawInput.id === 'string' ? rawInput.id.trim() : '';
       return {
         scope: id ? `task:${id}` : 'task:*',
         reason: '需要更新子任务',
@@ -1364,8 +1375,7 @@ function buildPermissionRequestContext(
       };
     }
     case 'call_omo_agent': {
-      const agentDesc =
-        typeof rawInput['description'] === 'string' ? rawInput['description'].trim() : '';
+      const agentDesc = typeof rawInput.description === 'string' ? rawInput.description.trim() : '';
       return {
         scope: agentDesc ? `agent:${agentDesc}` : 'agent:*',
         reason: '需要调用子 Agent',
@@ -1375,7 +1385,7 @@ function buildPermissionRequestContext(
       };
     }
     case 'skill': {
-      const name = typeof rawInput['name'] === 'string' ? rawInput['name'].trim() : '';
+      const name = typeof rawInput.name === 'string' ? rawInput.name.trim() : '';
       if (!name) return null;
       return {
         scope: name,
@@ -1386,14 +1396,14 @@ function buildPermissionRequestContext(
       };
     }
     case 'skill_mcp': {
-      const mcpName = typeof rawInput['mcp_name'] === 'string' ? rawInput['mcp_name'].trim() : '';
+      const mcpName = typeof rawInput.mcp_name === 'string' ? rawInput.mcp_name.trim() : '';
       const operation =
-        typeof rawInput['tool_name'] === 'string'
-          ? rawInput['tool_name'].trim()
-          : typeof rawInput['resource_name'] === 'string'
-            ? rawInput['resource_name'].trim()
-            : typeof rawInput['prompt_name'] === 'string'
-              ? rawInput['prompt_name'].trim()
+        typeof rawInput.tool_name === 'string'
+          ? rawInput.tool_name.trim()
+          : typeof rawInput.resource_name === 'string'
+            ? rawInput.resource_name.trim()
+            : typeof rawInput.prompt_name === 'string'
+              ? rawInput.prompt_name.trim()
               : '';
       if (!mcpName || !operation) return null;
       return {
@@ -1405,9 +1415,8 @@ function buildPermissionRequestContext(
       };
     }
     case 'bash': {
-      const command = typeof rawInput['command'] === 'string' ? rawInput['command'].trim() : '';
-      const workdirValue =
-        typeof rawInput['workdir'] === 'string' ? rawInput['workdir'] : WORKSPACE_ROOT;
+      const command = typeof rawInput.command === 'string' ? rawInput.command.trim() : '';
+      const workdirValue = typeof rawInput.workdir === 'string' ? rawInput.workdir : WORKSPACE_ROOT;
       const safeWorkdir = validateWorkspacePath(workdirValue);
       if (!command || !safeWorkdir) return null;
       const cmdPrefix = extractBashCommandPrefix(command);
@@ -1421,7 +1430,7 @@ function buildPermissionRequestContext(
     }
     case 'interactive_bash': {
       const tmuxCommand =
-        typeof rawInput['tmux_command'] === 'string' ? rawInput['tmux_command'].trim() : '';
+        typeof rawInput.tmux_command === 'string' ? rawInput.tmux_command.trim() : '';
       if (!tmuxCommand) return null;
       const cmdPrefix = extractBashCommandPrefix(tmuxCommand);
       return {
@@ -1433,8 +1442,8 @@ function buildPermissionRequestContext(
       };
     }
     case 'ast_grep_replace': {
-      const pattern = typeof rawInput['pattern'] === 'string' ? rawInput['pattern'].trim() : '';
-      const lang = typeof rawInput['lang'] === 'string' ? rawInput['lang'].trim() : '';
+      const pattern = typeof rawInput.pattern === 'string' ? rawInput.pattern.trim() : '';
+      const lang = typeof rawInput.lang === 'string' ? rawInput.lang.trim() : '';
       if (!pattern) return null;
       return {
         scope: `ast:${lang}:${pattern}`.slice(0, 200),
@@ -1445,7 +1454,7 @@ function buildPermissionRequestContext(
       };
     }
     case 'apply_patch': {
-      const patchText = typeof rawInput['patchText'] === 'string' ? rawInput['patchText'] : '';
+      const patchText = typeof rawInput.patchText === 'string' ? rawInput.patchText : '';
       if (!patchText.trim()) return null;
       return {
         scope: buildApplyPatchPermissionScope(patchText),
@@ -1457,7 +1466,7 @@ function buildPermissionRequestContext(
     }
     case 'task': {
       const description =
-        typeof rawInput['description'] === 'string' ? rawInput['description'].trim() : '';
+        typeof rawInput.description === 'string' ? rawInput.description.trim() : '';
       if (!description) return null;
       return {
         scope: `task:${description}`,
@@ -1493,7 +1502,7 @@ function buildPermissionRequestContext(
     }
     case 'workspace_review_revert': {
       const safeWorkspacePath = pathValue ? validateWorkspacePath(pathValue) : null;
-      const filePath = typeof rawInput['filePath'] === 'string' ? rawInput['filePath'] : null;
+      const filePath = typeof rawInput.filePath === 'string' ? rawInput.filePath : null;
       if (!safeWorkspacePath || !filePath) return null;
       const relativeFilePath = resolveWorkspaceReviewFilePath(safeWorkspacePath, filePath);
       const absoluteFilePath = join(safeWorkspacePath, relativeFilePath);
@@ -1523,15 +1532,15 @@ function buildPermissionRequestContext(
     }
     case 'desktop_automation': {
       const action =
-        typeof rawInput['action'] === 'string' ? rawInput['action'].trim().toLowerCase() : '';
+        typeof rawInput.action === 'string' ? rawInput.action.trim().toLowerCase() : '';
       if (!action) {
         return null;
       }
       const target =
-        typeof rawInput['url'] === 'string'
-          ? rawInput['url'].trim()
-          : typeof rawInput['selector'] === 'string'
-            ? rawInput['selector'].trim()
+        typeof rawInput.url === 'string'
+          ? rawInput.url.trim()
+          : typeof rawInput.selector === 'string'
+            ? rawInput.selector.trim()
             : '';
       return {
         scope: target ? `${action}:${target}` : action,
@@ -1543,7 +1552,7 @@ function buildPermissionRequestContext(
     }
     case 'lsp_rename': {
       const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
-      const newName = typeof rawInput['newName'] === 'string' ? rawInput['newName'].trim() : '';
+      const newName = typeof rawInput.newName === 'string' ? rawInput.newName.trim() : '';
       if (!safePath || !newName) return null;
       return {
         scope: `${toRelativeScope(safePath)}:${newName}`,
@@ -1999,6 +2008,7 @@ async function executeGatewayManagedTool(
       }
       const startAt = Date.now();
       const result = await executeGenerateImageTool({
+        signal,
         sessionId,
         userId,
         toolCallId: request.toolCallId,
@@ -2321,10 +2331,7 @@ async function executeGatewayManagedTool(
       };
     }
 
-    if (
-      request.toolName === workspaceWriteFileTool.name ||
-      request.toolName === writeTool.name
-    ) {
+    if (request.toolName === workspaceWriteFileTool.name || request.toolName === writeTool.name) {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
         return {
@@ -2337,9 +2344,7 @@ async function executeGatewayManagedTool(
       }
 
       const toolDefinition =
-        request.toolName === workspaceWriteFileTool.name
-          ? workspaceWriteFileTool
-          : writeTool;
+        request.toolName === workspaceWriteFileTool.name ? workspaceWriteFileTool : writeTool;
       const parsed = toolDefinition.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
         return {
@@ -2366,23 +2371,19 @@ async function executeGatewayManagedTool(
                   kind: 'before_write',
                 }),
             })
-          : await executeWriteTool(
-              parsed.data,
-              signal,
-              {
-                beforeWriteBackup: async ({ content, filePath }) =>
-                  captureBeforeWriteBackup({
-                    sessionId,
-                    userId,
-                    requestId: executionContext?.clientRequestId,
-                    toolCallId: request.toolCallId,
-                    toolName: request.toolName,
-                    filePath,
-                    content,
-                    kind: 'before_write',
-                  }),
-              },
-            );
+          : await executeWriteTool(parsed.data, signal, {
+              beforeWriteBackup: async ({ content, filePath }) =>
+                captureBeforeWriteBackup({
+                  sessionId,
+                  userId,
+                  requestId: executionContext?.clientRequestId,
+                  toolCallId: request.toolCallId,
+                  toolName: request.toolName,
+                  filePath,
+                  content,
+                  kind: 'before_write',
+                }),
+            });
 
       return {
         toolCallId: request.toolCallId,
@@ -2460,7 +2461,7 @@ async function executeGatewayManagedTool(
     }
 
     if (request.toolName === 'batch') {
-      const toolCallsValue = rawInput['tool_calls'];
+      const toolCallsValue = rawInput.tool_calls;
       if (!Array.isArray(toolCallsValue) || toolCallsValue.length === 0) {
         return {
           toolCallId: request.toolCallId,
@@ -2481,8 +2482,8 @@ async function executeGatewayManagedTool(
       // Build initial sub-tool status array for progress reporting.
       const subToolStates: BatchSubToolProgress[] = selectedToolCalls.map((entry, index) => {
         const tool =
-          entry && typeof entry === 'object' && typeof entry['tool'] === 'string'
-            ? entry['tool']
+          entry && typeof entry === 'object' && typeof entry.tool === 'string'
+            ? entry.tool
             : 'unknown';
         return { index, tool, status: 'running' };
       });
@@ -2504,9 +2505,7 @@ async function executeGatewayManagedTool(
             };
             subToolStates[index] = progress;
             if (onProgress) {
-              const completedCount = subToolStates.filter(
-                (s) => s.status !== 'running',
-              ).length;
+              const completedCount = subToolStates.filter((s) => s.status !== 'running').length;
               onProgress([...subToolStates], completedCount, totalCount);
             }
             return {
@@ -2516,11 +2515,9 @@ async function executeGatewayManagedTool(
             };
           }
 
-          const tool = typeof entry['tool'] === 'string' ? entry['tool'] : '';
+          const tool = typeof entry.tool === 'string' ? entry.tool : '';
           const parameters =
-            entry['parameters'] && typeof entry['parameters'] === 'object'
-              ? entry['parameters']
-              : null;
+            entry.parameters && typeof entry.parameters === 'object' ? entry.parameters : null;
           if (!tool || !parameters) {
             const progress: BatchSubToolProgress = {
               index,
@@ -2531,9 +2528,7 @@ async function executeGatewayManagedTool(
             };
             subToolStates[index] = progress;
             if (onProgress) {
-              const completedCount = subToolStates.filter(
-                (s) => s.status !== 'running',
-              ).length;
+              const completedCount = subToolStates.filter((s) => s.status !== 'running').length;
               onProgress([...subToolStates], completedCount, totalCount);
             }
             return {
@@ -2553,9 +2548,7 @@ async function executeGatewayManagedTool(
             };
             subToolStates[index] = progress;
             if (onProgress) {
-              const completedCount = subToolStates.filter(
-                (s) => s.status !== 'running',
-              ).length;
+              const completedCount = subToolStates.filter((s) => s.status !== 'running').length;
               onProgress([...subToolStates], completedCount, totalCount);
             }
             return {
@@ -2571,7 +2564,34 @@ async function executeGatewayManagedTool(
             toolName: tool,
             rawInput: parameters,
           };
-          const subResult = await sandbox.execute(subRequest, signal, sessionId, executionContext);
+          // Per-sub-call execution context that injects a partial-output
+          // wrapper. When a streaming-capable dispatcher (bash) calls
+          // onPartialOutput with the rolling stdout snapshot, we stitch
+          // that into subToolStates[index].partialOutput and fan out via
+          // onProgress so the SSE channel (and ultimately the UI) sees
+          // live terminal output for in-flight sub-tools.
+          const subExecutionContext: SandboxExecutionContext = {
+            ...(executionContext ?? {}),
+            onPartialOutput: (text: string) => {
+              const current = subToolStates[index];
+              // Only patch if the sub-tool is still in `running` state —
+              // a late chunk arriving after we've already written the
+              // final progress entry must not clobber the completed
+              // result.
+              if (!current || current.status !== 'running') return;
+              subToolStates[index] = { ...current, partialOutput: text };
+              if (onProgress) {
+                const completedCount = subToolStates.filter((s) => s.status !== 'running').length;
+                onProgress([...subToolStates], completedCount, totalCount);
+              }
+            },
+          };
+          const subResult = await sandbox.execute(
+            subRequest,
+            signal,
+            sessionId,
+            subExecutionContext,
+          );
           if (!pendingRequestId && subResult.pendingPermissionRequestId) {
             pendingRequestId = subResult.pendingPermissionRequestId;
           }
@@ -2581,14 +2601,14 @@ async function executeGatewayManagedTool(
             tool,
             status: subResult.isError ? 'error' : 'completed',
             output: subResult.output,
+            // partialOutput intentionally omitted — the final `output`
+            // supersedes it and the UI should switch to the real card.
             isError: subResult.isError,
             durationMs: Date.now() - subStartAt,
           };
           subToolStates[index] = progress;
           if (onProgress) {
-            const completedCount = subToolStates.filter(
-              (s) => s.status !== 'running',
-            ).length;
+            const completedCount = subToolStates.filter((s) => s.status !== 'running').length;
             onProgress([...subToolStates], completedCount, totalCount);
           }
 
@@ -2602,10 +2622,8 @@ async function executeGatewayManagedTool(
 
       for (const [index, droppedEntry] of droppedToolCalls.entries()) {
         const tool =
-          droppedEntry &&
-          typeof droppedEntry === 'object' &&
-          typeof droppedEntry['tool'] === 'string'
-            ? droppedEntry['tool']
+          droppedEntry && typeof droppedEntry === 'object' && typeof droppedEntry.tool === 'string'
+            ? droppedEntry.tool
             : 'unknown';
         results.push({
           tool,
@@ -2983,28 +3001,28 @@ async function executeGatewayManagedTool(
         requestedSkills,
       };
       if (delegatedModel?.modelId) {
-        childSessionMetadata['modelId'] = delegatedModel.modelId;
+        childSessionMetadata.modelId = delegatedModel.modelId;
       }
       if (delegatedModel?.providerId) {
-        childSessionMetadata['providerId'] = delegatedModel.providerId;
+        childSessionMetadata.providerId = delegatedModel.providerId;
       }
       if (delegatedModel?.variant) {
-        childSessionMetadata['variant'] = delegatedModel.variant;
+        childSessionMetadata.variant = delegatedModel.variant;
       }
       if (parentToolReference) {
         childSessionMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY] = parentToolReference.clientRequestId;
         childSessionMetadata[TASK_PARENT_TOOL_CALL_ID_KEY] = parentToolReference.toolCallId;
       }
       if (category) {
-        childSessionMetadata['taskCategory'] = category;
+        childSessionMetadata.taskCategory = category;
       }
-      const inheritedWorkingDirectory = parentSessionMetadata['workingDirectory'];
+      const inheritedWorkingDirectory = parentSessionMetadata.workingDirectory;
       if (typeof inheritedWorkingDirectory === 'string') {
-        childSessionMetadata['workingDirectory'] = inheritedWorkingDirectory;
+        childSessionMetadata.workingDirectory = inheritedWorkingDirectory;
       }
-      const inheritedDialogueMode = parentSessionMetadata['dialogueMode'];
+      const inheritedDialogueMode = parentSessionMetadata.dialogueMode;
       if (typeof inheritedDialogueMode === 'string') {
-        childSessionMetadata['dialogueMode'] = inheritedDialogueMode;
+        childSessionMetadata.dialogueMode = inheritedDialogueMode;
       }
       const inheritedUpstreamRetryMaxRetries =
         normalizeUpstreamRetryMaxRetries(childRequestData?.[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
@@ -3012,10 +3030,13 @@ async function executeGatewayManagedTool(
       if (inheritedUpstreamRetryMaxRetries !== undefined) {
         childSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY] = inheritedUpstreamRetryMaxRetries;
       }
-      const existingChildSession = sqliteGet<{ id: string; metadata_json: string }>(
-        'SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-        [childSessionId, userId],
-      );
+      const existingChildSession = sqliteGet<{
+        id: string;
+        metadata_json: string;
+      }>('SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1', [
+        childSessionId,
+        userId,
+      ]);
       if (resumableTask?.sessionId && !existingChildSession) {
         return {
           toolCallId: request.toolCallId,
@@ -3049,7 +3070,10 @@ async function executeGatewayManagedTool(
             string,
             unknown
           >;
-          mergedMetadata = { ...parsedExistingMetadata, ...childSessionMetadata };
+          mergedMetadata = {
+            ...parsedExistingMetadata,
+            ...childSessionMetadata,
+          };
         } catch {
           mergedMetadata = childSessionMetadata;
         }
@@ -3501,7 +3525,10 @@ async function executeGatewayManagedTool(
         }
       }
 
-      const childMessages = listSessionMessages({ sessionId: childSessionId, userId });
+      const childMessages = listSessionMessages({
+        sessionId: childSessionId,
+        userId,
+      });
       const childDisplayText = collectDelegatedSessionText(childMessages);
       const latestChildMessage = extractLatestDelegatedSessionMessage(childMessages);
       const taskMessage =
@@ -3702,7 +3729,12 @@ async function executeGatewayManagedTool(
         };
       }
 
-      const output = await runBashCommand(parsed.data);
+      const output = await runBashCommand(parsed.data, {
+        signal,
+        ...(executionContext?.onPartialOutput
+          ? { onPartialOutput: executionContext.onPartialOutput }
+          : {}),
+      });
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -3791,7 +3823,10 @@ function formatBackgroundOutputMessages(input: {
   userId: string;
   sessionId: string;
 }) {
-  const messages = listSessionMessages({ sessionId: input.sessionId, userId: input.userId });
+  const messages = listSessionMessages({
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
   const startIndex = input.sinceMessageId
     ? messages.findIndex((message) => message.id === input.sinceMessageId)
     : -1;
@@ -3926,9 +3961,9 @@ async function cancelBackgroundTaskEntry(input: {
   const childMetadata = childSession ? parseSessionMetadataJson(childSession.metadata_json) : {};
   const assignedAgent =
     taskEntry.assignedAgent ??
-    (typeof childMetadata['subagentType'] === 'string' ? childMetadata['subagentType'] : 'task');
+    (typeof childMetadata.subagentType === 'string' ? childMetadata.subagentType : 'task');
   const category =
-    typeof childMetadata['taskCategory'] === 'string' ? childMetadata['taskCategory'] : undefined;
+    typeof childMetadata.taskCategory === 'string' ? childMetadata.taskCategory : undefined;
   const requestedSkills = readTaskRequestedSkills(childMetadata) ?? [];
   syncParentTaskToolResult({
     assignedAgent,
@@ -3983,8 +4018,8 @@ async function runChildTaskSessionInBackground(input: {
 }): Promise<void> {
   const taskManager = new AgentTaskManagerImpl();
   const requestClientRequestId =
-    typeof input.requestData['clientRequestId'] === 'string'
-      ? input.requestData['clientRequestId']
+    typeof input.requestData.clientRequestId === 'string'
+      ? input.requestData.clientRequestId
       : undefined;
   const firstResponseTimeoutMs = getTaskChildFirstResponseTimeoutMs();
   const firstResponseRetryMaxRetries = getTaskChildFirstResponseRetryMaxRetries(input.requestData);
@@ -4437,7 +4472,7 @@ function updateSessionMetadata(sessionId: string, metadata: Record<string, unkno
 }
 
 function isPlanModeEnabled(metadata: Record<string, unknown>): boolean {
-  return metadata['planMode'] === true;
+  return metadata.planMode === true;
 }
 
 function buildToolObservability(input: {
@@ -4660,10 +4695,10 @@ function ensurePermissionForTool(
   // Rule engine: evaluate default rules + workspace rules (last-match-wins).
   // Users override defaults via .openawork.permissions.json.
   const sessionMetadata = getSessionMetadata(sessionId);
-  const isTaskCreatedSession = sessionMetadata['createdByTool'] === 'task';
+  const isTaskCreatedSession = sessionMetadata.createdByTool === 'task';
   const explicitWorkingDirectory =
-    typeof sessionMetadata['workingDirectory'] === 'string'
-      ? String(sessionMetadata['workingDirectory'])
+    typeof sessionMetadata.workingDirectory === 'string'
+      ? String(sessionMetadata.workingDirectory)
       : null;
   const workspaceRoot = explicitWorkingDirectory
     ? getSessionWorkspaceRoot(sessionId)
@@ -4697,7 +4732,11 @@ function ensurePermissionForTool(
     workspaceRules,
   );
   if (scopedAction === 'allow') {
-    return { kind: 'approved', requestId: 'workspace-rule', decision: 'permanent' };
+    return {
+      kind: 'approved',
+      requestId: 'workspace-rule',
+      decision: 'permanent',
+    };
   }
   if (scopedAction === 'deny') {
     return {
@@ -4712,11 +4751,19 @@ function ensurePermissionForTool(
   const category = resolvePermissionCategory(request.toolName);
 
   if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
-    return { kind: 'approved', requestId: 'channel-policy', decision: 'session' };
+    return {
+      kind: 'approved',
+      requestId: 'channel-policy',
+      decision: 'session',
+    };
   }
 
   if (workspaceRoot && hasWorkspacePermanentPermission(sessionId, category, context.scope)) {
-    return { kind: 'approved', requestId: 'workspace-policy', decision: 'permanent' };
+    return {
+      kind: 'approved',
+      requestId: 'workspace-policy',
+      decision: 'permanent',
+    };
   }
 
   const requestPayload =
@@ -4735,7 +4782,11 @@ function ensurePermissionForTool(
 
   const approved = findApprovedPermission(sessionId, category, context.scope);
   if (approved) {
-    return { kind: 'approved', requestId: approved.id, decision: approved.decision };
+    return {
+      kind: 'approved',
+      requestId: approved.id,
+      decision: approved.decision,
+    };
   }
 
   const pendingRequestId = findPendingPermission(sessionId, category, context.scope);
@@ -4878,8 +4929,8 @@ export class ToolSandbox {
     if (FILE_TOOLS.has(normalizedRequest.toolName)) {
       const rawInput = normalizedRequest.rawInput as Record<string, unknown>;
       const filePath =
-        (typeof rawInput['path'] === 'string' ? rawInput['path'] : undefined) ??
-        (typeof rawInput['filePath'] === 'string' ? rawInput['filePath'] : undefined);
+        (typeof rawInput.path === 'string' ? rawInput.path : undefined) ??
+        (typeof rawInput.filePath === 'string' ? rawInput.filePath : undefined);
       if (filePath) {
         await ensureIgnoreRulesLoadedForPath(filePath);
       }

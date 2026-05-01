@@ -75,37 +75,74 @@ function createChatToolCallStream(input: {
   toolName: string;
 }): Response {
   const encoder = new TextEncoder();
+  const openAiFrames = [
+    `data: ${JSON.stringify({
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: input.toolCallId,
+                function: {
+                  name: input.toolName,
+                  arguments: input.argsJson,
+                },
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    })}`,
+    '',
+    'data: [DONE]',
+    '',
+  ];
+  const anthropicFrames = [
+    'event: message_start',
+    `data: ${JSON.stringify({
+      type: 'message_start',
+      message: { id: 'msg_mock_tool', usage: { input_tokens: 0, output_tokens: 0 } },
+    })}`,
+    '',
+    'event: content_block_start',
+    `data: ${JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: {
+        type: 'tool_use',
+        id: input.toolCallId,
+        name: input.toolName,
+        input: {},
+      },
+    })}`,
+    '',
+    'event: content_block_delta',
+    `data: ${JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'input_json_delta', partial_json: input.argsJson },
+    })}`,
+    '',
+    'event: content_block_stop',
+    `data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}`,
+    '',
+    'event: message_delta',
+    `data: ${JSON.stringify({
+      type: 'message_delta',
+      delta: { stop_reason: 'tool_use' },
+      usage: { output_tokens: 1 },
+    })}`,
+    '',
+    'event: message_stop',
+    `data: ${JSON.stringify({ type: 'message_stop' })}`,
+    '',
+  ];
   return new Response(
     new ReadableStream({
       start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            [
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      tool_calls: [
-                        {
-                          index: 0,
-                          id: input.toolCallId,
-                          function: {
-                            name: input.toolName,
-                            arguments: input.argsJson,
-                          },
-                        },
-                      ],
-                    },
-                    finish_reason: 'tool_calls',
-                  },
-                ],
-              })}`,
-              '',
-              'data: [DONE]',
-              '',
-            ].join('\n'),
-          ),
-        );
+        controller.enqueue(encoder.encode([...openAiFrames, ...anthropicFrames].join('\n')));
         controller.close();
       },
     }),
@@ -116,10 +153,17 @@ function createChatToolCallStream(input: {
 function hasToolResultInChatRequest(body: string): boolean {
   try {
     const parsed = JSON.parse(body) as {
-      messages?: Array<{ role?: string; tool_call_id?: string }>;
+      messages?: Array<{
+        content?: Array<{ type?: string }> | string;
+        role?: string;
+        tool_call_id?: string;
+      }>;
     };
     return (parsed.messages ?? []).some(
-      (message) => message.role === 'tool' && typeof message.tool_call_id === 'string',
+      (message) =>
+        (message.role === 'tool' && typeof message.tool_call_id === 'string') ||
+        (Array.isArray(message.content) &&
+          message.content.some((part) => part.type === 'tool_result')),
     );
   } catch {
     return false;
@@ -283,10 +327,15 @@ async function main(): Promise<void> {
               userId,
             });
 
-            await waitFor(async () => {
-              const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
-              return graph.tasks[taskOutput.taskId]?.status === 'completed';
-            }, 'resumed child task should eventually complete the parent task');
+            await waitFor(
+              async () => {
+                const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+                return graph.tasks[taskOutput.taskId]?.status === 'completed';
+              },
+              'resumed child task should eventually complete the parent task',
+              240,
+              50,
+            );
 
             const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
             const task = graph.tasks[taskOutput.taskId];

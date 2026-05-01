@@ -92,10 +92,7 @@ export interface RunUpstreamGenerateResult {
  * SDK option keys here so callers do not need to reason about both
  * naming surfaces.
  */
-function shouldOmit(
-  upstreamKeys: string[] | undefined,
-  ...candidates: string[]
-): boolean {
+function shouldOmit(upstreamKeys: string[] | undefined, ...candidates: string[]): boolean {
   if (!upstreamKeys || upstreamKeys.length === 0) return false;
   return candidates.some((k) => upstreamKeys.includes(k));
 }
@@ -126,10 +123,7 @@ export async function runUpstreamGenerate(
 
   // Decorate the conversation with Anthropic prompt-cache breakpoints
   // when applicable. This is a noop for non-anthropic providers.
-  const decoratedMessages = applyAnthropicCacheBreakpoints(
-    input.messages,
-    input.providerType,
-  );
+  const decoratedMessages = applyAnthropicCacheBreakpoints(input.messages, input.providerType);
 
   const providerOptions = buildProviderOptions({
     ...(input.thinking ? { thinking: input.thinking } : {}),

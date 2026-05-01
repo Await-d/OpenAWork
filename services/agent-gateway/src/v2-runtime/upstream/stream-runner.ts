@@ -40,11 +40,7 @@
  *     SSE consumer surfaces failures without waiting for a finish.
  */
 
-import type {
-  StreamChunk,
-  StreamDoneChunk,
-  StreamErrorChunk,
-} from '@openAwork/shared';
+import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/shared';
 import type { ModelMessage, StreamTextResult, ToolSet } from 'ai';
 import { streamText } from 'ai';
 import { applyAnthropicCacheBreakpoints } from './cache-breakpoints.js';
@@ -165,10 +161,7 @@ export async function* runUpstreamStream(
 
   // Decorate the conversation with Anthropic prompt-cache breakpoints
   // when applicable. Noop for non-anthropic / non-openrouter providers.
-  const decoratedMessages = applyAnthropicCacheBreakpoints(
-    input.messages,
-    input.providerType,
-  );
+  const decoratedMessages = applyAnthropicCacheBreakpoints(input.messages, input.providerType);
 
   // Synthesise AI SDK providerOptions for thinking / reasoning when
   // a thinking config is provided. The model id used for the lookup
@@ -222,8 +215,7 @@ export async function* runUpstreamStream(
         };
         break;
       case 'reasoning-start': {
-        const itemId =
-          'id' in part && typeof part.id === 'string' ? part.id : undefined;
+        const itemId = 'id' in part && typeof part.id === 'string' ? part.id : undefined;
         state.thinkingActive = true;
         state.thinkingItemId = itemId;
         yield {
@@ -234,8 +226,7 @@ export async function* runUpstreamStream(
         break;
       }
       case 'reasoning-delta': {
-        const itemId =
-          'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
+        const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
         yield {
           type: 'thinking_delta',
           delta: part.text,
@@ -245,8 +236,7 @@ export async function* runUpstreamStream(
         break;
       }
       case 'reasoning-end': {
-        const itemId =
-          'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
+        const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
         state.thinkingActive = false;
         state.thinkingItemId = undefined;
         yield {
@@ -304,13 +294,9 @@ export async function* runUpstreamStream(
         // legacy OpenAI `function_call`), surface the JSON payload
         // as a final `tool_call_delta` so accumulators see it once.
         const callId =
-          'toolCallId' in part && typeof part.toolCallId === 'string'
-            ? part.toolCallId
-            : undefined;
+          'toolCallId' in part && typeof part.toolCallId === 'string' ? part.toolCallId : undefined;
         const toolName =
-          ('toolName' in part && typeof part.toolName === 'string'
-            ? part.toolName
-            : undefined) ??
+          ('toolName' in part && typeof part.toolName === 'string' ? part.toolName : undefined) ??
           (callId ? state.toolNamesById.get(callId) : undefined) ??
           '';
         if (!callId) break;

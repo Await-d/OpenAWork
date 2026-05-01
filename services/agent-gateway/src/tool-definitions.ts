@@ -1,18 +1,13 @@
-import { LSP_TOOLS, webSearchTool } from '@openAwork/agent-core';
+import { LSP_TOOLS } from '@openAwork/agent-core';
 import {
   globTool,
   grepTool,
   listTool,
   readTool,
   workspaceCreateDirectoryTool,
-  workspaceCreateFileTool,
-  workspaceReadFileTool,
   workspaceReviewRevertTool,
   workspaceReviewDiffTool,
   workspaceReviewStatusTool,
-  workspaceSearchTool,
-  workspaceTreeTool,
-  workspaceWriteFileTool,
   writeTool,
 } from './workspace-tools.js';
 import { websearchTool } from './tool-aliases.js';
@@ -867,8 +862,7 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         properties: {
           task_id: {
             type: 'string',
-            description:
-              'Background task id to inspect. Provide one of task_id, taskId, or runId.',
+            description: 'Background task id to inspect. Provide one of task_id, taskId, or runId.',
           },
           taskId: { type: 'string', description: 'Alias for task_id.' },
           runId: { type: 'string', description: 'Run id alias for the background task.' },
@@ -1077,13 +1071,25 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           size: {
             type: 'string',
             description:
-              'Image size in WxH format, e.g. "1024x1024", "1536x1024". Defaults to the user\'s configured default size.',
+              'Image size in WxH format. Prefer presets: 1K — "1024x1024" (1:1), "1536x1024" (3:2), "1024x1536" (2:3); 2K (auto-uses high quality) — "2048x2048" (1:1), "2048x1152" (16:9), "1152x2048" (9:16); 4K (experimental, slow, relay-only) — "3840x2160" (16:9), "2160x3840" (9:16). Custom sizes must satisfy: max edge ≤ 3840, both dimensions multiples of 16, ratio ≤ 3:1, total pixels in [655360, 8294400]. Defaults to user setting.',
           },
           quality: {
             type: 'string',
             enum: ['low', 'medium', 'high'],
             description:
-              'Image quality: "low" for speed, "medium" for balance, "high" for detail. Defaults to user setting.',
+              'Image quality: "low" for speed, "medium" for balance, "high" for detail. 2K/4K sizes are auto-raised to "high" by the server. Defaults to user setting.',
+          },
+          outputFormat: {
+            type: 'string',
+            enum: ['png', 'jpeg', 'webp'],
+            description:
+              'Output file format: "png" (lossless, default), "jpeg" (smaller, no transparency), "webp" (modern, smaller). Defaults to user setting.',
+          },
+          background: {
+            type: 'string',
+            enum: ['auto', 'opaque'],
+            description:
+              'Background handling: "auto" lets the model decide (may yield transparency on png/webp); "opaque" forces a solid background. Defaults to user setting.',
           },
         },
         required: ['prompt'],

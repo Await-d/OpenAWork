@@ -9,7 +9,7 @@ vi.mock('../db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(),
-  sqliteTransaction: <T,>(fn: () => T) => fn(),
+  sqliteTransaction: <T>(fn: () => T) => fn(),
 }));
 
 import {

@@ -22,12 +22,7 @@
  *     used by the legacy SSE writer for replay, not by AI SDK.
  */
 
-import type {
-  AssistantModelMessage,
-  ModelMessage,
-  TextPart,
-  ToolCallPart,
-} from 'ai';
+import type { AssistantModelMessage, ModelMessage, TextPart, ToolCallPart } from 'ai';
 import type { NormalizedConversationMessage } from '../../normalized-conversation.js';
 
 /**

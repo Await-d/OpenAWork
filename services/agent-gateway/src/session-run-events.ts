@@ -3,10 +3,7 @@ import { buildAssistantEventMessageContent } from './assistant-event-message.js'
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-adapter.js';
-import {
-  appendSessionEvent,
-  translateRunEventToSessionEvent,
-} from './session-entry-store.js';
+import { appendSessionEvent, translateRunEventToSessionEvent } from './session-entry-store.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
@@ -149,6 +146,7 @@ function mirrorDisplayableRunEventAsMessage(input: {
     clientRequestId: buildMirroredAssistantEventClientRequestId(input),
     content,
     createdAt: input.occurredAt,
+    replaceExisting: true,
   });
 }
 

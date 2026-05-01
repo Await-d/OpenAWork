@@ -21,7 +21,7 @@
 
 import { Cause, Effect, Exit, Layer, Runtime } from 'effect';
 import { BusService } from './bus-service.js';
-import { StorageService } from './storage-service.js';
+import type { StorageService } from './storage-service.js';
 import { resolveStorageLayer } from '../boot.js';
 
 const defaultRuntime = Runtime.defaultRuntime;
@@ -74,9 +74,7 @@ export const EffectBridge = {
   async runWithStorage<E, A>(
     program: Effect.Effect<A, E, StorageService | BusService>,
   ): Promise<A> {
-    const provided = program.pipe(
-      Effect.provide(withBaseline(resolveStorageLayer())),
-    );
+    const provided = program.pipe(Effect.provide(withBaseline(resolveStorageLayer())));
     return Runtime.runPromise(defaultRuntime)(provided);
   },
 
@@ -89,9 +87,7 @@ export const EffectBridge = {
   async runWithStorageOption<E, A>(
     program: Effect.Effect<A, E, StorageService | BusService>,
   ): Promise<A | null> {
-    const provided = program.pipe(
-      Effect.provide(withBaseline(resolveStorageLayer())),
-    );
+    const provided = program.pipe(Effect.provide(withBaseline(resolveStorageLayer())));
     const exit = await Runtime.runPromiseExit(defaultRuntime)(provided);
     if (Exit.isSuccess(exit)) return exit.value;
     return null;

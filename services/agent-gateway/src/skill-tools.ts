@@ -1,11 +1,29 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
-import { z } from 'zod';
+import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
+import { z } from 'zod';
 import { sqliteAll, sqliteGet } from './db.js';
 
-const skillInputSchema = z.object({
-  name: z.string().min(1),
-});
+const skillInputSchema = z
+  .object({
+    name: z.string().optional(),
+    skill: z.string().optional(),
+  })
+  .transform((value, context) => {
+    const rawName =
+      typeof value.name === 'string' && value.name.trim().length > 0 ? value.name : value.skill;
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+
+    if (name.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Skill tool requires a non-empty `skill` or `name` field.',
+        path: ['skill'],
+      });
+    }
+
+    return { name };
+  });
 
 const skillOutputSchema = z.string();
 
@@ -26,15 +44,7 @@ interface SkillEntryLike {
   manifestUrl?: string;
 }
 
-interface SkillManifestLike {
-  id?: string;
-  name?: string;
-  displayName?: string;
-  description?: string;
-  descriptionForModel?: string;
-  permissions?: Array<{ type?: string; scope?: string }>;
-  capabilities?: string[];
-}
+type SkillManifestLike = Partial<SkillManifest>;
 
 function normalizeSkillName(value: string): string {
   return value.trim().toLowerCase();
@@ -80,10 +90,14 @@ function buildBuiltinSkillContent(manifest: SkillManifestLike): string {
 
 function findBuiltinSkillContent(name: string): string | null {
   const normalizedName = normalizeSkillName(name);
+  if (normalizedName.length === 0) {
+    return null;
+  }
+
   const entry = BUILTIN_SKILLS.find(({ manifest }) =>
-    [manifest.id, manifest.name, manifest.displayName].some(
-      (value) => normalizeSkillName(value) === normalizedName,
-    ),
+    [manifest.id, manifest.name, manifest.displayName]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .some((value) => normalizeSkillName(value) === normalizedName),
   );
   if (!entry) {
     return null;
@@ -154,7 +168,7 @@ export function createSkillTool(
   return {
     name: 'skill',
     description:
-      'Load an installed skill and inject its instructions into the conversation context. Use the exact installed skill name when possible.',
+      'Load an installed or built-in skill and inject its instructions into the conversation context. Use the exact skill name when possible.',
     inputSchema: skillInputSchema,
     outputSchema: skillOutputSchema,
     timeout: 30000,
@@ -162,7 +176,12 @@ export function createSkillTool(
       void sessionId;
       const installed = findInstalledSkill(userId, input.name);
       if (!installed) {
-        throw new Error(`Installed skill not found: ${input.name}`);
+        const builtinContent = findBuiltinSkillContent(input.name);
+        if (builtinContent) {
+          return builtinContent;
+        }
+
+        throw new Error(`Skill not found: ${input.name}`);
       }
 
       const cachedEntry = findCachedSkillEntry(userId, installed.skillId, installed.sourceId);

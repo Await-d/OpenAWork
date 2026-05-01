@@ -261,7 +261,11 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       socket.on('close', () => {
         if (socketClosed) return;
         socketClosed = true;
-        console.log('[WS_CLOSE] socket closed for session', sessionId, '— stream continues in background');
+        console.log(
+          '[WS_CLOSE] socket closed for session',
+          sessionId,
+          '— stream continues in background',
+        );
       });
 
       socket.on('message', (raw: Buffer | string) => {

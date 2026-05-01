@@ -16,17 +16,13 @@
 import { randomUUID } from 'node:crypto';
 import { Effect } from 'effect';
 import { connectDb, db, migrate, sqliteRun } from '../db.js';
-import {
-  insertMessage,
-  insertPart,
-  transitionToolToRunning,
-} from '../message-store-v2.js';
+import { insertMessage, insertPart, transitionToolToRunning } from '../message-store-v2.js';
 import {
   appendSessionEvent,
   listSessionEvents,
   replaySessionEntries,
 } from '../session-entry-store.js';
-import { makeSessionEventId, type SessionEventID } from '../session-event.js';
+import { makeSessionEventId } from '../session-event.js';
 import {
   makeMessageId,
   makePartId,
@@ -54,10 +50,11 @@ async function main(): Promise<void> {
     const sessionId = randomUUID();
     const messageId = `msg_${randomUUID()}`;
 
-    sqliteRun(
-      'INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)',
-      [userId, `verify-v2-${userId}@openawork.local`, 'hash'],
-    );
+    sqliteRun('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+      userId,
+      `verify-v2-${userId}@openawork.local`,
+      'hash',
+    ]);
     sqliteRun(
       `INSERT INTO sessions (id, user_id, title, time_created, time_updated)
        VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
@@ -97,7 +94,7 @@ async function main(): Promise<void> {
       userId,
       clientRequestId: 'verify-req',
       event: {
-        id: makeSessionEventId(1100) as SessionEventID,
+        id: makeSessionEventId(1100),
         type: 'prompt',
         timestamp: 1100,
         text: 'verify replay path',
@@ -110,7 +107,7 @@ async function main(): Promise<void> {
       userId,
       clientRequestId: 'verify-req',
       event: {
-        id: makeSessionEventId(1200) as SessionEventID,
+        id: makeSessionEventId(1200),
         type: 'step.started',
         timestamp: 1200,
         model: { id: 'verify-model', providerID: 'verify' },
@@ -123,7 +120,7 @@ async function main(): Promise<void> {
       userId,
       clientRequestId: 'verify-req',
       event: {
-        id: makeSessionEventId(1300) as SessionEventID,
+        id: makeSessionEventId(1300),
         type: 'text.delta',
         timestamp: 1300,
         delta: 'verified',
@@ -134,7 +131,7 @@ async function main(): Promise<void> {
       userId,
       clientRequestId: 'verify-req',
       event: {
-        id: makeSessionEventId(1400) as SessionEventID,
+        id: makeSessionEventId(1400),
         type: 'step.ended',
         timestamp: 1400,
         reason: 'end_turn',
@@ -158,7 +155,10 @@ async function main(): Promise<void> {
         return seq;
       }),
     );
-    assert(typeof allocResult === 'number' && allocResult >= 1, 'allocateNextEventSeq should yield a positive sequence');
+    assert(
+      typeof allocResult === 'number' && allocResult >= 1,
+      'allocateNextEventSeq should yield a positive sequence',
+    );
 
     const listed = await EffectBridge.runWithStorage(
       Effect.gen(function* () {
@@ -215,7 +215,10 @@ async function main(): Promise<void> {
       callID: toolCallId,
       title: 'read /tmp/example.txt',
     });
-    assert(transitioned !== undefined, 'transitionToolToRunning should locate and transition the part');
+    assert(
+      transitioned !== undefined,
+      'transitionToolToRunning should locate and transition the part',
+    );
     assert(
       transitioned.state.status === 'running',
       `expected tool state running, got ${transitioned.state.status}`,

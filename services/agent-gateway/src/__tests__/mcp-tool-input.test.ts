@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  parseMcpCallRawInput,
-  parseMcpListToolsRawInput,
-} from '../mcp-tool-input.js';
+import { parseMcpCallRawInput, parseMcpListToolsRawInput } from '../mcp-tool-input.js';
 
 describe('parseMcpListToolsRawInput', () => {
   it('returns trimmed serverId when provided', () => {
@@ -53,7 +50,7 @@ describe('parseMcpCallRawInput', () => {
     const result = parseMcpCallRawInput({
       serverId: 'memory',
       toolName: 'query',
-      arguments: "'{\"q\":\"hello\"}'",
+      arguments: '\'{"q":"hello"}\'',
     });
     expect(result.ok).toBe(true);
     if (result.ok) {

@@ -22,7 +22,11 @@ import {
   resolveModelRoute,
   resolveModelRouteFromProvider,
 } from '../model-router.js';
-import { getCompactionProviderConfig, getFastProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
+import {
+  getCompactionProviderConfig,
+  getFastProviderConfig,
+  getProviderConfigForSelection,
+} from '../provider-config.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { isContextNearOverflow, isContextOverflow } from '../session-message-store.js';
 import {
@@ -59,10 +63,7 @@ import {
   traceFileDiffs,
 } from '../modified-files-summary.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
-import {
-  buildToolResultContent,
-  buildToolResultRunEvent,
-} from '../tool-result-contract.js';
+import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tool-sandbox.js';
 import { buildGatewayToolDefinitions } from './stream-protocol.js';
@@ -105,10 +106,16 @@ import { buildDynamicOrchestratorPrompt } from '../dynamic-agent-prompt-builder.
 import { appendTaskResumeInfo } from '../task-resume-info.js';
 import { checkAiComments } from '../comment-checker.js';
 import { checkNonInteractiveBash, buildBannedCommandWarning } from '../non-interactive-env.js';
-import { checkAtlasGuard, buildAtlasPostProcessReminder, SINGLE_TASK_DIRECTIVE, ORCHESTRATOR_DELEGATION_REQUIRED } from '../atlas-guard.js';
+import {
+  checkAtlasGuard,
+  buildAtlasPostProcessReminder,
+  SINGLE_TASK_DIRECTIVE,
+} from '../atlas-guard.js';
 import { checkRalphLoopContinuation } from '../ralph-loop.js';
-import { detectStartWorkKeyword as detectUltraworkKeyword, processStartWork } from '../start-work.js';
-import { readBoulderState, getPlanProgress } from '../boulder-state.js';
+import {
+  detectStartWorkKeyword as detectUltraworkKeyword,
+  processStartWork,
+} from '../start-work.js';
 import { detectActiveCommandContext } from '../command-templates.js';
 import {
   checkPrometheusToolGuard,
@@ -357,23 +364,25 @@ export function isWebSearchEnabled(metadataJson: string): boolean {
 
 const reasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
 
-const inputImagePartSchema = z.object({
-  type: z.literal('input_image'),
-  artifactId: z.string().trim().min(1).max(200).optional(),
-  detail: z.enum(['auto', 'high', 'low', 'original']).optional(),
-  fileId: z.string().trim().min(1).max(200).optional(),
-  fileName: z.string().trim().min(1).max(255).optional(),
-  imageUrl: z.string().trim().min(1).max(500_000).optional(),
-  mimeType: z.string().trim().min(1).max(255).optional(),
-}).superRefine((value, context) => {
-  if (!value.artifactId && !value.fileId && !value.imageUrl) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'input_image part must include artifactId, fileId, or imageUrl',
-      path: ['artifactId'],
-    });
-  }
-});
+const inputImagePartSchema = z
+  .object({
+    type: z.literal('input_image'),
+    artifactId: z.string().trim().min(1).max(200).optional(),
+    detail: z.enum(['auto', 'high', 'low', 'original']).optional(),
+    fileId: z.string().trim().min(1).max(200).optional(),
+    fileName: z.string().trim().min(1).max(255).optional(),
+    imageUrl: z.string().trim().min(1).max(500_000).optional(),
+    mimeType: z.string().trim().min(1).max(255).optional(),
+  })
+  .superRefine((value, context) => {
+    if (!value.artifactId && !value.fileId && !value.imageUrl) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'input_image part must include artifactId, fileId, or imageUrl',
+        path: ['artifactId'],
+      });
+    }
+  });
 
 export const streamRequestSchema = modelRequestSchema.omit({ model: true }).extend({
   agentId: z.string().trim().min(1).max(120).optional(),
@@ -443,7 +452,9 @@ export function buildStreamUserContent(input: {
   message: string;
 }): MessageContent[] {
   return [
-    ...(input.message.trim().length > 0 ? [{ type: 'text', text: input.message } satisfies MessageContent] : []),
+    ...(input.message.trim().length > 0
+      ? [{ type: 'text', text: input.message } satisfies MessageContent]
+      : []),
     ...((input.inputParts ?? []).map((part) => ({
       type: 'input_image' as const,
       ...(part.artifactId ? { artifactId: part.artifactId } : {}),
@@ -1156,8 +1167,9 @@ export async function executeToolCalls(input: {
   let hasPendingPermission = false;
 
   // Agent usage reminder state (oh-my-opencode agentUsageReminder pattern)
-  // Track whether task/delegation tools have been used in this session
-  let taskToolUsedInSession = false;
+  // Track whether task/delegation tools have been used in this turn's tool call batch.
+  // NOTE: this is turn-scoped (resets per executeToolCalls call), not session-scoped.
+  let taskToolUsedInTurn = false;
   let agentUsageReminderCount = 0;
   const MAX_AGENT_USAGE_REMINDERS = 3;
 
@@ -1205,7 +1217,10 @@ export async function executeToolCalls(input: {
       const atlasGuard = checkAtlasGuard({
         agentId: currentAgentId,
         toolName: toolCall.toolName,
-        filePath: (parsedInput['filePath'] ?? parsedInput['path'] ?? parsedInput['file'] ?? '') as string,
+        filePath: (parsedInput['filePath'] ??
+          parsedInput['path'] ??
+          parsedInput['file'] ??
+          '') as string,
         prompt: (parsedInput['prompt'] ?? '') as string,
       });
 
@@ -1262,56 +1277,57 @@ export async function executeToolCalls(input: {
           durationMs: 0,
         }
       : prometheusGuard.blocked
-      ? {
-          toolCallId,
-          toolName: toolCall.toolName,
-          output: prometheusGuard.blockMessage ?? 'Operation blocked by Prometheus guard.',
-          isError: true,
-          durationMs: 0,
-        }
-      : isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput)
         ? {
             toolCallId,
             toolName: toolCall.toolName,
-            output: buildMissingToolArgumentsMessage(toolCall.toolName, workingDirectory),
+            output: prometheusGuard.blockMessage ?? 'Operation blocked by Prometheus guard.',
             isError: true,
             durationMs: 0,
           }
-        : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
-          ? await sandbox.execute(request, input.signal, input.sessionId, {
-              ...input.executionContext,
-              onBatchProgress: (subTools, completedCount, totalCount) => {
-                input.writeChunk({
-                  type: 'tool_progress',
-                  toolCallId,
-                  toolName: toolCall.toolName,
-                  subTools,
-                  completedCount,
-                  totalCount,
-                  clientRequestId: input.clientRequestId,
-                  occurredAt: Date.now(),
-                });
-              },
-            })
-          : {
+        : isMissingRequiredToolArguments(toolCall.toolName, normalizedInputText, parsedInput)
+          ? {
               toolCallId,
               toolName: toolCall.toolName,
-              output: `Tool "${toolCall.toolName}" is not enabled for this request`,
+              output: buildMissingToolArgumentsMessage(toolCall.toolName, workingDirectory),
               isError: true,
               durationMs: 0,
-            };
+            }
+          : isEnabledToolName(toolCall.toolName, input.enabledToolNames)
+            ? await sandbox.execute(request, input.signal, input.sessionId, {
+                ...input.executionContext,
+                onBatchProgress: (subTools, completedCount, totalCount) => {
+                  input.writeChunk({
+                    type: 'tool_progress',
+                    toolCallId,
+                    toolName: toolCall.toolName,
+                    subTools,
+                    completedCount,
+                    totalCount,
+                    clientRequestId: input.clientRequestId,
+                    occurredAt: Date.now(),
+                  });
+                },
+              })
+            : {
+                toolCallId,
+                toolName: toolCall.toolName,
+                output: `Tool "${toolCall.toolName}" is not enabled for this request`,
+                isError: true,
+                durationMs: 0,
+              };
 
     // Agent usage reminder (oh-my-opencode agentUsageReminder pattern):
     // When search/read tools are called directly without using task delegation,
     // append a reminder to encourage using task tools for better results.
     const toolLower = toolCall.toolName.toLowerCase();
     if (AGENT_DELEGATION_TOOLS.has(toolLower)) {
-      taskToolUsedInSession = true;
+      taskToolUsedInTurn = true;
     } else if (
       !result.isError &&
-      !taskToolUsedInSession &&
+      !taskToolUsedInTurn &&
       agentUsageReminderCount < MAX_AGENT_USAGE_REMINDERS &&
-      SEARCH_READ_TOOLS.has(toolLower)
+      SEARCH_READ_TOOLS.has(toolLower) &&
+      !(typeof result.output === 'string' && /no files? found/i.test(result.output.trim()))
     ) {
       if (typeof result.output === 'string') {
         result.output += AGENT_USAGE_REMINDER_SUFFIX;
@@ -1430,6 +1446,7 @@ export async function executeToolCalls(input: {
         }),
       ],
       clientRequestId: createToolResultRequestId(input.clientRequestId, toolCallId),
+      replaceExisting: true,
     });
 
     if (input.turnFileDiffs) {
@@ -1824,9 +1841,10 @@ export async function handleStreamRequest(input: {
       }
 
       const baseTools = getEnabledTools(webSearchEnabled);
-      const allTools = dynamicToolDefs.length > 0
-        ? [...baseTools, ...buildDynamicGatewayToolDefinitions(dynamicToolDefs)]
-        : baseTools;
+      const allTools =
+        dynamicToolDefs.length > 0
+          ? [...baseTools, ...buildDynamicGatewayToolDefinitions(dynamicToolDefs)]
+          : baseTools;
       const filteredTools = filterEnabledGatewayToolsForSession(
         allTools,
         input.sessionContext.metadataJson,
@@ -2254,7 +2272,14 @@ export async function handleStreamRequest(input: {
           if (result.stopReason !== 'error') {
             wl.flush(ctx, 200);
           }
-          console.log('[STREAM_DONE] session', input.sessionId, 'stopReason:', result.stopReason, 'keepPaused:', shouldKeepPausedState);
+          console.log(
+            '[STREAM_DONE] session',
+            input.sessionId,
+            'stopReason:',
+            result.stopReason,
+            'keepPaused:',
+            shouldKeepPausedState,
+          );
           if (!shouldKeepPausedState) {
             setPersistedSessionStateStatus({
               sessionId: input.sessionId,

@@ -144,9 +144,7 @@ export type SessionEntry =
  * are still applied if a matching open entry / tool slot exists, otherwise
  * they are dropped. This mirrors opencode's tolerant `fromEvent` builders.
  */
-export function aggregateSessionEntries(
-  events: Iterable<SessionEvent>,
-): SessionEntry[] {
+export function aggregateSessionEntries(events: Iterable<SessionEvent>): SessionEntry[] {
   const entries: SessionEntry[] = [];
   let openAssistant: SessionEntryAssistant | null = null;
 
@@ -327,12 +325,14 @@ export function aggregateSessionEntries(
         const tool = findToolByCallID(openAssistant, event.callID);
         if (!tool) break;
         const previousInput =
-          tool.state.status === 'running' || tool.state.status === 'completed' || tool.state.status === 'error'
+          tool.state.status === 'running' ||
+          tool.state.status === 'completed' ||
+          tool.state.status === 'error'
             ? tool.state.input
             : {};
         tool.state = {
           status: 'completed',
-          input: previousInput as Record<string, unknown>,
+          input: previousInput,
           output: event.output ?? '',
           title: event.title,
           metadata: {},
@@ -348,12 +348,14 @@ export function aggregateSessionEntries(
         const tool = findToolByCallID(openAssistant, event.callID);
         if (!tool) break;
         const previousInput =
-          tool.state.status === 'running' || tool.state.status === 'completed' || tool.state.status === 'error'
+          tool.state.status === 'running' ||
+          tool.state.status === 'completed' ||
+          tool.state.status === 'error'
             ? tool.state.input
             : {};
         tool.state = {
           status: 'error',
-          input: previousInput as Record<string, unknown>,
+          input: previousInput,
           error: event.error,
         };
         tool.time.completed = event.timestamp;

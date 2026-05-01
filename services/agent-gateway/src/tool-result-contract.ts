@@ -35,8 +35,7 @@ const MAX_STORED_TOOL_OUTPUT_CHARS = 200_000;
 const MAX_STORED_TOOL_ARGUMENT_CHARS = 50_000;
 const MAX_STORED_FILE_DIFFS = 20;
 const MAX_STORED_FILE_DIFF_CONTENT_CHARS = 10_000;
-const STORED_TOOL_OUTPUT_TRUNCATION_NOTICE =
-  '\n\n[工具输出已截断 — 原始输出超过持久化上限。]';
+const STORED_TOOL_OUTPUT_TRUNCATION_NOTICE = '\n\n[工具输出已截断 — 原始输出超过持久化上限。]';
 const STORED_TOOL_ARGUMENT_TRUNCATION_NOTICE =
   '\n\n[工具调用参数已截断 — 参数过大，已省略后续内容。]';
 const STORED_FILE_DIFF_TRUNCATION_NOTICE = '\n...[truncated]';
@@ -64,9 +63,7 @@ export function normalizeToolResultOutputForStorage(output: unknown): unknown {
   if (serialized.length <= MAX_STORED_TOOL_OUTPUT_CHARS) {
     return output;
   }
-  return (
-    serialized.slice(0, MAX_STORED_TOOL_OUTPUT_CHARS) + STORED_TOOL_OUTPUT_TRUNCATION_NOTICE
-  );
+  return serialized.slice(0, MAX_STORED_TOOL_OUTPUT_CHARS) + STORED_TOOL_OUTPUT_TRUNCATION_NOTICE;
 }
 
 export function normalizeToolArgumentsForStorage(argumentsValue: unknown): string {
@@ -169,9 +166,7 @@ export function toStoredToolResult(content: ToolResultContent): StoredToolResult
 }
 
 export function extractToolResultContentsFromMessage(message: Message): ToolResultContent[] {
-  return message.content.flatMap((content) =>
-    content.type === 'tool_result' ? [content] : [],
-  );
+  return message.content.flatMap((content) => (content.type === 'tool_result' ? [content] : []));
 }
 
 export function hasToolResultContent(message: Message): boolean {

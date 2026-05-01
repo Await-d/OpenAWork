@@ -24,7 +24,12 @@ export type NormalizedConversationMessage =
       role: 'assistant';
       content: string | null;
       toolCalls?: Array<{ id: string; name: string; arguments: string }>;
-      reasoning?: { text?: string; encryptedContent?: string; summary?: string; responseId?: string };
+      reasoning?: {
+        text?: string;
+        encryptedContent?: string;
+        summary?: string;
+        responseId?: string;
+      };
     }
   | { role: 'tool'; toolCallId: string; content: string };
 
@@ -55,7 +60,9 @@ export function normalizeUpstreamChatMessages(
       if (!message.tool_call_id || message.content == null) {
         return [];
       }
-      return [{ role: 'tool' as const, toolCallId: message.tool_call_id, content: message.content }];
+      return [
+        { role: 'tool' as const, toolCallId: message.tool_call_id, content: message.content },
+      ];
     }
 
     if (message.content == null) {

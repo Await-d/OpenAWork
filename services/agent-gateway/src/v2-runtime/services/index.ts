@@ -9,15 +9,8 @@
  * follow-up) can consume without rewriting upstream interfaces.
  */
 
-export {
-  BusService,
-  type BusEventEnvelope,
-  type BusServiceImpl,
-} from './bus-service.js';
+export { BusService, type BusEventEnvelope, type BusServiceImpl } from './bus-service.js';
 
-export {
-  StorageService,
-  type StorageServiceImpl,
-} from './storage-service.js';
+export { StorageService, type StorageServiceImpl } from './storage-service.js';
 
 export { EffectBridge } from './effect-bridge.js';

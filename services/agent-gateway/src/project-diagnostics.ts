@@ -64,9 +64,7 @@ export async function getProjectWideDiagnostics(
 export function formatProjectDiagnostics(diagnostics: ProjectDiagnostic[]): string {
   if (diagnostics.length === 0) return '';
 
-  const lines = diagnostics.map(
-    (d) => `  ${d.file}:${d.line} [${d.severity}] ${d.message}`,
-  );
+  const lines = diagnostics.map((d) => `  ${d.file}:${d.line} [${d.severity}] ${d.message}`);
   const header =
     diagnostics.length >= MAX_PROJECT_DIAGNOSTICS
       ? `\n\n⚠️ Project-wide errors (showing first ${MAX_PROJECT_DIAGNOSTICS}):`

@@ -1,3 +1,4 @@
+import { requiresHighQualityForSize } from '@openAwork/shared';
 import { z } from 'zod';
 import {
   DEFAULT_IMAGE_GENERATION_DEFAULTS,
@@ -21,16 +22,40 @@ export const imageGenerationRequestSchema = imageGenerationDefaultsSchema.partia
 
 export type ImageGenerationRequest = z.infer<typeof imageGenerationRequestSchema>;
 
+export interface ResolveImageGenerationDefaultsResult extends ImageGenerationDefaults {
+  /** True when the requested quality was raised to "high" because the size requires it. */
+  qualityAutoLifted: boolean;
+  /** Quality value originally requested (or fallback) before any auto-lift, kept for diagnostics. */
+  requestedQuality: ImageGenerationDefaults['quality'];
+}
+
+/**
+ * Merge per-request overrides with the user's stored defaults, then enforce
+ * GPT Image 2's hard requirement that 2K/4K calls must use quality="high".
+ * The lift is silent at the code level but flagged via `qualityAutoLifted` so
+ * callers can log / surface it to the UI when relevant.
+ */
 export function resolveImageGenerationDefaults(
   input: Partial<ImageGenerationDefaults> | undefined,
   fallback: ImageGenerationDefaults,
-): ImageGenerationDefaults {
+): ResolveImageGenerationDefaultsResult {
+  const size = input?.size ?? fallback.size ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.size;
+  const requestedQuality =
+    input?.quality ?? fallback.quality ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.quality;
+  const outputFormat =
+    input?.outputFormat ?? fallback.outputFormat ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.outputFormat;
+  const background =
+    input?.background ?? fallback.background ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.background;
+
+  const qualityAutoLifted = requiresHighQualityForSize(size) && requestedQuality !== 'high';
+  const quality = qualityAutoLifted ? 'high' : requestedQuality;
+
   return {
-    size: input?.size ?? fallback.size ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.size,
-    quality: input?.quality ?? fallback.quality ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.quality,
-    outputFormat:
-      input?.outputFormat ?? fallback.outputFormat ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.outputFormat,
-    background:
-      input?.background ?? fallback.background ?? DEFAULT_IMAGE_GENERATION_DEFAULTS.background,
+    size,
+    quality,
+    outputFormat,
+    background,
+    qualityAutoLifted,
+    requestedQuality,
   };
 }

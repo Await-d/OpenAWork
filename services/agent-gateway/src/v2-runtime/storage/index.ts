@@ -10,10 +10,7 @@
  */
 
 import { and, asc, desc, eq, gte, lt } from 'drizzle-orm';
-import {
-  type DrizzleHandle,
-  createDrizzleHandle,
-} from './db.js';
+import { type DrizzleHandle, createDrizzleHandle } from './db.js';
 import {
   eventLog,
   eventSequences,
@@ -28,19 +25,8 @@ import {
   type SessionRow,
 } from './schema.js';
 
-export {
-  createDrizzleHandle,
-  schema,
-  type DrizzleHandle,
-} from './db.js';
-export {
-  eventLog,
-  eventSequences,
-  messageV2,
-  partV2,
-  sessionEntry,
-  sessions,
-} from './schema.js';
+export { createDrizzleHandle, schema, type DrizzleHandle } from './db.js';
+export { eventLog, eventSequences, messageV2, partV2, sessionEntry, sessions } from './schema.js';
 export type {
   EventLogInsert,
   EventLogRow,
@@ -99,7 +85,10 @@ export class V2Storage {
     afterTime?: number;
     limit?: number;
   }): Promise<MessageV2Row[]> {
-    const conditions = [eq(messageV2.sessionId, input.sessionId), eq(messageV2.userId, input.userId)];
+    const conditions = [
+      eq(messageV2.sessionId, input.sessionId),
+      eq(messageV2.userId, input.userId),
+    ];
     if (typeof input.afterTime === 'number') {
       conditions.push(gte(messageV2.timeCreated, input.afterTime));
     }

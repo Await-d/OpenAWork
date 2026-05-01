@@ -64,12 +64,7 @@ describe('message-v2 projectors — Removed', () => {
     // V2 main tables PLUS the legacy mirror + FTS — the regression we
     // are guarding against is the projector forgetting to clean
     // session_messages and session_messages_fts.
-    expect(tables).toEqual([
-      'part_v2',
-      'message_v2',
-      'session_messages',
-      'session_messages_fts',
-    ]);
+    expect(tables).toEqual(['part_v2', 'message_v2', 'session_messages', 'session_messages_fts']);
   });
 
   it('keys all DELETEs by the messageID payload', () => {

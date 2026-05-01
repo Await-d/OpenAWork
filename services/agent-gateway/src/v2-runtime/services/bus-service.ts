@@ -16,10 +16,7 @@
  */
 
 import { Context, Effect, Layer, Stream } from 'effect';
-import {
-  publishBusEvent,
-  subscribeBusEvents,
-} from '../../sync-event.js';
+import { publishBusEvent, subscribeBusEvents } from '../../sync-event.js';
 
 export interface BusEventEnvelope {
   type: string;
@@ -37,10 +34,7 @@ export interface BusServiceImpl {
   readonly stream: Stream.Stream<BusEventEnvelope>;
 }
 
-export class BusService extends Context.Tag('@openAwork/BusService')<
-  BusService,
-  BusServiceImpl
->() {
+export class BusService extends Context.Tag('@openAwork/BusService')<BusService, BusServiceImpl>() {
   static live(): Layer.Layer<BusService> {
     const impl: BusServiceImpl = {
       publish: (envelope) =>

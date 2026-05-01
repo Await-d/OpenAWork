@@ -16,7 +16,7 @@ import {
 } from './edit-replacers.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
 import { getSessionWorkspaceRoot } from './workspace-safety.js';
-import { getProjectWideDiagnostics, type ProjectDiagnostic } from './project-diagnostics.js';
+import { getProjectWideDiagnostics } from './project-diagnostics.js';
 
 // Edit error recovery suffix (oh-my-opencode editErrorRecovery pattern)
 // Injected into edit tool error messages to guide the LLM to read the file
@@ -174,7 +174,9 @@ export function createEditTool(
         try {
           const wsRoot = getSessionWorkspaceRoot(sessionId);
           if (wsRoot) await formatFileAfterWrite(safePath, wsRoot);
-        } catch { /* best-effort formatting */ }
+        } catch {
+          /* best-effort formatting */
+        }
         await touchEditedFile(safePath);
         const diagnostics = await getPostWriteDiagnostics([safePath]);
         const projDiags = await getProjectWideDiagnostics(true, [safePath]);
@@ -214,12 +216,7 @@ export function createEditTool(
 
       let nextContent: string;
       try {
-        nextContent = fuzzyReplace(
-          currentContent,
-          normalizedOld,
-          normalizedNew,
-          input.replaceAll,
-        );
+        nextContent = fuzzyReplace(currentContent, normalizedOld, normalizedNew, input.replaceAll);
       } catch (err) {
         throw new Error(
           (err instanceof Error ? err.message : String(err)) + ' ' + EDIT_ERROR_RECOVERY_SUFFIX,
@@ -240,7 +237,9 @@ export function createEditTool(
       try {
         const wsRoot = getSessionWorkspaceRoot(sessionId);
         if (wsRoot) await formatFileAfterWrite(safePath, wsRoot);
-      } catch { /* best-effort formatting */ }
+      } catch {
+        /* best-effort formatting */
+      }
       await touchEditedFile(safePath);
       const diagnostics = await getPostWriteDiagnostics([safePath]);
       const projDiags = await getProjectWideDiagnostics(true, [safePath]);
@@ -254,9 +253,7 @@ export function createEditTool(
         },
         success: true,
         path: safePath,
-        replacements: input.replaceAll
-          ? countOccurrences(currentContent, normalizedOld) || 1
-          : 1,
+        replacements: input.replaceAll ? countOccurrences(currentContent, normalizedOld) || 1 : 1,
         created: false,
         diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
         projectDiagnostics: projDiags.length > 0 ? projDiags : undefined,

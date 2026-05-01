@@ -23,13 +23,9 @@ import {
   type ToolStateRunning,
   type ToolStateCompleted,
   type ToolStateError,
-  type AssistantMessage,
   type AssistantErrorObject,
-  makePartId,
   messageInfoFromRow,
-  messageInfoToRowData,
   partFromRow,
-  partToRowData,
   type PageResult,
   type MessageCursor,
 } from './message-v2-schema.js';
@@ -40,7 +36,7 @@ import {
 } from './tool-result-contract.js';
 import { emitEvent, MessageEvents } from './sync-event.js';
 import { appendSessionEvent } from './session-entry-store.js';
-import { makeSessionEventId, type SessionEventID } from './session-event.js';
+import { makeSessionEventId } from './session-event.js';
 // Side-effect import: registers the message/part projectors that translate
 // the events emitted below into INSERT/UPDATE/DELETE on message_v2/part_v2.
 // Without this the unified SyncEvent write path would silently no-op.
@@ -156,10 +152,7 @@ export function listMessagesByTurnLimit(input: {
   return rows.map((row) => messageInfoFromRow(row));
 }
 
-export function countMessages(input: {
-  sessionId: string;
-  userId: string;
-}): number {
+export function countMessages(input: { sessionId: string; userId: string }): number {
   const row = sqliteGet<{ cnt: number }>(
     'SELECT COUNT(*) AS cnt FROM message_v2 WHERE session_id = ? AND user_id = ?',
     [input.sessionId, input.userId],
@@ -167,10 +160,7 @@ export function countMessages(input: {
   return row?.cnt ?? 0;
 }
 
-export function countUserMessages(input: {
-  sessionId: string;
-  userId: string;
-}): number {
+export function countUserMessages(input: { sessionId: string; userId: string }): number {
   const row = sqliteGet<{ cnt: number }>(
     `SELECT COUNT(*) AS cnt FROM message_v2 WHERE session_id = ? AND user_id = ? AND data LIKE '%"role":"user"%'`,
     [input.sessionId, input.userId],
@@ -392,7 +382,7 @@ export function transitionToolToRunning(input: {
       sessionId: input.sessionId,
       userId: input.userId,
       event: {
-        id: makeSessionEventId(ts) as SessionEventID,
+        id: makeSessionEventId(ts),
         type: 'tool.called',
         timestamp: ts,
         callID: input.callID,
@@ -731,7 +721,9 @@ export function toUIMessages(input: MessageWithParts[]): UIMessage[] {
             ...(readState.output
               ? {
                   output:
-                    'attachments' in part.state && part.state.attachments && part.state.attachments.length > 0
+                    'attachments' in part.state &&
+                    part.state.attachments &&
+                    part.state.attachments.length > 0
                       ? { text: readState.output, attachments: part.state.attachments }
                       : readState.output,
                 }

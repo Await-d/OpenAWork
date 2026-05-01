@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  makeMessageId,
-  makePartId,
-  type MessageWithParts,
-} from '../message-v2-schema.js';
+import { makeMessageId, makePartId, type MessageWithParts } from '../message-v2-schema.js';
 import { toModelMessages } from '../message-to-model-messages.js';
 import { renderResponsesApi } from '../render-responses-api.js';
 import { renderChatCompletions } from '../render-chat-completions.js';
@@ -75,7 +71,9 @@ describe('multimodal user renderers', () => {
 
   it('renders Responses API user content with input_image blocks', () => {
     const unified = toModelMessages([createUserMessageWithImage()]);
-    const body = renderResponsesApi(unified, renderOptions) as { input: Array<{ content: unknown[] }> };
+    const body = renderResponsesApi(unified, renderOptions) as {
+      input: Array<{ content: unknown[] }>;
+    };
 
     expect(body.input[0]?.content).toEqual([
       { type: 'input_text', text: '请描述这张图片' },
@@ -85,7 +83,9 @@ describe('multimodal user renderers', () => {
 
   it('renders Chat Completions user content with image_url blocks', () => {
     const unified = toModelMessages([createUserMessageWithImage()]);
-    const body = renderChatCompletions(unified, renderOptions) as { messages: Array<{ content: unknown[] }> };
+    const body = renderChatCompletions(unified, renderOptions) as {
+      messages: Array<{ content: unknown[] }>;
+    };
 
     expect(body.messages[0]?.content).toEqual([
       { type: 'text', text: '请描述这张图片' },

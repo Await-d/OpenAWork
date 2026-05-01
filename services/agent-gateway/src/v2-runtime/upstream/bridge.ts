@@ -91,7 +91,10 @@ function pickProtocol(provider: AIProvider): UpstreamProtocolKind {
   return 'chat_completions';
 }
 
-function selectApiKey(provider: AIProvider, env: NodeJS.ProcessEnv = process.env): string | undefined {
+function selectApiKey(
+  provider: AIProvider,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
   if (provider.apiKey && provider.apiKey.length > 0) return provider.apiKey;
   if (provider.apiKeyEnv) {
     const fromEnv = env[provider.apiKeyEnv];

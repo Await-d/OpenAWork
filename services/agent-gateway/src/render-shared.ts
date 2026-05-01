@@ -15,9 +15,7 @@ import type { PromptCacheConfig, UpstreamRequestBody } from './provider-adapter.
  * Build extra top-level body fields for session-level prompt caching.
  * OpenAI/Azure/OpenRouter all use snake_case prompt_cache_key.
  */
-export function buildPromptCacheKeyFields(
-  cache?: PromptCacheConfig,
-): Record<string, unknown> {
+export function buildPromptCacheKeyFields(cache?: PromptCacheConfig): Record<string, unknown> {
   if (!cache?.sessionId) return {};
 
   const providerType = cache.providerType;
@@ -82,4 +80,51 @@ export function readObjectRecord(value: unknown): Record<string, unknown> {
 
 export function isReasoningModel(model: string): boolean {
   return /^(gpt-5|o[134]|codex-?)/i.test(model);
+}
+
+// ─── OpenAI gpt-5.x text verbosity default ───
+
+/**
+ * Mirror of opencode's `transform.ts` heuristic
+ * (`packages/opencode/src/provider/transform.ts` ~lines 950-957): only
+ * `gpt-5.x` versioned models (5.1+, NOT bare `gpt-5` / `gpt-5-mini` /
+ * `gpt-5-pro`) accept the new `verbosity` knob, and chat-tuned (`-chat`)
+ * or codex variants either don't support it or only support `medium`.
+ *
+ * Returns true when we should default the request to `verbosity: "low"`
+ * for terser assistant output. Caller still needs to ensure
+ * `providerType === 'openai'`.
+ */
+export function shouldDefaultGpt5LowVerbosity(model: string): boolean {
+  const id = model.toLowerCase();
+  return id.includes('gpt-5.') && !id.includes('codex') && !id.includes('-chat');
+}
+
+/**
+ * Inject `verbosity: "low"` (chat completions, top-level) or
+ * `text: { verbosity: "low" }` (responses, nested) when the model
+ * matches the gpt-5.x default-verbosity rule. Does NOT overwrite a
+ * verbosity value the caller already supplied via requestOverrides.
+ */
+export function applyOpenAIDefaultTextVerbosity(
+  body: UpstreamRequestBody,
+  providerType: string | undefined,
+  model: string,
+  protocol: 'chat_completions' | 'responses' | 'anthropic_messages',
+): UpstreamRequestBody {
+  if (protocol === 'anthropic_messages') return body;
+  if (providerType !== 'openai') return body;
+  if (!shouldDefaultGpt5LowVerbosity(model)) return body;
+
+  if (protocol === 'chat_completions') {
+    if (body['verbosity'] !== undefined) return body;
+    return { ...body, verbosity: 'low' };
+  }
+
+  const existingText = readObjectRecord(body['text']);
+  if (existingText['verbosity'] !== undefined) return body;
+  return {
+    ...body,
+    text: { ...existingText, verbosity: 'low' },
+  };
 }

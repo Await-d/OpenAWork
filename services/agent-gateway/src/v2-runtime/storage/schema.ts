@@ -107,10 +107,7 @@ export const eventLog = sqliteTable(
     createdAt: text('created_at').default(sql`(datetime('now'))`),
   },
   (table) => ({
-    aggregateSeqUq: uniqueIndex('uq_event_log_aggregate_seq').on(
-      table.aggregateId,
-      table.seq,
-    ),
+    aggregateSeqUq: uniqueIndex('uq_event_log_aggregate_seq').on(table.aggregateId, table.seq),
   }),
 );
 

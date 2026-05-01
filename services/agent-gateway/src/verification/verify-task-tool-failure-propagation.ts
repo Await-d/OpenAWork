@@ -44,9 +44,13 @@ function isTaskToolOutput(value: unknown): value is {
   );
 }
 
-function extractToolResultPart(message: {
-  content?: MessageContent[];
-} | undefined): Extract<MessageContent, { type: 'tool_result' }> | undefined {
+function extractToolResultPart(
+  message:
+    | {
+        content?: MessageContent[];
+      }
+    | undefined,
+): Extract<MessageContent, { type: 'tool_result' }> | undefined {
   if (!Array.isArray(message?.content)) {
     return undefined;
   }
@@ -212,9 +216,11 @@ async function main(): Promise<void> {
               toolOutput?.['status'] === 'failed',
               'parent tool_result should mark failed status',
             );
+            const errorMessage =
+              typeof toolOutput['errorMessage'] === 'string' ? toolOutput['errorMessage'] : '';
             assert(
-              String(toolOutput?.['errorMessage'] ?? '').includes(EXPECTED_USER_FACING_ERROR) &&
-                String(toolOutput?.['errorMessage'] ?? '').includes(EXPECTED_ERROR_SUMMARY),
+              errorMessage.includes(EXPECTED_USER_FACING_ERROR) &&
+                errorMessage.includes(EXPECTED_ERROR_SUMMARY),
               'parent tool_result should expose the user-facing child error summary with technical detail',
             );
 
@@ -235,8 +241,7 @@ async function main(): Promise<void> {
             );
             assert(
               reminderPayload.payload?.message?.includes(`错误：${EXPECTED_USER_FACING_ERROR}`) ===
-                true &&
-                reminderPayload.payload?.message?.includes(EXPECTED_ERROR_SUMMARY) === true,
+                true && reminderPayload.payload?.message?.includes(EXPECTED_ERROR_SUMMARY) === true,
               'failure reminder should include the user-facing error summary with technical detail',
             );
 

@@ -75,10 +75,7 @@ import {
   translateRunEventToSessionEvent,
   translateStreamChunkToSessionEvents,
 } from '../session-entry-store.js';
-import type {
-  SessionEvent,
-  SessionEventID,
-} from '../session-event.js';
+import type { SessionEvent, SessionEventID } from '../session-event.js';
 
 beforeEach(() => {
   sessionRows = [{ id: 'session-1', user_id: 'user-1' }];
@@ -155,8 +152,7 @@ describe('session-entry-store', () => {
   });
 
   it('replaySessionEntries reconstructs an assistant entry from persisted events', () => {
-    const persist = (event: SessionEvent) =>
-      appendSessionEvent({ sessionId: 'session-1', event });
+    const persist = (event: SessionEvent) => appendSessionEvent({ sessionId: 'session-1', event });
 
     persist({
       id: 'e1' as SessionEventID,
@@ -294,22 +290,10 @@ describe('session-entry-store', () => {
 
     it('resets reasoning state on thinking_end so the next thinking_start can re-open', () => {
       const state = createStreamSessionEventState();
-      translateStreamChunkToSessionEvents(
-        { type: 'thinking_start' },
-        state,
-        1,
-      );
-      translateStreamChunkToSessionEvents(
-        { type: 'thinking_delta', delta: 'why' },
-        state,
-        2,
-      );
+      translateStreamChunkToSessionEvents({ type: 'thinking_start' }, state, 1);
+      translateStreamChunkToSessionEvents({ type: 'thinking_delta', delta: 'why' }, state, 2);
       translateStreamChunkToSessionEvents({ type: 'thinking_end' }, state, 3);
-      const reopened = translateStreamChunkToSessionEvents(
-        { type: 'thinking_start' },
-        state,
-        4,
-      );
+      const reopened = translateStreamChunkToSessionEvents({ type: 'thinking_start' }, state, 4);
       expect(reopened.map((e) => e.type)).toEqual(['reasoning.started']);
     });
 

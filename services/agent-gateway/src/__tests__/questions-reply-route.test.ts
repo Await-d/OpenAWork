@@ -83,7 +83,9 @@ const ANSWERED_PAYLOAD_JSON = JSON.stringify({
   clientRequestId: 'client-req-1',
   nextRound: 2,
   toolCallId: 'tool-call-1',
-  rawInput: { questions: [{ header: 'h', question: 'q', options: [{ label: 'a', description: 'a' }] }] },
+  rawInput: {
+    questions: [{ header: 'h', question: 'q', options: [{ label: 'a', description: 'a' }] }],
+  },
   requestData: {
     clientRequestId: 'client-req-1',
     message: '请问哪个目录',

@@ -1,8 +1,9 @@
 import type { RequestOverrides } from '@openAwork/agent-core';
-import type {
-  ImageGenerationBackground,
-  ImageGenerationOutputFormat,
-  ImageGenerationQuality,
+import {
+  getImageGenerationSizeTier,
+  type ImageGenerationBackground,
+  type ImageGenerationOutputFormat,
+  type ImageGenerationQuality,
 } from '@openAwork/shared';
 
 export type ImageGenerationSize = string;
@@ -53,23 +54,36 @@ export class OpenAiImageGenerationError extends Error {
   }
 }
 
-function mapUpstreamImageGenerationMessage(statusCode: number, upstreamBody?: string): string {
+function mapUpstreamImageGenerationMessage(
+  statusCode: number,
+  upstreamBody: string | undefined,
+  size: ImageGenerationSize,
+): string {
   const detail = extractUpstreamErrorDetail(upstreamBody);
   const suffix = detail ? ` (${detail})` : '';
+  const tier = getImageGenerationSizeTier(size);
+  const fourKHint =
+    tier === '4k'
+      ? ' 提示：4K 是实验性功能，您当前的中转/服务可能不支持，建议改用 2K（如 2048x1152）重试。'
+      : '';
 
   if (statusCode === 400) {
-    return `图片生成请求被上游拒绝，请检查模型配置与请求参数。${suffix}`;
+    return `图片生成请求被上游拒绝，请检查模型配置与请求参数。${suffix}${fourKHint}`;
   }
 
   if (statusCode === 401 || statusCode === 403) {
     return `图片生成鉴权失败，请检查 OpenAI 提供商凭据。${suffix}`;
   }
 
+  if (statusCode === 408) {
+    return `图片生成超时（${tier === '4k' ? '4K 可能耗时接近 6 分钟' : tier === '2k' ? '2K 通常约 1~3 分钟' : '请检查网络'}）。${fourKHint}`;
+  }
+
   if (statusCode === 429) {
     return '图片生成请求过于频繁，请稍后重试。';
   }
 
-  return `图片生成上游服务暂时不可用 [HTTP ${statusCode}]，请稍后重试。${suffix}`;
+  return `图片生成上游服务暂时不可用 [HTTP ${statusCode}]，请稍后重试。${suffix}${fourKHint}`;
 }
 
 function extractUpstreamErrorDetail(body?: string): string | null {
@@ -78,7 +92,7 @@ function extractUpstreamErrorDetail(body?: string): string | null {
     const json = JSON.parse(body) as Record<string, unknown>;
     const error = json['error'] as Record<string, unknown> | undefined;
     if (error && typeof error['message'] === 'string') {
-      const msg = error['message'] as string;
+      const msg = error['message'];
       return msg.length > 200 ? msg.slice(0, 200) + '…' : msg;
     }
   } catch {
@@ -101,6 +115,12 @@ function applyImageGenerationOverrides(
   }
 
   return nextBody;
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: unknown };
+  return candidate.name === 'AbortError';
 }
 
 function inferMimeType(outputFormat: ImageGenerationOutputFormat): string {
@@ -141,21 +161,32 @@ export async function generateImageWithOpenAi(
     background: input.background,
   } satisfies Record<string, unknown>;
 
-  const response = await fetch(`${input.apiBaseUrl}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(input.requestOverrides.headers ?? {}),
-      Authorization: `Bearer ${input.apiKey}`,
-    },
-    body: JSON.stringify(applyImageGenerationOverrides(baseBody, input.requestOverrides)),
-    signal: input.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${input.apiBaseUrl}/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(input.requestOverrides.headers ?? {}),
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify(applyImageGenerationOverrides(baseBody, input.requestOverrides)),
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new OpenAiImageGenerationError('图片生成已被取消。', {
+        retryable: false,
+        statusCode: 499,
+      });
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const upstreamBody = await response.text().catch(() => 'Unknown error');
     throw new OpenAiImageGenerationError(
-      mapUpstreamImageGenerationMessage(response.status, upstreamBody),
+      mapUpstreamImageGenerationMessage(response.status, upstreamBody, input.size),
       {
         retryable: response.status >= 500 || response.status === 429,
         statusCode: response.status,
@@ -218,22 +249,36 @@ export async function editImageWithOpenAi(
     input.inputImage.fileName,
   );
 
-  const response = await fetch(`${input.apiBaseUrl}/images/edits`, {
-    method: 'POST',
-    headers: {
-      ...(input.requestOverrides.headers ?? {}),
-      Authorization: `Bearer ${input.apiKey}`,
-    },
-    body: form,
-    signal: input.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${input.apiBaseUrl}/images/edits`, {
+      method: 'POST',
+      headers: {
+        ...(input.requestOverrides.headers ?? {}),
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: form,
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new OpenAiImageGenerationError('图片编辑已被取消。', {
+        retryable: false,
+        statusCode: 499,
+      });
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const upstreamBody = await response.text().catch(() => 'Unknown error');
-    throw new OpenAiImageGenerationError(mapUpstreamImageGenerationMessage(response.status, upstreamBody), {
-      retryable: response.status >= 500 || response.status === 429,
-      statusCode: response.status,
-    });
+    throw new OpenAiImageGenerationError(
+      mapUpstreamImageGenerationMessage(response.status, upstreamBody, input.size),
+      {
+        retryable: response.status >= 500 || response.status === 429,
+        statusCode: response.status,
+      },
+    );
   }
 
   const payload = (await response.json()) as {

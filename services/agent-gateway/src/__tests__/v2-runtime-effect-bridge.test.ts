@@ -8,7 +8,7 @@ vi.mock('../db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(),
-  sqliteTransaction: <T,>(fn: () => T) => fn(),
+  sqliteTransaction: <T>(fn: () => T) => fn(),
 }));
 
 import { EffectBridge, StorageService } from '../v2-runtime/services/index.js';
@@ -36,9 +36,9 @@ describe('EffectBridge.run', () => {
       return yield* Effect.fail(new Error('explicit failure'));
     });
 
-    await expect(
-      EffectBridge.run(StorageService.test({}), program),
-    ).rejects.toThrow(/explicit failure/);
+    await expect(EffectBridge.run(StorageService.test({}), program)).rejects.toThrow(
+      /explicit failure/,
+    );
   });
 
   it('lets multiple services be supplied via Layer.merge', async () => {

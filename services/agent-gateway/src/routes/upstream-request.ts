@@ -1,13 +1,17 @@
 import type { RequestOverrides } from '@openAwork/agent-core';
 import type { UpstreamProtocol } from './upstream-protocol.js';
 import type { PromptCacheConfig } from '../provider-adapter.js';
+import { applyOpenAIDefaultTextVerbosity } from '../render-shared.js';
 import {
   renderNormalizedConversationToUpstreamChatMessages,
   type NormalizedConversationMessage,
   type UpstreamChatMessage,
 } from '../normalized-conversation.js';
 
-export type { NormalizedConversationMessage, UpstreamChatMessage } from '../normalized-conversation.js';
+export type {
+  NormalizedConversationMessage,
+  UpstreamChatMessage,
+} from '../normalized-conversation.js';
 
 export type UpstreamRequestBody = Record<string, unknown>;
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -297,18 +301,18 @@ export function buildUpstreamRequestBody(input: {
       : input.protocol === 'anthropic_messages'
         ? buildAnthropicMessagesBody(renderedMessages, input)
         : {
-          model: input.model,
-          ...(input.variant ? { variant: input.variant } : {}),
-          messages: annotatedMessages,
-          max_tokens: input.maxTokens,
-          temperature: input.temperature,
-          stream: true,
-          stream_options: {
-            include_usage: true,
-          },
-          ...(input.tools.length > 0 ? { tools: input.tools, tool_choice: 'auto' as const } : {}),
-          ...buildCacheKeyFields(input.cache),
-        };
+            model: input.model,
+            ...(input.variant ? { variant: input.variant } : {}),
+            messages: annotatedMessages,
+            max_tokens: input.maxTokens,
+            temperature: input.temperature,
+            stream: true,
+            stream_options: {
+              include_usage: true,
+            },
+            ...(input.tools.length > 0 ? { tools: input.tools, tool_choice: 'auto' as const } : {}),
+            ...buildCacheKeyFields(input.cache),
+          };
 
   const overriddenBody = applyRequestOverridesToBody(
     baseBody,
@@ -317,7 +321,22 @@ export function buildUpstreamRequestBody(input: {
   );
   const usageAwareBody = applyChatStreamUsageOptions(overriddenBody, input.protocol);
 
-  return applyThinkingConfigToBody(usageAwareBody, input.thinking, input.protocol);
+  const thoughtAwareBody = applyThinkingConfigToBody(
+    usageAwareBody,
+    input.thinking,
+    input.protocol,
+  );
+
+  // Default `verbosity: "low"` on gpt-5.x non-codex non-chat models (top-level
+  // for chat completions, nested under `text` for responses). Independent of
+  // thinking enabled/disabled — verbosity is OpenAI's text-output-length knob,
+  // not a reasoning param. Mirrors opencode (`transform.ts` ~lines 950-957).
+  return applyOpenAIDefaultTextVerbosity(
+    thoughtAwareBody,
+    input.thinking?.providerType ?? input.cache?.providerType,
+    input.model,
+    input.protocol,
+  );
 }
 
 function convertConversationToResponsesInput(
@@ -567,9 +586,7 @@ function buildResponsesCacheKeyFields(cache?: PromptCacheConfig): Record<string,
  * Used to set `previous_response_id` for the next Responses API request,
  * enabling OpenAI to reuse cached KV state including reasoning tokens.
  */
-function findLastResponseId(
-  messages?: NormalizedConversationMessage[],
-): string | undefined {
+function findLastResponseId(messages?: NormalizedConversationMessage[]): string | undefined {
   if (!messages) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!;
@@ -631,7 +648,9 @@ function buildAnthropicMessagesBody(
     const isTail = lastTwoIndices.has(i);
 
     if (msg.role === 'user') {
-      const contentBlocks: Array<Record<string, unknown>> = [{ type: 'text', text: msg.content ?? '' }];
+      const contentBlocks: Array<Record<string, unknown>> = [
+        { type: 'text', text: msg.content ?? '' },
+      ];
       if (isTail) {
         Object.assign(contentBlocks[0]!, maybeCacheControl());
       }

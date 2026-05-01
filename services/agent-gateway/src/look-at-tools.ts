@@ -287,14 +287,10 @@ export async function runLookAtTool(input: {
       imageDataUrl,
       mimeType,
       model: routeConfig.route.model,
-      ...(routeConfig.route.providerType
-        ? { providerType: routeConfig.route.providerType }
-        : {}),
+      ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
-      ...(routeConfig.route.systemPrompt
-        ? { systemPrompt: routeConfig.route.systemPrompt }
-        : {}),
+      ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
     });
   } else if (filePath && ['text/plain', 'text/markdown', 'application/json'].includes(mimeType)) {
     const textContent = (await readFileAsText(filePath)).slice(0, 16000);
@@ -303,14 +299,10 @@ export async function runLookAtTool(input: {
       apiKey: routeConfig.route.apiKey,
       mimeType,
       model: routeConfig.route.model,
-      ...(routeConfig.route.providerType
-        ? { providerType: routeConfig.route.providerType }
-        : {}),
+      ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
-      ...(routeConfig.route.systemPrompt
-        ? { systemPrompt: routeConfig.route.systemPrompt }
-        : {}),
+      ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
       textContent: `File content:\n${textContent}`,
     });
   } else if (filePath && mimeType === 'application/pdf') {
@@ -320,14 +312,10 @@ export async function runLookAtTool(input: {
       apiKey: routeConfig.route.apiKey,
       mimeType,
       model: routeConfig.route.model,
-      ...(routeConfig.route.providerType
-        ? { providerType: routeConfig.route.providerType }
-        : {}),
+      ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
-      ...(routeConfig.route.systemPrompt
-        ? { systemPrompt: routeConfig.route.systemPrompt }
-        : {}),
+      ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
       textContent: `PDF text:\n${textContent}`,
     });
   } else {

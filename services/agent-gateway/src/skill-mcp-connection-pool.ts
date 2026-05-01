@@ -27,9 +27,7 @@ const EXCLUDED_ENV_PATTERNS: RegExp[] = [
   /^NO_UPDATE_NOTIFIER$/,
 ];
 
-function createCleanMcpEnvironment(
-  customEnv: Record<string, string> = {},
-): Record<string, string> {
+function createCleanMcpEnvironment(customEnv: Record<string, string> = {}): Record<string, string> {
   const proc = globalThis as unknown as { process?: { env?: Record<string, string | undefined> } };
   const rawEnv = proc?.process?.env ?? {};
   const cleanEnv: Record<string, string> = {};
@@ -101,25 +99,36 @@ class SkillMcpConnectionPool {
       this.pendingConnections.clear();
     };
 
-    const proc = globalThis as unknown as { process?: { on?: (event: string, cb: () => void) => void; exit?: (code: number) => never } };
-    proc.process?.on?.('SIGINT', async () => {
-      await cleanup();
-      proc.process?.exit?.(0);
-    });
-    proc.process?.on?.('SIGTERM', async () => {
-      await cleanup();
-      proc.process?.exit?.(0);
-    });
+    const proc = globalThis as unknown as {
+      process?: { on?: (event: string, cb: () => void) => void; exit?: (code: number) => never };
+    };
+    const cleanupAndExit = (): void => {
+      void cleanup()
+        .catch((error: unknown) => {
+          console.warn('Failed to clean up Skill MCP connections before exit', error);
+        })
+        .finally(() => {
+          proc.process?.exit?.(0);
+        });
+    };
+    proc.process?.on?.('SIGINT', cleanupAndExit);
+    proc.process?.on?.('SIGTERM', cleanupAndExit);
   }
 
   private startCleanupTimer(): void {
     if (this.cleanupInterval) return;
     this.cleanupInterval = setInterval(() => {
-      this.cleanupIdleConnections();
+      void this.cleanupIdleConnections().catch((error: unknown) => {
+        console.warn('Failed to clean up idle Skill MCP connections', error);
+      });
     }, CLEANUP_INTERVAL_MS);
 
     // Don't keep the process alive just for this timer
-    if (typeof this.cleanupInterval === 'object' && this.cleanupInterval && 'unref' in this.cleanupInterval) {
+    if (
+      typeof this.cleanupInterval === 'object' &&
+      this.cleanupInterval &&
+      'unref' in this.cleanupInterval
+    ) {
       (this.cleanupInterval as ReturnType<typeof setInterval> & { unref(): void }).unref();
     }
   }

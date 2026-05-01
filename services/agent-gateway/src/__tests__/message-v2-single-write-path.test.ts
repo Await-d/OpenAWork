@@ -140,9 +140,7 @@ vi.mock('../db.js', () => ({
     }
     if (sql.includes('DELETE FROM message_v2')) {
       // Either single delete or bulk IN(...) delete
-      const ids = sql.includes('id IN (')
-        ? (params.slice(2) as string[])
-        : [params[0] as string];
+      const ids = sql.includes('id IN (') ? (params.slice(2) as string[]) : [params[0] as string];
       messageRows = messageRows.filter((r) => !ids.includes(r.id));
       return;
     }
@@ -224,9 +222,7 @@ vi.mock('../db.js', () => ({
           )
           .sort((a, b) => a.time_created - b.time_created || a.id.localeCompare(b.id));
       }
-      return messageRows.filter(
-        (r) => r.session_id === sessionId && r.user_id === userId,
-      );
+      return messageRows.filter((r) => r.session_id === sessionId && r.user_id === userId);
     }
     if (sql.includes('FROM part_v2') && sql.includes('message_id')) {
       return partRows.filter((r) => r.message_id === params[0]);

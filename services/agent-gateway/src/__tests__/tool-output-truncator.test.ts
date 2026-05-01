@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  truncateToolOutput,
-  truncateToolOutputUniversal,
-} from '../tool-output-truncator.js';
+import { truncateToolOutput, truncateToolOutputUniversal } from '../tool-output-truncator.js';
 
 const NOTICE_FRAGMENT = '[输出已截断';
 
@@ -73,7 +70,7 @@ describe('truncateToolOutputUniversal', () => {
     const output = { payload: 'a'.repeat(120_000) };
     const result = truncateToolOutputUniversal('mcp_call', output);
     expect(typeof result).toBe('string');
-    expect((result as string)).toContain(NOTICE_FRAGMENT);
+    expect(result as string).toContain(NOTICE_FRAGMENT);
   });
 
   it('preserves null and undefined outputs', () => {
@@ -87,6 +84,6 @@ describe('truncateToolOutputUniversal', () => {
     node.next = node;
     const result = truncateToolOutputUniversal('mcp_call', node);
     expect(typeof result).toBe('string');
-    expect((result as string)).toContain(NOTICE_FRAGMENT);
+    expect(result as string).toContain(NOTICE_FRAGMENT);
   });
 });

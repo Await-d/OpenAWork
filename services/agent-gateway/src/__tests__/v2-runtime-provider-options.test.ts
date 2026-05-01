@@ -109,9 +109,7 @@ describe('applyAnthropicCacheBreakpoints', () => {
   it('marks the system message and last 2 non-system messages on anthropic providers', () => {
     const result = applyAnthropicCacheBreakpoints(buildMessages(), 'anthropic');
     const cacheMarked = result.map(
-      (m) =>
-        ((m.providerOptions?.['anthropic'] ?? {}) as { cacheControl?: unknown })
-          .cacheControl,
+      (m) => ((m.providerOptions?.['anthropic'] ?? {}) as { cacheControl?: unknown }).cacheControl,
     );
     // system → marked; turn-1 → unchanged; reply-1 → unchanged;
     // turn-2 → marked; reply-2 → marked

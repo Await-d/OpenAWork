@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import type * as MessageStoreV2 from '../message-store-v2.js';
 
 const mocks = vi.hoisted(() => ({
   transitionToolToRunningMock: vi.fn(),
@@ -17,9 +18,7 @@ vi.mock('../db.js', () => ({
 }));
 
 vi.mock('../message-store-v2.js', async () => {
-  const actual = await vi.importActual<typeof import('../message-store-v2.js')>(
-    '../message-store-v2.js',
-  );
+  const actual = await vi.importActual<typeof MessageStoreV2>('../message-store-v2.js');
   return {
     ...actual,
     transitionToolToRunning: mocks.transitionToolToRunningMock,

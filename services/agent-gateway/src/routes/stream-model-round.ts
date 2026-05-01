@@ -1,9 +1,20 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../thinking-block-validator.js';
-import { isContextOverflow, type PreparedUpstreamConversationReport } from '../session-message-store.js';
-import { toModelMessages, filterCompacted, type UnifiedMessage } from '../message-to-model-messages.js';
-import { ProviderAdapter, type FunctionToolDefinition, type PromptCacheConfig } from '../provider-adapter.js';
+import {
+  isContextOverflow,
+  type PreparedUpstreamConversationReport,
+} from '../session-message-store.js';
+import {
+  toModelMessages,
+  filterCompacted,
+  type UnifiedMessage,
+} from '../message-to-model-messages.js';
+import {
+  ProviderAdapter,
+  type FunctionToolDefinition,
+  type PromptCacheConfig,
+} from '../provider-adapter.js';
 import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../anthropic-betas.js';
 import {
   appendSessionMessageV2,
@@ -27,10 +38,7 @@ import {
   ResponsesUpstreamEventError,
   type StreamUsageSummary,
 } from './stream-protocol.js';
-import {
-  buildSystemPromptChain,
-  type SyntheticRequestContext,
-} from './stream-system-prompts.js';
+import { buildSystemPromptChain, type SyntheticRequestContext } from './stream-system-prompts.js';
 import type { resolveModelRoute } from '../model-router.js';
 import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
@@ -86,6 +94,8 @@ interface StreamAccumulationState {
    * appending duplicate segments per delta.
    */
   contentSegments: OrderedContentSegment[];
+  /** Timestamp of the first text_delta or thinking_delta chunk. */
+  firstContentAt?: number;
   /** Encrypted reasoning content from Responses API, needed for multi-turn. */
   reasoningEncryptedContent?: string;
   /** Reasoning summary from Responses API. */
@@ -270,6 +280,7 @@ function _buildAssistantTextWithThinking(text: string, thinking: string): string
 
 function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): void {
   if (chunk.type === 'text_delta') {
+    if (state.firstContentAt === undefined) state.firstContentAt = Date.now();
     state.assistantText += chunk.delta;
     // Order-preserving mirror: extend the trailing text segment if the most
     // recent segment is also text, otherwise open a new one. This way the
@@ -292,6 +303,7 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
   }
 
   if (chunk.type === 'thinking_delta') {
+    if (state.firstContentAt === undefined) state.firstContentAt = Date.now();
     state.assistantThinkingBlocks = appendReasoningChunk(state.assistantThinkingBlocks, chunk);
     // Trailing-segment extension only: if the wire stream interleaves
     // reasoning with text/tool deltas (e.g. reasoning_A → text →
@@ -362,9 +374,11 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
   // Subsequent argument deltas update toolCalls map only — segment carries
   // just the identity reference and buildAssistantContent reads the latest
   // input from the map at finalize time.
-  if (!state.contentSegments.some(
-    (segment) => segment.kind === 'tool_call' && segment.toolCallId === chunk.toolCallId,
-  )) {
+  if (
+    !state.contentSegments.some(
+      (segment) => segment.kind === 'tool_call' && segment.toolCallId === chunk.toolCallId,
+    )
+  ) {
     state.contentSegments.push({
       kind: 'tool_call',
       toolCallId: chunk.toolCallId,
@@ -488,9 +502,7 @@ function buildOrderedAssistantContent(
     Boolean(state.reasoningEncryptedContent) ||
     Boolean(state.reasoningSummary) ||
     Boolean(state.responseId);
-  const hasReasoningSegment = state.contentSegments.some(
-    (segment) => segment.kind === 'reasoning',
-  );
+  const hasReasoningSegment = state.contentSegments.some((segment) => segment.kind === 'reasoning');
   if (hasResponsesMeta && !hasReasoningSegment) {
     content.push({
       type: 'reasoning',
@@ -519,13 +531,23 @@ function buildOrderedAssistantContent(
       // ReasoningBlock is consulted only as a fallback for missing
       // timestamps (e.g. block.startedAt/endedAt may be set by upstream
       // but the chunk lacked occurredAt).
-      const block = state.assistantThinkingBlocks.find(
-        (entry) => entry.key === segment.blockKey,
-      );
+      const block = state.assistantThinkingBlocks.find((entry) => entry.key === segment.blockKey);
       const text = segment.text;
       const startedAt = segment.startedAt ?? block?.startedAt;
       const endedAt = segment.endedAt ?? block?.endedAt;
       const shouldAttachMeta = !reasoningMetadataAttached && hasResponsesMeta;
+      // Skip orphan reasoning segments — i.e. a `thinking_start` was emitted
+      // but the wire stream got cut to a tool_use (or finished early)
+      // before any `thinking_delta` arrived AND no Responses-API metadata
+      // (encryptedContent / summary / responseId) needs to ride along.
+      // Persisting these segments serves no purpose: the model can't
+      // consume them on the next turn (no encrypted payload), and the
+      // client renders them as a stray "Thinking:" header with no body.
+      // Real content (text non-empty) and the metadata-carrying placeholder
+      // both still emit below.
+      if (text.trim().length === 0 && !shouldAttachMeta) {
+        continue;
+      }
       content.push({
         type: 'reasoning',
         text,
@@ -534,9 +556,7 @@ function buildOrderedAssistantContent(
         ...(shouldAttachMeta && state.reasoningEncryptedContent
           ? { encryptedContent: state.reasoningEncryptedContent }
           : {}),
-        ...(shouldAttachMeta && state.reasoningSummary
-          ? { summary: state.reasoningSummary }
-          : {}),
+        ...(shouldAttachMeta && state.reasoningSummary ? { summary: state.reasoningSummary } : {}),
         ...(shouldAttachMeta && state.responseId ? { responseId: state.responseId } : {}),
       });
       if (shouldAttachMeta) reasoningMetadataAttached = true;
@@ -821,7 +841,12 @@ export async function runModelRound(input: {
   let stepEndedEmitted = false;
   const emitStepEnded = (
     reason: string,
-    usageSummary?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } } | undefined,
+    usageSummary?: {
+      input?: number;
+      output?: number;
+      reasoning?: number;
+      cache?: { read?: number; write?: number };
+    },
     cost = 0,
   ): void => {
     if (stepEndedEmitted) return;
@@ -882,6 +907,9 @@ export async function runModelRound(input: {
         reason === 'tool_use'
           ? createIntermediateAssistantRequestId(input.clientRequestId, input.round)
           : input.clientRequestId,
+      createdAt: stepStartedAt,
+      completedAt: Date.now(),
+      firstContentAt: state.firstContentAt,
     });
     if (reason === 'end_turn') {
       upsertArtifactsFromAssistantMessage({
@@ -1139,9 +1167,7 @@ export async function runModelRound(input: {
       finalizeAssistant(stopReason);
       emitStepEnded(stopReason);
 
-      const shouldContinue = isToolUseStopReason(stopReason)
-        ? state.toolCalls.size > 0
-        : false;
+      const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
       return {
         overflow: false,
         shouldContinue,

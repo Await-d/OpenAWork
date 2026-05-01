@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  aggregateSessionEntries,
-  type SessionEntryAssistant,
-} from '../session-entry.js';
-import type {
-  SessionEvent,
-  SessionEventID,
-} from '../session-event.js';
+import { aggregateSessionEntries, type SessionEntryAssistant } from '../session-entry.js';
+import type { SessionEvent, SessionEventID } from '../session-event.js';
 
 function evt<T extends SessionEvent>(value: Omit<T, 'id'> & { id?: string }): T {
   return {

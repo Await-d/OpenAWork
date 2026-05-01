@@ -13,7 +13,12 @@ import type {
   ThinkingConfig,
   RenderOptions,
 } from './provider-adapter.js';
-import { buildPromptCacheKeyFields, applyRequestOverrides, readObjectRecord } from './render-shared.js';
+import {
+  buildPromptCacheKeyFields,
+  applyRequestOverrides,
+  readObjectRecord,
+  applyOpenAIDefaultTextVerbosity,
+} from './render-shared.js';
 
 // ─── Cache Annotations ───
 
@@ -24,10 +29,7 @@ interface CacheControlAnnotation {
 type AnnotatedChatMessage = Record<string, unknown> & Partial<CacheControlAnnotation>;
 
 function shouldApplyCacheAnnotations(providerType?: string): boolean {
-  return (
-    providerType === 'anthropic' ||
-    providerType === 'openrouter'
-  );
+  return providerType === 'anthropic' || providerType === 'openrouter';
 }
 
 /**
@@ -108,7 +110,7 @@ export function renderChatCompletions(
         role: 'user' as const,
         content: [
           ...(msg.content ? [{ type: 'text' as const, text: msg.content }] : []),
-          ...((msg.images ?? []).flatMap((image) =>
+          ...(msg.images ?? []).flatMap((image) =>
             image.imageUrl
               ? [
                   {
@@ -120,7 +122,7 @@ export function renderChatCompletions(
                   },
                 ]
               : [],
-          )),
+          ),
         ],
       };
     }
@@ -169,6 +171,15 @@ function applyOverridesAndThinking(
 ): UpstreamRequestBody {
   let result = applyRequestOverrides(body, options.requestOverrides);
   result = applyThinkingConfig(result, options.thinking);
+  // Default `verbosity: "low"` on gpt-5.x non-codex non-chat models.
+  // Independent of thinking enabled/disabled — this is OpenAI's separate
+  // text-output-length knob, not a reasoning param. Mirrors opencode.
+  result = applyOpenAIDefaultTextVerbosity(
+    result,
+    options.thinking?.providerType ?? options.cache?.providerType,
+    options.model,
+    'chat_completions',
+  );
   return result;
 }
 
@@ -215,9 +226,7 @@ function applyThinkingConfig(
 
     case 'openrouter':
       if (!supportsOpenRouterReasoning(model)) return next;
-      next['reasoning'] = thinking.enabled
-        ? { effort: thinking.effort }
-        : { enabled: false };
+      next['reasoning'] = thinking.enabled ? { effort: thinking.effort } : { enabled: false };
       return next;
 
     case 'qwen':
@@ -262,10 +271,7 @@ function applyGeminiThinking(
   return body;
 }
 
-function mergeGeminiConfig(
-  body: UpstreamRequestBody,
-  value: Record<string, unknown>,
-): void {
+function mergeGeminiConfig(body: UpstreamRequestBody, value: Record<string, unknown>): void {
   const extraBody = readObjectRecord(body['extra_body']);
   const googleBody = readObjectRecord(extraBody['google']);
   body['extra_body'] = {
@@ -293,9 +299,7 @@ function isMoonshotThinkingModel(model: string): boolean {
   );
 }
 
-function mapGeminiThinkingLevel(
-  effort: ReasoningEffort,
-): 'low' | 'medium' | 'high' {
+function mapGeminiThinkingLevel(effort: ReasoningEffort): 'low' | 'medium' | 'high' {
   if (effort === 'minimal' || effort === 'low') return 'low';
   if (effort === 'xhigh') return 'high';
   return effort;

@@ -108,6 +108,13 @@ describe('session images routes', () => {
     mocks.getImageProviderConfigMock.mockResolvedValue({
       provider: { id: 'openai', type: 'openai' },
       modelId: 'gpt-image-2',
+      model: {
+        id: 'gpt-image-2',
+        label: 'GPT Image 2',
+        enabled: true,
+        supportsImageGeneration: true,
+        supportsImageGeneration4K: false,
+      },
     });
     mocks.listArtifactsMock.mockResolvedValue([
       {
@@ -160,6 +167,65 @@ describe('session images routes', () => {
 
     expect(response.statusCode).toBe(404);
     expect(JSON.parse(response.body)).toEqual({ error: 'Session not found' });
+
+    await app.close();
+  });
+
+  it('allows 4K image requests even when the selected model declares no 4K support', async () => {
+    mocks.generateImageWithOpenAiMock.mockResolvedValue({
+      bytes: Buffer.from('4k-image-binary'),
+      mimeType: 'image/png',
+      outputFormat: 'png',
+      prompt: '画一张 4K 蓝鲸海报',
+      quality: 'high',
+      requestId: 'req-image-4k-1',
+      revisedPrompt: '一张 4K 蓝鲸海报',
+      size: '3840x2160',
+    });
+    mocks.createArtifactMock.mockReturnValue({
+      id: 'artifact-image-4k-1',
+      sessionId: 'session-1',
+      userId: 'user-a',
+      type: 'image',
+      title: '画一张 4K 蓝鲸海报',
+      content: 'data:image/png;base64,NGstaW1hZ2UtYmluYXJ5',
+      version: 1,
+      parentVersionId: null,
+      metadata: { modelId: 'gpt-image-2' },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      updatedAt: '2026-04-22T00:00:00.000Z',
+    });
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations',
+      payload: { prompt: '画一张 4K 蓝鲸海报', size: '3840x2160' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mocks.generateImageWithOpenAiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: '画一张 4K 蓝鲸海报',
+        size: '3840x2160',
+        quality: 'high',
+        outputFormat: 'png',
+        background: 'auto',
+      }),
+    );
+    expect(JSON.parse(response.body)).toMatchObject({
+      parameters: {
+        providerId: 'openai',
+        modelId: 'gpt-image-2',
+        size: '3840x2160',
+        quality: 'high',
+        outputFormat: 'png',
+        background: 'auto',
+      },
+    });
 
     await app.close();
   });
@@ -323,7 +389,9 @@ describe('session images routes', () => {
       url: '/sessions/session-1/images/generations',
       payload: {
         prompt: '把这张图改成极简蓝鲸海报',
-        inputArtifacts: [{ artifactId: 'artifact-input-1', fileName: 'input.png', mimeType: 'image/png' }],
+        inputArtifacts: [
+          { artifactId: 'artifact-input-1', fileName: 'input.png', mimeType: 'image/png' },
+        ],
       },
     });
 
@@ -348,7 +416,8 @@ describe('session images routes', () => {
     );
     expect(JSON.parse(response.body)).toMatchObject({
       artifact: { id: 'artifact-image-edit-1', type: 'image' },
-      messageSummary: '已编辑 1 张图片（gpt-image-2 · 1024x1024 · PNG）。 上游已对提示词做轻微改写。',
+      messageSummary:
+        '已编辑 1 张图片（gpt-image-2 · 1024x1024 · PNG）。 上游已对提示词做轻微改写。',
     });
 
     await app.close();
@@ -376,7 +445,9 @@ describe('session images routes', () => {
       url: '/sessions/session-1/images/generations',
       payload: {
         prompt: '把这份文本伪装成图片编辑',
-        inputArtifacts: [{ artifactId: 'artifact-input-1', fileName: 'spoof.png', mimeType: 'image/png' }],
+        inputArtifacts: [
+          { artifactId: 'artifact-input-1', fileName: 'spoof.png', mimeType: 'image/png' },
+        ],
       },
     });
 

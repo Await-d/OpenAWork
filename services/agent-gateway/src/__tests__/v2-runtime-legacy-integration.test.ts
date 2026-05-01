@@ -13,15 +13,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
+import type { DatabaseSync as NodeDatabaseSync } from 'node:sqlite';
 
 const requireFromHere = createRequire(import.meta.url);
-const sqliteModule = requireFromHere('node:sqlite') as typeof import('node:sqlite');
+const sqliteModule = requireFromHere('node:sqlite') as {
+  DatabaseSync: new (path: string) => NodeDatabaseSync;
+};
 const { DatabaseSync } = sqliteModule;
-type DatabaseSync = InstanceType<typeof sqliteModule.DatabaseSync>;
 
 let tempDir: string;
 let dbPath: string;
-let db: DatabaseSync;
+let db: NodeDatabaseSync;
 
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'openawork-v2-integration-'));
@@ -182,9 +184,7 @@ describe('v2-runtime integration with legacy schema', () => {
   it('streamMessagesNewestFirst yields messages back-to-front via the legacy schema', async () => {
     applyMinimalMigrations();
     db.exec(`INSERT INTO users (id, email) VALUES ('u-stream', 's@example.com')`);
-    db.exec(
-      `INSERT INTO sessions (id, user_id, title) VALUES ('s-stream', 'u-stream', 'stream')`,
-    );
+    db.exec(`INSERT INTO sessions (id, user_id, title) VALUES ('s-stream', 'u-stream', 'stream')`);
     const insert = db.prepare(
       'INSERT INTO message_v2 (id, session_id, user_id, time_created, data) VALUES (?, ?, ?, ?, ?)',
     );
@@ -209,9 +209,7 @@ describe('v2-runtime integration with legacy schema', () => {
   it('event_log + allocateNextEventSeq survive a round-trip via the legacy tables', async () => {
     applyMinimalMigrations();
     db.exec(`INSERT INTO users (id, email) VALUES ('u-evt', 'e@example.com')`);
-    db.exec(
-      `INSERT INTO sessions (id, user_id, title) VALUES ('s-evt', 'u-evt', 'events')`,
-    );
+    db.exec(`INSERT INTO sessions (id, user_id, title) VALUES ('s-evt', 'u-evt', 'events')`);
 
     const { V2Storage } = await import('../v2-runtime/storage/index.js');
     const storage = V2Storage.fromConnection(db);

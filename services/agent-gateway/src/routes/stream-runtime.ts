@@ -9,10 +9,7 @@ import {
   approveToolPermission,
   rejectToolPermission,
 } from '../message-v2-adapter.js';
-import {
-  publishSessionRunEvent,
-  subscribeSessionRunEvents,
-} from '../session-run-events.js';
+import { publishSessionRunEvent, subscribeSessionRunEvents } from '../session-run-events.js';
 import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import {
   collectFileDiffsFromToolOutput,
