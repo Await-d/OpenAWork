@@ -143,7 +143,8 @@ const agentBrowserManifest: SkillManifest = {
   name: 'agent-browser',
   displayName: 'agent-browser',
   version: '1.0.0',
-  description: 'Automates browser interactions for web testing, form filling, screenshots, and data extraction.',
+  description:
+    'Automates browser interactions for web testing, form filling, screenshots, and data extraction.',
   descriptionForModel: `Browser Automation with agent-browser
 
 ## Quick start
@@ -207,7 +208,13 @@ agent-browser eval "document.title"
 
 ## Global Options
 --session <name> | --profile <path> | --headed | --json | --debug`,
-  capabilities: ['browser.automation', 'web.testing', 'screenshot', 'form.filling', 'data.extraction'],
+  capabilities: [
+    'browser.automation',
+    'web.testing',
+    'screenshot',
+    'form.filling',
+    'data.extraction',
+  ],
   permissions: [{ type: 'network', scope: 'https://*', required: true }],
   lifecycle: { activation: 'on-demand' },
   constraints: { timeout: 60000 },
@@ -219,7 +226,8 @@ const devBrowserManifest: SkillManifest = {
   name: 'dev-browser',
   displayName: 'dev-browser',
   version: '1.0.0',
-  description: 'Browser automation with persistent page state. Use for navigating websites, filling forms, screenshots, extracting web data, testing web apps.',
+  description:
+    'Browser automation with persistent page state. Use for navigating websites, filling forms, screenshots, extracting web data, testing web apps.',
   descriptionForModel: `Dev Browser Skill — Browser automation that maintains page state across script executions.
 
 ## Choosing Your Approach
@@ -346,7 +354,8 @@ const gitMasterManifest: SkillManifest = {
   name: 'git-master',
   displayName: 'git-master',
   version: '1.0.0',
-  description: 'MUST USE for ANY git operations. Atomic commits, rebase/squash, history search (blame, bisect, log -S).',
+  description:
+    'MUST USE for ANY git operations. Atomic commits, rebase/squash, history search (blame, bisect, log -S).',
   descriptionForModel: `Git Master Agent — Combines three specializations:
 1. Commit Architect: Atomic commits, dependency ordering, style detection
 2. Rebase Surgeon: History rewriting, conflict resolution, branch cleanup
@@ -422,7 +431,10 @@ Quick reference:
 };
 
 const noopExecutor: SkillExecutor = async (): Promise<ToolResult> => {
-  return { content: 'This is a prompt-based skill. Content is injected via descriptionForModel.', isError: false };
+  return {
+    content: 'This is a prompt-based skill. Content is injected via descriptionForModel.',
+    isError: false,
+  };
 };
 
 export const BUILTIN_SKILLS: BuiltinSkillDef[] = [

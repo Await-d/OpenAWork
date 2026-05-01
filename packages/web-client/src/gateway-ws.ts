@@ -59,16 +59,16 @@ export class GatewayWebSocketClient {
   send(message: string, options: SendMessageOptions = {}): void {
     const clientRequestId = options.clientRequestId ?? crypto.randomUUID();
     const agentId = options.agentId?.trim() || undefined;
-      const payload = JSON.stringify({
-        ...(agentId ? { agentId } : {}),
-        clientRequestId,
-        ...(options.dialogueMode ? { dialogueMode: options.dialogueMode } : {}),
-        ...(options.inputParts ? { inputParts: options.inputParts } : {}),
-        message,
-        model: options.model ?? 'default',
-        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-        ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode } : {}),
-      });
+    const payload = JSON.stringify({
+      ...(agentId ? { agentId } : {}),
+      clientRequestId,
+      ...(options.dialogueMode ? { dialogueMode: options.dialogueMode } : {}),
+      ...(options.inputParts ? { inputParts: options.inputParts } : {}),
+      message,
+      model: options.model ?? 'default',
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.yoloMode !== undefined ? { yoloMode: options.yoloMode } : {}),
+    });
 
     if (!this.ws) return;
     if (this.ws.readyState === WebSocket.OPEN) {

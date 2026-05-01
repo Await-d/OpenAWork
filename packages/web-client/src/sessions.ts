@@ -759,13 +759,10 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         params.set('since', String(options.since));
       }
       const qs = params.toString();
-      const res = await fetch(
-        `${gatewayUrl}/sessions/${sessionId}/recovery${qs ? `?${qs}` : ''}`,
-        {
-          headers: authHeader(token),
-          signal: options?.signal,
-        },
-      );
+      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/recovery${qs ? `?${qs}` : ''}`, {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
       if (!res.ok) {
         throw new HttpError(`Failed to get session recovery: ${res.status}`, res.status);
       }

@@ -141,6 +141,7 @@ const BUILTIN_PRESETS: Record<BuiltinProviderType, ProviderPreset> = {
         label: 'GPT Image 2',
         enabled: true,
         supportsImageGeneration: true,
+        supportsImageGeneration4K: false,
       },
     ],
   },

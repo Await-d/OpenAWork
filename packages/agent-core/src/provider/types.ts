@@ -54,6 +54,14 @@ export interface AIModelConfig {
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsImageGeneration?: boolean;
+  /**
+   * Set to `true` if this image-generation model is known to support 4K
+   * resolutions (3840×2160 / 2160×3840) via the configured relay/provider.
+   * When `false`, the gateway rejects 4K requests upfront and the UI hides
+   * the 4K presets. When `undefined`, behavior falls back to the legacy
+   * "best-effort" path (request is forwarded; relay decides).
+   */
+  supportsImageGeneration4K?: boolean;
   supportsThinking?: boolean;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
