@@ -161,8 +161,8 @@ export interface AgentTeamsWorkspaceGroup {
 export type AgentTeamsTimelineEventType =
   | 'session_start'
   | 'thinking'
-  | 'file_read'
-  | 'file_write'
+  | 'read'
+  | 'write'
   | 'file_create'
   | 'command_execute'
   | 'tool_use'

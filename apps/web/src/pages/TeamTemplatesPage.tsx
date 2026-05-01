@@ -1,100 +1,19 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import type { WorkflowTemplateRecord, WorkflowTemplateScale } from '@openAwork/web-client';
-import { FIXED_TEAM_CORE_ROLE_BINDINGS, type TeamCoreRole } from '@openAwork/shared';
+import type { UpdateWorkflowTemplateInput, WorkflowTemplateRecord } from '@openAwork/web-client';
 import { useTeamWorkflowTemplates } from './team/runtime/use-team-workflow-templates.js';
-import { useTeamRuntimeRoleBindings } from './team/runtime/use-team-runtime-role-bindings.js';
-import { PANEL_STYLE, SHELL_BACKGROUND } from './team/runtime/team-runtime-shared.js';
+import { SHELL_BACKGROUND } from './team/runtime/team-runtime-shared.js';
 import { agentTeamsNewTemplateProviders } from './team/runtime/team-runtime-ui-config.js';
 import {
-  ChevronDownIcon,
-  PlusIcon,
-  TemplateIcon,
-  SyncIcon,
-  CollapseLeftIcon,
-  CheckIcon,
-  XIcon,
-  TrashIcon,
-} from './team/runtime/TeamIcons.js';
-
-const ROLE_COLOR_MAP: Record<string, string> = {
-  团队领导: '#b45309',
-  领导: '#b45309',
-  团队负责人: '#d59b11',
-  规划: '#d59b11',
-  研究员: '#5b5bd8',
-  研究: '#5b5bd8',
-  执行者: '#378dff',
-  执行: '#378dff',
-  批评者: '#d04e4e',
-  审查: '#d04e4e',
-};
-
-const BUILTIN_AGENT_LABELS: Record<string, string> = {
-  atlas: 'Atlas',
-  metis: 'Metis',
-  'sisyphus-junior': 'Sisyphus-Junior',
-};
-
-const REQUIRED_TEMPLATE_ROLES: Array<
-  'leader' | 'planner' | 'researcher' | 'executor' | 'reviewer'
-> = ['leader', 'planner', 'researcher', 'executor', 'reviewer'];
-
-const ROLE_LABELS: Record<string, string> = {
-  leader: '团队领导',
-  planner: '团队负责人',
-  researcher: '研究员',
-  executor: '执行者',
-  reviewer: '批评者',
-};
-
-const SCALE_OPTIONS: { value: WorkflowTemplateScale; label: string }[] = [
-  { value: 'small', label: '小型' },
-  { value: 'medium', label: '中型' },
-  { value: 'large', label: '大型' },
-  { value: 'full', label: '完整' },
-];
-
-type EditorMode = 'idle' | 'create' | 'edit';
-
-/* ── Shared inline styles ─────────────────────────────────────────────── */
-
-const fieldLabelStyle = {
-  fontSize: 10,
-  fontWeight: 700 as const,
-  color: 'var(--text-3)',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.05em',
-};
-
-const inputStyle = (valid?: boolean) => ({
-  padding: '8px 12px',
-  borderRadius: 8,
-  border: valid
-    ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
-    : '1px solid var(--border-subtle)',
-  background: 'var(--bg)',
-  color: 'var(--text)',
-  fontSize: 13,
-  outline: 'none',
-  transition: 'border-color 0.15s',
-  width: '100%',
-  boxSizing: 'border-box' as const,
-});
-
-const pillButtonStyle = (active: boolean, color: string) => ({
-  padding: '5px 12px',
-  borderRadius: 999,
-  border: active
-    ? `1px solid color-mix(in oklch, ${color} 50%, transparent)`
-    : '1px solid var(--border-subtle)',
-  background: active ? `color-mix(in oklch, ${color} 8%, var(--bg))` : 'var(--surface-2)',
-  color: active ? color : 'var(--text-3)',
-  fontSize: 11,
-  fontWeight: 600,
-  cursor: 'pointer',
-  transition: 'all 0.15s',
-});
+  ROLE_COLOR_MAP,
+  type EditorMode,
+  type EditorState,
+  type RoleBindingEdit,
+  REQUIRED_TEMPLATE_ROLES,
+} from './team/runtime/template-editor-shared.js';
+import { TemplateEditor, editorStateToTemplateData } from './team/runtime/TemplateEditorPanel.js';
+import { TemplateDetailView } from './team/runtime/TemplateDetailView.js';
+import { PlusIcon, TemplateIcon, SyncIcon, CollapseLeftIcon } from './team/runtime/TeamIcons.js';
 
 /* ── Template list item ───────────────────────────────────────────────── */
 
@@ -179,631 +98,23 @@ function TemplateListItem({
   );
 }
 
-/* ── Template editor panel ─────────────────────────────────────────────── */
-
-interface EditorState {
-  name: string;
-  description: string;
-  provider: string;
-  optionalAgentIds: Set<string>;
-  scale: WorkflowTemplateScale;
-  focus: string;
-  recommendedFor: string;
-  isRecommendedDefault: boolean;
-}
-
-function TemplateEditor({
-  mode,
-  initialState,
-  busy,
-  onSave,
-  onDelete,
-  onDuplicate,
-  onCancel,
-}: {
-  mode: EditorMode;
-  initialState: EditorState;
-  busy: boolean;
-  onSave: (state: EditorState) => Promise<boolean>;
-  onDelete?: () => void;
-  onDuplicate?: () => void;
-  onCancel: () => void;
-}) {
-  const roleBindings = useTeamRuntimeRoleBindings();
-  const [state, setState] = useState<EditorState>(initialState);
-
-  const fixedRoleCards = useMemo(
-    () =>
-      roleBindings.roleCards.filter((rc) =>
-        REQUIRED_TEMPLATE_ROLES.includes(rc.role as (typeof REQUIRED_TEMPLATE_ROLES)[number]),
-      ),
-    [roleBindings.roleCards],
-  );
-
-  const hasValidName = state.name.trim().length > 0;
-  const hasCompleteBindings = fixedRoleCards.length === REQUIRED_TEMPLATE_ROLES.length;
-  const isValid = hasValidName && hasCompleteBindings;
-
-  const update = <K extends keyof EditorState>(key: K, value: EditorState[K]) => {
-    setState((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const toggleAgent = (agentId: string) => {
-    setState((prev) => {
-      const next = new Set(prev.optionalAgentIds);
-      if (next.has(agentId)) next.delete(agentId);
-      else next.add(agentId);
-      return { ...prev, optionalAgentIds: next };
-    });
-  };
-
-  const isEditing = mode === 'edit';
-  const title = isEditing ? '编辑模板' : '组建新模板';
-
-  return (
-    <div style={{ display: 'grid', gap: 14, padding: '16px 20px', overflow: 'auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{title}</span>
-        <button
-          type="button"
-          onClick={onCancel}
-          style={{
-            appearance: 'none',
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--text-3)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-          }}
-        >
-          <XIcon size={14} color="var(--text-3)" />
-        </button>
-      </div>
-
-      {/* Name */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <label style={fieldLabelStyle}>模板名称</label>
-        <input
-          type="text"
-          placeholder="例如：代码审查流水线"
-          value={state.name}
-          onChange={(e) => update('name', e.target.value)}
-          style={inputStyle(hasValidName)}
-        />
-        {!hasValidName && (
-          <span style={{ fontSize: 9, color: 'var(--warning)' }}>请输入模板名称</span>
-        )}
-      </div>
-
-      {/* Description */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <label style={fieldLabelStyle}>模板描述</label>
-        <textarea
-          placeholder="描述模板的用途和适用场景…"
-          value={state.description}
-          onChange={(e) => update('description', e.target.value)}
-          rows={3}
-          style={{
-            ...inputStyle(),
-            resize: 'vertical' as const,
-            minHeight: 60,
-            fontFamily: 'inherit',
-            lineHeight: 1.5,
-          }}
-        />
-      </div>
-
-      {/* Provider */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <label style={fieldLabelStyle}>默认 Provider</label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {agentTeamsNewTemplateProviders.map((p) => (
-            <button
-              key={p.value}
-              type="button"
-              onClick={() => update('provider', p.value)}
-              style={pillButtonStyle(state.provider === p.value, 'var(--success)')}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Scale */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <label style={fieldLabelStyle}>模板规模</label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {SCALE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => update('scale', opt.value)}
-              style={pillButtonStyle(state.scale === opt.value, 'var(--accent)')}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Focus & Recommended for */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div style={{ display: 'grid', gap: 5 }}>
-          <label style={fieldLabelStyle}>重点方向</label>
-          <input
-            type="text"
-            placeholder="例如：代码审查"
-            value={state.focus}
-            onChange={(e) => update('focus', e.target.value)}
-            style={inputStyle()}
-          />
-        </div>
-        <div style={{ display: 'grid', gap: 5 }}>
-          <label style={fieldLabelStyle}>适用场景</label>
-          <input
-            type="text"
-            placeholder="例如：中型团队"
-            value={state.recommendedFor}
-            onChange={(e) => update('recommendedFor', e.target.value)}
-            style={inputStyle()}
-          />
-        </div>
-      </div>
-
-      {/* Recommended default toggle */}
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
-        <input
-          type="checkbox"
-          checked={state.isRecommendedDefault}
-          onChange={(e) => update('isRecommendedDefault', e.target.checked)}
-          style={{ accentColor: 'var(--accent)' }}
-        />
-        <span style={{ fontSize: 11, color: 'var(--text-2)' }}>标记为推荐起步模板</span>
-      </label>
-
-      {/* Core roles */}
-      <div style={{ display: 'grid', gap: 6 }}>
-        <label style={fieldLabelStyle}>核心角色（系统固定）</label>
-        <div style={{ display: 'grid', gap: 6 }}>
-          {fixedRoleCards.map((roleCard) => {
-            const roleLabel = ROLE_LABELS[roleCard.role] ?? roleCard.roleLabel;
-            const color = ROLE_COLOR_MAP[roleLabel] ?? 'var(--accent)';
-            return (
-              <div
-                key={roleCard.role}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'auto 1fr auto',
-                  gap: 8,
-                  alignItems: 'center',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: `1px solid color-mix(in oklch, ${color} 25%, transparent)`,
-                  background: `color-mix(in oklch, ${color} 4%, var(--bg))`,
-                }}
-              >
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-                <div style={{ display: 'grid', gap: 2 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                    {roleLabel}
-                  </span>
-                  <span style={{ fontSize: 10, color: 'var(--text-2)' }}>
-                    {roleCard.selectedAgent?.label ??
-                      FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole]}
-                  </span>
-                </div>
-                <span
-                  style={{
-                    fontSize: 9,
-                    color: 'var(--text-3)',
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    background: 'var(--surface-2)',
-                  }}
-                >
-                  固定
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        {!hasCompleteBindings && (
-          <span style={{ fontSize: 9, color: 'var(--warning)' }}>正在加载核心角色绑定…</span>
-        )}
-      </div>
-
-      {/* Optional agents */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <label style={fieldLabelStyle}>额外增援（可选）</label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {Object.entries(BUILTIN_AGENT_LABELS).map(([agentId, label]) => (
-            <button
-              key={agentId}
-              type="button"
-              onClick={() => toggleAgent(agentId)}
-              style={pillButtonStyle(state.optionalAgentIds.has(agentId), '#f59e0b')}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
-          增援角色会在核心流水线之外提供额外能力
-        </span>
-      </div>
-
-      {/* Actions */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          paddingTop: 6,
-          borderTop: '1px solid var(--border-subtle)',
-          marginTop: 4,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 6 }}>
-          {isEditing && onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid color-mix(in oklch, var(--danger) 40%, transparent)',
-                background: 'color-mix(in oklch, var(--danger) 6%, transparent)',
-                color: 'var(--danger)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <TrashIcon size={11} color="currentColor" />
-              删除
-            </button>
-          )}
-          {isEditing && onDuplicate && (
-            <button
-              type="button"
-              onClick={onDuplicate}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--border-subtle)',
-                background: 'var(--surface-2)',
-                color: 'var(--text-2)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              复制为新模板
-            </button>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            style={{
-              padding: '7px 14px',
-              borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'transparent',
-              color: 'var(--text-3)',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            disabled={!isValid || busy}
-            onClick={() => void onSave(state)}
-            style={{
-              padding: '7px 16px',
-              borderRadius: 8,
-              border: '1px solid color-mix(in oklch, var(--success) 48%, transparent)',
-              background: 'color-mix(in oklch, var(--success) 12%, var(--bg))',
-              color: 'var(--success)',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: isValid && !busy ? 'pointer' : 'not-allowed',
-              opacity: isValid && !busy ? 1 : 0.5,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-            }}
-          >
-            <CheckIcon size={12} color="currentColor" />
-            {busy ? '保存中…' : isEditing ? '保存修改' : '确认组建'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Template detail view (read-only) ──────────────────────────────────── */
-
-function TemplateDetailView({
-  template,
-  onEdit,
-  onDuplicate,
-  onDelete,
-}: {
-  template: ReturnType<typeof useTeamWorkflowTemplates>['templateCards'][number];
-  onEdit: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
-}) {
-  const subagentNodes = template.nodes.filter((n) => n.type === 'subagent');
-  const teamTemplate = template.metadata?.teamTemplate;
-  const optionalAgents = (teamTemplate?.optionalAgentIds ?? []).map(
-    (id) => BUILTIN_AGENT_LABELS[id] ?? id,
-  );
-
-  return (
-    <div style={{ display: 'grid', gap: 14, padding: '16px 20px', overflow: 'auto' }}>
-      {/* Header with actions */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{template.name}</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            type="button"
-            onClick={onDuplicate}
-            style={{
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--surface-2)',
-              color: 'var(--text-2)',
-              fontSize: 10,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            复制
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            style={{
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
-              background: 'color-mix(in oklch, var(--danger) 4%, transparent)',
-              color: 'var(--danger)',
-              fontSize: 10,
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-            }}
-          >
-            <TrashIcon size={9} color="currentColor" />
-            删除
-          </button>
-          <button
-            type="button"
-            onClick={onEdit}
-            style={{
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--accent)',
-              background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-              color: 'var(--accent)',
-              fontSize: 10,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            编辑
-          </button>
-        </div>
-      </div>
-
-      {/* Description */}
-      {template.description && (
-        <div style={{ display: 'grid', gap: 4 }}>
-          <span style={fieldLabelStyle}>描述</span>
-          <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
-            {template.description}
-          </span>
-        </div>
-      )}
-
-      {/* Metadata row */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {teamTemplate?.defaultProvider && (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 6,
-              background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-              color: 'var(--accent)',
-              fontSize: 10,
-              fontWeight: 700,
-            }}
-          >
-            Provider:{' '}
-            {agentTeamsNewTemplateProviders.find((p) => p.value === teamTemplate.defaultProvider)
-              ?.label ?? teamTemplate.defaultProvider}
-          </span>
-        )}
-        {teamTemplate?.templateScale && (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 6,
-              background: 'color-mix(in oklch, var(--success) 10%, transparent)',
-              color: 'var(--success)',
-              fontSize: 10,
-              fontWeight: 700,
-            }}
-          >
-            {SCALE_OPTIONS.find((s) => s.value === teamTemplate.templateScale)?.label ??
-              teamTemplate.templateScale}
-          </span>
-        )}
-        {teamTemplate?.templateFocus && (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 6,
-              background: 'var(--surface-2)',
-              color: 'var(--text-2)',
-              fontSize: 10,
-            }}
-          >
-            重点：{teamTemplate.templateFocus}
-          </span>
-        )}
-        {teamTemplate?.recommendedFor && (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 6,
-              background: 'var(--surface-2)',
-              color: 'var(--text-2)',
-              fontSize: 10,
-            }}
-          >
-            适用：{teamTemplate.recommendedFor}
-          </span>
-        )}
-        {teamTemplate?.recommendedDefault && (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 6,
-              background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-              color: '#a5b4fc',
-              fontSize: 10,
-              fontWeight: 700,
-            }}
-          >
-            推荐起步
-          </span>
-        )}
-      </div>
-
-      {/* Role roster */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <span style={fieldLabelStyle}>角色配置</span>
-        {subagentNodes.map((node) => {
-          const parts = node.label.split(' · ');
-          const roleLabel = parts[0]?.trim() ?? node.label;
-          const providerLabel = parts[1]?.trim();
-          const color = ROLE_COLOR_MAP[roleLabel] ?? 'var(--accent)';
-          return (
-            <div
-              key={node.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'auto 1fr auto',
-                gap: 8,
-                alignItems: 'center',
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: `1px solid color-mix(in oklch, ${color} 20%, transparent)`,
-                background: `color-mix(in oklch, ${color} 4%, var(--bg))`,
-              }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                {roleLabel}
-              </span>
-              {providerLabel && (
-                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{providerLabel}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Optional agents */}
-      {optionalAgents.length > 0 && (
-        <div style={{ display: 'grid', gap: 5 }}>
-          <span style={fieldLabelStyle}>额外增援</span>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {optionalAgents.map((label) => (
-              <span key={label} style={pillButtonStyle(true, '#f59e0b')}>
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Workflow flow */}
-      <div style={{ display: 'grid', gap: 5 }}>
-        <span style={fieldLabelStyle}>工作流连接</span>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-          {template.edges.map((edge, i) => {
-            const sourceNode = template.nodes.find((n) => n.id === edge.source);
-            const targetNode = template.nodes.find((n) => n.id === edge.target);
-            return (
-              <span
-                key={edge.id}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  fontSize: 9,
-                  color: 'var(--text-3)',
-                }}
-              >
-                {i > 0 && <span style={{ margin: '0 2px' }}>→</span>}
-                <span style={{ color: 'var(--text-2)' }}>
-                  {sourceNode?.label.split(' · ')[0] ?? edge.source}
-                </span>
-                <span>→</span>
-                <span style={{ color: 'var(--text-2)' }}>
-                  {targetNode?.label.split(' · ')[0] ?? edge.target}
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Timestamps */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          fontSize: 9,
-          color: 'var(--text-3)',
-          paddingTop: 4,
-          borderTop: '1px solid var(--border-subtle)',
-        }}
-      >
-        {template.createdAt && (
-          <span>创建：{new Date(template.createdAt).toLocaleString('zh-CN')}</span>
-        )}
-        {template.updatedAt && (
-          <span>更新：{new Date(template.updatedAt).toLocaleString('zh-CN')}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /* ── Helper: extract editor state from template ───────────────────────── */
 
 function templateToEditorState(t: WorkflowTemplateRecord): EditorState {
   const team = t.metadata?.teamTemplate;
+  const roleBindings: Record<string, RoleBindingEdit> = {};
+  if (team?.defaultBindings) {
+    for (const role of REQUIRED_TEMPLATE_ROLES) {
+      const raw = team.defaultBindings[role];
+      if (typeof raw === 'object' && raw !== null) {
+        roleBindings[role] = {
+          providerId: raw.providerId ?? '',
+          modelId: raw.modelId ?? '',
+          variant: raw.variant ?? '',
+        };
+      }
+    }
+  }
   return {
     name: t.name,
     description: t.description ?? '',
@@ -813,6 +124,7 @@ function templateToEditorState(t: WorkflowTemplateRecord): EditorState {
     focus: team?.templateFocus ?? '',
     recommendedFor: team?.recommendedFor ?? '',
     isRecommendedDefault: team?.recommendedDefault ?? false,
+    roleBindings,
   };
 }
 
@@ -825,6 +137,7 @@ const EMPTY_EDITOR_STATE: EditorState = {
   focus: '',
   recommendedFor: '',
   isRecommendedDefault: false,
+  roleBindings: {},
 };
 
 /* ── Main page ────────────────────────────────────────────────────────── */
@@ -836,6 +149,7 @@ export default function TeamTemplatesPage() {
     createTemplate,
     duplicateTemplate,
     removeTemplate,
+    updateTemplate,
     templateCards: templates,
     templateCount,
     error: templateError,
@@ -854,8 +168,9 @@ export default function TeamTemplatesPage() {
 
   const handleCreate = useCallback(
     async (state: EditorState) => {
+      const data = editorStateToTemplateData(state);
       const ok = await createTemplate({
-        name: state.name,
+        name: data.name,
         provider: state.provider,
         optionalAgentIds: Array.from(state.optionalAgentIds),
       });
@@ -868,18 +183,17 @@ export default function TeamTemplatesPage() {
   const handleSaveEdit = useCallback(
     async (state: EditorState) => {
       if (!selectedRaw) return false;
-      // Backend has no update endpoint, so delete + recreate
-      const deleted = await removeTemplate(selectedRaw.id);
-      if (!deleted) return false;
-      const ok = await createTemplate({
-        name: state.name,
-        provider: state.provider,
-        optionalAgentIds: Array.from(state.optionalAgentIds),
-      });
+      const data = editorStateToTemplateData(state);
+      const input: UpdateWorkflowTemplateInput = {
+        name: data.name,
+        description: data.description,
+        metadata: data.metadata,
+      };
+      const ok = await updateTemplate(selectedRaw.id, input);
       if (ok) setEditorMode('idle');
       return ok;
     },
-    [selectedRaw, removeTemplate, createTemplate],
+    [selectedRaw, updateTemplate],
   );
 
   const handleDelete = useCallback(
@@ -932,15 +246,15 @@ export default function TeamTemplatesPage() {
       );
     }
 
-    if (selectedCard) {
+    if (selectedCard && selectedRaw) {
       return (
         <TemplateDetailView
           template={selectedCard}
+          rawTemplate={selectedRaw}
           onEdit={() => setEditorMode('edit')}
-          onDuplicate={() => {
-            if (selectedRaw) void handleDuplicate(selectedRaw);
-          }}
+          onDuplicate={() => void handleDuplicate(selectedRaw)}
           onDelete={() => setConfirmDeleteId(selectedCard.id)}
+          onUpdate={(input) => updateTemplate(selectedRaw.id, input)}
         />
       );
     }

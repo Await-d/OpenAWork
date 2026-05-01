@@ -367,8 +367,8 @@ function createMonitorTexture(data: {
     const actLabels: Record<string, string> = {
       session_start: '启动',
       thinking: '思考',
-      file_read: '读文件',
-      file_write: '写文件',
+      read: '读文件',
+      write: '写文件',
       tool_call: '工具',
       task_complete: '完成',
       assistant_message: '回复',

@@ -429,7 +429,7 @@ export function useTeamCollaboration(
     ],
   );
 
-  const replySharedPermission = useCallback(
+  const replySharedSessionPermission = useCallback(
     async (
       sessionId: string,
       input: { decision: 'once' | 'session' | 'permanent' | 'reject'; requestId: string },
@@ -636,7 +636,7 @@ export function useTeamCollaboration(
     loading,
     members,
     messages,
-    replySharedPermission,
+    replySharedSessionPermission,
     replySharedQuestion,
     runtimeTaskGroups,
     runtimeTasks,

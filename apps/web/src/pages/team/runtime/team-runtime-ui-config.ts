@@ -31,8 +31,8 @@ export const AGENT_TEAMS_EVENT_CONFIG: Record<
 > = {
   session_start: { color: '#3FB950', label: '启动', icon: 'play' },
   thinking: { color: '#BC8CFF', label: '思考', icon: 'thinking' },
-  file_read: { color: '#58A6FF', label: '读取', icon: 'file-read' },
-  file_write: { color: '#D2A8FF', label: '写入', icon: 'file-write' },
+  read: { color: '#58A6FF', label: '读取', icon: 'file-read' },
+  write: { color: '#D2A8FF', label: '写入', icon: 'file-write' },
   file_create: { color: '#D2A8FF', label: '创建', icon: 'file-create' },
   command_execute: { color: '#D29922', label: '命令', icon: 'command' },
   tool_use: { color: '#58A6FF', label: '工具', icon: 'tool' },

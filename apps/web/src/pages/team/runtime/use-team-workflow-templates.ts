@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createWorkflowsClient,
+  type UpdateWorkflowTemplateInput,
   type WorkflowEdgeRecord,
   type WorkflowNodeRecord,
   type WorkflowTemplateMetadata,
@@ -422,6 +423,25 @@ export function useTeamWorkflowTemplates() {
     [accessToken, client],
   );
 
+  const updateTemplate = useCallback(
+    async (templateId: string, input: UpdateWorkflowTemplateInput) => {
+      if (!accessToken) return false;
+      setBusy(true);
+      setError(null);
+      try {
+        const updated = await client.updateTemplate(accessToken, templateId, input);
+        setTemplates((current) => current.map((t) => (t.id === templateId ? updated : t)));
+        return true;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : '更新模板失败');
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [accessToken, client],
+  );
+
   const templateCards = useMemo(
     () => [...templates].sort(sortTemplates).map((template) => toTemplateCard(template)),
     [templates],
@@ -441,5 +461,6 @@ export function useTeamWorkflowTemplates() {
     templateCards,
     templateCount: templates.length,
     templates,
+    updateTemplate,
   };
 }

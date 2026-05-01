@@ -891,8 +891,8 @@ export const agentTeamsNewTemplateProviders = [
 export type AgentTeamsTimelineEventType =
   | 'session_start'
   | 'thinking'
-  | 'file_read'
-  | 'file_write'
+  | 'read'
+  | 'write'
   | 'file_create'
   | 'command_execute'
   | 'tool_use'
@@ -919,8 +919,8 @@ export const AGENT_TEAMS_EVENT_CONFIG: Record<
 > = {
   session_start: { color: '#3FB950', label: '启动', icon: 'play' },
   thinking: { color: '#BC8CFF', label: '思考', icon: 'thinking' },
-  file_read: { color: '#58A6FF', label: '读取', icon: 'file-read' },
-  file_write: { color: '#D2A8FF', label: '写入', icon: 'file-write' },
+  read: { color: '#58A6FF', label: '读取', icon: 'file-read' },
+  write: { color: '#D2A8FF', label: '写入', icon: 'file-write' },
   file_create: { color: '#D2A8FF', label: '创建', icon: 'file-create' },
   command_execute: { color: '#D29922', label: '命令', icon: 'command' },
   tool_use: { color: '#58A6FF', label: '工具', icon: 'tool' },
@@ -953,7 +953,7 @@ export const agentTeamsTimelineEvents: AgentTeamsTimelineEvent[] = [
   },
   {
     id: 'evt-3',
-    type: 'file_read',
+    type: 'read',
     detail: '读取 src/config/default.ts',
     timestamp: '2026-03-31T14:02:30',
     agentId: 'researcher-a',
@@ -962,7 +962,7 @@ export const agentTeamsTimelineEvents: AgentTeamsTimelineEvent[] = [
   },
   {
     id: 'evt-4',
-    type: 'file_write',
+    type: 'write',
     detail: '修改 src/api/handlers.ts - 新增错误处理中间件',
     timestamp: '2026-03-31T14:05:45',
     agentId: 'backend',
@@ -1052,7 +1052,7 @@ export const agentTeamsTimelineEvents: AgentTeamsTimelineEvent[] = [
   },
   {
     id: 'evt-14',
-    type: 'file_read',
+    type: 'read',
     detail: '读取 src/middleware/errorHandler.ts',
     timestamp: '2026-03-31T14:22:00',
     agentId: 'critic',
@@ -1081,8 +1081,8 @@ export const agentTeamsTimelineEvents: AgentTeamsTimelineEvent[] = [
 
 export const agentTeamsActivityStats: Record<string, number> = {
   thinking: 12,
-  file_read: 28,
-  file_write: 15,
+  read: 28,
+  write: 15,
   file_create: 8,
   command_execute: 22,
   tool_use: 18,

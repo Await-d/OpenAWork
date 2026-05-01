@@ -403,7 +403,7 @@ function mapTimelineEventTypeFromAudit(
     return 'session_start';
   }
   if (action === 'share_deleted') {
-    return 'file_write';
+    return 'write';
   }
   return 'tool_use';
 }
@@ -623,7 +623,7 @@ export function useResolvedTeamRuntimeReferenceData(
         (request) => `permission-${request.requestId}` === cardId,
       );
       if (permissionRequest) {
-        return collaboration.replySharedPermission(sessionId, {
+        return collaboration.replySharedSessionPermission(sessionId, {
           decision: status === 'approved' ? 'session' : 'reject',
           requestId: permissionRequest.requestId,
         });
@@ -643,7 +643,7 @@ export function useResolvedTeamRuntimeReferenceData(
       return false;
     },
     [
-      collaboration.replySharedPermission,
+      collaboration.replySharedSessionPermission,
       collaboration.replySharedQuestion,
       collaboration.selectedSharedSession,
     ],
