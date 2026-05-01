@@ -3,9 +3,15 @@ import {
   AttributionConfigUI,
   DiagnosticCard,
   PermissionHistory,
+  PermissionRulesEditor,
   TelemetryConsentDialog,
 } from '@openAwork/shared-ui';
-import type { AttributionConfig, PermissionDecisionRecord } from '@openAwork/shared-ui';
+import type {
+  AttributionConfig,
+  PermissionDecisionRecord,
+  PermissionRuleEntry,
+  PermissionCategoryMeta,
+} from '@openAwork/shared-ui';
 import type { DevtoolsSourceState, SettingsDiagnosticRecord } from '../settings-types.js';
 import { groupDiagnosticsByFile } from '../settings-derived.js';
 import { BP, SS, ST, UV } from './settings-section-styles.js';
@@ -13,6 +19,10 @@ import { NotificationPreferencePanel } from './notification-preference-panel.js'
 
 interface SecurityTabContentProps {
   permissions: PermissionDecisionRecord[];
+  permissionCategories: PermissionCategoryMeta[];
+  permissionRules: PermissionRuleEntry[];
+  onPermissionRulesChange: (rules: PermissionRuleEntry[]) => void;
+  permissionRulesSaving?: boolean;
   attribution: AttributionConfig;
   setAttribution: React.Dispatch<React.SetStateAction<AttributionConfig>>;
   diagnostics: SettingsDiagnosticRecord[];
@@ -21,6 +31,10 @@ interface SecurityTabContentProps {
 
 export function SecurityTabContent({
   permissions,
+  permissionCategories,
+  permissionRules,
+  onPermissionRulesChange,
+  permissionRulesSaving,
   attribution,
   setAttribution,
   diagnostics,
@@ -32,6 +46,17 @@ export function SecurityTabContent({
   return (
     <>
       <NotificationPreferencePanel />
+      <section style={SS}>
+        <h3 style={ST}>权限规则</h3>
+        <div style={UV}>
+          <PermissionRulesEditor
+            categories={permissionCategories}
+            rules={permissionRules}
+            onChange={onPermissionRulesChange}
+            saving={permissionRulesSaving}
+          />
+        </div>
+      </section>
       <section style={SS}>
         <h3 style={ST}>权限记录</h3>
         <div style={UV}>

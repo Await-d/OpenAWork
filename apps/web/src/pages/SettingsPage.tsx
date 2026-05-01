@@ -6,6 +6,7 @@ import type {
   ChannelSettingsEntry,
   ChannelTypeDescriptor,
 } from '../components/ChannelSubscriptionSettings.js';
+import { validateImageGenerationSize } from '@openAwork/shared';
 import {
   buildDevEventsFromLogs,
   createInitialDevtoolsSourceStates,
@@ -24,9 +25,12 @@ import type {
   AIModelConfigRef,
   ActiveSelectionRef,
   AIModelConfigItem,
+  ImageGenerationDefaultsRef,
   MonthlyRecord,
   CostBreakdownItem,
   PermissionDecisionRecord,
+  PermissionRuleEntry,
+  PermissionCategoryMeta,
   ModelPriceEntry,
   AttributionConfig,
   MCPServerStatus,
@@ -40,16 +44,15 @@ import { ChannelsTabContent } from './settings/channels-tab-content.js';
 import { DevtoolsTabContent } from './settings/devtools-tab-content.js';
 import {
   BUILTIN_PROVIDER_TYPE_SET,
-  DEFAULT_THINKING_DEFAULTS,
   isTauri,
   normalizeActiveSelectionProviders,
-  normalizeThinkingDefaults,
   parseStructuredPayload,
   readErrorMessage,
   SETTINGS_LAYOUT_SIDE_GUTTER,
   SETTINGS_LAYOUT_MAX_WIDTH,
   SETTINGS_TAB_CONTENT_GAP,
   SETTINGS_TAB_NAV_WIDTH,
+  TAB_CATEGORIES,
   TABS,
   type TabId,
 } from './settings/settings-page-helpers.js';
@@ -60,7 +63,9 @@ import { SecurityTabContent } from './settings/security-tab-content.js';
 import { UsageTabContent } from './settings/usage-tab-content.js';
 import { MemoryTabContent } from './settings/memory-tab-content.js';
 import { CompanionTabContent } from './settings/companion-tab-content.js';
+import { PluginsTabContent } from './settings/plugins-tab-content.js';
 import { useMemoryManagement } from './settings/use-memory-management.js';
+import { useProviderDefaultProfile } from './settings/use-provider-default-profile.js';
 import { useSettingsTabActions } from './settings/use-settings-tab-actions.js';
 import type {
   DevtoolsSourceKey,
@@ -70,6 +75,74 @@ import type {
   SettingsDevLogRecord,
   ThinkingDefaultsRef,
 } from './settings-types.js';
+
+function SettingsNavIcon({ id }: { id: string }) {
+  const icons: Record<string, React.ReactNode> = {
+    connection: (
+      <>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </>
+    ),
+    channels: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+    companion: (
+      <>
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </>
+    ),
+    memory: (
+      <>
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      </>
+    ),
+    usage: (
+      <>
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </>
+    ),
+    security: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+    workspace: (
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    ),
+    devtools: (
+      <>
+        <polyline points="16 18 22 12 16 6" />
+        <polyline points="8 6 2 12 8 18" />
+      </>
+    ),
+    plugins: (
+      <>
+        <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+        <line x1="16" y1="8" x2="2" y2="22" />
+        <line x1="17.5" y1="15" x2="9" y2="15" />
+      </>
+    ),
+  };
+
+  const content = icons[id];
+  if (!content) return null;
+
+  return (
+    <svg
+      aria-hidden="true"
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {content}
+    </svg>
+  );
+}
 
 export default function SettingsPage() {
   const { gatewayUrl, setGatewayUrl, webAccessEnabled, webPort, setWebAccess } = useAuthStore();
@@ -114,23 +187,33 @@ export default function SettingsPage() {
 
   const [mcpServers, setMcpServersState] = useState<MCPServerEntry[]>([]);
   const [providers, setProviders] = useState<AIProviderRef[]>([]);
-  const [activeSelection, setActiveSelectionState] = useState<ActiveSelectionRef>({
-    chat: { providerId: '', modelId: '' },
-    fast: { providerId: '', modelId: '' },
+  const providersRef = useRef<AIProviderRef[]>(providers);
+  const normalizeProviderSelection = React.useCallback(
+    (selection: ActiveSelectionRef) =>
+      normalizeActiveSelectionProviders(selection, providersRef.current),
+    [],
+  );
+  const {
+    activeSelection,
+    activeSelectionRef,
+    applyServerDefaults,
+    defaultThinking,
+    defaultThinkingRef,
+    hasUnsavedDefaultModelChanges,
+    imageGenerationDefaults,
+    imageGenerationDefaultsRef,
+    savedActiveSelectionRef,
+    savedDefaultThinkingRef,
+    savedImageGenerationDefaultsRef,
+    savingDefaultModelSettings,
+    setActiveSelection,
+    setSavedActiveSelection,
+    setDefaultThinking,
+    setImageGenerationDefaults,
+    setSavingDefaultModelSettings,
+  } = useProviderDefaultProfile({
+    normalizeSelection: normalizeProviderSelection,
   });
-  const [savedActiveSelection, setSavedActiveSelectionState] = useState<ActiveSelectionRef>({
-    chat: { providerId: '', modelId: '' },
-    fast: { providerId: '', modelId: '' },
-  });
-  const [defaultThinking, setDefaultThinkingState] = useState<ThinkingDefaultsRef>({
-    chat: { ...DEFAULT_THINKING_DEFAULTS.chat },
-    fast: { ...DEFAULT_THINKING_DEFAULTS.fast },
-  });
-  const [savedDefaultThinking, setSavedDefaultThinkingState] = useState<ThinkingDefaultsRef>({
-    chat: { ...DEFAULT_THINKING_DEFAULTS.chat },
-    fast: { ...DEFAULT_THINKING_DEFAULTS.fast },
-  });
-  const [savingDefaultModelSettings, setSavingDefaultModelSettings] = useState(false);
   const [filePatterns, setFilePatterns] = useState<string[]>([]);
   const [githubTriggers, setGithubTriggers] = useState<Array<{ repo: string; events: string[] }>>(
     [],
@@ -147,6 +230,9 @@ export default function SettingsPage() {
   const [usageRecordsError, setUsageRecordsError] = useState<string | null>(null);
   const [costBreakdownError, setCostBreakdownError] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<PermissionDecisionRecord[]>([]);
+  const [permissionRules, setPermissionRules] = useState<PermissionRuleEntry[]>([]);
+  const [permissionCategories, setPermissionCategories] = useState<PermissionCategoryMeta[]>([]);
+  const [permissionRulesSaving, setPermissionRulesSaving] = useState(false);
   const [devLogs, setDevLogs] = useState<SettingsDevLogRecord[]>([]);
   const [mcpStatuses, setMcpStatuses] = useState<MCPServerStatus[]>([]);
   const [workers, setWorkers] = useState<WorkerEntry[]>([]);
@@ -186,16 +272,11 @@ export default function SettingsPage() {
   const [sshNodes, setSshNodes] = useState<FileTreeNode[]>([]);
   const [sshPreview, setSshPreview] = useState<(ArtifactItem & { content?: string }) | null>(null);
   const [activeSSHConnectionId, setActiveSSHConnectionId] = useState<string | null>(null);
-  const providersRef = useRef<AIProviderRef[]>(providers);
   const devLogsRef = useRef<SettingsDevLogRecord[]>(devLogs);
   const workersRef = useRef<WorkerEntry[]>(workers);
   const diagnosticsRef = useRef<SettingsDiagnosticRecord[]>(diagnostics);
   const desktopAutomationEnabledRef = useRef(desktopAutomationEnabled);
   const sshConnectionsRef = useRef<SSHConnectionEntry[]>(sshConnections);
-  const activeSelectionRef = useRef<ActiveSelectionRef>(activeSelection);
-  const savedActiveSelectionRef = useRef<ActiveSelectionRef>(savedActiveSelection);
-  const defaultThinkingRef = useRef<ThinkingDefaultsRef>(defaultThinking);
-  const savedDefaultThinkingRef = useRef<ThinkingDefaultsRef>(savedDefaultThinking);
   const providerSaveSeqRef = useRef(0);
   const providerSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const hasLoadedFilePatterns = useRef(false);
@@ -236,29 +317,6 @@ export default function SettingsPage() {
     }, 600);
     return () => clearTimeout(timer);
   }, [filePatterns, gatewayUrl, token]);
-
-  useEffect(() => {
-    activeSelectionRef.current = activeSelection;
-  }, [activeSelection]);
-
-  useEffect(() => {
-    savedActiveSelectionRef.current = savedActiveSelection;
-  }, [savedActiveSelection]);
-
-  useEffect(() => {
-    defaultThinkingRef.current = defaultThinking;
-  }, [defaultThinking]);
-
-  useEffect(() => {
-    savedDefaultThinkingRef.current = savedDefaultThinking;
-  }, [savedDefaultThinking]);
-
-  const hasUnsavedDefaultModelChanges = React.useMemo(
-    () =>
-      JSON.stringify(activeSelection) !== JSON.stringify(savedActiveSelection) ||
-      JSON.stringify(defaultThinking) !== JSON.stringify(savedDefaultThinking),
-    [activeSelection, savedActiveSelection, defaultThinking, savedDefaultThinking],
-  );
 
   const updateDevtoolsSourceState = React.useCallback(
     (key: DevtoolsSourceKey, patch: Partial<DevtoolsSourceState>) => {
@@ -572,25 +630,22 @@ export default function SettingsPage() {
             providers: AIProviderRef[] | null;
             activeSelection?: ActiveSelectionRef | null;
             defaultThinking?: ThinkingDefaultsRef | null;
+            imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
           }>,
       )
       .then((d) => {
-        if (d.providers) setProviders(d.providers);
-        if (d.activeSelection) {
-          const normalizedSelection = normalizeActiveSelectionProviders(
-            d.activeSelection,
-            d.providers ?? providersRef.current,
-          );
-          activeSelectionRef.current = normalizedSelection;
-          savedActiveSelectionRef.current = normalizedSelection;
-          setActiveSelectionState(normalizedSelection);
-          setSavedActiveSelectionState(normalizedSelection);
+        if (d.providers) {
+          providersRef.current = d.providers;
+          setProviders(d.providers);
         }
-        const normalizedThinking = normalizeThinkingDefaults(d.defaultThinking);
-        defaultThinkingRef.current = normalizedThinking;
-        savedDefaultThinkingRef.current = normalizedThinking;
-        setDefaultThinkingState(normalizedThinking);
-        setSavedDefaultThinkingState(normalizedThinking);
+        applyServerDefaults(
+          {
+            activeSelection: d.activeSelection,
+            defaultThinking: d.defaultThinking,
+            imageGenerationDefaults: d.imageGenerationDefaults,
+          },
+          { syncDraft: true, syncSaved: true },
+        );
       });
     void fetch(`${gatewayUrl}/settings/mcp-servers`, { headers: h })
       .then((r) => r.json() as Promise<{ servers: MCPServerEntry[] }>)
@@ -636,6 +691,20 @@ export default function SettingsPage() {
         setCostBreakdownError(error instanceof Error ? error.message : '加载费用明细失败');
         logger.error('failed to load usage breakdown', error);
       });
+    void fetch(`${gatewayUrl}/settings/permission-rules`, { headers: h })
+      .then((response) =>
+        response.ok
+          ? (response.json() as Promise<{
+              rules: PermissionRuleEntry[];
+              categories: PermissionCategoryMeta[];
+            }>)
+          : Promise.resolve({ rules: [], categories: [] }),
+      )
+      .then((d) => {
+        setPermissionRules(d.rules ?? []);
+        if (d.categories?.length) setPermissionCategories(d.categories);
+      })
+      .catch(() => setPermissionRules([]));
     void fetch(`${gatewayUrl}/settings/permissions`, { headers: h })
       .then((response) =>
         response.ok
@@ -776,6 +845,7 @@ export default function SettingsPage() {
       next: AIProviderRef[] = providersRef.current,
       nextSel: ActiveSelectionRef = activeSelectionRef.current,
       nextThinking: ThinkingDefaultsRef = defaultThinkingRef.current,
+      nextImageGenerationDefaults: ImageGenerationDefaultsRef = imageGenerationDefaultsRef.current,
       options?: {
         syncDraft?: boolean;
         syncSaved?: boolean;
@@ -784,6 +854,10 @@ export default function SettingsPage() {
       if (!token) return;
       const syncDraft = options?.syncDraft ?? true;
       const syncSaved = options?.syncSaved ?? true;
+      const sizeValidation = validateImageGenerationSize(nextImageGenerationDefaults.size);
+      if (!sizeValidation.valid) {
+        throw new Error(sizeValidation.message ?? '图片尺寸无效');
+      }
       const requestSeq = providerSaveSeqRef.current + 1;
       providerSaveSeqRef.current = requestSeq;
 
@@ -795,6 +869,7 @@ export default function SettingsPage() {
             providers: next,
             activeSelection: nextSel,
             defaultThinking: nextThinking,
+            imageGenerationDefaults: nextImageGenerationDefaults,
           }),
         });
 
@@ -802,6 +877,7 @@ export default function SettingsPage() {
           providers?: AIProviderRef[];
           activeSelection?: ActiveSelectionRef;
           defaultThinking?: ThinkingDefaultsRef;
+          imageGenerationDefaults?: ImageGenerationDefaultsRef;
           error?: string;
         };
 
@@ -817,31 +893,14 @@ export default function SettingsPage() {
           providersRef.current = data.providers;
           setProviders(data.providers);
         }
-        if (data.activeSelection) {
-          const normalizedSelection = normalizeActiveSelectionProviders(
-            data.activeSelection,
-            data.providers ?? providersRef.current,
-          );
-          if (syncDraft) {
-            activeSelectionRef.current = normalizedSelection;
-            setActiveSelectionState(normalizedSelection);
-          }
-          if (syncSaved) {
-            savedActiveSelectionRef.current = normalizedSelection;
-            setSavedActiveSelectionState(normalizedSelection);
-          }
-        }
-        if (data.defaultThinking) {
-          const normalizedThinking = normalizeThinkingDefaults(data.defaultThinking);
-          if (syncDraft) {
-            defaultThinkingRef.current = normalizedThinking;
-            setDefaultThinkingState(normalizedThinking);
-          }
-          if (syncSaved) {
-            savedDefaultThinkingRef.current = normalizedThinking;
-            setSavedDefaultThinkingState(normalizedThinking);
-          }
-        }
+        applyServerDefaults(
+          {
+            activeSelection: data.activeSelection,
+            defaultThinking: data.defaultThinking,
+            imageGenerationDefaults: data.imageGenerationDefaults,
+          },
+          { syncDraft, syncSaved },
+        );
       };
 
       const queuedSave = providerSaveQueueRef.current.catch(() => undefined).then(runSave);
@@ -871,29 +930,6 @@ export default function SettingsPage() {
     [token, gatewayUrl],
   );
 
-  const setActiveSelection = React.useCallback(
-    (updater: React.SetStateAction<ActiveSelectionRef>) => {
-      setActiveSelectionState((prev) => {
-        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
-        const next = normalizeActiveSelectionProviders(nextRaw, providersRef.current);
-        activeSelectionRef.current = next;
-        return next;
-      });
-    },
-    [],
-  );
-
-  const setDefaultThinking = React.useCallback(
-    (updater: React.SetStateAction<ThinkingDefaultsRef>) => {
-      setDefaultThinkingState((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
-        defaultThinkingRef.current = next;
-        return next;
-      });
-    },
-    [],
-  );
-
   const syncSelectionForProviders = React.useCallback((nextProviders: AIProviderRef[]) => {
     const normalizedDraftSelection = normalizeActiveSelectionProviders(
       activeSelectionRef.current,
@@ -905,9 +941,8 @@ export default function SettingsPage() {
     );
 
     activeSelectionRef.current = normalizedDraftSelection;
-    savedActiveSelectionRef.current = normalizedSavedSelection;
-    setActiveSelectionState(normalizedDraftSelection);
-    setSavedActiveSelectionState(normalizedSavedSelection);
+    setActiveSelection(normalizedDraftSelection);
+    setSavedActiveSelection(normalizedSavedSelection);
 
     return {
       draftSelection: normalizedDraftSelection,
@@ -926,12 +961,12 @@ export default function SettingsPage() {
         activeSelectionRef.current,
         providersRef.current,
       );
-      activeSelectionRef.current = normalizedDraftSelection;
-      setActiveSelectionState(normalizedDraftSelection);
+      setActiveSelection(normalizedDraftSelection);
       await saveProviders(
         providersRef.current,
         normalizedDraftSelection,
         defaultThinkingRef.current,
+        imageGenerationDefaultsRef.current,
         {
           syncDraft: true,
           syncSaved: true,
@@ -943,6 +978,24 @@ export default function SettingsPage() {
       setSavingDefaultModelSettings(false);
     }
   }, [token, savingDefaultModelSettings, saveProviders]);
+
+  function handlePermissionRulesChange(rules: PermissionRuleEntry[]) {
+    setPermissionRules(rules);
+    setPermissionRulesSaving(true);
+    void apiFetch('/settings/permission-rules', {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          logger.error('failed to save permission rules');
+        }
+      })
+      .catch((error: unknown) => {
+        logger.error('failed to save permission rules', error);
+      })
+      .finally(() => setPermissionRulesSaving(false));
+  }
 
   function handleAddProvider(data?: ProviderEditData) {
     if (!data) return;
@@ -977,10 +1030,16 @@ export default function SettingsPage() {
       const next = [...prev, nextProvider];
       providersRef.current = next;
       const { savedSelection } = syncSelectionForProviders(next);
-      void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
-        syncDraft: false,
-        syncSaved: true,
-      }).catch((error: unknown) => {
+      void saveProviders(
+        next,
+        savedSelection,
+        savedDefaultThinkingRef.current,
+        savedImageGenerationDefaultsRef.current,
+        {
+          syncDraft: false,
+          syncSaved: true,
+        },
+      ).catch((error: unknown) => {
         logger.error('failed to save added provider', error);
       });
       return next;
@@ -1004,10 +1063,16 @@ export default function SettingsPage() {
       );
       providersRef.current = next;
       const { savedSelection } = syncSelectionForProviders(next);
-      void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
-        syncDraft: false,
-        syncSaved: true,
-      }).catch((error: unknown) => {
+      void saveProviders(
+        next,
+        savedSelection,
+        savedDefaultThinkingRef.current,
+        savedImageGenerationDefaultsRef.current,
+        {
+          syncDraft: false,
+          syncSaved: true,
+        },
+      ).catch((error: unknown) => {
         logger.error('failed to save edited provider', error);
       });
       return next;
@@ -1020,10 +1085,16 @@ export default function SettingsPage() {
       );
       providersRef.current = next;
       const { savedSelection } = syncSelectionForProviders(next);
-      void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
-        syncDraft: false,
-        syncSaved: true,
-      }).catch((error: unknown) => {
+      void saveProviders(
+        next,
+        savedSelection,
+        savedDefaultThinkingRef.current,
+        savedImageGenerationDefaultsRef.current,
+        {
+          syncDraft: false,
+          syncSaved: true,
+        },
+      ).catch((error: unknown) => {
         logger.error('failed to save toggled provider', error);
       });
       return next;
@@ -1037,10 +1108,16 @@ export default function SettingsPage() {
       const next = mutate(prev);
       providersRef.current = next;
       const { savedSelection } = syncSelectionForProviders(next);
-      void saveProviders(next, savedSelection, savedDefaultThinkingRef.current, {
-        syncDraft: false,
-        syncSaved: true,
-      }).catch((error: unknown) => {
+      void saveProviders(
+        next,
+        savedSelection,
+        savedDefaultThinkingRef.current,
+        savedImageGenerationDefaultsRef.current,
+        {
+          syncDraft: false,
+          syncSaved: true,
+        },
+      ).catch((error: unknown) => {
         logger.error(errorMessage, error);
       });
       return next;
@@ -1273,40 +1350,115 @@ export default function SettingsPage() {
                 width: SETTINGS_TAB_NAV_WIDTH,
                 flexShrink: 0,
                 borderRight: '1px solid var(--border-subtle)',
-                padding: '16px 8px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 2,
-                overflowY: 'auto',
                 background: 'var(--nav-rail-bg)',
+                minHeight: 0,
               }}
             >
-              {TABS.map((tabItem) => (
-                <NavLink
-                  key={tabItem.id}
-                  to={`/settings/${tabItem.id}`}
-                  style={({ isActive }) => ({
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: 8,
-                    textAlign: 'center' as const,
-                    fontSize: 12,
-                    fontWeight: isActive ? 600 : 400,
-                    background: isActive ? 'var(--accent-muted)' : 'transparent',
-                    color: isActive ? 'var(--accent)' : 'var(--text-2)',
-                    boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
-                    textDecoration: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    transition: 'background 150ms ease, color 150ms ease',
-                  })}
+              <div
+                style={{
+                  padding: '20px 12px 12px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: 'var(--text-1)',
+                    letterSpacing: '-0.01em',
+                  }}
                 >
-                  {tabItem.label}
-                </NavLink>
-              ))}
+                  设置
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-3)',
+                    marginTop: 3,
+                  }}
+                >
+                  偏好与模型设置
+                </div>
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  padding: '8px 8px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1,
+                  scrollbarWidth: 'none' as const,
+                }}
+              >
+                {TAB_CATEGORIES.map((category, idx) => (
+                  <div key={category.id} style={{ marginTop: idx > 0 ? 12 : 0 }}>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: 'var(--text-3)',
+                        letterSpacing: '0.07em',
+                        textTransform: 'uppercase',
+                        padding: '4px 10px 3px',
+                        userSelect: 'none',
+                      }}
+                    >
+                      {category.label}
+                    </div>
+                    {TABS.filter((t) => (category.tabIds as readonly string[]).includes(t.id)).map(
+                      (tabItem) => (
+                        <NavLink
+                          key={tabItem.id}
+                          to={`/settings/${tabItem.id}`}
+                          style={({ isActive }) => ({
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            fontSize: 12,
+                            fontWeight: isActive ? 600 : 400,
+                            background: isActive ? 'var(--accent-muted)' : 'transparent',
+                            color: isActive ? 'var(--accent)' : 'var(--text-2)',
+                            boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
+                            textDecoration: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            transition: 'background 150ms ease, color 150ms ease',
+                            overflow: 'hidden',
+                          })}
+                        >
+                          <span
+                            style={{
+                              flexShrink: 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 18,
+                            }}
+                          >
+                            <SettingsNavIcon id={tabItem.id} />
+                          </span>
+                          <span
+                            style={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {tabItem.label}
+                          </span>
+                        </NavLink>
+                      ),
+                    )}
+                  </div>
+                ))}
+              </div>
             </nav>
             <div
               style={{
@@ -1322,10 +1474,12 @@ export default function SettingsPage() {
                     providers={providers}
                     activeSelection={activeSelection}
                     defaultThinking={defaultThinking}
+                    imageGenerationDefaults={imageGenerationDefaults}
                     hasUnsavedDefaultChanges={hasUnsavedDefaultModelChanges}
                     isSavingDefaultChanges={savingDefaultModelSettings}
                     setActiveSelection={setActiveSelection}
                     setDefaultThinking={setDefaultThinking}
+                    setImageGenerationDefaults={setImageGenerationDefaults}
                     saveDefaultModelSettings={() => {
                       void saveDefaultModelSettings();
                     }}
@@ -1395,6 +1549,10 @@ export default function SettingsPage() {
                 {activeTab === 'security' && (
                   <SecurityTabContent
                     permissions={permissions}
+                    permissionCategories={permissionCategories}
+                    permissionRules={permissionRules}
+                    onPermissionRulesChange={handlePermissionRulesChange}
+                    permissionRulesSaving={permissionRulesSaving}
                     attribution={attribution}
                     setAttribution={setAttribution}
                     diagnostics={diagnostics}
@@ -1427,6 +1585,13 @@ export default function SettingsPage() {
                     onDesktopAutomationClick={handleDesktopAutomationClick}
                     onDesktopAutomationType={handleDesktopAutomationType}
                     onDesktopAutomationScreenshot={handleDesktopAutomationScreenshot}
+                  />
+                )}
+                {activeTab === 'plugins' && (
+                  <PluginsTabContent
+                    providers={providers}
+                    activeImageProviderId={activeSelection.image?.providerId}
+                    activeImageModelId={activeSelection.image?.modelId}
                   />
                 )}
                 {activeTab === 'devtools' && (

@@ -6,6 +6,7 @@ import {
   type ActiveSelectionRef,
   type AIModelConfigItem,
   type AIProviderRef,
+  type ImageGenerationDefaultsRef,
   type MCPServerEntry,
   type MCPServerStatus,
 } from '@openAwork/shared-ui';
@@ -17,10 +18,12 @@ interface ConnectionTabContentProps {
   providers: AIProviderRef[];
   activeSelection: ActiveSelectionRef;
   defaultThinking: ThinkingDefaultsRef;
+  imageGenerationDefaults: ImageGenerationDefaultsRef;
   hasUnsavedDefaultChanges: boolean;
   isSavingDefaultChanges: boolean;
   setActiveSelection: React.Dispatch<React.SetStateAction<ActiveSelectionRef>>;
   setDefaultThinking: React.Dispatch<React.SetStateAction<ThinkingDefaultsRef>>;
+  setImageGenerationDefaults: React.Dispatch<React.SetStateAction<ImageGenerationDefaultsRef>>;
   saveDefaultModelSettings: () => void;
   handleAddModel: (providerId: string, model: AIModelConfigItem) => void;
   handleRemoveModel: (providerId: string, modelId: string) => void;
@@ -60,10 +63,12 @@ export function ConnectionTabContent({
   providers,
   activeSelection,
   defaultThinking,
+  imageGenerationDefaults,
   hasUnsavedDefaultChanges,
   isSavingDefaultChanges,
   setActiveSelection,
   setDefaultThinking,
+  setImageGenerationDefaults,
   saveDefaultModelSettings,
   handleAddModel,
   handleRemoveModel,
@@ -125,28 +130,6 @@ export function ConnectionTabContent({
       <div>
         <h3 style={{ ...ST, marginBottom: 12 }}>模型与提供商</h3>
         <div style={{ ...SS, marginBottom: 12 }}>
-          <div
-            style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
-          >
-            <div style={{ display: 'grid', gap: 6, maxWidth: 320 }} />
-            <button
-              type="button"
-              onClick={saveDefaultModelSettings}
-              disabled={isSavingDefaultChanges || !hasUnsavedDefaultChanges}
-              style={{
-                ...BP,
-                minWidth: 116,
-                alignSelf: 'flex-start',
-                opacity: isSavingDefaultChanges || !hasUnsavedDefaultChanges ? 0.72 : 1,
-              }}
-            >
-              {isSavingDefaultChanges
-                ? '保存中…'
-                : hasUnsavedDefaultChanges
-                  ? '保存默认配置档'
-                  : '已保存'}
-            </button>
-          </div>
           <div style={{ display: 'grid', gap: 6, maxWidth: 520 }}>
             <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
               新建会话会默认继承这里的工具配置档；进入具体会话后，仍可在聊天顶部继续临时切换。
@@ -158,6 +141,7 @@ export function ConnectionTabContent({
             providers={providers}
             active={activeSelection}
             defaultThinking={defaultThinking}
+            imageDefaults={imageGenerationDefaults}
             hasUnsavedDefaultChanges={hasUnsavedDefaultChanges}
             isSavingDefaultChanges={isSavingDefaultChanges}
             onSetActiveChat={(providerId, modelId) =>
@@ -172,11 +156,23 @@ export function ConnectionTabContent({
                 fast: { providerId, modelId },
               }))
             }
+            onSetActiveImage={(providerId, modelId) =>
+              setActiveSelection((prev) => ({
+                ...prev,
+                image: { providerId, modelId },
+              }))
+            }
             onSaveDefaultChanges={saveDefaultModelSettings}
             onSetThinkingMode={(mode: keyof ThinkingDefaultsRef, value: ThinkingModeRef) =>
               setDefaultThinking((prev: ThinkingDefaultsRef) => ({
                 ...prev,
                 [mode]: value,
+              }))
+            }
+            onSetImageDefaults={(updates) =>
+              setImageGenerationDefaults((prev) => ({
+                ...prev,
+                ...updates,
               }))
             }
             onToggleProvider={handleToggleProvider}

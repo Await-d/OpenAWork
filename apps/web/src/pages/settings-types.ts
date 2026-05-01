@@ -18,7 +18,7 @@ export interface ProviderEditData {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
-  upstreamProtocol?: 'chat_completions' | 'responses';
+  upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
 }
 
 export interface SettingsDevLogRecord extends LogEntry {
