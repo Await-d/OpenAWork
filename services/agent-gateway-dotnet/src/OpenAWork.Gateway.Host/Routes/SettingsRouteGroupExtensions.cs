@@ -24,7 +24,7 @@ public static class SettingsRouteGroupExtensions
     ["minimal", "low", "medium", "high", "xhigh"];
 
     private static readonly HashSet<string> ValidUpstreamProtocols =
-    ["chat_completions", "responses"];
+    ["chat_completions", "responses", "anthropic_messages"];
 
     private static readonly IReadOnlyDictionary<string, string> AllowedApiKeyEnvByType = new Dictionary<string, string>
     {

@@ -15,6 +15,7 @@ public sealed class SessionStreamRuntimeService(
     IMessageV2Store messageV2Store,
     ISessionRunEventStore sessionRunEventStore,
     ISessionRuntimeThreadStore sessionRuntimeThreadStore,
+    ISessionRuntimeReconciler sessionRuntimeReconciler,
     ISessionStreamRequestRegistry requestRegistry,
     ISessionRunEventBroadcaster sessionRunEventBroadcaster,
     IWorkflowLlmClient workflowLlmClient,
@@ -26,12 +27,6 @@ public sealed class SessionStreamRuntimeService(
 
     public async Task<int> HandleAsync(SessionStreamRuntimeRequest request, Func<object, ValueTask> writeChunk, CancellationToken connectionCancellationToken)
     {
-        var existingReplay = await TryReplayPersistedAssistantAsync(request, writeChunk, connectionCancellationToken);
-        if (existingReplay)
-        {
-            return StatusCodes.Status200OK;
-        }
-
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellationToken);
         var registration = requestRegistry.RegisterOrGetConflict(request.SessionId, request.UserId, request.ClientRequestId, linkedCts);
 
@@ -58,6 +53,12 @@ public sealed class SessionStreamRuntimeService(
 
         try
         {
+            var existingReplay = await TryReplayPersistedAssistantAsync(request, writeChunk, connectionCancellationToken);
+            if (existingReplay)
+            {
+                return StatusCodes.Status200OK;
+            }
+
             await ExecuteAsync(request, writeChunk, linkedCts.Token).ConfigureAwait(false);
             return StatusCodes.Status200OK;
         }
@@ -82,6 +83,9 @@ public sealed class SessionStreamRuntimeService(
             FormatTimestamp(nowMs)), cancellationToken);
 
         using var heartbeatTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(SessionRuntimeThreadStore.HeartbeatMs));
+        var shouldHandleChildTerminal = false;
+        var terminalStatusCode = StatusCodes.Status500InternalServerError;
+        string? terminalReason = null;
         var heartbeatTask = Task.Run(async () =>
         {
             try
@@ -129,16 +133,23 @@ public sealed class SessionStreamRuntimeService(
             }
 
             await EmitRunEventAsync(request, new { type = "done", stopReason = "end_turn" }, writeChunk, cancellationToken);
+            shouldHandleChildTerminal = true;
+            terminalStatusCode = StatusCodes.Status200OK;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await EmitRunEventAsync(request, new { type = "done", stopReason = "cancelled" }, writeChunk, CancellationToken.None);
+            shouldHandleChildTerminal = true;
+            terminalStatusCode = 499;
+            terminalReason = "cancelled";
         }
         catch (Exception exception)
         {
             logger.LogError(exception, "session stream runtime failed for session {SessionId} request {ClientRequestId}", request.SessionId, request.ClientRequestId);
             await PersistAssistantMessageAsync(request, $"[错误: {StreamRuntimeErrorCode}] {StreamRuntimeErrorMessage}", "error", CancellationToken.None);
             await EmitRunEventAsync(request, CreateErrorChunk(StreamRuntimeErrorCode, StreamRuntimeErrorMessage), writeChunk, CancellationToken.None);
+            shouldHandleChildTerminal = true;
+            terminalStatusCode = StatusCodes.Status500InternalServerError;
         }
         finally
         {
@@ -153,6 +164,12 @@ public sealed class SessionStreamRuntimeService(
 
             await sessionRuntimeThreadStore.ClearAsync(request.SessionId, request.UserId, request.ClientRequestId, CancellationToken.None);
             await SetSessionStateAsync(request.SessionId, request.UserId, "idle", CancellationToken.None);
+            if (shouldHandleChildTerminal)
+            {
+                await sessionRuntimeReconciler.HandleChildSessionTerminalAsync(
+                    new TaskChildSessionTerminalInput(request.SessionId, request.UserId, terminalStatusCode, false, terminalReason),
+                    CancellationToken.None);
+            }
         }
     }
 

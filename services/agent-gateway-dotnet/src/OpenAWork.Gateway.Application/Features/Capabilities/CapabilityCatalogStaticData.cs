@@ -122,13 +122,7 @@ internal static class CapabilityCatalogStaticData
         Command("nav-settings", "设置", "设置", ["palette"]),
         Command("toggle-theme", "切换主题", "切换当前主题", ["palette"]),
         Command("slash-init-deep", "/init-deep", "Inject deep AGENTS context — 递归汇总已有 AGENTS.md 到当前会话", ["composer"]),
-        Command("slash-ralph-loop", "/ralph-loop", "Start Ralph Loop — 启动自引用持续开发循环（默认上限 100 轮）", ["composer"]),
-        Command("slash-ulw-loop", "/ulw-loop", "Start ULW Loop — 启动需要验证收尾的 UltraWork 循环", ["composer"]),
-        Command("slash-ulw-verify", "/ulw-verify", "Verify ULW result — 用 --pass / --fail 提交 ULW 验证结果", ["composer"]),
-        Command("slash-cancel-ralph", "/cancel-ralph", "Cancel active loop state — 取消当前活动中的 Ralph/ULW 循环", ["composer"]),
-        Command("slash-stop-continuation", "/stop-continuation", "Stop continuation systems — 停止当前 continuation / loop 状态", ["composer"]),
         Command("slash-refactor", "/refactor", "Start refactor workflow — 启动带任务追踪与验证预期的重构流程", ["composer"]),
-        Command("slash-start-work", "/start-work", "Resume work from plan/task state — 从计划或任务状态恢复执行", ["composer"]),
     ];
 
     internal static IReadOnlyList<ToolDefinitionItemResponse> BuildToolDefinitions(bool presentedNames)

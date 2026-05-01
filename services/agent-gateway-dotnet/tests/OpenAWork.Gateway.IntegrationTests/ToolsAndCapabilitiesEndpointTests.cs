@@ -112,6 +112,8 @@ public sealed class ToolsAndCapabilitiesEndpointTests : IClassFixture<GatewayWeb
         Assert.Contains(payload.Capabilities, (item) => item.Kind == "tool" && item.Label == "websearch");
         Assert.Contains(payload.Capabilities, (item) => item.Kind == "tool" && item.Label == "Skill");
         Assert.Contains(payload.Capabilities, (item) => item.Kind == "command" && item.Label == "/compact");
+        Assert.Contains(payload.Capabilities, (item) => item.Kind == "command" && item.Label == "/refactor");
+        Assert.DoesNotContain(payload.Capabilities, (item) => item.Kind == "command" && item.Label == "/start-work");
     }
 
     private HttpClient CreateAuthenticatedClient(string userId)

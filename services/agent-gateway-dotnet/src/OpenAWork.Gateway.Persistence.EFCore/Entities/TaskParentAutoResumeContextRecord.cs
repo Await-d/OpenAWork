@@ -12,6 +12,8 @@ public sealed class TaskParentAutoResumeContextRecord
 
     public required string RequestDataJson { get; set; }
 
+    public required string VersionToken { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }

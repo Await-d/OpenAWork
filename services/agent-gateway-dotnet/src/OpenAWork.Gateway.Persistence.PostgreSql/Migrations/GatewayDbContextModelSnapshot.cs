@@ -607,6 +607,11 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("request_data_json");
 
+                    b.Property<string>("VersionToken")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("version_token");
+
                     b.Property<string>("TaskId")
                         .IsRequired()
                         .HasColumnType("text")
@@ -628,6 +633,9 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
                     b.HasIndex("ParentSessionId");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("VersionToken")
+                        .IsUnique();
 
                     b.ToTable("task_parent_auto_resume_contexts", (string)null);
                 });

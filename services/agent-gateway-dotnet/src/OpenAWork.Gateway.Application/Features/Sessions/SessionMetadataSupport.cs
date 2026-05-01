@@ -43,7 +43,7 @@ internal static class SessionMetadataSupport
         }
     }
 
-    public static string SanitizePersistedMetadataJson(string metadataJson, string? workspaceRoot)
+    public static string SanitizePersistedMetadataJson(string metadataJson, IReadOnlyList<string> workspaceRoots)
     {
         try
         {
@@ -54,7 +54,7 @@ internal static class SessionMetadataSupport
                 return metadataJson;
             }
 
-            var safeWorkingDirectory = NormalizeWorkspacePath(workingDirectory, workspaceRoot);
+            var safeWorkingDirectory = SessionWorkspaceRootSupport.NormalizeWorkspacePath(workingDirectory, workspaceRoots);
             if (safeWorkingDirectory == workingDirectory)
             {
                 return metadataJson;
@@ -80,14 +80,14 @@ internal static class SessionMetadataSupport
     public static string NormalizeNewMetadata(
         JsonObject metadata,
         string? workingDirectory,
-        string? workspaceRoot)
+        IReadOnlyList<string> workspaceRoots)
     {
         if (workingDirectory is not null)
         {
             metadata["workingDirectory"] = workingDirectory;
         }
 
-        var normalized = NormalizeIncomingMetadata(metadata, workspaceRoot);
+        var normalized = NormalizeIncomingMetadata(metadata, workspaceRoots);
         if (normalized.WorkingDirectory is null && (workingDirectory is not null || metadata["workingDirectory"] is not null))
         {
             throw new SessionRequestValidationException(403, "Forbidden");
@@ -96,16 +96,16 @@ internal static class SessionMetadataSupport
         return normalized.Metadata.ToJsonString(JsonOptions);
     }
 
-    public static string MergeMetadataForUpdate(string currentMetadataJson, JsonObject patchMetadata, string? workspaceRoot)
+    public static string MergeMetadataForUpdate(string currentMetadataJson, JsonObject patchMetadata, IReadOnlyList<string> workspaceRoots)
     {
-        var currentMetadata = ParsePersistedMetadata(SanitizePersistedMetadataJson(currentMetadataJson, workspaceRoot));
+        var currentMetadata = ParsePersistedMetadata(SanitizePersistedMetadataJson(currentMetadataJson, workspaceRoots));
         var requestedWorkingDirectory = ExtractWorkingDirectory(patchMetadata);
         var currentParentSessionId = ExtractParentSessionId(currentMetadata);
         var requestedParentSessionId = ExtractParentSessionId(patchMetadata);
 
         var normalizedRequestedWorkingDirectory = requestedWorkingDirectory is null
             ? null
-            : NormalizeWorkspacePath(requestedWorkingDirectory, workspaceRoot);
+            : SessionWorkspaceRootSupport.NormalizeWorkspacePath(requestedWorkingDirectory, workspaceRoots);
         if (requestedWorkingDirectory is not null && normalizedRequestedWorkingDirectory is null)
         {
             throw new SessionRequestValidationException(403, "Forbidden");
@@ -126,7 +126,7 @@ internal static class SessionMetadataSupport
             currentMetadata[property.Key] = property.Value?.DeepClone();
         }
 
-        var normalized = NormalizeIncomingMetadata(currentMetadata, workspaceRoot);
+        var normalized = NormalizeIncomingMetadata(currentMetadata, workspaceRoots);
         if (normalized.WorkingDirectory is null && requestedWorkingDirectory is not null)
         {
             throw new SessionRequestValidationException(403, "Forbidden");
@@ -179,7 +179,7 @@ internal static class SessionMetadataSupport
             : null;
     }
 
-    private static (JsonObject Metadata, string? WorkingDirectory) NormalizeIncomingMetadata(JsonObject metadata, string? workspaceRoot)
+    private static (JsonObject Metadata, string? WorkingDirectory) NormalizeIncomingMetadata(JsonObject metadata, IReadOnlyList<string> workspaceRoots)
     {
         var workingDirectory = ExtractWorkingDirectory(metadata);
         if (workingDirectory is null)
@@ -187,7 +187,7 @@ internal static class SessionMetadataSupport
             return (metadata, null);
         }
 
-        var safeWorkingDirectory = NormalizeWorkspacePath(workingDirectory, workspaceRoot);
+        var safeWorkingDirectory = SessionWorkspaceRootSupport.NormalizeWorkspacePath(workingDirectory, workspaceRoots);
         if (safeWorkingDirectory is null)
         {
             return (metadata, null);
@@ -207,38 +207,6 @@ internal static class SessionMetadataSupport
 
         return currentWorkingDirectory != nextWorkingDirectory;
     }
-
-    private static string? NormalizeWorkspacePath(string path, string? workspaceRoot)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
-            {
-                return null;
-            }
-
-            var candidatePath = Path.GetFullPath(path);
-
-            if (string.IsNullOrWhiteSpace(workspaceRoot))
-            {
-                return null;
-            }
-
-            var rootPath = Path.GetFullPath(workspaceRoot);
-
-            if (candidatePath == rootPath || candidatePath.StartsWith(rootPath + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                return candidatePath;
-            }
-
-            return null;
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-
     private static void ValidateMetadataObject(JsonElement metadataElement, string[] pathPrefix, List<object> issues)
     {
         foreach (var property in metadataElement.EnumerateObject())

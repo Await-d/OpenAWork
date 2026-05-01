@@ -72,6 +72,54 @@ public sealed class PermissionRequestStore(GatewayDbContext dbContext) : IPermis
         return true;
     }
 
+    public async Task<bool> BeginPermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken)
+    {
+        var record = await dbContext.Set<PermissionRequestRecord>()
+            .SingleOrDefaultAsync((item) => item.SessionId == sessionId && item.Id == requestId && item.Status == "pending", cancellationToken);
+        if (record is null)
+        {
+            return false;
+        }
+
+        record.Status = "materializing";
+        record.Decision = "permanent";
+        record.UpdatedAtUtc = ParseTimestamp(updatedAt);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> CompletePermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken)
+    {
+        var record = await dbContext.Set<PermissionRequestRecord>()
+            .SingleOrDefaultAsync((item) => item.SessionId == sessionId && item.Id == requestId && item.Status == "materializing" && item.Decision == "permanent", cancellationToken);
+        if (record is null)
+        {
+            return false;
+        }
+
+        record.Status = "approved";
+        record.Decision = "permanent";
+        record.UpdatedAtUtc = ParseTimestamp(updatedAt);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> RevertPermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken)
+    {
+        var record = await dbContext.Set<PermissionRequestRecord>()
+            .SingleOrDefaultAsync((item) => item.SessionId == sessionId && item.Id == requestId && item.Status == "materializing" && item.Decision == "permanent", cancellationToken);
+        if (record is null)
+        {
+            return false;
+        }
+
+        record.Status = "pending";
+        record.Decision = null;
+        record.UpdatedAtUtc = ParseTimestamp(updatedAt);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<bool> UpdateResolutionAsync(string sessionId, string requestId, string status, string? decision, string updatedAt, CancellationToken cancellationToken)
     {
         var record = await dbContext.Set<PermissionRequestRecord>()

@@ -21,6 +21,7 @@ public sealed class TaskParentAutoResumeContextStore(GatewayDbContext dbContext)
                 UserId = record.UserId,
                 TaskId = record.TaskId,
                 RequestDataJson = record.RequestDataJson,
+                VersionToken = NewVersionToken(),
                 CreatedAtUtc = ParseTimestamp(record.CreatedAt),
                 UpdatedAtUtc = ParseTimestamp(record.UpdatedAt),
             });
@@ -31,6 +32,7 @@ public sealed class TaskParentAutoResumeContextStore(GatewayDbContext dbContext)
             existing.UserId = record.UserId;
             existing.TaskId = record.TaskId;
             existing.RequestDataJson = record.RequestDataJson;
+            existing.VersionToken = NewVersionToken();
             existing.UpdatedAtUtc = ParseTimestamp(record.UpdatedAt);
         }
 
@@ -44,6 +46,7 @@ public sealed class TaskParentAutoResumeContextStore(GatewayDbContext dbContext)
         CancellationToken cancellationToken)
     {
         var record = await dbContext.Set<TaskParentAutoResumeContextRecord>()
+            .AsNoTracking()
             .SingleOrDefaultAsync(
                 (item) => item.ChildSessionId == childSessionId && item.ParentSessionId == parentSessionId && item.UserId == userId,
                 cancellationToken);
@@ -52,10 +55,11 @@ public sealed class TaskParentAutoResumeContextStore(GatewayDbContext dbContext)
             return null;
         }
 
-        var result = Map(record);
-        dbContext.Remove(record);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return result;
+        var deletedCount = await dbContext.Set<TaskParentAutoResumeContextRecord>()
+            .Where((item) => item.ChildSessionId == record.ChildSessionId
+                && item.VersionToken == record.VersionToken)
+            .ExecuteDeleteAsync(cancellationToken);
+        return deletedCount == 1 ? Map(record) : null;
     }
 
     public Task ClearAsync(string childSessionId, string userId, CancellationToken cancellationToken)
@@ -78,4 +82,6 @@ public sealed class TaskParentAutoResumeContextStore(GatewayDbContext dbContext)
 
     private static string FormatTimestamp(DateTimeOffset value)
         => value.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static string NewVersionToken() => Guid.NewGuid().ToString("N");
 }

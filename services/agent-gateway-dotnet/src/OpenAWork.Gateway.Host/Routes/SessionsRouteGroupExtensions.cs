@@ -43,11 +43,71 @@ public static class SessionsRouteGroupExtensions
             return Results.Ok(response);
         });
 
+        group.MapGet("/search", async Task<IResult> (HttpRequest request, ISender sender, CancellationToken cancellationToken) =>
+        {
+            if (!TryParseSearchQuery(request.Query, out var query, out var error))
+            {
+                return Results.Json(new { error }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var response = await sender.Send(query!, cancellationToken);
+            return Results.Ok(response);
+        });
+
         group.MapGet("/{sessionId}", async Task<IResult> (string sessionId, ISender sender, CancellationToken cancellationToken) =>
         {
             try
             {
                 var response = await sender.Send(new GetSessionQuery(sessionId), cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status404NotFound);
+            }
+        });
+
+        group.MapGet("/{sessionId}/children", async Task<IResult> (string sessionId, HttpRequest request, ISender sender, CancellationToken cancellationToken) =>
+        {
+            if (!TryParseChildrenQuery(request.Query, out var query, out var error))
+            {
+                return Results.Json(new { error }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            try
+            {
+                var response = await sender.Send(new GetSessionChildrenQuery(sessionId, query!.Limit, query.Offset), cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status404NotFound);
+            }
+        });
+
+        group.MapGet("/{sessionId}/tasks", async Task<IResult> (string sessionId, ISender sender, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await sender.Send(new GetSessionTasksQuery(sessionId), cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status404NotFound);
+            }
+        });
+
+        group.MapPost("/{sessionId}/messages/truncate", async Task<IResult> (string sessionId, JsonElement body, ISender sender, CancellationToken cancellationToken) =>
+        {
+            if (!TryParseTruncateBody(body, sessionId, out var command, out var issues))
+            {
+                return Results.Json(new { error = "Invalid input", issues }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            try
+            {
+                var response = await sender.Send(command!, cancellationToken);
                 return Results.Ok(response);
             }
             catch (KeyNotFoundException exception)
@@ -249,6 +309,131 @@ public static class SessionsRouteGroupExtensions
         }
 
         query = new GetSessionsQuery(limit, offset);
+        return true;
+    }
+
+    private static bool TryParseChildrenQuery(IQueryCollection queryCollection, out GetSessionsQuery? query, out string error)
+    {
+        query = null;
+        error = string.Empty;
+
+        var limit = 20;
+        if (queryCollection.TryGetValue("limit", out var limitValue) && !int.TryParse(limitValue, out limit))
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        if (limit < 1 || limit > 50)
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        var offset = 0;
+        if (queryCollection.TryGetValue("offset", out var offsetValue) && !int.TryParse(offsetValue, out offset))
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        if (offset < 0)
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        query = new GetSessionsQuery(limit, offset);
+        return true;
+    }
+
+    private static bool TryParseSearchQuery(IQueryCollection queryCollection, out SearchSessionsQuery? query, out string error)
+    {
+        query = null;
+        error = string.Empty;
+
+        var rawQuery = queryCollection.TryGetValue("q", out var queryValue)
+            ? queryValue.ToString().Trim()
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(rawQuery))
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        var limit = 8;
+        if (queryCollection.TryGetValue("limit", out var limitValue) && !int.TryParse(limitValue, out limit))
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        if (limit < 1 || limit > 20)
+        {
+            error = "Invalid query params";
+            return false;
+        }
+
+        query = new SearchSessionsQuery(rawQuery, limit);
+        return true;
+    }
+
+    private static bool TryParseTruncateBody(JsonElement body, string sessionId, out TruncateSessionMessagesCommand? command, out List<object> issues)
+    {
+        command = null;
+        issues = [];
+        if (body.ValueKind != JsonValueKind.Object)
+        {
+            issues.Add(new { code = "invalid_type", path = Array.Empty<string>(), expected = "object", received = DescribeJsonKind(body.ValueKind), message = "Expected object" });
+            return false;
+        }
+
+        string? messageId = null;
+        if (!body.TryGetProperty("messageId", out var messageIdElement) || messageIdElement.ValueKind != JsonValueKind.String)
+        {
+            issues.Add(new { code = "invalid_type", path = new[] { "messageId" }, expected = "string", received = body.TryGetProperty("messageId", out var actual) ? DescribeJsonKind(actual.ValueKind) : "undefined", message = "Expected string" });
+        }
+        else
+        {
+            messageId = messageIdElement.GetString();
+            if (string.IsNullOrWhiteSpace(messageId))
+            {
+                issues.Add(new { code = "too_small", minimum = 1, type = "string", inclusive = true, exact = false, path = new[] { "messageId" }, message = "String must contain at least 1 character(s)" });
+            }
+        }
+
+        var inclusive = true;
+        if (body.TryGetProperty("inclusive", out var inclusiveElement))
+        {
+            if (inclusiveElement.ValueKind != JsonValueKind.True && inclusiveElement.ValueKind != JsonValueKind.False)
+            {
+                issues.Add(new { code = "invalid_type", path = new[] { "inclusive" }, expected = "boolean", received = DescribeJsonKind(inclusiveElement.ValueKind), message = "Expected boolean" });
+            }
+            else
+            {
+                inclusive = inclusiveElement.GetBoolean();
+            }
+        }
+
+        string? messageText = null;
+        if (body.TryGetProperty("messageText", out var messageTextElement))
+        {
+            if (messageTextElement.ValueKind != JsonValueKind.String)
+            {
+                issues.Add(new { code = "invalid_type", path = new[] { "messageText" }, expected = "string", received = DescribeJsonKind(messageTextElement.ValueKind), message = "Expected string" });
+            }
+            else
+            {
+                messageText = messageTextElement.GetString();
+            }
+        }
+
+        if (issues.Count > 0)
+        {
+            return false;
+        }
+
+        command = new TruncateSessionMessagesCommand(sessionId, messageId!, inclusive, messageText);
         return true;
     }
 

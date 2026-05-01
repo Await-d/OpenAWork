@@ -99,7 +99,7 @@ public static class PermissionsRouteGroupExtensions
                 null,
                 JsonSerializer.Serialize(new { clientRequestId }),
                 expiresAtMs,
-                null,
+                JsonSerializer.Serialize(new[] { requestBody.Scope }),
                 createdAt,
                 createdAt),
                 cancellationToken);
@@ -132,7 +132,7 @@ public static class PermissionsRouteGroupExtensions
                             null,
                             JsonSerializer.Serialize(new { clientRequestId }),
                             expiresAtMs,
-                            null,
+                            JsonSerializer.Serialize(new[] { requestBody.Scope }),
                             createdAt,
                             createdAt))
                         : MapPendingPermissionRequest(createdRequest),
@@ -203,24 +203,104 @@ public static class PermissionsRouteGroupExtensions
                 return Results.Json(new { error = "Permission request already resolved" }, statusCode: StatusCodes.Status409Conflict);
             }
 
-            if (string.Equals(replyBody.Decision, "permanent", StringComparison.Ordinal))
+            var updatedAt = FormatTimestamp(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            var isPermanentDecision = string.Equals(replyBody.Decision, "permanent", StringComparison.Ordinal);
+
+            if (isPermanentDecision)
             {
-                return Results.Json(
-                    new { error = "Permanent permission decisions are not yet supported in the .NET gateway." },
-                    statusCode: StatusCodes.Status400BadRequest);
+                var claimed = await permissionRequestStore.BeginPermanentMaterializationAsync(
+                    id,
+                    replyBody.RequestId,
+                    updatedAt,
+                    cancellationToken);
+                if (!claimed)
+                {
+                    return Results.Json(new { error = "Permission request already resolved" }, statusCode: StatusCodes.Status409Conflict);
+                }
+            }
+
+            WorkspacePermissionMaterializationResult? permanentMaterialization = null;
+            if (isPermanentDecision)
+            {
+                try
+                {
+                    permanentMaterialization = await PermissionsRouteWorkspacePermissionConfigWriter.PersistAsync(
+                        dbContext,
+                        configuration,
+                        id,
+                        permissionRequest.ToolName,
+                        ResolveAlwaysPatterns(permissionRequest.AlwaysJson, permissionRequest.Scope),
+                        cancellationToken);
+                }
+                catch
+                {
+                    await RollbackPermanentMaterializationAsync(
+                        permissionRequestStore,
+                        null,
+                        id,
+                        replyBody.RequestId,
+                        updatedAt);
+                    throw;
+                }
+
+                if (permanentMaterialization is null)
+                {
+                    await RollbackPermanentMaterializationAsync(
+                        permissionRequestStore,
+                        null,
+                        id,
+                        replyBody.RequestId,
+                        updatedAt);
+                    return Results.Json(new { error = "Workspace root unavailable for permanent permission" }, statusCode: StatusCodes.Status409Conflict);
+                }
             }
 
             var resolvedStatus = string.Equals(replyBody.Decision, "reject", StringComparison.Ordinal) ? "rejected" : "approved";
-            var updatedAt = FormatTimestamp(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            var updated = await permissionRequestStore.UpdateResolutionAsync(
-                id,
-                replyBody.RequestId,
-                resolvedStatus,
-                replyBody.Decision,
-                updatedAt,
-                cancellationToken);
+            bool updated;
+            if (isPermanentDecision)
+            {
+                try
+                {
+                    updated = await permissionRequestStore.CompletePermanentMaterializationAsync(
+                        id,
+                        replyBody.RequestId,
+                        updatedAt,
+                        cancellationToken);
+                }
+                catch
+                {
+                    await RollbackPermanentMaterializationAsync(
+                        permissionRequestStore,
+                        permanentMaterialization,
+                        id,
+                        replyBody.RequestId,
+                        updatedAt);
+                    throw;
+                }
+            }
+            else
+            {
+                updated = await permissionRequestStore.UpdateResolutionAsync(
+                    id,
+                    replyBody.RequestId,
+                    resolvedStatus,
+                    replyBody.Decision,
+                    updatedAt,
+                    cancellationToken);
+            }
+
             if (!updated)
             {
+                if (isPermanentDecision)
+                {
+                    await RollbackPermanentMaterializationAsync(
+                        permissionRequestStore,
+                        permanentMaterialization,
+                        id,
+                        replyBody.RequestId,
+                        updatedAt);
+                }
+
                 return Results.Json(new { error = "Permission request already resolved" }, statusCode: StatusCodes.Status409Conflict);
             }
 
@@ -231,7 +311,7 @@ public static class PermissionsRouteGroupExtensions
                 ToolName = permissionRequest.ToolName,
                 Scope = permissionRequest.Scope,
                 Decision = replyBody.Decision,
-                WorkspaceRoot = null,
+                WorkspaceRoot = permanentMaterialization?.WorkspaceRoot,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
             });
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -291,7 +371,7 @@ public static class PermissionsRouteGroupExtensions
                 var logger = loggerFactory.CreateLogger("PermissionsRouteGroupExtensions");
                 var initialToolResult = string.Equals(replyBody.Decision, "reject", StringComparison.Ordinal)
                     ? BuildRejectedInitialToolResult(resumeContext!, permissionRequest.ToolName, replyBody.Feedback)
-                    : await ExecuteApprovedToolAsync(resumeContext!, permissionRequest.ToolName, configuration, logger, cancellationToken);
+                    : await ExecuteApprovedToolAsync(resumeContext!, permissionRequest.ToolName, dbContext, configuration, logger, cancellationToken);
                 var runtimeRequest = BuildRuntimeResumeRequest(resumeContext!, initialToolResult);
                 StartResumeInBackground(
                     scopeFactory,
@@ -400,6 +480,53 @@ public static class PermissionsRouteGroupExtensions
         session.StateStatus = status;
         session.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task RollbackPermanentMaterializationAsync(
+        IPermissionRequestStore permissionRequestStore,
+        WorkspacePermissionMaterializationResult? permanentMaterialization,
+        string sessionId,
+        string requestId,
+        string updatedAt)
+    {
+        List<Exception>? rollbackErrors = null;
+
+        if (permanentMaterialization is not null)
+        {
+            try
+            {
+                await PermissionsRouteWorkspacePermissionConfigWriter.RollbackAsync(permanentMaterialization, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                rollbackErrors = [ex];
+            }
+        }
+
+        try
+        {
+            var reverted = await permissionRequestStore.RevertPermanentMaterializationAsync(sessionId, requestId, updatedAt, CancellationToken.None);
+            if (!reverted)
+            {
+                (rollbackErrors ??= []).Add(new InvalidOperationException("Failed to revert permanent materialization state."));
+            }
+        }
+        catch (Exception ex)
+        {
+            (rollbackErrors ??= []).Add(ex);
+        }
+
+        if (rollbackErrors is null || rollbackErrors.Count == 0)
+        {
+            return;
+        }
+
+        if (rollbackErrors.Count == 1)
+        {
+            throw rollbackErrors[0];
+        }
+
+        throw new AggregateException("Failed to rollback permanent permission materialization.", rollbackErrors);
     }
 
     private static bool TryParseCreateRequest(JsonElement body, out CreatePermissionRequestBody? request, out object? error)
@@ -609,6 +736,7 @@ public static class PermissionsRouteGroupExtensions
                 model,
                 requestDataElement.TryGetProperty("thinkingEnabled", out var thinkingEnabled) && thinkingEnabled.ValueKind is JsonValueKind.True or JsonValueKind.False ? thinkingEnabled.GetBoolean() : null,
                 requestDataElement.TryGetProperty("webSearchEnabled", out var webSearchEnabled) && webSearchEnabled.ValueKind is JsonValueKind.True or JsonValueKind.False ? webSearchEnabled.GetBoolean() : null,
+                requestDataElement.GetRawText(),
                 toolCallId,
                 rawInputElement.GetRawText(),
                 nextRound,
@@ -653,6 +781,8 @@ public static class PermissionsRouteGroupExtensions
             context.Model,
             context.ThinkingEnabled,
             context.WebSearchEnabled,
+            context.RequestDataJson,
+            context.ObservabilityJson,
             initialToolResult);
 
     private static SessionStreamInitialToolResult BuildRejectedInitialToolResult(PermissionResumeContext context, string toolName, string? feedback)
@@ -674,6 +804,7 @@ public static class PermissionsRouteGroupExtensions
     private static async Task<SessionStreamInitialToolResult> ExecuteApprovedToolAsync(
         PermissionResumeContext context,
         string toolName,
+        GatewayDbContext dbContext,
         IConfiguration configuration,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -728,13 +859,19 @@ public static class PermissionsRouteGroupExtensions
             ? Math.Clamp(parsedTimeout, 1000, 120000)
             : 30000;
 
-        if (!TryResolveApprovedBashWorkingDirectory(configuration, workdir, out var resolvedWorkdir, out var workdirError))
+        var workdirResolution = await TryResolveApprovedBashWorkingDirectoryAsync(
+            dbContext,
+            configuration,
+            context.SessionId,
+            workdir,
+            cancellationToken);
+        if (!workdirResolution.Success)
         {
             return new SessionStreamInitialToolResult(
                 context.ToolCallId,
                 toolName,
                 context.RawInputJson,
-                JsonSerializer.Serialize(workdirError),
+                JsonSerializer.Serialize(workdirResolution.Error),
                 true,
                 true,
                 context.NextRound,
@@ -752,7 +889,7 @@ public static class PermissionsRouteGroupExtensions
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
-                    WorkingDirectory = resolvedWorkdir,
+                    WorkingDirectory = workdirResolution.ResolvedWorkdir,
                 },
             };
 
@@ -864,72 +1001,54 @@ public static class PermissionsRouteGroupExtensions
         return false;
     }
 
-    private static bool TryResolveApprovedBashWorkingDirectory(
+    private static async Task<(bool Success, string ResolvedWorkdir, string? Error)> TryResolveApprovedBashWorkingDirectoryAsync(
+        GatewayDbContext dbContext,
         IConfiguration configuration,
+        string sessionId,
         string? requestedWorkdir,
-        out string resolvedWorkdir,
-        out string? error)
+        CancellationToken cancellationToken)
     {
-        resolvedWorkdir = string.Empty;
-        error = null;
-
-        var workspaceRoot = configuration["WORKSPACE_ROOT"]?.Trim();
-        if (string.IsNullOrWhiteSpace(workspaceRoot))
+        var configuredRoots = PermissionsRouteWorkspacePermissionConfigWriter.ResolveConfiguredWorkspaceRoots(configuration);
+        if (configuredRoots.Count == 0)
         {
-            error = "Approved bash requires a configured WORKSPACE_ROOT.";
-            return false;
+            return (false, string.Empty, "Approved bash requires a configured WORKSPACE_ROOT or WORKSPACE_ROOTS.");
         }
 
-        if (!Path.IsPathRooted(workspaceRoot))
-        {
-            error = "Configured WORKSPACE_ROOT must be an absolute path.";
-            return false;
-        }
-
-        var normalizedWorkspaceRoot = Path.GetFullPath(workspaceRoot);
-        if (!Directory.Exists(normalizedWorkspaceRoot))
-        {
-            error = "Configured WORKSPACE_ROOT directory does not exist.";
-            return false;
-        }
-
-        if (HasSymbolicLinkInDirectoryPath(normalizedWorkspaceRoot, normalizedWorkspaceRoot))
-        {
-            error = "Configured WORKSPACE_ROOT must not be a symbolic link.";
-            return false;
-        }
-
-        var candidateWorkdir = string.IsNullOrWhiteSpace(requestedWorkdir) ? normalizedWorkspaceRoot : requestedWorkdir;
+        var candidateWorkdir = string.IsNullOrWhiteSpace(requestedWorkdir)
+            ? await PermissionsRouteWorkspacePermissionConfigWriter.ResolveSessionWorkspaceRootAsync(
+                    dbContext,
+                    configuration,
+                    sessionId,
+                    cancellationToken)
+                ?? configuredRoots[0]
+            : requestedWorkdir;
         if (!Path.IsPathRooted(candidateWorkdir))
         {
-            error = "Approved bash workdir must be an absolute path under WORKSPACE_ROOT.";
-            return false;
+            return (false, string.Empty, "Approved bash workdir must be an absolute path under configured WORKSPACE_ROOT or WORKSPACE_ROOTS.");
         }
 
         var normalizedWorkdir = Path.GetFullPath(candidateWorkdir);
         if (!Directory.Exists(normalizedWorkdir))
         {
-            error = "Approved bash workdir must point to an existing directory under WORKSPACE_ROOT.";
-            return false;
+            return (false, string.Empty, "Approved bash workdir must point to an existing directory under configured WORKSPACE_ROOT or WORKSPACE_ROOTS.");
         }
 
-        if (!IsPathUnderRoot(normalizedWorkdir, normalizedWorkspaceRoot))
+        var matchedRoot = configuredRoots
+            .FirstOrDefault((root) => IsPathUnderRoot(normalizedWorkdir, root));
+        if (matchedRoot is null)
         {
-            error = "Approved bash workdir must stay within WORKSPACE_ROOT.";
-            return false;
+            return (false, string.Empty, "Approved bash workdir must stay within configured WORKSPACE_ROOT or WORKSPACE_ROOTS.");
         }
 
-        if (HasSymbolicLinkInDirectoryPath(normalizedWorkdir, normalizedWorkspaceRoot))
+        if (HasSymbolicLinkInDirectoryPath(normalizedWorkdir, matchedRoot))
         {
-            error = "Approved bash workdir must not traverse symbolic links under WORKSPACE_ROOT.";
-            return false;
+            return (false, string.Empty, "Approved bash workdir must not traverse symbolic links under configured WORKSPACE_ROOT or WORKSPACE_ROOTS.");
         }
 
-        resolvedWorkdir = normalizedWorkdir;
-        return true;
+        return (true, normalizedWorkdir, null);
     }
 
-    private static bool IsPathUnderRoot(string candidatePath, string rootPath)
+    internal static bool IsPathUnderRoot(string candidatePath, string rootPath)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (string.Equals(candidatePath, rootPath, comparison))
@@ -942,7 +1061,37 @@ public static class PermissionsRouteGroupExtensions
         return candidatePath.StartsWith(normalizedRoot, comparison);
     }
 
-    private static bool HasSymbolicLinkInDirectoryPath(string candidatePath, string rootPath)
+    private static string[] ResolveAlwaysPatterns(string? raw, string scope)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [scope];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return [scope];
+            }
+
+            var values = document.RootElement
+                .EnumerateArray()
+                .Where((item) => item.ValueKind == JsonValueKind.String)
+                .Select((item) => item.GetString())
+                .Where((item) => !string.IsNullOrWhiteSpace(item))
+                .Select((item) => item!)
+                .ToArray();
+            return values.Length > 0 ? values : [scope];
+        }
+        catch (JsonException)
+        {
+            return [scope];
+        }
+    }
+
+    internal static bool HasSymbolicLinkInDirectoryPath(string candidatePath, string rootPath)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var currentPath = candidatePath;
@@ -1100,6 +1249,7 @@ public static class PermissionsRouteGroupExtensions
         string? Model,
         bool? ThinkingEnabled,
         bool? WebSearchEnabled,
+        string RequestDataJson,
         string ToolCallId,
         string RawInputJson,
         int? NextRound,

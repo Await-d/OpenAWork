@@ -598,6 +598,11 @@ namespace OpenAWork.Gateway.Persistence.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("request_data_json");
 
+                    b.Property<string>("VersionToken")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("version_token");
+
                     b.Property<string>("TaskId")
                         .IsRequired()
                         .HasColumnType("TEXT")
@@ -619,6 +624,9 @@ namespace OpenAWork.Gateway.Persistence.Sqlite.Migrations
                     b.HasIndex("ParentSessionId");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("VersionToken")
+                        .IsUnique();
 
                     b.ToTable("task_parent_auto_resume_contexts", (string)null);
                 });

@@ -414,6 +414,68 @@ public sealed class SessionStreamRuntimeTests : IClassFixture<GatewayWebApplicat
     }
 
     [Fact]
+    public async Task WebSocketStream_ShouldReleaseRegistryAfterReplayBeforeNextRequest()
+    {
+        const string userId = "user-ws-stream-replay-release";
+        const string sessionId = "session-ws-stream-replay-release";
+        var countingClient = new CountingWorkflowLlmClient("fresh after replay release");
+        using var factory = CreateFactoryWithLlm(countingClient);
+        await SeedUserAndSessionAsync(factory, userId, sessionId);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var runEventStore = scope.ServiceProvider.GetRequiredService<OpenAWork.Gateway.Application.Abstractions.Persistence.ISessionRunEventStore>();
+            await runEventStore.PersistAsync(new OpenAWork.Gateway.Application.Abstractions.Persistence.SessionRunEventInfoRecord(
+                0,
+                sessionId,
+                userId,
+                "req-replay-release",
+                null,
+                "text_delta",
+                null,
+                null,
+                1000,
+                "{\"type\":\"text_delta\",\"delta\":\"durable replay text\"}",
+                "2026-04-19 10:00:00"), CancellationToken.None);
+            await runEventStore.PersistAsync(new OpenAWork.Gateway.Application.Abstractions.Persistence.SessionRunEventInfoRecord(
+                0,
+                sessionId,
+                userId,
+                "req-replay-release",
+                null,
+                "done",
+                null,
+                null,
+                1001,
+                "{\"type\":\"done\",\"stopReason\":\"end_turn\"}",
+                "2026-04-19 10:00:01"), CancellationToken.None);
+        }
+
+        using var socket = await ConnectWebSocketAsync(factory, sessionId, userId);
+        await SendJsonAsync(socket, new
+        {
+            message = "ignored",
+            clientRequestId = "req-replay-release",
+            model = "gpt-test",
+        });
+
+        var replayChunks = await ReceiveChunksUntilAsync(socket, (items) => items.Any((item) => item.GetProperty("type").GetString() == "done"));
+        Assert.Contains(replayChunks, (chunk) => chunk.GetProperty("type").GetString() == "text_delta" && chunk.GetProperty("delta").GetString() == "durable replay text");
+
+        await SendJsonAsync(socket, new
+        {
+            message = "fresh",
+            clientRequestId = "req-after-replay-release",
+            model = "gpt-test",
+        });
+
+        var newRunChunks = await ReceiveChunksUntilAsync(socket, (items) => items.Any((item) => item.GetProperty("type").GetString() == "done"));
+        Assert.DoesNotContain(newRunChunks, (chunk) => chunk.GetProperty("code").GetString() == "SESSION_ALREADY_RUNNING");
+        Assert.Contains(newRunChunks, (chunk) => chunk.GetProperty("type").GetString() == "text_delta" && chunk.GetProperty("delta").GetString() == "fresh after replay release");
+        Assert.Equal(1, countingClient.CallCount);
+    }
+
+    [Fact]
     public async Task WebSocketStream_ShouldWaitAndReplaySameRequestWhileFirstRunIsStillInFlight()
     {
         const string userId = "user-ws-stream-replay-inflight";

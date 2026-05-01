@@ -81,6 +81,7 @@ public partial class Program
         app.MapCommandsRoutes();
         app.MapSessionStreamRoutes();
         app.MapPermissionsRoutes();
+        app.MapQuestionsRoutes();
         app.MapSessionsRoutes();
         app.MapAgentsRoutes();
         app.MapWorkflowsRoutes();

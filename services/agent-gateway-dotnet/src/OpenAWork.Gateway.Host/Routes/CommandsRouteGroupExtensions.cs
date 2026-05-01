@@ -1,6 +1,8 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using OpenAWork.Gateway.Application.Abstractions.Auth;
 using OpenAWork.Gateway.Application.Abstractions.Persistence;
 using OpenAWork.Gateway.Persistence.EFCore;
@@ -14,7 +16,17 @@ public static class CommandsRouteGroupExtensions
     {
         "compact_session",
         "generate_handoff",
+        "init_deep",
+        "refactor_session",
     };
+
+    private static readonly IReadOnlyList<string> InitDeepInstructionFileNames =
+    [
+        "AGENTS.md",
+        "CRUSH.md",
+        "CLAUDE.md",
+        "GEMINI.md",
+    ];
 
     private static readonly IReadOnlyList<CommandDescriptorView> CommandDescriptors =
     [
@@ -53,6 +65,7 @@ public static class CommandsRouteGroupExtensions
             JsonElement body,
             ICurrentUser currentUser,
             GatewayDbContext dbContext,
+            IConfiguration configuration,
             IMessageV2Store messageV2Store,
             CancellationToken cancellationToken) =>
         {
@@ -89,6 +102,14 @@ public static class CommandsRouteGroupExtensions
             else if (string.Equals(command.Action.Kind, "generate_handoff", StringComparison.Ordinal))
             {
                 result = ExecuteHandoff(id, messages);
+            }
+            else if (string.Equals(command.Action.Kind, "init_deep", StringComparison.Ordinal))
+            {
+                result = await ExecuteInitDeepAsync(id, requestBody.CommandId, session, dbContext, configuration, cancellationToken);
+            }
+            else if (string.Equals(command.Action.Kind, "refactor_session", StringComparison.Ordinal))
+            {
+                result = await ExecuteRefactorAsync(id, requestBody.CommandId, requestBody.RawInput, session, dbContext, cancellationToken);
             }
             else
             {
@@ -233,6 +254,308 @@ public static class CommandsRouteGroupExtensions
             },
             sessionId);
     }
+
+    private static async Task<CommandExecutionResultView> ExecuteInitDeepAsync(
+        string sessionId,
+        string commandId,
+        SessionRecord session,
+        GatewayDbContext dbContext,
+        IConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        var workspaceRoot = await PermissionsRouteWorkspacePermissionConfigWriter.ResolveSessionWorkspaceRootAsync(
+            dbContext,
+            configuration,
+            sessionId,
+            cancellationToken);
+        var entries = workspaceRoot is not null
+            ? await CollectInitDeepEntriesAsync(workspaceRoot, workspaceRoot, cancellationToken)
+            : [];
+        var injectionBlock = BuildInitDeepInjectionBlock(entries);
+        var fileCount = entries.Count;
+        var summary = fileCount > 0
+            ? $"已注入 {fileCount} 条 Instructions 上下文到会话。"
+            : "未找到可注入的 Instructions 文件，会话上下文未更新。";
+        var metadata = ParseMetadata(session.MetadataJson);
+        metadata["initDeepContext"] = injectionBlock;
+        metadata["initDeepFileCount"] = fileCount;
+        metadata["initDeepAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var summarySnippet = injectionBlock[..Math.Min(300, injectionBlock.Length)];
+        var card = new Dictionary<string, object?>
+        {
+            ["type"] = "status",
+            ["title"] = "/init-deep 完成",
+            ["message"] = $"{summary}\n\nInstructions 摘要（前 300 字符）：\n{summarySnippet}{(injectionBlock.Length > 300 ? "…" : string.Empty)}",
+            ["tone"] = "info",
+        };
+
+        var storedMessages = JsonNode.Parse(session.MessagesJson) as JsonArray ?? [];
+        storedMessages.Add(JsonValue.Create(JsonSerializer.Serialize(new
+        {
+            type = "status",
+            payload = card,
+        })));
+
+        session.MetadataJson = metadata.ToJsonString();
+        session.MessagesJson = storedMessages.ToJsonString();
+        session.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var occurredAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        return new CommandExecutionResultView(
+            [
+                new Dictionary<string, object?>
+                {
+                    ["type"] = "audit_ref",
+                    ["auditLogId"] = $"{sessionId}:{commandId}:init-deep",
+                    ["eventId"] = $"{sessionId}:{commandId}:init-deep",
+                    ["runId"] = $"command:{sessionId}:{commandId}",
+                    ["occurredAt"] = occurredAt,
+                },
+            ],
+            card,
+            sessionId);
+    }
+
+    private static async Task<CommandExecutionResultView> ExecuteRefactorAsync(
+        string sessionId,
+        string commandId,
+        string? rawInput,
+        SessionRecord session,
+        GatewayDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var (scope, strategy, target) = ParseRefactorInput(rawInput);
+        var startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var taskId = $"refactor:{sessionId}:{startedAt}";
+        var metadata = ParseMetadata(session.MetadataJson);
+        metadata["refactorStartedAt"] = startedAt;
+        metadata["refactorStrategy"] = strategy;
+        metadata["refactorScope"] = scope;
+        metadata["refactorTarget"] = target;
+        metadata["refactorTaskId"] = taskId;
+
+        var card = new Dictionary<string, object?>
+        {
+            ["type"] = "status",
+            ["title"] = "/refactor 已启动",
+            ["message"] = $"重构工作流已创建。\n目标：{target}\n范围：{scope}\n策略：{strategy}\n下一步：分析目标 → 建立影响面 → 执行并验证。\n任务：LSP+重构\n任务 ID：{taskId}",
+            ["tone"] = "info",
+        };
+
+        var storedMessages = JsonNode.Parse(session.MessagesJson) as JsonArray ?? [];
+        storedMessages.Add(JsonValue.Create(JsonSerializer.Serialize(new
+        {
+            type = "status",
+            payload = card,
+        })));
+
+        session.MetadataJson = metadata.ToJsonString();
+        session.MessagesJson = storedMessages.ToJsonString();
+        session.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new CommandExecutionResultView(
+            [
+                new Dictionary<string, object?>
+                {
+                    ["type"] = "task_update",
+                    ["taskId"] = taskId,
+                    ["label"] = "LSP+重构",
+                    ["status"] = "in_progress",
+                    ["sessionId"] = sessionId,
+                    ["parentTaskId"] = null,
+                    ["eventId"] = $"{sessionId}:{taskId}:task",
+                    ["runId"] = $"command:{sessionId}:{commandId}",
+                    ["occurredAt"] = startedAt,
+                },
+            ],
+            card,
+            sessionId);
+    }
+
+    private static (string Scope, string Strategy, string Target) ParseRefactorInput(string? rawInput)
+    {
+        if (string.IsNullOrWhiteSpace(rawInput))
+        {
+            return ("module", "safe", "当前会话上下文");
+        }
+
+        var tokens = ExtractCommandArgs(rawInput, "/refactor");
+        var (named, positional) = ParseCommandArgs(tokens);
+        var scope = named.TryGetValue("scope", out var rawScope) && rawScope is "file" or "module" or "project"
+            ? rawScope
+            : "module";
+        var strategy = named.TryGetValue("strategy", out var rawStrategy) && rawStrategy is "safe" or "aggressive"
+            ? rawStrategy
+            : "safe";
+
+        var target = positional.Count == 0 ? "当前会话上下文" : string.Join(' ', positional);
+        return (scope, strategy, target);
+    }
+
+    private static (Dictionary<string, string> Named, List<string> Positional) ParseCommandArgs(IReadOnlyList<string> args)
+    {
+        var named = new Dictionary<string, string>(StringComparer.Ordinal);
+        var positional = new List<string>();
+
+        for (var index = 0; index < args.Count; index += 1)
+        {
+            var current = args[index];
+            if (!current.StartsWith("--", StringComparison.Ordinal))
+            {
+                positional.Add(current);
+                continue;
+            }
+
+            var option = current[2..];
+            var separatorIndex = option.IndexOf('=');
+            if (separatorIndex >= 0)
+            {
+                var key = option[..separatorIndex];
+                var value = option[(separatorIndex + 1)..];
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    named[key] = value;
+                }
+
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(option) && index + 1 < args.Count && !args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                named[option] = args[index + 1];
+                index += 1;
+                continue;
+            }
+        }
+
+        return (named, positional);
+    }
+
+    private static IReadOnlyList<string> ExtractCommandArgs(string rawInput, string label)
+    {
+        var tokens = TokenizeCommandInput(rawInput);
+        if (tokens.Count == 0)
+        {
+            return [];
+        }
+
+        var first = tokens[0];
+        if (first.StartsWith('/', StringComparison.Ordinal))
+        {
+            return string.Equals(first, label, StringComparison.Ordinal)
+                ? tokens.Skip(1).ToArray()
+                : [];
+        }
+
+        return tokens;
+    }
+
+    private static IReadOnlyList<string> TokenizeCommandInput(string rawInput)
+    {
+        var tokens = new List<string>();
+        var current = new StringBuilder();
+        char? quote = null;
+
+        for (var index = 0; index < rawInput.Length; index += 1)
+        {
+            var currentChar = rawInput[index];
+
+            if (quote is not null)
+            {
+                if (currentChar == quote)
+                {
+                    quote = null;
+                    continue;
+                }
+
+                if (currentChar == '\\' && index + 1 < rawInput.Length)
+                {
+                    current.Append(rawInput[index + 1]);
+                    index += 1;
+                    continue;
+                }
+
+                current.Append(currentChar);
+                continue;
+            }
+
+            if (currentChar is '\'' or '"')
+            {
+                quote = currentChar;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(currentChar))
+            {
+                if (current.Length > 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+
+                continue;
+            }
+
+            current.Append(currentChar);
+        }
+
+        if (current.Length > 0)
+        {
+            tokens.Add(current.ToString());
+        }
+
+        return tokens;
+    }
+
+    private static async Task<IReadOnlyList<InitDeepContextEntry>> CollectInitDeepEntriesAsync(
+        string startDirectory,
+        string stopDirectory,
+        CancellationToken cancellationToken)
+    {
+        var entries = new List<InitDeepContextEntry>();
+        var currentDirectory = Path.GetFullPath(startDirectory);
+        var normalizedStopDirectory = Path.GetFullPath(stopDirectory);
+        var depth = 0;
+
+        while (true)
+        {
+            foreach (var fileName in InitDeepInstructionFileNames)
+            {
+                var candidate = Path.Combine(currentDirectory, fileName);
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                var content = await File.ReadAllTextAsync(candidate, cancellationToken);
+                entries.Add(new InitDeepContextEntry(candidate, content, depth));
+            }
+
+            if (string.Equals(currentDirectory, normalizedStopDirectory, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            var parent = Path.GetDirectoryName(currentDirectory);
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                break;
+            }
+
+            currentDirectory = parent;
+            depth += 1;
+        }
+
+        return entries.OrderBy((item) => item.Depth).ToArray();
+    }
+
+    private static string BuildInitDeepInjectionBlock(IReadOnlyList<InitDeepContextEntry> entries)
+        => entries.Count == 0
+            ? string.Empty
+            : string.Join("\n\n", entries.Select((entry) => $"Instructions from: {entry.FilePath}\n{entry.Content}"));
 
     private static bool ShouldExposeCommand(CommandDescriptorView descriptor)
         => string.Equals(descriptor.Execution, "client", StringComparison.Ordinal)
@@ -508,6 +831,8 @@ public static class CommandsRouteGroupExtensions
     private sealed record CommandMessageSnapshot(string Id, string Role, IReadOnlyList<CommandContentSnapshot> Content, long CreatedAt);
 
     private sealed record CommandContentSnapshot(string Type, string? Text);
+
+    private sealed record InitDeepContextEntry(string FilePath, string Content, int Depth);
 
     private sealed record CommandExecutionResultView(IReadOnlyList<object> Events, object? Card, string? SessionId);
 

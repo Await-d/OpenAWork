@@ -26,4 +26,6 @@ public sealed record SessionStreamRuntimeRequest(
     string? Model,
     bool? ThinkingEnabled,
     bool? WebSearchEnabled,
+    string? RequestDataJson,
+    string? ObservabilityJson,
     SessionStreamInitialToolResult? InitialToolResult);

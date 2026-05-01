@@ -12,6 +12,12 @@ public interface IPermissionRequestStore
 
     Task<bool> UpdatePendingPayloadAsync(string requestId, string payloadJson, string updatedAt, CancellationToken cancellationToken);
 
+    Task<bool> BeginPermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken);
+
+    Task<bool> CompletePermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken);
+
+    Task<bool> RevertPermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken);
+
     Task<bool> UpdateResolutionAsync(string sessionId, string requestId, string status, string? decision, string updatedAt, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<PermissionRequestInfoRecord>> ExpirePendingAsync(string sessionId, long nowMs, string updatedAt, CancellationToken cancellationToken);

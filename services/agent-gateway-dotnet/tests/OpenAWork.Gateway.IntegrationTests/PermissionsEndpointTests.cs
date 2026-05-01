@@ -12,6 +12,7 @@ using OpenAWork.Gateway.Application.Abstractions.Persistence;
 using OpenAWork.Gateway.Application.Abstractions.Settings;
 using OpenAWork.Gateway.Persistence.EFCore;
 using OpenAWork.Gateway.Persistence.EFCore.Entities;
+using OpenAWork.Gateway.Persistence.EFCore.Stores;
 
 namespace OpenAWork.Gateway.IntegrationTests;
 
@@ -63,6 +64,7 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
         var persisted = await permissionStore.GetAsync(sessionId, requestId!, CancellationToken.None);
         Assert.NotNull(persisted);
         Assert.Equal("req-permission-1", JsonDocument.Parse(persisted.RequestPayloadJson!).RootElement.GetProperty("clientRequestId").GetString());
+        Assert.Equal("[\"/repo\"]", persisted.AlwaysJson);
 
         var runEvents = await runEventStore.ListByRequestAsync(sessionId, "req-permission-1", CancellationToken.None);
         Assert.Contains(runEvents, (eventRecord) => eventRecord.EventType == "permission_asked");
@@ -371,46 +373,443 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
     }
 
     [Fact]
-    public async Task Reply_ShouldRejectPermanentDecisionUntilDotNetSupportsPersistedRules()
+    public async Task Reply_ShouldPersistPermanentDecisionForWorkspaceRoot()
     {
         const string userId = "user-permissions-permanent";
         const string sessionId = "session-permissions-permanent";
-        await SeedUserAndSessionAsync(_factory, userId, sessionId, stateStatus: "paused");
+        var workspaceRoot = CreateWorkspaceRoot();
+        await using var cleanup = new AsyncDirectoryCleanup(workspaceRoot);
+        using var factory = CreateFactoryWithLlm(
+            new StubWorkflowLlmClient("permission permanent resumed"),
+            new Dictionary<string, string?>
+            {
+                ["WORKSPACE_ROOT"] = workspaceRoot,
+            });
+        await SeedUserAndSessionAsync(
+            factory,
+            userId,
+            sessionId,
+            stateStatus: "paused",
+            metadataJson: JsonSerializer.Serialize(new
+            {
+                workingDirectory = Path.Combine(workspaceRoot, "apps", "web"),
+            }));
 
-        using var client = CreateAuthenticatedClient(_factory, userId);
-        var createResponse = await client.PostAsJsonAsync($"/sessions/{sessionId}/permissions/requests", new
+        await using (var scope = factory.Services.CreateAsyncScope())
         {
-            toolName = "bash",
-            scope = "/repo",
-            reason = "need shell",
-            riskLevel = "high",
-            clientRequestId = "req-permission-permanent",
+            var permissionStore = scope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+            await permissionStore.InsertAsync(new PermissionRequestInfoRecord(
+                "permission-permanent",
+                sessionId,
+                "bash",
+                "/repo",
+                "need shell",
+                "high",
+                null,
+                "pending",
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    clientRequestId = "req-permission-permanent",
+                    nextRound = 2,
+                    requestData = new
+                    {
+                        message = "继续实现",
+                        model = "gpt-test",
+                    },
+                    toolCallId = "tool-permission-permanent",
+                    rawInput = new { command = "pwd" },
+                }),
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10_000,
+                null,
+                "2026-04-21 18:00:00",
+                "2026-04-21 18:00:00"),
+                CancellationToken.None);
+        }
+
+        using var client = CreateAuthenticatedClient(factory, userId);
+        var replyResponse = await client.PostAsJsonAsync($"/sessions/{sessionId}/permissions/reply", new
+        {
+            requestId = "permission-permanent",
+            decision = "permanent",
+        });
+        replyResponse.EnsureSuccessStatusCode();
+
+        await WaitForConditionAsync(async () =>
+        {
+            await using var scope = factory.Services.CreateAsyncScope();
+            var runEventStore = scope.ServiceProvider.GetRequiredService<ISessionRunEventStore>();
+            var runEvents = await runEventStore.ListByRequestAsync(sessionId, "req-permission-permanent", CancellationToken.None);
+            return runEvents.Any((item) => item.EventType == "done");
+        });
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var permissionStore = verificationScope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+        var dbContext = verificationScope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+        var stored = await permissionStore.GetAsync(sessionId, "permission-permanent", CancellationToken.None);
+        Assert.NotNull(stored);
+        Assert.Equal("approved", stored.Status);
+        Assert.Equal("permanent", stored.Decision);
+
+        var decisionLog = await dbContext.Set<PermissionDecisionLogRecord>().SingleAsync((item) => item.RequestId == "permission-permanent");
+        Assert.Equal(workspaceRoot, decisionLog.WorkspaceRoot);
+
+        var permissionConfigPath = Path.Combine(workspaceRoot, ".openawork.permissions.json");
+        Assert.True(File.Exists(permissionConfigPath));
+        using var configDocument = JsonDocument.Parse(await File.ReadAllTextAsync(permissionConfigPath));
+        var permanentGrants = configDocument.RootElement.GetProperty("permanentGrants");
+        Assert.Contains(permanentGrants.EnumerateArray(), (grant) =>
+            grant.GetProperty("toolName").GetString() == "bash"
+            && grant.GetProperty("scope").GetString() == "/repo");
+        var rules = configDocument.RootElement.GetProperty("rules");
+        Assert.Contains(rules.EnumerateArray(), (rule) =>
+            rule.GetProperty("permission").GetString() == "bash"
+            && rule.GetProperty("pattern").GetString() == "/repo"
+            && rule.GetProperty("action").GetString() == "allow");
+
+        var session = await dbContext.Sessions.SingleAsync((item) => item.Id == sessionId);
+        Assert.Equal("idle", session.StateStatus);
+    }
+
+    [Fact]
+    public async Task Reply_ShouldPersistPermanentDecisionForMatchedWorkspaceRootFromWorkspaceRoots()
+    {
+        const string userId = "user-permissions-permanent-multiroot";
+        var firstWorkspaceRoot = CreateWorkspaceRoot();
+        var secondWorkspaceRoot = CreateWorkspaceRoot();
+        await using var firstCleanup = new AsyncDirectoryCleanup(firstWorkspaceRoot);
+        await using var secondCleanup = new AsyncDirectoryCleanup(secondWorkspaceRoot);
+        Directory.CreateDirectory(Path.Combine(secondWorkspaceRoot, "apps", "web"));
+        using var factory = CreateFactoryWithLlm(
+            new StubWorkflowLlmClient("permission permanent resumed on second root"),
+            new Dictionary<string, string?>
+            {
+                ["WORKSPACE_ROOTS"] = JsonSerializer.Serialize(new[] { firstWorkspaceRoot, secondWorkspaceRoot }),
+            });
+        await SeedUserAsync(factory, userId);
+        using var client = CreateAuthenticatedClient(factory, userId);
+        var workingDirectory = Path.Combine(secondWorkspaceRoot, "apps", "web");
+        var createResponse = await client.PostAsJsonAsync("/sessions", new
+        {
+            workingDirectory,
         });
         var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
         createResponse.EnsureSuccessStatusCode();
+        var sessionId = createPayload.GetProperty("sessionId").GetString()!;
 
-        var requestId = createPayload.GetProperty("request").GetProperty("requestId").GetString();
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+            var permissionStore = scope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+            var session = await dbContext.Sessions.SingleAsync((item) => item.Id == sessionId);
+            session.StateStatus = "paused";
+            session.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await permissionStore.InsertAsync(new PermissionRequestInfoRecord(
+                "permission-permanent-multiroot",
+                sessionId,
+                "bash",
+                "/repo",
+                "need shell",
+                "high",
+                null,
+                "pending",
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    clientRequestId = "req-permission-permanent-multiroot",
+                    nextRound = 2,
+                    requestData = new
+                    {
+                        message = "继续实现",
+                        model = "gpt-test",
+                    },
+                    toolCallId = "tool-permission-permanent-multiroot",
+                    rawInput = new { command = "pwd", workdir = workingDirectory },
+                }),
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10_000,
+                JsonSerializer.Serialize(new[] { "/repo" }),
+                "2026-04-21 18:05:00",
+                "2026-04-21 18:05:00"),
+                CancellationToken.None);
+            await dbContext.SaveChangesAsync();
+        }
+
+        var replyResponse = await client.PostAsJsonAsync($"/sessions/{sessionId}/permissions/reply", new
+        {
+            requestId = "permission-permanent-multiroot",
+            decision = "permanent",
+        });
+        replyResponse.EnsureSuccessStatusCode();
+
+        await WaitForConditionAsync(async () =>
+        {
+            await using var scope = factory.Services.CreateAsyncScope();
+            var runEventStore = scope.ServiceProvider.GetRequiredService<ISessionRunEventStore>();
+            var runEvents = await runEventStore.ListByRequestAsync(sessionId, "req-permission-permanent-multiroot", CancellationToken.None);
+            return runEvents.Any((item) => item.EventType == "done");
+        });
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var dbContext = verificationScope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+        var runEventStore = verificationScope.ServiceProvider.GetRequiredService<ISessionRunEventStore>();
+        var decisionLog = await dbContext.Set<PermissionDecisionLogRecord>().SingleAsync((item) => item.RequestId == "permission-permanent-multiroot");
+        Assert.Equal(secondWorkspaceRoot, decisionLog.WorkspaceRoot);
+        Assert.False(File.Exists(Path.Combine(firstWorkspaceRoot, ".openawork.permissions.json")));
+        Assert.True(File.Exists(Path.Combine(secondWorkspaceRoot, ".openawork.permissions.json")));
+        var runEvents = await runEventStore.ListByRequestAsync(sessionId, "req-permission-permanent-multiroot", CancellationToken.None);
+        var toolResultPayload = JsonDocument.Parse(runEvents.Single((eventRecord) => eventRecord.EventType == "tool_result").PayloadJson).RootElement;
+        Assert.False(toolResultPayload.GetProperty("isError").GetBoolean());
+        Assert.Equal(workingDirectory, toolResultPayload.GetProperty("output").GetString());
+    }
+
+    [Fact]
+    public async Task Reply_ShouldRecoverFromMalformedExistingPermissionConfig()
+    {
+        const string userId = "user-permissions-malformed-config";
+        const string sessionId = "session-permissions-malformed-config";
+        var workspaceRoot = CreateWorkspaceRoot();
+        await using var cleanup = new AsyncDirectoryCleanup(workspaceRoot);
+        Directory.CreateDirectory(Path.Combine(workspaceRoot, "apps", "web"));
+        var permissionConfigPath = Path.Combine(workspaceRoot, ".openawork.permissions.json");
+        await File.WriteAllTextAsync(permissionConfigPath, "{not valid json");
+
+        using var factory = CreateFactoryWithLlm(
+            new StubWorkflowLlmClient("permission permanent resumed after malformed config"),
+            new Dictionary<string, string?>
+            {
+                ["WORKSPACE_ROOT"] = workspaceRoot,
+            });
+        await SeedUserAndSessionAsync(
+            factory,
+            userId,
+            sessionId,
+            stateStatus: "paused",
+            metadataJson: JsonSerializer.Serialize(new
+            {
+                workingDirectory = Path.Combine(workspaceRoot, "apps", "web"),
+            }));
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var permissionStore = scope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+            await permissionStore.InsertAsync(new PermissionRequestInfoRecord(
+                "permission-permanent-malformed-config",
+                sessionId,
+                "bash",
+                "/repo",
+                "need shell",
+                "high",
+                null,
+                "pending",
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    clientRequestId = "req-permission-permanent-malformed-config",
+                    nextRound = 2,
+                    requestData = new
+                    {
+                        message = "继续实现",
+                        model = "gpt-test",
+                    },
+                    toolCallId = "tool-permission-permanent-malformed-config",
+                    rawInput = new { command = "pwd" },
+                }),
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10_000,
+                JsonSerializer.Serialize(new[] { "/repo" }),
+                "2026-04-21 18:06:00",
+                "2026-04-21 18:06:00"),
+                CancellationToken.None);
+        }
+
+        using var client = CreateAuthenticatedClient(factory, userId);
+        var replyResponse = await client.PostAsJsonAsync($"/sessions/{sessionId}/permissions/reply", new
+        {
+            requestId = "permission-permanent-malformed-config",
+            decision = "permanent",
+        });
+        replyResponse.EnsureSuccessStatusCode();
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var permissionStore = verificationScope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+        var stored = await permissionStore.GetAsync(sessionId, "permission-permanent-malformed-config", CancellationToken.None);
+        Assert.NotNull(stored);
+        Assert.Equal("approved", stored.Status);
+        using var configDocument = JsonDocument.Parse(await File.ReadAllTextAsync(permissionConfigPath));
+        Assert.Contains(configDocument.RootElement.GetProperty("rules").EnumerateArray(), (rule) =>
+            rule.GetProperty("pattern").GetString() == "/repo"
+            && rule.GetProperty("permission").GetString() == "bash");
+    }
+
+    [Fact]
+    public async Task Reply_ShouldRollbackPermissionFileWhenCompletePermanentMaterializationFails()
+    {
+        const string userId = "user-permissions-permanent-complete-failure";
+        const string sessionId = "session-permissions-permanent-complete-failure";
+        const string requestId = "permission-permanent-complete-failure";
+        const string clientRequestId = "req-permission-permanent-complete-failure";
+        const string originalPermissionConfig = "{\"rules\":[{\"permission\":\"read\",\"pattern\":\"/existing\",\"action\":\"allow\"}],\"permanentGrants\":[]}";
+
+        var workspaceRoot = CreateWorkspaceRoot();
+        await using var cleanup = new AsyncDirectoryCleanup(workspaceRoot);
+        Directory.CreateDirectory(Path.Combine(workspaceRoot, "apps", "web"));
+        var permissionConfigPath = Path.Combine(workspaceRoot, ".openawork.permissions.json");
+        await File.WriteAllTextAsync(permissionConfigPath, originalPermissionConfig);
+
+        using var factory = CreateFactoryWithLlm(
+            new StubWorkflowLlmClient("should not run when permanent complete fails"),
+            new Dictionary<string, string?>
+            {
+                ["WORKSPACE_ROOT"] = workspaceRoot,
+            },
+            (services) =>
+            {
+                services.RemoveAll<IPermissionRequestStore>();
+                services.AddScoped<IPermissionRequestStore>((serviceProvider) =>
+                    new ThrowOnCompletePermissionRequestStore(
+                        new PermissionRequestStore(serviceProvider.GetRequiredService<GatewayDbContext>())));
+            });
+
+        await SeedUserAndSessionAsync(
+            factory,
+            userId,
+            sessionId,
+            stateStatus: "paused",
+            metadataJson: JsonSerializer.Serialize(new
+            {
+                workingDirectory = Path.Combine(workspaceRoot, "apps", "web"),
+            }));
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var permissionStore = scope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+            await permissionStore.InsertAsync(new PermissionRequestInfoRecord(
+                requestId,
+                sessionId,
+                "bash",
+                "/repo",
+                "need shell",
+                "high",
+                null,
+                "pending",
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    clientRequestId,
+                    nextRound = 2,
+                    requestData = new
+                    {
+                        message = "继续实现",
+                        model = "gpt-test",
+                    },
+                    toolCallId = "tool-permission-permanent-complete-failure",
+                    rawInput = new { command = "pwd" },
+                }),
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10_000,
+                JsonSerializer.Serialize(new[] { "/repo" }),
+                "2026-04-21 18:06:30",
+                "2026-04-21 18:06:30"),
+                CancellationToken.None);
+        }
+
+        using var client = CreateAuthenticatedClient(factory, userId);
         var replyResponse = await client.PostAsJsonAsync($"/sessions/{sessionId}/permissions/reply", new
         {
             requestId,
             decision = "permanent",
         });
-        var replyPayload = await replyResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var payload = await replyResponse.Content.ReadFromJsonAsync<JsonElement>();
 
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, replyResponse.StatusCode);
-        Assert.Equal("Permanent permission decisions are not yet supported in the .NET gateway.", replyPayload.GetProperty("error").GetString());
+        Assert.Equal(System.Net.HttpStatusCode.InternalServerError, replyResponse.StatusCode);
+        Assert.Equal("Gateway request failed.", payload.GetProperty("title").GetString());
+        Assert.Equal(500, payload.GetProperty("status").GetInt32());
 
-        await using var verificationScope = _factory.Services.CreateAsyncScope();
-        var permissionStore = verificationScope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var permissionStoreAfter = verificationScope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+        var runEventStore = verificationScope.ServiceProvider.GetRequiredService<ISessionRunEventStore>();
         var dbContext = verificationScope.ServiceProvider.GetRequiredService<GatewayDbContext>();
-        var stored = await permissionStore.GetAsync(sessionId, requestId!, CancellationToken.None);
+        var stored = await permissionStoreAfter.GetAsync(sessionId, requestId, CancellationToken.None);
         Assert.NotNull(stored);
         Assert.Equal("pending", stored.Status);
         Assert.Null(stored.Decision);
         Assert.Empty(await dbContext.Set<PermissionDecisionLogRecord>().Where((item) => item.RequestId == requestId).ToListAsync());
+        Assert.Equal(originalPermissionConfig, await File.ReadAllTextAsync(permissionConfigPath));
+        Assert.Empty(await runEventStore.ListByRequestAsync(sessionId, clientRequestId, CancellationToken.None));
 
         var session = await dbContext.Sessions.SingleAsync((item) => item.Id == sessionId);
         Assert.Equal("paused", session.StateStatus);
+    }
+
+    [Fact]
+    public async Task Reply_ShouldReturn409WhenWorkspaceRootCannotBeResolvedForPermanentDecision()
+    {
+        const string userId = "user-permissions-permanent-no-root";
+        const string sessionId = "session-permissions-permanent-no-root";
+        using var factory = CreateFactoryWithLlm(
+            new StubWorkflowLlmClient("should not run when permanent root missing"),
+            new Dictionary<string, string?>
+            {
+                ["WORKSPACE_ROOTS"] = JsonSerializer.Serialize(new[] { CreateWorkspaceRoot() }),
+            });
+        await SeedUserAndSessionAsync(
+            factory,
+            userId,
+            sessionId,
+            stateStatus: "paused",
+            metadataJson: JsonSerializer.Serialize(new
+            {
+                workingDirectory = "/outside/of/configured/root",
+            }));
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var permissionStore = scope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+            await permissionStore.InsertAsync(new PermissionRequestInfoRecord(
+                "permission-permanent-no-root",
+                sessionId,
+                "bash",
+                "/repo",
+                "need shell",
+                "high",
+                null,
+                "pending",
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    clientRequestId = "req-permission-permanent-no-root",
+                    nextRound = 2,
+                    requestData = new
+                    {
+                        message = "继续实现",
+                        model = "gpt-test",
+                    },
+                    toolCallId = "tool-permission-permanent-no-root",
+                    rawInput = new { command = "pwd" },
+                }),
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10_000,
+                JsonSerializer.Serialize(new[] { "/repo" }),
+                "2026-04-21 18:07:00",
+                "2026-04-21 18:07:00"),
+                CancellationToken.None);
+        }
+
+        using var client = CreateAuthenticatedClient(factory, userId);
+        var replyResponse = await client.PostAsJsonAsync($"/sessions/{sessionId}/permissions/reply", new
+        {
+            requestId = "permission-permanent-no-root",
+            decision = "permanent",
+        });
+        var payload = await replyResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, replyResponse.StatusCode);
+        Assert.Equal("Workspace root unavailable for permanent permission", payload.GetProperty("error").GetString());
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var permissionStore = verificationScope.ServiceProvider.GetRequiredService<IPermissionRequestStore>();
+        var dbContext = verificationScope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+        var stored = await permissionStore.GetAsync(sessionId, "permission-permanent-no-root", CancellationToken.None);
+        Assert.NotNull(stored);
+        Assert.Equal("pending", stored.Status);
+        Assert.Null(stored.Decision);
+        Assert.Empty(await dbContext.Set<PermissionDecisionLogRecord>().Where((item) => item.RequestId == "permission-permanent-no-root").ToListAsync());
     }
 
     [Fact]
@@ -833,7 +1232,8 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
 
     private static WebApplicationFactory<OpenAWork.Gateway.Host.Program> CreateFactoryWithLlm(
         IWorkflowLlmClient llmClient,
-        IReadOnlyDictionary<string, string?>? configurationOverrides = null)
+        IReadOnlyDictionary<string, string?>? configurationOverrides = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         return new GatewayWebApplicationFactory().WithWebHostBuilder((builder) =>
         {
@@ -849,8 +1249,28 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
             {
                 services.RemoveAll<IWorkflowLlmClient>();
                 services.AddSingleton(llmClient);
+                configureServices?.Invoke(services);
             });
         });
+    }
+
+    private static async Task SeedUserAsync(WebApplicationFactory<OpenAWork.Gateway.Host.Program> factory, string userId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+        if (await dbContext.Users.AnyAsync((user) => user.Id == userId))
+        {
+            return;
+        }
+
+        dbContext.Users.Add(new UserRecord
+        {
+            Id = userId,
+            Email = $"{userId}@openawork.local",
+            PasswordHash = "seed",
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        });
+        await dbContext.SaveChangesAsync();
     }
 
     private static string CreateWorkspaceRoot()
@@ -860,7 +1280,7 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
         return path;
     }
 
-    private static async Task SeedUserAndSessionAsync(WebApplicationFactory<OpenAWork.Gateway.Host.Program> factory, string userId, string sessionId, string stateStatus = "idle")
+    private static async Task SeedUserAndSessionAsync(WebApplicationFactory<OpenAWork.Gateway.Host.Program> factory, string userId, string sessionId, string stateStatus = "idle", string metadataJson = "{}")
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
@@ -884,7 +1304,7 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
                 UserId = userId,
                 MessagesJson = "[]",
                 StateStatus = stateStatus,
-                MetadataJson = "{}",
+                MetadataJson = metadataJson,
                 Title = "Permissions Session",
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -907,6 +1327,62 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
         }
 
         throw new TimeoutException("Condition was not satisfied in time.");
+    }
+
+    private sealed class ThrowOnCompletePermissionRequestStore(IPermissionRequestStore inner) : IPermissionRequestStore
+    {
+        public Task InsertAsync(PermissionRequestInfoRecord record, CancellationToken cancellationToken)
+            => inner.InsertAsync(record, cancellationToken);
+
+        public Task<PermissionRequestInfoRecord?> GetAsync(string sessionId, string requestId, CancellationToken cancellationToken)
+            => inner.GetAsync(sessionId, requestId, cancellationToken);
+
+        public Task<IReadOnlyList<PermissionRequestInfoRecord>> ListPendingAsync(string sessionId, CancellationToken cancellationToken)
+            => inner.ListPendingAsync(sessionId, cancellationToken);
+
+        public Task<string?> FindLatestPendingIdAsync(string sessionId, string toolName, string scope, CancellationToken cancellationToken)
+            => inner.FindLatestPendingIdAsync(sessionId, toolName, scope, cancellationToken);
+
+        public Task<bool> UpdatePendingPayloadAsync(string requestId, string payloadJson, string updatedAt, CancellationToken cancellationToken)
+            => inner.UpdatePendingPayloadAsync(requestId, payloadJson, updatedAt, cancellationToken);
+
+        public Task<bool> BeginPermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken)
+            => inner.BeginPermanentMaterializationAsync(sessionId, requestId, updatedAt, cancellationToken);
+
+        public Task<bool> CompletePermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated permanent materialization completion failure.");
+
+        public Task<bool> RevertPermanentMaterializationAsync(string sessionId, string requestId, string updatedAt, CancellationToken cancellationToken)
+            => inner.RevertPermanentMaterializationAsync(sessionId, requestId, updatedAt, cancellationToken);
+
+        public Task<bool> UpdateResolutionAsync(string sessionId, string requestId, string status, string? decision, string updatedAt, CancellationToken cancellationToken)
+            => inner.UpdateResolutionAsync(sessionId, requestId, status, decision, updatedAt, cancellationToken);
+
+        public Task<IReadOnlyList<PermissionRequestInfoRecord>> ExpirePendingAsync(string sessionId, long nowMs, string updatedAt, CancellationToken cancellationToken)
+            => inner.ExpirePendingAsync(sessionId, nowMs, updatedAt, cancellationToken);
+
+        public Task<bool> MarkConsumedAsync(string requestId, string updatedAt, CancellationToken cancellationToken)
+            => inner.MarkConsumedAsync(requestId, updatedAt, cancellationToken);
+    }
+
+    private sealed class AsyncDirectoryCleanup : IAsyncDisposable
+    {
+        private readonly string _path;
+
+        public AsyncDirectoryCleanup(string path)
+        {
+            _path = path;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (Directory.Exists(_path))
+            {
+                Directory.Delete(_path, recursive: true);
+            }
+
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class StubWorkflowLlmClient(string responseText) : IWorkflowLlmClient

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OpenAWork.Gateway.Application.Abstractions.Persistence;
 using OpenAWork.Gateway.Persistence.EFCore;
 using OpenAWork.Gateway.Persistence.EFCore.Entities;
 
@@ -478,6 +479,41 @@ public sealed class SessionsEndpointTests : IClassFixture<GatewayWebApplicationF
     }
 
     [Fact]
+    public async Task Create_ShouldAcceptWorkingDirectoryFromSecondaryWorkspaceRoot()
+    {
+        const string userId = "user-sessions-multiroot-create";
+        var firstWorkspaceRoot = CreateWorkspaceRoot();
+        var secondWorkspaceRoot = CreateWorkspaceRoot();
+        await using var firstCleanup = new AsyncDirectoryCleanup(firstWorkspaceRoot);
+        await using var secondCleanup = new AsyncDirectoryCleanup(secondWorkspaceRoot);
+        Directory.CreateDirectory(Path.Combine(secondWorkspaceRoot, "apps", "web"));
+
+        using var factory = CreateWorkspaceFactory(new Dictionary<string, string?>
+        {
+            ["WORKSPACE_ROOTS"] = JsonSerializer.Serialize(new[] { firstWorkspaceRoot, secondWorkspaceRoot }),
+        });
+        await SeedUserAsync(factory, userId);
+        using var client = CreateAuthenticatedClient(factory, userId);
+
+        var workingDirectory = Path.Combine(secondWorkspaceRoot, "apps", "web");
+        var createResponse = await client.PostAsJsonAsync("/sessions", new
+        {
+            workingDirectory,
+        });
+        var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+        createResponse.EnsureSuccessStatusCode();
+        var sessionId = createPayload.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+
+        var getResponse = await client.GetAsync($"/sessions/{sessionId}");
+        var getPayload = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+        getResponse.EnsureSuccessStatusCode();
+        Assert.Contains(workingDirectory, getPayload.GetProperty("session").GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Create_ShouldRejectIncompleteTeamDefinitionMetadata()
     {
         const string userId = "user-sessions-teamdefinition";
@@ -532,6 +568,44 @@ public sealed class SessionsEndpointTests : IClassFixture<GatewayWebApplicationF
         var getPayload = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Null(getPayload.GetProperty("session").GetProperty("title").GetString());
         Assert.Equal("{}", getPayload.GetProperty("session").GetProperty("metadata_json").GetString());
+    }
+
+    [Fact]
+    public async Task Patch_ShouldAcceptWorkingDirectoryFromSecondaryWorkspaceRoot()
+    {
+        const string userId = "user-sessions-multiroot-patch";
+        var firstWorkspaceRoot = CreateWorkspaceRoot();
+        var secondWorkspaceRoot = CreateWorkspaceRoot();
+        await using var firstCleanup = new AsyncDirectoryCleanup(firstWorkspaceRoot);
+        await using var secondCleanup = new AsyncDirectoryCleanup(secondWorkspaceRoot);
+        Directory.CreateDirectory(Path.Combine(secondWorkspaceRoot, "apps", "web"));
+
+        using var factory = CreateWorkspaceFactory(new Dictionary<string, string?>
+        {
+            ["WORKSPACE_ROOTS"] = JsonSerializer.Serialize(new[] { firstWorkspaceRoot, secondWorkspaceRoot }),
+        });
+        await SeedUserAsync(factory, userId);
+        using var client = CreateAuthenticatedClient(factory, userId);
+
+        var createResponse = await client.PostAsJsonAsync("/sessions", new { });
+        var createPayload = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = createPayload.GetProperty("sessionId").GetString()!;
+        var workingDirectory = Path.Combine(secondWorkspaceRoot, "apps", "web");
+
+        var patchResponse = await client.PatchAsJsonAsync($"/sessions/{sessionId}", new
+        {
+            metadata = new
+            {
+                workingDirectory,
+            },
+        });
+
+        patchResponse.EnsureSuccessStatusCode();
+
+        var getResponse = await client.GetAsync($"/sessions/{sessionId}");
+        var getPayload = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
+        getResponse.EnsureSuccessStatusCode();
+        Assert.Contains(workingDirectory, getPayload.GetProperty("session").GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -620,6 +694,344 @@ public sealed class SessionsEndpointTests : IClassFixture<GatewayWebApplicationF
         }
     }
 
+    [Fact]
+    public async Task GetChildren_ShouldReturnSanitizedChildLineageSessions()
+    {
+        const string userId = "user-sessions-children-lineage";
+        var workspaceRoot = CreateWorkspaceRoot();
+        await using var cleanup = new AsyncDirectoryCleanup(workspaceRoot);
+        using var factory = CreateWorkspaceFactory(workspaceRoot);
+        await SeedUserAsync(factory, userId);
+        using var client = CreateAuthenticatedClient(factory, userId);
+
+        var parentSessionId = Guid.NewGuid().ToString("N");
+        var childSessionId = Guid.NewGuid().ToString("N");
+        var grandchildSessionId = Guid.NewGuid().ToString("N");
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            dbContext.Sessions.AddRange(
+                new SessionRecord
+                {
+                    Id = parentSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = "{}",
+                    Title = "Parent Session",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                },
+                new SessionRecord
+                {
+                    Id = childSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        parentSessionId,
+                        childTag = "child-alpha",
+                        workingDirectory = Path.Combine(Path.GetTempPath(), "outside-workspace"),
+                    }),
+                    Title = "Child Session",
+                    CreatedAtUtc = now.AddMinutes(1),
+                    UpdatedAtUtc = now.AddMinutes(1),
+                },
+                new SessionRecord
+                {
+                    Id = grandchildSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        parentSessionId = childSessionId,
+                        childTag = "grandchild-beta",
+                        workingDirectory = Path.Combine(workspaceRoot, "apps", "web"),
+                    }),
+                    Title = "Grandchild Session",
+                    CreatedAtUtc = now.AddMinutes(2),
+                    UpdatedAtUtc = now.AddMinutes(2),
+                });
+
+            dbContext.MessageV2.Add(new MessageV2Record
+            {
+                Id = "msg-child-lineage-1",
+                SessionId = childSessionId,
+                UserId = userId,
+                TimeCreated = 10,
+                DataJson = "{\"role\":\"assistant\",\"clientRequestId\":\"req-child-lineage-1\",\"time\":{\"created\":10},\"status\":\"final\",\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+            });
+            dbContext.PartV2.Add(new PartV2Record
+            {
+                Id = "part-child-lineage-1",
+                MessageId = "msg-child-lineage-1",
+                SessionId = childSessionId,
+                UserId = userId,
+                TimeCreated = 11,
+                DataJson = "{\"type\":\"text\",\"text\":\"child lineage summary\"}",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+            });
+
+            await dbContext.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync($"/sessions/{parentSessionId}/children?limit=10&offset=0");
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        response.EnsureSuccessStatusCode();
+
+        var sessions = payload.GetProperty("sessions");
+        Assert.Equal(2, sessions.GetArrayLength());
+        var child = sessions.EnumerateArray().Single((item) => item.GetProperty("id").GetString() == childSessionId);
+        Assert.Equal("idle", child.GetProperty("state_status").GetString());
+        Assert.Contains("parentSessionId", child.GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+        Assert.Contains("child-alpha", child.GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("outside-workspace", child.GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+        Assert.Equal(1, child.GetProperty("messages").GetArrayLength());
+        Assert.Equal("child lineage summary", child.GetProperty("messages")[0].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal(0, child.GetProperty("runEvents").GetArrayLength());
+        Assert.Equal(0, child.GetProperty("todos").GetArrayLength());
+
+        var grandchild = sessions.EnumerateArray().Single((item) => item.GetProperty("id").GetString() == grandchildSessionId);
+        Assert.Contains(childSessionId, grandchild.GetProperty("metadata_json").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTasks_ShouldProjectChildLineageTaskSummaries()
+    {
+        const string userId = "user-sessions-child-tasks";
+        await SeedUserAsync(_factory, userId);
+        using var client = CreateAuthenticatedClient(_factory, userId);
+
+        var parentSessionId = Guid.NewGuid().ToString("N");
+        var childSessionId = Guid.NewGuid().ToString("N");
+        var grandchildSessionId = Guid.NewGuid().ToString("N");
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+            var autoResumeStore = scope.ServiceProvider.GetRequiredService<ITaskParentAutoResumeContextStore>();
+            var now = DateTimeOffset.UtcNow;
+            dbContext.Sessions.AddRange(
+                new SessionRecord
+                {
+                    Id = parentSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = "{}",
+                    Title = "Parent Task Session",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                },
+                new SessionRecord
+                {
+                    Id = childSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "running",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        parentSessionId,
+                        agentId = "librarian",
+                    }),
+                    Title = "Child Task Session",
+                    CreatedAtUtc = now.AddMinutes(1),
+                    UpdatedAtUtc = now.AddMinutes(1),
+                },
+                new SessionRecord
+                {
+                    Id = grandchildSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        parentSessionId = childSessionId,
+                        agentId = "oracle",
+                        taskId = "task-grandchild",
+                        terminalReason = "timeout",
+                        deadlineMs = 1735689600000L,
+                    }),
+                    Title = "Grandchild Task Session",
+                    CreatedAtUtc = now.AddMinutes(2),
+                    UpdatedAtUtc = now.AddMinutes(2),
+                });
+            await dbContext.SaveChangesAsync();
+
+            await autoResumeStore.UpsertAsync(new TaskParentAutoResumeContextInfoRecord(
+                childSessionId,
+                parentSessionId,
+                userId,
+                "task-child",
+                JsonSerializer.Serialize(new
+                {
+                    agentId = "librarian",
+                    message = "continue child task",
+                }),
+                "2026-04-21 14:00:00",
+                "2026-04-21 14:00:00"),
+                CancellationToken.None);
+
+            dbContext.MessageV2.AddRange(
+                new MessageV2Record
+                {
+                    Id = "msg-child-task-1",
+                    SessionId = childSessionId,
+                    UserId = userId,
+                    TimeCreated = 100,
+                    DataJson = "{\"role\":\"assistant\",\"clientRequestId\":\"req-child-task\",\"time\":{\"created\":100},\"status\":\"final\"}",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                },
+                new MessageV2Record
+                {
+                    Id = "msg-grandchild-task-1",
+                    SessionId = grandchildSessionId,
+                    UserId = userId,
+                    TimeCreated = 200,
+                    DataJson = "{\"role\":\"assistant\",\"clientRequestId\":\"req-grandchild-task\",\"time\":{\"created\":200},\"status\":\"final\"}",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                });
+            dbContext.PartV2.AddRange(
+                new PartV2Record
+                {
+                    Id = "part-child-task-1",
+                    MessageId = "msg-child-task-1",
+                    SessionId = childSessionId,
+                    UserId = userId,
+                    TimeCreated = 101,
+                    DataJson = "{\"type\":\"text\",\"text\":\"child running summary\"}",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                },
+                new PartV2Record
+                {
+                    Id = "part-grandchild-task-1",
+                    MessageId = "msg-grandchild-task-1",
+                    SessionId = grandchildSessionId,
+                    UserId = userId,
+                    TimeCreated = 201,
+                    DataJson = "{\"type\":\"text\",\"text\":\"grandchild timeout summary\"}",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync($"/sessions/{parentSessionId}/tasks");
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        response.EnsureSuccessStatusCode();
+
+        var tasks = payload.GetProperty("tasks");
+        Assert.Equal(2, tasks.GetArrayLength());
+
+        var childTask = tasks.EnumerateArray().Single((item) => item.GetProperty("id").GetString() == "task-child");
+        Assert.Equal("task", childTask.GetProperty("kind").GetString());
+        Assert.Equal("Child Task Session", childTask.GetProperty("title").GetString());
+        Assert.Equal("Child Task Session", childTask.GetProperty("subject").GetString());
+        Assert.Equal("running", childTask.GetProperty("status").GetString());
+        Assert.Equal(childSessionId, childTask.GetProperty("sessionId").GetString());
+        Assert.Equal("librarian", childTask.GetProperty("assignedAgent").GetString());
+        Assert.Equal("child running summary", childTask.GetProperty("result").GetString());
+        Assert.Equal(0, childTask.GetProperty("depth").GetInt32());
+        Assert.Equal(1, childTask.GetProperty("subtaskCount").GetInt32());
+        Assert.Equal(0, childTask.GetProperty("completedSubtaskCount").GetInt32());
+
+        var grandchildTask = tasks.EnumerateArray().Single((item) => item.GetProperty("id").GetString() == "task-grandchild");
+        Assert.Equal("failed", grandchildTask.GetProperty("status").GetString());
+        Assert.Equal("timeout", grandchildTask.GetProperty("terminalReason").GetString());
+        Assert.Equal(1735689600000L, grandchildTask.GetProperty("effectiveDeadline").GetInt64());
+        Assert.Equal(1, grandchildTask.GetProperty("depth").GetInt32());
+        Assert.Equal("task-child", grandchildTask.GetProperty("parentTaskId").GetString());
+        Assert.Equal("oracle", grandchildTask.GetProperty("assignedAgent").GetString());
+        Assert.Equal("grandchild timeout summary", grandchildTask.GetProperty("errorMessage").GetString());
+        Assert.True(payload.GetProperty("updatedAt").GetInt64() > 0);
+    }
+
+    [Fact]
+    public async Task GetTasks_ShouldProjectIdleAssistantErrorAsFailedTask()
+    {
+        const string userId = "user-sessions-child-task-error";
+        await SeedUserAsync(_factory, userId);
+        using var client = CreateAuthenticatedClient(_factory, userId);
+
+        var parentSessionId = Guid.NewGuid().ToString("N");
+        var childSessionId = Guid.NewGuid().ToString("N");
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<GatewayDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            dbContext.Sessions.AddRange(
+                new SessionRecord
+                {
+                    Id = parentSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = "{}",
+                    Title = "Parent Error Session",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                },
+                new SessionRecord
+                {
+                    Id = childSessionId,
+                    UserId = userId,
+                    MessagesJson = "[]",
+                    StateStatus = "idle",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        parentSessionId,
+                        taskId = "task-error-child",
+                    }),
+                    Title = "Child Error Session",
+                    CreatedAtUtc = now.AddMinutes(1),
+                    UpdatedAtUtc = now.AddMinutes(1),
+                });
+
+            dbContext.MessageV2.Add(new MessageV2Record
+            {
+                Id = "msg-child-task-error-1",
+                SessionId = childSessionId,
+                UserId = userId,
+                TimeCreated = 300,
+                DataJson = "{\"role\":\"assistant\",\"clientRequestId\":\"req-child-error\",\"time\":{\"created\":300},\"status\":\"error\"}",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+            });
+            dbContext.PartV2.Add(new PartV2Record
+            {
+                Id = "part-child-task-error-1",
+                MessageId = "msg-child-task-error-1",
+                SessionId = childSessionId,
+                UserId = userId,
+                TimeCreated = 301,
+                DataJson = "{\"type\":\"text\",\"text\":\"child task failed summary\"}",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync($"/sessions/{parentSessionId}/tasks");
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        response.EnsureSuccessStatusCode();
+
+        var task = payload.GetProperty("tasks").EnumerateArray().Single();
+        Assert.Equal("task-error-child", task.GetProperty("id").GetString());
+        Assert.Equal("failed", task.GetProperty("status").GetString());
+        Assert.Equal("child task failed summary", task.GetProperty("errorMessage").GetString());
+    }
+
     private static async Task SeedUserAsync(WebApplicationFactory<OpenAWork.Gateway.Host.Program> factory, string userId)
     {
         await using var scope = factory.Services.CreateAsyncScope();
@@ -649,6 +1061,17 @@ public sealed class SessionsEndpointTests : IClassFixture<GatewayWebApplicationF
                 {
                     ["WORKSPACE_ROOT"] = workspaceRoot,
                 });
+            });
+        });
+    }
+
+    private static WebApplicationFactory<OpenAWork.Gateway.Host.Program> CreateWorkspaceFactory(IReadOnlyDictionary<string, string?> configurationOverrides)
+    {
+        return new GatewayWebApplicationFactory().WithWebHostBuilder((builder) =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+            {
+                configurationBuilder.AddInMemoryCollection(configurationOverrides);
             });
         });
     }

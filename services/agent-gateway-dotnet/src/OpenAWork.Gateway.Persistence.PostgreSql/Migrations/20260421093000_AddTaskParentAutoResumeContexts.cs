@@ -21,6 +21,7 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
                     user_id = table.Column<string>(type: "text", nullable: false),
                     task_id = table.Column<string>(type: "text", nullable: false),
                     request_data_json = table.Column<string>(type: "text", nullable: false),
+                    version_token = table.Column<string>(type: "text", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
                     updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
@@ -56,6 +57,12 @@ namespace OpenAWork.Gateway.Persistence.PostgreSql.Migrations
                 name: "IX_task_parent_auto_resume_contexts_user_id",
                 table: "task_parent_auto_resume_contexts",
                 column: "user_id");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_task_parent_auto_resume_contexts_version_token",
+                table: "task_parent_auto_resume_contexts",
+                column: "version_token",
+                unique: true);
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

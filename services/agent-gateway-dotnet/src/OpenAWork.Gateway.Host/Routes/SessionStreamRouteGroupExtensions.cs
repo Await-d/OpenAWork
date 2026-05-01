@@ -502,6 +502,8 @@ public static class SessionStreamRouteGroupExtensions
                 trimmedModel,
                 root.TryGetProperty("thinkingEnabled", out var thinkingEnabled) && thinkingEnabled.ValueKind is JsonValueKind.True or JsonValueKind.False ? thinkingEnabled.GetBoolean() : null,
                 root.TryGetProperty("webSearchEnabled", out var webSearchEnabled) && webSearchEnabled.ValueKind is JsonValueKind.True or JsonValueKind.False ? webSearchEnabled.GetBoolean() : null,
+                root.GetRawText(),
+                root.TryGetProperty("observability", out var observability) && observability.ValueKind == JsonValueKind.Object ? observability.GetRawText() : null,
                 null);
             return true;
         }

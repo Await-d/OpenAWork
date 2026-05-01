@@ -15,6 +15,7 @@ public sealed class TaskParentAutoResumeContextRecordConfiguration : IEntityType
         builder.Property((record) => record.UserId).HasColumnName("user_id").IsRequired();
         builder.Property((record) => record.TaskId).HasColumnName("task_id").IsRequired();
         builder.Property((record) => record.RequestDataJson).HasColumnName("request_data_json").IsRequired();
+        builder.Property((record) => record.VersionToken).HasColumnName("version_token").IsRequired();
         builder.Property((record) => record.CreatedAtUtc)
             .HasColumnName("created_at")
             .HasDefaultValueSql("CURRENT_TIMESTAMP")
@@ -23,6 +24,7 @@ public sealed class TaskParentAutoResumeContextRecordConfiguration : IEntityType
             .HasColumnName("updated_at")
             .HasDefaultValueSql("CURRENT_TIMESTAMP")
             .IsRequired();
+        builder.HasIndex((record) => record.VersionToken).IsUnique();
         builder.HasIndex((record) => record.ParentSessionId);
         builder.HasIndex((record) => record.UserId);
         builder.HasOne((record) => record.ChildSession)

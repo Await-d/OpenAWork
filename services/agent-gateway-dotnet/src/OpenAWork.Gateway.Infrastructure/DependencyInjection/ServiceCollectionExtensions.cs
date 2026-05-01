@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISessionStreamRequestRegistry, InMemorySessionStreamRequestRegistry>();
         services.AddSingleton<ISessionRunEventBroadcaster, InMemorySessionRunEventBroadcaster>();
         services.AddScoped<ISessionStreamRuntimeService, SessionStreamRuntimeService>();
+        services.AddScoped<ISessionRuntimeReconciler, SessionRuntimeReconciler>();
         services.AddScoped<IRequestWorkflowTracker, RequestWorkflowTracker>();
         services.AddHostedService<GatewayHeartbeatService>();
         return services;
