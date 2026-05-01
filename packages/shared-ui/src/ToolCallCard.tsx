@@ -15,10 +15,7 @@ import {
   resolveBashTerminalView,
   type BashTerminalView,
 } from './tool-call-card-bash-terminal.js';
-import {
-  buildToolCopyText,
-  iconForToolKind,
-} from './tool-call-card-meta.js';
+import { buildToolCopyText, iconForToolKind } from './tool-call-card-meta.js';
 import type {
   PillTone,
   TaskSummaryData,
@@ -375,9 +372,13 @@ function buildOutputReadHints(
   if (typeof output === 'string') {
     const lineCount = output.split(/\r?\n/).length;
     if (toolCallId) {
-      const hints = [`read_tool_output {"toolCallId":"${toolCallId}","lineStart":1,"lineCount":200}`];
+      const hints = [
+        `read_tool_output {"toolCallId":"${toolCallId}","lineStart":1,"lineCount":200}`,
+      ];
       if (lineCount > 200) {
-        hints.push(`read_tool_output {"toolCallId":"${toolCallId}","lineStart":201,"lineCount":200}`);
+        hints.push(
+          `read_tool_output {"toolCallId":"${toolCallId}","lineStart":201,"lineCount":200}`,
+        );
       }
       return hints;
     }
@@ -391,7 +392,9 @@ function buildOutputReadHints(
 
   if (Array.isArray(output)) {
     if (toolCallId) {
-      const hints = [`read_tool_output {"toolCallId":"${toolCallId}","itemStart":0,"itemCount":50}`];
+      const hints = [
+        `read_tool_output {"toolCallId":"${toolCallId}","itemStart":0,"itemCount":50}`,
+      ];
       if (output.length > 50) {
         hints.push(`read_tool_output {"toolCallId":"${toolCallId}","itemStart":50,"itemCount":50}`);
       }
@@ -811,15 +814,33 @@ function summarizeOutputPreview(output: unknown): string | undefined {
 function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] | undefined {
   if (typeof output === 'string') {
     const trimmed = output.trim();
-    if (!/(^diff --git|^@@\s+-)/m.test(trimmed)) {
-      return undefined;
+    // Fast path: the output is already a unified diff blob.
+    if (/(^diff --git|^@@\s+-)/m.test(trimmed)) {
+      const summary = summarizeUnifiedDiff(trimmed);
+      return {
+        diffText: trimmed,
+        summary: `代码变更 · +${summary.added} / -${summary.removed}`,
+      };
     }
-
-    const summary = summarizeUnifiedDiff(trimmed);
-    return {
-      diffText: trimmed,
-      summary: `代码变更 · +${summary.added} / -${summary.removed}`,
-    };
+    // Recovery path: write/edit/multi_edit/apply_patch outputs are
+    // serialised to JSON during storage (see stringifyToolResultOutput in
+    // agent-gateway), so the UI receives a JSON-encoded string rather than
+    // a parsed envelope. Without this, multi-file patches render as a 4KB
+    // raw JSON dump in the generic ExpandableOutput fallback. Cheaply
+    // gate on the leading/trailing brace shape so bash/grep string output
+    // never enters JSON.parse.
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        return resolveDiffView(JSON.parse(trimmed));
+      } catch {
+        // Malformed JSON — fall through to undefined so the caller can pick
+        // a different output renderer.
+      }
+    }
+    return undefined;
   }
 
   const record = asRecord(output);
@@ -845,7 +866,20 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
     .map((item) => buildDiffFileView(item))
     .filter((item): item is ToolDiffFileView => Boolean(item));
 
-  if (multiFiles && multiFiles.length > 1) {
+  if (multiFiles && multiFiles.length >= 1) {
+    // Single-file `files[]` (common for apply_patch with one update) — render
+    // as a single-file diff view rather than falling through and missing the
+    // chance to surface the diff. Without this, single-file patches dropped
+    // into the generic JSON fallback.
+    if (multiFiles.length === 1) {
+      const single = multiFiles[0]!;
+      return {
+        beforeText: single.beforeText,
+        afterText: single.afterText,
+        filePath: single.filePath,
+        summary: single.summary,
+      } as ToolCallCardDisplayData['diffView'];
+    }
     const added = multiFiles.reduce((count, item) => {
       const match = item.summary.match(/\+(\d+)/);
       return count + Number.parseInt(match?.[1] ?? '0', 10);
@@ -997,14 +1031,14 @@ export function ToolCallCard({
         : undefined;
   const displayData = useMemo(
     () =>
-        resolveToolCallCardDisplayData({
-          kind,
-          toolCallId,
-          toolName,
-          input,
-          output,
-          includeOutputDetails: open,
-        }),
+      resolveToolCallCardDisplayData({
+        kind,
+        toolCallId,
+        toolName,
+        input,
+        output,
+        includeOutputDetails: open,
+      }),
     [input, kind, open, output, toolCallId, toolName],
   );
   const taskMetaDetails = useMemo(

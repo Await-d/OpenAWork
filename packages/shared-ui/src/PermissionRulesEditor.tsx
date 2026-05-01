@@ -62,7 +62,7 @@ const SELECT: React.CSSProperties = {
   appearance: 'none' as const,
   paddingRight: 22,
   backgroundImage:
-    'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'6\'%3E%3Cpath d=\'M0 0l5 6 5-6z\' fill=\'%2394a3b8\'/%3E%3C/svg%3E")',
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E\")",
   backgroundRepeat: 'no-repeat',
   backgroundPosition: 'right 8px center',
 };
@@ -172,7 +172,9 @@ function PatternRuleRow({
         style={{ ...SELECT, fontSize: 11, padding: '4px 6px', minWidth: 64 }}
       >
         {ACTIONS.map((a) => (
-          <option key={a} value={a}>{ACTION_META[a].label}</option>
+          <option key={a} value={a}>
+            {ACTION_META[a].label}
+          </option>
         ))}
       </select>
       <span
@@ -187,7 +189,11 @@ function PatternRuleRow({
       >
         {meta.icon}
       </span>
-      <button type="button" style={{ ...DANGER_BTN, padding: '2px 5px', fontSize: 9 }} onClick={onRemove}>
+      <button
+        type="button"
+        style={{ ...DANGER_BTN, padding: '2px 5px', fontSize: 9 }}
+        onClick={onRemove}
+      >
         删除
       </button>
     </div>

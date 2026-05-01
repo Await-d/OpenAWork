@@ -26,14 +26,70 @@ export interface ImageGenerationSizePresetGroup {
 export const DEFAULT_IMAGE_GENERATION_SIZE = '1024x1024';
 
 export const IMAGE_GENERATION_SIZE_PRESETS: ImageGenerationSizePreset[] = [
-  { id: '1k-square', tier: '1k', aspect: 'square', label: '方图', size: '1024x1024', description: '1024 × 1024' },
-  { id: '1k-landscape', tier: '1k', aspect: 'landscape', label: '横图', size: '1536x1024', description: '1536 × 1024' },
-  { id: '1k-portrait', tier: '1k', aspect: 'portrait', label: '竖图', size: '1024x1536', description: '1024 × 1536' },
-  { id: '2k-square', tier: '2k', aspect: 'square', label: '方图', size: '2048x2048', description: '2048 × 2048' },
-  { id: '2k-landscape', tier: '2k', aspect: 'landscape', label: '横图', size: '2560x1440', description: '2560 × 1440' },
-  { id: '2k-portrait', tier: '2k', aspect: 'portrait', label: '竖图', size: '1440x2560', description: '1440 × 2560' },
-  { id: '4k-landscape', tier: '4k', aspect: 'landscape', label: '横图', size: '3840x2160', description: '3840 × 2160' },
-  { id: '4k-portrait', tier: '4k', aspect: 'portrait', label: '竖图', size: '2160x3840', description: '2160 × 3840' },
+  {
+    id: '1k-square',
+    tier: '1k',
+    aspect: 'square',
+    label: '方图',
+    size: '1024x1024',
+    description: '1024 × 1024 · 1:1',
+  },
+  {
+    id: '1k-landscape',
+    tier: '1k',
+    aspect: 'landscape',
+    label: '横图',
+    size: '1536x1024',
+    description: '1536 × 1024 · 3:2',
+  },
+  {
+    id: '1k-portrait',
+    tier: '1k',
+    aspect: 'portrait',
+    label: '竖图',
+    size: '1024x1536',
+    description: '1024 × 1536 · 2:3',
+  },
+  {
+    id: '2k-square',
+    tier: '2k',
+    aspect: 'square',
+    label: '方图',
+    size: '2048x2048',
+    description: '2048 × 2048 · 1:1',
+  },
+  {
+    id: '2k-landscape',
+    tier: '2k',
+    aspect: 'landscape',
+    label: '横图',
+    size: '2048x1152',
+    description: '2048 × 1152 · 16:9',
+  },
+  {
+    id: '2k-portrait',
+    tier: '2k',
+    aspect: 'portrait',
+    label: '竖图',
+    size: '1152x2048',
+    description: '1152 × 2048 · 9:16',
+  },
+  {
+    id: '4k-landscape',
+    tier: '4k',
+    aspect: 'landscape',
+    label: '横图',
+    size: '3840x2160',
+    description: '3840 × 2160 · 16:9',
+  },
+  {
+    id: '4k-portrait',
+    tier: '4k',
+    aspect: 'portrait',
+    label: '竖图',
+    size: '2160x3840',
+    description: '2160 × 3840 · 9:16',
+  },
 ];
 
 export const IMAGE_GENERATION_SIZE_PRESET_GROUPS: ImageGenerationSizePresetGroup[] = [
@@ -101,7 +157,10 @@ export function validateImageGenerationSize(value: string): { message?: string; 
   return { valid: true };
 }
 
-export function normalizeImageGenerationSize(value: unknown, fallback = DEFAULT_IMAGE_GENERATION_SIZE): string {
+export function normalizeImageGenerationSize(
+  value: unknown,
+  fallback = DEFAULT_IMAGE_GENERATION_SIZE,
+): string {
   if (typeof value !== 'string') {
     return fallback;
   }
@@ -126,4 +185,72 @@ export function sizeForPreset(
   const groupFallback = IMAGE_GENERATION_SIZE_PRESET_GROUPS.find((group) => group.tier === id)
     ?.presets[0]?.size;
   return groupFallback ?? DEFAULT_IMAGE_GENERATION_SIZE;
+}
+
+/**
+ * Classify an arbitrary image generation size into a tier (1K/2K/4K).
+ * The tier is decided by the longest edge:
+ *   - max edge ≤ 1536 → 1K
+ *   - 1536 < max edge ≤ 2560 → 2K
+ *   - max edge > 2560 → 4K
+ * Returns null if the value is not parseable. Custom sizes are included.
+ */
+export function getImageGenerationSizeTier(size: string): ImageGenerationSizePresetTier | null {
+  const parsed = parseImageGenerationSize(size);
+  if (!parsed) {
+    return null;
+  }
+  const maxEdge = Math.max(parsed.width, parsed.height);
+  if (maxEdge <= 1536) {
+    return '1k';
+  }
+  if (maxEdge <= 2560) {
+    return '2k';
+  }
+  return '4k';
+}
+
+/**
+ * GPT Image 2 requires `quality="high"` whenever the request goes beyond 1K.
+ * Sources of truth:
+ *   - 2K: documented as needing high quality on the official API.
+ *   - 4K: experimental relay extension; high quality avoids rejection on most relays.
+ */
+export function requiresHighQualityForSize(size: string): boolean {
+  const tier = getImageGenerationSizeTier(size);
+  return tier === '2k' || tier === '4k';
+}
+
+export function downgradeImageGenerationSizeFrom4K(size: string): string {
+  const parsed = parseImageGenerationSize(size);
+  if (!parsed) {
+    return sizeForPreset('2k-square');
+  }
+
+  if (parsed.width === parsed.height) {
+    return sizeForPreset('2k-square');
+  }
+
+  return parsed.width > parsed.height
+    ? sizeForPreset('2k-landscape')
+    : sizeForPreset('2k-portrait');
+}
+
+/**
+ * Recommended HTTP timeouts (ms) per tier when calling the upstream image
+ * generation endpoint. 4K needs ≥ 6 minutes per OpenAI guidance; 2K can take
+ * ~2 minutes; 1K usually finishes within a minute.
+ */
+export const IMAGE_GENERATION_TIMEOUT_MS_BY_TIER: Record<ImageGenerationSizePresetTier, number> = {
+  '1k': 90_000,
+  '2k': 180_000,
+  '4k': 360_000,
+};
+
+export function resolveImageGenerationTimeoutMs(size: string): number {
+  const tier = getImageGenerationSizeTier(size);
+  if (!tier) {
+    return IMAGE_GENERATION_TIMEOUT_MS_BY_TIER['2k'];
+  }
+  return IMAGE_GENERATION_TIMEOUT_MS_BY_TIER[tier];
 }

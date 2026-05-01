@@ -11,10 +11,21 @@ interface OpenAIReasoningSupportRule {
   matches: (modelId: string) => boolean;
 }
 
+// `gpt-5-pro` and its versioned siblings (`gpt-5.4-pro`, ...) run their own
+// internal reasoning and reject any effort knob upstream — mirroring opencode
+// (`if (id === "gpt-5-pro") return {}`), we expose zero variants and also flip
+// `canConfigureThinkingForModel` to false so the UI surfaces a "模型自带思考"
+// pill and disables the toggle, instead of pretending `high` is selectable.
+const OPENAI_PRO_MODEL_PATTERN = /^gpt-5(?:\.\d+)?-pro/;
+
+function isOpenAIProModel(modelId: string): boolean {
+  return OPENAI_PRO_MODEL_PATTERN.test(modelId);
+}
+
 const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
   {
-    efforts: ['high'],
-    matches: (modelId) => modelId === 'gpt-5-pro' || /gpt-5(?:\.\d+)?-pro/.test(modelId),
+    efforts: [],
+    matches: (modelId) => isOpenAIProModel(modelId),
   },
   {
     efforts: ['medium', 'high', 'xhigh'],
@@ -22,10 +33,13 @@ const OPENAI_REASONING_SUPPORT_RULES: readonly OpenAIReasoningSupportRule[] = [
   },
   {
     efforts: ['low', 'medium', 'high', 'xhigh'],
-    matches: (modelId) =>
-      modelId.startsWith('gpt-5.2') ||
-      modelId.startsWith('gpt-5.3') ||
-      modelId.startsWith('gpt-5.4'),
+    matches: (modelId) => {
+      const match = /^gpt-5\.(\d+)(?=$|[^\d])/.exec(modelId);
+      const minorRaw = match?.[1];
+      if (!minorRaw) return false;
+      const minor = Number.parseInt(minorRaw, 10);
+      return Number.isFinite(minor) && minor >= 2;
+    },
   },
   {
     efforts: ['low', 'medium', 'high'],
@@ -46,7 +60,7 @@ export function canConfigureThinkingForModel(
   }
 
   if (providerType === 'openai') {
-    return true;
+    return !isOpenAIProModel(modelId.toLowerCase());
   }
 
   if (providerType === 'deepseek') {

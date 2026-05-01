@@ -3,7 +3,6 @@ import type { CSSProperties, SyntheticEvent } from 'react';
 import {
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
-  sizeForPreset,
   validateImageGenerationSize,
 } from '@openAwork/shared';
 import {
@@ -86,6 +85,7 @@ export interface AIModelConfigRef {
   maxOutputTokens?: number;
   outputPricePerMillion?: number;
   supportsImageGeneration?: boolean;
+  supportsImageGeneration4K?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
@@ -181,12 +181,6 @@ const inputStyle: CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
 };
-
-function maskApiKey(key: string | undefined): string {
-  if (!key) return '—';
-  if (key.length <= 8) return '••••••••';
-  return key.slice(0, 4) + '••••••••' + key.slice(-4);
-}
 
 function emptyForm(provider?: AIProviderRef): ProviderEditData {
   return {
@@ -987,7 +981,9 @@ export function ProviderSettings({
           )}
         </div>
 
-        {thinkingMode ? renderThinkingControls(thinkingMode, selectedProvider?.type, selectedModel) : null}
+        {thinkingMode
+          ? renderThinkingControls(thinkingMode, selectedProvider?.type, selectedModel)
+          : null}
         {mode === 'image' ? renderImageDefaultsControls() : null}
       </div>
     );
@@ -1020,7 +1016,8 @@ export function ProviderSettings({
       ...chipBase,
       background: 'color-mix(in oklch, var(--color-accent, #6366f1) 14%, transparent)',
       color: 'var(--color-accent, #6366f1)',
-      borderColor: 'color-mix(in oklch, var(--color-accent, #6366f1) 40%, var(--color-border, #334155))',
+      borderColor:
+        'color-mix(in oklch, var(--color-accent, #6366f1) 40%, var(--color-border, #334155))',
       fontWeight: 600,
     };
 
@@ -1061,16 +1058,22 @@ export function ProviderSettings({
           gap: 12,
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em' }}>
-          图片默认参数
-        </div>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em' }}>图片默认参数</div>
 
         {/* Size presets */}
         <div style={{ display: 'grid', gap: 8 }}>
           {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
-            <div key={group.tier} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div
+              key={group.tier}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+            >
               <span
-                style={{ fontSize: 10, color: 'var(--color-muted, #94a3b8)', fontWeight: 600, minWidth: 24 }}
+                style={{
+                  fontSize: 10,
+                  color: 'var(--color-muted, #94a3b8)',
+                  fontWeight: 600,
+                  minWidth: 24,
+                }}
                 title={group.description}
               >
                 {group.label}
@@ -1079,15 +1082,22 @@ export function ProviderSettings({
                 <button
                   key={preset.id}
                   type="button"
-                  onClick={() => { setForceCustomImageSize(false); onSetImageDefaults({ size: preset.size }); }}
+                  onClick={() => {
+                    setForceCustomImageSize(false);
+                    onSetImageDefaults({ size: preset.size });
+                  }}
                   title={preset.description}
-                  style={sizePresetId === preset.id && !forceCustomImageSize ? chipActive : chipInactive}
+                  style={
+                    sizePresetId === preset.id && !forceCustomImageSize ? chipActive : chipInactive
+                  }
                 >
                   {preset.label}
                 </button>
               ))}
               {group.tier === '2k' && (
-                <span style={{ fontSize: 9, color: 'var(--color-muted, #94a3b8)', fontStyle: 'italic' }}>
+                <span
+                  style={{ fontSize: 9, color: 'var(--color-muted, #94a3b8)', fontStyle: 'italic' }}
+                >
                   ~4MP
                 </span>
               )}
@@ -1099,7 +1109,8 @@ export function ProviderSettings({
                     color: 'var(--color-danger, #f87171)',
                     borderRadius: 4,
                     padding: '1px 5px',
-                    background: 'color-mix(in oklch, var(--color-danger, #f87171) 10%, transparent)',
+                    background:
+                      'color-mix(in oklch, var(--color-danger, #f87171) 10%, transparent)',
                   }}
                 >
                   ~8MP · 实验性
@@ -1144,7 +1155,9 @@ export function ProviderSettings({
             <select
               value={imageDefaults.quality}
               onChange={(event) =>
-                onSetImageDefaults({ quality: event.target.value as ImageGenerationDefaultsRef['quality'] })
+                onSetImageDefaults({
+                  quality: event.target.value as ImageGenerationDefaultsRef['quality'],
+                })
               }
               style={selectFieldStyle}
             >
@@ -1275,11 +1288,11 @@ export function ProviderSettings({
           {onSetActiveFast &&
             renderModelSelect('fast', '快速 / 内联', active.fast, onSetActiveFast)}
         </div>
-        {onSetActiveImage && active.image
-          ? <div style={{ marginTop: 12 }}>
-              {renderModelSelect('image', '图片生成', active.image, onSetActiveImage)}
-            </div>
-          : null}
+        {onSetActiveImage && active.image ? (
+          <div style={{ marginTop: 12 }}>
+            {renderModelSelect('image', '图片生成', active.image, onSetActiveImage)}
+          </div>
+        ) : null}
       </section>
 
       <section

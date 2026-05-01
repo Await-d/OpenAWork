@@ -163,9 +163,7 @@ export function BatchTerminalCard({
           fontSize: 11,
         }}
       >
-        <span style={{ color: headerColor, fontWeight: 700, flexShrink: 0 }}>
-          batch
-        </span>
+        <span style={{ color: headerColor, fontWeight: 700, flexShrink: 0 }}>batch</span>
         <span style={{ color: tokens.color.muted, fontSize: 10, flex: 1 }}>
           {allDone
             ? `${completedCount}/${totalCount} 完成`

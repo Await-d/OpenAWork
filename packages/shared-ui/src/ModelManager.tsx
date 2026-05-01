@@ -13,6 +13,7 @@ export interface AIModelConfigItem {
   maxOutputTokens?: number;
   outputPricePerMillion?: number;
   supportsImageGeneration?: boolean;
+  supportsImageGeneration4K?: boolean;
   supportsThinking?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
@@ -397,24 +398,32 @@ export function ModelManager({
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 880, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--color-border, #334155)' }}>
-                {['模型', '上下文', '输出', '输入 $/M', '输出 $/M', '自动压缩', '已启用', ''].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      style={{
-                        ...mutedStyle,
-                        fontWeight: 500,
-                        textAlign: 'left',
-                        fontSize: 12,
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  '模型',
+                  '上下文',
+                  '输出',
+                  '输入 $/M',
+                  '输出 $/M',
+                  '自动压缩',
+                  '4K',
+                  '已启用',
+                  '',
+                ].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      ...mutedStyle,
+                      fontWeight: 500,
+                      textAlign: 'left',
+                      fontSize: 12,
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -438,6 +447,9 @@ export function ModelManager({
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
                       {model.supportsImageGeneration ? <CapabilityDot label="生图" /> : null}
+                      {model.supportsImageGeneration && model.supportsImageGeneration4K === true ? (
+                        <CapabilityDot label="4K" />
+                      ) : null}
                       {model.supportsTools ? <CapabilityDot label="工具" /> : null}
                       {model.supportsVision ? <CapabilityDot label="视觉" /> : null}
                       {model.supportsThinking ? <CapabilityDot label="思考" /> : null}
@@ -509,6 +521,32 @@ export function ModelManager({
                         </>
                       );
                     })()}
+                  </td>
+                  <td style={cellStyle}>
+                    {model.supportsImageGeneration ? (
+                      <label
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 11,
+                          color: 'var(--color-muted, #94a3b8)',
+                          cursor: onUpdateModel ? 'pointer' : 'default',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={model.supportsImageGeneration4K === true}
+                          disabled={!onUpdateModel}
+                          onChange={(event) =>
+                            onUpdateModel?.(provider.id, model.id, {
+                              supportsImageGeneration4K: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>支持 4K</span>
+                      </label>
+                    ) : null}
                   </td>
                   <td style={cellStyle}>
                     <Toggle

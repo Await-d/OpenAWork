@@ -1,9 +1,9 @@
 import type { StatusMeta, ToolCardStatus, ToolKind } from './tool-call-card-shared.js';
-import { tokens } from './tokens.js';
 import { resolveToolKind, resolveToolStatusMeta, ToolGlyph } from './tool-visual-meta.js';
 
 export function ToolKindIcon({ kind }: { kind: ToolKind }) {
-  const toolName = kind === 'mcp' ? 'mcp' : kind === 'skill' ? 'skill' : kind === 'agent' ? 'task' : 'tool';
+  const toolName =
+    kind === 'mcp' ? 'mcp' : kind === 'skill' ? 'skill' : kind === 'agent' ? 'task' : 'tool';
   return <ToolGlyph kind={kind} size={12} toolName={toolName} />;
 }
 

@@ -117,4 +117,6 @@ export interface Message {
   content: MessageContent[];
   createdAt: number;
   clientRequestId?: string;
+  durationMs?: number;
+  firstTokenLatencyMs?: number;
 }

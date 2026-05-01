@@ -662,7 +662,11 @@ export function BashTerminalCard({
     view.summary?.totalLines ?? (combinedText.length > 0 ? countTerminalLines(combinedText) : 0);
   const tokenEstimate = Math.max(1, Math.ceil(combinedText.length / 4));
   const isLong = combinedText.length > 1000;
-  const [expanded, setExpanded] = useState(false);
+  // When the outer BlockToolCall is expanded (compact=false), default the
+  // terminal panel to fully expanded — opencode-style "show the whole
+  // command + output as soon as the card is open". The "显示较少" button
+  // below still lets users collapse very long output back to a tail.
+  const [expanded, setExpanded] = useState(!compact);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   useEffect(() => {

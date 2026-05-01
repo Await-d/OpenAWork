@@ -144,11 +144,11 @@ export function parseAssistantTraceContent(
             : null;
         const startedAt =
           timing && typeof timing['startedAt'] === 'number' && Number.isFinite(timing['startedAt'])
-            ? (timing['startedAt'] as number)
+            ? timing['startedAt']
             : undefined;
         const endedAt =
           timing && typeof timing['endedAt'] === 'number' && Number.isFinite(timing['endedAt'])
-            ? (timing['endedAt'] as number)
+            ? timing['endedAt']
             : undefined;
         return {
           text: normalized,
@@ -182,7 +182,9 @@ export function parseAssistantTraceContent(
           }
 
           const input =
-            record['input'] && typeof record['input'] === 'object' && !Array.isArray(record['input'])
+            record['input'] &&
+            typeof record['input'] === 'object' &&
+            !Array.isArray(record['input'])
               ? (record['input'] as Record<string, unknown>)
               : {};
 
@@ -209,7 +211,9 @@ export function parseAssistantTraceContent(
             : false;
           const normalizedStatus = hasPendingPermission
             ? 'paused'
-            : parsedStatus === 'failed' || parsedStatus === 'completed' || parsedStatus === 'running'
+            : parsedStatus === 'failed' ||
+                parsedStatus === 'completed' ||
+                parsedStatus === 'running'
               ? parsedStatus
               : parsedStatus === 'paused' && isError
                 ? 'failed'
@@ -229,9 +233,15 @@ export function parseAssistantTraceContent(
                 ? { clientRequestId: record['clientRequestId'] }
                 : {}),
               ...(Array.isArray(record['fileDiffs']) && options?.parseFileDiffContent
-                ? { fileDiffs: record['fileDiffs'].flatMap((entry) => options.parseFileDiffContent!(entry)) }
+                ? {
+                    fileDiffs: record['fileDiffs'].flatMap((entry) =>
+                      options.parseFileDiffContent!(entry),
+                    ),
+                  }
                 : {}),
-              ...(typeof record['toolCallId'] === 'string' ? { toolCallId: record['toolCallId'] } : {}),
+              ...(typeof record['toolCallId'] === 'string'
+                ? { toolCallId: record['toolCallId'] }
+                : {}),
               toolName: record['toolName'],
               input,
               output: record['output'],
@@ -259,9 +269,7 @@ export function parseAssistantTraceContent(
       toolCalls,
       ...(modifiedFilesSummary ? { modifiedFilesSummary } : {}),
       ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
-      ...(reasoningBlocks.length > 0 && hasAnyTiming
-        ? { reasoningBlocksTimings }
-        : {}),
+      ...(reasoningBlocks.length > 0 && hasAnyTiming ? { reasoningBlocksTimings } : {}),
     };
   } catch {
     return null;
@@ -276,11 +284,18 @@ export function partsFromAssistantTrace(
 
   if (trace.reasoningBlocks) {
     for (let index = 0; index < trace.reasoningBlocks.length; index += 1) {
+      const text = trace.reasoningBlocks[index]!;
+      // Skip empty reasoning blocks — see `partsFromOrderedAssistantContent`
+      // for the same rationale (an empty block renders as a "Thinking:"
+      // header with no body, which is what users see after a refresh
+      // when the gateway recorded a `thinking_end` without any matching
+      // `thinking_delta`).
+      if (text.trim().length === 0) continue;
       const timing = trace.reasoningBlocksTimings?.[index];
       parts.push({
         id: `${messageId}:reasoning:${index}`,
         type: 'reasoning',
-        text: trace.reasoningBlocks[index]!,
+        text,
         ...(typeof timing?.startedAt === 'number' ? { startedAt: timing.startedAt } : {}),
         ...(typeof timing?.endedAt === 'number' ? { endedAt: timing.endedAt } : {}),
       });
@@ -322,7 +337,14 @@ export function readAssistantTracePayloadFromParts(
 ): AssistantTracePayload {
   const reasoningBlocks: string[] = [];
   const reasoningBlocksTimings: AssistantReasoningBlockTiming[] = [];
-  let text = '';
+  // Collect every text part separately and join them at the end. The
+  // ordered-content storage may produce multiple text parts when the wire
+  // stream interleaves text with tool-call segments (e.g.
+  // text "A" → tool → text "B"). Picking only the last one would silently
+  // drop earlier slices from `trace.text` (used by copy-as-markdown,
+  // height estimation, and snapshot comparison). Empty/whitespace slices
+  // are skipped so a no-text run does not introduce a stray separator.
+  const textSlices: string[] = [];
   const toolCalls: AssistantTraceToolCall[] = [];
 
   for (const part of parts) {
@@ -335,7 +357,9 @@ export function readAssistantTracePayloadFromParts(
         });
         break;
       case 'text':
-        text = part.text;
+        if (part.text.trim().length > 0) {
+          textSlices.push(part.text);
+        }
         break;
       case 'tool':
         toolCalls.push({
@@ -362,7 +386,7 @@ export function readAssistantTracePayloadFromParts(
   );
 
   return {
-    text,
+    text: textSlices.join('\n\n'),
     toolCalls,
     ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
     ...(reasoningBlocks.length > 0 && hasAnyTiming ? { reasoningBlocksTimings } : {}),
