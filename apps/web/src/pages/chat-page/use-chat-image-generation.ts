@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  DEFAULT_IMAGE_GENERATION_SIZE,
-  validateImageGenerationSize,
-} from '@openAwork/shared';
+import { DEFAULT_IMAGE_GENERATION_SIZE, validateImageGenerationSize } from '@openAwork/shared';
 import type {
   ChatSettingsProvider,
   SavedChatImageDefaults,
@@ -67,7 +64,9 @@ export function useChatImageGeneration(input: {
         if (!cancelled) setImagePluginLoaded(true);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [gatewayUrl, token]);
   const [imageGenerationBusy, setImageGenerationBusy] = useState(false);
   const [imageGenerationDefaults, setImageGenerationDefaults] = useState<SavedChatImageDefaults>(
@@ -99,12 +98,9 @@ export function useChatImageGeneration(input: {
     setImageGenerationDefaults(next);
   }, []);
 
-  const updateImageGenerationDefaults = useCallback(
-    (updates: Partial<SavedChatImageDefaults>) => {
-      setImageGenerationDefaults((prev) => ({ ...prev, ...updates }));
-    },
-    [],
-  );
+  const updateImageGenerationDefaults = useCallback((updates: Partial<SavedChatImageDefaults>) => {
+    setImageGenerationDefaults((prev) => ({ ...prev, ...updates }));
+  }, []);
 
   const toggleImageGenerationMode = useCallback(() => {
     if (!imagePluginEnabled) return;

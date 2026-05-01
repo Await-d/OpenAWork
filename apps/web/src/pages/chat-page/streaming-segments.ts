@@ -90,7 +90,10 @@ export function appendStreamingTextDelta(
 export function appendStreamingThinkingDelta(
   segments: ChatMessagePart[],
   metaByPartId: Map<string, ReasoningSegmentMeta>,
-  chunk: Pick<StreamThinkingChunk, 'delta' | 'itemId' | 'outputIndex' | 'summaryIndex' | 'occurredAt'>,
+  chunk: Pick<
+    StreamThinkingChunk,
+    'delta' | 'itemId' | 'outputIndex' | 'summaryIndex' | 'occurredAt'
+  >,
   messageId: string,
 ): ChatMessagePart[] {
   if (chunk.delta.length === 0) return segments;
@@ -276,6 +279,44 @@ export function reasoningBlocksFromSegments(
     });
   }
   return blocks;
+}
+
+/**
+ * Build ordered segments from a recovery snapshot's thinking blocks and text.
+ *
+ * During a recovery phase (before the live attach completes) the ordered
+ * segment list is empty because the snapshot only carries
+ * `StreamingThinkingBlock[]` and a text string.  Without this helper the
+ * live renderer falls back to `partsFromAssistantTrace` which strips
+ * `startedAt` / `endedAt`, so reasoning blocks never appear "ended" — the
+ * exact symptom the user observes (blinking cursor never stops).
+ */
+export function segmentsFromRecoverySnapshot(
+  messageId: string,
+  thinkingBlocks: StreamingThinkingBlock[],
+  text: string,
+): ChatMessagePart[] {
+  const parts: ChatMessagePart[] = [];
+  let reasoningCounter = 0;
+  for (const block of thinkingBlocks) {
+    if (block.text.trim().length === 0) continue;
+    parts.push({
+      id: `${messageId}:reasoning:${reasoningCounter}`,
+      type: 'reasoning',
+      text: block.text,
+      ...(typeof block.startedAt === 'number' ? { startedAt: block.startedAt } : {}),
+      ...(typeof block.endedAt === 'number' ? { endedAt: block.endedAt } : {}),
+    });
+    reasoningCounter += 1;
+  }
+  if (text.trim().length > 0) {
+    parts.push({
+      id: `${messageId}:text`,
+      type: 'text',
+      text,
+    });
+  }
+  return parts;
 }
 
 /**

@@ -49,13 +49,8 @@ export interface UseChatMessageActionsReturn {
 export function useChatMessageActions(
   options: UseChatMessageActionsOptions,
 ): UseChatMessageActionsReturn {
-  const {
-    messages,
-    messageRatings,
-    onToggleMessageRating,
-    setHistoryEditPrompt,
-    setRetryPrompt,
-  } = options;
+  const { messages, messageRatings, onToggleMessageRating, setHistoryEditPrompt, setRetryPrompt } =
+    options;
 
   const getCopyableMessageText = useCallback((message: ChatMessage): string => {
     if (message.role === 'user') return message.content;
@@ -115,9 +110,7 @@ export function useChatMessageActions(
   }, []);
 
   const findRetrySource = useCallback(
-    (
-      messageId: string,
-    ): { id: string; inputParts?: InputImageContent[]; text: string } | null => {
+    (messageId: string): { id: string; inputParts?: InputImageContent[]; text: string } | null => {
       const index = messages.findIndex((item) => item.id === messageId);
       if (index === -1) return null;
       for (let cursor = index; cursor >= 0; cursor -= 1) {

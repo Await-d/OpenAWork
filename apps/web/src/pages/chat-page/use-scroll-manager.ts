@@ -131,10 +131,7 @@ export function useScrollManager(
           : behavior === 'auto'
             ? performance.now() + 80
             : 0;
-      ignoreScrollEventsUntilRef.current = Math.max(
-        ignoreScrollEventsUntilRef.current,
-        nextIgnore,
-      );
+      ignoreScrollEventsUntilRef.current = Math.max(ignoreScrollEventsUntilRef.current, nextIgnore);
       pendingScrollFrameRef.current = requestAnimationFrame(() => {
         if (sr) {
           const maxST = Math.max(0, sr.scrollHeight - sr.clientHeight);

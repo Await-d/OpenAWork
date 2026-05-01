@@ -45,7 +45,6 @@ const PANEL_SECTION_EYEBROW_STYLE: React.CSSProperties = {
   letterSpacing: '0.06em',
 };
 
-
 function fmtOverviewTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
@@ -359,11 +358,7 @@ export function ChatHistoryTabContent(props: {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                       }}
-                      title={
-                        task.errorMessage ??
-                        task.result ??
-                        formatSessionTaskTimeoutText(task)
-                      }
+                      title={task.errorMessage ?? task.result ?? formatSessionTaskTimeoutText(task)}
                     >
                       {task.errorMessage
                         ? `✗ ${task.errorMessage}`
@@ -870,7 +865,12 @@ export function ChatOverviewTabContent(props: {
         ))}
       </div>
 
-      <div style={{ borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)', margin: '2px 0' }} />
+      <div
+        style={{
+          borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)',
+          margin: '2px 0',
+        }}
+      />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 4px' }}>
         <div
@@ -933,14 +933,28 @@ export function ChatOverviewTabContent(props: {
               产物工作区 →
             </Link>
           ) : (
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', opacity: 0.56, padding: '1px 4px', flexShrink: 0 }}>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: 'var(--text-3)',
+                opacity: 0.56,
+                padding: '1px 4px',
+                flexShrink: 0,
+              }}
+            >
               产物工作区 →
             </span>
           )}
         </div>
       </div>
 
-      <div style={{ borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)', margin: '2px 0' }} />
+      <div
+        style={{
+          borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)',
+          margin: '2px 0',
+        }}
+      />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 4px' }}>
         <div

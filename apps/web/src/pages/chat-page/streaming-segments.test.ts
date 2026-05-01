@@ -20,6 +20,7 @@ import {
   appendStreamingThinkingDelta,
   applyToolResultToStreamingSegment,
   markStreamingReasoningSegmentEnded,
+  segmentsFromRecoverySnapshot,
   upsertStreamingToolSegment,
 } from './streaming-segments.js';
 import type { ChatMessagePart, ChatReasoningPart, ChatToolPart } from './support.js';
@@ -57,9 +58,7 @@ describe('appendStreamingTextDelta', () => {
   });
 
   it('returns the same array when the delta is empty', () => {
-    const before: ChatMessagePart[] = [
-      { id: `${MESSAGE_ID}:text`, type: 'text', text: 'a' },
-    ];
+    const before: ChatMessagePart[] = [{ id: `${MESSAGE_ID}:text`, type: 'text', text: 'a' }];
     const after = appendStreamingTextDelta(before, '', MESSAGE_ID);
     expect(after).toBe(before);
   });
@@ -250,9 +249,7 @@ describe('markStreamingReasoningSegmentEnded', () => {
 
 describe('upsertStreamingToolSegment', () => {
   it('appends a new tool segment at the current end of the list', () => {
-    let segments: ChatMessagePart[] = [
-      { id: `${MESSAGE_ID}:text`, type: 'text', text: 'hi' },
-    ];
+    let segments: ChatMessagePart[] = [{ id: `${MESSAGE_ID}:text`, type: 'text', text: 'hi' }];
     segments = upsertStreamingToolSegment(segments, {
       toolCallId: 'tool-1',
       toolName: 'echo',
@@ -372,17 +369,65 @@ describe('integration: wire ordering survives an interleaved round', () => {
     // follow-up text after tool
     segments = appendStreamingTextDelta(segments, ' done', MESSAGE_ID);
 
-    expect(segments.map((s) => s.type)).toEqual([
-      'reasoning',
-      'text',
-      'reasoning',
-      'tool',
-      'text',
-    ]);
+    expect(segments.map((s) => s.type)).toEqual(['reasoning', 'text', 'reasoning', 'tool', 'text']);
     expect((segments[0] as ChatReasoningPart).text).toBe('thinking-1 ');
     expect((segments[1] as { text: string }).text).toBe('answer-A');
     expect((segments[2] as ChatReasoningPart).text).toBe('thinking-2');
     expect((segments[3] as ChatToolPart).output).toEqual({ ok: true });
     expect((segments[4] as { text: string }).text).toBe(' done');
+  });
+});
+
+describe('segmentsFromRecoverySnapshot', () => {
+  it('builds reasoning parts with startedAt and endedAt from thinking blocks', () => {
+    const segments = segmentsFromRecoverySnapshot(
+      'recovery-1',
+      [
+        { key: 'indexed:0:summary:-1', text: 'plan A', startedAt: 100, endedAt: 200 },
+        { key: 'indexed:1:summary:-1', text: 'plan B', startedAt: 300 },
+      ],
+      'Hello world',
+    );
+    expect(segments).toHaveLength(3);
+    const [r0, r1, t0] = segments as [
+      ChatReasoningPart,
+      ChatReasoningPart,
+      { type: string; text: string },
+    ];
+    expect(r0.type).toBe('reasoning');
+    expect(r0.text).toBe('plan A');
+    expect(r0.startedAt).toBe(100);
+    expect(r0.endedAt).toBe(200);
+    expect(r1.type).toBe('reasoning');
+    expect(r1.text).toBe('plan B');
+    expect(r1.startedAt).toBe(300);
+    expect(r1.endedAt).toBeUndefined();
+    expect(t0.type).toBe('text');
+    expect(t0.text).toBe('Hello world');
+  });
+
+  it('skips empty thinking blocks', () => {
+    const segments = segmentsFromRecoverySnapshot(
+      'recovery-2',
+      [
+        { key: 'legacy:0', text: '   ', startedAt: 100 },
+        { key: 'legacy:1', text: 'real content', startedAt: 200, endedAt: 300 },
+      ],
+      '',
+    );
+    expect(segments).toHaveLength(1);
+    expect((segments[0] as ChatReasoningPart).text).toBe('real content');
+    expect((segments[0] as ChatReasoningPart).endedAt).toBe(300);
+  });
+
+  it('returns empty array when no blocks and no text', () => {
+    const segments = segmentsFromRecoverySnapshot('recovery-3', [], '');
+    expect(segments).toHaveLength(0);
+  });
+
+  it('returns only text part when no thinking blocks', () => {
+    const segments = segmentsFromRecoverySnapshot('recovery-4', [], 'just text');
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.type).toBe('text');
   });
 });

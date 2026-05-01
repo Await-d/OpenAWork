@@ -261,7 +261,8 @@ function SubAgentItemCard({
               item.status === 'running'
                 ? '0 0 0 2px color-mix(in oklch, var(--accent) 16%, transparent)'
                 : 'none',
-            animation: item.status === 'running' ? 'sub-agent-pulse 1.5s ease-in-out infinite' : 'none',
+            animation:
+              item.status === 'running' ? 'sub-agent-pulse 1.5s ease-in-out infinite' : 'none',
           }}
         />
         <span

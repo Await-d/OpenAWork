@@ -1,41 +1,11 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo, useTransition } from 'react';
-import { makeOrderedMessageId } from './chat-page/ordered-id.js';
-import { useFileEditor } from '../hooks/useFileEditor.js';
-import { usePageActivation } from '../components/CachedRouteOutlet.js';
-import { ChatComposer } from '../components/chat/ChatComposer.js';
-import { ChatImageGenerationResultStrip } from '../components/chat/ChatImageGenerationResultStrip.js';
-import {
-  ChatMessageGroupList,
-  type ChatRenderEntry,
-  type ChatRenderGroup,
-} from '../components/chat/chat-message-group-list.js';
-import { ChatRemoteStreamPlaceholder } from '../components/chat/chat-remote-stream-placeholder.js';
-import { ChatSessionSkeleton } from '../components/chat/chat-session-skeleton.js';
-import { ChatTopBar } from '../components/chat/ChatTopBar.js';
-import {
-  ModelPicker,
-  ModelSettingsPopover,
-  renderChatMessageContentWithOptions,
-  renderStreamingChatMessageContentWithOptions,
-  sharedUiThemeVars,
-  WelcomeScreen,
-} from '../components/chat/ChatPageSections.js';
-import { useFileEditorContext } from '../App.js';
-import { useUIStateStore } from '../stores/uiState.js';
-import { useChatQueueStore } from '../stores/chat-queue.js';
-import { useLocation, useParams, useNavigate } from 'react-router';
-import { useAuthStore } from '../stores/auth.js';
-import { useGatewayClient } from '../hooks/useGatewayClient.js';
-import { detectThinkKeyword } from './chat-page/think-keyword-detector.js';
-import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
-import { useComposerWorkspaceCatalog } from '../hooks/useComposerWorkspaceCatalog.js';
-import { useWorkspace } from '../hooks/useWorkspace.js';
-import {
-  createPendingPermissionRequestSnapshot,
-  createSessionsClient,
-  dedupePendingPermissionRequests,
-  createWorkflowsClient,
-} from '@openAwork/web-client';
+import type {
+  CommandResultCard,
+  InputImageContent,
+  Message,
+  RunEvent,
+  StreamThinkingChunk,
+} from '@openAwork/shared';
+import type { AttachmentItem, MCPServerStatus } from '@openAwork/shared-ui';
 import type {
   PendingPermissionRequest,
   PendingQuestionRequest,
@@ -47,8 +17,63 @@ import type {
   SessionRecoveryReadModel,
   SessionTask,
 } from '@openAwork/web-client';
-import type { CommandResultCard, Message, RunEvent, StreamThinkingChunk } from '@openAwork/shared';
+import {
+  createPendingPermissionRequestSnapshot,
+  createQuestionsClient,
+  createSessionsClient,
+  createWorkflowsClient,
+  dedupePendingPermissionRequests,
+} from '@openAwork/web-client';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
+import { useFileEditorContext } from '../App.js';
+import { usePageActivation } from '../components/CachedRouteOutlet.js';
+import { ChatComposer } from '../components/chat/ChatComposer.js';
+import { ChatImageGenerationResultStrip } from '../components/chat/ChatImageGenerationResultStrip.js';
+import {
+  ModelPicker,
+  ModelSettingsPopover,
+  renderChatMessageContentWithOptions,
+  renderStreamingChatMessageContentWithOptions,
+  sharedUiThemeVars,
+  WelcomeScreen,
+} from '../components/chat/ChatPageSections.js';
+import { ChatTopBar } from '../components/chat/ChatTopBar.js';
+import {
+  ChatMessageGroupList,
+  type ChatRenderEntry,
+  type ChatRenderGroup,
+} from '../components/chat/chat-message-group-list.js';
+import { ChatRemoteStreamPlaceholder } from '../components/chat/chat-remote-stream-placeholder.js';
+import { ChatSearchOverlay, useChatSearch } from '../components/chat/chat-search-overlay.js';
+import { ChatSessionSkeleton } from '../components/chat/chat-session-skeleton.js';
+import { CompanionStage } from '../components/chat/companion/companion-stage.js';
+import { InlineQuestionPanel } from '../components/chat/InlineQuestionPanel.js';
+import { toast } from '../components/ToastNotification.js';
+import WorkspacePickerModal from '../components/WorkspacePickerModal.js';
+import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
+import { useComposerWorkspaceCatalog } from '../hooks/useComposerWorkspaceCatalog.js';
+import { useFileEditor } from '../hooks/useFileEditor.js';
+import { useGatewayClient } from '../hooks/useGatewayClient.js';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js';
+import { useWorkspace } from '../hooks/useWorkspace.js';
+import { useAuthStore } from '../stores/auth.js';
+import { useChatQueueStore } from '../stores/chat-queue.js';
+import { useUIStateStore } from '../stores/uiState.js';
+import {
+  type ChatSettingsProvider,
+  loadSavedChatSessionDefaults,
+} from '../utils/chat-session-defaults.js';
+import {
+  COMPOSER_REFERENCE_EVENT_NAME,
+  isComposerReferenceEvent,
+} from '../utils/composer-reference-events.js';
 import { logger } from '../utils/logger.js';
+import {
+  getPermissionReplyStatusCode,
+  getPermissionReplySuccessMessage,
+  replyPermissionRequest,
+} from '../utils/permission-reply.js';
 import {
   publishSessionPendingPermission,
   publishSessionPendingQuestion,
@@ -58,137 +83,80 @@ import {
 } from '../utils/session-list-events.js';
 import { extractWorkingDirectory } from '../utils/session-metadata.js';
 import {
-  getPermissionReplyStatusCode,
-  getPermissionReplySuccessMessage,
-  replyPermissionRequest,
-} from '../utils/permission-reply.js';
-import type { MCPServerStatus } from '@openAwork/shared-ui';
-import type { AttachmentItem } from '@openAwork/shared-ui';
-import WorkspacePickerModal from '../components/WorkspacePickerModal.js';
-import HistoryEditDialog from './chat-page/history-edit-dialog.js';
-import RetryModeDialog from './chat-page/retry-mode-dialog.js';
-import { getDefaultAgentForDialogueMode, type DialogueMode } from './dialogue-mode.js';
-import {
-  applyPermissionDecisionToLocalAssistantMessages,
-  applyToolResultToLocalAssistantMessages,
-  createAssistantTraceContent,
-  dismissPermissionEventMessage,
-  detectComposerTrigger,
-  estimateTokenCount,
-  matchClientSlashCommand,
-  matchServerSlashCommand,
-  normalizeChatMessages,
-  parseAssistantTraceContent,
-  parseToolCallInputText,
-  parseSessionModeMetadata,
-  reconcileSnapshotChatMessages,
-  replaceOrAppendStreamedAssistantMessage,
-  sanitizeComposerPlainText,
-  hasActivePendingPermissionRequest,
-  upsertPermissionEventMessage,
-  type AssistantTraceToolCall,
-  type ReasoningEffort,
-  partsFromAssistantTrace,
-  type ChatMessage,
-  type ChatMessagePart,
-  type ComposerMenuState,
-  type WorkspaceFileMentionItem,
-} from './chat-page/support.js';
-import {
-  filterTranscriptMessages,
-  shouldShowRunEventInTranscript,
-} from './chat-page/transcript-visibility.js';
-import { isAutoAcceptEnabled } from './chat-page/permission-auto-respond.js';
-import { ChatRightPanel } from './chat-page/chat-right-panel.js';
-import {
-  useChatMessageActions,
-  type HistoryEditPrompt,
-  type RetryPrompt,
-} from './chat-page/use-chat-message-actions.js';
-import {
-  type PreparedSessionRecoveryState,
-  type LiveToolCallState,
-  type SessionsClientWithActiveStop,
-  SESSION_SWITCH_DEFER_THRESHOLD,
-  REMOTE_STREAM_RECOVERY_POLL_MS,
-  CHAT_SCROLL_BOTTOM_PADDING,
-  CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
-  normalizeModelLookupKey,
-  buildQueuedComposerScopeKey,
-  createSessionMetadataSnapshot,
-  prepareSessionRecoveryState,
-  deriveLatestUserGoal,
-  buildRightPanelStateFromSessionSnapshot,
-  isImmediatelyRenderableStructuredContent,
-} from './chat-page/chat-page-utils.js';
-import { useSessionViewGuard } from './chat-page/use-session-view-guard.js';
-import { useStreamReveal } from './chat-page/use-stream-reveal.js';
-import { useScrollManager } from './chat-page/use-scroll-manager.js';
-import { useComposerCallbacks } from './chat-page/use-composer-callbacks.js';
-import { useComposerQueue } from './chat-page/use-composer-queue.js';
-import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
-import { handleInterruptedAttachStream } from './chat-page/attach-stream-reconnect.js';
-import { createAttachStreamReconnectWiring } from './chat-page/attach-stream-reconnect-wiring.js';
-import {
   shouldAttemptAttachToSession,
   shouldResetAttachAttempt,
 } from './chat-page/attach-stream-eligibility.js';
-import { useStreamAttachRetry } from './chat-page/use-stream-attach-retry.js';
-import { useModelPrices } from './chat-page/use-model-prices.js';
-import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
-import { useChatRenderData } from './chat-page/use-chat-render-data.js';
-import { useChatUiActions } from './chat-page/use-chat-ui-actions.js';
-import { useAssistantMessageProcessing } from './chat-page/use-assistant-message-processing.js';
-import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
-import { useComposerMenuItems } from './chat-page/use-composer-menu-items.js';
-import { useChatDataLoaders } from './chat-page/use-chat-data-loaders.js';
+import { handleInterruptedAttachStream } from './chat-page/attach-stream-reconnect.js';
+import { createAttachStreamReconnectWiring } from './chat-page/attach-stream-reconnect-wiring.js';
+import {
+  appendAttachmentSummary,
+  buildUploadedAttachmentSummaryLine,
+  uploadChatAttachments,
+} from './chat-page/attachment-upload.js';
+import { ChatEditorPane } from './chat-page/chat-editor-pane.js';
+import {
+  buildQueuedComposerScopeKey,
+  buildRightPanelStateFromSessionSnapshot,
+  CHAT_SCROLL_BOTTOM_PADDING,
+  CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
+  createSessionMetadataSnapshot,
+  deriveLatestUserGoal,
+  isImmediatelyRenderableStructuredContent,
+  type LiveToolCallState,
+  normalizeModelLookupKey,
+  type PreparedSessionRecoveryState,
+  prepareSessionRecoveryState,
+  REMOTE_STREAM_RECOVERY_POLL_MS,
+  SESSION_SWITCH_DEFER_THRESHOLD,
+  type SessionsClientWithActiveStop,
+} from './chat-page/chat-page-utils.js';
+import { ChatRightPanel } from './chat-page/chat-right-panel.js';
 import { ChatScrollBottomButton } from './chat-page/chat-scroll-bottom-button.js';
 import { ChatStreamErrorBar } from './chat-page/chat-stream-error-bar.js';
-import { toast } from '../components/ToastNotification.js';
-import { ChatEditorPane } from './chat-page/chat-editor-pane.js';
-import { executeServerCommand } from './chat-page/server-command-item.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
-import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
-import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
-import { useChatImageGeneration } from './chat-page/use-chat-image-generation.js';
-import type { SessionImageGenerationResponse } from './chat-page/use-chat-image-generation.js';
+import HistoryEditDialog from './chat-page/history-edit-dialog.js';
+import { makeOrderedMessageId } from './chat-page/ordered-id.js';
+import { isAutoAcceptEnabled } from './chat-page/permission-auto-respond.js';
+import {
+  deleteQueuedComposerFiles,
+  restoreQueuedComposerFiles,
+} from './chat-page/queued-composer-file-store.js';
+import {
+  createQueuedComposerPreview,
+  hydrateQueuedComposerMessage,
+  type QueuedComposerMessage,
+  toPersistedQueuedComposerMessage,
+} from './chat-page/queued-composer-state.js';
+import RetryModeDialog from './chat-page/retry-mode-dialog.js';
+import { startSequentialPolling } from './chat-page/sequential-polling.js';
+import { executeServerCommand } from './chat-page/server-command-item.js';
 import {
   SessionRunStateBar,
   SessionRunStatePlaceholder,
 } from './chat-page/session-run-state-bar.js';
 import {
   flattenSessionTodoLanes,
-  shouldPollSessionRuntime,
-  toSessionPendingPermissionState,
   type SessionStateStatus,
   type SessionTodoItem,
+  shouldPollSessionRuntime,
+  toSessionPendingPermissionState,
 } from './chat-page/session-runtime.js';
-import { buildSubAgentRunItems, SubAgentRunList } from './chat-page/sub-agent-run-list.js';
-import { startSequentialPolling } from './chat-page/sequential-polling.js';
-import { SubSessionDetailPanel } from './chat-page/sub-session-detail-panel.js';
 import {
-  buildTaskToolRuntimeLookup,
-  buildTerminalTaskSyncMarker,
-  resolveTaskToolRuntimeSnapshot,
-} from './chat-page/task-tool-runtime.js';
+  type RecoveredActiveAssistantStream,
+  recoverActiveAssistantStream,
+} from './chat-page/stream-recovery.js';
 import {
-  applyChatRightPanelEvent,
-  applyChatRightPanelChunk,
-  buildChatRightPanelStateFromRunEvents,
-  clearResolvedPendingPermissionToolCalls,
-  createInitialChatRightPanelState,
-  getToolCallCards,
-  startChatRightPanelRun,
-  type ChatRightPanelState,
-} from './chat-stream-state.js';
-import {
-  mergeChatBackendUsageSnapshot,
   type ChatBackendUsageSnapshot,
+  mergeChatBackendUsageSnapshot,
 } from './chat-page/stream-usage.js';
 import {
-  recoverActiveAssistantStream,
-  type RecoveredActiveAssistantStream,
-} from './chat-page/stream-recovery.js';
+  appendStreamingTextDelta,
+  appendStreamingThinkingDelta,
+  applyToolResultToStreamingSegment,
+  markStreamingReasoningSegmentEnded,
+  segmentsFromRecoverySnapshot,
+  upsertStreamingToolSegment,
+} from './chat-page/streaming-segments.js';
 import {
   appendStreamingThinkingChunk,
   extractStreamingThinkingDurations,
@@ -198,41 +166,83 @@ import {
   markStreamingThinkingChunkEnded,
   type StreamingThinkingBlock,
 } from './chat-page/streaming-thinking.js';
+import { buildSubAgentRunItems, SubAgentRunList } from './chat-page/sub-agent-run-list.js';
+import { SubSessionDetailPanel } from './chat-page/sub-session-detail-panel.js';
 import {
-  appendStreamingTextDelta,
-  appendStreamingThinkingDelta,
-  applyToolResultToStreamingSegment,
-  markStreamingReasoningSegmentEnded,
-  upsertStreamingToolSegment,
-} from './chat-page/streaming-segments.js';
+  type AssistantTraceToolCall,
+  applyPermissionDecisionToLocalAssistantMessages,
+  applyToolResultToLocalAssistantMessages,
+  type ChatMessage,
+  type ChatMessagePart,
+  type ComposerMenuState,
+  createAssistantTraceContent,
+  detectComposerTrigger,
+  dismissPermissionEventMessage,
+  estimateTokenCount,
+  hasActivePendingPermissionRequest,
+  matchClientSlashCommand,
+  matchServerSlashCommand,
+  normalizeChatMessages,
+  parseAssistantTraceContent,
+  parseSessionModeMetadata,
+  parseToolCallInputText,
+  partsFromAssistantTrace,
+  type ReasoningEffort,
+  reconcileSnapshotChatMessages,
+  replaceOrAppendStreamedAssistantMessage,
+  sanitizeComposerPlainText,
+  upsertPermissionEventMessage,
+  type WorkspaceFileMentionItem,
+} from './chat-page/support.js';
 import {
-  createQueuedComposerPreview,
-  hydrateQueuedComposerMessage,
-  toPersistedQueuedComposerMessage,
-  type QueuedComposerMessage,
-} from './chat-page/queued-composer-state.js';
+  buildTaskToolRuntimeLookup,
+  buildTerminalTaskSyncMarker,
+  resolveTaskToolRuntimeSnapshot,
+} from './chat-page/task-tool-runtime.js';
+import { detectThinkKeyword } from './chat-page/think-keyword-detector.js';
 import {
-  deleteQueuedComposerFiles,
-  restoreQueuedComposerFiles,
-} from './chat-page/queued-composer-file-store.js';
+  filterTranscriptMessages,
+  shouldShowRunEventInTranscript,
+} from './chat-page/transcript-visibility.js';
+import { useAssistantMessageProcessing } from './chat-page/use-assistant-message-processing.js';
+import { useChatDataLoaders } from './chat-page/use-chat-data-loaders.js';
+import type { SessionImageGenerationResponse } from './chat-page/use-chat-image-generation.js';
+import { useChatImageGeneration } from './chat-page/use-chat-image-generation.js';
 import {
-  appendAttachmentSummary,
-  buildUploadedAttachmentSummaryLine,
-  uploadChatAttachments,
-} from './chat-page/attachment-upload.js';
+  type HistoryEditPrompt,
+  type RetryPrompt,
+  useChatMessageActions,
+} from './chat-page/use-chat-message-actions.js';
+import { useChatRenderData } from './chat-page/use-chat-render-data.js';
+import { useChatUiActions } from './chat-page/use-chat-ui-actions.js';
+import { useComposerCallbacks } from './chat-page/use-composer-callbacks.js';
+import { useComposerMenuItems } from './chat-page/use-composer-menu-items.js';
+import { useComposerQueue } from './chat-page/use-composer-queue.js';
+import { useModelPrices } from './chat-page/use-model-prices.js';
+import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
+import { useScrollManager } from './chat-page/use-scroll-manager.js';
+import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
+import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
+import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
+import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
 import {
-  loadSavedChatSessionDefaults,
-  type ChatSettingsProvider,
-} from '../utils/chat-session-defaults.js';
-import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js';
-import { CompanionStage } from '../components/chat/companion/companion-stage.js';
-import { InlineQuestionPanel } from '../components/chat/InlineQuestionPanel.js';
-import { createQuestionsClient } from '@openAwork/web-client';
-import type { InputImageContent } from '@openAwork/shared';
-import {
-  useSessionViewCache,
   type SessionViewStreamingSnapshot,
+  useSessionViewCache,
 } from './chat-page/use-session-view-cache.js';
+import { useSessionViewGuard } from './chat-page/use-session-view-guard.js';
+import { useStreamAttachRetry } from './chat-page/use-stream-attach-retry.js';
+import { useStreamReveal } from './chat-page/use-stream-reveal.js';
+import {
+  applyChatRightPanelChunk,
+  applyChatRightPanelEvent,
+  buildChatRightPanelStateFromRunEvents,
+  type ChatRightPanelState,
+  clearResolvedPendingPermissionToolCalls,
+  createInitialChatRightPanelState,
+  getToolCallCards,
+  startChatRightPanelRun,
+} from './chat-stream-state.js';
+import { type DialogueMode, getDefaultAgentForDialogueMode } from './dialogue-mode.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
 const LOAD_MORE_MESSAGE_INCREMENT = 20;
@@ -296,7 +306,10 @@ export default function ChatPage() {
   const activeSessionRef = useRef<string | null>(sessionId ?? null);
   const currentLoadedSessionIdRef = useRef<string | null>(currentSessionId);
   const sessionViewEpochRef = useRef(0);
-  const currentSessionViewRef = useRef<{ epoch: number; sessionId: string | null }>({
+  const currentSessionViewRef = useRef<{
+    epoch: number;
+    sessionId: string | null;
+  }>({
     epoch: 0,
     sessionId: sessionId ?? null,
   });
@@ -317,7 +330,7 @@ export default function ChatPage() {
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
   const [rightOpen, setRightOpen] = useState(false);
   const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
-  const [dialogueMode, setDialogueMode] = useState<DialogueMode>('clarify');
+  const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
   const [manualAgentId, setManualAgentId] = useState('');
   const [yoloMode, setYoloMode] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
@@ -720,10 +733,11 @@ export default function ChatPage() {
     if (!token) {
       return null;
     }
-    const { defaults, imageDefaults, providers: loadedProviders } = await loadSavedChatSessionDefaults(
-      gatewayUrl,
-      token,
-    );
+    const {
+      defaults,
+      imageDefaults,
+      providers: loadedProviders,
+    } = await loadSavedChatSessionDefaults(gatewayUrl, token);
     savedChatDefaultsRef.current = defaults;
 
     return { defaults, imageDefaults, providers: loadedProviders };
@@ -909,11 +923,21 @@ export default function ChatPage() {
     : (recoveredStreamSnapshot?.startedAt ?? null);
   const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
   // Surfaces the wire-faithful ordered parts during an active stream so the
-  // live render reflects gateway event order. During recovery we have no
-  // segment list (the recovery snapshot only carries text + thinkingBlocks),
-  // so we fall back to an empty array which makes `useChatRenderData`
-  // reconstruct a placeholder message via the legacy reordered path.
-  const visibleStreamingSegments = streaming ? streamingSegments : [];
+  // live render reflects gateway event order. During recovery (before the
+  // live attach completes) the real segment list is still empty, so we
+  // synthesize ordered parts from the snapshot's thinking blocks + text.
+  // This preserves `startedAt` / `endedAt` on reasoning parts so the UI
+  // correctly marks ended thinking blocks instead of showing an infinite
+  // streaming cursor.
+  const visibleStreamingSegments = streaming
+    ? streamingSegments
+    : recoveredStreamSnapshot
+      ? segmentsFromRecoverySnapshot(
+          recoveredStreamSnapshot.messageId ?? '__recovery__',
+          recoveredStreamSnapshot.thinkingBlocks ?? [],
+          recoveredStreamSnapshot.text ?? '',
+        )
+      : [];
   const activeStreamMessageId =
     currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
   const queuedComposerPreviews = useMemo(
@@ -1085,19 +1109,16 @@ export default function ChatPage() {
     [],
   );
 
-  const handleInlineQuestionCustomInput = useCallback(
-    (questionIndex: number, value: string) => {
-      setInlineQuestionCustomInputs((prev) => {
-        const next = [...prev];
-        while (next.length <= questionIndex) {
-          next.push('');
-        }
-        next[questionIndex] = value;
-        return next;
-      });
-    },
-    [],
-  );
+  const handleInlineQuestionCustomInput = useCallback((questionIndex: number, value: string) => {
+    setInlineQuestionCustomInputs((prev) => {
+      const next = [...prev];
+      while (next.length <= questionIndex) {
+        next.push('');
+      }
+      next[questionIndex] = value;
+      return next;
+    });
+  }, []);
 
   const replyInlineQuestion = useCallback(
     async (status: 'answered' | 'dismissed') => {
@@ -1113,7 +1134,11 @@ export default function ChatPage() {
 
       const payload =
         status === 'answered'
-          ? { answers: mergedAnswers, requestId: activePendingQuestion.requestId, status }
+          ? {
+              answers: mergedAnswers,
+              requestId: activePendingQuestion.requestId,
+              status,
+            }
           : { requestId: activePendingQuestion.requestId, status };
 
       try {
@@ -1246,7 +1271,9 @@ export default function ChatPage() {
           ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),
           isError: toolCall.isError,
           ...(toolCall.pendingPermissionRequestId
-            ? { pendingPermissionRequestId: toolCall.pendingPermissionRequestId }
+            ? {
+                pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
+              }
             : {}),
           ...(toolCall.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
           status: toolCall.status,
@@ -1381,7 +1408,7 @@ export default function ChatPage() {
     lastPersistedSessionMetadataSnapshotRef.current = null;
     resetStreamState();
     setStreamError(null);
-    setDialogueMode('clarify');
+    setDialogueMode('coding');
     setManualAgentId('');
     setYoloMode(false);
     setWebSearchEnabled(true);
@@ -1408,7 +1435,8 @@ export default function ChatPage() {
       .then((recovery) => {
         console.log('[RECOVERY]', requestedSessionId, {
           activeStream: recovery.activeStream,
-          sessionStateStatus: (recovery.session as unknown as Record<string, unknown>)?.state_status,
+          sessionStateStatus: (recovery.session as unknown as Record<string, unknown>)
+            ?.state_status,
         });
         if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
           console.log('[RECOVERY] skipped — cancelled or view mismatch');
@@ -1711,7 +1739,14 @@ export default function ChatPage() {
       };
     }
     prevSnapshotReadyRef.current = isSessionSnapshotReady;
-  }, [isSessionSnapshotReady, messages.length, isNearBottomRef, ignoreScrollEventsUntilRef, scrollRegionRef, bottomRef]);
+  }, [
+    isSessionSnapshotReady,
+    messages.length,
+    isNearBottomRef,
+    ignoreScrollEventsUntilRef,
+    scrollRegionRef,
+    bottomRef,
+  ]);
 
   useEffect(() => {
     if (!isSessionSnapshotReady) {
@@ -1729,6 +1764,35 @@ export default function ChatPage() {
       textareaRef.current.setSelectionRange(caret, caret);
     });
   }, []);
+
+  const appendTextToComposer = useCallback((text: string) => {
+    setInput((previous) => {
+      const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
+      return `${previous}${separator}${text}`;
+    });
+    setComposerMenu(null);
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      const caret = textareaRef.current.value.length;
+      textareaRef.current.setSelectionRange(caret, caret);
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleComposerReference = (event: Event) => {
+      if (!isComposerReferenceEvent(event)) {
+        return;
+      }
+
+      appendTextToComposer(event.detail.text);
+    };
+
+    window.addEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
+    return () => {
+      window.removeEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
+    };
+  }, [appendTextToComposer]);
 
   const handleToggleMessageRating = useCallback(
     async (message: ChatMessage, rating: SessionMessageRatingValue) => {
@@ -1756,7 +1820,10 @@ export default function ChatPage() {
           message.id,
           { rating },
         );
-        setMessageRatings((previous) => ({ ...previous, [message.id]: nextRating }));
+        setMessageRatings((previous) => ({
+          ...previous,
+          [message.id]: nextRating,
+        }));
       } catch (error) {
         logger.error('message rating failed', error);
       }
@@ -1855,11 +1922,7 @@ export default function ChatPage() {
   );
 
   const truncateSessionMessagesInPlace = useCallback(
-    async (
-      sessionId: string,
-      messageId: string,
-      messageText?: string,
-    ): Promise<Message[]> => {
+    async (sessionId: string, messageId: string, messageText?: string): Promise<Message[]> => {
       if (!token) return [];
       const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
         method: 'POST',
@@ -2076,7 +2139,9 @@ export default function ChatPage() {
         return false;
       }
 
-      let imageEditArtifacts: Array<{ artifactId: string; fileName?: string; mimeType?: string }> | undefined;
+      let imageEditArtifacts:
+        | Array<{ artifactId: string; fileName?: string; mimeType?: string }>
+        | undefined;
       let localImageInputs: InputImageContent[] | undefined;
       if (effectiveFiles.length > 0) {
         const invalidAttachment = effectiveFiles.find((file) => !file.type.startsWith('image/'));
@@ -2366,7 +2431,9 @@ export default function ChatPage() {
           output: nextToolState.output,
           isError: nextToolState.isError,
           ...(hasPendingPermission
-            ? { pendingPermissionRequestId: nextToolState.pendingPermissionRequestId }
+            ? {
+                pendingPermissionRequestId: nextToolState.pendingPermissionRequestId,
+              }
             : {}),
           resumedAfterApproval: nextToolState.resumedAfterApproval,
           status,
@@ -2398,9 +2465,7 @@ export default function ChatPage() {
         ) ?? false;
       const tracePayload = {
         ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
-        ...(hasPersistableTiming && reasoningBlocksTimings
-          ? { reasoningBlocksTimings }
-          : {}),
+        ...(hasPersistableTiming && reasoningBlocksTimings ? { reasoningBlocksTimings } : {}),
         text: textContent,
         toolCalls,
       };
@@ -2521,11 +2586,7 @@ export default function ChatPage() {
       // / setStreamThinkingBuffer('') reset is not overwritten by a late flush.
       cancelThinkingFlush();
       cancelSegmentsFlush();
-      const { content } = buildAssistantTraceMessage(
-        closingMessageId,
-        accumulated,
-        'completed',
-      );
+      const { content } = buildAssistantTraceMessage(closingMessageId, accumulated, 'completed');
       // Prefer the ordered segment list as the canonical parts source so the
       // committed round message reflects the wire-arrival order. Fall back
       // to the legacy reordered parts only when no segments were collected
@@ -2733,33 +2794,33 @@ export default function ChatPage() {
         if (event.type === 'task_update') {
           setSessionTasks((previous) => {
             const existingTask = previous.find((task) => task.id === event.taskId);
-              const nextTask: SessionTask = {
-                assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
-                blockedBy: existingTask?.blockedBy ?? [],
-                completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
-                createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
-                depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
-                errorMessage: event.errorMessage ?? existingTask?.errorMessage,
-                id: event.taskId,
-                parentTaskId: event.parentTaskId,
-                priority: existingTask?.priority ?? 'medium',
-                readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
-                result: event.result ?? existingTask?.result,
-                sessionId: event.sessionId ?? existingTask?.sessionId,
-                status:
-                  event.status === 'in_progress'
-                    ? 'running'
-                    : event.status === 'done'
-                      ? 'completed'
-                      : event.status,
-                subtaskCount: existingTask?.subtaskCount ?? 0,
-                tags: existingTask?.tags ?? [],
-                terminalReason: event.reason ?? existingTask?.terminalReason,
-                timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
-                title: event.label,
-                unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
-                updatedAt: event.occurredAt ?? Date.now(),
-              };
+            const nextTask: SessionTask = {
+              assignedAgent: event.assignedAgent ?? existingTask?.assignedAgent,
+              blockedBy: existingTask?.blockedBy ?? [],
+              completedSubtaskCount: existingTask?.completedSubtaskCount ?? 0,
+              createdAt: existingTask?.createdAt ?? event.occurredAt ?? Date.now(),
+              depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
+              errorMessage: event.errorMessage ?? existingTask?.errorMessage,
+              id: event.taskId,
+              parentTaskId: event.parentTaskId,
+              priority: existingTask?.priority ?? 'medium',
+              readySubtaskCount: existingTask?.readySubtaskCount ?? 0,
+              result: event.result ?? existingTask?.result,
+              sessionId: event.sessionId ?? existingTask?.sessionId,
+              status:
+                event.status === 'in_progress'
+                  ? 'running'
+                  : event.status === 'done'
+                    ? 'completed'
+                    : event.status,
+              subtaskCount: existingTask?.subtaskCount ?? 0,
+              tags: existingTask?.tags ?? [],
+              terminalReason: event.reason ?? existingTask?.terminalReason,
+              timeoutSource: event.timeoutSource ?? existingTask?.timeoutSource,
+              title: event.label,
+              unmetDependencyCount: existingTask?.unmetDependencyCount ?? 0,
+              updatedAt: event.occurredAt ?? Date.now(),
+            };
 
             const existingIndex = previous.findIndex((task) => task.id === event.taskId);
             if (existingIndex === -1) {
@@ -3023,7 +3084,9 @@ export default function ChatPage() {
                 model: requestModelLabel,
                 agentId: streamAgentId || requestAgentId,
                 ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                  ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                  ? {
+                      firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
+                    }
                   : {}),
                 status: 'completed',
               },
@@ -3044,8 +3107,7 @@ export default function ChatPage() {
           // Prefer the wire-ordered segments collected so far; only fall back
           // to the legacy reasoning → text → tool flattening when no segments
           // were captured (e.g. cancellation before any chunk arrived).
-          const parts =
-            accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
+          const parts = accumulatedSegments.length > 0 ? accumulatedSegments : legacyParts;
           const finalRoundToolCallIds = new Set(liveToolCalls.keys());
           const shouldAttachFirstTokenLatency =
             firstTokenObservedAt !== null && !firstTokenLatencyAttached;
@@ -3072,7 +3134,9 @@ export default function ChatPage() {
                 model: requestModelLabel,
                 agentId: streamAgentId || requestAgentId,
                 ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                  ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                  ? {
+                      firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
+                    }
                   : {}),
                 status: 'completed',
               },
@@ -3222,7 +3286,10 @@ export default function ChatPage() {
         return;
       }
 
-      setInlinePermissionPendingDecision({ decision, requestId: request.requestId });
+      setInlinePermissionPendingDecision({
+        decision,
+        requestId: request.requestId,
+      });
       setInlinePermissionErrors((previous) => {
         const next = { ...previous };
         delete next[request.requestId];
@@ -3374,7 +3441,11 @@ export default function ChatPage() {
     const eligibilitySignature = `${currentSessionId ?? 'none'}|${shouldAttemptAttach ? 1 : 0}|${attachEligibility.sessionStateStatus ?? 'null'}|${attachEligibility.streaming ? 1 : 0}|${attachEligibility.recoveryActiveStreamPresent ? 1 : 0}|${attachEligibility.activeGatewayStreamSessionId ?? 'null'}|${attachEligibility.isSessionSnapshotReady ? 1 : 0}|${attachEligibility.sessionModesHydrated ? 1 : 0}|${attachEligibility.isPageActive ? 1 : 0}|${attachAttemptedSessionRef.current ?? 'none'}`;
     if (attachEligibilitySignatureRef.current !== eligibilitySignature) {
       attachEligibilitySignatureRef.current = eligibilitySignature;
-      console.log('[ATTACH_ELIGIBILITY]', currentSessionId, { shouldAttemptAttach, ...attachEligibility, attachAttempted: attachAttemptedSessionRef.current });
+      console.log('[ATTACH_ELIGIBILITY]', currentSessionId, {
+        shouldAttemptAttach,
+        ...attachEligibility,
+        attachAttempted: attachAttemptedSessionRef.current,
+      });
     }
 
     if (!shouldAttemptAttach || !currentSessionId) {
@@ -3421,10 +3492,7 @@ export default function ChatPage() {
       pendingThinkingFlushFrame = null;
       // Late RAF after attach was torn down (session switch / cancel /
       // round-close) must not overwrite the cleared buffer with stale text.
-      if (
-        !streamingRef.current ||
-        !isCurrentSessionRequest(sid, attachSessionViewEpoch)
-      ) {
+      if (!streamingRef.current || !isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
         return;
       }
       setStreamThinkingBlocks(accumulatedThinkingBlocks);
@@ -3442,10 +3510,7 @@ export default function ChatPage() {
     };
     const flushSegmentsState = () => {
       pendingSegmentsFlushFrame = null;
-      if (
-        !streamingRef.current ||
-        !isCurrentSessionRequest(sid, attachSessionViewEpoch)
-      ) {
+      if (!streamingRef.current || !isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
         return;
       }
       setStreamingSegments(accumulatedSegments);
@@ -3500,7 +3565,9 @@ export default function ChatPage() {
           output: toolCallState.output,
           isError: toolCallState.isError,
           ...(hasPendingPermission
-            ? { pendingPermissionRequestId: toolCallState.pendingPermissionRequestId }
+            ? {
+                pendingPermissionRequestId: toolCallState.pendingPermissionRequestId,
+              }
             : {}),
           resumedAfterApproval: toolCallState.resumedAfterApproval,
           status,
@@ -3564,9 +3631,7 @@ export default function ChatPage() {
           ? { modifiedFilesSummary: recoveredModifiedFilesSummary }
           : {}),
         ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
-        ...(hasPersistableTiming && reasoningBlocksTimings
-          ? { reasoningBlocksTimings }
-          : {}),
+        ...(hasPersistableTiming && reasoningBlocksTimings ? { reasoningBlocksTimings } : {}),
         text: textContent,
         toolCalls,
       };
@@ -3711,9 +3776,7 @@ export default function ChatPage() {
           accumulatedUsage,
           attachStateInitialized,
           currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
-          ...(recoveredModifiedFilesSummary
-            ? { recoveredModifiedFilesSummary }
-            : {}),
+          ...(recoveredModifiedFilesSummary ? { recoveredModifiedFilesSummary } : {}),
           requestStartedAt,
           toolCalls: buildAttachToolCalls(),
         },
@@ -3828,7 +3891,9 @@ export default function ChatPage() {
           ...(toolCallState.output !== undefined ? { output: toolCallState.output } : {}),
           ...(toolCallState.isError !== undefined ? { isError: toolCallState.isError } : {}),
           ...(toolCallState.pendingPermissionRequestId
-            ? { pendingPermissionRequestId: toolCallState.pendingPermissionRequestId }
+            ? {
+                pendingPermissionRequestId: toolCallState.pendingPermissionRequestId,
+              }
             : {}),
           ...(toolCallState.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
           kind: resolveAssistantCapabilityKind(toolCallState.toolName) as
@@ -3949,7 +4014,9 @@ export default function ChatPage() {
               isError: hasPendingPermission ? false : event.isError,
               status: hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed',
               ...(hasPendingPermission && rawPendingPermissionRequestId
-                ? { pendingPermissionRequestId: rawPendingPermissionRequestId }
+                ? {
+                    pendingPermissionRequestId: rawPendingPermissionRequestId,
+                  }
                 : {}),
               ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
             });
@@ -4287,7 +4354,9 @@ export default function ChatPage() {
                   model: requestModelLabel,
                   agentId: streamAgentId || requestAgentId,
                   ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                    ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                    ? {
+                        firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
+                      }
                     : {}),
                   status: 'completed',
                 },
@@ -4357,7 +4426,9 @@ export default function ChatPage() {
               model: requestModelLabel,
               agentId: requestAgentId,
               ...(shouldAttachFirstTokenLatency && firstTokenObservedAt !== null
-                ? { firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt }
+                ? {
+                    firstTokenLatencyMs: firstTokenObservedAt - requestStartedAt,
+                  }
                 : {}),
               status: 'error',
             },
@@ -4482,8 +4553,7 @@ export default function ChatPage() {
       normalizeChatMessages(remainingMessages),
     );
     const fallbackMessages = trimMessagesFromSource(messages, sourceMessageId);
-    const sourceFoundLocally =
-      messages.findIndex((message) => message.id === sourceMessageId) >= 0;
+    const sourceFoundLocally = messages.findIndex((message) => message.id === sourceMessageId) >= 0;
     // Same rationale as handleRetryInCurrentSession: prefer local truncation
     // when the source message is present in the local state, because backend
     // truncation may silently fail due to frontend/backend message ID mismatch.
@@ -4741,7 +4811,26 @@ export default function ChatPage() {
     taskToolRuntimeLookup,
     visibleMessageCount,
     serverTotalTurnCount,
+    stopCapability,
+    stoppingStream,
+    onStopActiveMessage: stopActiveMessage,
   });
+
+  const chatSearch = useChatSearch({ messages, scrollRegionRef });
+
+  useEffect(() => {
+    if (!isPageActive) return undefined;
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+        if (event.key === 'f' || event.key === 'F') {
+          event.preventDefault();
+          chatSearch.open();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [chatSearch.open, isPageActive]);
 
   const showSessionSwitchSkeleton = currentSessionId !== null && isSessionLoading && !streaming;
 
@@ -4797,7 +4886,10 @@ export default function ChatPage() {
                 if (!token) return;
                 if (currentSessionId) {
                   const targetSessionId = currentSessionId;
-                  const selectedMetadata = buildSessionMetadata({ providerId: pid, modelId: mid });
+                  const selectedMetadata = buildSessionMetadata({
+                    providerId: pid,
+                    modelId: mid,
+                  });
                   await createSessionsClient(gatewayUrl).updateMetadata(
                     token,
                     targetSessionId,
@@ -4867,7 +4959,9 @@ export default function ChatPage() {
             }}
             onContinueCurrent={(text, editedInputParts) => {
               if (editedInputParts && editedInputParts.length > 0) {
-                void sendMessage(text, { existingInputParts: editedInputParts });
+                void sendMessage(text, {
+                  existingInputParts: editedInputParts,
+                });
               } else {
                 focusComposerWithText(text);
               }
@@ -4919,6 +5013,7 @@ export default function ChatPage() {
                 transition: 'none',
               }}
             >
+              <ChatSearchOverlay controller={chatSearch} />
               <div
                 ref={scrollRegionRef}
                 onScroll={handleScroll}
@@ -4963,7 +5058,10 @@ export default function ChatPage() {
                   {showSessionSwitchSkeleton ? (
                     <div
                       ref={bottomRef}
-                      style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }}
+                      style={{
+                        height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
+                        flexShrink: 0,
+                      }}
                     />
                   ) : messages.length > 0 || visibleStreaming || remoteSessionBusyState ? (
                     <>
@@ -4972,20 +5070,22 @@ export default function ChatPage() {
                           type="button"
                           data-testid="chat-load-earlier"
                           onClick={() => {
-                            const localHidden = sanitizedHistoricalMessages.length - (visibleMessageCount ?? sanitizedHistoricalMessages.length);
+                            const localHidden =
+                              sanitizedHistoricalMessages.length -
+                              (visibleMessageCount ?? sanitizedHistoricalMessages.length);
                             if (localHidden > 0) {
-                              setVisibleMessageCount((prev) =>
-                                prev + LOAD_MORE_MESSAGE_INCREMENT,
-                              );
+                              setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
                             } else if (currentSessionId) {
                               void loadCurrentSessionSnapshot(currentSessionId, {
                                 replaceMessages: true,
-                              }).then(() => {
-                                setServerTotalTurnCount(null);
-                                setVisibleMessageCount(
-                                  (prev) => prev + LOAD_MORE_MESSAGE_INCREMENT,
-                                );
-                              }).catch(() => undefined);
+                              })
+                                .then(() => {
+                                  setServerTotalTurnCount(null);
+                                  setVisibleMessageCount(
+                                    (prev) => prev + LOAD_MORE_MESSAGE_INCREMENT,
+                                  );
+                                })
+                                .catch(() => undefined);
                             }
                           }}
                           style={{
@@ -4997,8 +5097,7 @@ export default function ChatPage() {
                             padding: '0 14px',
                             borderRadius: 999,
                             border: '1px solid var(--border)',
-                            background:
-                              'color-mix(in oklch, var(--surface) 90%, transparent)',
+                            background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
                             color: 'var(--text-2)',
                             fontSize: 11,
                             fontWeight: 600,
@@ -5021,7 +5120,8 @@ export default function ChatPage() {
                             <path d="M12 19V5" />
                             <path d="m5 12 7-7 7 7" />
                           </svg>
-                          加载更早的 {Math.min(hiddenMessageCount, LOAD_MORE_MESSAGE_INCREMENT)} 条消息（共 {hiddenMessageCount} 条隐藏）
+                          加载更早的 {Math.min(hiddenMessageCount, LOAD_MORE_MESSAGE_INCREMENT)}{' '}
+                          条消息（共 {hiddenMessageCount} 条隐藏）
                         </button>
                       )}
                       <ChatMessageGroupList

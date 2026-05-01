@@ -25,9 +25,7 @@ export default function HistoryEditDialog({
   open,
 }: HistoryEditDialogProps) {
   const [draft, setDraft] = useState(initialText);
-  const [draftInputParts, setDraftInputParts] = useState<InputImageContent[]>(
-    inputParts ?? [],
-  );
+  const [draftInputParts, setDraftInputParts] = useState<InputImageContent[]>(inputParts ?? []);
 
   useEffect(() => {
     if (!open) return;
@@ -41,11 +39,9 @@ export default function HistoryEditDialog({
   const addImageFiles = useCallback((files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
-    void Promise.all(imageFiles.map(fileToInputImagePart)).then(
-      (parts: InputImageContent[]) => {
-        setDraftInputParts((prev) => [...prev, ...parts]);
-      },
-    );
+    void Promise.all(imageFiles.map(fileToInputImagePart)).then((parts: InputImageContent[]) => {
+      setDraftInputParts((prev) => [...prev, ...parts]);
+    });
   }, []);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -103,8 +99,7 @@ export default function HistoryEditDialog({
 
   const hasCodeMarkers = containsCodeMarkers(draft);
 
-  const effectiveInputParts =
-    draftInputParts.length > 0 ? draftInputParts : undefined;
+  const effectiveInputParts = draftInputParts.length > 0 ? draftInputParts : undefined;
 
   if (!open) return null;
 
@@ -132,9 +127,7 @@ export default function HistoryEditDialog({
         style={{
           width: 'min(560px, 100%)',
           borderRadius: 18,
-          border: dragging
-            ? '2px dashed var(--accent)'
-            : '1px solid var(--border)',
+          border: dragging ? '2px dashed var(--accent)' : '1px solid var(--border)',
           background: dragging
             ? 'color-mix(in oklch, var(--accent) 6%, var(--surface))'
             : 'var(--surface)',
@@ -245,9 +238,7 @@ export default function HistoryEditDialog({
                   <button
                     type="button"
                     aria-label={`移除 ${label}`}
-                    onClick={() =>
-                      setDraftInputParts((prev) => prev.filter((_, i) => i !== index))
-                    }
+                    onClick={() => setDraftInputParts((prev) => prev.filter((_, i) => i !== index))}
                     style={{
                       position: 'absolute',
                       top: -6,
@@ -310,11 +301,7 @@ export default function HistoryEditDialog({
         />
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={secondaryButtonStyle}
-          >
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
             取消
           </button>
           <button

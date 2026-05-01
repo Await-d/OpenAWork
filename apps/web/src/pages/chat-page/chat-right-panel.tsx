@@ -489,7 +489,9 @@ function renderToolsPanel(
       </div>
       {filtered.length > 0 ? (
         filtered.map((toolCall, index) =>
-          toolCall.toolName.trim().toLowerCase() === 'task' ? (
+          ['task', 'agent', 'call_omo_agent', 'delegate_task'].includes(
+            toolCall.toolName.trim().toLowerCase(),
+          ) ? (
             <TaskToolInline
               key={`${toolCall.toolName}-${index}`}
               toolCallId={toolCall.toolCallId}

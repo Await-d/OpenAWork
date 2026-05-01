@@ -44,13 +44,7 @@ describe('partsFromOrderedAssistantContent', () => {
       { type: 'tool_call', toolCallId: 'tool-B', toolName: 'echo', input: { msg: 'hi' } },
     ];
     const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
-    expect(parts.map((part) => part.type)).toEqual([
-      'reasoning',
-      'text',
-      'tool',
-      'text',
-      'tool',
-    ]);
+    expect(parts.map((part) => part.type)).toEqual(['reasoning', 'text', 'tool', 'text', 'tool']);
     expect(parts[0]).toMatchObject({
       type: 'reasoning',
       text: 'analysing',
@@ -60,10 +54,13 @@ describe('partsFromOrderedAssistantContent', () => {
     const toolA = parts[2] as ChatToolPart;
     expect(toolA.toolCallId).toBe('tool-A');
     expect(toolA.id).toBe('tool-A');
-    expect(toolA.status).toBe('completed');
+    // Without a paired tool_result the tool is still in flight.
+    expect(toolA.status).toBe('running');
+    expect(toolA.output).toBeUndefined();
     const toolB = parts[4] as ChatToolPart;
     expect(toolB.toolCallId).toBe('tool-B');
     expect(toolB.input).toEqual({ msg: 'hi' });
+    expect(toolB.status).toBe('running');
   });
 
   it('keeps multiple distinct text parts when interleaved with tools', () => {
@@ -91,6 +88,31 @@ describe('partsFromOrderedAssistantContent', () => {
     expect(parts[0]).toMatchObject({ type: 'text', text: 'real' });
   });
 
+  it('drops empty reasoning segments — including encryptedContent placeholders', () => {
+    // The gateway persists empty reasoning blocks in two situations:
+    //   1. a `thinking_end` event arriving without any matching `thinking_delta`
+    //   2. a placeholder created in `buildAssistantContent` to carry the
+    //      OpenAI Responses API `encryptedContent` / `summary` / `responseId`
+    //      so a follow-up turn can hand the encrypted reasoning back to the
+    //      model. Both must NOT render as a "Thinking:" header with no body.
+    const wire = [
+      { type: 'reasoning', text: '' },
+      { type: 'reasoning', text: '   \n\t' },
+      {
+        type: 'reasoning',
+        text: '',
+        encryptedContent: 'opaque-base64-blob',
+        summary: 'r-summary',
+      },
+      { type: 'reasoning', text: 'real thought', startedAt: 1, endedAt: 2 },
+      { type: 'text', text: 'final answer' },
+    ];
+    const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatchObject({ type: 'reasoning', text: 'real thought' });
+    expect(parts[1]).toMatchObject({ type: 'text', text: 'final answer' });
+  });
+
   it('skips unsupported entries silently', () => {
     const wire = [
       null,
@@ -105,14 +127,90 @@ describe('partsFromOrderedAssistantContent', () => {
   });
 
   it('falls back to a synthetic id when toolCallId is missing on a tool_call', () => {
-    const wire = [
-      { type: 'tool_call', toolCallId: '', toolName: 'unnamed', input: {} },
-    ];
+    const wire = [{ type: 'tool_call', toolCallId: '', toolName: 'unnamed', input: {} }];
     const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
     expect(parts).toHaveLength(1);
     const tool = parts[0] as ChatToolPart;
     expect(tool.toolCallId).toBe('');
     expect(tool.id).toBe(`${MSG_ID}:tool:0`);
+  });
+
+  it('merges a tool_result onto the matching tool part by toolCallId', () => {
+    // The V2 projection in the gateway emits tool_call and tool_result
+    // back-to-back inside the assistant message's own content array, so
+    // the only place that can attach `output` to the rendered ChatToolPart
+    // is right here. If this regresses, GenerateImageToolCard (and every
+    // other card that reads `part.output`) silently shows a header-only
+    // "completed" state with no body — the bug the user reported.
+    const wire = [
+      {
+        type: 'tool_call',
+        toolCallId: 'tool-A',
+        toolName: 'generate_image',
+        input: { prompt: 'cat' },
+      },
+      {
+        type: 'tool_result',
+        toolCallId: 'tool-A',
+        toolName: 'generate_image',
+        output: '{"success":true,"artifactId":"art-1"}',
+        isError: false,
+      },
+    ];
+    const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
+    expect(parts).toHaveLength(1);
+    const tool = parts[0] as ChatToolPart;
+    expect(tool.toolCallId).toBe('tool-A');
+    expect(tool.status).toBe('completed');
+    expect(tool.isError).toBe(false);
+    expect(tool.output).toBe('{"success":true,"artifactId":"art-1"}');
+  });
+
+  it('flags failed tool results with status="failed" and isError=true', () => {
+    const wire = [
+      { type: 'tool_call', toolCallId: 'tool-A', toolName: 'fetch', input: {} },
+      {
+        type: 'tool_result',
+        toolCallId: 'tool-A',
+        toolName: 'fetch',
+        output: 'boom',
+        isError: true,
+      },
+    ];
+    const tool = partsFromOrderedAssistantContent(MSG_ID, wire)[0] as ChatToolPart;
+    expect(tool.status).toBe('failed');
+    expect(tool.isError).toBe(true);
+    expect(tool.output).toBe('boom');
+  });
+
+  it('preserves order when tool_result appears between two tool_calls', () => {
+    // Wire shape: tool_call(A) → tool_result(A) → text → tool_call(B).
+    // The merged result on A must not move A's position, and B must
+    // remain pending (status=running) because no result arrived yet.
+    const wire = [
+      { type: 'tool_call', toolCallId: 'A', toolName: 'a', input: {} },
+      { type: 'tool_result', toolCallId: 'A', toolName: 'a', output: 'okA', isError: false },
+      { type: 'text', text: 'between' },
+      { type: 'tool_call', toolCallId: 'B', toolName: 'b', input: {} },
+    ];
+    const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
+    expect(parts.map((p) => p.type)).toEqual(['tool', 'text', 'tool']);
+    const a = parts[0] as ChatToolPart;
+    const b = parts[2] as ChatToolPart;
+    expect(a.output).toBe('okA');
+    expect(a.status).toBe('completed');
+    expect(b.output).toBeUndefined();
+    expect(b.status).toBe('running');
+  });
+
+  it('silently drops a tool_result whose toolCallId has no preceding tool_call', () => {
+    const wire = [
+      { type: 'text', text: 'hello' },
+      { type: 'tool_result', toolCallId: 'orphan', output: 'x', isError: false },
+    ];
+    const parts = partsFromOrderedAssistantContent(MSG_ID, wire);
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({ type: 'text', text: 'hello' });
   });
 });
 
@@ -130,12 +228,14 @@ describe('applyToolResultToLocalAssistantMessages', () => {
     };
   }
 
-  function makeToolResultEvent(overrides: Partial<{
-    toolCallId: string;
-    output: unknown;
-    isError: boolean;
-    toolName: string;
-  }>): Extract<RunEvent, { type: 'tool_result' }> {
+  function makeToolResultEvent(
+    overrides: Partial<{
+      toolCallId: string;
+      output: unknown;
+      isError: boolean;
+      toolName: string;
+    }>,
+  ): Extract<RunEvent, { type: 'tool_result' }> {
     return {
       type: 'tool_result',
       toolCallId: overrides.toolCallId ?? 'tool-1',
@@ -174,12 +274,7 @@ describe('applyToolResultToLocalAssistantMessages', () => {
     expect(next).toHaveLength(1);
     const updatedParts = next[0]?.parts ?? [];
     // Wire ordering preserved.
-    expect(updatedParts.map((part) => part.type)).toEqual([
-      'reasoning',
-      'tool',
-      'text',
-      'tool',
-    ]);
+    expect(updatedParts.map((part) => part.type)).toEqual(['reasoning', 'tool', 'text', 'tool']);
     // Only tool-2 received the output; tool-1 is untouched.
     const tool1 = updatedParts.find(
       (part): part is ChatToolPart => part.type === 'tool' && part.toolCallId === 'tool-1',

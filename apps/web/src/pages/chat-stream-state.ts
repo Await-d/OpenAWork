@@ -1,4 +1,10 @@
-import type { BatchSubToolProgress, RunEvent, StreamChunk, TaskTimeoutSource, ToolSearchStatus } from '@openAwork/shared';
+import type {
+  BatchSubToolProgress,
+  RunEvent,
+  StreamChunk,
+  TaskTimeoutSource,
+  ToolSearchStatus,
+} from '@openAwork/shared';
 import { hasActivePendingPermissionRequest } from './chat-page/support.js';
 import type {
   AgentVizEvent,
@@ -422,8 +428,7 @@ function buildTaskEventLabel(
   if (reason === 'timeout') {
     const timeoutLabel = timeoutSource === 'first_response' ? '首响应未到' : '超时';
     parts.push(`原因：${timeoutLabel}`);
-  }
-  else if (reason) parts.push(`原因：${reason}`);
+  } else if (reason) parts.push(`原因：${reason}`);
   if (errorMessage) parts.push(`错误：${truncate(errorMessage, 60)}`);
   else if (result) parts.push(`结果：${truncate(result, 60)}`);
   return parts.join(' · ');

@@ -22,7 +22,11 @@ import {
   partsFromAssistantTrace as partsFromSharedAssistantTrace,
   readAssistantTracePayloadFromParts as readAssistantTracePayloadFromSharedParts,
 } from '@openAwork/shared';
-export type { AssistantTracePart, AssistantTracePayload, AssistantTraceToolCall } from '@openAwork/shared';
+export type {
+  AssistantTracePart,
+  AssistantTracePayload,
+  AssistantTraceToolCall,
+} from '@openAwork/shared';
 import {
   buildReadableAssistantText,
   collectTextCandidateFields,
@@ -248,17 +252,22 @@ export function partsFromAssistantTrace(
  * sequence of reasoning / text / tool_call segments instead of the legacy
  * reasoning → text → tool flattening produced by `partsFromAssistantTrace`.
  *
- * `tool_result` entries are intentionally ignored here because `tool_result`
- * is persisted on the subsequent `role: 'tool'` message, not in the
- * assistant message's content array. Tool output is merged onto the tool
- * part by `normalizeChatMessages` when it processes that follow-up tool
- * message (see the `extractToolResults` loop downstream).
+ * `tool_result` entries that appear in the same content array (the V2
+ * projection in `message-v2-adapter.ts:v2ToV1Message` emits tool_call and
+ * tool_result back-to-back inside the assistant message — no follow-up
+ * `role: 'tool'` message is produced anymore) are merged onto the matching
+ * tool part so the renderer sees `output` / `isError` / `status` directly
+ * from the parts array. This is required for cards like `generate_image`
+ * that read `result.artifactId` out of `part.output` to fetch and display
+ * the actual artifact; without it the card shows "图片已生成" but the
+ * image preview never appears even after refresh.
  */
 export function partsFromOrderedAssistantContent(
   messageId: string,
   content: unknown[],
 ): ChatMessagePart[] {
   const parts: ChatMessagePart[] = [];
+  const toolPartIndexByCallId = new Map<string, number>();
   let reasoningCounter = 0;
   let textCounter = 0;
   for (let index = 0; index < content.length; index += 1) {
@@ -269,8 +278,14 @@ export function partsFromOrderedAssistantContent(
 
     if (type === 'reasoning') {
       const text = typeof record['text'] === 'string' ? record['text'] : '';
-      const startedAt =
-        typeof record['startedAt'] === 'number' ? record['startedAt'] : undefined;
+      // Skip empty reasoning segments. The gateway may persist them when a
+      // `thinking_end` event arrives without any preceding `thinking_delta`
+      // (or when the wire stream gets cut between the open and the first
+      // content chunk). Rendering an empty reasoning part shows a stray
+      // "Thinking:" header with no body — exactly the symptom users see
+      // after a refresh.
+      if (text.trim().length === 0) continue;
+      const startedAt = typeof record['startedAt'] === 'number' ? record['startedAt'] : undefined;
       const endedAt = typeof record['endedAt'] === 'number' ? record['endedAt'] : undefined;
       parts.push({
         id: `${messageId}:reasoning:${reasoningCounter}`,
@@ -302,14 +317,63 @@ export function partsFromOrderedAssistantContent(
         record['input'] && typeof record['input'] === 'object' && !Array.isArray(record['input'])
           ? (record['input'] as Record<string, unknown>)
           : {};
+      // Tool parts default to `running` so a result that hasn't arrived yet
+      // (e.g. a snapshot taken mid-execution) does not look "completed".
+      // The tool_result branch below upgrades the status when the matching
+      // result is present in the same content array.
       parts.push({
         id: toolCallId.length > 0 ? toolCallId : `${messageId}:tool:${parts.length}`,
         type: 'tool',
         toolCallId,
         toolName,
         input,
-        status: 'completed',
+        status: 'running',
       });
+      if (toolCallId.length > 0) {
+        toolPartIndexByCallId.set(toolCallId, parts.length - 1);
+      }
+      continue;
+    }
+
+    if (type === 'tool_result') {
+      const toolCallId = typeof record['toolCallId'] === 'string' ? record['toolCallId'] : '';
+      if (toolCallId.length === 0) continue;
+      const targetIndex = toolPartIndexByCallId.get(toolCallId);
+      if (targetIndex === undefined) continue;
+      const existing = parts[targetIndex];
+      if (!existing || existing.type !== 'tool') continue;
+      const isError = record['isError'] === true;
+      const pendingPermissionRequestId =
+        typeof record['pendingPermissionRequestId'] === 'string'
+          ? record['pendingPermissionRequestId']
+          : undefined;
+      const resumedAfterApproval = record['resumedAfterApproval'] === true;
+      const hasPendingPermission = hasActivePendingPermissionRequest({
+        isError,
+        pendingPermissionRequestId,
+        resumedAfterApproval,
+      });
+      const nextStatus: ChatToolPart['status'] = hasPendingPermission
+        ? 'paused'
+        : isError
+          ? 'failed'
+          : 'completed';
+      const observability = parseToolCallObservability(record['observability']);
+      const fileDiffs = Array.isArray(record['fileDiffs'])
+        ? record['fileDiffs'].flatMap((entry) => parseFileDiffContent(entry))
+        : undefined;
+      parts[targetIndex] = {
+        ...existing,
+        output: record['output'],
+        isError: hasPendingPermission ? false : isError,
+        ...(observability ? { observability } : {}),
+        ...(fileDiffs && fileDiffs.length > 0 ? { fileDiffs } : {}),
+        ...(hasPendingPermission && pendingPermissionRequestId
+          ? { pendingPermissionRequestId }
+          : { pendingPermissionRequestId: undefined }),
+        ...(resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+        status: nextStatus,
+      } satisfies ChatToolPart;
       continue;
     }
   }
@@ -332,7 +396,9 @@ export function readAssistantTracePayloadFromParts(
   modifiedFilesSummary?: ModifiedFilesSummaryContent,
 ): AssistantTracePayload {
   return readAssistantTracePayloadFromSharedParts(
-    parts.filter((part): part is AssistantTracePart => part.type !== 'event') as AssistantTracePart[],
+    parts.filter(
+      (part): part is AssistantTracePart => part.type !== 'event',
+    ) as AssistantTracePart[],
     modifiedFilesSummary,
   );
 }
@@ -739,9 +805,7 @@ export function applyPermissionDecisionToLocalAssistantMessages(
         isError: decision === 'reject',
         ...(decision === 'reject'
           ? {
-              output: feedback
-                ? `权限已拒绝。用户反馈: ${feedback}`
-                : '权限已拒绝，工具未执行。',
+              output: feedback ? `权限已拒绝。用户反馈: ${feedback}` : '权限已拒绝，工具未执行。',
             }
           : {}),
         ...(decision !== 'reject' ? { resumedAfterApproval: true } : {}),
@@ -758,19 +822,13 @@ export function applyPermissionDecisionToLocalAssistantMessages(
       if (part.type !== 'tool' || part.pendingPermissionRequestId !== requestId) {
         return part;
       }
-      const {
-        pendingPermissionRequestId: _resolved,
-        output: _waitingOutput,
-        ...basePart
-      } = part;
+      const { pendingPermissionRequestId: _resolved, output: _waitingOutput, ...basePart } = part;
       return {
         ...basePart,
         isError: decision === 'reject',
         ...(decision === 'reject'
           ? {
-              output: feedback
-                ? `权限已拒绝。用户反馈: ${feedback}`
-                : '权限已拒绝，工具未执行。',
+              output: feedback ? `权限已拒绝。用户反馈: ${feedback}` : '权限已拒绝，工具未执行。',
             }
           : {}),
         ...(decision !== 'reject' ? { resumedAfterApproval: true } : {}),
@@ -881,8 +939,11 @@ export function applyToolResultToLocalAssistantMessages(
           ? { pendingPermissionRequestId: event.pendingPermissionRequestId }
           : { pendingPermissionRequestId: undefined }),
         ...(event.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-        status: (hasPendingPermission ? 'paused' : event.isError ? 'failed' : 'completed') as
-          ChatToolPart['status'],
+        status: (hasPendingPermission
+          ? 'paused'
+          : event.isError
+            ? 'failed'
+            : 'completed') as ChatToolPart['status'],
       } satisfies ChatToolPart;
     });
 
@@ -1325,7 +1386,9 @@ function appendToolCallToAssistantMessage(
     ...message,
     content: createAssistantTraceContent(newTrace),
     parts: [
-      ...(message.parts ?? [{ id: `${message.id}:text`, type: 'text' as const, text: message.content }]),
+      ...(message.parts ?? [
+        { id: `${message.id}:text`, type: 'text' as const, text: message.content },
+      ]),
       newToolPart,
     ],
     toolCallCount: (message.toolCallCount ?? 0) + 1,
@@ -1644,8 +1707,12 @@ export function reconcileSnapshotChatMessages(
           message: {
             ...previousMessage,
             parts: mergedParts,
-            content: contentFromParts(mergedParts, previousMessage.modifiedFilesSummary ?? snapshotMessage.modifiedFilesSummary),
-            modifiedFilesSummary: snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary,
+            content: contentFromParts(
+              mergedParts,
+              previousMessage.modifiedFilesSummary ?? snapshotMessage.modifiedFilesSummary,
+            ),
+            modifiedFilesSummary:
+              snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary,
           },
         });
       } else {
@@ -1672,7 +1739,7 @@ export function reconcileSnapshotChatMessages(
           !matchedPreviousIndices.has(candidateIndex)
         ) {
           const candidate = previousMessages[candidateIndex]!;
-            const matchedByParts = hasOverlappingPartIds(candidate.parts, snapshotMessage.parts);
+          const matchedByParts = hasOverlappingPartIds(candidate.parts, snapshotMessage.parts);
           if (matchedByParts || areSnapshotMessagesEquivalent(candidate, snapshotMessage)) {
             matchedPreviousIndices.add(candidateIndex);
             reconciledSnapshotEntries.push({
@@ -1773,11 +1840,7 @@ export function replaceOrAppendStreamedAssistantMessage(
 
     // Primary: check for overlapping part IDs (deterministic, no heuristics).
     if (hasOverlappingPartIds(msg.parts, onDoneMessage.parts)) {
-      return [
-        ...previousMessages.slice(0, i),
-        onDoneMessage,
-        ...previousMessages.slice(i + 1),
-      ];
+      return [...previousMessages.slice(0, i), onDoneMessage, ...previousMessages.slice(i + 1)];
     }
 
     // Fallback: heuristic checks for messages without parts.
@@ -1790,11 +1853,7 @@ export function replaceOrAppendStreamedAssistantMessage(
         existingTrace.toolCalls.map((tc) => tc.toolCallId).filter(Boolean),
       );
       if ([...streamToolCallIds].some((id) => existingIds.has(id))) {
-        return [
-          ...previousMessages.slice(0, i),
-          onDoneMessage,
-          ...previousMessages.slice(i + 1),
-        ];
+        return [...previousMessages.slice(0, i), onDoneMessage, ...previousMessages.slice(i + 1)];
       }
     }
 
@@ -1808,11 +1867,7 @@ export function replaceOrAppendStreamedAssistantMessage(
         onDoneText.length >= existingText.length &&
         onDoneText.startsWith(existingText)
       ) {
-        return [
-          ...previousMessages.slice(0, i),
-          onDoneMessage,
-          ...previousMessages.slice(i + 1),
-        ];
+        return [...previousMessages.slice(0, i), onDoneMessage, ...previousMessages.slice(i + 1)];
       }
 
       // Reasoning block prefix match.
@@ -1823,11 +1878,7 @@ export function replaceOrAppendStreamedAssistantMessage(
         onDoneReasoning.length >= existingReasoning.length &&
         onDoneReasoning.startsWith(existingReasoning)
       ) {
-        return [
-          ...previousMessages.slice(0, i),
-          onDoneMessage,
-          ...previousMessages.slice(i + 1),
-        ];
+        return [...previousMessages.slice(0, i), onDoneMessage, ...previousMessages.slice(i + 1)];
       }
     }
 
@@ -2036,9 +2087,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           text,
           toolCalls: assistantToolCalls,
           ...(reasoningBlocks.length > 0 ? { reasoningBlocks } : {}),
-          ...(reasoningBlocks.length > 0 && hasReasoningTimings
-            ? { reasoningBlocksTimings }
-            : {}),
+          ...(reasoningBlocks.length > 0 && hasReasoningTimings ? { reasoningBlocksTimings } : {}),
           ...(modifiedFilesSummary ? { modifiedFilesSummary } : {}),
         };
         const traceContent =
@@ -2181,7 +2230,9 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
                 pendingPermissionRequestId: hasPendingPermission
                   ? toolResult.pendingPermissionRequestId
                   : undefined,
-                resumedAfterApproval: toolResult.resumedAfterApproval ? true : part.resumedAfterApproval,
+                resumedAfterApproval: toolResult.resumedAfterApproval
+                  ? true
+                  : part.resumedAfterApproval,
                 status: nextStatus,
               };
             });
@@ -2202,9 +2253,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
         text: '',
         toolCalls: [
           {
-            ...(toolResult.clientRequestId
-              ? { clientRequestId: toolResult.clientRequestId }
-              : {}),
+            ...(toolResult.clientRequestId ? { clientRequestId: toolResult.clientRequestId } : {}),
             ...(toolResult.fileDiffs ? { fileDiffs: toolResult.fileDiffs } : {}),
             toolCallId: toolResult.toolCallId,
             toolName: toolResult.toolName ?? toolCall?.toolName ?? 'tool',
@@ -2344,10 +2393,7 @@ function getComparableCreatedAt(value: number | string | undefined): number | nu
  * prefer the previous message's local annotations (tool call states, pending permissions)
  * but adopt the snapshot's text if it is strictly longer (more complete).
  */
-function mergePreferringCompleteContent(
-  previous: ChatMessage,
-  snapshot: ChatMessage,
-): ChatMessage {
+function mergePreferringCompleteContent(previous: ChatMessage, snapshot: ChatMessage): ChatMessage {
   if (previous.role !== 'assistant') return previous;
 
   const prevTrace = readAssistantTracePayload(previous);
@@ -2413,8 +2459,8 @@ function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): b
   // have the same text but different tool call states serialized into the content JSON.
   // Compare by the displayable text portion to catch these cases.
   if (left.role === 'assistant') {
-      const leftTrace = readAssistantTracePayload(left);
-      const rightTrace = readAssistantTracePayload(right);
+    const leftTrace = readAssistantTracePayload(left);
+    const rightTrace = readAssistantTracePayload(right);
     if (leftTrace && rightTrace) {
       const leftText = leftTrace.text.trim();
       const rightText = rightTrace.text.trim();

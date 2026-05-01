@@ -609,7 +609,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
           padding: '20px 14px',
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>点击子代理卡片查看详情</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>
+          点击子代理卡片查看详情
+        </div>
       </div>
     );
   }
@@ -627,7 +629,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
       }}
     >
       <div style={SUB_SESSION_FLAT_SECTION_STYLE}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}
+        >
           <div
             style={{
               fontSize: 12,
@@ -659,12 +663,25 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             {formatTaskStatus(headlineStatus)}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: 'var(--text-3)', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 10,
+            color: 'var(--text-3)',
+            flexWrap: 'wrap',
+          }}
+        >
           <span title={childSessionId}>{compactSessionId(childSessionId)}</span>
           <span>消息 {messages.length}</span>
           <span>任务 {tasks.length}</span>
-          {runningTaskCount > 0 && <span style={{ color: 'var(--accent)' }}>运行中 {runningTaskCount}</span>}
-          {completedTaskCount > 0 && <span style={{ color: '#86efac' }}>完成 {completedTaskCount}</span>}
+          {runningTaskCount > 0 && (
+            <span style={{ color: 'var(--accent)' }}>运行中 {runningTaskCount}</span>
+          )}
+          {completedTaskCount > 0 && (
+            <span style={{ color: '#86efac' }}>完成 {completedTaskCount}</span>
+          )}
           {failedTaskCount > 0 && <span style={{ color: '#fca5a5' }}>失败 {failedTaskCount}</span>}
           <button
             type="button"
@@ -1065,7 +1082,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               }
             }}
             rows={1}
-            placeholder={isChildSessionBusy ? '子代理运行中…' : '发送消息…（Enter 发送，Shift+Enter 换行）'}
+            placeholder={
+              isChildSessionBusy ? '子代理运行中…' : '发送消息…（Enter 发送，Shift+Enter 换行）'
+            }
             style={{
               width: '100%',
               minHeight: 52,
@@ -1121,13 +1140,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
                 transition: 'opacity 150ms ease',
               }}
             >
-              <span>
-                {cancellingTask
-                  ? '停止中'
-                  : isChildSessionBusy
-                    ? '追加'
-                    : '发送'}
-              </span>
+              <span>{cancellingTask ? '停止中' : isChildSessionBusy ? '追加' : '发送'}</span>
               <svg
                 aria-hidden="true"
                 width="14"

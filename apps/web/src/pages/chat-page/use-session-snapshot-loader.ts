@@ -63,9 +63,7 @@ export interface SessionSnapshotLoaderSetters {
     value:
       | RecoveredActiveAssistantStream
       | null
-      | ((
-          prev: RecoveredActiveAssistantStream | null,
-        ) => RecoveredActiveAssistantStream | null),
+      | ((prev: RecoveredActiveAssistantStream | null) => RecoveredActiveAssistantStream | null),
   ) => void;
   setIsSessionSnapshotReady: (value: boolean) => void;
 }

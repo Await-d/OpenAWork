@@ -1,35 +1,35 @@
+import type { PendingPermissionRequest } from '@openAwork/web-client';
 import { useMemo } from 'react';
-import type { ChatMessage, ChatMessagePart, ChatUsageDetails } from './support.js';
-import {
-  estimateTokenCount,
-  readAssistantTracePayload,
-  clearResolvedPendingPermissionFromMessage,
-  createAssistantTraceContent,
-  partsFromAssistantTrace,
-} from './support.js';
-import { shouldShowMessageInTranscript } from './transcript-visibility.js';
-import type {
-  ChatRenderEntry,
-  ChatRenderGroup,
-  ChatRenderAction,
-} from '../../components/chat/chat-message-group-list.js';
-import type { ModelPriceEntry } from './chat-page-utils.js';
-import {
-  resolveModelPriceEntry,
-  groupChatRenderEntries,
-  decorateAssistantGroupActions,
-} from './chat-page-utils.js';
 import {
   renderChatMessageContentWithOptions,
   renderStreamingChatMessageContentWithOptions,
 } from '../../components/chat/ChatPageSections.js';
-import type { PendingPermissionRequest } from '@openAwork/web-client';
+import type {
+  ChatRenderAction,
+  ChatRenderEntry,
+  ChatRenderGroup,
+} from '../../components/chat/chat-message-group-list.js';
+import type { ToolCallCardModel } from '../chat-stream-state.js';
+import type { ModelPriceEntry } from './chat-page-utils.js';
+import {
+  decorateAssistantGroupActions,
+  groupChatRenderEntries,
+  resolveModelPriceEntry,
+} from './chat-page-utils.js';
+import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
+import { buildChatContextUsageSnapshot, type ChatContextUsageSnapshot } from './context-usage.js';
 import type { ChatBackendUsageSnapshot } from './stream-usage.js';
 import { hasUsableReportedUsageSnapshot } from './stream-usage.js';
-import { buildChatContextUsageSnapshot, type ChatContextUsageSnapshot } from './context-usage.js';
-import type { ToolCallCardModel } from '../chat-stream-state.js';
+import type { ChatMessage, ChatMessagePart, ChatUsageDetails } from './support.js';
+import {
+  clearResolvedPendingPermissionFromMessage,
+  createAssistantTraceContent,
+  estimateTokenCount,
+  partsFromAssistantTrace,
+  readAssistantTracePayload,
+} from './support.js';
 import type { TaskToolRuntimeLookup } from './task-tool-runtime.js';
-import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
+import { shouldShowMessageInTranscript } from './transcript-visibility.js';
 
 export interface ChatRenderDataInput {
   messages: ChatMessage[];
@@ -78,6 +78,16 @@ export interface ChatRenderDataInput {
   taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined;
   visibleMessageCount?: number;
   serverTotalTurnCount?: number | null;
+  /**
+   * Inline stop control surfaced on the live-streaming assistant
+   * message. The button label / wiring live alongside the existing
+   * composer-level stop affordance — duplicating it next to the
+   * streaming bubble dramatically improves discoverability for users
+   * who don't know about the Esc shortcut.
+   */
+  stopCapability?: 'none' | 'precise' | 'best_effort' | 'observe_only';
+  stoppingStream?: boolean;
+  onStopActiveMessage?: () => void;
 }
 
 export interface ChatRenderDataReturn {
@@ -112,6 +122,9 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     activeStreamFirstTokenLatencyMs,
     activeStreamMessageId,
     toolCallCards,
+    stopCapability,
+    stoppingStream = false,
+    onStopActiveMessage,
     streamingOrderedParts,
     resolveAssistantCapabilityKind,
     resolveInlinePermissionActions,
@@ -287,7 +300,10 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   }, [messages, pendingPermissions]);
 
   const visibleMessages = useMemo(() => {
-    if (visibleMessageCount === undefined || visibleMessageCount >= sanitizedHistoricalMessages.length) {
+    if (
+      visibleMessageCount === undefined ||
+      visibleMessageCount >= sanitizedHistoricalMessages.length
+    ) {
       return sanitizedHistoricalMessages;
     }
     return sanitizedHistoricalMessages.slice(-visibleMessageCount);
@@ -414,15 +430,40 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
           taskRuntimeLookup: taskToolRuntimeLookup,
         }),
       usageDetails: streamingUsageDetails,
+      // Inline "stop" pill on the active streaming bubble. We only
+      // expose it when the page actually owns a stoppable handle —
+      // `precise` (current page is the originating client) and
+      // `best_effort` (page joined an active session and can ask
+      // the gateway to interrupt). `observe_only` and `none` would
+      // surface a non-functional button so they're filtered out.
+      ...(onStopActiveMessage && (stopCapability === 'precise' || stopCapability === 'best_effort')
+        ? {
+            actions: [
+              {
+                id: 'stop',
+                label: stoppingStream ? '⏹ 正在停止…' : '⏹ 停止生成',
+                title: stoppingStream
+                  ? '正在向 Gateway 发送停止请求'
+                  : '停止当前的助手响应（快捷键 Esc）',
+                onClick: () => {
+                  if (!stoppingStream) onStopActiveMessage();
+                },
+              },
+            ],
+          }
+        : {}),
     };
   }, [
     activeModelId,
     activeModelOption?.label,
     activeProviderId,
     openChildSessionInspector,
+    onStopActiveMessage,
     resolveInlinePermissionActions,
     resolveAssistantCapabilityKind,
     selectedChildSessionId,
+    stopCapability,
+    stoppingStream,
     streamingUsageDetails,
     streamingOrderedParts,
     taskToolRuntimeLookup,
