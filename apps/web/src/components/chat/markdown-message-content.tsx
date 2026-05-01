@@ -1,11 +1,33 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
+import {
+  Children,
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { Components } from 'react-markdown';
+import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import { MarkdownPathRef } from './markdown-path-ref.js';
+import { tokenizePathsInText } from './tool-call/shared/tokenize-paths.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
+
+// Code blocks longer than this collapse to a clipped view with an
+// "展开全部" affordance. The collapsed view shows ~36 lines (60vh fade)
+// so the threshold needs to be enough above that to make folding
+// meaningful — at 100 lines the user still sees ~36% of the content
+// while genuinely long log dumps / file pastes get tamed. Earlier
+// values (60: too aggressive, folds typical components; 200: rarely
+// triggers in practice) were tuned away.
+const CODE_BLOCK_FOLD_THRESHOLD = 100;
+// How long the copy button stays in its "✓ 已复制" confirmation state.
+const COPY_FEEDBACK_MS = 1500;
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript';
 
@@ -36,16 +58,57 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
 
 export default MarkdownMessageContent;
 
+/**
+ * Wrap detected file-path tokens inside markdown text children with
+ * `<MarkdownPathRef>` so users can click `apps/web/src/foo.ts:30`
+ * style references to open the file in the editor pane.
+ *
+ * Only string children are tokenised — nested React elements
+ * (`<strong>`, `<em>`, inline `<code>`, `<a>` URL links) pass through
+ * untouched. Code blocks are not affected because they are rendered by
+ * the `code` component branch, not via these text-bearing elements.
+ *
+ * The walk is shallow on purpose: we tokenize each direct string
+ * child but do not recurse into element children. Path references
+ * inside emphasis (`**apps/web/foo.ts**`) are uncommon enough that
+ * they don't justify the extra complexity for V1.
+ */
+function renderTextWithPaths(children: ReactNode, keyBase: string): ReactNode {
+  let nextIndex = 0;
+  const tokenizeOne = (text: string): ReactNode => {
+    const tokens = tokenizePathsInText(text);
+    if (tokens.length === 0) return text;
+    if (tokens.length === 1 && tokens[0]?.type === 'text') {
+      return text;
+    }
+    return tokens.map((tok, i) => {
+      if (tok.type === 'text') return tok.value;
+      const key = `${keyBase}-${nextIndex++}-${i}`;
+      return <MarkdownPathRef key={key} path={tok.path} line={tok.line} raw={tok.raw} />;
+    });
+  };
+
+  // `Children.map` flattens, applies keys, and walks single nodes
+  // and arrays uniformly so we don't need to special-case either.
+  const mapped = Children.map(children, (child) => {
+    if (typeof child === 'string') return tokenizeOne(child);
+    return child;
+  });
+  return mapped ?? children;
+}
+
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 className="chat-markdown-h1">{children}</h1>,
   h2: ({ children }) => <h2 className="chat-markdown-h2">{children}</h2>,
   h3: ({ children }) => <h3 className="chat-markdown-h3">{children}</h3>,
-  p: ({ children }) => <p className="chat-markdown-p">{children}</p>,
+  p: ({ children }) => <p className="chat-markdown-p">{renderTextWithPaths(children, 'p')}</p>,
   ul: ({ children }) => <ul className="chat-markdown-ul">{children}</ul>,
   ol: ({ children }) => <ol className="chat-markdown-ol">{children}</ol>,
-  li: ({ children }) => <li className="chat-markdown-li">{children}</li>,
+  li: ({ children }) => <li className="chat-markdown-li">{renderTextWithPaths(children, 'li')}</li>,
   blockquote: ({ children }) => (
-    <blockquote className="chat-markdown-blockquote">{children}</blockquote>
+    <blockquote className="chat-markdown-blockquote">
+      {renderTextWithPaths(children, 'bq')}
+    </blockquote>
   ),
   table: ({ children }) => (
     <div className="chat-markdown-table-wrap">
@@ -53,7 +116,7 @@ const markdownComponents: Components = {
     </div>
   ),
   th: ({ children }) => <th className="chat-markdown-th">{children}</th>,
-  td: ({ children }) => <td className="chat-markdown-td">{children}</td>,
+  td: ({ children }) => <td className="chat-markdown-td">{renderTextWithPaths(children, 'td')}</td>,
   a: ({ children, href }) => (
     <a className="chat-markdown-link" href={href} target="_blank" rel="noreferrer">
       {children}
@@ -104,29 +167,12 @@ const markdownComponents: Components = {
     }
 
     return (
-      <div className="chat-markdown-code-block">
-        <div className="chat-markdown-code-toolbar">
-          <div className="chat-markdown-code-label">{language ?? 'CODE'}</div>
-          <button
-            type="button"
-            data-testid="chat-markdown-code-copy"
-            className="chat-markdown-code-copy"
-            onClick={() => {
-              const copyRequest = navigator.clipboard?.writeText(
-                getCopyableCodeText(codeContent).replace(/\n$/, ''),
-              );
-              void copyRequest?.catch(() => undefined);
-            }}
-          >
-            复制代码
-          </button>
-        </div>
-        <pre className="chat-markdown-pre">
-          <code className={className} {...props}>
-            {codeContent}
-          </code>
-        </pre>
-      </div>
+      <CodeBlock
+        codeContent={codeContent}
+        codeProps={props}
+        className={className}
+        language={language}
+      />
     );
   },
 };
@@ -166,32 +212,139 @@ const noMarkdownPreviewComponents: Components = {
     }
 
     return (
-      <div className="chat-markdown-code-block">
-        <div className="chat-markdown-code-toolbar">
+      <CodeBlock
+        codeContent={codeContent}
+        codeProps={props}
+        className={className}
+        language={language}
+      />
+    );
+  },
+};
+
+/**
+ * Shared renderer for fenced code blocks. Adds three things over the
+ * stock `<pre><code>` rendering:
+ *   1. Left-side line-number gutter aligned to the code via grid layout.
+ *      Numbers are derived from the same `\n` segmentation we already
+ *      use for `getCopyableCodeText`, so they stay in sync regardless
+ *      of how rehype-highlight wraps tokens.
+ *   2. Copy button with transient "✓ 已复制" confirmation. Without the
+ *      visual ack users can't tell whether their click hit clipboard.
+ *   3. Long-block fold: if the snippet exceeds `CODE_BLOCK_FOLD_THRESHOLD`
+ *      lines, render a clipped view + "展开全部 N 行" toggle so a 600-line
+ *      log doesn't dominate the message scroll.
+ */
+function CodeBlock({
+  codeContent,
+  codeProps,
+  className,
+  language,
+}: {
+  codeContent: ReactNode;
+  codeProps: Record<string, unknown>;
+  className?: string;
+  language: string | undefined;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
+
+  // Cleanup on unmount so a stale timer can't toggle state on a
+  // dismounted node (StrictMode double-invoke + scroll virtualization).
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current != null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const text = useMemo(() => getCopyableCodeText(codeContent), [codeContent]);
+  const lineCount = useMemo(() => (text === '' ? 0 : text.split('\n').length), [text]);
+  const lineNumbers = useMemo(
+    () =>
+      lineCount === 0 ? '' : Array.from({ length: lineCount }, (_, i) => String(i + 1)).join('\n'),
+    [lineCount],
+  );
+
+  const isCollapsible = lineCount > CODE_BLOCK_FOLD_THRESHOLD;
+  const collapsed = isCollapsible && !expanded;
+
+  const handleCopy = useCallback(() => {
+    const writeText = navigator.clipboard?.writeText;
+    if (!writeText) return;
+    void writeText
+      .call(navigator.clipboard, text.replace(/\n$/, ''))
+      .then(() => {
+        setCopied(true);
+        if (copyTimerRef.current != null) {
+          window.clearTimeout(copyTimerRef.current);
+        }
+        copyTimerRef.current = window.setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+      })
+      .catch(() => undefined);
+  }, [text]);
+
+  return (
+    <div className="chat-markdown-code-block" data-collapsed={collapsed ? 'true' : undefined}>
+      <div className="chat-markdown-code-toolbar">
+        <div className="chat-markdown-code-toolbar-meta">
           <div className="chat-markdown-code-label">{language ?? 'CODE'}</div>
+          {lineCount > 0 && (
+            <span className="chat-markdown-code-lines" aria-hidden="true">
+              {lineCount} 行
+            </span>
+          )}
+        </div>
+        <div className="chat-markdown-code-actions">
           <button
             type="button"
             data-testid="chat-markdown-code-copy"
+            data-copied={copied ? 'true' : undefined}
             className="chat-markdown-code-copy"
-            onClick={() => {
-              const copyRequest = navigator.clipboard?.writeText(
-                getCopyableCodeText(codeContent).replace(/\n$/, ''),
-              );
-              void copyRequest?.catch(() => undefined);
-            }}
+            onClick={handleCopy}
           >
-            复制代码
+            {copied ? '✓ 已复制' : '复制代码'}
           </button>
         </div>
+      </div>
+      <div className="chat-markdown-code-body">
+        {lineCount > 0 && (
+          <div className="chat-markdown-code-gutter" aria-hidden="true">
+            {lineNumbers}
+          </div>
+        )}
         <pre className="chat-markdown-pre">
-          <code className={className} {...props}>
+          <code className={className} {...codeProps}>
             {codeContent}
           </code>
         </pre>
       </div>
-    );
-  },
-};
+      {isCollapsible && !expanded && (
+        <button
+          type="button"
+          data-testid="chat-markdown-code-expand"
+          className="chat-markdown-code-expand"
+          onClick={() => setExpanded(true)}
+        >
+          展开全部 {lineCount} 行
+        </button>
+      )}
+      {isCollapsible && expanded && (
+        <button
+          type="button"
+          data-testid="chat-markdown-code-collapse"
+          className="chat-markdown-code-collapse"
+          onClick={() => setExpanded(false)}
+        >
+          收起 ({lineCount} 行)
+        </button>
+      )}
+    </div>
+  );
+}
 
 function normalizeCodeChildren(children: ReactNode): ReactNode {
   if (typeof children === 'string') {
@@ -281,7 +434,7 @@ const RESIZE_SCRIPT = `<script>
     });
   }
 })();
-<\/script>`;
+</script>`;
 
 function isFullHtmlDocument(code: string): boolean {
   const trimmed = code.trimStart().slice(0, 200).toLowerCase();
@@ -349,7 +502,7 @@ ${escapeForInlineScript(code)}
           report('脚本执行失败：' + (error && error.message ? error.message : String(error)));
         }
       })();
-      <\/script>`
+      </script>`
       : '';
 
   return `<!DOCTYPE html>
@@ -571,7 +724,10 @@ function MarkdownPreviewCodeBlock({
           <div
             style={
               shouldCollapse
-                ? { maxHeight: MARKDOWN_PREVIEW_COLLAPSED_HEIGHT, overflow: 'clip' }
+                ? {
+                    maxHeight: MARKDOWN_PREVIEW_COLLAPSED_HEIGHT,
+                    overflow: 'clip',
+                  }
                 : undefined
             }
           >
@@ -597,7 +753,13 @@ function MarkdownPreviewCodeBlock({
             />
           )}
           {isLong && (
-            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                paddingTop: 4,
+              }}
+            >
               <button
                 type="button"
                 onClick={() => setExpanded((prev) => !prev)}
@@ -740,10 +902,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
   const shouldCollapse = isCollapsible && !expanded;
 
   return (
-    <div
-      className="assistant-reasoning-block"
-      data-collapsed={shouldCollapse ? 'true' : undefined}
-    >
+    <div className="assistant-reasoning-block" data-collapsed={shouldCollapse ? 'true' : undefined}>
       <div
         className="assistant-reasoning-body"
         style={
@@ -784,7 +943,12 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
           className="chat-markdown-code-copy"
-          style={{ fontSize: 10, marginTop: 2, display: 'block', marginLeft: 'auto' }}
+          style={{
+            fontSize: 10,
+            marginTop: 2,
+            display: 'block',
+            marginLeft: 'auto',
+          }}
         >
           {expanded ? '收起思考' : '展开思考'}
         </button>

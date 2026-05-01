@@ -19,6 +19,7 @@ export function getLocalReasoningLabel(options: {
 }
 
 export function shouldStreamLocalReasoningBlock(options: {
+  ended?: boolean;
   hasActiveToolCall: boolean;
   hasAssistantText: boolean;
   index: number;
@@ -26,6 +27,10 @@ export function shouldStreamLocalReasoningBlock(options: {
   total: number;
 }): boolean {
   if (!options.streaming || options.total <= 0) {
+    return false;
+  }
+
+  if (options.ended) {
     return false;
   }
 

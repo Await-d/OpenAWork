@@ -140,7 +140,12 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
           ＋
         </button>
         <div
-          style={{ width: 1, height: 20, alignSelf: 'center', background: 'rgba(255,255,255,0.15)' }}
+          style={{
+            width: 1,
+            height: 20,
+            alignSelf: 'center',
+            background: 'rgba(255,255,255,0.15)',
+          }}
         />
         <button
           type="button"
@@ -159,7 +164,12 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
           ↻
         </button>
         <div
-          style={{ width: 1, height: 20, alignSelf: 'center', background: 'rgba(255,255,255,0.15)' }}
+          style={{
+            width: 1,
+            height: 20,
+            alignSelf: 'center',
+            background: 'rgba(255,255,255,0.15)',
+          }}
         />
         <button
           type="button"
@@ -188,7 +198,12 @@ export function ImageLightbox({ src, open, onClose, alt, caption, fileName }: Im
           ↓ 下载
         </button>
         <div
-          style={{ width: 1, height: 20, alignSelf: 'center', background: 'rgba(255,255,255,0.15)' }}
+          style={{
+            width: 1,
+            height: 20,
+            alignSelf: 'center',
+            background: 'rgba(255,255,255,0.15)',
+          }}
         />
         <button
           type="button"

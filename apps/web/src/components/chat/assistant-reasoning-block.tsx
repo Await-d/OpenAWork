@@ -12,7 +12,7 @@ export function resetReasoningOpenStateCacheForTests() {
   reasoningOpenStateCache.clear();
 }
 
-const REASONING_COLLAPSED_MAX_LINES = 6;
+const REASONING_COLLAPSED_MAX_LINES = 3;
 
 function formatReasoningEndedBadge(durationMs?: number): string {
   if (typeof durationMs !== 'number' || durationMs < 0) {
@@ -99,44 +99,65 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
       </div>
       {shouldCollapse && (
         <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setExpanded(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') setExpanded(true);
+          }}
           style={{
             position: 'relative',
-            marginTop: -30,
-            height: 30,
-            background:
-              'linear-gradient(to bottom, transparent 0%, color-mix(in oklch, var(--bg) 80%, transparent) 40%, var(--bg) 100%)',
-            pointerEvents: 'none',
-            borderRadius: '0 0 6px 6px',
+            marginTop: -22,
+            height: 22,
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'flex-end',
+            cursor: 'pointer',
           }}
-        />
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background:
+                'linear-gradient(to bottom, transparent 0%, color-mix(in oklch, var(--bg) 50%, transparent) 50%, var(--bg) 100%)',
+              pointerEvents: 'none',
+            }}
+          />
+          <span
+            style={{
+              position: 'relative',
+              fontSize: 10,
+              color: 'var(--text-3)',
+              lineHeight: 1,
+            }}
+          >
+            展开思考
+          </span>
+        </div>
+      )}
+      {isCollapsible && expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="chat-markdown-code-copy"
+          style={{ fontSize: 10, marginTop: 2, display: 'inline', color: 'var(--text-3)' }}
+        >
+          收起思考
+        </button>
       )}
       {showLiveEndedBadge && (
-        <div
+        <span
           className="assistant-reasoning-ended-badge"
           aria-label="思考已完成"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            marginTop: 4,
             fontSize: 10,
-            color: 'var(--text-2)',
-            justifyContent: 'flex-end',
+            color: 'var(--text-3)',
+            marginTop: 2,
           }}
         >
-          <span aria-hidden="true">✓</span>
-          <span>{formatReasoningEndedBadge(durationMs)}</span>
-        </div>
-      )}
-      {isCollapsible && (
-        <button
-          type="button"
-          onClick={() => setExpanded((prev) => !prev)}
-          className="chat-markdown-code-copy"
-          style={{ fontSize: 10, marginTop: 2, display: 'block', marginLeft: 'auto' }}
-        >
-          {expanded ? '收起思考' : '展开思考'}
-        </button>
+          ✓ {formatReasoningEndedBadge(durationMs)}
+        </span>
       )}
     </section>
   );

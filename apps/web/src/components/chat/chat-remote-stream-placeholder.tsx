@@ -38,11 +38,7 @@ const CHAT_REMOTE_STREAM_PLACEHOLDER_CSS = `
 
 let chatRemoteStreamPlaceholderStyleInjected = false;
 
-export function ChatRemoteStreamPlaceholder({
-  status,
-}: {
-  status: 'running' | 'paused';
-}) {
+export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'paused' }) {
   useEffect(() => {
     if (chatRemoteStreamPlaceholderStyleInjected) {
       return;

@@ -4,9 +4,10 @@ import { readAssistantTracePayload } from '../../pages/chat-page/support.js';
 import {
   InlinePermissionQuickBar,
   MessageRow,
-  sharedUiThemeVars,
   type ResolveInlinePermissionActionsFn,
+  sharedUiThemeVars,
 } from './ChatPageSections.js';
+import { decideTimeDivider } from './time-divider.js';
 
 export interface ChatRenderAction {
   id: string;
@@ -60,6 +61,7 @@ interface ChatMessageGroupListProps {
 const DEFAULT_GROUP_HEIGHT = 148;
 const OVERSCAN_PX = 720;
 const GROUP_GAP_PX = 24;
+const TIME_DIVIDER_HEIGHT_PX = 28;
 const VIRTUALIZATION_GROUP_THRESHOLD = 32;
 const FALLBACK_VIEWPORT_HEIGHT = 720;
 const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
@@ -81,10 +83,12 @@ export function ChatMessageGroupList({
   const showQuickBar =
     activePendingPermissions.length > 0 && resolveInlinePermissionActions !== undefined;
 
+  const dividerLabels = useMemo(() => computeDividerLabels(groups), [groups]);
+
   if (!shouldVirtualize) {
     return (
       <>
-        {groups.map((group) => (
+        {groups.map((group, groupIndex) => (
           <ChatGroupBlock
             key={group.key}
             activeModelId={activeModelId}
@@ -93,6 +97,7 @@ export function ChatMessageGroupList({
             currentUserEmail={currentUserEmail}
             group={group}
             providerCatalog={providerCatalog}
+            timeDividerLabel={dividerLabels[groupIndex] ?? null}
           />
         ))}
         {showQuickBar && (
@@ -113,6 +118,7 @@ export function ChatMessageGroupList({
       activeProviderId={activeProviderId}
       bottomRef={bottomRef}
       currentUserEmail={currentUserEmail}
+      dividerLabels={dividerLabels}
       groups={groups}
       pendingPermissions={activePendingPermissions}
       providerCatalog={providerCatalog}
@@ -122,18 +128,47 @@ export function ChatMessageGroupList({
   );
 }
 
+function computeDividerLabels(groups: ChatRenderGroup[]): Array<string | null> {
+  const now = Date.now();
+  const labels: Array<string | null> = [];
+  let previousTs: number | null = null;
+
+  for (const group of groups) {
+    const ts = readGroupTimestamp(group);
+    const decision = decideTimeDivider(ts, previousTs, now);
+    labels.push(decision.show ? decision.label : null);
+    if (ts != null && Number.isFinite(ts)) {
+      previousTs = ts;
+    }
+  }
+
+  return labels;
+}
+
+function readGroupTimestamp(group: ChatRenderGroup): number | null {
+  const first = group.entries[0]?.message;
+  if (!first) return null;
+  const raw = first.createdAt;
+  if (raw == null) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  // createdAt may also arrive as ISO string from older payloads.
+  const parsed = Date.parse(raw as unknown as string);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function VirtualizedChatGroupViewport({
   activeModelId,
   activeModelLabel,
   activeProviderId,
   bottomRef,
   currentUserEmail,
+  dividerLabels,
   groups,
   pendingPermissions,
   providerCatalog,
   resolveInlinePermissionActions,
   scrollRegionRef,
-}: ChatMessageGroupListProps) {
+}: ChatMessageGroupListProps & { dividerLabels: Array<string | null> }) {
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
   const [scrollTop, setScrollTop] = useState(0);
   const [measuredVersion, setMeasuredVersion] = useState(0);
@@ -223,17 +258,20 @@ function VirtualizedChatGroupViewport({
 
     void measurementVersion;
 
-    for (const group of groups) {
+    groups.forEach((group, i) => {
       offsets.push(totalHeight);
+      const dividerExtra = dividerLabels[i] ? TIME_DIVIDER_HEIGHT_PX : 0;
       totalHeight +=
-        (groupHeightsRef.current.get(group.key) ?? estimateGroupHeight(group)) + GROUP_GAP_PX;
-    }
+        (groupHeightsRef.current.get(group.key) ?? estimateGroupHeight(group)) +
+        dividerExtra +
+        GROUP_GAP_PX;
+    });
 
     return {
       offsets,
       totalHeight: totalHeight > 0 ? totalHeight - GROUP_GAP_PX : 0,
     };
-  }, [groups, measurementVersion]);
+  }, [groups, measurementVersion, dividerLabels]);
 
   const visibleRange = useMemo(() => {
     const startBoundary = Math.max(0, scrollTop - OVERSCAN_PX);
@@ -321,6 +359,7 @@ function VirtualizedChatGroupViewport({
                 currentUserEmail={currentUserEmail}
                 group={group}
                 providerCatalog={providerCatalog}
+                timeDividerLabel={dividerLabels[actualIndex] ?? null}
               />
             </div>
           );
@@ -344,6 +383,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   currentUserEmail,
   group,
   providerCatalog,
+  timeDividerLabel,
 }: {
   activeModelId: string;
   activeModelLabel?: string;
@@ -351,6 +391,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   currentUserEmail: string;
   group: ChatRenderGroup;
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
+  timeDividerLabel?: string | null;
 }) {
   return (
     <div
@@ -359,6 +400,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
       data-group-key={group.key}
       data-role={group.role}
     >
+      {timeDividerLabel ? <TimeDividerRow label={timeDividerLabel} /> : null}
       {group.entries.map((entry, entryIndex) => {
         const resolvedProviderId = entry.message.providerId?.trim() || activeProviderId;
         const resolvedProvider = resolvedProviderId
@@ -385,6 +427,16 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
     </div>
   );
 });
+
+function TimeDividerRow({ label }: { label: string }) {
+  return (
+    <div className="chat-time-divider" aria-hidden="true">
+      <span className="chat-time-divider-line" />
+      <span className="chat-time-divider-label">{label}</span>
+      <span className="chat-time-divider-line" />
+    </div>
+  );
+}
 
 function estimateGroupHeight(group: ChatRenderGroup): number {
   let estimatedContentHeight = 0;

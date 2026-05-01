@@ -1,34 +1,11 @@
 import React, { useState } from 'react';
 import './chat-message.css';
-import { GenerativeUIRenderer } from '@openAwork/shared-ui';
 import type { GenerativeUIMessage } from '@openAwork/shared-ui';
-import type { DialogueMode } from '../../pages/dialogue-mode.js';
-import { DIALOGUE_MODE_OPTIONS } from '../../pages/dialogue-mode.js';
-import { AssistantEventRow } from './assistant-event-row.js';
-import {
-  normalizeProviderKey,
-  ProviderAvatar,
-  resolveProviderIdentity,
-  UserAvatar,
-} from './chat-provider-display.js';
-import { TaskToolInline } from './task-tool-inline.js';
-import { ToolCallDisplay } from './tool-call-inline.js';
-import { ImageLightbox } from './image-lightbox.js';
-import {
-  resolveTaskToolRuntimeSnapshot,
-  type TaskToolRuntimeLookup,
-} from '../../pages/chat-page/task-tool-runtime.js';
-import {
-  AssistantErrorContent,
-  looksLikeAssistantErrorContent,
-} from './assistant-error-content.js';
-import { AssistantReasoningBlock, buildReasoningBlockKey } from './assistant-reasoning-block.js';
-import { shouldStreamLocalReasoningBlock } from './assistant-reasoning-block.helpers.js';
-import { resolveAgentAccentColor } from './agent-color-map.js';
-import { ModifiedFilesSummaryCard } from './modified-files-summary-card.js';
-import StreamingMarkdownContent from './streaming-markdown-content.js';
+import { GenerativeUIRenderer } from '@openAwork/shared-ui';
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion.js';
 import {
   type AssistantTracePayload,
+  type ChatMessage,
   type ChatMessagePart,
   type ChatReasoningPart,
   type ChatToolPart,
@@ -38,13 +15,38 @@ import {
   formatDurationLabel,
   formatShortTime,
   formatStopReasonLabel,
-  parseCopiedToolCardContent,
   parseAssistantEventContent,
   parseAssistantTraceContent,
+  parseCopiedToolCardContent,
   readAssistantTracePayload,
-  type ChatMessage,
 } from '../../pages/chat-page/support.js';
-import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion.js';
+import {
+  resolveTaskToolRuntimeSnapshot,
+  type TaskToolRuntimeLookup,
+} from '../../pages/chat-page/task-tool-runtime.js';
+import type { DialogueMode } from '../../pages/dialogue-mode.js';
+import { DIALOGUE_MODE_OPTIONS } from '../../pages/dialogue-mode.js';
+import { resolveAgentAccentColor } from './agent-color-map.js';
+import {
+  AssistantErrorContent,
+  looksLikeAssistantErrorContent,
+} from './assistant-error-content.js';
+import { AssistantEventRow } from './assistant-event-row.js';
+import { shouldStreamLocalReasoningBlock } from './assistant-reasoning-block.helpers.js';
+import { AssistantReasoningBlock, buildReasoningBlockKey } from './assistant-reasoning-block.js';
+import {
+  normalizeProviderKey,
+  ProviderAvatar,
+  resolveProviderIdentity,
+  UserAvatar,
+} from './chat-provider-display.js';
+import { CollapsibleAssistantContent } from './collapsible-assistant-content.js';
+import { ImageLightbox } from './image-lightbox.js';
+import { MessageHoverActions } from './message-hover-actions.js';
+import { ModifiedFilesSummaryCard } from './modified-files-summary-card.js';
+import StreamingMarkdownContent from './streaming-markdown-content.js';
+import { TaskToolInline } from './task-tool-inline.js';
+import { GroupedToolCallPill, groupConsecutiveTools, ToolCallDisplay } from './tool-call-inline.js';
 
 export const sharedUiThemeVars = {
   '--color-bg': 'var(--bg)',
@@ -64,6 +66,7 @@ export const sharedUiThemeVars = {
 } as React.CSSProperties;
 
 export { ModelPicker, ModelSettingsPopover } from './model-picker-panels.js';
+
 const MarkdownMessageContent = React.lazy(() => import('./markdown-message-content.js'));
 
 export function MessageRow({
@@ -131,7 +134,10 @@ export function MessageRow({
         color: `color-mix(in oklch, ${agentAccent} 82%, white 18%)`,
       }
     : undefined;
-  const metaItems: Array<{ label: string; tone?: 'default' | 'accent' | 'danger' }> = [];
+  const metaItems: Array<{
+    label: string;
+    tone?: 'default' | 'accent' | 'danger';
+  }> = [];
 
   if (!isUser) {
     if (usageDetails) {
@@ -164,7 +170,9 @@ export function MessageRow({
 
     if (toolLabel) metaItems.push({ label: toolLabel });
     if (message.modifiedFilesSummary && message.modifiedFilesSummary.files.length > 0) {
-      metaItems.push({ label: `修改 ${message.modifiedFilesSummary.files.length} 文件` });
+      metaItems.push({
+        label: `修改 ${message.modifiedFilesSummary.files.length} 文件`,
+      });
     }
     if (stopReasonLabel) {
       metaItems.push({
@@ -184,6 +192,7 @@ export function MessageRow({
     <article
       className={`chat-message-row${groupedWithPrevious ? ' is-grouped' : ''}${agentAccent ? ' has-agent-accent' : ''}`}
       data-role={message.role}
+      data-message-id={message.id}
       data-grouped={groupedWithPrevious ? 'true' : 'false'}
       data-status={message.status ?? 'completed'}
       data-agent-id={message.agentId || undefined}
@@ -195,7 +204,9 @@ export function MessageRow({
         data-grouped={groupedWithPrevious ? 'true' : 'false'}
         style={
           agentAccent
-            ? { boxShadow: `0 0 0 2px var(--surface), 0 0 0 3.5px ${agentAccent}` }
+            ? {
+                boxShadow: `0 0 0 2px var(--surface), 0 0 0 3.5px ${agentAccent}`,
+              }
             : undefined
         }
       >
@@ -228,7 +239,14 @@ export function MessageRow({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {actions && actions.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    flexWrap: 'wrap',
+                  }}
+                >
                   {actions.map((action) => (
                     <button
                       key={action.id}
@@ -263,6 +281,7 @@ export function MessageRow({
           data-role={message.role}
           data-status={message.status ?? 'completed'}
         >
+          <MessageHoverActions getCopyText={() => message.content} />
           <div className="chat-message-content" data-role={message.role} style={sharedUiThemeVars}>
             {renderContent(message)}
           </div>
@@ -352,17 +371,14 @@ export interface ChatToolRenderOptions {
   taskRuntimeLookup?: TaskToolRuntimeLookup;
 }
 
-function UserAttachedImagesGallery({
-  images,
-}: {
-  images: ReturnType<typeof extractInputImages>;
-}) {
+function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extractInputImages> }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   const activeImage = openIndex !== null ? images[openIndex] : undefined;
   const activeSrc = activeImage?.imageUrl;
-  const activeLabel = activeImage?.fileName ?? (openIndex !== null ? `图片 ${openIndex + 1}` : '图片');
+  const activeLabel =
+    activeImage?.fileName ?? (openIndex !== null ? `图片 ${openIndex + 1}` : '图片');
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
@@ -511,7 +527,10 @@ export function renderStreamingChatMessageContentWithOptions(
   contentOrMessage: ChatMessage | string,
   options?: Omit<ChatToolRenderOptions, 'streaming'>,
 ) {
-  return renderAssistantMessageContentValue(contentOrMessage, { ...options, streaming: true });
+  return renderAssistantMessageContentValue(contentOrMessage, {
+    ...options,
+    streaming: true,
+  });
 }
 
 function renderToolCallContent(input: {
@@ -544,7 +563,13 @@ function renderToolCallContent(input: {
   toolName: string;
   toolInput: Record<string, unknown>;
 }) {
-  if (input.toolName.trim().toLowerCase() === 'task') {
+  const normalizedToolName = input.toolName.trim().toLowerCase();
+  if (
+    normalizedToolName === 'task' ||
+    normalizedToolName === 'agent' ||
+    normalizedToolName === 'call_omo_agent' ||
+    normalizedToolName === 'delegate_task'
+  ) {
     return (
       <TaskToolInline
         key={input.reactKey}
@@ -598,7 +623,8 @@ function renderAssistantMessageContentValue(
   ) {
     return <AssistantPartsContent message={contentOrMessage} options={options} />;
   }
-  const content = typeof contentOrMessage === 'string' ? contentOrMessage : contentOrMessage.content;
+  const content =
+    typeof contentOrMessage === 'string' ? contentOrMessage : contentOrMessage.content;
   const copiedToolCard = parseCopiedToolCardContent(content);
   if (copiedToolCard) {
     return renderToolCallContent({
@@ -647,9 +673,7 @@ function renderAssistantMessageContentValue(
       : readAssistantTracePayload(contentOrMessage);
   if (assistantTrace) {
     const reasoningBlocksEndedFlags =
-      typeof contentOrMessage === 'string'
-        ? undefined
-        : contentOrMessage.reasoningBlocksEndedFlags;
+      typeof contentOrMessage === 'string' ? undefined : contentOrMessage.reasoningBlocksEndedFlags;
     const reasoningBlocksDurationsMs =
       typeof contentOrMessage === 'string'
         ? undefined
@@ -791,9 +815,7 @@ function AssistantPartsContent({
               ? part.endedAt - part.startedAt
               : undefined;
           const durationMs =
-            typeof rawDuration === 'number' && rawDuration >= 0
-              ? rawDuration
-              : persistedDuration;
+            typeof rawDuration === 'number' && rawDuration >= 0 ? rawDuration : persistedDuration;
           return (
             <AssistantReasoningBlock
               key={part.id}
@@ -804,6 +826,7 @@ function AssistantPartsContent({
               messageStreaming={streaming}
               renderBody={renderReasoningRichBody}
               streaming={shouldStreamLocalReasoningBlock({
+                ended,
                 hasActiveToolCall,
                 hasAssistantText,
                 index: myIndex,
@@ -817,11 +840,7 @@ function AssistantPartsContent({
         if (part.type === 'text') {
           if (part.text.length === 0) return null;
           return (
-            <AssistantRichContentBody
-              key={part.id}
-              content={part.text}
-              streaming={streaming}
-            />
+            <AssistantRichContentBody key={part.id} content={part.text} streaming={streaming} />
           );
         }
         if (part.type === 'tool') {
@@ -923,6 +942,7 @@ function AssistantTraceContent({
             messageStreaming={streaming}
             renderBody={renderReasoningRichBody}
             streaming={shouldStreamLocalReasoningBlock({
+              ended,
               hasActiveToolCall,
               hasAssistantText,
               index,
@@ -936,9 +956,24 @@ function AssistantTraceContent({
       {payload.text.length > 0 && (
         <AssistantRichContentBody content={payload.text} streaming={streaming} />
       )}
-      {payload.toolCalls.map((toolCall, index) =>
-        renderToolCallContent({
-          reactKey: `${toolCall.toolName}-${index}`,
+      {/* Collapse runs of ≥2 consecutive read/grep/glob calls into a
+          single grouped pill so a session that reads 8 files in a row
+          doesn't blow out the message column. The helper preserves
+          the original index so the React key stays stable across
+          re-renders even when group boundaries shift. */}
+      {groupConsecutiveTools(payload.toolCalls).map((entry) => {
+        if (entry.kind === 'group') {
+          return (
+            <GroupedToolCallPill
+              key={`group-${entry.startIndex}-${entry.toolName}`}
+              toolName={entry.toolName}
+              calls={entry.calls}
+            />
+          );
+        }
+        const toolCall = entry.call;
+        return renderToolCallContent({
+          reactKey: `${toolCall.toolName}-${entry.index}`,
           kind: toolCall.kind,
           toolCallId: toolCall.toolCallId,
           toolName: toolCall.toolName,
@@ -956,8 +991,8 @@ function AssistantTraceContent({
           selectedChildSessionId,
           status: toolCall.status,
           taskRuntimeLookup,
-        }),
-      )}
+        });
+      })}
       {payload.modifiedFilesSummary && (
         <ModifiedFilesSummaryCard summary={payload.modifiedFilesSummary} />
       )}
@@ -1016,7 +1051,9 @@ function AssistantRichContentBody({
   return (
     <div className="assistant-rich-content-body">
       <React.Suspense fallback={<div className="chat-markdown-streaming">{content}</div>}>
-        <MarkdownMessageContent content={content} />
+        <CollapsibleAssistantContent content={content}>
+          <MarkdownMessageContent content={content} />
+        </CollapsibleAssistantContent>
       </React.Suspense>
     </div>
   );
@@ -1163,24 +1200,47 @@ export function WelcomeScreen({
             width: 42,
             height: 42,
             borderRadius: 13,
-            background: 'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, #a855f7))',
+            background:
+              'linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 65%, #a855f7))',
             marginBottom: 10,
             boxShadow: '0 4px 24px color-mix(in srgb, var(--accent) 28%, transparent)',
             animation: 'ws-float 3s ease-in-out infinite',
           }}
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
             <path d="M2 17l10 5 10-5" />
             <path d="M2 12l10 5 10-5" />
           </svg>
         </div>
         <div
-          style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.03em' }}
+          style={{
+            fontSize: 20,
+            fontWeight: 700,
+            color: 'var(--text)',
+            letterSpacing: '-0.03em',
+          }}
         >
           OpenAWork
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5, marginTop: 4 }}>
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--text-3)',
+            lineHeight: 1.5,
+            marginTop: 4,
+          }}
+        >
           选择一个对话模式，然后在下方输入框开始对话
         </div>
       </div>
@@ -1203,23 +1263,25 @@ export function WelcomeScreen({
               className="ws-card"
               type="button"
               onClick={() => onSelectMode(mode.value)}
-              style={{
-                '--glow': accent.color,
-                position: 'relative',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: 8,
-                padding: '14px 13px 12px',
-                borderRadius: 12,
-                border: isActive ? `1.5px solid ${accent.color}` : '1px solid var(--border)',
-                background: isActive ? accent.bg : 'var(--surface)',
-                color: 'var(--text)',
-                cursor: 'pointer',
-                textAlign: 'left',
-                animation: `ws-fade-up .5s ease both ${0.1 + idx * 0.08}s${isActive ? ', ws-glow-pulse 2.5s ease-in-out infinite .6s' : ''}`,
-                overflow: 'hidden',
-              } as React.CSSProperties}
+              style={
+                {
+                  '--glow': accent.color,
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  padding: '14px 13px 12px',
+                  borderRadius: 12,
+                  border: isActive ? `1.5px solid ${accent.color}` : '1px solid var(--border)',
+                  background: isActive ? accent.bg : 'var(--surface)',
+                  color: 'var(--text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  animation: `ws-fade-up .5s ease both ${0.1 + idx * 0.08}s${isActive ? ', ws-glow-pulse 2.5s ease-in-out infinite .6s' : ''}`,
+                  overflow: 'hidden',
+                } as React.CSSProperties
+              }
             >
               {/* Shimmer overlay on active card */}
               {isActive && (
@@ -1256,8 +1318,24 @@ export function WelcomeScreen({
               >
                 {accent.icon}
               </span>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'relative' }}>
-                <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  position: 'relative',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
                   {mode.label}
                   {isActive && (
                     <span
@@ -1280,7 +1358,13 @@ export function WelcomeScreen({
                     </span>
                   )}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-3)',
+                    lineHeight: 1.4,
+                  }}
+                >
                   {mode.description}
                 </span>
               </span>
@@ -1352,7 +1436,17 @@ export function WelcomeScreen({
             cursor: 'pointer',
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
@@ -1376,7 +1470,17 @@ export function WelcomeScreen({
             cursor: 'pointer',
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
           {hasWorkspace ? '切换工作区' : '打开工作区'}
@@ -1490,7 +1594,14 @@ export function InlinePermissionQuickBar({
               fontSize: 10,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexWrap: 'wrap',
+              }}
+            >
               <span
                 style={{
                   width: 5,

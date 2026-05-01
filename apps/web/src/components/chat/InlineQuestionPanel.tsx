@@ -28,7 +28,8 @@ export function InlineQuestionPanel({
 }: InlineQuestionPanelProps) {
   const isSubmitting = pendingAction !== null;
   const hasAnyAnswer = request.questions.some(
-    (_, index) => (answers[index]?.length ?? 0) > 0 || (customInputs[index]?.trim().length ?? 0) > 0,
+    (_, index) =>
+      (answers[index]?.length ?? 0) > 0 || (customInputs[index]?.trim().length ?? 0) > 0,
   );
   const isSubmitDisabled = isSubmitting || !hasAnyAnswer;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,70 +44,83 @@ export function InlineQuestionPanel({
       <div ref={containerRef} className="inline-question-panel">
         <style>{panelStyles}</style>
 
-      <div className="iqp-header" onClick={() => setCollapsed((c) => !c)}>
-        <div className="iqp-header-left">
-          <span className="iqp-pulse" />
-          <span className="iqp-label">等待回答</span>
-          <span className="iqp-title">{request.title}</span>
-        </div>
-        <div className="iqp-header-right">
-          <span className="iqp-tool">{request.toolName}</span>
-          <button type="button" className="iqp-collapse-btn" aria-label={collapsed ? '展开' : '收起'}>
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform 200ms ease' }}
-            >
-              <path d="M3 5.5L7 9.5L11 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {!collapsed && (
-        <div className="iqp-body">
-          {errorMessage && (
-            <div className="iqp-error" role="alert">
-              <span className="iqp-error-icon">!</span>
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {request.questions.map((question, questionIndex) => (
-            <QuestionBlock
-              key={`${request.requestId}:${questionIndex}`}
-              question={question}
-              questionIndex={questionIndex}
-              selectedAnswers={answers[questionIndex] ?? []}
-              customInput={customInputs[questionIndex] ?? ''}
-              isSubmitting={isSubmitting}
-              onToggleOption={onToggleOption}
-              onCustomInputChange={onCustomInputChange}
-            />
-          ))}
-
-          <div className="iqp-actions">
+        <div className="iqp-header" onClick={() => setCollapsed((c) => !c)}>
+          <div className="iqp-header-left">
+            <span className="iqp-pulse" />
+            <span className="iqp-label">等待回答</span>
+            <span className="iqp-title">{request.title}</span>
+          </div>
+          <div className="iqp-header-right">
+            <span className="iqp-tool">{request.toolName}</span>
             <button
               type="button"
-              className="iqp-btn iqp-btn-secondary"
-              disabled={isSubmitting}
-              onClick={onDismiss}
+              className="iqp-collapse-btn"
+              aria-label={collapsed ? '展开' : '收起'}
             >
-              {pendingAction === 'dismissed' ? '处理中…' : '跳过'}
-            </button>
-            <button
-              type="button"
-              className="iqp-btn iqp-btn-primary"
-              disabled={isSubmitDisabled}
-              onClick={onSubmit}
-            >
-              {pendingAction === 'answered' ? '提交中…' : '确认'}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                style={{
+                  transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
+                  transition: 'transform 200ms ease',
+                }}
+              >
+                <path
+                  d="M3 5.5L7 9.5L11 5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
           </div>
         </div>
-      )}
+
+        {!collapsed && (
+          <div className="iqp-body">
+            {errorMessage && (
+              <div className="iqp-error" role="alert">
+                <span className="iqp-error-icon">!</span>
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {request.questions.map((question, questionIndex) => (
+              <QuestionBlock
+                key={`${request.requestId}:${questionIndex}`}
+                question={question}
+                questionIndex={questionIndex}
+                selectedAnswers={answers[questionIndex] ?? []}
+                customInput={customInputs[questionIndex] ?? ''}
+                isSubmitting={isSubmitting}
+                onToggleOption={onToggleOption}
+                onCustomInputChange={onCustomInputChange}
+              />
+            ))}
+
+            <div className="iqp-actions">
+              <button
+                type="button"
+                className="iqp-btn iqp-btn-secondary"
+                disabled={isSubmitting}
+                onClick={onDismiss}
+              >
+                {pendingAction === 'dismissed' ? '处理中…' : '跳过'}
+              </button>
+              <button
+                type="button"
+                className="iqp-btn iqp-btn-primary"
+                disabled={isSubmitDisabled}
+                onClick={onSubmit}
+              >
+                {pendingAction === 'answered' ? '提交中…' : '确认'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -160,7 +174,13 @@ function QuestionBlock({
               <span className="iqp-option-check">
                 {selected ? (
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M2.5 6L5 8.5L9.5 3.5" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M2.5 6L5 8.5L9.5 3.5"
+                      stroke="var(--accent)"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                 ) : (
                   <span className="iqp-option-check-empty" />
@@ -185,11 +205,22 @@ function QuestionBlock({
           <span className="iqp-option-check">
             {hasCustom ? (
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M2.5 6L5 8.5L9.5 3.5" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M2.5 6L5 8.5L9.5 3.5"
+                  stroke="var(--accent)"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             ) : (
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M6 2.5V9.5M2.5 6H9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                <path
+                  d="M6 2.5V9.5M2.5 6H9.5"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
               </svg>
             )}
           </span>

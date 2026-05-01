@@ -29,7 +29,8 @@ const iconButtonBaseStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  transition: 'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
+  transition:
+    'width 220ms ease, height 220ms ease, opacity 150ms ease, background 150ms ease, color 150ms ease',
 };
 
 const selectStyle: React.CSSProperties = {
@@ -185,8 +186,18 @@ export function ChatImageGenerationControls({
             flexShrink: 0,
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 6L6 18" />
+            <path d="M6 6l12 12" />
           </svg>
         </button>
       </div>
@@ -194,7 +205,10 @@ export function ChatImageGenerationControls({
       {/* Size presets - compact */}
       <div style={{ display: 'grid', gap: 6 }}>
         {IMAGE_GENERATION_SIZE_PRESET_GROUPS.map((group) => (
-          <div key={group.tier} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <div
+            key={group.tier}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+          >
             <span
               style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600, minWidth: 28 }}
               title={group.description}
@@ -208,7 +222,10 @@ export function ChatImageGenerationControls({
                   key={preset.id}
                   type="button"
                   disabled={busy}
-                  onClick={() => { setForceCustomSize(false); onUpdateImageDefaults({ size: preset.size }); }}
+                  onClick={() => {
+                    setForceCustomSize(false);
+                    onUpdateImageDefaults({ size: preset.size });
+                  }}
                   title={preset.description}
                   style={{
                     borderRadius: 999,
@@ -229,9 +246,7 @@ export function ChatImageGenerationControls({
               );
             })}
             {group.tier === '2k' && (
-              <span style={{ fontSize: 9, color: 'var(--text-3)', fontStyle: 'italic' }}>
-                ~4MP
-              </span>
+              <span style={{ fontSize: 9, color: 'var(--text-3)', fontStyle: 'italic' }}>~4MP</span>
             )}
             {group.tier === '4k' && (
               <span
@@ -291,9 +306,7 @@ export function ChatImageGenerationControls({
             />
           )}
           {isCustomSize && !sizeValidation.valid && (
-            <span style={{ fontSize: 10, color: 'var(--warning)' }}>
-              {sizeValidation.message}
-            </span>
+            <span style={{ fontSize: 10, color: 'var(--warning)' }}>{sizeValidation.message}</span>
           )}
         </div>
       </div>

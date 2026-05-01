@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentBar, ImagePreview, VoiceRecorder } from '@openAwork/shared-ui';
 import type { AttachmentItem } from '@openAwork/shared-ui';
-import type { ComposerMenuState, MentionItem, SlashCommandItem } from '../../pages/chat-page/support.js';
+import type {
+  ComposerMenuState,
+  MentionItem,
+  SlashCommandItem,
+} from '../../pages/chat-page/support.js';
 import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
 import { ProviderMark } from './chat-provider-display.js';
 import { ChatImageGenerationControls } from './ChatImageGenerationControls.js';
@@ -520,8 +524,7 @@ export function ChatComposer({
               ? {
                   borderColor: 'var(--accent)',
                   borderStyle: 'dashed',
-                  background:
-                    'color-mix(in oklch, var(--accent) 4%, var(--bg-2))',
+                  background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-2))',
                 }
               : {}),
           }}
@@ -535,8 +538,7 @@ export function ChatComposer({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background:
-                  'color-mix(in oklch, var(--accent) 6%, transparent)',
+                background: 'color-mix(in oklch, var(--accent) 6%, transparent)',
                 zIndex: 10,
                 pointerEvents: 'none',
               }}
@@ -1468,15 +1470,15 @@ export function ChatComposer({
                       ? `可先追加到队列${queuedMessages.length > 0 ? ` · 已排队 ${queuedMessages.length} 条` : ''}`
                       : imageGenerationBusy
                         ? '图片生成中 · 请等待结果返回'
-                      : sessionBusyState === 'running'
-                        ? '会话持续运行中 · 正在同步最新结果'
-                      : sessionBusyState === 'paused'
-                          ? '会话等待处理 · 处理后继续同步'
-                          : imageGenerationMode
-                            ? 'Enter 生成 · Shift+Enter 换行'
-                          : isHomeVariant
-                            ? 'Enter 发送 · Shift+Enter 换行'
-                            : 'Enter 发送'}
+                        : sessionBusyState === 'running'
+                          ? '会话持续运行中 · 正在同步最新结果'
+                          : sessionBusyState === 'paused'
+                            ? '会话等待处理 · 处理后继续同步'
+                            : imageGenerationMode
+                              ? 'Enter 生成 · Shift+Enter 换行'
+                              : isHomeVariant
+                                ? 'Enter 发送 · Shift+Enter 换行'
+                                : 'Enter 发送'}
                 </span>
                 <button
                   type="button"
@@ -1526,7 +1528,7 @@ export function ChatComposer({
                           : '停止'
                       : sessionBusyState === 'running'
                         ? '运行中'
-                      : sessionBusyState === 'paused'
+                        : sessionBusyState === 'paused'
                           ? '待处理'
                           : imageGenerationMode
                             ? '生成'

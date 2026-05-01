@@ -28,74 +28,26 @@ export function ModifiedFilesSummaryCard({ summary }: { summary: ModifiedFilesSu
   const hiddenCount = summary.files.length - visibleFiles.length;
 
   return (
-    <section
+    <div
       data-chat-modified-summary="true"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        padding: '12px 14px',
-        borderRadius: 14,
-        border: '1px solid color-mix(in oklch, var(--accent) 16%, var(--border) 84%)',
-        background:
-          'linear-gradient(180deg, color-mix(in oklch, var(--accent) 8%, var(--surface) 92%), color-mix(in oklch, var(--surface) 92%, var(--bg-2) 8%))',
-        boxShadow: '0 10px 24px rgba(15, 23, 42, 0.08)',
-      }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}
     >
-      <header
+      <div
         style={{
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 12,
-          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 12,
+          color: 'var(--text-2)',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'color-mix(in oklch, var(--accent) 74%, var(--text) 26%)',
-            }}
-          >
-            变更记录
-          </span>
-          <strong style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.4 }}>
-            {summary.title}
-          </strong>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
-            {summary.summary}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {[`${summary.files.length} 个文件`, `+${totalAdditions}`, `-${totalDeletions}`].map(
-            (label) => (
-              <span
-                key={label}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  height: 22,
-                  padding: '0 9px',
-                  borderRadius: 999,
-                  background: 'color-mix(in oklch, var(--surface) 84%, var(--accent) 16%)',
-                  border: '1px solid color-mix(in oklch, var(--accent) 12%, var(--border) 88%)',
-                  color: 'var(--text)',
-                  fontSize: 11,
-                  fontWeight: 700,
-                }}
-              >
-                {label}
-              </span>
-            ),
-          )}
-        </div>
-      </header>
+        <span>{summary.title}</span>
+        <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+          {summary.files.length} 个文件 · +{totalAdditions} / -{totalDeletions}
+        </span>
+      </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {visibleFiles.map((file) => {
           const sourceLabel = formatSourceLabel(file.sourceKind);
           return (
@@ -103,59 +55,47 @@ export function ModifiedFilesSummaryCard({ summary }: { summary: ModifiedFilesSu
               key={`${file.file}:${file.status ?? 'modified'}`}
               data-chat-modified-summary-file="true"
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-                gap: 8,
+                display: 'flex',
                 alignItems: 'center',
-                padding: '8px 10px',
-                borderRadius: 10,
-                background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
-                border: '1px solid color-mix(in oklch, var(--border) 72%, transparent)',
+                gap: 8,
+                padding: '3px 0',
+                fontSize: 12,
               }}
             >
               <span
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 42,
-                  height: 22,
-                  padding: '0 8px',
-                  borderRadius: 999,
-                  background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
-                  color: 'color-mix(in oklch, var(--accent) 70%, var(--text) 30%)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
+                  color: 'var(--text-3)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  minWidth: 28,
                 }}
               >
                 {formatStatusLabel(file.status)}
               </span>
-              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span
-                  style={{
-                    color: 'var(--text)',
-                    fontSize: 12,
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title={file.file}
-                >
-                  {file.file}
-                </span>
-                {(sourceLabel || file.guaranteeLevel) && (
-                  <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
-                    {[sourceLabel, file.guaranteeLevel].filter(Boolean).join(' · ')}
-                  </span>
-                )}
-              </div>
               <span
                 style={{
-                  color: 'var(--text-2)',
+                  color: 'var(--text)',
+                  fontSize: 12,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  flex: 1,
+                  minWidth: 0,
+                }}
+                title={file.file}
+              >
+                {file.file}
+              </span>
+              {(sourceLabel || file.guaranteeLevel) && (
+                <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                  {[sourceLabel, file.guaranteeLevel].filter(Boolean).join(' · ')}
+                </span>
+              )}
+              <span
+                style={{
+                  color: 'var(--text-3)',
                   fontSize: 11,
-                  fontWeight: 600,
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -165,17 +105,11 @@ export function ModifiedFilesSummaryCard({ summary }: { summary: ModifiedFilesSu
           );
         })}
         {hiddenCount > 0 && (
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--text-3)',
-              paddingLeft: 4,
-            }}
-          >
+          <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '2px 0' }}>
             另外还有 {hiddenCount} 个文件变更未展开。
           </div>
         )}
       </div>
-    </section>
+    </div>
   );
 }

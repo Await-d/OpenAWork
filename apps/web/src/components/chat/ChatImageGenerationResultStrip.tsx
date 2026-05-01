@@ -46,7 +46,9 @@ export function ChatImageGenerationResultStrip({
           >
             最新图片结果
           </span>
-          <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>{modelLabel}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>
+            {modelLabel}
+          </span>
         </div>
         <strong
           style={{
