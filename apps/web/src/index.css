@@ -28,6 +28,35 @@
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.45);
   --shadow-md: 0 4px 16px oklch(0 0 0 / 0.5);
   --shadow-lg: 0 20px 60px -8px oklch(0 0 0 / 0.6);
+  /* ── Tool-call summary semantic colors (OpenCode-inspired) ──
+     Each token corresponds to a parser kind in `colorize-summary.tsx`
+     and a `.tc-tok-<kind>` class in `tool-call/css/tokens.css`. */
+  --tc-path: oklch(0.78 0.13 200);
+  --tc-cmd: oklch(0.8 0.13 125);
+  --tc-string: oklch(0.78 0.14 30);
+  --tc-num: oklch(0.74 0.14 290);
+  --tc-url: oklch(0.7 0.16 230);
+  --tc-keyword: oklch(0.74 0.16 145);
+  /* Tool-name pill category colors. The category is computed by
+     `getToolCategory()` and applied as `[data-tool-category]`. */
+  --tc-cat-read: oklch(0.72 0.13 230);
+  --tc-cat-edit: oklch(0.78 0.16 60);
+  --tc-cat-shell: oklch(0.72 0.16 145);
+  --tc-cat-think: oklch(0.74 0.17 290);
+  --tc-cat-net: oklch(0.7 0.16 230);
+  --tc-cat-state: oklch(0.78 0.14 30);
+  /* File-extension hue rotation. Applied via `[data-ext]` on
+     `.tc-tok-path` so the path stripe gets a per-language tint. */
+  --tc-ext-ts: oklch(0.7 0.14 240);
+  --tc-ext-py: oklch(0.84 0.16 90);
+  --tc-ext-md: oklch(0.78 0.04 250);
+  --tc-ext-json: oklch(0.78 0.13 30);
+  --tc-ext-css: oklch(0.74 0.18 290);
+  --tc-ext-html: oklch(0.7 0.18 25);
+  --tc-ext-go: oklch(0.74 0.13 200);
+  --tc-ext-rs: oklch(0.7 0.16 30);
+  --tc-ext-rb: oklch(0.72 0.18 20);
+  --tc-ext-sh: oklch(0.78 0.16 130);
   color-scheme: dark;
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -78,6 +107,31 @@
   --shadow-sm: 0 1px 2px oklch(0.3 0.02 50 / 0.1);
   --shadow-md: 0 4px 16px oklch(0.3 0.02 50 / 0.08);
   --shadow-lg: 0 20px 60px -8px oklch(0.3 0.02 50 / 0.1);
+  /* Light theme: lower lightness + higher chroma so the same hues
+     stay perceivable on the warm cream background. Tuned slightly
+     lighter than 0.5 so summaries don't feel heavier than body text. */
+  --tc-path: oklch(0.52 0.13 200);
+  --tc-cmd: oklch(0.54 0.14 125);
+  --tc-string: oklch(0.52 0.16 30);
+  --tc-num: oklch(0.52 0.16 290);
+  --tc-url: oklch(0.5 0.18 240);
+  --tc-keyword: oklch(0.5 0.15 145);
+  --tc-cat-read: oklch(0.5 0.16 230);
+  --tc-cat-edit: oklch(0.54 0.17 60);
+  --tc-cat-shell: oklch(0.5 0.15 145);
+  --tc-cat-think: oklch(0.52 0.18 290);
+  --tc-cat-net: oklch(0.5 0.18 230);
+  --tc-cat-state: oklch(0.54 0.16 30);
+  --tc-ext-ts: oklch(0.48 0.18 240);
+  --tc-ext-py: oklch(0.55 0.18 90);
+  --tc-ext-md: oklch(0.5 0.04 250);
+  --tc-ext-json: oklch(0.5 0.16 30);
+  --tc-ext-css: oklch(0.5 0.2 290);
+  --tc-ext-html: oklch(0.5 0.2 25);
+  --tc-ext-go: oklch(0.48 0.14 200);
+  --tc-ext-rs: oklch(0.5 0.18 30);
+  --tc-ext-rb: oklch(0.5 0.2 20);
+  --tc-ext-sh: oklch(0.48 0.18 130);
   color-scheme: light;
 }
 
@@ -506,8 +560,9 @@ textarea {
     padding: 0 8px;
     border-radius: 8px;
     text-decoration: none;
-    background: var(--accent);
-    color: var(--accent-text);
+    background: var(--accent-muted);
+    color: var(--accent);
+    font-weight: 600;
     transition:
       background 150ms ease,
       color 150ms ease;

@@ -5,6 +5,13 @@ import { useAuthStore } from '../../stores/auth.js';
 import { useSessions } from '../../hooks/useSessions.js';
 import SessionContextMenu from './SessionContextMenu.js';
 import FileTreeContextMenu from './FileTreeContextMenu.js';
+import {
+  copyTextToClipboard,
+  getFileTreeRelativePath,
+  getResponseErrorMessage,
+  isValidFileTreeEntryName,
+  joinFileTreePath,
+} from './file-tree-actions.js';
 import { SessionSidebarSessionRow } from './SessionSidebarSessionRow.js';
 import WorkspaceGroupMenu from './WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from './WorkspaceDeleteConfirmDialog.js';
@@ -12,6 +19,7 @@ import { WorkspaceGitBadge, FileTreeView, type FileTreeContextTarget } from './S
 import type { FileTreeNode } from '../WorkspacePickerModal.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { toast } from '../ToastNotification.js';
+import { dispatchComposerReference } from '../../utils/composer-reference-events.js';
 import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../utils/session-grouping.js';
 
 const sessionIconBtnStyle: React.CSSProperties = {
@@ -29,53 +37,9 @@ const sessionIconBtnStyle: React.CSSProperties = {
   flexShrink: 0,
 };
 
-const HIDDEN_FILE_TREE_ENTRY_NAMES = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  '.next',
-  '__pycache__',
-  '.DS_Store',
-]);
-
 type FileTreeContextMenuState = FileTreeContextTarget & {
   targetType: 'root' | FileTreeContextTarget['type'];
 };
-
-function joinFileTreePath(directoryPath: string, entryName: string): string {
-  if (directoryPath === '/') {
-    return `/${entryName}`;
-  }
-
-  return `${directoryPath}/${entryName}`;
-}
-
-function isValidFileTreeEntryName(entryName: string): boolean {
-  return (
-    entryName.length > 0 &&
-    !/[\\/]/.test(entryName) &&
-    entryName !== '.' &&
-    entryName !== '..' &&
-    !HIDDEN_FILE_TREE_ENTRY_NAMES.has(entryName)
-  );
-}
-
-async function getResponseErrorMessage(
-  response: Response,
-  fallbackMessage: string,
-): Promise<string> {
-  try {
-    const data = (await response.json()) as { error?: unknown };
-    if (typeof data.error === 'string' && data.error.length > 0) {
-      return data.error;
-    }
-  } catch {
-    return fallbackMessage;
-  }
-
-  return fallbackMessage;
-}
-
 export interface SessionSidebarProps {
   onOpenFile?: (path: string) => void;
   fetchRootPath: () => Promise<string>;
@@ -676,6 +640,36 @@ export function SessionSidebar({
       }
     })();
   }, [ensureRootPath, refreshDirectory]);
+
+  const handleCopyFileTreePath = useCallback((path: string, label: string) => {
+    void copyTextToClipboard(path)
+      .then(() => toast(`已复制${label}`, 'success'))
+      .catch((error: unknown) => {
+        toast(error instanceof Error ? error.message : '复制失败', 'error');
+      });
+  }, []);
+
+  const handleReferenceFileTreeTarget = useCallback(
+    (target: FileTreeContextMenuState) => {
+      const relativePath = getFileTreeRelativePath(fileTreeRootPath, target.path);
+      const referencePath = relativePath ?? target.path;
+      const targetKind = target.targetType === 'file' ? '文件' : '目录';
+      dispatchComposerReference(`@${referencePath} `);
+      toast(`已引用${targetKind}到输入框`, 'success');
+    },
+    [fileTreeRootPath],
+  );
+
+  const handleCreateSessionFromFileTreeTarget = useCallback(
+    (target: FileTreeContextMenuState) => {
+      if (target.targetType !== 'root' && target.targetType !== 'directory') {
+        return;
+      }
+
+      void newSession(target.path);
+    },
+    [newSession],
+  );
 
   const handleOpenRootContextMenu = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
@@ -1403,7 +1397,27 @@ export function SessionSidebar({
             fileTreeContextMenu.targetType === 'root' ? '工作区根目录' : fileTreeContextMenu.name
           }
           targetType={fileTreeContextMenu.targetType}
+          relativePath={getFileTreeRelativePath(fileTreeRootPath, fileTreeContextMenu.path)}
+          canOpen={fileTreeContextMenu.targetType === 'file' && Boolean(onOpenFile)}
+          canCreateSession={Boolean(fileTreeContextMenu.path)}
           onClose={() => setFileTreeContextMenu(null)}
+          onOpen={() => {
+            if (fileTreeContextMenu.targetType === 'file') {
+              onOpenFile?.(fileTreeContextMenu.path);
+            }
+          }}
+          onCopyPath={() => handleCopyFileTreePath(fileTreeContextMenu.path, '完整路径')}
+          onCopyRelativePath={() => {
+            const relativePath = getFileTreeRelativePath(
+              fileTreeRootPath,
+              fileTreeContextMenu.path,
+            );
+            if (relativePath) {
+              handleCopyFileTreePath(relativePath, '相对路径');
+            }
+          }}
+          onReferenceInChat={() => handleReferenceFileTreeTarget(fileTreeContextMenu)}
+          onCreateSession={() => handleCreateSessionFromFileTreeTarget(fileTreeContextMenu)}
           onCreateFile={() => {
             const label =
               fileTreeContextMenu.targetType === 'root'

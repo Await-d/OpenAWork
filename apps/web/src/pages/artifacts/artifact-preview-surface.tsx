@@ -71,6 +71,39 @@ export function ArtifactPreviewSurface({ artifact, content }: ArtifactPreviewSur
     );
   }
 
+  if (artifact.type === 'image') {
+    const metadataMimeType =
+      artifact.metadata && typeof artifact.metadata['mimeType'] === 'string'
+        ? artifact.metadata['mimeType']
+        : 'image/png';
+    const src = content.startsWith('data:')
+      ? content
+      : `data:${metadataMimeType};base64,${content}`;
+
+    return (
+      <PreviewShell title="图片预览" note="直接渲染内容型图片产物，便于确认生成结果与尺寸方向。">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 280,
+            padding: tokens.spacing.lg,
+            borderRadius: tokens.radius.lg,
+            border: `1px solid ${tokens.color.borderSubtle}`,
+            background: 'color-mix(in oklch, var(--surface) 88%, var(--bg) 12%)',
+          }}
+        >
+          <img
+            src={src}
+            alt={artifact.title}
+            style={{ maxWidth: '100%', maxHeight: 420, borderRadius: tokens.radius.md }}
+          />
+        </div>
+      </PreviewShell>
+    );
+  }
+
   const csv = parseCsvPreview(content);
   return (
     <PreviewShell title="CSV 结构预览" note="展示前 25 行数据，方便快速验证字段和内容分布。">

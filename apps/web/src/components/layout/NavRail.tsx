@@ -49,10 +49,6 @@ export default function NavRail({ clearAuth }: NavRailProps) {
         {railItems.map(({ to, label }) => {
           const resolvedTo = label === 'Chat' ? (lastChatPath ?? to) : to;
           const isChatActive = label === 'Chat' && location.pathname.startsWith('/chat');
-          const isChannelsActive =
-            label === 'Channels' &&
-            (location.pathname === '/channels' ||
-              location.pathname.startsWith('/settings/channels'));
           const isTemplatesActive =
             label === 'Templates' && location.pathname.startsWith('/templates');
           const isTeamActive = label === 'Team' && location.pathname.startsWith('/team');
@@ -66,13 +62,12 @@ export default function NavRail({ clearAuth }: NavRailProps) {
               onPointerDown={() => preloadRoute(resolvedTo)}
               title={railLabelCn[label] ?? label}
               className={({ isActive }) =>
-                isChatActive || isChannelsActive || isTemplatesActive || isTeamActive || isActive
+                isChatActive || isTemplatesActive || isTeamActive || isActive
                   ? 'nav-rail-link-active'
                   : 'nav-rail-btn'
               }
               style={({ isActive }) => {
-                const isActiveState =
-                  isChatActive || isChannelsActive || isTemplatesActive || isTeamActive || isActive;
+                const isActiveState = isChatActive || isTemplatesActive || isTeamActive || isActive;
                 return {
                   display: 'flex',
                   width: '100%',
@@ -84,7 +79,7 @@ export default function NavRail({ clearAuth }: NavRailProps) {
                   textDecoration: 'none',
                   background: isActiveState ? 'var(--accent-muted)' : 'transparent',
                   color: isActiveState ? 'var(--accent)' : 'var(--text-3)',
-                  boxShadow: isActiveState ? 'inset 2px 0 0 var(--accent)' : 'none',
+                  fontWeight: isActiveState ? 600 : 500,
                   transition: 'background 150ms ease, color 150ms ease',
                   overflow: 'hidden',
                 };
@@ -123,11 +118,7 @@ export default function NavRail({ clearAuth }: NavRailProps) {
         onFocus={() => preloadRoute('/settings')}
         onPointerDown={() => preloadRoute('/settings')}
         title={railLabelCn['Settings'] ?? '设置'}
-        className={({ isActive }) =>
-          isActive && !location.pathname.startsWith('/settings/channels')
-            ? 'nav-rail-link-active'
-            : 'nav-rail-btn'
-        }
+        className={({ isActive }) => (isActive ? 'nav-rail-link-active' : 'nav-rail-btn')}
         style={({ isActive }) => ({
           display: 'flex',
           width: '100%',
@@ -137,18 +128,9 @@ export default function NavRail({ clearAuth }: NavRailProps) {
           padding: '0 8px',
           borderRadius: 8,
           textDecoration: 'none',
-          background:
-            isActive && !location.pathname.startsWith('/settings/channels')
-              ? 'var(--accent-muted)'
-              : 'transparent',
-          color:
-            isActive && !location.pathname.startsWith('/settings/channels')
-              ? 'var(--accent)'
-              : 'var(--text-3)',
-          boxShadow:
-            isActive && !location.pathname.startsWith('/settings/channels')
-              ? 'inset 2px 0 0 var(--accent)'
-              : 'none',
+          background: isActive ? 'var(--accent-muted)' : 'transparent',
+          color: isActive ? 'var(--accent)' : 'var(--text-3)',
+          fontWeight: isActive ? 600 : 500,
           transition: 'background 150ms ease, color 150ms ease',
           overflow: 'hidden',
           paddingLeft: 14,

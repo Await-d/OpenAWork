@@ -64,7 +64,9 @@ export function getArtifactEditorLanguage(type: ArtifactContentType): string {
 }
 
 export function canPreviewArtifact(type: ArtifactContentType): boolean {
-  return type === 'html' || type === 'svg' || type === 'markdown' || type === 'csv';
+  return (
+    type === 'html' || type === 'svg' || type === 'markdown' || type === 'csv' || type === 'image'
+  );
 }
 
 function normalizeFileStem(title: string): string {

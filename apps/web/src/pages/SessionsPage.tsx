@@ -10,6 +10,7 @@ import { toast } from '../components/ToastNotification.js';
 import {
   buildWorkspaceSessionCollections,
   getWorkspaceGroupKey,
+  listWorkspacePathsFromSessions,
   UNBOUND_WORKSPACE_GROUP_KEY,
 } from '../utils/session-grouping.js';
 import { subscribeSessionListRefresh } from '../utils/session-list-events.js';
@@ -101,6 +102,7 @@ export default function SessionsPage() {
   );
   const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
+  const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
   const removeSavedWorkspacePath = useUIStateStore((s) => s.removeSavedWorkspacePath);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,7 +179,9 @@ export default function SessionsPage() {
         if (loadSessionsRequestIdRef.current !== requestId) {
           return;
         }
-        setSessions(list as SessionRow[]);
+        const nextSessions = list as SessionRow[];
+        mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
+        setSessions(nextSessions);
       } catch {
         return;
       } finally {
@@ -186,7 +190,7 @@ export default function SessionsPage() {
         }
       }
     },
-    [gatewayUrl, token],
+    [gatewayUrl, token, mergeSavedWorkspacePaths],
   );
 
   useEffect(() => {
@@ -506,6 +510,7 @@ export default function SessionsPage() {
     () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths),
     [savedWorkspacePaths, sessions],
   );
+
   const filtered = useMemo(
     () =>
       sessions.filter((session) =>

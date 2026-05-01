@@ -439,11 +439,10 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
         return;
       }
 
-      const recovery = await createSessionsClient(gatewayUrl).getRecovery(
-        accessToken,
-        sessionId,
-        { ...options, messageLimit: 1 },
-      );
+      const recovery = await createSessionsClient(gatewayUrl).getRecovery(accessToken, sessionId, {
+        ...options,
+        messageLimit: 1,
+      });
       const pendingInteractions = getRecoveryPendingInteractions(recovery);
       updatePendingPermission(
         toSessionPendingPermissionStateFromRequest(pendingInteractions.pendingPermission),

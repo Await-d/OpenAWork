@@ -2,6 +2,7 @@ export type SessionDialogueMode = 'clarify' | 'coding' | 'programmer';
 
 interface ParsedSessionMetadata {
   dialogueMode: SessionDialogueMode;
+  icon?: string;
   modelId?: string;
   parentSessionId?: string;
   teamWorkspaceId?: string;
@@ -56,6 +57,10 @@ export function hasTeamWorkspace(metadataJson?: string): boolean {
   return parseSessionMetadata(metadataJson).teamWorkspaceId != null;
 }
 
+export function extractSessionIcon(metadataJson?: string): string | undefined {
+  return parseSessionMetadata(metadataJson).icon;
+}
+
 function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
   if (!metadataJson) {
     return FALLBACK_PARSED_SESSION_METADATA;
@@ -69,6 +74,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
   try {
     const parsed = JSON.parse(metadataJson) as {
       dialogueMode?: unknown;
+      icon?: unknown;
       modelId?: unknown;
       parentSessionId?: unknown;
       teamWorkspaceId?: unknown;
@@ -83,6 +89,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
         parsed.dialogueMode === 'programmer'
           ? parsed.dialogueMode
           : FALLBACK_PARSED_SESSION_METADATA.dialogueMode,
+      icon: normalizeOptionalString(parsed.icon),
       modelId: normalizeOptionalString(parsed.modelId),
       parentSessionId: normalizeOptionalString(parsed.parentSessionId),
       teamWorkspaceId: normalizeOptionalString(parsed.teamWorkspaceId),

@@ -1,7 +1,4 @@
-import {
-  DEFAULT_IMAGE_GENERATION_SIZE,
-  normalizeImageGenerationSize,
-} from '@openAwork/shared';
+import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type { ReasoningEffort } from '../pages/chat-page/support.js';
 
 export interface ChatSettingsModel {
@@ -11,6 +8,7 @@ export interface ChatSettingsModel {
   contextWindow?: number;
   maxOutputTokens?: number;
   supportsImageGeneration?: boolean;
+  supportsImageGeneration4K?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;

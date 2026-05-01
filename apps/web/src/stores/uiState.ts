@@ -35,6 +35,7 @@ export interface UIStateStore {
   bumpWorkspaceTreeVersion: () => void;
   savedWorkspacePaths: string[];
   addSavedWorkspacePath: (path: string) => void;
+  mergeSavedWorkspacePaths: (paths: readonly string[]) => void;
   removeSavedWorkspacePath: (path: string) => void;
   selectedWorkspacePath: string | null;
   setSelectedWorkspacePath: (path: string | null) => void;
@@ -132,6 +133,34 @@ export const useUIStateStore = create<UIStateStore>()(
               normalized,
               ...state.savedWorkspacePaths.filter((entry) => entry !== normalized),
             ],
+          };
+        }),
+      mergeSavedWorkspacePaths: (paths) =>
+        set((state) => {
+          const normalizedPaths = paths
+            .map((path) => normalizeWorkspacePath(path))
+            .filter((path): path is string => path !== null);
+          if (normalizedPaths.length === 0) {
+            return state;
+          }
+
+          const uniquePaths = Array.from(new Set(normalizedPaths));
+          const nextSavedWorkspacePaths = [
+            ...uniquePaths,
+            ...state.savedWorkspacePaths.filter((entry) => !uniquePaths.includes(entry)),
+          ];
+
+          if (
+            nextSavedWorkspacePaths.length === state.savedWorkspacePaths.length &&
+            nextSavedWorkspacePaths.every(
+              (entry, index) => entry === state.savedWorkspacePaths[index],
+            )
+          ) {
+            return state;
+          }
+
+          return {
+            savedWorkspacePaths: nextSavedWorkspacePaths,
           };
         }),
       removeSavedWorkspacePath: (path) =>

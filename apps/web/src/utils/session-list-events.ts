@@ -1,4 +1,6 @@
 import type { PendingQuestionRequest } from '@openAwork/web-client';
+import type { SessionPendingPermissionState } from './pending-permission-state.js';
+export type { SessionPendingPermissionState } from './pending-permission-state.js';
 
 const SESSION_LIST_REFRESH_EVENT = 'openAwork:sessions-refresh';
 const CURRENT_SESSION_REFRESH_EVENT = 'openAwork:current-session-refresh';
@@ -15,16 +17,6 @@ const pendingQuestionStateBySession = new Map<string, PendingQuestionRequest | n
 const runStateBySession = new Map<string, SessionRunState>();
 
 export type SessionRunState = 'idle' | 'running' | 'paused';
-
-export interface SessionPendingPermissionState {
-  requestId: string;
-  toolName: string;
-  scope: string;
-  reason: string;
-  riskLevel: 'low' | 'medium' | 'high';
-  previewAction?: string;
-  targetSessionId: string;
-}
 
 export function requestSessionListRefresh(): void {
   if (typeof window === 'undefined' || refreshScheduled) {

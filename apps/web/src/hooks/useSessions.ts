@@ -10,6 +10,7 @@ import { exportSession } from '../utils/session-transfer.js';
 import {
   buildWorkspaceSessionCollections,
   filterSessionTreeGroupsByQuery,
+  listWorkspacePathsFromSessions,
 } from '../utils/session-grouping.js';
 import {
   subscribeSessionListRefresh,
@@ -56,6 +57,7 @@ export function useSessions() {
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
+  const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
   const tokenStore: TokenStore = useMemo(
     () => ({
       getAccessToken: () => useAuthStore.getState().accessToken,
@@ -139,14 +141,16 @@ export function useSessions() {
       if (fetchRequestIdRef.current !== requestId) {
         return;
       }
-      setSessions(data as unknown as Session[]);
+      const nextSessions = data as unknown as Session[];
+      mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
+      setSessions(nextSessions);
     } catch (err) {
       if (err instanceof HttpError && err.status === 401) {
         clearAuth();
         void navigate('/');
       }
     }
-  }, [accessToken, gatewayUrl, tokenStore, clearAuth, navigate]);
+  }, [accessToken, gatewayUrl, tokenStore, clearAuth, navigate, mergeSavedWorkspacePaths]);
 
   const newSession = useCallback(
     async (workspacePath?: string | null, parentSessionId?: string | null) => {
@@ -394,6 +398,7 @@ export function useSessions() {
     () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths),
     [savedWorkspacePaths, sessions],
   );
+
   const groupedSessionTrees = useMemo(
     () => filterSessionTreeGroupsByQuery(workspaceCollections.treeGroups, normalizedSessionSearch),
     [normalizedSessionSearch, workspaceCollections.treeGroups],

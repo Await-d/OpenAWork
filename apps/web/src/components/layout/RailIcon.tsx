@@ -8,8 +8,6 @@ export const railItems = [
   { to: '/skills', label: 'Skills' },
   { to: '/agents', label: 'Agents' },
   { to: '/workflows', label: 'Workflows' },
-  { to: '/settings/channels', label: 'Channels' },
-  { to: '/usage', label: 'Usage' },
   { to: '/schedules', label: 'Schedules' },
 ];
 
@@ -22,8 +20,6 @@ export const railLabelCn: Record<string, string> = {
   Workflows: '工作流',
   Team: '团队',
   Templates: '模板',
-  Channels: '频道',
-  Usage: '用量',
   Schedules: '定时',
 };
 

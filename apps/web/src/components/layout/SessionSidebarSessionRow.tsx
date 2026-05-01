@@ -1,7 +1,10 @@
-import React from 'react';
-import { SessionModeBadges } from '../SessionModeBadges.js';
+import React, { useMemo } from 'react';
 import type { Session } from '../../hooks/useSessions.js';
-import { hasParentSession } from '../../utils/session-metadata.js';
+import {
+  extractSessionIcon,
+  getSessionModeLabels,
+  hasParentSession,
+} from '../../utils/session-metadata.js';
 import type { WorkspaceSessionTreeNode } from '../../utils/session-grouping.js';
 
 const sessionActionButtonStyle: React.CSSProperties = {
@@ -70,6 +73,14 @@ export function SessionSidebarSessionRow({
   const isRenaming = renamingSessionId === session.id;
   const showChildBadge = depth > 0 || hasParentSession(session.metadata_json);
   const deleting = isDeletingSession(session.id);
+  const modeLabels = useMemo(
+    () => getSessionModeLabels(session.metadata_json),
+    [session.metadata_json],
+  );
+  const sessionIcon = useMemo(
+    () => extractSessionIcon(session.metadata_json),
+    [session.metadata_json],
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -130,8 +141,8 @@ export function SessionSidebarSessionRow({
           listStyle: 'none',
           display: 'flex',
           flexDirection: 'row',
-          alignItems: 'center',
-          gap: 2,
+          alignItems: 'flex-start',
+          gap: 6,
           width: '100%',
           borderRadius: 6,
           padding: '4px 6px',
@@ -158,23 +169,30 @@ export function SessionSidebarSessionRow({
         )}
         <span
           style={{
+            position: 'relative',
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 14,
-            height: 14,
+            width: 20,
+            height: 20,
+            marginTop: 2,
+            borderRadius: 5,
+            background: isActive
+              ? 'color-mix(in oklch, var(--accent) 15%, transparent)'
+              : 'transparent',
             color: isActive
               ? 'var(--accent)'
               : isPinned(session.id)
                 ? 'var(--accent)'
                 : 'var(--text-3)',
+            transition: 'background 120ms ease',
           }}
         >
           {isPinned(session.id) ? (
             <svg
-              width="11"
-              height="11"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -186,10 +204,14 @@ export function SessionSidebarSessionRow({
               <line x1="12" y1="17" x2="12" y2="22" />
               <path d="M5 17H19V15L17 9V4H18V2H6V4H7V9L5 15V17Z" />
             </svg>
+          ) : sessionIcon ? (
+            <span aria-hidden="true" style={{ fontSize: 14, lineHeight: 1 }}>
+              {sessionIcon}
+            </span>
           ) : (
             <svg
-              width="11"
-              height="11"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -201,14 +223,44 @@ export function SessionSidebarSessionRow({
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           )}
+          {session.state_status === 'running' && (
+            <span
+              aria-label="运行中"
+              style={{
+                position: 'absolute',
+                bottom: -1,
+                right: -1,
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: '#22c55e',
+                boxShadow: '0 0 5px #22c55e',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              }}
+            />
+          )}
+          {session.state_status === 'paused' && (
+            <span
+              aria-label="已暂停"
+              style={{
+                position: 'absolute',
+                bottom: -1,
+                right: -1,
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: 'var(--warning, #f59e0b)',
+              }}
+            />
+          )}
         </span>
         <div
           style={{
             flex: 1,
             minWidth: 0,
             display: 'flex',
-            alignItems: 'center',
-            gap: 6,
+            flexDirection: 'column',
+            gap: 1,
           }}
         >
           {isRenaming ? (
@@ -240,16 +292,16 @@ export function SessionSidebarSessionRow({
               onPointerEnter={() => preloadChatRoute(session.id)}
               onFocus={() => preloadChatRoute(session.id)}
               onClick={() => openChatSession(session.id)}
+              title={session.title ?? '未命名'}
               style={{
-                flex: 1,
-                minWidth: 0,
                 display: 'flex',
                 alignItems: 'center',
                 textAlign: 'left',
                 border: 'none',
                 background: 'transparent',
                 cursor: 'pointer',
-                padding: '4px 0',
+                padding: '1px 0',
+                minWidth: 0,
               }}
             >
               <span
@@ -259,59 +311,20 @@ export function SessionSidebarSessionRow({
                   fontSize: 12,
                   fontWeight: isActive ? 600 : 400,
                   color: isActive ? 'var(--text)' : 'var(--text-2)',
-                  lineHeight: '1.4',
+                  lineHeight: '1.35',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    width: '100%',
-                    minWidth: 0,
-                  }}
-                >
-                  <span
-                    title={session.title ?? '未命名'}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {session.title ?? '未命名'}
-                  </span>
-                  {showChildBadge && (
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        height: 16,
-                        padding: '0 5px',
-                        borderRadius: 999,
-                        background: 'var(--accent-muted)',
-                        color: 'var(--accent)',
-                        fontSize: 9,
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}
-                    >
-                      子会话
-                    </span>
-                  )}
-                </span>
+                {session.title ?? '未命名'}
               </span>
             </button>
           )}
           <div
             style={{
               position: 'relative',
-              width: 170,
-              height: 24,
-              flexShrink: 0,
-              marginLeft: 'auto',
+              height: 16,
             }}
           >
             <span
@@ -320,8 +333,7 @@ export function SessionSidebarSessionRow({
                 inset: 0,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'flex-end',
-                gap: 6,
+                gap: 4,
                 opacity: !isRenaming && !isHovered ? 1 : 0,
                 transition: 'opacity 120ms ease-out',
                 pointerEvents: 'none',
@@ -330,25 +342,63 @@ export function SessionSidebarSessionRow({
             >
               <span
                 style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  lineHeight: '16px',
+                  fontSize: 10,
+                }}
+              >
+                {showChildBadge && (
+                  <>
+                    <span style={{ color: 'var(--accent)', fontWeight: 600 }}>子会话</span>
+                    {modeLabels.length > 0 && (
+                      <span style={{ color: 'var(--text-3)', margin: '0 3px' }}>·</span>
+                    )}
+                  </>
+                )}
+                {modeLabels.map((label, i) => (
+                  <React.Fragment key={label}>
+                    {i > 0 && <span style={{ color: 'var(--text-3)', margin: '0 3px' }}>·</span>}
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        flexShrink: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        color:
+                          label === '澄清(方案)'
+                            ? 'rgb(245, 158, 11)'
+                            : label === '编程'
+                              ? 'rgb(167, 139, 250)'
+                              : label === '程序员'
+                                ? 'rgb(52, 211, 153)'
+                                : label === 'YOLO'
+                                  ? 'var(--accent)'
+                                  : 'rgb(96, 165, 250)',
+                      }}
+                    >
+                      {label}
+                    </span>
+                  </React.Fragment>
+                ))}
+              </span>
+              <span
+                style={{
                   fontSize: 10,
                   color: 'var(--text-3)',
                   whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  lineHeight: '16px',
                 }}
               >
                 {new Date(session.updated_at).toLocaleDateString(undefined, {
                   month: 'short',
                   day: 'numeric',
                 })}
-              </span>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  minWidth: 0,
-                  maxWidth: 100,
-                  overflow: 'hidden',
-                }}
-              >
-                <SessionModeBadges compact metadataJson={session.metadata_json} />
               </span>
             </span>
             <div

@@ -144,6 +144,32 @@ export function buildWorkspaceSessionCollections<TSession extends SessionWithWor
   };
 }
 
+export function listWorkspacePathsFromSessions<TSession extends SessionWithWorkspaceLike>(
+  sessions: TSession[],
+): string[] {
+  const orderedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
+  const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
+  const resolvedWorkspaceCache = new Map<string, string | null>();
+  const workspacePaths: string[] = [];
+  const seenWorkspacePaths = new Set<string>();
+
+  for (const session of orderedSessions) {
+    const workspacePath = resolveSessionWorkspacePath(
+      session,
+      sessionsById,
+      resolvedWorkspaceCache,
+    );
+    if (!workspacePath || seenWorkspacePaths.has(workspacePath)) {
+      continue;
+    }
+
+    seenWorkspacePaths.add(workspacePath);
+    workspacePaths.push(workspacePath);
+  }
+
+  return workspacePaths;
+}
+
 export function filterSessionTreeGroupsByQuery<TSession extends SessionWithWorkspaceLike>(
   groups: WorkspaceSessionTreeGroup<TSession>[],
   query: string,
@@ -263,20 +289,7 @@ function sortWorkspaceGroups<TSession extends SessionWithWorkspaceLike>(
     if (aHasSessions && !bHasSessions) return -1;
     if (!aHasSessions && bHasSessions) return 1;
 
-    const byLatest = getLatestUpdatedAt(b.sessions).localeCompare(getLatestUpdatedAt(a.sessions));
-    if (byLatest !== 0) {
-      return byLatest;
-    }
-
-    const aSavedOrder =
-      a.workspacePath === null
-        ? Number.MAX_SAFE_INTEGER
-        : (savedWorkspaceOrder.get(a.workspacePath) ?? Number.MAX_SAFE_INTEGER);
-    const bSavedOrder =
-      b.workspacePath === null
-        ? Number.MAX_SAFE_INTEGER
-        : (savedWorkspaceOrder.get(b.workspacePath) ?? Number.MAX_SAFE_INTEGER);
-    return aSavedOrder - bSavedOrder;
+    return a.workspaceLabel.localeCompare(b.workspaceLabel, undefined, { sensitivity: 'base' });
   });
 
   return orderedGroups;
@@ -289,6 +302,13 @@ function compareSessionsByUpdatedAt<TSession extends SessionWithWorkspaceLike>(
   const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);
   if (byUpdatedAt !== 0) {
     return byUpdatedAt;
+  }
+
+  const aTitle = (a.title ?? '').toLowerCase();
+  const bTitle = (b.title ?? '').toLowerCase();
+  const byTitle = aTitle.localeCompare(bTitle, undefined, { sensitivity: 'base' });
+  if (byTitle !== 0) {
+    return byTitle;
   }
 
   return a.id.localeCompare(b.id);

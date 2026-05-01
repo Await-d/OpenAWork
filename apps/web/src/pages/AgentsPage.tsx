@@ -49,6 +49,14 @@ function toUpdateInput(state: AgentEditorState): UpdateManagedAgentInput {
   return toCreateInput(state);
 }
 
+function toBuiltinUpdateInput(state: AgentEditorState): UpdateManagedAgentInput {
+  return {
+    model: state.model.trim() || undefined,
+    variant: state.variant.trim() || undefined,
+    fallbackModels: parseAliases(state.fallbackModelsText),
+  };
+}
+
 function summarizeAgents(agents: ManagedAgentRecord[]) {
   return {
     total: agents.length,
@@ -250,7 +258,9 @@ export default function AgentsPage() {
       const updated = await client.update(
         accessToken,
         selectedAgent.id,
-        toUpdateInput(editorState),
+        selectedAgent.origin === 'builtin'
+          ? toBuiltinUpdateInput(editorState)
+          : toUpdateInput(editorState),
       );
       updateLocalAgent(updated);
       setSaveMessage('已保存 Agent 实体');

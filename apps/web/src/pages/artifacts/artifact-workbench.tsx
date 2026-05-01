@@ -188,7 +188,7 @@ export function ArtifactWorkbench({
               </button>
               <button
                 type="button"
-                onClick={() => downloadArtifact(draftTitle, artifact.type, draftContent)}
+                onClick={() => downloadArtifact(artifact, draftContent)}
                 style={secondaryButtonStyle}
               >
                 下载
@@ -233,12 +233,23 @@ export function ArtifactWorkbench({
   );
 }
 
-function downloadArtifact(title: string, type: ArtifactRecord['type'], content: string) {
+function downloadArtifact(artifact: ArtifactRecord, content: string) {
+  const anchor = document.createElement('a');
+  const metadataFileName =
+    artifact.metadata && typeof artifact.metadata['fileName'] === 'string'
+      ? artifact.metadata['fileName']
+      : null;
+  anchor.download = metadataFileName ?? buildArtifactDownloadName(artifact);
+
+  if (artifact.type === 'image' && content.startsWith('data:')) {
+    anchor.href = content;
+    anchor.click();
+    return;
+  }
+
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = buildArtifactDownloadName({ title, type });
   anchor.click();
   URL.revokeObjectURL(url);
 }

@@ -693,7 +693,16 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       const startSse = () => {
         if (fallbackStarted || settled || streamGenerationRef.current !== streamGeneration) {
-          console.log('[STREAM] startSse skipped: fallback=', fallbackStarted, 'settled=', settled, 'gen=', streamGeneration, 'current=', streamGenerationRef.current);
+          console.log(
+            '[STREAM] startSse skipped: fallback=',
+            fallbackStarted,
+            'settled=',
+            settled,
+            'gen=',
+            streamGeneration,
+            'current=',
+            streamGenerationRef.current,
+          );
           return;
         }
         console.log('[STREAM] startSse fallback initiated for session', sessionId);
@@ -730,7 +739,16 @@ export function useGatewayClient(token: string | null): GatewayClient {
           handleChunk(chunk);
         };
         es.onerror = () => {
-          console.log('[STREAM] SSE onerror: settled=', settled, 'gen=', streamGeneration, 'current=', streamGenerationRef.current, 'stopReq=', stopRequestedRef.current);
+          console.log(
+            '[STREAM] SSE onerror: settled=',
+            settled,
+            'gen=',
+            streamGeneration,
+            'current=',
+            streamGenerationRef.current,
+            'stopReq=',
+            stopRequestedRef.current,
+          );
           if (!settled && streamGenerationRef.current === streamGeneration) {
             const wasStopRequested = stopRequestedRef.current;
             settled = true;
@@ -773,7 +791,12 @@ export function useGatewayClient(token: string | null): GatewayClient {
         };
 
         ws.onerror = () => {
-          console.log('[STREAM] WS onerror: gen=', streamGeneration, 'current=', streamGenerationRef.current);
+          console.log(
+            '[STREAM] WS onerror: gen=',
+            streamGeneration,
+            'current=',
+            streamGenerationRef.current,
+          );
           ws.close();
           if (streamGenerationRef.current === streamGeneration) {
             startSse();
@@ -781,7 +804,16 @@ export function useGatewayClient(token: string | null): GatewayClient {
         };
 
         ws.onclose = () => {
-          console.log('[STREAM] WS onclose: settled=', settled, 'gen=', streamGeneration, 'current=', streamGenerationRef.current, 'stopReq=', stopRequestedRef.current);
+          console.log(
+            '[STREAM] WS onclose: settled=',
+            settled,
+            'gen=',
+            streamGeneration,
+            'current=',
+            streamGenerationRef.current,
+            'stopReq=',
+            stopRequestedRef.current,
+          );
           if (settled || streamGenerationRef.current !== streamGeneration) {
             return;
           }
