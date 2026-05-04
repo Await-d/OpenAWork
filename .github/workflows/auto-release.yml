@@ -122,6 +122,7 @@ jobs:
 
       - name: Create and push desktop preview tag
         if: steps.changes.outputs.has_changes == 'true'
+        id: tag
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -129,9 +130,40 @@ jobs:
 
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists — skipping"
+            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git tag -a "$TAG" -F release-notes.md
           git push origin "$TAG"
           echo "Created and pushed tag: $TAG"
+          echo "tag_created=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Write job summary
+        if: always()
+        env:
+          HAS_CHANGES: ${{ steps.changes.outputs.has_changes }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TAG_CREATED: ${{ steps.tag.outputs.tag_created }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ "$HAS_CHANGES" != "true" ]; then
+            echo "## ⏭ 自动发布：跳过" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "自上次 desktop tag 以来没有新的可发布提交。" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$TAG_CREATED" = "true" ]; then
+            echo "## 🚀 自动发布：成功" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| 项目 | 值 |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|------|-----|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| 版本 | \`$VERSION\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| 标签 | \`$TAG\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "标签已推送，\`release-desktop.yml\` 正在构建各平台安装包。" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## ⚠️ 自动发布：标签已存在" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "标签 \`$TAG\` 已存在，未重复创建。" >> "$GITHUB_STEP_SUMMARY"
+          fi
