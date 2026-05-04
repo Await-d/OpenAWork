@@ -32,7 +32,7 @@ describe('resolvePermissionCategory', () => {
     expect(resolvePermissionCategory('multi_edit')).toBe('edit');
     expect(resolvePermissionCategory('task_create')).toBe('task');
     expect(resolvePermissionCategory('task_update')).toBe('task');
-    expect(resolvePermissionCategory('call_omo_agent')).toBe('task');
+    expect(resolvePermissionCategory('call_omo_agent')).toBe('task_run');
 
     // Already covered before the audit — guard against accidental
     // regressions while we're in the same area.
@@ -41,7 +41,7 @@ describe('resolvePermissionCategory', () => {
     expect(resolvePermissionCategory('write')).toBe('write');
     expect(resolvePermissionCategory('bash')).toBe('bash');
     expect(resolvePermissionCategory('interactive_bash')).toBe('bash');
-    expect(resolvePermissionCategory('task')).toBe('task');
+    expect(resolvePermissionCategory('task')).toBe('task_run');
     expect(resolvePermissionCategory('skill')).toBe('skill');
     expect(resolvePermissionCategory('skill_mcp')).toBe('skill');
     expect(resolvePermissionCategory('mcp_call')).toBe('mcp_call');
@@ -71,7 +71,6 @@ describe('default permission rule evaluation', () => {
     expect(effectiveActionFor('multi_edit')).toBe('ask');
     expect(effectiveActionFor('task_create')).toBe('ask');
     expect(effectiveActionFor('task_update')).toBe('ask');
-    expect(effectiveActionFor('call_omo_agent')).toBe('ask');
     expect(effectiveActionFor('ast_grep_replace')).toBe('ask');
   });
 

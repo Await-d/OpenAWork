@@ -247,7 +247,11 @@ export function toModelMessages(
     }
 
     if (msg.info.role === 'assistant') {
-      // Skip error messages with no valid content
+      // Skip error-status messages (failed upstream responses should not replay in recovery)
+      if (msg.info.status === 'error') {
+        continue;
+      }
+      // Skip messages with structured error field but no valid content
       if (msg.info.error && !hasValidAssistantParts(msg.parts)) {
         continue;
       }
