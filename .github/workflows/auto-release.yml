@@ -70,9 +70,9 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         run: git pull --rebase origin main
 
-      - name: Bump version (auto — infers patch/minor/major from commits)
+      - name: Bump version (patch — rolls 0.2.1→0.2.2→…→0.2.9→0.3.0 via normalization)
         if: steps.changes.outputs.has_changes == 'true'
-        run: node scripts/release-version.mjs --bump auto
+        run: node scripts/release-version.mjs --bump patch
 
       - name: Read bumped version
         if: steps.changes.outputs.has_changes == 'true'
