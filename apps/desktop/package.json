@@ -9,7 +9,7 @@
     "package": "pnpm run build",
     "bundle-sidecar": "node src-tauri/scripts/bundle-sidecar.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
     "lint": "node -e \"console.log('跳过 apps/desktop lint：apps/** 按仓库约定不参与根 ESLint 检查')\""
   },
