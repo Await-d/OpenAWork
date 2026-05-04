@@ -104,18 +104,21 @@ jobs:
         include:
           - label: macos-aarch64
             runner: macos-latest
-            args: '--target aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin --bundles dmg'
             rust_targets: 'aarch64-apple-darwin'
+            tauri_target_triple: 'aarch64-apple-darwin'
             bundle_path: apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/
           - label: windows
             runner: windows-latest
-            args: ''
+            args: '--bundles nsis'
             rust_targets: ''
+            tauri_target_triple: ''
             bundle_path: apps/desktop/src-tauri/target/release/bundle/
           - label: linux
             runner: ubuntu-22.04
-            args: ''
+            args: '--bundles deb,appimage'
             rust_targets: ''
+            tauri_target_triple: ''
             bundle_path: apps/desktop/src-tauri/target/release/bundle/
     runs-on: ${{ matrix.runner }}
     steps:
@@ -153,6 +156,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Build gateway sidecar
+        shell: bash
+        env:
+          TAURI_TARGET_TRIPLE: ${{ matrix.tauri_target_triple }}
+        run: node apps/desktop/src-tauri/scripts/bundle-sidecar.mjs
 
       - name: Import macOS signing cert
         if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true'
