@@ -4,11 +4,20 @@ import type { ModelRouteConfig } from '../model-router.js';
 const mocks = vi.hoisted(() => ({
   sqliteGet: vi.fn(),
   sqliteRun: vi.fn(),
+  runUpstreamGenerate: vi.fn(),
 }));
 
 vi.mock('../db.js', () => ({
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,
+  WORKSPACE_ROOT: '/workspace',
+  WORKSPACE_ROOTS: ['/workspace'],
+  WORKSPACE_ACCESS_MODE: 'unrestricted' as const,
+  WORKSPACE_ACCESS_RESTRICTED: false,
+}));
+
+vi.mock('../v2-runtime/upstream/index.js', () => ({
+  runUpstreamGenerate: mocks.runUpstreamGenerate,
 }));
 
 import { generateSessionTitleLlm } from '../session-title-llm.js';
@@ -34,11 +43,10 @@ describe('generateSessionTitleLlm', () => {
   beforeEach(() => {
     mocks.sqliteGet.mockReset();
     mocks.sqliteRun.mockReset();
-    vi.stubGlobal('fetch', vi.fn());
+    mocks.runUpstreamGenerate.mockReset();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -52,59 +60,36 @@ describe('generateSessionTitleLlm', () => {
       userId: 'user-1',
     });
 
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
     expect(mocks.sqliteRun).not.toHaveBeenCalled();
   });
 
-  it('forces title requests to stay non-streaming and only updates empty titles', async () => {
+  it('calls upstream and updates the session title when title is empty', async () => {
     mocks.sqliteGet.mockReturnValue({ title: '' });
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: '升级后的标题' } }],
-        }),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      ),
-    );
+    mocks.runUpstreamGenerate.mockResolvedValue({
+      text: '升级后的标题',
+      inputTokens: 10,
+      outputTokens: 5,
+      finishReason: 'stop',
+    });
 
     await generateSessionTitleLlm({
-      route: createRoute({
-        requestOverrides: {
-          body: {
-            stream: true,
-            stream_options: { include_usage: true },
-          },
-        },
-      }),
+      route: createRoute(),
       userMessage: '帮我修复标题',
       sessionId: 'session-2',
       userId: 'user-2',
     });
 
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const [, requestInit] = vi.mocked(globalThis.fetch).mock.calls[0] ?? [];
-    const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
-    expect(body['stream']).toBe(false);
-    expect(body).not.toHaveProperty('stream_options');
-
+    expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
     expect(mocks.sqliteRun).toHaveBeenCalledWith(
       expect.stringContaining("AND COALESCE(TRIM(title), '') = ''"),
       ['升级后的标题', 'session-2', 'user-2'],
     );
   });
 
-  it('swallows SSE-like JSON parse failures and keeps the heuristic title', async () => {
+  it('swallows upstream errors and keeps the heuristic title', async () => {
     mocks.sqliteGet.mockReturnValue({ title: '' });
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response('data: {"choices":[{"delta":{"content":"标题"}}]}\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      }),
-    );
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.runUpstreamGenerate.mockRejectedValue(new Error('upstream blew up'));
 
     await expect(
       generateSessionTitleLlm({
@@ -115,7 +100,7 @@ describe('generateSessionTitleLlm', () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
     expect(mocks.sqliteRun).not.toHaveBeenCalled();
   });
 });
