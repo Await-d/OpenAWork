@@ -3,9 +3,12 @@
     "name": "OpenAWork",
     "slug": "openAwork",
     "scheme": "openawork",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "orientation": "portrait",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "updates": {
       "url": "https://u.expo.dev/5d5fee00-cf47-4452-a6b3-238c1b84eb0c",
       "checkAutomatically": "ON_LOAD",
@@ -36,7 +39,9 @@
         {
           "microphonePermission": "允许 OpenAWork 使用麦克风进行语音输入。",
           "speechRecognitionPermission": "允许 OpenAWork 使用语音识别将语音转换为文本。",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ]
     ],
