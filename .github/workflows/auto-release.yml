@@ -1,0 +1,137 @@
+name: Auto Release Preview
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: true
+
+jobs:
+  auto-release-preview:
+    runs-on: ubuntu-latest
+    # Only run when CI passes and the triggering actor is a human (not the release bot itself)
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login != 'github-actions[bot]'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Check for releasable changes since last desktop tag
+        id: changes
+        run: |
+          LAST_TAG=$(git tag --sort=-version:refname | grep -E '^desktop-v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous desktop tag found — treating as first release"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Last desktop tag: $LAST_TAG"
+
+          # Count commits since last tag, ignoring bot version-bump commits
+          CHANGES=$(git log "${LAST_TAG}..HEAD" --oneline \
+            | grep -v 'build(release):.*自动提升版本' || true)
+
+          if [ -z "$CHANGES" ]; then
+            echo "No releasable commits since $LAST_TAG — skipping auto-release"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Releasable commits found since $LAST_TAG"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull latest main before version bump
+        if: steps.changes.outputs.has_changes == 'true'
+        run: git pull --rebase origin main
+
+      - name: Bump version (auto — infers patch/minor/major from commits)
+        if: steps.changes.outputs.has_changes == 'true'
+        run: node scripts/release-version.mjs --bump auto
+
+      - name: Read bumped version
+        if: steps.changes.outputs.has_changes == 'true'
+        id: version
+        run: |
+          VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped to: $VERSION"
+
+      - name: Generate release notes
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          LAST_TAG=$(git tag --sort=-version:refname | grep -E '^desktop-v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
+          RANGE="${LAST_TAG:+${LAST_TAG}..HEAD}"
+
+          # Extract first commit description that contains Chinese characters
+          SUMMARY=$(git log ${RANGE} --format="%s" \
+            | grep -v 'build(release):.*自动提升版本' \
+            | grep -P '[\x{4e00}-\x{9fff}\x{3400}-\x{4dbf}]' \
+            | head -n 1 || true)
+
+          # Fallback to generic Chinese summary
+          if [ -z "$SUMMARY" ]; then
+            SUMMARY="持续迭代优化，修复问题并改进稳定性"
+          fi
+
+          echo "Using summary: $SUMMARY"
+
+          node scripts/release-notes.mjs write \
+            --version "${{ steps.version.outputs.version }}" \
+            --target "desktop-preview" \
+            --summary "$SUMMARY" \
+            --output-file release-notes.md
+
+      - name: Commit and push version bump
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git add package.json apps packages services apps/mobile/app.json apps/desktop/src-tauri/Cargo.toml
+          if git diff --cached --quiet; then
+            echo "No version files changed — skipping version bump commit"
+          else
+            git commit -m "build(release): 自动提升版本到 v${VERSION}"
+            git push origin HEAD:main
+          fi
+
+      - name: Create and push desktop preview tag
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="desktop-v${VERSION}-preview"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping"
+            exit 0
+          fi
+
+          git tag -a "$TAG" -F release-notes.md
+          git push origin "$TAG"
+          echo "Created and pushed tag: $TAG"
