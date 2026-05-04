@@ -2,13 +2,14 @@
 // static imports of `node:sqlite`, so we defer the resolution to runtime via
 // `createRequire` which preserves the `node:` prefix end-to-end.
 import { createRequire } from 'node:module';
+import type * as NodeSqlite from 'node:sqlite';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { V2Storage } from '../v2-runtime/storage/index.js';
 
 const requireFromHere = createRequire(import.meta.url);
-const sqliteModule = requireFromHere('node:sqlite') as typeof import('node:sqlite');
+const sqliteModule = requireFromHere('node:sqlite') as typeof NodeSqlite;
 const { DatabaseSync } = sqliteModule;
-type DatabaseSync = InstanceType<typeof sqliteModule.DatabaseSync>;
+type DatabaseSyncInstance = InstanceType<typeof sqliteModule.DatabaseSync>;
 
 // ─── Fresh in-memory SQLite per test ─────────────────────────────────
 //
@@ -18,7 +19,7 @@ type DatabaseSync = InstanceType<typeof sqliteModule.DatabaseSync>;
 // CREATE TABLE statements column-for-column (including index keys), and
 // that `V2Storage` returns the rows we expect.
 
-function createInMemoryDatabase(): DatabaseSync {
+function createInMemoryDatabase(): DatabaseSyncInstance {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys=ON');
 
@@ -113,7 +114,7 @@ function createInMemoryDatabase(): DatabaseSync {
   return db;
 }
 
-let db: DatabaseSync;
+let db: DatabaseSyncInstance;
 let storage: V2Storage;
 
 beforeEach(() => {

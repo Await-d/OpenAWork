@@ -1,6 +1,5 @@
 import type {
   PendingPermissionRequest,
-  PermissionDecision,
   PermissionReplyPayload,
   PermissionRequestBase,
   StreamPermissionAskedChunk,
@@ -14,7 +13,7 @@ export type {
   PermissionRequestBase,
 } from '@openAwork/shared';
 
-export interface CreatePermissionRequestPayload extends Omit<PermissionRequestBase, 'requestId'> {}
+export type CreatePermissionRequestPayload = Omit<PermissionRequestBase, 'requestId'>;
 
 export interface PermissionsClient {
   listPending(

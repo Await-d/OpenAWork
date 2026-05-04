@@ -4,6 +4,21 @@ import { Navigate } from 'react-router';
 import { useAuthStore } from '../stores/auth.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import { login } from '@openAwork/web-client';
+import {
+  type DesktopGatewayMode,
+  DEFAULT_GATEWAY_PORT,
+  desktopGatewayModeForUrl,
+  isTauriRuntime,
+  localGatewayUrl,
+  normalizeGatewayUrl,
+  parseGatewayPort,
+  readDesktopGatewayMode,
+  readGatewayPortFromUrl,
+  startDesktopGateway,
+  stopDesktopGateway,
+  waitForGatewayHealth,
+  writeDesktopGatewayMode,
+} from '../utils/desktop-gateway.js';
 
 interface LoginPageProps {
   theme?: 'dark' | 'light';
@@ -16,12 +31,24 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const setGatewayUrl = useAuthStore((s) => s.setGatewayUrl);
+  const setWebAccess = useAuthStore((s) => s.setWebAccess);
+  const webPort = useAuthStore((s) => s.webPort);
+  const desktopRuntime = isTauriRuntime();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [gatewayInput, setGatewayInput] = useState(gatewayUrl || 'http://localhost:3000');
+  const [gatewayMode, setGatewayMode] = useState<DesktopGatewayMode>(
+    () => readDesktopGatewayMode() ?? desktopGatewayModeForUrl(gatewayUrl),
+  );
+  const [portInput, setPortInput] = useState(
+    String(readGatewayPortFromUrl(gatewayUrl, webPort || DEFAULT_GATEWAY_PORT)),
+  );
+  const [localStatus, setLocalStatus] = useState<'idle' | 'starting' | 'ok' | 'fail'>('idle');
+  const [remoteStatus, setRemoteStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   if (token) {
@@ -33,8 +60,16 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
     setError(null);
     setLoading(true);
     try {
-      const resolvedUrl = gatewayInput.trim().replace(/\/$/, '') || gatewayUrl;
+      const resolvedUrl = normalizeGatewayUrl(gatewayInput) || gatewayUrl;
       setGatewayUrl(resolvedUrl);
+      if (desktopRuntime) {
+        const nextMode = desktopGatewayModeForUrl(resolvedUrl);
+        setGatewayMode(nextMode);
+        writeDesktopGatewayMode(nextMode);
+        if (nextMode === 'remote') {
+          setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
+        }
+      }
       const data = await login(resolvedUrl, email, password);
       setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
       void preloadRouteModuleByPath('/chat');
@@ -54,7 +89,73 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
   }
 
   function handleGatewayBlur() {
-    setGatewayUrl(gatewayInput.trim().replace(/\/$/, ''));
+    const resolvedUrl = normalizeGatewayUrl(gatewayInput);
+    setGatewayInput(resolvedUrl);
+    setGatewayUrl(resolvedUrl);
+    if (desktopRuntime) {
+      const nextMode = desktopGatewayModeForUrl(resolvedUrl);
+      setGatewayMode(nextMode);
+      writeDesktopGatewayMode(nextMode);
+    }
+  }
+
+  async function handleStartLocalGateway() {
+    const port = parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT);
+    const localUrl = localGatewayUrl(port);
+
+    setServerError(null);
+    setLocalStatus('starting');
+    setRemoteStatus('idle');
+    setGatewayMode('local');
+    setPortInput(String(port));
+    setGatewayInput(localUrl);
+    setGatewayUrl(localUrl);
+    setWebAccess(true, port);
+    writeDesktopGatewayMode('local');
+
+    try {
+      await startDesktopGateway(port);
+      if (!(await waitForGatewayHealth(localUrl))) {
+        throw new Error('本地服务端已启动，但健康检查暂未通过');
+      }
+      setLocalStatus('ok');
+    } catch (err: unknown) {
+      setLocalStatus('fail');
+      setServerError(err instanceof Error ? err.message : '无法启动本地服务端');
+    }
+  }
+
+  async function handleUseRemoteGateway() {
+    const remoteUrl = normalizeGatewayUrl(gatewayInput);
+    setGatewayInput(remoteUrl);
+    setServerError(null);
+
+    if (!remoteUrl) {
+      setRemoteStatus('fail');
+      setServerError('请先填写远程服务端地址');
+      return;
+    }
+
+    setRemoteStatus('testing');
+    setLocalStatus('idle');
+
+    try {
+      await stopDesktopGateway();
+    } catch (err: unknown) {
+      console.warn('Failed to stop local desktop gateway before remote login setup', err);
+    }
+
+    if (!(await waitForGatewayHealth(remoteUrl))) {
+      setRemoteStatus('fail');
+      setServerError('远程服务端健康检查失败，请确认地址可访问');
+      return;
+    }
+
+    setGatewayMode('remote');
+    setGatewayUrl(remoteUrl);
+    setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
+    writeDesktopGatewayMode('remote');
+    setRemoteStatus('ok');
   }
 
   return (
@@ -133,7 +234,70 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
             </button>
 
             {showAdvanced && (
-              <div>
+              <div className="login-advanced-panel">
+                {desktopRuntime && (
+                  <div className="login-server-mode-grid">
+                    <div
+                      className={`login-server-card${gatewayMode === 'local' ? ' login-server-card--active' : ''}`}
+                    >
+                      <div>
+                        <div className="login-server-card-title">本地服务端</div>
+                        <p className="login-server-card-copy">
+                          启动桌面端内置 Gateway，适合单机使用。
+                        </p>
+                      </div>
+                      <label className="login-label" htmlFor="login-local-port">
+                        本地端口
+                      </label>
+                      <input
+                        id="login-local-port"
+                        className="login-input"
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={portInput}
+                        onChange={(e) => setPortInput(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="login-server-action"
+                        disabled={localStatus === 'starting'}
+                        onClick={() => void handleStartLocalGateway()}
+                      >
+                        {localStatus === 'starting'
+                          ? '正在启动…'
+                          : localStatus === 'ok'
+                            ? '本地已就绪'
+                            : '使用本地服务端'}
+                      </button>
+                    </div>
+
+                    <div
+                      className={`login-server-card${gatewayMode === 'remote' ? ' login-server-card--active' : ''}`}
+                    >
+                      <div>
+                        <div className="login-server-card-title">远程服务端</div>
+                        <p className="login-server-card-copy">
+                          连接团队、NAS 或云端部署的 OpenAWork Gateway。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="login-server-action login-server-action--secondary"
+                        disabled={remoteStatus === 'testing'}
+                        onClick={() => void handleUseRemoteGateway()}
+                      >
+                        {remoteStatus === 'testing'
+                          ? '正在测试…'
+                          : remoteStatus === 'ok'
+                            ? '远程已就绪'
+                            : remoteStatus === 'fail'
+                              ? '重试远程连接'
+                              : '测试并使用远程'}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <label className="login-label" htmlFor="login-gateway">
                   Gateway 地址
                 </label>
@@ -147,12 +311,28 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
                   placeholder="http://localhost:3000"
                   autoComplete="url"
                 />
-                <p className="login-advanced-hint">API 网关地址，默认 http://localhost:3000</p>
+                <p className="login-advanced-hint">
+                  {desktopRuntime
+                    ? gatewayMode === 'local'
+                      ? '当前使用桌面端内置本地服务端。'
+                      : '当前使用远程服务端地址。'
+                    : 'API 网关地址，默认 http://localhost:3000'}
+                </p>
+                {serverError && (
+                  <div className="login-server-error">
+                    <ErrorIcon />
+                    <span>{serverError}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          <button type="submit" disabled={loading} className="login-submit-btn">
+          <button
+            type="submit"
+            disabled={loading || localStatus === 'starting' || remoteStatus === 'testing'}
+            className="login-submit-btn"
+          >
             <span className="login-btn-shine" />
             {loading ? (
               <>

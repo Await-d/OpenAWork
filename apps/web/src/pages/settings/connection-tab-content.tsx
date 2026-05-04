@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { DesktopGatewayMode } from '../../utils/desktop-gateway.js';
 import {
   MCPServerConfig,
   MCPServerList,
@@ -47,10 +48,17 @@ interface ConnectionTabContentProps {
   webPort: number;
   portInput: string;
   setPortInput: React.Dispatch<React.SetStateAction<string>>;
-  saveWebPort: () => void;
+  saveWebPort: () => Promise<void>;
   toggleWebAccess: () => void;
   copied: boolean;
   copyAddress: () => void;
+  desktopGatewayBusy: boolean;
+  desktopGatewayError: string | null;
+  desktopGatewayMode: DesktopGatewayMode;
+  remoteAdminEmail: string;
+  remoteAdminPassword: string;
+  setRemoteAdminEmail: React.Dispatch<React.SetStateAction<string>>;
+  setRemoteAdminPassword: React.Dispatch<React.SetStateAction<string>>;
   isTauri: boolean;
   savingUpstreamRetrySettings: boolean;
   setUpstreamRetryMaxRetries: React.Dispatch<React.SetStateAction<number>>;
@@ -92,6 +100,13 @@ export function ConnectionTabContent({
   toggleWebAccess,
   copied,
   copyAddress,
+  desktopGatewayBusy,
+  desktopGatewayError,
+  desktopGatewayMode,
+  remoteAdminEmail,
+  remoteAdminPassword,
+  setRemoteAdminEmail,
+  setRemoteAdminPassword,
   isTauri,
   savingUpstreamRetrySettings,
   setUpstreamRetryMaxRetries,
@@ -103,6 +118,27 @@ export function ConnectionTabContent({
     <>
       <section style={SS}>
         <h3 style={ST}>网关</h3>
+        {isTauri ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              fontSize: 12,
+              color: 'var(--text-3)',
+            }}
+          >
+            <span>当前桌面网关模式</span>
+            <strong style={{ color: 'var(--accent)' }}>
+              {desktopGatewayMode === 'local' ? '本地网关' : '远程网关'}
+            </strong>
+          </div>
+        ) : null}
         <label htmlFor="gw-url" style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>
           网关地址
         </label>
@@ -116,9 +152,54 @@ export function ConnectionTabContent({
             placeholder="http://localhost:3000"
           />
           <button type="button" onClick={saveGatewayUrl} style={BP}>
-            {urlSaved ? '✓ 已保存' : '保存'}
+            {desktopGatewayBusy ? '同步中…' : urlSaved ? '✓ 已保存' : '保存'}
           </button>
         </div>
+        {desktopGatewayError ? (
+          <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{desktopGatewayError}</p>
+        ) : null}
+        {isTauri ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <label
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                color: 'var(--text-3)',
+                fontSize: 12,
+              }}
+            >
+              远程管理员邮箱
+              <input
+                style={IS}
+                type="email"
+                value={remoteAdminEmail}
+                onChange={(event) => setRemoteAdminEmail(event.target.value)}
+                placeholder="admin@openAwork.local"
+                autoComplete="username"
+              />
+            </label>
+            <label
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                color: 'var(--text-3)',
+                fontSize: 12,
+              }}
+            >
+              远程管理员密码
+              <input
+                style={IS}
+                type="password"
+                value={remoteAdminPassword}
+                onChange={(event) => setRemoteAdminPassword(event.target.value)}
+                placeholder="切换远程网关时必填"
+                autoComplete="current-password"
+              />
+            </label>
+          </div>
+        ) : null}
       </section>
       <UpstreamRetrySection
         isSaving={savingUpstreamRetrySettings}
@@ -203,24 +284,29 @@ export function ConnectionTabContent({
       </section>
       {isTauri && (
         <section style={SS}>
-          <h3 style={ST}>网页访问</h3>
+          <h3 style={ST}>桌面网关切换</h3>
+          <p style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.6, margin: 0 }}>
+            首次启动后可以在这里切换本地网关和远程网关。本地网关会启动桌面端内置服务；远程网关请在上方填写地址并保存。
+          </p>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500, flex: 1 }}>
-              启用网页访问
+              {webAccessEnabled ? '正在使用本地网关' : '正在使用远程网关'}
             </span>
             <button
               type="button"
               onClick={toggleWebAccess}
               aria-pressed={webAccessEnabled}
+              disabled={desktopGatewayBusy}
               style={{
                 position: 'relative',
                 width: 44,
                 height: 24,
                 borderRadius: 999,
                 border: 'none',
-                cursor: 'pointer',
+                cursor: desktopGatewayBusy ? 'not-allowed' : 'pointer',
                 flexShrink: 0,
                 padding: 0,
+                opacity: desktopGatewayBusy ? 0.6 : 1,
                 background: webAccessEnabled ? 'var(--accent)' : 'var(--border)',
               }}
             >
@@ -246,15 +332,15 @@ export function ConnectionTabContent({
               max={65535}
               value={portInput}
               onChange={(event) => setPortInput(event.target.value)}
-              disabled={webAccessEnabled}
+              disabled={desktopGatewayBusy}
             />
             <button
               type="button"
-              onClick={saveWebPort}
-              disabled={webAccessEnabled}
-              style={{ ...BP, opacity: webAccessEnabled ? 0.4 : 1 }}
+              onClick={() => void saveWebPort()}
+              disabled={desktopGatewayBusy}
+              style={{ ...BP, opacity: desktopGatewayBusy ? 0.4 : 1 }}
             >
-              应用
+              {desktopGatewayBusy ? '应用中…' : '应用'}
             </button>
           </div>
           {webAccessEnabled && (

@@ -1,6 +1,5 @@
 import {
   listEffectiveWorkspacePermissionRules,
-  hasWorkspacePersistentPermission,
   loadWorkspacePermissionConfig,
   resolveWorkspacePermissionAction,
   upsertWorkspacePermanentPermission,

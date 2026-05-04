@@ -10,6 +10,7 @@
     "beforeBuildCommand": "pnpm --filter @openAwork/web build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "OpenAWork",
@@ -25,7 +26,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "OpenAWork",
     "icon": [
       "icons/icon_32x32.png",
       "icons/icon_128x128.png",
@@ -34,8 +36,14 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "externalBin": ["binaries/node"],
-    "resources": ["sidecars/agent-gateway/"]
+    "externalBin": ["binaries/agent-gateway"],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   },
   "plugins": {
     "shell": {

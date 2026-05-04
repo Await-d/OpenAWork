@@ -11,10 +11,30 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+# 阻止用户启动第二个桌面端实例——第二次启动会 focus 已有窗口然后退出。
+tauri-plugin-single-instance = "2"
+# C-7 全局快捷键（唤醒主窗口 / 显示配对二维码）
+tauri-plugin-global-shortcut = "2"
+# C-8 窗口大小/位置记忆（应用退出时保存，下次启动恢复）
+tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+rand = "0.8"
+# 解析 ~/ 与跨平台用户主目录；用于把所有桌面端持久化数据集中到 ~/.openAwork/。
+dirs = "5"
+# Argon2 用于 PIN 解锁 hash。选 argon2id 参数：m=19456 KiB, t=2, p=1（OWASP 默认），
+# PIN 仅 4-6 位数字，必须靠 argon2 慢哈希 + 随机盐抵御本地字典攻击。
+argon2 = "0.5"
+# 必须显式启用 `rustls` feature（含 __rustls-aws-lc-rs crypto provider），
+# 否则 cargo features unification 后只有 tauri-plugin-updater 的
+# `rustls-tls` -> `rustls-no-provider`（仅 __rustls，无 provider）生效，
+# `reqwest::Client::new()` 会在 client.rs:2461 触发 `panic!("No provider set")`。
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }

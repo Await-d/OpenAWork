@@ -4,11 +4,20 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@openAwork/artifacts': fileURLToPath(
+        new URL('../../packages/artifacts/src/index.ts', import.meta.url),
+      ),
+      '@openAwork/logger': fileURLToPath(
+        new URL('../../packages/logger/src/index.ts', import.meta.url),
+      ),
       '@openAwork/shared': fileURLToPath(
-        new URL('../../packages/shared/dist/index.js', import.meta.url),
+        new URL('../../packages/shared/src/index.ts', import.meta.url),
       ),
       '@openAwork/shared-ui': fileURLToPath(
         new URL('./src/test/mocks/shared-ui.tsx', import.meta.url),
+      ),
+      '@openAwork/web-client': fileURLToPath(
+        new URL('../../packages/web-client/src/index.ts', import.meta.url),
       ),
     },
   },

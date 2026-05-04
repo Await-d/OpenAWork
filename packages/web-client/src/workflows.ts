@@ -112,7 +112,7 @@ export interface TranslationResult {
   taskId: string;
   translatedContent: string;
   glossaryMatches?: number | null;
-  status: 'pending' | 'running' | 'completed' | 'failed' | string;
+  status: string;
   completedAt: number;
 }
 

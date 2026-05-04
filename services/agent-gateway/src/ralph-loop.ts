@@ -18,7 +18,7 @@ import { join, dirname } from 'node:path';
 export const DEFAULT_STATE_FILE = '.sisyphus/ralph-loop.local.md';
 export const DEFAULT_MAX_ITERATIONS = 100;
 export const DEFAULT_COMPLETION_PROMISE = 'DONE';
-const COMPLETION_TAG_PATTERN = /<promise>(.*?)<\/promise>/is;
+const _COMPLETION_TAG_PATTERN = /<promise>(.*?)<\/promise>/is;
 
 export interface RalphLoopState {
   active: boolean;
@@ -56,7 +56,7 @@ function parseFrontmatter(content: string): { data: Record<string, unknown>; bod
       else if (value === 'false') value = false;
       // Parse numbers
       else if (typeof value === 'string' && /^\d+$/.test(value)) value = Number(value);
-      data[key as string] = value;
+      data[key] = value;
     }
   }
 
@@ -64,7 +64,10 @@ function parseFrontmatter(content: string): { data: Record<string, unknown>; bod
 }
 
 const stripQuotes = (val: unknown): string => {
-  const str = String(val ?? '');
+  const str =
+    typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean'
+      ? String(val)
+      : '';
   return str.replace(/^["']|["']$/g, '');
 };
 

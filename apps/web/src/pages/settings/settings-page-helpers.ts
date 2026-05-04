@@ -12,6 +12,7 @@ import type {
 
 export const TABS = [
   { id: 'connection', label: '连接与模型' },
+  { id: 'desktop', label: '桌面端' },
   { id: 'channels', label: '消息频道' },
   { id: 'companion', label: 'Buddy 伴侣' },
   { id: 'memory', label: '记忆管理' },
@@ -24,12 +25,18 @@ export const TABS = [
 
 export type TabId = (typeof TABS)[number]['id'];
 
+/**
+ * 仅在 Tauri 桌面端运行时可见的 tab 列表。Web/移动端不渲染。
+ * 由 SettingsPage 在 nav 与路由切换处共同过滤。
+ */
+export const TAURI_ONLY_TAB_IDS: ReadonlySet<TabId> = new Set(['desktop']);
+
 export const TAB_CATEGORIES: ReadonlyArray<{
   id: string;
   label: string;
   tabIds: readonly TabId[];
 }> = [
-  { id: 'general', label: '常规', tabIds: ['connection'] },
+  { id: 'general', label: '常规', tabIds: ['connection', 'desktop'] },
   { id: 'assistant', label: '助理', tabIds: ['companion', 'memory', 'channels'] },
   { id: 'account', label: '账户', tabIds: ['usage', 'security'] },
   { id: 'extensions', label: '扩展与集成', tabIds: ['plugins'] },
@@ -198,19 +205,53 @@ export function normalizeActiveSelectionProviders(
 }
 
 export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const tauri = (
-    window as Window & {
-      __TAURI__?: {
-        core: { invoke: (name: string, value?: Record<string, unknown>) => Promise<T> };
-      };
-    }
-  ).__TAURI__;
-  if (!tauri) {
-    throw new Error('Not running in Tauri');
+  const runtime = window as Window & {
+    isTauri?: boolean;
+    __TAURI__?: {
+      core: { invoke: (name: string, value?: Record<string, unknown>) => Promise<T> };
+    };
+    __TAURI_INTERNALS__?: {
+      invoke: (name: string, value?: Record<string, unknown>) => Promise<T>;
+    };
+  };
+
+  if (runtime.__TAURI__) {
+    return runtime.__TAURI__.core.invoke(cmd, args);
   }
 
-  return tauri.core.invoke(cmd, args);
+  if (runtime.__TAURI_INTERNALS__) {
+    return runtime.__TAURI_INTERNALS__.invoke(cmd, args);
+  }
+
+  if (runtime.isTauri) {
+    throw new Error('Tauri IPC is not available yet');
+  }
+
+  throw new Error('Not running in Tauri');
 }
 
 export const isTauri =
-  typeof window !== 'undefined' && !!(window as Window & { __TAURI__?: unknown }).__TAURI__;
+  typeof window !== 'undefined' &&
+  Boolean(
+    (
+      window as Window & {
+        isTauri?: boolean;
+        __TAURI__?: unknown;
+        __TAURI_INTERNALS__?: unknown;
+      }
+    ).__TAURI__ ||
+    (
+      window as Window & {
+        isTauri?: boolean;
+        __TAURI__?: unknown;
+        __TAURI_INTERNALS__?: unknown;
+      }
+    ).__TAURI_INTERNALS__ ||
+    (
+      window as Window & {
+        isTauri?: boolean;
+        __TAURI__?: unknown;
+        __TAURI_INTERNALS__?: unknown;
+      }
+    ).isTauri,
+  );

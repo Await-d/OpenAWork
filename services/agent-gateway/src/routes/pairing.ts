@@ -1,8 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { PairingManagerImpl } from '@openAwork/pairing';
 import { z } from 'zod';
-import { issueTokenPair } from '../auth.js';
+import { hasValidDesktopAuthToken, issueTokenPair, type JwtPayload } from '../auth.js';
 import { sqliteGet } from '../db.js';
 
 const pairingRequestSchema = z.object({
@@ -16,6 +16,20 @@ const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.l
 export const pairingManager = new PairingManagerImpl(
   Number(globalThis.process?.env['GATEWAY_PORT'] ?? 3000),
 );
+
+async function canGeneratePairingQr(request: FastifyRequest): Promise<boolean> {
+  if (hasValidDesktopAuthToken(request)) {
+    return true;
+  }
+
+  try {
+    await request.jwtVerify();
+    const payload = request.user as JwtPayload;
+    return payload.email === ADMIN_EMAIL;
+  } catch (_error) {
+    return false;
+  }
+}
 
 export async function pairingRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
@@ -69,7 +83,11 @@ export async function pairingRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(issueTokenPair(app, user));
   });
 
-  app.get('/pairing/qr', async (_request, reply) => {
+  app.get('/pairing/qr', async (request, reply) => {
+    if (!(await canGeneratePairingQr(request))) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
     const session = await pairingManager.generatePairingCode();
     const dataUrl = await QRCode.toDataURL(session.qrData, { width: 256 });
     return reply.send({

@@ -54,6 +54,7 @@ import {
   SETTINGS_TAB_NAV_WIDTH,
   TAB_CATEGORIES,
   TABS,
+  TAURI_ONLY_TAB_IDS,
   type TabId,
 } from './settings/settings-page-helpers.js';
 import { useSettingsEnvironment } from './settings/use-settings-environment.js';
@@ -64,6 +65,7 @@ import { UsageTabContent } from './settings/usage-tab-content.js';
 import { MemoryTabContent } from './settings/memory-tab-content.js';
 import { CompanionTabContent } from './settings/companion-tab-content.js';
 import { PluginsTabContent } from './settings/plugins-tab-content.js';
+import { DesktopTabContent } from './settings/desktop-tab-content.js';
 import { useMemoryManagement } from './settings/use-memory-management.js';
 import { useProviderDefaultProfile } from './settings/use-provider-default-profile.js';
 import { useSettingsTabActions } from './settings/use-settings-tab-actions.js';
@@ -145,7 +147,8 @@ function SettingsNavIcon({ id }: { id: string }) {
 }
 
 export default function SettingsPage() {
-  const { gatewayUrl, setGatewayUrl, webAccessEnabled, webPort, setWebAccess } = useAuthStore();
+  const { gatewayUrl, setGatewayUrl, setAuth, webAccessEnabled, webPort, setWebAccess } =
+    useAuthStore();
   const token = useAuthStore((s) => s.accessToken);
   const { tab } = useParams<{ tab: string }>();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
@@ -154,9 +157,16 @@ export default function SettingsPage() {
     checkVersionUpdate,
     copied,
     copyAddress,
+    desktopGatewayBusy,
+    desktopGatewayError,
+    desktopGatewayMode,
     portInput,
+    remoteAdminEmail,
+    remoteAdminPassword,
     saveGatewayUrl,
     saveWebPort,
+    setRemoteAdminEmail,
+    setRemoteAdminPassword,
     setPortInput,
     setUrlInput,
     toggleWebAccess,
@@ -166,6 +176,7 @@ export default function SettingsPage() {
   } = useSettingsEnvironment({
     gatewayUrl,
     setGatewayUrl,
+    setAuth,
     token,
     webAccessEnabled,
     webPort,
@@ -1409,53 +1420,56 @@ export default function SettingsPage() {
                     >
                       {category.label}
                     </div>
-                    {TABS.filter((t) => (category.tabIds as readonly string[]).includes(t.id)).map(
-                      (tabItem) => (
-                        <NavLink
-                          key={tabItem.id}
-                          to={`/settings/${tabItem.id}`}
-                          style={({ isActive }) => ({
+                    {/* 仅在 Tauri 桌面端运行时才渲染 desktop tab；Web/移动端隐藏。 */}
+                    {TABS.filter(
+                      (t) =>
+                        (category.tabIds as readonly string[]).includes(t.id) &&
+                        (!TAURI_ONLY_TAB_IDS.has(t.id) || isTauri),
+                    ).map((tabItem) => (
+                      <NavLink
+                        key={tabItem.id}
+                        to={`/settings/${tabItem.id}`}
+                        style={({ isActive }) => ({
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          width: '100%',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          fontSize: 12,
+                          fontWeight: isActive ? 600 : 400,
+                          background: isActive ? 'var(--accent-muted)' : 'transparent',
+                          color: isActive ? 'var(--accent)' : 'var(--text-2)',
+                          boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
+                          textDecoration: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          transition: 'background 150ms ease, color 150ms ease',
+                          overflow: 'hidden',
+                        })}
+                      >
+                        <span
+                          style={{
+                            flexShrink: 0,
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 8,
-                            width: '100%',
-                            padding: '8px 10px',
-                            borderRadius: 8,
-                            fontSize: 12,
-                            fontWeight: isActive ? 600 : 400,
-                            background: isActive ? 'var(--accent-muted)' : 'transparent',
-                            color: isActive ? 'var(--accent)' : 'var(--text-2)',
-                            boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
-                            textDecoration: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            transition: 'background 150ms ease, color 150ms ease',
-                            overflow: 'hidden',
-                          })}
+                            justifyContent: 'center',
+                            width: 18,
+                          }}
                         >
-                          <span
-                            style={{
-                              flexShrink: 0,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 18,
-                            }}
-                          >
-                            <SettingsNavIcon id={tabItem.id} />
-                          </span>
-                          <span
-                            style={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {tabItem.label}
-                          </span>
-                        </NavLink>
-                      ),
-                    )}
+                          <SettingsNavIcon id={tabItem.id} />
+                        </span>
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {tabItem.label}
+                        </span>
+                      </NavLink>
+                    ))}
                   </div>
                 ))}
               </div>
@@ -1505,6 +1519,13 @@ export default function SettingsPage() {
                     toggleWebAccess={() => void toggleWebAccess()}
                     copied={copied}
                     copyAddress={copyAddress}
+                    desktopGatewayBusy={desktopGatewayBusy}
+                    desktopGatewayError={desktopGatewayError}
+                    desktopGatewayMode={desktopGatewayMode}
+                    remoteAdminEmail={remoteAdminEmail}
+                    remoteAdminPassword={remoteAdminPassword}
+                    setRemoteAdminEmail={setRemoteAdminEmail}
+                    setRemoteAdminPassword={setRemoteAdminPassword}
                     isTauri={isTauri}
                     savingUpstreamRetrySettings={savingUpstreamRetrySettings}
                     setUpstreamRetryMaxRetries={setUpstreamRetryMaxRetries}
@@ -1594,6 +1615,7 @@ export default function SettingsPage() {
                     activeImageModelId={activeSelection.image?.modelId}
                   />
                 )}
+                {activeTab === 'desktop' && isTauri && <DesktopTabContent />}
                 {activeTab === 'devtools' && (
                   <DevtoolsTabContent
                     devLogs={devLogs}

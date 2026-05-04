@@ -12,12 +12,12 @@
     }
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^2.0.0"
+    "@vitest/coverage-v8": "^4.1.0"
   },
   "dependencies": {
     "@openAwork/platform-adapter": "workspace:*",
     "@openAwork/shared": "workspace:*",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.9.0",
     "zod": "^3.23.0"
   },
   "optionalDependencies": {

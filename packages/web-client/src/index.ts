@@ -2,7 +2,7 @@ export { GatewayWebSocketClient } from './gateway-ws.js';
 export { GatewaySSEClient } from './gateway-sse.js';
 export { login, refreshAccessToken, logout } from './auth.js';
 export type { TokenPair } from './auth.js';
-export { getPairingQr, loginWithPairingToken } from './pairing.js';
+export { getPairingQr, loginWithDesktopDefault, loginWithPairingToken } from './pairing.js';
 export type { PairingQrResponse } from './pairing.js';
 export type {
   GatewayStreamEvent,

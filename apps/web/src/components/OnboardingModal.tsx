@@ -4,6 +4,23 @@ import { getPairingQr, login, type PairingQrResponse } from '@openAwork/web-clie
 import { PairingPanel, OAuthButton } from '@openAwork/shared-ui';
 import { logger } from '../utils/logger.js';
 import type { PairingMode } from '@openAwork/shared-ui';
+import {
+  type DesktopGatewayMode,
+  authenticateDesktopGateway,
+  DEFAULT_GATEWAY_PORT,
+  DESKTOP_DEFAULT_EMAIL,
+  isGatewayHealthy,
+  isTauriRuntime,
+  localGatewayUrl,
+  normalizeGatewayUrl,
+  parseGatewayPort,
+  readDesktopGatewayMode,
+  readGatewayPortFromUrl,
+  startDesktopGateway,
+  stopDesktopGateway,
+  waitForGatewayHealth,
+  writeDesktopGatewayMode,
+} from '../utils/desktop-gateway.js';
 
 const inputStyle: React.CSSProperties = {
   background: 'var(--surface)',
@@ -17,17 +34,383 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-type Step = 'connect' | 'login' | 'pairing';
+type Step = 'mode' | 'connect' | 'login' | 'pairing';
+type LocalStatus = 'idle' | 'starting' | 'ok' | 'fail';
 
 interface Props {
   onComplete: () => void;
 }
 
-export default function OnboardingModal({ onComplete }: Props) {
-  const { gatewayUrl, setGatewayUrl, setAuth } = useAuthStore();
+type DesktopOnboardingStep = 'mode' | 'connect';
+type DesktopRemoteStatus = 'idle' | 'testing' | 'ok' | 'fail';
+
+export default function OnboardingModal(props: Props) {
+  if (isTauriRuntime()) {
+    return <DesktopGatewayOnboarding {...props} />;
+  }
+
+  return <BrowserOnboardingModal {...props} />;
+}
+
+function DesktopGatewayOnboarding({ onComplete }: Props) {
+  const { gatewayUrl, setGatewayUrl, setAuth, setWebAccess, webPort } = useAuthStore();
+  const initialPort = readGatewayPortFromUrl(gatewayUrl, webPort || DEFAULT_GATEWAY_PORT);
+  const [step, setStep] = useState<DesktopOnboardingStep>('mode');
   const [urlInput, setUrlInput] = useState(gatewayUrl);
+  const [portInput, setPortInput] = useState(String(initialPort));
+  const [localStatus, setLocalStatus] = useState<LocalStatus>('idle');
+  const [remoteStatus, setRemoteStatus] = useState<DesktopRemoteStatus>('idle');
+  const [remoteEmail, setRemoteEmail] = useState(DESKTOP_DEFAULT_EMAIL);
+  const [remotePassword, setRemotePassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  function completeDesktopOnboarding(
+    url: string,
+    mode: DesktopGatewayMode,
+    port: number,
+    tokenPair: { accessToken: string; refreshToken?: string; expiresIn?: string },
+    email: string,
+  ) {
+    setAuth(tokenPair.accessToken, email, tokenPair.refreshToken, tokenPair.expiresIn);
+    setGatewayUrl(url);
+    setWebAccess(mode === 'local', port);
+    writeDesktopGatewayMode(mode);
+    localStorage.setItem('onboarded', '1');
+    onComplete();
+  }
+
+  async function completeLocalDesktopOnboarding(url: string, port: number) {
+    const tokenPair = await authenticateDesktopGateway(url);
+    completeDesktopOnboarding(url, 'local', port, tokenPair, DESKTOP_DEFAULT_EMAIL);
+  }
+
+  async function chooseLocalGateway() {
+    const port = parseGatewayPort(portInput, DEFAULT_GATEWAY_PORT);
+    const url = localGatewayUrl(port);
+
+    setLocalStatus('starting');
+    setRemoteStatus('idle');
+    setError(null);
+    setPortInput(String(port));
+    setUrlInput(url);
+
+    try {
+      await startDesktopGateway(port);
+      if (!(await waitForGatewayHealth(url))) {
+        throw new Error('本地网关已启动，但健康检查暂未通过');
+      }
+
+      setLocalStatus('ok');
+      await completeLocalDesktopOnboarding(url, port);
+    } catch (eventualError: unknown) {
+      setLocalStatus('fail');
+      setError(eventualError instanceof Error ? eventualError.message : '无法启动本地网关');
+    }
+  }
+
+  function chooseRemoteGateway() {
+    setLocalStatus('idle');
+    setRemoteStatus('idle');
+    setError(null);
+    writeDesktopGatewayMode('remote');
+    setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
+    setStep('connect');
+
+    void stopDesktopGateway().catch((eventualError: unknown) => {
+      logger.warn('Failed to stop local desktop gateway before remote setup', eventualError);
+    });
+  }
+
+  async function connectRemoteGateway() {
+    const url = normalizeGatewayUrl(urlInput);
+    const port = parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT);
+    setUrlInput(url);
+    setError(null);
+
+    if (!url) {
+      setRemoteStatus('fail');
+      setError('请先填写远程网关地址');
+      return;
+    }
+    if (!remoteEmail || !remotePassword) {
+      setRemoteStatus('fail');
+      setError('请填写远程网关管理员邮箱和密码');
+      return;
+    }
+
+    setRemoteStatus('testing');
+    try {
+      if (!(await waitForGatewayHealth(url))) {
+        throw new Error('远程网关健康检查失败，请确认地址可访问');
+      }
+
+      const tokenPair = await login(url, remoteEmail, remotePassword);
+      setRemoteStatus('ok');
+      completeDesktopOnboarding(url, 'remote', port, tokenPair, remoteEmail);
+    } catch (eventualError: unknown) {
+      setRemoteStatus('fail');
+      setError(eventualError instanceof Error ? eventualError.message : '无法连接远程网关');
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: 'oklch(0 0 0 / 0.7)',
+        backdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 16,
+          padding: '2rem',
+          width: step === 'mode' ? 680 : 420,
+          maxWidth: 'calc(100vw - 32px)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem',
+        }}
+      >
+        <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)', margin: 0 }}>
+          OpenAWork Desktop
+        </h1>
+        <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0, lineHeight: 1.6 }}>
+          桌面端会使用默认本地身份进入工作台。首次启动只需要选择网关来源，后续可在设置中切换。
+        </p>
+
+        {step === 'mode' ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+              gap: 12,
+            }}
+          >
+            <section
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                minHeight: 230,
+                padding: 16,
+                border: '1px solid var(--accent-muted)',
+                borderRadius: 14,
+                background: 'var(--accent-muted)',
+              }}
+            >
+              <strong style={{ fontSize: 15, color: 'var(--text)' }}>使用本地网关</strong>
+              <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+                适合单机使用。桌面端会启动内置 Gateway，并自动进入工作台。
+              </span>
+              <label
+                style={{
+                  fontSize: 12,
+                  color: 'var(--text-3)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}
+              >
+                本地端口
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={portInput}
+                  onChange={(event) => setPortInput(event.target.value)}
+                  style={inputStyle}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void chooseLocalGateway()}
+                disabled={localStatus === 'starting'}
+                style={{
+                  marginTop: 'auto',
+                  background: 'var(--accent)',
+                  color: 'var(--accent-text)',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '0.7rem',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: localStatus === 'starting' ? 'not-allowed' : 'pointer',
+                  opacity: localStatus === 'starting' ? 0.72 : 1,
+                }}
+              >
+                {localStatus === 'starting'
+                  ? '正在启动并进入…'
+                  : localStatus === 'ok'
+                    ? '本地网关已就绪'
+                    : '使用本地网关'}
+              </button>
+            </section>
+
+            <section
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+                minHeight: 230,
+                padding: 16,
+                border: '1px solid var(--border)',
+                borderRadius: 14,
+                background: 'var(--surface-hover)',
+              }}
+            >
+              <strong style={{ fontSize: 15, color: 'var(--text)' }}>连接远程网关</strong>
+              <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+                适合连接团队服务器、NAS、云端部署或已经运行的 OpenAWork Gateway。
+              </span>
+              <button
+                type="button"
+                onClick={chooseRemoteGateway}
+                style={{
+                  marginTop: 'auto',
+                  background: 'transparent',
+                  color: 'var(--text)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  padding: '0.7rem',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                输入远程网关地址
+              </button>
+            </section>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <label
+              style={{
+                fontSize: 12,
+                color: 'var(--text-3)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              远程网关地址
+              <input
+                type="url"
+                value={urlInput}
+                onChange={(event) => {
+                  setUrlInput(event.target.value);
+                  setRemoteStatus('idle');
+                }}
+                placeholder="https://gateway.example.com"
+                style={inputStyle}
+              />
+            </label>
+            <label
+              style={{
+                fontSize: 12,
+                color: 'var(--text-3)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              管理员邮箱
+              <input
+                type="email"
+                value={remoteEmail}
+                onChange={(event) => setRemoteEmail(event.target.value)}
+                autoComplete="username"
+                placeholder={DESKTOP_DEFAULT_EMAIL}
+                style={inputStyle}
+              />
+            </label>
+            <label
+              style={{
+                fontSize: 12,
+                color: 'var(--text-3)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              管理员密码
+              <input
+                type="password"
+                value={remotePassword}
+                onChange={(event) => setRemotePassword(event.target.value)}
+                autoComplete="current-password"
+                placeholder="远程 Gateway 管理员密码"
+                style={inputStyle}
+              />
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setStep('mode')}
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  color: 'var(--text-3)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  padding: '0.6rem',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                返回
+              </button>
+              <button
+                type="button"
+                onClick={() => void connectRemoteGateway()}
+                disabled={remoteStatus === 'testing'}
+                style={{
+                  flex: 1,
+                  background: 'var(--accent)',
+                  color: 'var(--accent-text)',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '0.6rem',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: remoteStatus === 'testing' ? 'not-allowed' : 'pointer',
+                  opacity: remoteStatus === 'testing' ? 0.72 : 1,
+                }}
+              >
+                {remoteStatus === 'testing'
+                  ? '正在连接并进入…'
+                  : remoteStatus === 'ok'
+                    ? '远程网关已就绪'
+                    : '连接并进入'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error ? <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function BrowserOnboardingModal({ onComplete }: Props) {
+  const desktopRuntime = isTauriRuntime();
+  const { accessToken, gatewayUrl, setGatewayUrl, setAuth, setWebAccess, webPort } = useAuthStore();
+  const initialPort = readGatewayPortFromUrl(gatewayUrl, webPort || DEFAULT_GATEWAY_PORT);
+  const [mode, setMode] = useState<DesktopGatewayMode | null>(() => readDesktopGatewayMode());
+  const [urlInput, setUrlInput] = useState(gatewayUrl);
+  const [portInput, setPortInput] = useState(String(initialPort));
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [step, setStep] = useState<Step>('connect');
+  const [localStatus, setLocalStatus] = useState<LocalStatus>('idle');
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>(() => (desktopRuntime ? 'mode' : 'connect'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -42,10 +425,10 @@ export default function OnboardingModal({ onComplete }: Props) {
     }
 
     let cancelled = false;
-    const url = urlInput.trim().replace(/\/$/, '');
+    const url = normalizeGatewayUrl(urlInput);
     setPairingLoading(true);
     setPairingError(null);
-    void getPairingQr(url)
+    void getPairingQr(url, accessToken ?? undefined)
       .then((data) => {
         if (!cancelled) {
           setPairingQr(data);
@@ -65,33 +448,87 @@ export default function OnboardingModal({ onComplete }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [step, urlInput]);
+  }, [accessToken, step, urlInput]);
 
   async function testConnection() {
     setTestStatus('testing');
-    const url = urlInput.trim().replace(/\/$/, '');
-    try {
-      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
-      setTestStatus(res.ok ? 'ok' : 'fail');
-    } catch {
+    const url = normalizeGatewayUrl(urlInput);
+    setUrlInput(url);
+    if (!url) {
       setTestStatus('fail');
+      return;
     }
+
+    setTestStatus((await isGatewayHealthy(url)) ? 'ok' : 'fail');
   }
 
   function saveAndContinue() {
-    setGatewayUrl(urlInput.trim().replace(/\/$/, ''));
+    const url = normalizeGatewayUrl(urlInput);
+    setGatewayUrl(url);
+    if (desktopRuntime) {
+      setMode('remote');
+      writeDesktopGatewayMode('remote');
+      setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
+    }
     setStep('login');
+  }
+
+  async function chooseLocalGateway() {
+    const port = parseGatewayPort(portInput, DEFAULT_GATEWAY_PORT);
+    const url = localGatewayUrl(port);
+
+    setMode('local');
+    writeDesktopGatewayMode('local');
+    setPortInput(String(port));
+    setUrlInput(url);
+    setGatewayUrl(url);
+    setWebAccess(true, port);
+    setLocalStatus('starting');
+    setLocalError(null);
+    setLoginError(null);
+    setTestStatus('idle');
+
+    try {
+      await startDesktopGateway(port);
+      if (!(await waitForGatewayHealth(url))) {
+        throw new Error('本地服务端已启动，但健康检查暂未通过');
+      }
+
+      setLocalStatus('ok');
+      setStep('login');
+    } catch (error: unknown) {
+      setLocalStatus('fail');
+      setLocalError(error instanceof Error ? error.message : '无法启动本地服务端');
+    }
+  }
+
+  function chooseRemoteGateway() {
+    setMode('remote');
+    writeDesktopGatewayMode('remote');
+    setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
+    setLocalStatus('idle');
+    setLocalError(null);
+    setLoginError(null);
+    setTestStatus('idle');
+    setStep('connect');
+
+    void stopDesktopGateway().catch((error: unknown) => {
+      logger.warn('Failed to stop local desktop gateway before remote setup', error);
+    });
   }
 
   async function handleLogin(e: React.SyntheticEvent) {
     e.preventDefault();
     setLoginError(null);
     setLogging(true);
-    const url = urlInput.trim().replace(/\/$/, '');
+    const url = normalizeGatewayUrl(urlInput);
     try {
       const data = await login(url, email, password);
       setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
       localStorage.setItem('onboarded', '1');
+      if (desktopRuntime && mode) {
+        writeDesktopGatewayMode(mode);
+      }
       onComplete();
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : '网络错误 — Gateway 是否正在运行？');
@@ -120,56 +557,170 @@ export default function OnboardingModal({ onComplete }: Props) {
           border: '1px solid var(--border)',
           borderRadius: 16,
           padding: '2rem',
-          width: 400,
+          width: step === 'mode' ? 680 : 400,
+          maxWidth: 'calc(100vw - 32px)',
           display: 'flex',
           flexDirection: 'column',
           gap: '1.25rem',
         }}
       >
-        <button
-          type="button"
-          onClick={onComplete}
-          aria-label="关闭引导"
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 12,
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            color: 'var(--text-3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            transition: 'background 150ms ease, color 150ms ease',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--surface-hover)';
-            e.currentTarget.style.color = 'var(--text)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = 'var(--text-3)';
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
+        {desktopRuntime && step === 'mode' ? null : (
+          <button
+            type="button"
+            onClick={onComplete}
+            aria-label="关闭引导"
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              color: 'var(--text-3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'background 150ms ease, color 150ms ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--surface-hover)';
+              e.currentTarget.style.color = 'var(--text)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--text-3)';
+            }}
           >
-            <path d="M2 2l8 8M10 2l-8 8" />
-          </svg>
-        </button>
+            <svg
+              aria-hidden="true"
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M2 2l8 8M10 2l-8 8" />
+            </svg>
+          </button>
+        )}
         <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>OpenAWork</h1>
-        {step === 'connect' ? (
+        {step === 'mode' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>
+              首次启动桌面端时，请选择服务端连接方式。
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                gap: 12,
+              }}
+            >
+              <section
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  minHeight: 230,
+                  padding: 16,
+                  border: '1px solid var(--accent-muted)',
+                  borderRadius: 14,
+                  background: 'var(--accent-muted)',
+                }}
+              >
+                <strong style={{ fontSize: 15, color: 'var(--text)' }}>启动本地服务端</strong>
+                <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+                  适合单机使用。桌面端会启动内置 Gateway，并自动连接到本机地址。
+                </span>
+                <label
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--text-3)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  本地端口
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={portInput}
+                    onChange={(e) => setPortInput(e.target.value)}
+                    style={inputStyle}
+                  />
+                </label>
+                {localError ? (
+                  <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{localError}</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void chooseLocalGateway()}
+                  disabled={localStatus === 'starting'}
+                  style={{
+                    marginTop: 'auto',
+                    background: 'var(--accent)',
+                    color: 'var(--accent-text)',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '0.7rem',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: localStatus === 'starting' ? 'not-allowed' : 'pointer',
+                    opacity: localStatus === 'starting' ? 0.72 : 1,
+                  }}
+                >
+                  {localStatus === 'starting'
+                    ? '正在启动本地服务端…'
+                    : localStatus === 'ok'
+                      ? '本地服务端已启动'
+                      : '使用本地服务端'}
+                </button>
+              </section>
+
+              <section
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  minHeight: 230,
+                  padding: 16,
+                  border: '1px solid var(--border)',
+                  borderRadius: 14,
+                  background: 'var(--surface-hover)',
+                }}
+              >
+                <strong style={{ fontSize: 15, color: 'var(--text)' }}>连接远程服务端</strong>
+                <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+                  适合连接团队服务器、NAS、云端部署或已经运行的 OpenAWork Gateway。
+                </span>
+                <button
+                  type="button"
+                  onClick={chooseRemoteGateway}
+                  style={{
+                    marginTop: 'auto',
+                    background: 'transparent',
+                    color: 'var(--text)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    padding: '0.7rem',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  输入远程服务端地址
+                </button>
+              </section>
+            </div>
+          </div>
+        ) : step === 'connect' ? (
           <>
             <p style={{ fontSize: 12, color: 'var(--text-3)' }}>输入网关地址以连接。</p>
             <label
@@ -189,7 +740,9 @@ export default function OnboardingModal({ onComplete }: Props) {
                   setUrlInput(e.target.value);
                   setTestStatus('idle');
                 }}
-                placeholder="http://localhost:3000"
+                placeholder={
+                  desktopRuntime ? 'https://gateway.example.com' : 'http://localhost:3000'
+                }
                 style={inputStyle}
               />
             </label>
@@ -333,7 +886,7 @@ export default function OnboardingModal({ onComplete }: Props) {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
-                onClick={() => setStep('connect')}
+                onClick={() => setStep(desktopRuntime && mode === 'local' ? 'mode' : 'connect')}
                 style={{
                   flex: 1,
                   background: 'transparent',

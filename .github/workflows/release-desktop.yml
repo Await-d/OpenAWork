@@ -150,6 +150,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Import macOS signing cert
         if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true'
         uses: apple-actions/import-codesign-certs@v3

@@ -7,13 +7,13 @@
     "core:default",
     {
       "identifier": "shell:allow-execute",
-      "allow": [
-        { "name": "node", "sidecar": true },
-        { "name": "node", "cmd": "node", "args": [{ "validator": ".+" }] }
-      ]
+      "allow": [{ "name": "agent-gateway", "sidecar": true }]
     },
     "shell:allow-kill",
-    "shell:allow-open",
-    "updater:default"
+    "opener:allow-open-path",
+    "updater:default",
+    "dialog:default",
+    "notification:default",
+    "autostart:default"
   ]
 }

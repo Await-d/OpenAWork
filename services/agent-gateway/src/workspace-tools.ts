@@ -935,7 +935,7 @@ export async function executeWorkspaceWriteFile(
   await fsp.writeFile(safePath, input.content, 'utf8');
   const effectiveRoot = options?.workspaceRoot ?? WORKSPACE_ROOT;
   if (effectiveRoot) {
-    await formatFileAfterWrite(safePath, effectiveRoot).catch(() => {});
+    await formatFileAfterWrite(safePath, effectiveRoot).catch((_e: unknown) => undefined);
   }
   lspManager.touchFile(safePath, true).catch((_e: unknown) => undefined);
   const diagnostics = await getPostWriteDiagnostics([safePath]);

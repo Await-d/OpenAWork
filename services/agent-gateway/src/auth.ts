@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import jwtPlugin from '@fastify/jwt';
 import fp from 'fastify-plugin';
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { redis, sqliteGet, sqliteRun } from './db.js';
 import { ensureDefaultInstalledSkills } from './default-skills.js';
@@ -11,10 +11,17 @@ import { startRequestWorkflow } from './request-workflow.js';
 const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-production-min-32-chars';
 const JWT_EXPIRES_IN = globalThis.process?.env['JWT_EXPIRES_IN'] ?? '15m';
 const REFRESH_EXPIRES_DAYS = 7;
+const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
+const DESKTOP_AUTH_HEADER = 'x-openawork-desktop-auth';
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+});
+
+const desktopDefaultLoginSchema = z.object({
+  deviceName: z.string().min(1).max(80).optional(),
+  platform: z.enum(['desktop']).optional(),
 });
 
 export interface JwtPayload {
@@ -34,6 +41,35 @@ function hashToken(token: string): string {
 
 function generateRefreshToken(): string {
   return randomBytes(48).toString('base64url');
+}
+
+function readHeaderValue(request: FastifyRequest, name: string): string | null {
+  const value = request.headers[name];
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return typeof value === 'string' ? value : null;
+}
+
+export function hasValidDesktopAuthToken(request: FastifyRequest): boolean {
+  const expected = globalThis.process?.env['OPENAWORK_DESKTOP_AUTH_TOKEN'];
+  if (!expected || expected.length < 32) {
+    return false;
+  }
+
+  const provided = readHeaderValue(request, DESKTOP_AUTH_HEADER);
+  if (!provided || provided.length !== expected.length) {
+    return false;
+  }
+
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
 export function issueTokenPair(
@@ -96,6 +132,27 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     step.succeed(undefined, { userId: user.id });
 
     return reply.send(tokenPair);
+  });
+
+  app.post('/auth/desktop-default', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!hasValidDesktopAuthToken(request)) {
+      return reply.status(403).send({ error: 'Desktop default login is not enabled' });
+    }
+
+    const body = desktopDefaultLoginSchema.safeParse(request.body ?? {});
+    if (!body.success) {
+      return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+    }
+
+    const user = sqliteGet<{ id: string; email: string }>(
+      'SELECT id, email FROM users WHERE email = ? LIMIT 1',
+      [ADMIN_EMAIL],
+    );
+    if (!user) {
+      return reply.status(404).send({ error: 'Default admin user not found' });
+    }
+
+    return reply.send(issueTokenPair(app, user));
   });
 
   app.post('/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {

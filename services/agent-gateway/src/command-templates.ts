@@ -226,7 +226,7 @@ export const REFACTOR_INSTRUCTION = `Intelligent Refactoring Command — determi
  */
 export function resolveCommandInstruction(
   actionKind: string,
-  metadata: Record<string, unknown>,
+  _metadata: Record<string, unknown>,
 ): string | null {
   switch (actionKind) {
     case 'start_ralph_loop':

@@ -58,6 +58,7 @@
     "effect": "^3.21.2",
     "fastify": "^5.0.0",
     "fastify-plugin": "^5.1.0",
+    "fast-check": "^3.23.1",
     "pdf-parse": "^2.4.5",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",

@@ -20,6 +20,7 @@
     "@openAwork/shared": "workspace:*",
     "@openAwork/shared-ui": "workspace:*",
     "@openAwork/web-client": "workspace:*",
+    "@tauri-apps/api": "^2.10.1",
     "@types/three": "^0.183.1",
     "fuzzysort": "^3.1.0",
     "react": "^19.0.0",

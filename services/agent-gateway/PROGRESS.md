@@ -24,17 +24,17 @@ E        事后小项：token usage 透传             ✅
 
 ## 关键文件地图
 
-| 模块                                                 | 用途                                                         |
-| ---------------------------------------------------- | ------------------------------------------------------------ |
-| `src/v2-runtime/upstream/provider.ts`                | AI SDK provider 工厂（含 anthropic-beta header 自动组装）    |
-| `src/v2-runtime/upstream/bridge.ts`                  | OpenAWork `AIProvider` → AI SDK provider 配置桥              |
-| `src/v2-runtime/upstream/run-upstream-generate.ts`   | 非流式 `generateText` 封装（A 阶段使用）                     |
-| `src/v2-runtime/upstream/stream-runner.ts`           | 流式 `streamText` runner，输出 OpenAWork StreamChunk         |
-| `src/v2-runtime/upstream/normalized-message-bridge.ts` | NormalizedConversationMessage → ModelMessage              |
-| `src/v2-runtime/upstream/unified-message-bridge.ts`  | UnifiedMessage → ModelMessage（B.1 接入点）                  |
-| `src/v2-runtime/upstream/tool-adapter.ts`            | ToolDefinition → AI SDK ToolSet（含 declarations-only 变体） |
-| `src/v2-runtime/upstream/cache-breakpoints.ts`       | Anthropic 缓存断点决策                                       |
-| `src/v2-runtime/upstream/provider-options.ts`        | thinking / reasoning effort → providerOptions 映射           |
+| 模块                                                   | 用途                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------ |
+| `src/v2-runtime/upstream/provider.ts`                  | AI SDK provider 工厂（含 anthropic-beta header 自动组装）    |
+| `src/v2-runtime/upstream/bridge.ts`                    | OpenAWork `AIProvider` → AI SDK provider 配置桥              |
+| `src/v2-runtime/upstream/run-upstream-generate.ts`     | 非流式 `generateText` 封装（A 阶段使用）                     |
+| `src/v2-runtime/upstream/stream-runner.ts`             | 流式 `streamText` runner，输出 OpenAWork StreamChunk         |
+| `src/v2-runtime/upstream/normalized-message-bridge.ts` | NormalizedConversationMessage → ModelMessage                 |
+| `src/v2-runtime/upstream/unified-message-bridge.ts`    | UnifiedMessage → ModelMessage（B.1 接入点）                  |
+| `src/v2-runtime/upstream/tool-adapter.ts`              | ToolDefinition → AI SDK ToolSet（含 declarations-only 变体） |
+| `src/v2-runtime/upstream/cache-breakpoints.ts`         | Anthropic 缓存断点决策                                       |
+| `src/v2-runtime/upstream/provider-options.ts`          | thinking / reasoning effort → providerOptions 映射           |
 
 ## Phase A：非流式调用迁移
 
@@ -95,8 +95,8 @@ E        事后小项：token usage 透传             ✅
 之后增加 v2 早返回分支（约 220 行）：
 
 - **触发条件**：`isV2UpstreamForProviderType(route.providerType)
-  && (protocol === 'chat_completions' ||
-  protocol === 'anthropic_messages')`
+&& (protocol === 'chat_completions' ||
+protocol === 'anthropic_messages')`
 - **复用闭包**：`accumulateChunk` / `writeChunk` /
   `persistStreamChunkAsSessionEvents` / `ensureStepStarted` /
   `finalizeAssistant` / `emitStepEnded` / `markFailedRequestScopeMessages`
@@ -147,12 +147,12 @@ E        事后小项：token usage 透传             ✅
 
 ## 风险点 & 已知差距
 
-| 项                                | 影响                                                         |
-| --------------------------------- | ------------------------------------------------------------ |
-| **不支持 responses 协议**         | `@ai-sdk/openai` 未安装；responses-API 路由继续走 v1         |
-| **`previous_response_id` 暂缓**   | 同上，需要 `@ai-sdk/openai`                                  |
-| **deferLoading 由 v2 fall back** | 任一 tool 标 `deferLoading: true` 时 v2 主动落回 v1，避免 schema 行为差异（gate 在 `runModelRound` 中） |
-| **tool-adapter 缺少权限/沙箱**    | C.2 的带 execute 变体未接 ToolSandbox；B 阶段使用 declarations-only，外层 agent loop 继续负责权限/diff，未来如果切为全 AI SDK loop 需补 |
+| 项                               | 影响                                                                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **不支持 responses 协议**        | `@ai-sdk/openai` 未安装；responses-API 路由继续走 v1                                                                                    |
+| **`previous_response_id` 暂缓**  | 同上，需要 `@ai-sdk/openai`                                                                                                             |
+| **deferLoading 由 v2 fall back** | 任一 tool 标 `deferLoading: true` 时 v2 主动落回 v1，避免 schema 行为差异（gate 在 `runModelRound` 中）                                 |
+| **tool-adapter 缺少权限/沙箱**   | C.2 的带 execute 变体未接 ToolSandbox；B 阶段使用 declarations-only，外层 agent loop 继续负责权限/diff，未来如果切为全 AI SDK loop 需补 |
 
 ### LLM 上游覆盖完整性
 
@@ -203,7 +203,7 @@ deep-conversation 验证脚本——与本次迁移目标无关。
      防止单点失败阻断后续 lsp / v2-runtime / db 清理。
 7. **事件源↔SessionEntry aggregator 对称性通过**
    - `session-event.ts` 定义的 18 个事件类型 (prompt / synthetic /
-     step.* / text.* / reasoning.* / tool.input.* / tool.called /
+     step._ / text._ / reasoning._ / tool.input._ / tool.called /
      tool.success / tool.error / retried / compacted) 都在 `session-entry.ts`
      的 `aggregateSessionEntries` switch 里有处理分支，replay 不会丢事件。
 8. **`MessageEvents.Removed` projector 漏清 v1 mirror**
