@@ -269,6 +269,13 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
     supportsPatterns: false,
   },
   {
+    id: 'custom',
+    label: '自定义工具',
+    description: '用户自定义或动态注册的工具',
+    defaultAction: 'ask',
+    supportsPatterns: true,
+  },
+  {
     id: 'desktop_automation',
     label: '桌面自动化',
     description: '控制桌面浏览器操作',
@@ -305,9 +312,12 @@ export function resolvePermissionCategory(toolName: string): string {
     webfetch: 'webfetch',
     codesearch: 'codesearch',
     workspace_review_revert: 'edit',
+    ast_grep_replace: 'edit',
     desktop_automation: 'desktop_automation',
   };
-  return TOOL_TO_CATEGORY[toolName] ?? toolName;
+  if (toolName in TOOL_TO_CATEGORY) return TOOL_TO_CATEGORY[toolName]!;
+  if (toolName.startsWith('custom_')) return 'custom';
+  return toolName;
 }
 
 function dedupeWorkspacePermissionRules(
