@@ -450,11 +450,21 @@ function buildAssistantParts(
   // Extract responseId from the first reasoning part that has one
   const responseId = reasoningParts.find((p) => p.responseId)?.responseId;
 
+  // Extract Responses API metadata (encryptedContent / summary) stored in part.metadata
+  const encryptedContent = reasoningParts
+    .map((p) => p.metadata?.['encryptedContent'])
+    .find((v): v is string => typeof v === 'string' && v.length > 0);
+  const summary = reasoningParts
+    .map((p) => p.metadata?.['summary'])
+    .find((v): v is string => typeof v === 'string' && v.length > 0);
+
   const reasoning: AssistantReasoning | undefined =
-    trimmedReasoningText.length > 0 || responseId
+    trimmedReasoningText.length > 0 || responseId || encryptedContent || summary
       ? {
           ...(trimmedReasoningText.length > 0 ? { text: trimmedReasoningText } : {}),
           ...(responseId ? { responseId } : {}),
+          ...(encryptedContent ? { encryptedContent } : {}),
+          ...(summary ? { summary } : {}),
         }
       : undefined;
 
