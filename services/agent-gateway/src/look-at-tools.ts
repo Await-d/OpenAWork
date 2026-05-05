@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
-import { PDFParse } from 'pdf-parse';
 import { z } from 'zod';
 import { sqliteGet, sqliteRun } from './db.js';
 import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-adapter.js';
@@ -22,6 +21,13 @@ import { selectDelegatedModelForUser } from './task-model-selection.js';
 interface UserSettingRow {
   value: string;
 }
+
+interface PdfParser {
+  destroy(): Promise<void> | void;
+  getText(): Promise<{ text: string }>;
+}
+
+type PdfParserConstructor = new (input: { data: Buffer }) => PdfParser;
 
 const lookAtInputSchema = z
   .object({
@@ -104,6 +110,7 @@ async function readFileAsText(filePath: string): Promise<string> {
 }
 
 async function readPdfAsText(filePath: string): Promise<string> {
+  const { PDFParse } = (await import('pdf-parse')) as { PDFParse: PdfParserConstructor };
   const buffer = await readFile(filePath);
   const parser = new PDFParse({ data: buffer });
   try {
