@@ -202,53 +202,56 @@ function flushRequestWorkflow(request: FastifyRequest, statusCode: number, messa
   requestWorkflows.delete(request);
 }
 
-const requestWorkflowPlugin = fp(async (app) => {
-  app.addHook('onRequest', async (request) => {
-    const workflowLogger = new WorkflowLogger();
-    const workflowContext = createRequestContext(
-      request.method,
-      request.url,
-      request.headers as Record<string, string | string[] | undefined>,
-      request.ip,
-    );
-    const workflowRequestStep = workflowLogger.start('request.handle', undefined, {
-      method: request.method,
-      path: resolveRequestPath(request.url),
+const requestWorkflowPlugin = fp(
+  async (app) => {
+    app.addHook('onRequest', async (request) => {
+      const workflowLogger = new WorkflowLogger();
+      const workflowContext = createRequestContext(
+        request.method,
+        request.url,
+        request.headers as Record<string, string | string[] | undefined>,
+        request.ip,
+      );
+      const workflowRequestStep = workflowLogger.start('request.handle', undefined, {
+        method: request.method,
+        path: resolveRequestPath(request.url),
+      });
+
+      requestWorkflows.set(request, {
+        workflowLogger,
+        workflowContext,
+        workflowRequestStep,
+        workflowLogFlushed: false,
+      });
     });
 
-    requestWorkflows.set(request, {
-      workflowLogger,
-      workflowContext,
-      workflowRequestStep,
-      workflowLogFlushed: false,
+    app.addHook('onError', async (request, _reply, error) => {
+      const workflow = requestWorkflows.get(request);
+      if (!workflow) {
+        return;
+      }
+
+      settlePendingWorkflowStep(
+        workflow.workflowLogger,
+        workflow.workflowRequestStep,
+        'error',
+        error.message,
+      );
     });
-  });
 
-  app.addHook('onError', async (request, _reply, error) => {
-    const workflow = requestWorkflows.get(request);
-    if (!workflow) {
-      return;
-    }
+    app.addHook('onTimeout', async (request) => {
+      flushRequestWorkflow(request, 408, 'request timeout');
+    });
 
-    settlePendingWorkflowStep(
-      workflow.workflowLogger,
-      workflow.workflowRequestStep,
-      'error',
-      error.message,
-    );
-  });
+    app.addHook('onRequestAbort', async (request) => {
+      flushRequestWorkflow(request, 499, 'request aborted');
+    });
 
-  app.addHook('onTimeout', async (request) => {
-    flushRequestWorkflow(request, 408, 'request timeout');
-  });
-
-  app.addHook('onRequestAbort', async (request) => {
-    flushRequestWorkflow(request, 499, 'request aborted');
-  });
-
-  app.addHook('onResponse', async (request, reply) => {
-    flushRequestWorkflow(request, reply.statusCode);
-  });
-});
+    app.addHook('onResponse', async (request, reply) => {
+      flushRequestWorkflow(request, reply.statusCode);
+    });
+  },
+  { name: 'request-workflow' },
+);
 
 export default requestWorkflowPlugin;

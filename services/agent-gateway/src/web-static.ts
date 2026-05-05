@@ -25,4 +25,4 @@ async function webStaticPlugin(app: FastifyInstance): Promise<void> {
   });
 }
 
-export default fp(webStaticPlugin);
+export default fp(webStaticPlugin, { name: 'web-static' });

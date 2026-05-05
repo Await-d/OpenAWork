@@ -271,4 +271,4 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   }
 }
 
-export default fp(authPlugin);
+export default fp(authPlugin, { name: 'auth' });
