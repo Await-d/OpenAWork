@@ -250,25 +250,20 @@ jobs:
         run: |
           set -euo pipefail
           DEB_LOG="$RUNNER_TEMP/tauri-linux-deb.log"
-          APPIMAGE_LOG="$RUNNER_TEMP/tauri-linux-appimage.log"
           APPIMAGE_STATUS="$RUNNER_TEMP/tauri-linux-appimage-status.txt"
           APPIMAGE_DIAGNOSTICS="$RUNNER_TEMP/tauri-linux-appimage-diagnostics.md"
 
           pnpm --filter @openAwork/desktop exec tauri build --bundles deb --verbose 2>&1 | tee "$DEB_LOG"
 
-          if pnpm --filter @openAwork/desktop exec tauri build --bundles appimage --verbose 2>&1 | tee "$APPIMAGE_LOG"; then
+          if pnpm --filter @openAwork/desktop exec tauri build --bundles appimage --verbose; then
             echo 'success' > "$APPIMAGE_STATUS"
           else
             appimage_status=$?
             echo "failure:$appimage_status" > "$APPIMAGE_STATUS"
             {
-              echo '## Linux AppImage 打包警告'
+              echo '### Linux AppImage 打包警告'
               echo
               echo "AppImage 打包失败，退出码：$appimage_status。Linux deb 打包已成功，仍会继续发布。"
-              echo
-              echo '```text'
-              tail -n 200 "$APPIMAGE_LOG"
-              echo '```'
             } > "$APPIMAGE_DIAGNOSTICS"
             echo '::warning::Linux AppImage 打包失败；Linux deb 仍会继续发布。'
           fi
@@ -279,7 +274,7 @@ jobs:
         run: |
           {
             echo '## Linux desktop build failure'
-            for LOG in "$RUNNER_TEMP/linux-deps-check.log" "$RUNNER_TEMP/tauri-linux-deb.log" "$RUNNER_TEMP/tauri-linux-appimage.log"; do
+            for LOG in "$RUNNER_TEMP/linux-deps-check.log" "$RUNNER_TEMP/tauri-linux-deb.log"; do
               echo
               echo "### $(basename "$LOG")"
               echo '```text'
@@ -310,7 +305,6 @@ jobs:
           path: |
             ${{ runner.temp }}/linux-deps-check.log
             ${{ runner.temp }}/tauri-linux-deb.log
-            ${{ runner.temp }}/tauri-linux-appimage.log
             ${{ runner.temp }}/tauri-linux-appimage-status.txt
             ${{ runner.temp }}/tauri-linux-appimage-diagnostics.md
           if-no-files-found: warn
@@ -478,9 +472,16 @@ jobs:
               if [ -f "$APPIMAGE_STATUS" ] && grep -q '^failure:' "$APPIMAGE_STATUS"; then
                 echo
                 echo '> Linux deb 已成功发布；Linux AppImage 因 linuxdeploy 扫描 sidecar 失败暂未产出。'
+                if [ -f temp/linux-build-logs/tauri-linux-appimage-diagnostics.md ]; then
+                  echo
+                  cat temp/linux-build-logs/tauri-linux-appimage-diagnostics.md
+                fi
               fi
               for LOG in temp/linux-build-logs/*; do
                 [ -f "$LOG" ] || continue
+                case "$(basename "$LOG")" in
+                  tauri-linux-appimage-status.txt|tauri-linux-appimage-diagnostics.md) continue ;;
+                esac
                 echo
                 echo "### $(basename "$LOG")"
                 echo '```text'
