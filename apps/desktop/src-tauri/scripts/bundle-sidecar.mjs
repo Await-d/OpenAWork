@@ -1,5 +1,5 @@
 import { cp, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
@@ -7,17 +7,21 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(scriptDir, '../../../..');
 const gatewayDir = resolve(root, 'services/agent-gateway');
 const binariesDir = resolve(root, 'apps/desktop/src-tauri/binaries');
-const pnpmCommand = process.env.npm_execpath ? process.execPath : 'pnpm';
-const pnpmBaseArgs = process.env.npm_execpath ? [process.env.npm_execpath] : [];
+const npmExecPath = process.env.npm_execpath ?? '';
+const invokedByPnpm = basename(npmExecPath).toLowerCase().startsWith('pnpm');
+const fallbackPnpmCommand = process.platform === 'win32' ? 'cmd.exe' : 'pnpm';
+const fallbackPnpmBaseArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm'] : [];
+const pnpmCommand = invokedByPnpm ? process.execPath : fallbackPnpmCommand;
+const pnpmBaseArgs = invokedByPnpm ? [npmExecPath] : fallbackPnpmBaseArgs;
 
 function createPnpmArgs(...args) {
   return [...pnpmBaseArgs, ...args];
 }
 
-// Windows 下 'pnpm' 是 .cmd 脚本，需要 shell 才能被 spawnSync 找到。
-// 但当通过 pnpm 调用本脚本时（npm_execpath 已设置），pnpmCommand = node.exe，
-// 不需要 shell；且 shell=true 会导致含空格的路径（如 D:\Program Files\...）被 cmd 拆断。
-const useShell = process.platform === 'win32' && !process.env.npm_execpath;
+// 当通过 pnpm 调用本脚本时，pnpmCommand = node.exe + pnpm 脚本路径，
+// 可避免含空格的路径（如 D:\Program Files\...）被 cmd 拆断。
+// npm_execpath 也会被 npm 设置；tauri-action 通过 npm run 调用时必须回退到 pnpm。
+const useShell = false;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
