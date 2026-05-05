@@ -75,6 +75,16 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         run: node scripts/release-version.mjs --bump patch
 
+      - name: Format bumped version files
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          pnpm exec prettier --write \
+            package.json \
+            'apps/*/package.json' \
+            'packages/*/package.json' \
+            'services/*/package.json' \
+            apps/mobile/app.json
+
       - name: Read bumped version
         if: steps.changes.outputs.has_changes == 'true'
         id: version

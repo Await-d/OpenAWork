@@ -107,6 +107,15 @@ jobs:
       - name: Bump synchronized versions
         run: node scripts/release-version.mjs --bump "${{ inputs.bump }}"
 
+      - name: Format bumped version files
+        run: |
+          pnpm exec prettier --write \
+            package.json \
+            'apps/*/package.json' \
+            'packages/*/package.json' \
+            'services/*/package.json' \
+            apps/mobile/app.json
+
       - name: Read next version
         id: version
         run: |
