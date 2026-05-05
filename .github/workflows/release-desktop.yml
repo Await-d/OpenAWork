@@ -121,7 +121,7 @@ jobs:
             bundle_path: apps/desktop/src-tauri/target/release/bundle/
           - label: linux
             runner: ubuntu-22.04
-            args: '--bundles deb,appimage --verbose'
+            args: '--verbose'
             rust_targets: ''
             tauri_target_triple: ''
             bundle_path: apps/desktop/src-tauri/target/release/bundle/
@@ -162,6 +162,7 @@ jobs:
             libxdo-dev \
             librsvg2-dev \
             pkg-config \
+            fakeroot \
             patchelf \
             squashfs-tools \
             appstream \
@@ -241,9 +242,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          set -euo pipefail
-          LOG="$RUNNER_TEMP/tauri-linux-build.log"
-          pnpm --filter @openAwork/desktop exec tauri build ${{ matrix.args }} 2>&1 | tee "$LOG"
+          set -u -o pipefail
+          status=0
+          DEB_LOG="$RUNNER_TEMP/tauri-linux-deb.log"
+          APPIMAGE_LOG="$RUNNER_TEMP/tauri-linux-appimage.log"
+
+          pnpm --filter @openAwork/desktop exec tauri build --bundles deb --verbose 2>&1 | tee "$DEB_LOG" || status=$?
+          pnpm --filter @openAwork/desktop exec tauri build --bundles appimage --verbose 2>&1 | tee "$APPIMAGE_LOG" || status=$?
+
+          exit "$status"
 
       - name: Summarize Linux Tauri build failure
         if: failure() && matrix.runner == 'ubuntu-22.04'
@@ -251,7 +258,7 @@ jobs:
         run: |
           {
             echo '## Linux desktop build failure'
-            for LOG in "$RUNNER_TEMP/linux-deps-check.log" "$RUNNER_TEMP/tauri-linux-build.log"; do
+            for LOG in "$RUNNER_TEMP/linux-deps-check.log" "$RUNNER_TEMP/tauri-linux-deb.log" "$RUNNER_TEMP/tauri-linux-appimage.log"; do
               echo
               echo "### $(basename "$LOG")"
               echo '```text'
@@ -271,7 +278,8 @@ jobs:
           name: linux-desktop-build-logs
           path: |
             ${{ runner.temp }}/linux-deps-check.log
-            ${{ runner.temp }}/tauri-linux-build.log
+            ${{ runner.temp }}/tauri-linux-deb.log
+            ${{ runner.temp }}/tauri-linux-appimage.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -383,6 +391,13 @@ jobs:
           name: desktop-release-notes
           path: temp/release-notes
 
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.build.result != 'success' }}
+        continue-on-error: true
+        with:
+          name: linux-desktop-build-logs
+          path: temp/linux-build-logs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -411,6 +426,29 @@ jobs:
             --channel "${{ needs.resolve-release-notes.outputs.release_channel }}" \
             --output-file release-body-final.md >/dev/null
 
+      - name: Append Linux build diagnostics
+        if: ${{ needs.build.result != 'success' }}
+        shell: bash
+        run: |
+          if [ -d temp/linux-build-logs ]; then
+            {
+              echo
+              echo '## Linux build diagnostics'
+              for LOG in temp/linux-build-logs/*; do
+                [ -f "$LOG" ] || continue
+                echo
+                echo "### $(basename "$LOG")"
+                echo '```text'
+                tail -n 200 "$LOG"
+                echo '```'
+              done
+            } >> release-body-final.md
+          fi
+
+      - name: Build desktop aggregate summary
+        env:
+          NOTES_FILE: temp/release-notes/release-notes.md
+        run: |
           node scripts/release-aggregate-summary.mjs print \
             --base-file "$NOTES_FILE" \
             --desktop-file release-body-final.md \
