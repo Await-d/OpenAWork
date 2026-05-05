@@ -238,6 +238,7 @@ jobs:
         if: matrix.runner == 'ubuntu-22.04'
         shell: bash
         env:
+          DEPLOY_GTK_VERSION: '3'
           OPENAWORK_SKIP_SIDECAR_BUNDLE: '1'
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
