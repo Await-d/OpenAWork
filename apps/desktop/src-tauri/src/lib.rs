@@ -478,6 +478,11 @@ async fn is_local_gateway_healthy(port: u16) -> bool {
     }
 }
 
+#[tauri::command]
+async fn check_local_gateway_health(port: u16) -> Result<bool, String> {
+    Ok(is_local_gateway_healthy(port).await)
+}
+
 /// 应用真正退出时清理本桌面端实例**自己启动**的 gateway sidecar 子进程。
 ///
 /// 设计意图（"跨会话复用网关"）：
@@ -1516,6 +1521,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_gateway,
             stop_gateway,
+            check_local_gateway_health,
             gateway_status,
             authenticate_desktop_gateway,
             pick_folder,

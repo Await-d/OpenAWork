@@ -6,6 +6,7 @@ export const DESKTOP_GATEWAY_MODE_KEY = 'desktop_gateway_mode';
 export const DEFAULT_GATEWAY_PORT = 3000;
 export const DESKTOP_DEFAULT_EMAIL = 'admin@openAwork.local';
 const GATEWAY_HEALTH_CHECK_ATTEMPTS = 60;
+const LOCAL_GATEWAY_HEALTH_CHECK_ATTEMPTS = 120;
 const GATEWAY_HEALTH_CHECK_INTERVAL_MS = 500;
 
 interface TauriRuntime {
@@ -73,7 +74,14 @@ export function desktopGatewayModeForUrl(gatewayUrl: string): DesktopGatewayMode
 
 export async function isGatewayHealthy(gatewayUrl: string): Promise<boolean> {
   try {
-    const response = await fetch(`${gatewayUrl}/health`, { signal: AbortSignal.timeout(2500) });
+    const url = normalizeGatewayUrl(gatewayUrl);
+    if (isTauriRuntime() && isLocalGatewayUrl(url)) {
+      return await invokeTauri<boolean>('check_local_gateway_health', {
+        port: readGatewayPortFromUrl(url),
+      });
+    }
+
+    const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2500) });
     return response.ok;
   } catch (_error) {
     return false;
@@ -87,8 +95,14 @@ function delay(ms: number): Promise<void> {
 }
 
 export async function waitForGatewayHealth(gatewayUrl: string): Promise<boolean> {
-  for (let attempt = 0; attempt < GATEWAY_HEALTH_CHECK_ATTEMPTS; attempt += 1) {
-    if (await isGatewayHealthy(gatewayUrl)) {
+  const url = normalizeGatewayUrl(gatewayUrl);
+  const attempts =
+    isTauriRuntime() && isLocalGatewayUrl(url)
+      ? LOCAL_GATEWAY_HEALTH_CHECK_ATTEMPTS
+      : GATEWAY_HEALTH_CHECK_ATTEMPTS;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await isGatewayHealthy(url)) {
       return true;
     }
     await delay(GATEWAY_HEALTH_CHECK_INTERVAL_MS);

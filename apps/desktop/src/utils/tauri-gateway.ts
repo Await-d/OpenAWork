@@ -9,6 +9,10 @@ export async function stopDesktopGateway(): Promise<void> {
   await invoke<void>('stop_gateway');
 }
 
+export async function isLocalDesktopGatewayHealthy(port: number): Promise<boolean> {
+  return await invoke<boolean>('check_local_gateway_health', { port });
+}
+
 export async function authenticateLocalDesktopGateway(): Promise<TokenPair> {
   return await invoke<TokenPair>('authenticate_desktop_gateway');
 }
