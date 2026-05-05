@@ -1,5 +1,4 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
-import { DesktopBrowserAutomation } from '@openAwork/browser-automation';
 import { z } from 'zod';
 
 export interface DesktopAutomationDriver {
@@ -20,6 +19,19 @@ export interface DesktopAutomationStatus {
   enabled: boolean;
   started: boolean;
 }
+
+interface BrowserAutomationRuntime {
+  click(selector: string): Promise<unknown>;
+  goto(url: string): Promise<unknown>;
+  isStarted(): boolean;
+  screenshot(options?: { type?: 'png' }): Promise<string | Uint8Array>;
+  start(startUrl?: string): Promise<unknown>;
+  type(selector: string, text: string): Promise<unknown>;
+}
+
+type BrowserAutomationModule = {
+  DesktopBrowserAutomation: new () => BrowserAutomationRuntime;
+};
 
 export interface DesktopAutomationManager {
   status(): Promise<DesktopAutomationStatus>;
@@ -86,36 +98,47 @@ export const desktopAutomationToolDefinition: ToolDefinition<
 };
 
 class DesktopAutomationDriverImpl implements DesktopAutomationDriver {
-  constructor(private readonly desktop = new DesktopBrowserAutomation()) {}
+  private desktop: BrowserAutomationRuntime | null = null;
+
+  private async getDesktop(): Promise<BrowserAutomationRuntime> {
+    if (!this.desktop) {
+      const browserAutomation =
+        (await import('@openAwork/browser-automation')) as BrowserAutomationModule;
+      this.desktop = new browserAutomation.DesktopBrowserAutomation();
+    }
+
+    return this.desktop;
+  }
 
   async start(startUrl?: string): Promise<void> {
-    if (!this.desktop.isStarted()) {
-      await this.desktop.start(startUrl);
+    const desktop = await this.getDesktop();
+    if (!desktop.isStarted()) {
+      await desktop.start(startUrl);
       return;
     }
     if (startUrl) {
-      await this.desktop.goto(startUrl);
+      await desktop.goto(startUrl);
     }
   }
 
   isStarted(): boolean {
-    return this.desktop.isStarted();
+    return this.desktop?.isStarted() ?? false;
   }
 
   async goto(url: string): Promise<void> {
-    await this.desktop.goto(url);
+    await (await this.getDesktop()).goto(url);
   }
 
   async click(selector: string): Promise<void> {
-    await this.desktop.click(selector);
+    await (await this.getDesktop()).click(selector);
   }
 
   async type(selector: string, text: string): Promise<void> {
-    await this.desktop.type(selector, text);
+    await (await this.getDesktop()).type(selector, text);
   }
 
   async screenshot(): Promise<string> {
-    const screenshot = await this.desktop.screenshot({ type: 'png' });
+    const screenshot = await (await this.getDesktop()).screenshot({ type: 'png' });
     return typeof screenshot === 'string' ? screenshot : Buffer.from(screenshot).toString('base64');
   }
 }
