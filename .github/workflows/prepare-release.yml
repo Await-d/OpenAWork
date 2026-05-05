@@ -182,6 +182,27 @@ jobs:
           git tag -a "$TAG_NAME" -F release-notes.md
           git push origin "$TAG_NAME"
 
+      - name: Dispatch desktop release workflow
+        if: ${{ steps.plan.outputs.desktop_tag != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const releaseNotesBody = fs.readFileSync('release-notes.md', 'utf8');
+            const tagName = '${{ steps.plan.outputs.desktop_tag }}';
+            const channel = tagName.endsWith('-preview') ? 'preview' : 'stable';
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-desktop.yml',
+              ref: tagName,
+              inputs: {
+                channel,
+                release_notes_body: releaseNotesBody,
+              },
+            });
+
       - name: Create mobile production tag
         if: ${{ steps.plan.outputs.mobile_tag != '' }}
         env:
