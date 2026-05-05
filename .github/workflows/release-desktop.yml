@@ -170,7 +170,10 @@ jobs:
 
       - name: Verify Linux desktop deps
         if: matrix.runner == 'ubuntu-22.04'
-        run: node apps/desktop/src-tauri/scripts/check-build-deps.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node apps/desktop/src-tauri/scripts/check-build-deps.mjs 2>&1 | tee "$RUNNER_TEMP/linux-deps-check.log"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -246,26 +249,29 @@ jobs:
         if: failure() && matrix.runner == 'ubuntu-22.04'
         shell: bash
         run: |
-          LOG="$RUNNER_TEMP/tauri-linux-build.log"
           {
-            echo '## Linux Tauri build failure'
-            echo
-            echo 'Last 200 log lines:'
-            echo '```text'
-            if [ -f "$LOG" ]; then
-              tail -n 200 "$LOG"
-            else
-              echo 'tauri-linux-build.log was not created.'
-            fi
-            echo '```'
+            echo '## Linux desktop build failure'
+            for LOG in "$RUNNER_TEMP/linux-deps-check.log" "$RUNNER_TEMP/tauri-linux-build.log"; do
+              echo
+              echo "### $(basename "$LOG")"
+              echo '```text'
+              if [ -f "$LOG" ]; then
+                tail -n 200 "$LOG"
+              else
+                echo "$(basename "$LOG") was not created."
+              fi
+              echo '```'
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Linux Tauri build log
+      - name: Upload Linux build logs
         if: failure() && matrix.runner == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-linux-build-log
-          path: ${{ runner.temp }}/tauri-linux-build.log
+          name: linux-desktop-build-logs
+          path: |
+            ${{ runner.temp }}/linux-deps-check.log
+            ${{ runner.temp }}/tauri-linux-build.log
           if-no-files-found: warn
           retention-days: 14
 

@@ -9,6 +9,11 @@ function hasCommand(command) {
   return result.status === 0;
 }
 
+function hasMksquashfs() {
+  const result = spawnSync('mksquashfs', ['-version'], { stdio: 'ignore' });
+  return result.status === 0;
+}
+
 if (!hasCommand('pkg-config')) {
   console.error(`缺少 Linux 桌面打包依赖：pkg-config
 
@@ -18,7 +23,7 @@ if (!hasCommand('pkg-config')) {
   process.exit(1);
 }
 
-if (!hasCommand('mksquashfs')) {
+if (!hasMksquashfs()) {
   console.error(`缺少 Linux AppImage 打包依赖：mksquashfs
 
 请先安装以下依赖后再执行桌面打包：
