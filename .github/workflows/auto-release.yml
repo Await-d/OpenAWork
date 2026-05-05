@@ -136,7 +136,7 @@ jobs:
             exit 0
           fi
 
-          git tag -a "$TAG" -F release-notes.md
+          git tag -a --cleanup=verbatim "$TAG" -F release-notes.md
           git push origin "$TAG"
           echo "Created and pushed tag: $TAG"
           echo "tag_created=true" >> "$GITHUB_OUTPUT"

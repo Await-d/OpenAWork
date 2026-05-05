@@ -38,12 +38,15 @@ jobs:
 
       - name: Materialize release notes body
         env:
-          RELEASE_NOTES_BODY: ${{ inputs.release_notes_body }}
+          RELEASE_NOTES_BODY: ${{ github.event.inputs.release_notes_body || '' }}
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          if [[ -n "$RELEASE_NOTES_BODY" ]]; then
+            printf '%s' "$RELEASE_NOTES_BODY" > release-notes.md
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > release-notes.md
           else
-            printf '%s' "$RELEASE_NOTES_BODY" > release-notes.md
+            echo "release_notes_body is required when not running from a tag ref."
+            exit 1
           fi
 
       - name: Enrich manual release notes body

@@ -179,7 +179,7 @@ jobs:
             echo "Tag already exists: $TAG_NAME"
             exit 1
           fi
-          git tag -a "$TAG_NAME" -F release-notes.md
+          git tag -a --cleanup=verbatim "$TAG_NAME" -F release-notes.md
           git push origin "$TAG_NAME"
 
       - name: Dispatch desktop release workflow
