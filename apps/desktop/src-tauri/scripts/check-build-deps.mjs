@@ -14,7 +14,16 @@ if (!hasCommand('pkg-config')) {
 
 请先安装以下依赖后再执行桌面打包：
   sudo apt-get update
-  sudo apt-get install -y pkg-config libgtk-3-dev libglib2.0-dev libdbus-1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf appstream desktop-file-utils`);
+  sudo apt-get install -y pkg-config libgtk-3-dev libglib2.0-dev libdbus-1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf squashfs-tools appstream desktop-file-utils`);
+  process.exit(1);
+}
+
+if (!hasCommand('mksquashfs')) {
+  console.error(`缺少 Linux AppImage 打包依赖：mksquashfs
+
+请先安装以下依赖后再执行桌面打包：
+  sudo apt-get update
+  sudo apt-get install -y pkg-config libgtk-3-dev libglib2.0-dev libdbus-1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf squashfs-tools appstream desktop-file-utils`);
   process.exit(1);
 }
 
@@ -36,6 +45,6 @@ if (missing.length > 0) {
 
 请先安装以下依赖后再执行桌面打包：
   sudo apt-get update
-  sudo apt-get install -y pkg-config libgtk-3-dev libglib2.0-dev libdbus-1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf appstream desktop-file-utils`);
+  sudo apt-get install -y pkg-config libgtk-3-dev libglib2.0-dev libdbus-1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf squashfs-tools appstream desktop-file-utils`);
   process.exit(1);
 }

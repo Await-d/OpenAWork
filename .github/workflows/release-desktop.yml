@@ -163,6 +163,7 @@ jobs:
             librsvg2-dev \
             pkg-config \
             patchelf \
+            squashfs-tools \
             appstream \
             wget
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
@@ -211,7 +212,7 @@ jobs:
           echo "${DELIMITER}" >> "$GITHUB_OUTPUT"
 
       - name: Build Tauri app (default)
-        if: matrix.runner != 'macos-latest' || env.MACOS_CODESIGN_READY != 'true'
+        if: matrix.runner == 'windows-latest' || (matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY != 'true')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -228,6 +229,83 @@ jobs:
           releaseDraft: false
           prerelease: ${{ needs.resolve-release-notes.outputs.release_channel == 'preview' }}
           includeUpdaterJson: true
+
+      - name: Build Tauri app (Linux)
+        if: matrix.runner == 'ubuntu-22.04'
+        shell: bash
+        env:
+          OPENAWORK_SKIP_SIDECAR_BUNDLE: '1'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/tauri-linux-build.log"
+          pnpm --filter @openAwork/desktop exec tauri build ${{ matrix.args }} 2>&1 | tee "$LOG"
+
+      - name: Summarize Linux Tauri build failure
+        if: failure() && matrix.runner == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          LOG="$RUNNER_TEMP/tauri-linux-build.log"
+          {
+            echo '## Linux Tauri build failure'
+            echo
+            echo 'Last 200 log lines:'
+            echo '```text'
+            if [ -f "$LOG" ]; then
+              tail -n 200 "$LOG"
+            else
+              echo 'tauri-linux-build.log was not created.'
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Linux Tauri build log
+        if: failure() && matrix.runner == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-linux-build-log
+          path: ${{ runner.temp }}/tauri-linux-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Linux installers to GitHub release
+        if: matrix.runner == 'ubuntu-22.04'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          release_tag='${{ needs.resolve-release-notes.outputs.release_tag }}'
+          release_name='${{ needs.resolve-release-notes.outputs.release_name }}'
+          release_flags=()
+          if [ '${{ needs.resolve-release-notes.outputs.release_channel }}' = 'preview' ]; then
+            release_flags+=(--prerelease)
+          fi
+
+          if ! gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release create "$release_tag" \
+              --title "$release_name" \
+              --notes-file temp/release-notes/release-notes.md \
+              "${release_flags[@]}"
+          fi
+
+          upload=()
+          for file in apps/desktop/src-tauri/target/release/bundle/**/*; do
+            [ -f "$file" ] || continue
+            case "$file" in
+              *.AppImage|*.appimage|*.deb|*.sig|*.json) upload+=("$file") ;;
+            esac
+          done
+
+          if [ "${#upload[@]}" -eq 0 ]; then
+            echo 'No Linux installer assets found.' >&2
+            exit 1
+          fi
+
+          gh release upload "$release_tag" "${upload[@]}" --clobber
 
       - name: Build Tauri app (macOS signed)
         if: matrix.runner == 'macos-latest' && env.MACOS_CODESIGN_READY == 'true' && env.MACOS_NOTARIZATION_READY != 'true'
