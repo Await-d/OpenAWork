@@ -99,6 +99,8 @@ jobs:
     permissions:
       contents: write
     env:
+      TAURI_SCRIPT: pnpm --filter @openAwork/desktop run tauri
+      TAURI_LINUX_AYATANA_APPINDICATOR: '0'
       MACOS_CODESIGN_READY: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
       MACOS_NOTARIZATION_READY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     strategy:
@@ -146,14 +148,22 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             curl \
+            desktop-file-utils \
             file \
+            libdbus-1-dev \
+            libglib2.0-dev \
             libappindicator3-dev \
+            libgtk-3-dev \
+            libjavascriptcoregtk-4.1-dev \
             libfuse2 \
+            libsoup-3.0-dev \
             libssl-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             librsvg2-dev \
+            pkg-config \
             patchelf \
+            appstream \
             wget
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
 
@@ -206,6 +216,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
+          tauriScript: ${{ env.TAURI_SCRIPT }}
           args: ${{ matrix.args }}
           tagName: ${{ needs.resolve-release-notes.outputs.release_tag }}
           releaseName: ${{ needs.resolve-release-notes.outputs.release_name }}
@@ -227,6 +238,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           projectPath: apps/desktop
+          tauriScript: ${{ env.TAURI_SCRIPT }}
           args: ${{ matrix.args }}
           tagName: ${{ needs.resolve-release-notes.outputs.release_tag }}
           releaseName: ${{ needs.resolve-release-notes.outputs.release_name }}
@@ -251,6 +263,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/desktop
+          tauriScript: ${{ env.TAURI_SCRIPT }}
           args: ${{ matrix.args }}
           tagName: ${{ needs.resolve-release-notes.outputs.release_tag }}
           releaseName: ${{ needs.resolve-release-notes.outputs.release_name }}
