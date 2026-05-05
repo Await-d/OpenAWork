@@ -1,4 +1,4 @@
-import { cp, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -13,6 +13,11 @@ const fallbackPnpmCommand = process.platform === 'win32' ? 'cmd.exe' : 'pnpm';
 const fallbackPnpmBaseArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm'] : [];
 const pnpmCommand = invokedByPnpm ? process.execPath : fallbackPnpmCommand;
 const pnpmBaseArgs = invokedByPnpm ? [npmExecPath] : fallbackPnpmBaseArgs;
+
+if (process.env.OPENAWORK_SKIP_SIDECAR_BUNDLE === '1') {
+  console.log('Skipping gateway sidecar bundling because OPENAWORK_SKIP_SIDECAR_BUNDLE=1.');
+  process.exit(0);
+}
 
 function createPnpmArgs(...args) {
   return [...pnpmBaseArgs, ...args];
@@ -90,6 +95,9 @@ const gatewayDest = resolve(binariesDir, `agent-gateway-${targetTriple}${executa
 
 await mkdir(binariesDir, { recursive: true });
 await cp(gatewaySrc, gatewayDest);
+if (process.platform !== 'win32') {
+  await chmod(gatewayDest, 0o755);
+}
 console.log(`Gateway binary staged: ${gatewayDest}`);
 
 // Step 4: 写入 bundle stamp 触发 cargo 重新运行 build.rs。
