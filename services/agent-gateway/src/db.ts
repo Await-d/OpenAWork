@@ -1,5 +1,5 @@
-import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { dirname, parse, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import {
@@ -15,6 +15,39 @@ import {
   stringifyToolResultOutput,
 } from './tool-result-contract.js';
 import { normalizeSqliteBindParams, type SqliteBindableValue } from './sqlite-bind-params.js';
+
+interface SqliteStatement {
+  all(...params: unknown[]): unknown[];
+  get(...params: unknown[]): unknown;
+  run(...params: unknown[]): unknown;
+}
+
+interface GatewayDatabase {
+  close(): void;
+  exec(sql: string): unknown;
+  prepare(sql: string): SqliteStatement;
+}
+
+type DatabaseConstructor = new (path: string) => GatewayDatabase;
+
+const requireRuntimeModule = createRequire(import.meta.url);
+
+function loadDatabaseConstructor(): DatabaseConstructor {
+  const runtime = globalThis as typeof globalThis & { Bun?: unknown };
+  const moduleName = runtime.Bun ? 'bun:sqlite' : 'node:sqlite';
+  const sqliteModule = requireRuntimeModule(moduleName) as {
+    Database?: DatabaseConstructor;
+    DatabaseSync?: DatabaseConstructor;
+  };
+  const Database = sqliteModule.DatabaseSync ?? sqliteModule.Database;
+  if (!Database) {
+    throw new Error(`SQLite runtime module ${moduleName} did not expose a database constructor`);
+  }
+
+  return Database;
+}
+
+const DatabaseSync = loadDatabaseConstructor();
 
 function resolveDbPath(): string {
   return resolveGatewayDatabasePath();
@@ -39,7 +72,7 @@ export const WORKSPACE_ACCESS_RESTRICTED = WORKSPACE_ACCESS_MODE === 'restricted
 export const WORKSPACE_BROWSER_ROOT =
   parse(WORKSPACE_ROOT).root || parse(process.cwd()).root || resolve('/');
 
-function createDatabase(dbPath: string): DatabaseSync {
+function createDatabase(dbPath: string): GatewayDatabase {
   const dbDir = dbPath === ':memory:' ? null : dirname(dbPath);
   if (dbDir) mkdirSync(dbDir, { recursive: true });
   const database = new DatabaseSync(dbPath);
