@@ -124,7 +124,12 @@ jobs:
             args: '--verbose'
             rust_targets: ''
             tauri_target_triple: ''
-            bundle_path: apps/desktop/src-tauri/target/release/bundle/
+            bundle_path: |
+              apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+              apps/desktop/src-tauri/target/release/bundle/deb/*.sig
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.sig
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.json
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -243,15 +248,30 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          set -u -o pipefail
-          status=0
+          set -euo pipefail
           DEB_LOG="$RUNNER_TEMP/tauri-linux-deb.log"
           APPIMAGE_LOG="$RUNNER_TEMP/tauri-linux-appimage.log"
+          APPIMAGE_STATUS="$RUNNER_TEMP/tauri-linux-appimage-status.txt"
+          APPIMAGE_DIAGNOSTICS="$RUNNER_TEMP/tauri-linux-appimage-diagnostics.md"
 
-          pnpm --filter @openAwork/desktop exec tauri build --bundles deb --verbose 2>&1 | tee "$DEB_LOG" || status=$?
-          pnpm --filter @openAwork/desktop exec tauri build --bundles appimage --verbose 2>&1 | tee "$APPIMAGE_LOG" || status=$?
+          pnpm --filter @openAwork/desktop exec tauri build --bundles deb --verbose 2>&1 | tee "$DEB_LOG"
 
-          exit "$status"
+          if pnpm --filter @openAwork/desktop exec tauri build --bundles appimage --verbose 2>&1 | tee "$APPIMAGE_LOG"; then
+            echo 'success' > "$APPIMAGE_STATUS"
+          else
+            appimage_status=$?
+            echo "failure:$appimage_status" > "$APPIMAGE_STATUS"
+            {
+              echo '## Linux AppImage 打包警告'
+              echo
+              echo "AppImage 打包失败，退出码：$appimage_status。Linux deb 打包已成功，仍会继续发布。"
+              echo
+              echo '```text'
+              tail -n 200 "$APPIMAGE_LOG"
+              echo '```'
+            } > "$APPIMAGE_DIAGNOSTICS"
+            echo '::warning::Linux AppImage 打包失败；Linux deb 仍会继续发布。'
+          fi
 
       - name: Summarize Linux Tauri build failure
         if: failure() && matrix.runner == 'ubuntu-22.04'
@@ -272,8 +292,18 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Summarize optional Linux AppImage failure
+        if: matrix.runner == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          STATUS="$RUNNER_TEMP/tauri-linux-appimage-status.txt"
+          DIAGNOSTICS="$RUNNER_TEMP/tauri-linux-appimage-diagnostics.md"
+          if [ -f "$STATUS" ] && grep -q '^failure:' "$STATUS" && [ -f "$DIAGNOSTICS" ]; then
+            cat "$DIAGNOSTICS" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload Linux build logs
-        if: failure() && matrix.runner == 'ubuntu-22.04'
+        if: always() && matrix.runner == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
           name: linux-desktop-build-logs
@@ -281,6 +311,8 @@ jobs:
             ${{ runner.temp }}/linux-deps-check.log
             ${{ runner.temp }}/tauri-linux-deb.log
             ${{ runner.temp }}/tauri-linux-appimage.log
+            ${{ runner.temp }}/tauri-linux-appimage-status.txt
+            ${{ runner.temp }}/tauri-linux-appimage-diagnostics.md
           if-no-files-found: warn
           retention-days: 14
 
@@ -393,7 +425,6 @@ jobs:
           path: temp/release-notes
 
       - uses: actions/download-artifact@v4
-        if: ${{ needs.build.result != 'success' }}
         continue-on-error: true
         with:
           name: linux-desktop-build-logs
@@ -428,13 +459,26 @@ jobs:
             --output-file release-body-final.md >/dev/null
 
       - name: Append Linux build diagnostics
-        if: ${{ needs.build.result != 'success' }}
         shell: bash
         run: |
-          if [ -d temp/linux-build-logs ]; then
+          BUILD_RESULT='${{ needs.build.result }}'
+          APPIMAGE_STATUS='temp/linux-build-logs/tauri-linux-appimage-status.txt'
+          SHOULD_APPEND=false
+
+          if [ "$BUILD_RESULT" != 'success' ]; then
+            SHOULD_APPEND=true
+          elif [ -f "$APPIMAGE_STATUS" ] && grep -q '^failure:' "$APPIMAGE_STATUS"; then
+            SHOULD_APPEND=true
+          fi
+
+          if [ "$SHOULD_APPEND" = true ] && [ -d temp/linux-build-logs ]; then
             {
               echo
               echo '## Linux build diagnostics'
+              if [ -f "$APPIMAGE_STATUS" ] && grep -q '^failure:' "$APPIMAGE_STATUS"; then
+                echo
+                echo '> Linux deb 已成功发布；Linux AppImage 因 linuxdeploy 扫描 sidecar 失败暂未产出。'
+              fi
               for LOG in temp/linux-build-logs/*; do
                 [ -f "$LOG" ] || continue
                 echo
