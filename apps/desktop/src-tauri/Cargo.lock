@@ -2590,7 +2590,7 @@ dependencies = [
 
 [[package]]
 name = "openAwork-desktop"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "argon2",
  "dirs 5.0.1",

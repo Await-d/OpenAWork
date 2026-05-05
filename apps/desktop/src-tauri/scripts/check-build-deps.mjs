@@ -22,8 +22,6 @@ const requiredPackages = [
   'gtk+-3.0',
   'glib-2.0',
   'dbus-1',
-  'javascriptcoregtk-4.1',
-  'libsoup-3.0',
   'webkit2gtk-4.1',
   'appindicator3-0.1',
   'librsvg-2.0',

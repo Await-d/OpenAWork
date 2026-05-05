@@ -99,7 +99,7 @@ jobs:
     permissions:
       contents: write
     env:
-      TAURI_SCRIPT: pnpm --filter @openAwork/desktop run tauri
+      TAURI_SCRIPT: pnpm --filter @openAwork/desktop exec tauri
       TAURI_LINUX_AYATANA_APPINDICATOR: '0'
       MACOS_CODESIGN_READY: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
       MACOS_NOTARIZATION_READY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
@@ -166,6 +166,10 @@ jobs:
             appstream \
             wget
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+
+      - name: Verify Linux desktop deps
+        if: matrix.runner == 'ubuntu-22.04'
+        run: node apps/desktop/src-tauri/scripts/check-build-deps.mjs
 
       - uses: dtolnay/rust-toolchain@stable
         with:
