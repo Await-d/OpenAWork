@@ -1156,7 +1156,11 @@ export function sqliteGet<T>(
   params: readonly SqliteBindableValue[] = [],
 ): T | undefined {
   const stmt = db.prepare(query);
-  return stmt.get(...normalizeSqliteBindParams(params)) as T | undefined;
+  // bun:sqlite 在没有匹配行时返回 `null`，node:sqlite 返回 `undefined`。
+  // 上层代码大量使用 `row !== undefined` / `row != null` 等判断，统一在
+  // 这里把 `null` 折叠为 `undefined`，让所有 caller 在两种 runtime 下行为一致。
+  const row = stmt.get(...normalizeSqliteBindParams(params));
+  return (row ?? undefined) as T | undefined;
 }
 
 export function sqliteAll<T>(query: string, params: readonly SqliteBindableValue[] = []): T[] {

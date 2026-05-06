@@ -88,8 +88,11 @@ function allocateNextSeq(aggregateID: string): number {
 }
 
 function isEventProcessed(eventId: string): boolean {
+  // bun:sqlite 在没有匹配行时返回 `null`，而 node:sqlite 返回 `undefined`。
+  // 用 `!= null` 同时识别两种 runtime，避免桌面端打包后误判事件已处理、
+  // 跳过 projector 写入导致 message_v2/event_log 永远是空。
   const row = sqliteGet<{ id: string }>('SELECT id FROM event_log WHERE id = ?', [eventId]);
-  return row !== undefined;
+  return row != null;
 }
 
 // ─── Emit Event ───
