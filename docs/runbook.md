@@ -130,7 +130,7 @@ eas update --branch production --message "hotfix: {description}"
 
 ```bash
 # 1. Check the updater JSON endpoint is reachable:
-curl https://github.com/openwork/openAwork/releases/latest/download/latest.json
+curl https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json
 
 # 2. If JSON is malformed or missing, re-run the release workflow:
 # GitHub Actions > Release Desktop > Re-run

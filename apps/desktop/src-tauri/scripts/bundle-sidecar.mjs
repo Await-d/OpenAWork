@@ -1,7 +1,9 @@
-import { chmod, cp, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(scriptDir, '../../../..');
@@ -69,6 +71,75 @@ function readTargetTriple() {
   return targetTriple;
 }
 
+async function removeStaleGatewayBinaries() {
+  await mkdir(binariesDir, { recursive: true });
+  for (const entry of await readdir(binariesDir)) {
+    if (entry.startsWith('agent-gateway-')) {
+      await rm(resolve(binariesDir, entry), { force: true });
+    }
+  }
+}
+
+function shellSingleQuote(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function createLinuxGatewayWrapper(payloadName, payloadHash) {
+  return `#!/usr/bin/env sh
+set -eu
+
+payload_name=${shellSingleQuote(payloadName)}
+payload_hash=${shellSingleQuote(payloadHash)}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+cache_root="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}/openawork/sidecars"
+target="$cache_root/agent-gateway-$payload_hash"
+
+find_payload() {
+  for candidate in \\
+    "$script_dir/$payload_name" \\
+    "$script_dir/binaries/$payload_name" \\
+    "$script_dir/../binaries/$payload_name"
+  do
+    if [ -f "$candidate" ]; then
+      printf '%s\\n' "$candidate"
+      return 0
+    fi
+  done
+
+  if [ -n "\${APPDIR:-}" ]; then
+    found=$(find "$APPDIR" -type f -name "$payload_name" -print -quit 2>/dev/null || true)
+    if [ -n "$found" ]; then
+      printf '%s\\n' "$found"
+      return 0
+    fi
+  fi
+
+  found=$(find "$script_dir" -maxdepth 5 -type f -name "$payload_name" -print -quit 2>/dev/null || true)
+  if [ -n "$found" ]; then
+    printf '%s\\n' "$found"
+    return 0
+  fi
+
+  return 1
+}
+
+payload=$(find_payload) || {
+  echo "Cannot locate bundled agent-gateway payload: $payload_name" >&2
+  exit 127
+}
+
+mkdir -p "$cache_root"
+if [ ! -x "$target" ]; then
+  tmp="$target.tmp.$$"
+  gzip -dc "$payload" > "$tmp"
+  chmod 755 "$tmp"
+  mv "$tmp" "$target"
+fi
+
+exec "$target" "$@"
+`;
+}
+
 // Step 1: Compile gateway TypeScript（确保 workspace 依赖已编译）。
 run(pnpmCommand, createPnpmArgs('build'), { cwd: gatewayDir });
 
@@ -93,10 +164,20 @@ const executableExtension = process.platform === 'win32' ? '.exe' : '';
 const gatewaySrc = resolve(gatewayDir, `dist/agent-gateway${executableExtension}`);
 const gatewayDest = resolve(binariesDir, `agent-gateway-${targetTriple}${executableExtension}`);
 
-await mkdir(binariesDir, { recursive: true });
-await cp(gatewaySrc, gatewayDest);
-if (process.platform !== 'win32') {
+await removeStaleGatewayBinaries();
+if (process.platform === 'linux') {
+  const gatewayBytes = await readFile(gatewaySrc);
+  const payloadHash = createHash('sha256').update(gatewayBytes).digest('hex').slice(0, 16);
+  const payloadDest = `${gatewayDest}.gz`;
+  await writeFile(payloadDest, gzipSync(gatewayBytes));
+  await writeFile(gatewayDest, createLinuxGatewayWrapper(basename(payloadDest), payloadHash));
   await chmod(gatewayDest, 0o755);
+  console.log(`Gateway payload staged: ${payloadDest}`);
+} else {
+  await cp(gatewaySrc, gatewayDest);
+  if (process.platform !== 'win32') {
+    await chmod(gatewayDest, 0o755);
+  }
 }
 console.log(`Gateway binary staged: ${gatewayDest}`);
 

@@ -27,6 +27,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "publisher": "OpenAWork",
     "icon": [
       "icons/icon_32x32.png",
@@ -52,8 +53,8 @@
     "updater": {
       "pubkey": "vNyM9fcv5lH8yTSa7RQBp0ukzyhKelFFp3IYP8OkgJY=",
       "endpoints": [
-        "https://github.com/openAwork/openAwork/releases/latest/download/latest.json",
-        "https://github.com/openAwork/openAwork/releases/download/{{current_version}}-preview/latest.json"
+        "https://github.com/Await-d/OpenAWork/releases/latest/download/latest.json",
+        "https://github.com/Await-d/OpenAWork/releases/download/desktop-v{{current_version}}-preview/latest.json"
       ],
       "dialog": false
     }

@@ -129,6 +129,7 @@ jobs:
               apps/desktop/src-tauri/target/release/bundle/deb/*.sig
               apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
               apps/desktop/src-tauri/target/release/bundle/appimage/*.sig
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.tar.gz
               apps/desktop/src-tauri/target/release/bundle/appimage/*.json
     runs-on: ${{ matrix.runner }}
     steps:
@@ -263,10 +264,16 @@ jobs:
             {
               echo '### Linux AppImage 打包警告'
               echo
-              echo "AppImage 打包失败，退出码：$appimage_status。Linux deb 打包已成功，仍会继续发布。"
+              echo "AppImage 打包失败，退出码：$appimage_status。Tauri updater 的 Linux 自动更新需要 AppImage 资产。"
             } > "$APPIMAGE_DIAGNOSTICS"
-            echo '::warning::Linux AppImage 打包失败；Linux deb 仍会继续发布。'
+            echo '::error::Linux AppImage 打包失败；Tauri updater 需要 AppImage 更新资产。'
+            exit "$appimage_status"
           fi
+
+          find apps/desktop/src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage.sig' -print -quit | grep -q . || {
+            echo 'Missing Linux updater signature (*.AppImage.sig).' >&2
+            exit 1
+          }
 
       - name: Summarize Linux Tauri build failure
         if: failure() && matrix.runner == 'ubuntu-22.04'
@@ -337,7 +344,7 @@ jobs:
           for file in apps/desktop/src-tauri/target/release/bundle/**/*; do
             [ -f "$file" ] || continue
             case "$file" in
-              *.AppImage|*.appimage|*.deb|*.sig|*.json) upload+=("$file") ;;
+              *.AppImage|*.appimage|*.deb|*.sig|*.json|*.tar.gz) upload+=("$file") ;;
             esac
           done
 
@@ -452,6 +459,22 @@ jobs:
             --channel "${{ needs.resolve-release-notes.outputs.release_channel }}" \
             --output-file release-body-final.md >/dev/null
 
+      - name: Publish updater JSON
+        if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${{ needs.resolve-release-notes.outputs.release_tag }}" > release.json
+          node scripts/build-tauri-updater-json.mjs \
+            --input-file release.json \
+            --output-file latest.json \
+            --notes-file temp/release-notes/release-notes.md \
+            --version "${{ needs.resolve-release-notes.outputs.version }}" \
+            --required-platform linux-x86_64 \
+            --required-platform windows-x86_64 \
+            --required-platform darwin-aarch64
+          gh release upload "${{ needs.resolve-release-notes.outputs.release_tag }}" latest.json --clobber
+
       - name: Append Linux build diagnostics
         shell: bash
         run: |
@@ -471,7 +494,7 @@ jobs:
               echo '## Linux build diagnostics'
               if [ -f "$APPIMAGE_STATUS" ] && grep -q '^failure:' "$APPIMAGE_STATUS"; then
                 echo
-                echo '> Linux deb 已成功发布；Linux AppImage 因 linuxdeploy 扫描 sidecar 失败暂未产出。'
+                echo '> Linux AppImage 是 Tauri updater 的 Linux 自动更新资产；失败时本次桌面发布不会继续产出有效 updater JSON。'
                 if [ -f temp/linux-build-logs/tauri-linux-appimage-diagnostics.md ]; then
                   echo
                   cat temp/linux-build-logs/tauri-linux-appimage-diagnostics.md
