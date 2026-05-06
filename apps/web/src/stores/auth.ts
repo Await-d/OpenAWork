@@ -10,10 +10,17 @@ interface AuthState {
   gatewayUrl: string;
   webAccessEnabled: boolean;
   webPort: number;
+  /**
+   * 桌面端「Web 端访问」section 的局域网共享开关。
+   * - false（默认）→ sidecar bind 127.0.0.1，仅本机可访问；
+   * - true → sidecar bind 0.0.0.0，同局域网设备可通过本机 IP 访问。
+   * 持久化到 localStorage，下次启动 Rust 端会按此值重新 spawn sidecar。
+   */
+  webExposeLan: boolean;
   setAuth: (accessToken: string, email: string, refreshToken?: string, expiresIn?: string) => void;
   clearAuth: () => void;
   setGatewayUrl: (url: string) => void;
-  setWebAccess: (enabled: boolean, port: number) => void;
+  setWebAccess: (enabled: boolean, port: number, exposeLan?: boolean) => void;
   refreshAccessToken: () => Promise<void>;
 }
 
@@ -37,6 +44,7 @@ export const useAuthStore = create<AuthState>()(
       gatewayUrl: 'http://localhost:3000',
       webAccessEnabled: false,
       webPort: 3000,
+      webExposeLan: false,
       setAuth: (accessToken, email, refreshToken, expiresIn) => {
         const ms = expiresIn ? parseExpiresIn(expiresIn) : 15 * 60 * 1000;
         set({
@@ -49,7 +57,14 @@ export const useAuthStore = create<AuthState>()(
       clearAuth: () =>
         set({ accessToken: null, email: null, refreshToken: null, tokenExpiresAt: null }),
       setGatewayUrl: (url) => set({ gatewayUrl: url }),
-      setWebAccess: (enabled, port) => set({ webAccessEnabled: enabled, webPort: port }),
+      setWebAccess: (enabled, port, exposeLan) =>
+        set((state) => ({
+          webAccessEnabled: enabled,
+          webPort: port,
+          // 未显式传 exposeLan 时保留原值，避免「连接与模型」面板的 toggleWebAccess
+          // 在仅切换启停时把「桌面端」面板配置的 LAN 开关意外重置。
+          webExposeLan: exposeLan ?? state.webExposeLan,
+        })),
       refreshAccessToken: async () => {
         const { refreshToken, gatewayUrl } = get();
         if (!refreshToken) return;
@@ -76,6 +91,7 @@ export const useAuthStore = create<AuthState>()(
         gatewayUrl: s.gatewayUrl,
         webAccessEnabled: s.webAccessEnabled,
         webPort: s.webPort,
+        webExposeLan: s.webExposeLan,
       }),
       onRehydrateStorage: () => (_state, error) => {
         void error;

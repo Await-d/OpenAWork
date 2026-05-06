@@ -539,11 +539,31 @@ async fn authenticate_desktop_gateway(
         .map_err(|e| e.to_string())
 }
 
+/// 把外部传入的 host 字符串规范化为白名单中允许 sidecar bind 的值。
+///
+/// 仅允许 `127.0.0.1`（仅本机）与 `0.0.0.0`（局域网共享）两种。
+/// 其它值或 `None` 一律降级到 `127.0.0.1`，避免误把公网 IP / 任意主机名传给 sidecar，
+/// 也防止前端绕过 UI 直接 IPC 暴露非预期地址。
+fn normalize_gateway_host(input: Option<&str>) -> &'static str {
+    match input.map(|s| s.trim()) {
+        Some("0.0.0.0") => "0.0.0.0",
+        _ => "127.0.0.1",
+    }
+}
+
 /// gateway sidecar spawn 的核心实现。`start_gateway` 命令与 crash watchdog 共用此函数。
 ///
 /// 复用语义：目标端口已有健康 sidecar（本实例之前启动、独立启动的 agent-gateway）
 /// → 仅登记端口，不抢 child 所有权，让进程继续服务。
-async fn spawn_gateway_sidecar(app: tauri::AppHandle, port: u16) -> Result<(), String> {
+///
+/// `host` 参数由前端「桌面端 → Web 端访问」section 控制：
+/// - `Some("0.0.0.0")` → 局域网共享模式，sidecar bind 全网卡；
+/// - `Some("127.0.0.1")` 或 `None` → 仅本机模式（默认）。
+async fn spawn_gateway_sidecar(
+    app: tauri::AppHandle,
+    port: u16,
+    host: &'static str,
+) -> Result<(), String> {
     update_gateway_health(&app, GatewayHealth::Starting);
 
     if is_local_gateway_healthy(port).await {
@@ -591,7 +611,7 @@ async fn spawn_gateway_sidecar(app: tauri::AppHandle, port: u16) -> Result<(), S
         .sidecar("agent-gateway")
         .map_err(|e| e.to_string())?
         .env("GATEWAY_PORT", port.to_string())
-        .env("GATEWAY_HOST", "127.0.0.1")
+        .env("GATEWAY_HOST", host)
         .env("DESKTOP_AUTOMATION", "1")
         .env("OPENAWORK_DESKTOP_AUTH_TOKEN", desktop_auth_token)
         .env("OPENAWORK_DATA_DIR", data_dir.to_string_lossy().to_string())
@@ -684,10 +704,43 @@ fn spawn_health_probe(app: &tauri::AppHandle, port: u16) {
 #[tauri::command]
 async fn start_gateway(
     port: u16,
+    host: Option<String>,
     app: tauri::AppHandle,
     _state: State<'_, GatewayProcess>,
 ) -> Result<(), String> {
-    spawn_gateway_sidecar(app, port).await
+    let bind_host = normalize_gateway_host(host.as_deref());
+    spawn_gateway_sidecar(app, port, bind_host).await
+}
+
+/// 列出本机所有非回环、非链路本地、且属于私有网段（RFC1918）的 IPv4 地址。
+///
+/// 用于「桌面端 → Web 端访问」section 在 LAN 共享模式下展示「同局域网设备可用的 URL」。
+/// 公网 IP / CGNAT 段被刻意过滤，避免在 UI 上引导用户把 sidecar 暴露到公网。
+#[tauri::command]
+async fn list_lan_addresses() -> Result<Vec<String>, String> {
+    use local_ip_address::list_afinet_netifas;
+    use std::net::IpAddr;
+
+    let ifaces = list_afinet_netifas().map_err(|e| e.to_string())?;
+    let mut out: Vec<String> = ifaces
+        .into_iter()
+        .filter_map(|(_name, ip)| match ip {
+            IpAddr::V4(v4)
+                if !v4.is_loopback()
+                    && !v4.is_link_local()
+                    && !v4.is_unspecified()
+                    && !v4.is_multicast()
+                    && !v4.is_broadcast()
+                    && v4.is_private() =>
+            {
+                Some(v4.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    Ok(out)
 }
 
 #[tauri::command]
@@ -1521,6 +1574,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_gateway,
             stop_gateway,
+            list_lan_addresses,
             check_local_gateway_health,
             gateway_status,
             authenticate_desktop_gateway,

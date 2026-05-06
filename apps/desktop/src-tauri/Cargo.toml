@@ -38,3 +38,5 @@ argon2 = "0.5"
 # `rustls-tls` -> `rustls-no-provider`（仅 __rustls，无 provider）生效，
 # `reqwest::Client::new()` 会在 client.rs:2461 触发 `panic!("No provider set")`。
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
+# 列举本机所有网卡 IPv4 用于「桌面端 → Web 端访问 → 局域网共享」section 展示可访问 URL。
+local-ip-address = "0.6"

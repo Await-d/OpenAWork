@@ -335,7 +335,9 @@ export default function App() {
   // sidecar 崩溃自动重试：Rust 端 emit 'gateway:crashed' 后这里按 1s/3s/5s
   // 退避调用 start_gateway 重启 3 次。3 次失败则保留 Failed 健康状态供托盘显示。
   // 用户可在「设置 → 连接与模型」手动触发或在「设置 → 桌面端」查看状态。
+  // 重启时按当前 store 中的 webExposeLan 决定 host，避免 LAN 共享设置在崩溃恢复后丢失。
   const desktopRuntimeWebPort = useAuthStore((s) => s.webPort);
+  const desktopRuntimeWebExposeLan = useAuthStore((s) => s.webExposeLan);
   useEffect(() => {
     if (!desktopRuntime) return;
     let unlistenFn: UnlistenFn | null = null;
@@ -344,12 +346,13 @@ export default function App() {
       try {
         const fn = await listen<{ port: number }>('gateway:crashed', (event) => {
           const port = event.payload.port ?? desktopRuntimeWebPort;
+          const host = desktopRuntimeWebExposeLan ? '0.0.0.0' : '127.0.0.1';
           // 退避重试：1s / 3s / 5s。
           void (async () => {
             for (const delay of [1000, 3000, 5000]) {
               await new Promise((r) => setTimeout(r, delay));
               try {
-                await tauriInvoke('start_gateway', { port });
+                await tauriInvoke('start_gateway', { port, host });
                 return;
               } catch {
                 // 失败继续下一轮。

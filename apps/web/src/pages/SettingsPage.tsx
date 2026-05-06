@@ -86,6 +86,13 @@ function SettingsNavIcon({ id }: { id: string }) {
         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
       </>
     ),
+    desktop: (
+      <>
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </>
+    ),
     channels: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
     companion: (
       <>
@@ -147,8 +154,15 @@ function SettingsNavIcon({ id }: { id: string }) {
 }
 
 export default function SettingsPage() {
-  const { gatewayUrl, setGatewayUrl, setAuth, webAccessEnabled, webPort, setWebAccess } =
-    useAuthStore();
+  const {
+    gatewayUrl,
+    setGatewayUrl,
+    setAuth,
+    webAccessEnabled,
+    webPort,
+    webExposeLan,
+    setWebAccess,
+  } = useAuthStore();
   const token = useAuthStore((s) => s.accessToken);
   const { tab } = useParams<{ tab: string }>();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
@@ -180,6 +194,7 @@ export default function SettingsPage() {
     token,
     webAccessEnabled,
     webPort,
+    webExposeLan,
     setWebAccess,
   });
   const {

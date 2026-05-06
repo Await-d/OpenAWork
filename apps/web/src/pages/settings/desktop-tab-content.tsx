@@ -11,6 +11,7 @@ import {
   localGatewayUrl,
   waitForGatewayHealth,
 } from '../../utils/desktop-gateway.js';
+import { DesktopWebAccessSection } from './desktop-web-access-section.js';
 import { isTauri, tauriInvoke } from './settings-page-helpers.js';
 import { BP, IS, SS, ST } from './settings-section-styles.js';
 
@@ -181,6 +182,7 @@ function ToggleSwitch({
 export function DesktopTabContent() {
   const webPort = useAuthStore((state) => state.webPort);
   const webAccessEnabled = useAuthStore((state) => state.webAccessEnabled);
+  const webExposeLan = useAuthStore((state) => state.webExposeLan);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const accessToken = useAuthStore((state) => state.accessToken);
   const setAuth = useAuthStore((state) => state.setAuth);
@@ -302,9 +304,13 @@ export function DesktopTabContent() {
         return;
       }
 
-      // Step 2：以当前端口重启 sidecar（新的 OPENAWORK_DATA_DIR 会自动注入）
+      // Step 2：以当前端口重启 sidecar（新的 OPENAWORK_DATA_DIR 会自动注入）。
+      // 重启时按 store 中的 webExposeLan 决定 bind 模式，避免 LAN 共享设置在数据迁移后丢失。
       setBusy(`${kind}:restart` as BusyState);
-      await tauriInvoke('start_gateway', { port: webPort });
+      await tauriInvoke('start_gateway', {
+        port: webPort,
+        host: webExposeLan ? '0.0.0.0' : '127.0.0.1',
+      });
       const nextGatewayUrl = localGatewayUrl(webPort);
 
       // Step 3：重新认证
@@ -324,7 +330,7 @@ export function DesktopTabContent() {
       setWebAccess(true, webPort);
       setBusy(null);
     },
-    [setAuth, setGatewayUrl, setWebAccess, webAccessEnabled, webPort],
+    [setAuth, setGatewayUrl, setWebAccess, webAccessEnabled, webExposeLan, webPort],
   );
 
   const pickAndMigrate = useCallback(async () => {
@@ -751,6 +757,16 @@ export function DesktopTabContent() {
           </div>
         ) : null}
       </section>
+
+      <DesktopWebAccessSection
+        webPort={webPort}
+        webAccessEnabled={webAccessEnabled}
+        webExposeLan={webExposeLan}
+        setAuth={setAuth}
+        setGatewayUrl={setGatewayUrl}
+        setWebAccess={setWebAccess}
+        migrationInFlight={migrationInFlight}
+      />
 
       <section style={SS}>
         <h3 style={ST}>数据根目录</h3>

@@ -25,7 +25,17 @@ interface UseSettingsEnvironmentInput {
   token: string | null;
   webAccessEnabled: boolean;
   webPort: number;
-  setWebAccess: (enabled: boolean, port: number) => void;
+  /**
+   * 「桌面端」面板「Web 端访问」section 的局域网共享开关。
+   * 「连接与模型」面板的 toggleWebAccess / saveGatewayUrl / saveWebPort 在调用
+   * Rust `start_gateway` 时也读这个值决定 sidecar bind 模式，保证两侧一致。
+   */
+  webExposeLan: boolean;
+  setWebAccess: (enabled: boolean, port: number, exposeLan?: boolean) => void;
+}
+
+function hostForExposeLan(exposeLan: boolean): '127.0.0.1' | '0.0.0.0' {
+  return exposeLan ? '0.0.0.0' : '127.0.0.1';
 }
 
 interface UseSettingsEnvironmentResult {
@@ -177,7 +187,10 @@ export function useSettingsEnvironment(
         const fallbackPort = parseGatewayPort(portInput, input.webPort);
         const port = readGatewayPortFromUrl(gatewayUrl, fallbackPort);
         const nextGatewayUrl = localGatewayUrl(port);
-        await tauriInvoke('start_gateway', { port });
+        await tauriInvoke('start_gateway', {
+          port,
+          host: hostForExposeLan(input.webExposeLan),
+        });
         await refreshLocalDesktopAuth(nextGatewayUrl);
         writeDesktopGatewayMode('local');
         input.setGatewayUrl(nextGatewayUrl);
@@ -224,7 +237,10 @@ export function useSettingsEnvironment(
         return;
       }
 
-      await tauriInvoke('start_gateway', { port: validPort });
+      await tauriInvoke('start_gateway', {
+        port: validPort,
+        host: hostForExposeLan(input.webExposeLan),
+      });
       const gatewayUrl = localGatewayUrl(validPort);
       await refreshLocalDesktopAuth(gatewayUrl);
       writeDesktopGatewayMode('local');
@@ -273,7 +289,10 @@ export function useSettingsEnvironment(
         // 停止失败不致命——可能原进程已不在；继续尝试 start 新端口。
         logger.warn('stop_gateway failed while switching port', error);
       }
-      await tauriInvoke('start_gateway', { port });
+      await tauriInvoke('start_gateway', {
+        port,
+        host: hostForExposeLan(input.webExposeLan),
+      });
       await refreshLocalDesktopAuth(nextGatewayUrl);
       writeDesktopGatewayMode('local');
       input.setGatewayUrl(nextGatewayUrl);

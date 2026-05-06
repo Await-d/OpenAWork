@@ -147,12 +147,36 @@ async function invokeTauri<T>(name: string, args?: Record<string, unknown>): Pro
   }
 }
 
-export async function startDesktopGateway(port: number): Promise<void> {
-  await invokeTauri<void>('start_gateway', { port });
+/**
+ * 桌面端 sidecar bind 模式：
+ * - `localhost`：sidecar bind 127.0.0.1，仅本机可访问（默认）；
+ * - `lan`：sidecar bind 0.0.0.0，同局域网设备可通过本机 IP 访问。
+ */
+export type DesktopGatewayBindMode = 'localhost' | 'lan';
+
+export function gatewayBindHost(mode: DesktopGatewayBindMode): '127.0.0.1' | '0.0.0.0' {
+  return mode === 'lan' ? '0.0.0.0' : '127.0.0.1';
+}
+
+export async function startDesktopGateway(
+  port: number,
+  mode: DesktopGatewayBindMode = 'localhost',
+): Promise<void> {
+  await invokeTauri<void>('start_gateway', { port, host: gatewayBindHost(mode) });
 }
 
 export async function stopDesktopGateway(): Promise<void> {
   await invokeTauri<void>('stop_gateway');
+}
+
+/**
+ * 列出本机所有可在局域网中分发给其他设备的 IPv4 地址（RFC1918 私有段）。
+ *
+ * 仅在 Tauri 环境可用；在 Web/移动端调用会被 invokeTauri 抛错。
+ * Rust 端实现见 `apps/desktop/src-tauri/src/lib.rs::list_lan_addresses`。
+ */
+export async function listLanAddresses(): Promise<string[]> {
+  return await invokeTauri<string[]>('list_lan_addresses');
 }
 
 export async function authenticateDesktopGateway(gatewayUrl: string): Promise<TokenPair> {

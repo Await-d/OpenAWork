@@ -168,16 +168,18 @@ function useDesktopGatewayBootstrap(
     let cancelled = false;
 
     async function bootstrap() {
-      const { setAuth, setGatewayUrl, setWebAccess, webPort } = useAuthStore.getState();
+      const { setAuth, setGatewayUrl, setWebAccess, webPort, webExposeLan } =
+        useAuthStore.getState();
       const port = webPort;
       const localUrl = localGatewayUrl(port);
+      const bindMode = webExposeLan ? 'lan' : 'localhost';
 
       try {
         setBootstrapError(null);
         if (readDesktopGatewayMode() === 'local') {
           setGatewayUrl(localUrl);
           setWebAccess(true, port);
-          await startDesktopGateway(port);
+          await startDesktopGateway(port, bindMode);
           if (!(await waitForGatewayHealth(localUrl))) {
             throw new Error('本地 Gateway 健康检查失败');
           }
