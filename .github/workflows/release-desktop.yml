@@ -269,9 +269,12 @@ jobs:
             console.log(`::add-mask::${password}`);
           }
 
+          const encodedKey = Buffer.from(key, 'utf8').toString('base64');
+          console.log(`::add-mask::${encodedKey}`);
+
           const keyDelimiter = `TAURI_SIGNING_PRIVATE_KEY_${Date.now()}`;
           const passwordDelimiter = `TAURI_SIGNING_PRIVATE_KEY_PASSWORD_${Date.now()}`;
-          fs.appendFileSync(process.env.GITHUB_ENV, `TAURI_SIGNING_PRIVATE_KEY<<${keyDelimiter}\n${key}\n${keyDelimiter}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `TAURI_SIGNING_PRIVATE_KEY<<${keyDelimiter}\n${encodedKey}\n${keyDelimiter}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<${passwordDelimiter}\n${password}\n${passwordDelimiter}\n`);
           NODE
 
