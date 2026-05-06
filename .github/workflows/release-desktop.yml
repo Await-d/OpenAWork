@@ -109,7 +109,7 @@ jobs:
         include:
           - label: macos-aarch64
             runner: macos-latest
-            args: '--target aarch64-apple-darwin --bundles dmg'
+            args: '--target aarch64-apple-darwin --bundles app,dmg'
             rust_targets: 'aarch64-apple-darwin'
             tauri_target_triple: 'aarch64-apple-darwin'
             bundle_path: apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/
@@ -397,7 +397,7 @@ jobs:
           for file in apps/desktop/src-tauri/target/release/bundle/**/*; do
             [ -f "$file" ] || continue
             case "$file" in
-              *.AppImage|*.appimage|*.deb|*.sig|*.json|*.tar.gz) upload+=("$file") ;;
+              *.AppImage|*.appimage|*.deb|*.sig|*.json) upload+=("$file") ;;
             esac
           done
 
