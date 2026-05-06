@@ -78,10 +78,6 @@ export function readObjectRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function isReasoningModel(model: string): boolean {
-  return /^(gpt-5|o[134]|codex-?)/i.test(model);
-}
-
 // ─── OpenAI gpt-5.x text verbosity default ───
 
 /**

@@ -285,7 +285,7 @@ export function buildUpstreamRequestBody(input: {
       ? {
           model: input.model,
           ...(input.variant ? { variant: input.variant } : {}),
-          input: convertConversationToResponsesInput(renderedMessages, input.model),
+          input: convertConversationToResponsesInput(renderedMessages),
           max_output_tokens: input.maxTokens,
           temperature: input.temperature,
           stream: true,
@@ -339,18 +339,17 @@ export function buildUpstreamRequestBody(input: {
   );
 }
 
-function convertConversationToResponsesInput(
-  messages: UpstreamChatMessage[],
-  model: string,
-): unknown[] {
-  const systemRole = isReasoningModel(model) ? 'developer' : 'system';
+function convertConversationToResponsesInput(messages: UpstreamChatMessage[]): unknown[] {
+  // 协议端点由 buildUpstreamRequestBody 已确定为 `responses`，
+  // 因此 system 指令统一使用 Responses API 标准的 `developer` role，
+  // 不再按模型名（gpt-5/o1/o3 等）做启发式判定。
   const input: unknown[] = [];
 
   for (const message of messages) {
     if (message.role === 'system' || message.role === 'user') {
       if (!message.content) continue;
       input.push({
-        role: message.role === 'system' ? systemRole : message.role,
+        role: message.role === 'system' ? 'developer' : message.role,
         content: [{ type: 'input_text', text: message.content }],
       });
       continue;
@@ -508,10 +507,6 @@ export function sanitizeUpstreamConversation(
   }
 
   return result;
-}
-
-function isReasoningModel(model: string): boolean {
-  return /^(gpt-5|o[134]|codex-?)/i.test(model);
 }
 
 // ─── Prompt Cache Helpers ───

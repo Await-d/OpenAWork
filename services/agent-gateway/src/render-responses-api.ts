@@ -13,11 +13,7 @@ import type {
   RenderOptions,
   PromptCacheConfig,
 } from './provider-adapter.js';
-import {
-  applyRequestOverrides,
-  isReasoningModel,
-  applyOpenAIDefaultTextVerbosity,
-} from './render-shared.js';
+import { applyRequestOverrides, applyOpenAIDefaultTextVerbosity } from './render-shared.js';
 
 // ─── Responses API Renderer ───
 
@@ -25,7 +21,7 @@ export function renderResponsesApi(
   messages: UnifiedMessage[],
   options: RenderOptions,
 ): UpstreamRequestBody {
-  const input = convertToResponsesInput(messages, options.model);
+  const input = convertToResponsesInput(messages);
   // Extract previous_response_id from the last assistant message for caching.
   // The Responses API persists chain-of-thought tokens between turns via this ID,
   // providing 40-80% better cache utilization than re-sending encrypted_content.
@@ -52,15 +48,16 @@ export function renderResponsesApi(
 
 // ─── Input Conversion ───
 
-function convertToResponsesInput(messages: UnifiedMessage[], model: string): unknown[] {
-  const systemRole = isReasoningModel(model) ? 'developer' : 'system';
+function convertToResponsesInput(messages: UnifiedMessage[]): unknown[] {
+  // 协议端点已由调用方（ProviderAdapter.render）确定为 `responses`。
+  // Responses API 采用 `developer` 作为 system 指令的标准 role，不再依赖模型名前缀启发式。
   const input: unknown[] = [];
 
   for (const msg of messages) {
     if (msg.role === 'system') {
       if (!msg.content) continue;
       input.push({
-        role: systemRole,
+        role: 'developer',
         content: [{ type: 'input_text', text: msg.content }],
       });
       continue;
