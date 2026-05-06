@@ -47,6 +47,7 @@ export default {
         'chore',
         'ci',
         'revert',
+        'release',
       ],
     ],
     'scope-empty': [2, 'never'],

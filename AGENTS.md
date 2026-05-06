@@ -89,12 +89,24 @@ OpenAWork/
 ### 提交规范（husky + commitlint 强制执行）
 
 - 格式：`type(scope): <中文描述>` — **scope 必填，描述必须以中文字符开头**
-- 类型：feat | fix | docs | style | refactor | perf | test | build | chore | ci | revert
+- 类型：feat | fix | docs | style | refactor | perf | test | build | chore | ci | revert | release
 - 标题最大长度：100 字符
 - 示例：`feat(gateway): 新增GitHub路由支持`
 - scope 统一使用**小写**，优先采用模块 / 包 / 应用名（如 `gateway`、`web`、`shared-ui`、`agentdocs`）
 - 正文 / 尾注可选；**禁止**出现任何 Sisyphus 协作尾注或相关协作痕迹
 - 详细说明与示例见：`docs/commit-convention.md`
+
+### 自动构建触发规则
+
+- **默认普通提交不触发自动构建**：`feat / fix / docs / style / refactor / perf / test / build / chore / ci / revert` 提交只跑 CI（lint + typecheck + test），不会自动 bump 版本、不会自动打 tag、不会触发桌面端发布。
+- **只有 `release(<scope>):` 提交会触发自动构建**：自上次 `desktop-v*` tag 以来，存在至少一条形如 `release(<scope>): <中文描述>` 的提交时，`auto-release.yml` 才会执行版本提升、打 tag 与触发 `release-desktop.yml`。
+- **推荐写法**：
+  - `release(all): 准备发布预览版`
+  - `release(preview): 触发自动构建并发布桌面预览版`
+  - `release(auto): 收口本轮迭代并触发自动发布`
+- **优先级**：自动 release notes 摘要会优先取最近一条 `release(<scope>):` 提交的中文描述。
+- **手动通道仍可用**：`prepare-release.yml`、`release-desktop.yml`、`release-mobile.yml` 的 `workflow_dispatch` 入口不受影响，可在 GitHub Actions 页面手动触发。
+- **bot 自身的 `build(release): 自动提升版本到 vX` 不算触发提交**，不会引发递归构建。
 
 ### 代码风格（Prettier）
 
