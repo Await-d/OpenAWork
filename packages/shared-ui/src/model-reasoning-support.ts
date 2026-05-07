@@ -71,6 +71,22 @@ export function canConfigureThinkingForModel(
     return modelId === 'kimi-k2.5';
   }
 
+  // Anthropic / Claude：只要 catalog 已经把 `supportsThinking` 标为 true（Claude 3.7+ /
+  // 4.x / Opus 4.x 等带 extended thinking 的模型），就一律放开「思考等级」UI。
+  // 后端 `provider-options.ts` 的 anthropic 分支会把 effort 映射到 `thinking.budgetTokens`
+  // （minimal=1024 ~ xhigh=31999），与 opencode 在 `@ai-sdk/anthropic` 分支的处理一致；
+  // 之前这里写死 false 是历史遗留，导致 Claude 全系思考档位被前端锁死，但实际后端是
+  // 完全可用的。`canConfigureThinkingForModel` 不应再二次否决 catalog 的 supportsThinking。
+  if (providerType === 'anthropic' || providerType === 'claude') {
+    return true;
+  }
+
+  // Gemini / Qwen：后端 provider-options.ts 也支持 enabled/effort → thinking_budget /
+  // enable_thinking。同样让 catalog 的 supportsThinking 决定是否展示这个 UI。
+  if (providerType === 'gemini' || providerType === 'qwen') {
+    return true;
+  }
+
   return false;
 }
 
