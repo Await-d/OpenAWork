@@ -524,6 +524,48 @@ jobs:
             --required-platform darwin-aarch64
           gh release upload "${{ needs.resolve-release-notes.outputs.release_tag }}" latest.json --clobber
 
+      # 把 latest.json 镜像到滚动 tag `desktop-latest-preview`，让 tauri.conf.json
+      # 里固定的 endpoint URL 始终能拿到最新 preview 元数据；同时把它覆盖回所有
+      # 历史 `desktop-v*-preview` release，让仍持有旧 endpoint URL（曾经用过
+      # `{{current_version}}` 模板）的存量客户端也能升上来——它们只能查到自己版本号
+      # 对应的 release URL，所以必须把最新 latest.json 写到那里。
+      - name: Mirror updater JSON to rolling preview tag (preview channel)
+        if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' && needs.resolve-release-notes.outputs.release_channel == 'preview' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rolling_tag='desktop-latest-preview'
+          if ! gh release view "$rolling_tag" >/dev/null 2>&1; then
+            gh release create "$rolling_tag" \
+              --title 'OpenAWork Desktop Preview (rolling latest)' \
+              --notes '此 release 由 release-desktop.yml 自动维护，资产 latest.json 始终指向最新 preview 版本，供 Tauri updater 拉取。请勿手动修改。' \
+              --prerelease
+          fi
+          gh release upload "$rolling_tag" latest.json --clobber
+
+      - name: Backfill updater JSON to historical preview releases
+        if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' && needs.resolve-release-notes.outputs.release_channel == 'preview' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ needs.resolve-release-notes.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          # gh release list 只返回最近 N 条；--limit 100 足够覆盖历史 preview。
+          mapfile -t historical_tags < <(
+            gh release list --limit 100 --json tagName,isPrerelease \
+              --jq '.[] | select(.isPrerelease == true) | select(.tagName | test("^desktop-v[0-9]+\\.[0-9]+\\.[0-9]+-preview$")) | .tagName'
+          )
+          for tag in "${historical_tags[@]}"; do
+            if [ "$tag" = "$CURRENT_TAG" ]; then
+              continue
+            fi
+            echo "Backfilling latest.json to $tag"
+            if ! gh release upload "$tag" latest.json --clobber; then
+              echo "::warning::Failed to backfill latest.json to $tag (release may have been deleted)"
+            fi
+          done
+
       - name: Append Linux build diagnostics
         shell: bash
         run: |
