@@ -551,6 +551,23 @@ fn normalize_gateway_host(input: Option<&str>) -> &'static str {
     }
 }
 
+/// 解析 sidecar 启动时 `OPENAWORK_WEB_DIST` 应该指向的目录。
+///
+/// 生产构建中，前端 `apps/web/dist` 通过 `tauri.conf.json` 的
+/// `bundle.resources` 复制到资源目录的 `web-dist/` 子目录。返回该绝对路径，
+/// 让 agent-gateway 的 `web-static` 插件托管这些静态文件，使局域网设备
+/// 通过浏览器访问网关 URL 时直接拿到 OpenAWork 界面而不是 404 / API JSON。
+///
+/// dev 模式或资源未打包时返回 `None`，gateway 会回退到源码相对路径或跳过托管。
+fn resolve_web_dist_path(app: &tauri::AppHandle) -> Option<String> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let candidate = resource_dir.join("web-dist");
+    if !candidate.is_dir() {
+        return None;
+    }
+    Some(candidate.to_string_lossy().to_string())
+}
+
 /// gateway sidecar spawn 的核心实现。`start_gateway` 命令与 crash watchdog 共用此函数。
 ///
 /// 复用语义：目标端口已有健康 sidecar（本实例之前启动、独立启动的 agent-gateway）
@@ -606,7 +623,7 @@ async fn spawn_gateway_sidecar(
 
     // gateway 已编译为独立 Bun 二进制（binaries/agent-gateway-<triple>），
     // 无需传 entry 路径，也不依赖 node_modules，直接启动即可。
-    let (mut rx, child) = app
+    let mut command = app
         .shell()
         .sidecar("agent-gateway")
         .map_err(|e| e.to_string())?
@@ -615,8 +632,19 @@ async fn spawn_gateway_sidecar(
         .env("DESKTOP_AUTOMATION", "1")
         .env("OPENAWORK_DESKTOP_AUTH_TOKEN", desktop_auth_token)
         .env("OPENAWORK_DATA_DIR", data_dir.to_string_lossy().to_string())
-        .spawn()
-        .map_err(|e| e.to_string())?;
+        // 让 sidecar 监视 Tauri 主进程；主进程被强杀 / 系统崩溃 / 安装器卸载
+        // 时未走 RunEvent::Exit 的场景下，sidecar 自我退出避免变孤儿。
+        .env("OPENAWORK_PARENT_PID", std::process::id().to_string());
+
+    // 桌面端 sidecar 也提供 Web 前端静态资源，让局域网设备通过浏览器
+    // 访问网关 URL 时直接拿到 OpenAWork 界面，而不是 404。resource_dir
+    // 解析失败（比如 dev 模式资源未打包）时不传该 env，gateway 的
+    // web-static.ts 会回退到源码相对路径或直接跳过托管。
+    if let Some(web_dist) = resolve_web_dist_path(&app) {
+        command = command.env("OPENAWORK_WEB_DIST", web_dist);
+    }
+
+    let (mut rx, child) = command.spawn().map_err(|e| e.to_string())?;
 
     guard.child = Some(child);
     guard.port = Some(port);

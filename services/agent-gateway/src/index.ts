@@ -10,6 +10,7 @@ import { ensureDefaultInstalledSkillsForAllUsers } from './default-skills.js';
 import { ensureDefaultWorkflowTemplatesForAllUsers } from './default-workflow-templates.js';
 import { createHash, randomUUID } from 'crypto';
 import requestWorkflowPlugin, { startRequestWorkflow } from './request-workflow.js';
+import { startParentProcessWatch } from './parent-watch.js';
 
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
 const ADMIN_PASSWORD = globalThis.process?.env['ADMIN_PASSWORD'] ?? 'admin123456';
@@ -213,6 +214,11 @@ try {
   step = bootLogger.start('gateway.listen', undefined, { host, port });
   await app.listen({ port, host });
   bootLogger.succeed(step);
+
+  // 启用桌面端父进程死亡监视（仅 OPENAWORK_PARENT_PID 设置时生效）。
+  // 必须在 listen 之后启动；否则 Tauri 主进程在 sidecar 还没绑定端口时崩溃，
+  // 端口仍可能被占用一段时间。listen 之后注册可保证绑定成功后才进入监视循环。
+  startParentProcessWatch();
   bootLogger.flush(bootContext, 200);
 
   step = bootLogger.start('gateway.pairing-qr');

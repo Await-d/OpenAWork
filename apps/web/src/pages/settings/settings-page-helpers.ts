@@ -45,8 +45,13 @@ export const TAB_CATEGORIES: ReadonlyArray<{
 
 export const SETTINGS_TAB_NAV_WIDTH = 192;
 export const SETTINGS_TAB_CONTENT_GAP = 28;
+// 左侧 nav + gap 宽度，用于把内容列盒子相对于「非装饰 gutter」部分的外边距。
+// 旧实现在 grid 里额外保留了一条等宽的右侧装饰列（SIDE_GUTTER），用来在宽屏
+// 下让内容视觉居中；但在 ≤1100px 的窄屏下这条列会白白占掉 220px，使内容
+// 列被挤窄一半，右侧一大片空白。现在改为只用 `margin: 0 auto` 对 nav+content
+// 整体居中，丢掉额外右列，窄屏下把所有可用宽度都让给内容。
 export const SETTINGS_LAYOUT_SIDE_GUTTER = SETTINGS_TAB_NAV_WIDTH + SETTINGS_TAB_CONTENT_GAP;
-export const SETTINGS_LAYOUT_MAX_WIDTH = `calc(var(--content-max-width) + ${SETTINGS_LAYOUT_SIDE_GUTTER * 2}px)`;
+export const SETTINGS_LAYOUT_MAX_WIDTH = `calc(var(--content-max-width) + ${SETTINGS_LAYOUT_SIDE_GUTTER}px)`;
 
 export const DEFAULT_THINKING_DEFAULTS: ThinkingDefaultsRef = {
   chat: { enabled: false, effort: 'medium' },

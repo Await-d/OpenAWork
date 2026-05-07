@@ -48,7 +48,6 @@ import {
   normalizeActiveSelectionProviders,
   parseStructuredPayload,
   readErrorMessage,
-  SETTINGS_LAYOUT_SIDE_GUTTER,
   SETTINGS_LAYOUT_MAX_WIDTH,
   SETTINGS_TAB_CONTENT_GAP,
   SETTINGS_TAB_NAV_WIDTH,
@@ -1367,7 +1366,10 @@ export default function SettingsPage() {
               minHeight: 0,
               margin: '0 auto',
               overflow: 'hidden',
-              gridTemplateColumns: `${SETTINGS_TAB_NAV_WIDTH}px ${SETTINGS_TAB_CONTENT_GAP}px minmax(0, 1fr) ${SETTINGS_LAYOUT_SIDE_GUTTER}px`,
+              // 3 列布局：nav | gap | content。外层 `margin: 0 auto` 负责在宽屏
+              // 下整体居中；窄屏下 content 能拿到所有剩余宽度，不再被旧的
+              // 第 4 列「装饰 gutter」吃掉 220px。
+              gridTemplateColumns: `${SETTINGS_TAB_NAV_WIDTH}px ${SETTINGS_TAB_CONTENT_GAP}px minmax(0, 1fr)`,
             }}
           >
             <nav

@@ -38,6 +38,9 @@
       "icons/icon.png"
     ],
     "externalBin": ["binaries/agent-gateway"],
+    "resources": {
+      "../../web/dist/": "web-dist/"
+    },
     "windows": {
       "nsis": {
         "languages": ["SimpChinese"],
