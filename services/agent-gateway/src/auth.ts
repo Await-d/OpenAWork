@@ -209,6 +209,31 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  /**
+   * 桌面端专用：请求 sidecar 优雅退出。用途——
+   * 1. 用户在「桌面端 → Web 端访问」section 点「关闭」时，即使 Tauri 进程并未持有
+   *    该 sidecar 的 CommandChild 句柄（例如上次桌面崩溃残留的孤儿进程被新桌面
+   *    adopt 了），仍然能通过本接口把它杀掉；
+   * 2. 新桌面启动发现端口被占用时，先请占用方退出再 spawn 自己，保证 CommandChild
+   *    句柄总是对应当前真实运行的 sidecar。
+   *
+   * 同样用 X-OpenAWork-Desktop-Auth header 鉴权（仅桌面 sidecar 父进程签发），
+   * LAN 上的攻击者拿不到 token，也就无法把用户的 sidecar 停掉。
+   */
+  app.post('/__internal/shutdown', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!hasValidDesktopAuthToken(request)) {
+      return reply.status(403).send({ error: 'desktop_auth_required' });
+    }
+    void reply.code(202).send({ status: 'shutting_down' });
+    // 给 reply 一点时间 flush；再把 Fastify 主动关了以便 linger 中的 socket 能收到 FIN。
+    setTimeout(() => {
+      const proc = globalThis.process;
+      if (proc) {
+        proc.exit(0);
+      }
+    }, 100);
+  });
+
   app.post('/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {
     const { step, child } = startRequestWorkflow(request, 'auth.refresh');
     const body = z.object({ refreshToken: z.string() }).safeParse(request.body);

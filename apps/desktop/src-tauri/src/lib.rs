@@ -57,10 +57,55 @@ impl Drop for GatewayProcess {
     }
 }
 
+/// 生成一个 32 字节的随机十六进制 token（64 字符），用作桌面 sidecar ↔ 本地父进程
+/// 之间的内网 IPC 共享密钥。
 fn generate_desktop_auth_token() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// 读取或创建持久化的桌面 auth token。
+///
+/// 持久化的动机：sidecar 的 `/__internal/shutdown` 用 `X-OpenAWork-Desktop-Auth`
+/// 鉴权。若 token 每次桌面启动都重新生成，上次桌面崩溃残留的孤儿 sidecar 拿的是
+/// 旧 token，新桌面无法通过 HTTP 优雅杀死它，`stop_gateway` 也因没有 CommandChild
+/// 句柄而无能为力，就会出现「关闭 Web 端访问后浏览器仍能访问」的现象。
+///
+/// 把 token 放在 `~/.openAwork/desktop-auth-token` 中（仅本机持久化），同一用户的
+/// 多次桌面启动共享同一份 token，跨会话 HTTP shutdown 就能工作。
+/// 权限（`0600`）在 UNIX 上额外设置，防止其他用户读取；Windows 上 NTFS ACL
+/// 默认限制到当前用户，这里保留默认行为。
+fn desktop_auth_token_path() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(DESKTOP_HOME_FOLDER).join("desktop-auth-token"))
+}
+
+fn load_or_create_desktop_auth_token() -> String {
+    let path = match desktop_auth_token_path() {
+        Some(p) => p,
+        None => return generate_desktop_auth_token(),
+    };
+
+    if let Ok(existing) = fs::read_to_string(&path) {
+        let trimmed = existing.trim().to_string();
+        if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            return trimmed;
+        }
+    }
+
+    let token = generate_desktop_auth_token();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if fs::write(&path, &token).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+    }
+    token
 }
 
 fn clear_gateway_child(gateway_state: &Arc<Mutex<GatewayState>>, generation: u64) {
@@ -478,6 +523,41 @@ async fn is_local_gateway_healthy(port: u16) -> bool {
     }
 }
 
+/// 请求 sidecar 通过 `/__internal/shutdown` 端点优雅退出。
+///
+/// 这条路径解决一个关键问题：`CommandChild::kill()` 只能杀我们**自己** spawn 的
+/// sidecar；如果 `spawn_gateway_sidecar` 曾走过「端口已健康 → adopt」分支，
+/// `guard.child` 始终是 `None`，用户再点「关闭 Web 端访问」时就什么都杀不掉，
+/// 孤儿 sidecar 会继续监听 127.0.0.1 / 0.0.0.0，表现为「关了还能访问」。
+///
+/// 走 HTTP 通道 + desktop auth token 鉴权后，不论是不是我们自己的 child 都能杀，
+/// 同时 LAN 上没有 token 的攻击者也无法远程关掉用户的 sidecar。
+async fn request_sidecar_shutdown(port: u16, desktop_auth_token: &str) -> bool {
+    let result = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/__internal/shutdown"))
+        .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await;
+    matches!(result, Ok(r) if r.status().is_success())
+}
+
+/// 轮询等待端口上的 HTTP 服务消失（`/health` 不再响应）。
+/// 给 sidecar 一个最多 `timeout` 的优雅退出窗口；超时仍存活则返回 false，
+/// 调用方应当 fallback 到 `CommandChild::kill()` 或报错。
+async fn wait_for_port_released(port: u16, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if !is_local_gateway_healthy(port).await {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+}
+
 #[tauri::command]
 async fn check_local_gateway_health(port: u16) -> Result<bool, String> {
     Ok(is_local_gateway_healthy(port).await)
@@ -635,8 +715,10 @@ fn resolve_web_dist_path(app: &tauri::AppHandle) -> Option<String> {
 
 /// gateway sidecar spawn 的核心实现。`start_gateway` 命令与 crash watchdog 共用此函数。
 ///
-/// 复用语义：目标端口已有健康 sidecar（本实例之前启动、独立启动的 agent-gateway）
-/// → 仅登记端口，不抢 child 所有权，让进程继续服务。
+/// 端口抢占语义：目标端口已有健康 sidecar 时 **不会** 静默 adopt（历史实现的 bug：
+/// adopt 只登记 port 不登记 child，后续 stop_gateway 就没有 child 可以 kill，用户
+/// 关闭「Web 端访问」后浏览器仍能访问）。改为先通过 `/__internal/shutdown` 请占用方
+/// 优雅退出，再 spawn 自己持有的 child，保证 GatewayState.child 与真实运行的进程一一对应。
 ///
 /// `host` 参数由前端「桌面端 → Web 端访问」section 控制：
 /// - `Some("0.0.0.0")` → 局域网共享模式，sidecar bind 全网卡；
@@ -648,14 +730,25 @@ async fn spawn_gateway_sidecar(
 ) -> Result<(), String> {
     update_gateway_health(&app, GatewayHealth::Starting);
 
+    // 端口已经被占用时，**不能**直接 adopt：adopt 只写 `guard.port`、不写 `guard.child`，
+    // 之后 `stop_gateway` 就没有 child 句柄可以 kill，表现为「关了还能访问 Web」。
+    // 正确做法：如果占用方是带我们 desktop auth token 的 sidecar（通常是上次崩溃残留
+    // 的孤儿），先请它通过 `/__internal/shutdown` 优雅退出；等端口释放后再 spawn 一个
+    // 由本次桌面持有 CommandChild 句柄的新 sidecar。其它 HTTP 服务占用本端口会导致
+    // shutdown 失败 → spawn 失败 → 前端看到错误，由用户换端口。
     if is_local_gateway_healthy(port).await {
-        let state = app.state::<GatewayProcess>();
-        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-        guard.port = Some(port);
-        drop(guard);
-        update_gateway_health(&app, GatewayHealth::Healthy);
-        spawn_health_probe(&app, port);
-        return Ok(());
+        let existing_token = {
+            let state = app.state::<GatewayProcess>();
+            let guard = state.0.lock().map_err(|e| e.to_string())?;
+            guard.desktop_auth_token.clone()
+        };
+        let _ = request_sidecar_shutdown(port, &existing_token).await;
+        if !wait_for_port_released(port, Duration::from_secs(3)).await {
+            update_gateway_health(&app, GatewayHealth::Failed);
+            return Err(format!(
+                "端口 {port} 已被占用且无法通过桌面鉴权令牌请求其退出；请换一个端口或手动结束占用进程。"
+            ));
+        }
     }
 
     // 在拿 GatewayProcess 锁**之前**算数据目录，避免与 SettingsState 形成锁顺序耦合。
@@ -841,14 +934,36 @@ async fn stop_gateway(
     app: tauri::AppHandle,
     state: State<'_, GatewayProcess>,
 ) -> Result<(), String> {
-    {
+    // 取出 child / port / token 的快照后立即释放锁；HTTP shutdown 和 child.kill() 都
+    // 不需要再持有 GatewayState。同时把 generation +1，保证 sidecar 退出触发的
+    // CommandEvent::Terminated 被识别成「主动退出」而非「崩溃」，避免前端的
+    // gateway:crashed 监听器触发自动重启。
+    let (child, port, token) = {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
         guard.generation = guard.generation.wrapping_add(1);
-        if let Some(child) = guard.child.take() {
-            let _ = child.kill();
-        }
-        guard.port = None;
+        let child = guard.child.take();
+        let port = guard.port.take();
+        let token = guard.desktop_auth_token.clone();
+        (child, port, token)
+    };
+
+    // 先请 sidecar 通过 `/__internal/shutdown` 优雅退出。这条路径对**孤儿 sidecar**
+    // 尤其重要：如果先前 spawn 走了 adopt 分支（虽然当前代码不再 adopt，但为了未来
+    // 兼容性和多实例场景仍保留此兜底），`child` 可能是 None，HTTP shutdown 能
+    // 兜住「关了还能访问 Web」的问题。token 跨会话持久化，所以上次残留的 sidecar
+    // 也认得我们的鉴权头。
+    if let Some(p) = port {
+        let _ = request_sidecar_shutdown(p, &token).await;
+        // 等最多 2s 让对方 process.exit 完成；释放端口。
+        let _ = wait_for_port_released(p, Duration::from_secs(2)).await;
     }
+
+    // 即使 HTTP shutdown 成功了，也把 child.kill() 再走一次兜底——防止
+    // `/__internal/shutdown` 的 `setTimeout(... , 100)` 由于事件循环堵塞被延后。
+    if let Some(c) = child {
+        let _ = c.kill();
+    }
+
     update_gateway_health(&app, GatewayHealth::Stopped);
     Ok(())
 }
@@ -1661,7 +1776,7 @@ pub fn run() {
             child: None,
             port: None,
             generation: 0,
-            desktop_auth_token: generate_desktop_auth_token(),
+            desktop_auth_token: load_or_create_desktop_auth_token(),
         }))))
         .manage(GatewayHealthState(Arc::new(Mutex::new(GatewayHealth::Stopped))))
         .invoke_handler(tauri::generate_handler![
