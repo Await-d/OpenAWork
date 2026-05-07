@@ -32,13 +32,22 @@ function createEmptyGraph(projectRoot: string): AgentTaskGraph {
 export class AgentTaskStoreImpl implements AgentTaskStore {
   async load(projectRoot: string, graphId = DEFAULT_GRAPH_ID): Promise<AgentTaskGraph> {
     const filePath = resolveGraphPath(projectRoot, graphId);
-    try {
-      const content = await fs.readFile(filePath, 'utf8');
-      const graph = normalizePersistedTaskGraph(JSON.parse(content), projectRoot);
-      GRAPH_ID_BY_GRAPH.set(graph, graphId);
-      return graph;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException & { code?: string }).code !== 'ENOENT') {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const content = await fs.readFile(filePath, 'utf8');
+        const graph = normalizePersistedTaskGraph(JSON.parse(content), projectRoot);
+        GRAPH_ID_BY_GRAPH.set(graph, graphId);
+        return graph;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException & { code?: string }).code === 'ENOENT') {
+          const graph = createEmptyGraph(projectRoot);
+          GRAPH_ID_BY_GRAPH.set(graph, graphId);
+          return graph;
+        }
+        if (error instanceof SyntaxError && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
         if (error instanceof SyntaxError) {
           const graph = createEmptyGraph(projectRoot);
           GRAPH_ID_BY_GRAPH.set(graph, graphId);
@@ -46,17 +55,30 @@ export class AgentTaskStoreImpl implements AgentTaskStore {
         }
         throw error;
       }
-      const graph = createEmptyGraph(projectRoot);
-      GRAPH_ID_BY_GRAPH.set(graph, graphId);
-      return graph;
     }
+    const graph = createEmptyGraph(projectRoot);
+    GRAPH_ID_BY_GRAPH.set(graph, graphId);
+    return graph;
   }
 
   async save(graph: AgentTaskGraph): Promise<void> {
     const graphId = GRAPH_ID_BY_GRAPH.get(graph) ?? DEFAULT_GRAPH_ID;
     const filePath = resolveGraphPath(graph.projectRoot, graphId);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, `${JSON.stringify(graph, null, 2)}\n`, 'utf8');
+    const tempPath = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    try {
+      await fs.writeFile(tempPath, `${JSON.stringify(graph, null, 2)}\n`, 'utf8');
+      await fs.rename(tempPath, filePath);
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch (cleanupError) {
+        void cleanupError;
+      }
+      throw error;
+    }
   }
 
   async listGraphs(projectRoot: string): Promise<string[]> {
