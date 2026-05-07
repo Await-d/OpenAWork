@@ -168,21 +168,15 @@ export default function SettingsPage() {
   const {
     apiFetch,
     checkVersionUpdate,
-    copied,
-    copyAddress,
     desktopGatewayBusy,
     desktopGatewayError,
     desktopGatewayMode,
-    portInput,
     remoteAdminEmail,
     remoteAdminPassword,
     saveGatewayUrl,
-    saveWebPort,
     setRemoteAdminEmail,
     setRemoteAdminPassword,
-    setPortInput,
     setUrlInput,
-    toggleWebAccess,
     urlInput,
     urlSaved,
     versionInfo,
@@ -1528,14 +1522,6 @@ export default function SettingsPage() {
                     setUrlInput={setUrlInput}
                     saveGatewayUrl={saveGatewayUrl}
                     urlSaved={urlSaved}
-                    webAccessEnabled={webAccessEnabled}
-                    webPort={webPort}
-                    portInput={portInput}
-                    setPortInput={setPortInput}
-                    saveWebPort={saveWebPort}
-                    toggleWebAccess={() => void toggleWebAccess()}
-                    copied={copied}
-                    copyAddress={copyAddress}
                     desktopGatewayBusy={desktopGatewayBusy}
                     desktopGatewayError={desktopGatewayError}
                     desktopGatewayMode={desktopGatewayMode}

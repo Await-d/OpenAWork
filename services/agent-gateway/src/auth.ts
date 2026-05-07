@@ -12,6 +12,10 @@ const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-produc
 const JWT_EXPIRES_IN = globalThis.process?.env['JWT_EXPIRES_IN'] ?? '15m';
 const REFRESH_EXPIRES_DAYS = 7;
 const ADMIN_EMAIL = globalThis.process?.env['ADMIN_EMAIL'] ?? 'admin@openAwork.local';
+// 与 index.ts 的 seedDefaultAdmin 必须保持一致：env 优先，否则用 'admin123456'。
+// 用来判定 admin 是否还在用「写死的弱默认密码」——一旦用户启用 LAN Web 访问，
+// 这条密码会变成局域网攻击面。前端会在 toggle on 之前强制改密。
+const DEFAULT_ADMIN_PASSWORD = globalThis.process?.env['ADMIN_PASSWORD'] ?? 'admin123456';
 const DESKTOP_AUTH_HEADER = 'x-openawork-desktop-auth';
 
 const loginSchema = z.object({
@@ -153,6 +157,56 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     }
 
     return reply.send(issueTokenPair(app, user));
+  });
+
+  /**
+   * 桌面端用：检测 admin 账号当前的密码是否仍为种子默认值。返回 isDefault=true 时，
+   * 桌面端 UI 应强制弹出改密表单，并禁止开启 LAN Web 访问；否则视作用户已自定义。
+   * 用 X-OpenAWork-Desktop-Auth header 鉴权（仅桌面 sidecar 父进程能签发），
+   * LAN 上的攻击者无法读到这个状态。
+   */
+  app.get('/auth/admin-password-status', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!hasValidDesktopAuthToken(request)) {
+      return reply.status(403).send({ error: 'desktop_auth_required' });
+    }
+    const user = sqliteGet<{ password_hash: string }>(
+      'SELECT password_hash FROM users WHERE email = ? LIMIT 1',
+      [ADMIN_EMAIL],
+    );
+    if (!user) {
+      return reply.send({ exists: false, isDefault: false, email: ADMIN_EMAIL });
+    }
+    const defaultHash = createHash('sha256').update(DEFAULT_ADMIN_PASSWORD).digest('hex');
+    return reply.send({
+      exists: true,
+      isDefault: user.password_hash === defaultHash,
+      email: ADMIN_EMAIL,
+    });
+  });
+
+  /**
+   * 桌面端用：覆盖 admin 账号密码。同样要求 X-OpenAWork-Desktop-Auth header；
+   * 改完顺手把所有 refresh_tokens 失效掉，避免历史会话继续用旧凭据。
+   */
+  app.post('/auth/admin-set-password', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!hasValidDesktopAuthToken(request)) {
+      return reply.status(403).send({ error: 'desktop_auth_required' });
+    }
+    const body = z.object({ newPassword: z.string().min(8).max(128) }).safeParse(request.body);
+    if (!body.success) {
+      return reply.status(400).send({ error: 'invalid_input', issues: body.error.issues });
+    }
+    const user = sqliteGet<{ id: string }>('SELECT id FROM users WHERE email = ? LIMIT 1', [
+      ADMIN_EMAIL,
+    ]);
+    if (!user) {
+      return reply.status(404).send({ error: 'admin_not_found' });
+    }
+    const newHash = createHash('sha256').update(body.data.newPassword).digest('hex');
+    sqliteRun('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, user.id]);
+    sqliteRun('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
+    redis.del(`session:${user.id}:active`);
+    return reply.send({ ok: true });
   });
 
   app.post('/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {

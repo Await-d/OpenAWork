@@ -44,14 +44,12 @@ interface ConnectionTabContentProps {
   setUrlInput: React.Dispatch<React.SetStateAction<string>>;
   saveGatewayUrl: () => void;
   urlSaved: boolean;
-  webAccessEnabled: boolean;
-  webPort: number;
-  portInput: string;
-  setPortInput: React.Dispatch<React.SetStateAction<string>>;
-  saveWebPort: () => Promise<void>;
-  toggleWebAccess: () => void;
-  copied: boolean;
-  copyAddress: () => void;
+  /**
+   * 「桌面端」tab →「Web 端访问」section 已经接管本地 sidecar 启停 / 端口 /
+   * 暴露范围 / 可访问地址。这里只保留 mode 状态展示与远程网关 URL/凭据维护。
+   * 旧的 webAccessEnabled / webPort / portInput / saveWebPort / toggleWebAccess /
+   * copyAddress 等 props 已不再需要从这里传入。
+   */
   desktopGatewayBusy: boolean;
   desktopGatewayError: string | null;
   desktopGatewayMode: DesktopGatewayMode;
@@ -92,14 +90,6 @@ export function ConnectionTabContent({
   setUrlInput,
   saveGatewayUrl,
   urlSaved,
-  webAccessEnabled,
-  webPort,
-  portInput,
-  setPortInput,
-  saveWebPort,
-  toggleWebAccess,
-  copied,
-  copyAddress,
   desktopGatewayBusy,
   desktopGatewayError,
   desktopGatewayMode,
@@ -282,127 +272,6 @@ export function ConnectionTabContent({
           <MCPServerList servers={mcpStatuses} />
         </div>
       </section>
-      {isTauri && (
-        <section style={SS}>
-          <h3 style={ST}>桌面网关切换</h3>
-          <p style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.6, margin: 0 }}>
-            首次启动后可以在这里切换本地网关和远程网关。本地网关会启动桌面端内置服务；远程网关请在上方填写地址并保存。
-          </p>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500, flex: 1 }}>
-              {webAccessEnabled ? '正在使用本地网关' : '正在使用远程网关'}
-            </span>
-            <button
-              type="button"
-              onClick={toggleWebAccess}
-              aria-pressed={webAccessEnabled}
-              disabled={desktopGatewayBusy}
-              style={{
-                position: 'relative',
-                width: 44,
-                height: 24,
-                borderRadius: 999,
-                border: 'none',
-                cursor: desktopGatewayBusy ? 'not-allowed' : 'pointer',
-                flexShrink: 0,
-                padding: 0,
-                opacity: desktopGatewayBusy ? 0.6 : 1,
-                background: webAccessEnabled ? 'var(--accent)' : 'var(--border)',
-              }}
-            >
-              <span
-                style={{
-                  position: 'absolute',
-                  top: 2,
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  background: 'var(--surface)',
-                  display: 'block',
-                  transform: webAccessEnabled ? 'translateX(20px)' : 'translateX(2px)',
-                }}
-              />
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              style={{ ...IS, maxWidth: 120 }}
-              type="number"
-              min={1024}
-              max={65535}
-              value={portInput}
-              onChange={(event) => setPortInput(event.target.value)}
-              disabled={desktopGatewayBusy}
-            />
-            <button
-              type="button"
-              onClick={() => void saveWebPort()}
-              disabled={desktopGatewayBusy}
-              style={{ ...BP, opacity: desktopGatewayBusy ? 0.4 : 1 }}
-            >
-              {desktopGatewayBusy ? '应用中…' : '应用'}
-            </button>
-          </div>
-          {webAccessEnabled && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: '8px 12px',
-              }}
-            >
-              <span
-                style={{
-                  flex: 1,
-                  fontSize: 12,
-                  color: 'var(--accent)',
-                  fontFamily: 'monospace',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {`http://localhost:${webPort}`}
-              </span>
-              <button
-                type="button"
-                onClick={copyAddress}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  padding: '4px 10px',
-                  fontSize: 12,
-                  color: 'var(--text-3)',
-                  cursor: 'pointer',
-                }}
-              >
-                {copied ? '✓ 已复制' : '复制'}
-              </button>
-              <a
-                href={`http://localhost:${webPort}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  padding: '4px 10px',
-                  fontSize: 12,
-                  color: 'var(--text-3)',
-                  textDecoration: 'none',
-                }}
-              >
-                打开 ↗
-              </a>
-            </div>
-          )}
-        </section>
-      )}
     </>
   );
 }

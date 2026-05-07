@@ -539,6 +539,71 @@ async fn authenticate_desktop_gateway(
         .map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminPasswordStatus {
+    exists: bool,
+    is_default: bool,
+    email: String,
+}
+
+/// 通过 desktop-auth header 调网关 `/auth/admin-password-status`，告诉前端 admin
+/// 是否还在用种子默认密码。前端用这个结果决定要不要拦截 LAN Web toggle。
+#[tauri::command]
+async fn admin_password_status(
+    state: State<'_, GatewayProcess>,
+) -> Result<AdminPasswordStatus, String> {
+    let (port, desktop_auth_token) = {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        let port = guard.port.ok_or("Gateway is not running".to_string())?;
+        (port, guard.desktop_auth_token.clone())
+    };
+
+    let response = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/auth/admin-password-status"))
+        .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(response.text().await.map_err(|e| e.to_string())?);
+    }
+
+    response
+        .json::<AdminPasswordStatus>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 改 admin 密码：同样走 desktop-auth header，body 由前端传 `newPassword`。
+/// 改完后端会失效所有 refresh_tokens，前端需要重新跑 desktop-default 拿新令牌。
+#[tauri::command]
+async fn admin_set_password(
+    state: State<'_, GatewayProcess>,
+    new_password: String,
+) -> Result<(), String> {
+    let (port, desktop_auth_token) = {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        let port = guard.port.ok_or("Gateway is not running".to_string())?;
+        (port, guard.desktop_auth_token.clone())
+    };
+
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/auth/admin-set-password"))
+        .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
+        .json(&serde_json::json!({ "newPassword": new_password }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(response.text().await.map_err(|e| e.to_string())?);
+    }
+
+    Ok(())
+}
+
 /// 把外部传入的 host 字符串规范化为白名单中允许 sidecar bind 的值。
 ///
 /// 仅允许 `127.0.0.1`（仅本机）与 `0.0.0.0`（局域网共享）两种。
@@ -1606,6 +1671,8 @@ pub fn run() {
             check_local_gateway_health,
             gateway_status,
             authenticate_desktop_gateway,
+            admin_password_status,
+            admin_set_password,
             pick_folder,
             open_artifact_path,
             get_desktop_settings,

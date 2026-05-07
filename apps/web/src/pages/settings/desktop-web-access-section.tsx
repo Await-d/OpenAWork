@@ -46,6 +46,12 @@ const BUSY_LABELS: Record<Exclude<BusyKind, null>, string> = {
   port: '正在应用新端口…',
 };
 
+interface AdminPasswordStatus {
+  exists: boolean;
+  isDefault: boolean;
+  email: string;
+}
+
 const ROW_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -131,6 +137,16 @@ export function DesktopWebAccessSection({
   const [lanAddresses, setLanAddresses] = useState<string[]>([]);
   const [lanError, setLanError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  // admin 默认密码门控：sidecar 启动后会拉一次状态；isDefault=true 时
+  // 必须改密才能切到 LAN 暴露，否则 admin@openAwork.local / admin123456
+  // 会变成局域网攻击面。
+  const [passwordStatus, setPasswordStatus] = useState<AdminPasswordStatus | null>(null);
+  const [passwordCheckError, setPasswordCheckError] = useState<string | null>(null);
+  const [pwd1, setPwd1] = useState('');
+  const [pwd2, setPwd2] = useState('');
+  const [pwdSubmitting, setPwdSubmitting] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+  const [pwdSuccess, setPwdSuccess] = useState<string | null>(null);
 
   // 当 store 中的 webPort 改变（其它面板修改）时同步 portInput。
   useEffect(() => {
@@ -187,6 +203,34 @@ export function DesktopWebAccessSection({
     [setAuth, setGatewayUrl, setWebAccess],
   );
 
+  // 拉一次 admin 密码状态 —— 仅当 sidecar 在跑时才能拿到结果。
+  // sidecar 未跑时推迟到用户点 toggle on 才检查（在 handleToggleEnabled 里推动）。
+  const refreshPasswordStatus = useCallback(async () => {
+    if (!webAccessEnabled) {
+      setPasswordStatus(null);
+      setPasswordCheckError(null);
+      return null;
+    }
+    try {
+      const status = await tauriInvoke<AdminPasswordStatus>('admin_password_status');
+      setPasswordStatus(status);
+      setPasswordCheckError(null);
+      return status;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '检查 admin 密码状态失败';
+      setPasswordStatus(null);
+      setPasswordCheckError(msg);
+      logger.warn('admin_password_status failed', err);
+      return null;
+    }
+  }, [webAccessEnabled]);
+
+  // 进页时 / sidecar 状态变化时拉一下。webAccessEnabled 从 false → true 后会拉，
+  // 从 true → false 会清理状态。
+  useEffect(() => {
+    void refreshPasswordStatus();
+  }, [refreshPasswordStatus]);
+
   const handleToggleEnabled = useCallback(async () => {
     if (interactiveDisabled) return;
     setError(null);
@@ -195,6 +239,10 @@ export function DesktopWebAccessSection({
       try {
         await stopDesktopGateway();
         setWebAccess(false, webPort, webExposeLan);
+        setPasswordStatus(null);
+        setPasswordCheckError(null);
+        setPwdSuccess(null);
+        setPwdError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : '停止本地网关失败');
         logger.error('stopDesktopGateway failed', err);
@@ -206,19 +254,53 @@ export function DesktopWebAccessSection({
     const targetPort = parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT);
     setBusy('starting');
     try {
-      await startSidecar(targetPort, webExposeLan);
+      // 安全启动：不管用户选的 webExposeLan 是什么，首次启动先 bind 127.0.0.1，
+      // 拿到 admin 密码状态后再决定要不要重启到 0.0.0.0。这样默认密码从未被
+      // 暴露过 LAN，摆脱了「启动瞬间被扫到」的竞态。
+      await startSidecar(targetPort, false);
+      const status = await refreshPasswordStatus();
+      if (status?.isDefault) {
+        // sidecar 运行中（仅本机），开启状态保持，但不能升级到 LAN。
+        // 后面的 PasswordSetupCard 会提示用户修改默认密码。
+        if (webExposeLan) {
+          // 用户原本选了 LAN，但未改密前不允许，静默回退到「仅本机」。
+          setWebAccess(true, targetPort, false);
+        }
+        return;
+      }
+      // 密码已自定义：如果用户偏好 LAN，重启 sidecar 到正确 bind 模式。
+      if (webExposeLan) {
+        setBusy('switching');
+        await stopDesktopGateway();
+        await startSidecar(targetPort, true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '启动本地网关失败');
       logger.error('startDesktopGateway failed', err);
     } finally {
       setBusy(null);
     }
-  }, [interactiveDisabled, portInput, startSidecar, webAccessEnabled, webExposeLan, webPort]);
+  }, [
+    interactiveDisabled,
+    portInput,
+    refreshPasswordStatus,
+    setWebAccess,
+    startSidecar,
+    webAccessEnabled,
+    webExposeLan,
+    webPort,
+  ]);
 
   const handleSwitchExposeMode = useCallback(
     async (nextExposeLan: boolean) => {
       if (interactiveDisabled || nextExposeLan === webExposeLan) return;
       setError(null);
+
+      // 默认密码尚未修改时不允许升级到 LAN。localhost-only 随意切。
+      if (nextExposeLan && passwordStatus?.isDefault) {
+        setError('请先在下方「Admin 账号安全」修改 admin 默认密码后，再开启同局域网访问。');
+        return;
+      }
 
       // 未启用时仅持久化偏好，下次启动按新值生效。
       if (!webAccessEnabled) {
@@ -237,8 +319,54 @@ export function DesktopWebAccessSection({
         setBusy(null);
       }
     },
-    [interactiveDisabled, setWebAccess, startSidecar, webAccessEnabled, webExposeLan, webPort],
+    [
+      interactiveDisabled,
+      passwordStatus,
+      setWebAccess,
+      startSidecar,
+      webAccessEnabled,
+      webExposeLan,
+      webPort,
+    ],
   );
+
+  /**
+   * 提交 admin 新密码。后端会同时作废所有 refresh_tokens，所以这里后紧跟一次
+   * authenticateDesktopGateway 重新拿令牌，避免当前会话在下一次 jwt 过期后无法刷新。
+   */
+  const submitPassword = useCallback(async () => {
+    setPwdError(null);
+    setPwdSuccess(null);
+    if (pwd1.length < 8) {
+      setPwdError('密码至少 8 位。');
+      return;
+    }
+    if (pwd1.length > 128) {
+      setPwdError('密码不能超过 128 位。');
+      return;
+    }
+    if (pwd1 !== pwd2) {
+      setPwdError('两次输入的密码不一致。');
+      return;
+    }
+    setPwdSubmitting(true);
+    try {
+      await tauriInvoke('admin_set_password', { newPassword: pwd1 });
+      // 后端作废了 refresh_tokens —— 重走一次 desktop-default 让桌面处于合法会话。
+      const url = localGatewayUrl(webPort);
+      const tokens = await authenticateDesktopGateway(url);
+      setAuth(tokens.accessToken, DESKTOP_DEFAULT_EMAIL, tokens.refreshToken, tokens.expiresIn);
+      await refreshPasswordStatus();
+      setPwd1('');
+      setPwd2('');
+      setPwdSuccess('已修改。现在可以安全地切换到同局域网访问。');
+    } catch (err) {
+      setPwdError(err instanceof Error ? err.message : '修改密码失败');
+      logger.error('admin_set_password failed', err);
+    } finally {
+      setPwdSubmitting(false);
+    }
+  }, [pwd1, pwd2, refreshPasswordStatus, setAuth, webPort]);
 
   const handleApplyPort = useCallback(async () => {
     if (interactiveDisabled) return;
@@ -364,6 +492,120 @@ export function DesktopWebAccessSection({
         </div>
       ) : null}
 
+      {/* 默认 admin 密码 = 写死的 admin123456。Web 一旦暴露到 LAN，攻击面巨大。
+          这里强制提示并要求改密：sidecar 已启动 + 检测到 isDefault 时，把这块卡片
+          顶到最显眼的位置，并把「同局域网」选项屏蔽，直到用户完成修改。 */}
+      {!webAccessEnabled && passwordStatus === null && passwordCheckError === null ? (
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+            background: 'color-mix(in srgb, var(--accent) 6%, transparent)',
+            fontSize: 11,
+            color: 'var(--text-2)',
+            lineHeight: 1.6,
+          }}
+        >
+          <strong>首次开启会先用「仅本机」模式启动 sidecar 检查 admin 默认密码状态</strong>
+          。如果你之前从未改过密码，会要求先设新密码，再允许「同局域网」暴露。Web 默认关闭。
+        </div>
+      ) : null}
+
+      {webAccessEnabled && passwordStatus?.isDefault ? (
+        <div
+          style={{
+            padding: '12px',
+            borderRadius: 10,
+            border: '1px solid color-mix(in oklch, var(--danger) 35%, transparent)',
+            background: 'color-mix(in oklch, var(--danger) 8%, transparent)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>
+            ⚠ Admin 账号仍在使用默认密码
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
+            账号 <code style={{ fontFamily: 'monospace' }}>{passwordStatus.email}</code>{' '}
+            的密码当前为出厂默认值（<code style={{ fontFamily: 'monospace' }}>admin123456</code>
+            ）。在改密前 sidecar 仅 bind 到 127.0.0.1，不会暴露到
+            LAN；改完后才能切到「同局域网设备可访问」。
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <input
+              style={IS}
+              type="password"
+              placeholder="新密码（≥ 8 位）"
+              value={pwd1}
+              autoComplete="new-password"
+              onChange={(event) => setPwd1(event.target.value)}
+              disabled={pwdSubmitting}
+            />
+            <input
+              style={IS}
+              type="password"
+              placeholder="再次输入"
+              value={pwd2}
+              autoComplete="new-password"
+              onChange={(event) => setPwd2(event.target.value)}
+              disabled={pwdSubmitting}
+            />
+          </div>
+          {pwdError ? (
+            <div role="alert" style={{ fontSize: 11, color: 'var(--danger)' }}>
+              {pwdError}
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => void submitPassword()}
+              disabled={pwdSubmitting || pwd1.length === 0 || pwd2.length === 0}
+              style={{ ...BP, opacity: pwdSubmitting ? 0.4 : 1 }}
+            >
+              {pwdSubmitting ? '提交中…' : '设置新密码'}
+            </button>
+            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+              改完所有现有令牌会失效；桌面端会自动重新认证。
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {pwdSuccess ? (
+        <div
+          role="status"
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+            background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+            color: 'var(--accent)',
+            fontSize: 12,
+          }}
+        >
+          {pwdSuccess}
+        </div>
+      ) : null}
+
+      {passwordCheckError ? (
+        <div
+          role="alert"
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: '1px solid color-mix(in oklch, var(--danger) 25%, transparent)',
+            background: 'color-mix(in oklch, var(--danger) 6%, transparent)',
+            color: 'var(--danger)',
+            fontSize: 11,
+          }}
+        >
+          检查 admin 密码状态失败：{passwordCheckError}
+        </div>
+      ) : null}
+
       <div style={ROW_STYLE}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
@@ -402,9 +644,13 @@ export function DesktopWebAccessSection({
           />
           <ExposeOption
             active={webExposeLan}
-            disabled={interactiveDisabled}
+            disabled={interactiveDisabled || passwordStatus?.isDefault === true}
             label="同局域网设备可访问"
-            description="sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。建议同时启用桌面端 PIN。"
+            description={
+              passwordStatus?.isDefault === true
+                ? '需先在上方修改 admin 默认密码后才能开启。sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。'
+                : 'sidecar bind 0.0.0.0，同 Wi-Fi / 同有线网段的设备可通过本机 IP 访问。建议同时启用桌面端 PIN。'
+            }
             onSelect={() => void handleSwitchExposeMode(true)}
           />
         </div>
