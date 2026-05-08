@@ -1,13 +1,21 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   checkForUpdate,
-  downloadAndInstall,
+  downloadUpdate,
+  installUpdate,
   type UpdateCheckResult,
   type UpdateError,
 } from './auto-update.js';
 import { UpdateErrorDialog } from './UpdateErrorDialog.js';
 
-type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'done' | 'up-to-date';
+type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'installing'
+  | 'done'
+  | 'up-to-date';
 
 async function tauriInvoke<T>(cmd: string): Promise<T> {
   const tauri = (
@@ -20,21 +28,34 @@ async function tauriInvoke<T>(cmd: string): Promise<T> {
 }
 
 export interface UpdateProgressDialogProps {
+  autoCheck?: boolean;
   onClose: () => void;
 }
 
-export function UpdateProgressDialog({ onClose }: UpdateProgressDialogProps) {
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function UpdateProgressDialog({ autoCheck = false, onClose }: UpdateProgressDialogProps) {
   const [state, setState] = useState<UpdateState>('idle');
   const [progress, setProgress] = useState(0);
+  const [downloaded, setDownloaded] = useState(0);
+  const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<UpdateError | null>(null);
   const [result, setResult] = useState<UpdateCheckResult | null>(null);
   const [releaseNotes, setReleaseNotes] = useState<string | null>(null);
+  const autoCheckStartedRef = useRef(false);
+  const cancelledRef = useRef(false);
 
   const handleCheck = useCallback(async () => {
+    cancelledRef.current = false;
     setState('checking');
     setError(null);
     try {
       const r = await checkForUpdate();
+      if (cancelledRef.current) return;
       setResult(r);
       setReleaseNotes(r.notes);
       setState(r.available ? 'available' : 'up-to-date');
@@ -45,16 +66,47 @@ export function UpdateProgressDialog({ onClose }: UpdateProgressDialogProps) {
 
   const handleDownload = useCallback(async () => {
     if (!result?.update) return;
+    cancelledRef.current = false;
     setState('downloading');
     setProgress(0);
+    setDownloaded(0);
+    setTotal(null);
     setError(null);
     try {
-      await downloadAndInstall(result.update, (p) => setProgress(p.percent));
+      await downloadUpdate(result.update, (p) => {
+        if (cancelledRef.current) return;
+        setProgress(p.percent);
+        setDownloaded(p.downloaded);
+        setTotal(p.total);
+      });
+      if (cancelledRef.current) return;
+      setProgress(100);
+      setState('installing');
+      await installUpdate(result.update);
+      if (cancelledRef.current) return;
       setState('done');
     } catch (e) {
+      if (cancelledRef.current) return;
       setError(e as UpdateError);
     }
   }, [result]);
+
+  const handleClose = useCallback(() => {
+    cancelledRef.current = true;
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!autoCheck || autoCheckStartedRef.current) return;
+    autoCheckStartedRef.current = true;
+    void handleCheck();
+  }, [autoCheck, handleCheck]);
+
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
 
   if (error) {
     return (
@@ -81,6 +133,7 @@ ${releaseNotes}`
         : ''
     }`,
     downloading: `下载中… ${progress}%`,
+    installing: '下载完成，正在安装更新…',
     done: '更新已下载，重启应用以应用更新。',
     'up-to-date': '当前已是最新版本。',
   };
@@ -105,10 +158,10 @@ ${releaseNotes}`
         height: '100vh',
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') onClose();
+        if (e.key === 'Escape') handleClose();
       }}
     >
       <div
@@ -135,30 +188,46 @@ ${releaseNotes}`
           {STATUS_MSG[state]}
         </div>
 
-        {state === 'downloading' && (
-          <div
-            style={{
-              height: 4,
-              background: 'hsl(var(--muted) / 0.5)',
-              borderRadius: 2,
-              overflow: 'hidden',
-            }}
-          >
+        {(state === 'downloading' || state === 'installing') && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div
               style={{
-                height: '100%',
-                width: `${progress}%`,
-                background: 'hsl(var(--primary))',
-                transition: 'width 0.3s',
+                height: 6,
+                background: 'hsl(var(--muted) / 0.5)',
+                borderRadius: 999,
+                overflow: 'hidden',
               }}
-            />
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${progress}%`,
+                  background: 'hsl(var(--primary))',
+                  transition: 'width 0.3s',
+                }}
+              />
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 12,
+                color: 'hsl(var(--muted-foreground))',
+              }}
+            >
+              <span>{progress}%</span>
+              <span>
+                {formatBytes(downloaded)}
+                {total ? ` / ${formatBytes(total)}` : ''}
+              </span>
+            </div>
           </div>
         )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               padding: '6px 14px',
               background: 'transparent',
@@ -169,7 +238,7 @@ ${releaseNotes}`
               fontSize: 13,
             }}
           >
-            {state === 'downloading' ? '隐藏' : '关闭'}
+            {state === 'downloading' || state === 'installing' ? '取消显示' : '关闭'}
           </button>
           {(state === 'idle' || state === 'up-to-date') && (
             <button

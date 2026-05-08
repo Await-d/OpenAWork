@@ -135,6 +135,7 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const streamRequestVersionRef = useRef(0);
   const activeStreamTokenRef = useRef<string | null>(null);
   const lastTextRequestRef = useRef<RetryableTextRequest | null>(null);
+  const hasAppliedStoredImageDefaultsRef = useRef(false);
   const hasRunningSubagents = activities.some(
     (activity) => activity.kind === 'subagent' && activity.status === 'running',
   );
@@ -206,7 +207,13 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         return;
       }
 
-      setImageDefaults(storedImageDefaults);
+      // Only seed image defaults from storage on first load. Re-applying on
+      // every sessionId change would silently revert any size/quality/format/
+      // background the user just adjusted in the image panel.
+      if (!hasAppliedStoredImageDefaultsRef.current) {
+        setImageDefaults(storedImageDefaults);
+        hasAppliedStoredImageDefaultsRef.current = true;
+      }
       const activeImage = config?.active.image;
       const provider = activeImage
         ? config?.providers.find((item) => item.id === activeImage.providerId)

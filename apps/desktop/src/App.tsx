@@ -8,6 +8,7 @@ import ChatPage from '../../web/src/pages/ChatPage.js';
 import SessionsPage from '../../web/src/pages/SessionsPage.js';
 import SettingsPage from '../../web/src/pages/SettingsPage.js';
 import Layout from './components/layout/Layout.js';
+import { UpdateProgressDialog } from './updater/UpdateProgressDialog.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -220,30 +221,50 @@ export default function App() {
   const clearAuth = useAuthStore((state) => state.clearAuth);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapRetry, setBootstrapRetry] = useState(0);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
 
   useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
 
+  useEffect(() => {
+    const unlisten = listen('tray:check-updates', () => {
+      setShowUpdateDialog(true);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  const updateDialog = showUpdateDialog ? (
+    <UpdateProgressDialog autoCheck onClose={() => setShowUpdateDialog(false)} />
+  ) : null;
+
   if (!onboarded) {
     return (
-      <Routes>
-        <Route path="*" element={<OnboardingWizard onComplete={() => setOnboarded(true)} />} />
-      </Routes>
+      <>
+        <Routes>
+          <Route path="*" element={<OnboardingWizard onComplete={() => setOnboarded(true)} />} />
+        </Routes>
+        {updateDialog}
+      </>
     );
   }
 
   if (!accessToken) {
     return (
-      <DesktopBootstrapScreen
-        error={bootstrapError}
-        onRetry={() => setBootstrapRetry((value) => value + 1)}
-        onReconfigure={() => {
-          clearAuth();
-          localStorage.removeItem('onboarded');
-          localStorage.removeItem(DESKTOP_GATEWAY_MODE_KEY);
-          setBootstrapError(null);
-          setOnboarded(false);
-        }}
-      />
+      <>
+        <DesktopBootstrapScreen
+          error={bootstrapError}
+          onRetry={() => setBootstrapRetry((value) => value + 1)}
+          onReconfigure={() => {
+            clearAuth();
+            localStorage.removeItem('onboarded');
+            localStorage.removeItem(DESKTOP_GATEWAY_MODE_KEY);
+            setBootstrapError(null);
+            setOnboarded(false);
+          }}
+        />
+        {updateDialog}
+      </>
     );
   }
 
@@ -288,6 +309,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/sessions" replace />} />
         </Routes>
       </Layout>
+      {updateDialog}
     </>
   );
 }

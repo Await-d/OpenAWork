@@ -28,6 +28,9 @@ export class UpdateError extends Error {
 }
 
 function classifyError(err: unknown): UpdateError {
+  if (err instanceof UpdateError) {
+    return err;
+  }
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes('network') || msg.includes('fetch') || msg.includes('connect')) {
     return new UpdateError('network', msg);
@@ -39,6 +42,10 @@ function classifyError(err: unknown): UpdateError {
     return new UpdateError('permission', msg);
   }
   return new UpdateError('unknown', msg);
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
 }
 
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
@@ -58,7 +65,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   }
 }
 
-export async function downloadAndInstall(
+export async function downloadUpdate(
   update: Update,
   onProgress: (progress: DownloadProgress) => void,
 ): Promise<void> {
@@ -66,7 +73,7 @@ export async function downloadAndInstall(
     let downloaded = 0;
     let total: number | null = null;
 
-    await update.downloadAndInstall((event) => {
+    await update.download((event) => {
       if (event.event === 'Started') {
         total = event.data.contentLength ?? null;
       } else if (event.event === 'Progress') {
@@ -74,13 +81,29 @@ export async function downloadAndInstall(
         onProgress({
           downloaded,
           total,
-          percent: total ? Math.round((downloaded / total) * 100) : 0,
+          percent: total ? clampPercent(Math.round((downloaded / total) * 100)) : 0,
         });
       }
     });
   } catch (err) {
     throw classifyError(err);
   }
+}
+
+export async function installUpdate(update: Update): Promise<void> {
+  try {
+    await update.install();
+  } catch (err) {
+    throw classifyError(err);
+  }
+}
+
+export async function downloadAndInstall(
+  update: Update,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<void> {
+  await downloadUpdate(update, onProgress);
+  await installUpdate(update);
 }
 
 export async function silentUpdateCheck(): Promise<UpdateCheckResult | null> {

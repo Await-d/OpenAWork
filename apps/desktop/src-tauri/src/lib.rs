@@ -12,11 +12,10 @@ use tauri::{Emitter, Manager, State, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_updater::UpdaterExt;
 
 /// 桌面端统一根目录（存放 desktop-settings.json 与默认 agent-gateway 数据）。
 ///
@@ -1605,70 +1604,8 @@ fn open_gateway_logs_directory(app: &tauri::AppHandle) {
 /// 手动检查更新。调用 tauri-plugin-updater 拉取 endpoints 中的 latest.json，
 /// 根据结果弹对话框提示。有更新版本时询问是否下载安装。
 fn trigger_update_check(app: &tauri::AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let updater = match app.updater() {
-            Ok(u) => u,
-            Err(err) => {
-                app.dialog()
-                    .message(format!("检查更新失败：{err}"))
-                    .title("OpenAWork 更新")
-                    .kind(MessageDialogKind::Error)
-                    .show(|_| {});
-                return;
-            }
-        };
-        match updater.check().await {
-            Ok(Some(update)) => {
-                let version = update.version.clone();
-                let app_for_dialog = app.clone();
-                app.dialog()
-                    .message(format!(
-                        "发现新版本 {version}\n是否现在下载并安装？"
-                    ))
-                    .title("OpenAWork 更新")
-                    .kind(MessageDialogKind::Info)
-                    .buttons(MessageDialogButtons::OkCancelCustom(
-                        "立即更新".into(),
-                        "稍后".into(),
-                    ))
-                    .show(move |chose_install| {
-                        if !chose_install {
-                            return;
-                        }
-                        let app = app_for_dialog.clone();
-                        let update = update;
-                        tauri::async_runtime::spawn(async move {
-                            // download_and_install 会下载、验证签名、并提示重启。
-                            if let Err(err) =
-                                update.download_and_install(|_, _| {}, || {}).await
-                            {
-                                app.dialog()
-                                    .message(format!("下载更新失败：{err}"))
-                                    .title("OpenAWork 更新")
-                                    .kind(MessageDialogKind::Error)
-                                    .show(|_| {});
-                            }
-                        });
-                    });
-            }
-            Ok(None) => {
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title("OpenAWork")
-                    .body("当前已是最新版本")
-                    .show();
-            }
-            Err(err) => {
-                app.dialog()
-                    .message(format!("检查更新失败：{err}"))
-                    .title("OpenAWork 更新")
-                    .kind(MessageDialogKind::Error)
-                    .show(|_| {});
-            }
-        }
-    });
+    restore_main_window(app);
+    let _ = app.emit("tray:check-updates", ());
 }
 
 /// 显示"关于 OpenAWork"对话框（含版本号）。
