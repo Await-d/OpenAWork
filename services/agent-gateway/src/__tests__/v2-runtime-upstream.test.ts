@@ -48,20 +48,26 @@ describe('buildAISdkProvider', () => {
 // stream of fullStream parts and observe how the runner translates each
 // one into the OpenAWork StreamChunk taxonomy.
 
-function buildMockModel(parts: ReadonlyArray<unknown>): V2LanguageModel {
+function buildMockModel(
+  parts: ReadonlyArray<unknown>,
+  onDoStream?: (options: unknown) => void,
+): V2LanguageModel {
   return new MockLanguageModelV2({
-    doStream: async () => ({
-      stream: new ReadableStream<unknown>({
-        start(controller) {
-          for (const part of parts) {
-            controller.enqueue(part);
-          }
-          controller.close();
-        },
-      }) as never,
-      rawCall: { rawPrompt: null, rawSettings: {} },
-      warnings: [],
-    }),
+    doStream: async (options: unknown) => {
+      onDoStream?.(options);
+      return {
+        stream: new ReadableStream<unknown>({
+          start(controller) {
+            for (const part of parts) {
+              controller.enqueue(part);
+            }
+            controller.close();
+          },
+        }) as never,
+        rawCall: { rawPrompt: null, rawSettings: {} },
+        warnings: [],
+      };
+    },
   }) as unknown as V2LanguageModel;
 }
 
@@ -243,6 +249,98 @@ describe('runUpstreamStream', () => {
     );
     expect(errorChunk?.code).toBe('UPSTREAM_ERROR');
     expect(errorChunk?.message).toContain('upstream blew up');
+  });
+
+  it('adds empty reasoning parts for DeepSeek assistant history', async () => {
+    const calls: unknown[] = [];
+    const model = buildMockModel(
+      [
+        {
+          type: 'finish',
+          finishReason: 'stop',
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        },
+      ],
+      (options) => calls.push(options),
+    );
+
+    await collectChunks(
+      runUpstreamStream({
+        model,
+        modelId: 'deepseek-chat',
+        providerType: 'deepseek',
+        messages: [
+          { role: 'user', content: 'q' },
+          { role: 'assistant', content: 'answer' },
+        ],
+      }),
+    );
+
+    const settings = calls[0] as { prompt?: Array<{ role: string; content: unknown }> };
+    expect(settings.prompt?.[1]).toEqual({
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'answer' },
+        { type: 'reasoning', text: '' },
+      ],
+    });
+  });
+
+  it('applies request overrides to AI SDK stream settings', async () => {
+    const calls: unknown[] = [];
+    const model = buildMockModel(
+      [
+        {
+          type: 'finish',
+          finishReason: 'stop',
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        },
+      ],
+      (options) => calls.push(options),
+    );
+
+    await collectChunks(
+      runUpstreamStream({
+        model,
+        modelId: 'anthropic/claude-sonnet-4-5',
+        providerType: 'openrouter',
+        messages: [{ role: 'user', content: 'q' }],
+        temperature: 0.7,
+        maxOutputTokens: 4096,
+        topP: 0.8,
+        requestOverrides: {
+          temperature: 0.2,
+          maxTokens: 1234,
+          topP: 0.9,
+          frequencyPenalty: 0.4,
+          presencePenalty: 0.5,
+          body: {
+            extra_body_flag: true,
+            top_p: 1,
+          },
+          omitBodyKeys: ['temperature', 'top_p', 'presence_penalty'],
+        },
+      }),
+    );
+
+    const settings = calls[0] as Record<string, unknown>;
+    expect(settings['temperature']).toBeUndefined();
+    expect(settings['topP']).toBeUndefined();
+    expect(settings['presencePenalty']).toBeUndefined();
+    expect(settings['maxOutputTokens']).toBe(1234);
+    expect(settings['frequencyPenalty']).toBe(0.4);
+    expect(settings['providerOptions']).toMatchObject({
+      openrouter: {
+        usage: { include: true },
+        body: {
+          extra_body_flag: true,
+        },
+      },
+    });
+    const openrouterOptions = (
+      settings['providerOptions'] as Record<string, Record<string, Record<string, unknown>>>
+    )['openrouter'];
+    expect((openrouterOptions?.body ?? {})['top_p']).toBeUndefined();
   });
 
   it('fires onFinish with totalUsage propagated from the V2 finish event', async () => {

@@ -15,15 +15,31 @@ import {
   stringifyToolResultOutput,
 } from './tool-result-contract.js';
 import {
-  renderNormalizedConversationToUpstreamChatMessages,
-  type NormalizedConversationMessage,
-  type UpstreamChatMessage,
-} from './normalized-conversation.js';
-import {
   isCompactionMarkerMessageWithOptions,
   readLatestCompactionMarkerWithOptions,
 } from './compaction-marker.js';
-export type { UpstreamChatMessage } from './normalized-conversation.js';
+
+// `NormalizedConversationMessage` was historically defined in
+// `./normalized-conversation.ts` together with the v1 wire shape
+// (`UpstreamChatMessage`). After the v2-only cutover only the
+// normalized intermediate type is still needed — the rest of the
+// pipeline is owned by `UnifiedMessage` (in `message-to-model-messages.ts`)
+// which is structurally compatible with this shape. The type is
+// inlined here so we can delete the legacy module.
+export type NormalizedConversationMessage =
+  | { role: 'system' | 'user'; content: string }
+  | {
+      role: 'assistant';
+      content: string | null;
+      toolCalls?: Array<{ id: string; name: string; arguments: string }>;
+      reasoning?: {
+        text?: string;
+        encryptedContent?: string;
+        summary?: string;
+        responseId?: string;
+      };
+    }
+  | { role: 'tool'; toolCallId: string; content: string };
 
 const MAX_INLINE_TOOL_OUTPUT_BYTES = 8 * 1024;
 const MAX_EXTRACTED_TOOL_TEXT_CHARS = 8_000;
@@ -54,16 +70,13 @@ export interface PreparedUpstreamConversationReport {
   referencedToolOutputCount: number;
   /** safe window 裁掉的消息数（message 级） */
   safeWindowTrimmedMessageCount: number;
-  /** 最终参与 buildUpstreamConversationFromHistory 的历史消息数（message 级） */
+  /** 最终参与 buildNormalizedConversationFromHistory 的历史消息数（message 级） */
   selectedHistoryCount: number;
   /** tool_result content 数（content 级） */
   toolResultCount: number;
-  /** 最终发往 provider 的消息条数；若 compact summary 注入，则包含 prepend system message（message 级） */
-  upstreamMessageCount: number;
 }
 
 export interface PreparedUpstreamConversation {
-  messages: UpstreamChatMessage[];
   normalizedMessages: NormalizedConversationMessage[];
   compactionSummary: string | null;
   report?: PreparedUpstreamConversationReport;
@@ -99,15 +112,6 @@ export interface CompactionMarkerRecord {
   signature?: string;
   summary: string;
   trigger: string;
-}
-
-export function hasToolOutputReference(messages: UpstreamChatMessage[]): boolean {
-  return messages.some(
-    (message) =>
-      message.role === 'tool' &&
-      typeof message.content === 'string' &&
-      message.content.startsWith('[tool_output_reference]'),
-  );
 }
 
 export function isAssistantUiEventText(value: string): boolean {
@@ -266,17 +270,6 @@ export function filterVisibleSessionMessages(messages: Message[]): Message[] {
   return messages.filter((message) => !isCompactionMarkerMessage(message));
 }
 
-export function buildUpstreamConversation(
-  messages: Message[],
-  maxMessages = 12,
-): UpstreamChatMessage[] {
-  const history = selectSafeConversationWindow(
-    messages.filter((message) => !isContextArtifactMessage(message)),
-    maxMessages,
-  );
-  return buildUpstreamConversationFromHistory(history);
-}
-
 /**
  * Microcompact: replace tool_result content for messages older than the threshold.
  * This is a lightweight token-reduction step that runs before every API round,
@@ -289,6 +282,102 @@ export function buildUpstreamConversation(
  * for backward compatibility with the old pipeline path.
  */
 export const MICROCOMPACT_AGE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Token budget thresholds for `pruneToolResultsByTokenBudget`. Mirrors
+ * opencode's `PRUNE_PROTECT` / `PRUNE_MINIMUM` (`session/compaction.ts`).
+ *
+ * The walker preserves the most-recent `PRUNE_PROTECT` tokens worth of
+ * tool_result outputs verbatim and only rewrites older ones once at
+ * least `PRUNE_MINIMUM` tokens of older content have accumulated —
+ * preventing churn on small histories.
+ */
+export const PRUNE_PROTECT_TOKENS = 40_000;
+export const PRUNE_MINIMUM_TOKENS = 20_000;
+
+/**
+ * Tool names whose outputs should never be pruned regardless of age
+ * or token budget. Matches opencode's `PRUNE_PROTECTED_TOOLS`.
+ */
+export const PRUNE_PROTECTED_TOOLS: ReadonlySet<string> = new Set(['skill']);
+
+const PRUNED_TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared by token-budget prune]';
+
+function approximateTokens(value: string): number {
+  return Math.ceil(value.length / 4);
+}
+
+/**
+ * Token-budget-aware prune over `tool_result` outputs.
+ *
+ * Walks messages from newest to oldest, accumulating an estimate of
+ * tokens consumed by tool_result outputs. Once the running total
+ * exceeds `protectTokens`, every older tool_result whose `toolName`
+ * is not in `protectedTools` has its `output` replaced with a short
+ * placeholder. Returns a new array; does **not** mutate the input.
+ *
+ * Mirrors opencode's `session/compaction.ts:prune()` but operates on
+ * the in-memory message list at request time instead of mutating
+ * persisted parts. This keeps DB content intact while still saving
+ * tokens on the wire.
+ */
+export function pruneToolResultsByTokenBudget(
+  messages: Message[],
+  options: {
+    protectTokens?: number;
+    minimumTokens?: number;
+    protectedTools?: ReadonlySet<string>;
+  } = {},
+): Message[] {
+  const protectTokens = options.protectTokens ?? PRUNE_PROTECT_TOKENS;
+  const minimumTokens = options.minimumTokens ?? PRUNE_MINIMUM_TOKENS;
+  const protectedTools = options.protectedTools ?? PRUNE_PROTECTED_TOOLS;
+
+  // Map tool_call IDs to their tool names so the prune step knows
+  // which results belong to a protected tool.
+  const toolNameByCallId = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const content of message.content) {
+      if (content.type === 'tool_call') {
+        toolNameByCallId.set(content.toolCallId, content.toolName);
+      }
+    }
+  }
+
+  // First pass: walk newest → oldest, mark tool_result keys to prune.
+  let runningTokens = 0;
+  let prunedTokens = 0;
+  const toPrune = new Set<string>();
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+    if (!message) continue;
+    for (let contentIndex = message.content.length - 1; contentIndex >= 0; contentIndex--) {
+      const content = message.content[contentIndex];
+      if (!content || content.type !== 'tool_result') continue;
+      const toolName = toolNameByCallId.get(content.toolCallId);
+      if (toolName && protectedTools.has(toolName)) continue;
+      const outputText = typeof content.output === 'string' ? content.output : '';
+      const tokens = approximateTokens(outputText);
+      runningTokens += tokens;
+      if (runningTokens <= protectTokens) continue;
+      prunedTokens += tokens;
+      toPrune.add(`${messageIndex}:${contentIndex}`);
+    }
+  }
+
+  // No-op when we would not free enough tokens to be worthwhile.
+  if (prunedTokens < minimumTokens || toPrune.size === 0) return messages;
+
+  return messages.map((message, messageIndex) => ({
+    ...message,
+    content: message.content.map((content, contentIndex) => {
+      if (content.type !== 'tool_result') return content;
+      if (!toPrune.has(`${messageIndex}:${contentIndex}`)) return content;
+      return { ...content, output: PRUNED_TOOL_RESULT_PLACEHOLDER };
+    }),
+  }));
+}
 
 export function microcompactByAge(
   messages: Message[],
@@ -344,9 +433,13 @@ export function buildPreparedUpstreamConversation(
       ? historySinceBoundary
       : selectSafeConversationWindow(historySinceBoundary, maxMessages);
   // P3: Microcompact — clear old tool_result content to save tokens
-  const microcompactedHistory = microcompactByAge(history);
+  // Time-based first (cheap, ages-out long-idle outputs), then the
+  // opencode-style token-budget prune that protects the freshest
+  // PRUNE_PROTECT_TOKENS worth of tool_result outputs and rewrites
+  // older ones — but only when the savings exceed PRUNE_MINIMUM_TOKENS
+  // so very short conversations are unaffected.
+  const microcompactedHistory = pruneToolResultsByTokenBudget(microcompactByAge(history));
   const normalizedMessages = buildNormalizedConversationFromHistory(microcompactedHistory);
-  const upstreamMessages = renderNormalizedConversationToUpstreamChatMessages(normalizedMessages);
   const compactSummaryInjected = compactionContext.summarySource === 'fallback';
 
   // If there is a compaction summary but no compaction marker in the message
@@ -360,10 +453,6 @@ export function buildPreparedUpstreamConversation(
       { role: 'user', content: 'What did we do so far?' },
       { role: 'assistant', content: compactionContext.summary },
     );
-    upstreamMessages.unshift(
-      { role: 'user', content: 'What did we do so far?' },
-      { role: 'assistant', content: compactionContext.summary },
-    );
   }
   const report = buildPreparedUpstreamConversationReport({
     compactSummaryInjected,
@@ -371,11 +460,9 @@ export function buildPreparedUpstreamConversation(
     historySinceBoundary,
     inputMessages: messages,
     normalizedMessages: filteredMessages,
-    upstreamMessages,
   });
 
   return {
-    messages: upstreamMessages,
     normalizedMessages: finalNormalizedMessages,
     // Compaction summary is now injected into the conversation flow as
     // user+assistant message pair (opencode pattern), not as a system message.
@@ -390,7 +477,6 @@ function buildPreparedUpstreamConversationReport(input: {
   historySinceBoundary: Message[];
   inputMessages: Message[];
   normalizedMessages: Message[];
-  upstreamMessages: UpstreamChatMessage[];
 }): PreparedUpstreamConversationReport {
   const storedToolResults = listStoredToolResults(input.history);
   const assistantToolCallCount = input.history.reduce((count, message) => {
@@ -438,12 +524,11 @@ function buildPreparedUpstreamConversationReport(input: {
     toolResultCount,
     referencedToolOutputCount,
     assistantToolCallCount,
-    upstreamMessageCount: input.upstreamMessages.length,
   };
 }
 
 export function isContextOverflow(
-  usage: { inputTokens: number },
+  usage: { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number },
   contextWindow: number,
   reserved?: number,
 ): boolean {
@@ -452,7 +537,9 @@ export function isContextOverflow(
   }
 
   const buffer = reserved ?? Math.min(20_000, Math.floor(contextWindow * 0.15));
-  return usage.inputTokens >= contextWindow - buffer;
+  const usedInputTokens =
+    usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+  return usedInputTokens >= contextWindow - buffer;
 }
 
 /** Proactive compaction threshold: trigger before overflow.
@@ -461,7 +548,7 @@ export function isContextOverflow(
 export const PROACTIVE_COMPACTION_BUFFER_TOKENS = 30_000;
 
 export function isContextNearOverflow(
-  usage: { inputTokens: number },
+  usage: { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number },
   contextWindow: number,
   reserved?: number,
 ): boolean {
@@ -471,7 +558,9 @@ export function isContextNearOverflow(
 
   const buffer =
     reserved ?? Math.max(PROACTIVE_COMPACTION_BUFFER_TOKENS, Math.floor(contextWindow * 0.25));
-  return usage.inputTokens >= contextWindow - buffer;
+  const usedInputTokens =
+    usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+  return usedInputTokens >= contextWindow - buffer;
 }
 
 export function buildNormalizedConversationFromHistory(
@@ -603,12 +692,6 @@ export function buildNormalizedConversationFromHistory(
   });
 
   return normalizedMessages;
-}
-
-function buildUpstreamConversationFromHistory(messages: Message[]): UpstreamChatMessage[] {
-  return renderNormalizedConversationToUpstreamChatMessages(
-    buildNormalizedConversationFromHistory(messages),
-  );
 }
 
 export function buildStructuredCompactionSummary(input: {

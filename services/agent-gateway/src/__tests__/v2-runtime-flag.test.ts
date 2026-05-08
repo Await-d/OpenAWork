@@ -1,10 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  isV2UpstreamForProviderType,
-  parseRuntimeVariant,
-  readRuntimeFlags,
-  refreshRuntimeFlagsForTesting,
-} from '../v2-runtime/runtime-flag.js';
+import { describe, expect, it } from 'vitest';
+import { parseRuntimeVariant, readRuntimeFlags } from '../v2-runtime/runtime-flag.js';
 
 describe('v2-runtime feature flag', () => {
   describe('parseRuntimeVariant', () => {
@@ -88,51 +83,5 @@ describe('v2-runtime feature flag', () => {
       });
       expect(flags.upstreamProviderAllowlist.size).toBe(0);
     });
-  });
-});
-
-describe('isV2UpstreamForProviderType', () => {
-  beforeEach(() => {
-    delete process.env['OPENAWORK_RUNTIME'];
-    delete process.env['OPENAWORK_RUNTIME_UPSTREAM'];
-    delete process.env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS'];
-    refreshRuntimeFlagsForTesting();
-  });
-
-  afterEach(() => {
-    delete process.env['OPENAWORK_RUNTIME'];
-    delete process.env['OPENAWORK_RUNTIME_UPSTREAM'];
-    delete process.env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS'];
-    refreshRuntimeFlagsForTesting();
-  });
-
-  it('returns false when the upstream sub-flag is v1', () => {
-    process.env['OPENAWORK_RUNTIME'] = 'v1';
-    refreshRuntimeFlagsForTesting();
-    expect(isV2UpstreamForProviderType('anthropic')).toBe(false);
-  });
-
-  it('returns true for any providerType when no allowlist is set', () => {
-    process.env['OPENAWORK_RUNTIME_UPSTREAM'] = 'v2';
-    refreshRuntimeFlagsForTesting();
-    expect(isV2UpstreamForProviderType('anthropic')).toBe(true);
-    expect(isV2UpstreamForProviderType('moonshot')).toBe(true);
-    expect(isV2UpstreamForProviderType(undefined)).toBe(true);
-  });
-
-  it('only enables v2 for providerTypes in the allowlist', () => {
-    process.env['OPENAWORK_RUNTIME_UPSTREAM'] = 'v2';
-    process.env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS'] = 'anthropic';
-    refreshRuntimeFlagsForTesting();
-    expect(isV2UpstreamForProviderType('anthropic')).toBe(true);
-    expect(isV2UpstreamForProviderType('Anthropic')).toBe(true);
-    expect(isV2UpstreamForProviderType('openai')).toBe(false);
-  });
-
-  it('rejects an undefined providerType when the allowlist is non-empty', () => {
-    process.env['OPENAWORK_RUNTIME_UPSTREAM'] = 'v2';
-    process.env['OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS'] = 'anthropic';
-    refreshRuntimeFlagsForTesting();
-    expect(isV2UpstreamForProviderType(undefined)).toBe(false);
   });
 });

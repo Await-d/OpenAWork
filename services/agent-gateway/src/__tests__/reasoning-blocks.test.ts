@@ -117,6 +117,39 @@ describe('reasoning-blocks', () => {
     ]);
   });
 
+  it('records Anthropic signature on the matching block via providerMetadata', () => {
+    const blocks = [
+      { key: 'item:rs_1:output:0:summary:0', text: '思考1' },
+      { key: 'item:rs_1:output:1:summary:0', text: '思考2' },
+    ];
+    const next = markReasoningBlockEnded(blocks, {
+      itemId: 'rs_1',
+      outputIndex: 0,
+      summaryIndex: 0,
+      occurredAt: 1700000010000,
+      providerMetadata: { signature: 'sig-abc' },
+    });
+    expect(next[0]).toMatchObject({
+      key: 'item:rs_1:output:0:summary:0',
+      endedAt: 1700000010000,
+      signature: 'sig-abc',
+    });
+    // The other block must not receive the signature.
+    expect(next[1]).toMatchObject({ key: 'item:rs_1:output:1:summary:0' });
+    expect(next[1]?.signature).toBeUndefined();
+  });
+
+  it('extractReasoningEntries surfaces signature when present', () => {
+    const blocks = [
+      { key: 'a', text: '内容', signature: 'sig-1' },
+      { key: 'b', text: '另一段' },
+    ];
+    expect(extractReasoningEntries(blocks)).toEqual([
+      { text: '内容', startedAt: undefined, endedAt: undefined, signature: 'sig-1' },
+      { text: '另一段', startedAt: undefined, endedAt: undefined },
+    ]);
+  });
+
   it('closes every still-open block when the end chunk has no identity hint', () => {
     const blocks = [
       { key: 'legacy:0', text: '第一段思考' },

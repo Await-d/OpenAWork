@@ -36,7 +36,46 @@ vi.mock('../session-search-store.js', () => ({
 }));
 
 import { appendSessionMessageV2 } from '../message-v2-adapter.js';
+import { filterCompacted } from '../message-to-model-messages.js';
 import { hasSessionMessage } from '../session-message-rating-store.js';
+import type { MessageID, MessageWithParts, PartID } from '../message-v2-schema.js';
+
+function asMessageId(id: string): MessageID {
+  return id as MessageID;
+}
+
+function asPartId(id: string): PartID {
+  return id as PartID;
+}
+
+function userMessage(id: string, parts: MessageWithParts['parts'] = []): MessageWithParts {
+  return {
+    info: {
+      id: asMessageId(id),
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 1 },
+    },
+    parts,
+  };
+}
+
+function assistantSummary(id: string, parentID: string): MessageWithParts {
+  return {
+    info: {
+      id: asMessageId(id),
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 1 },
+      parentID: asMessageId(parentID),
+      summary: true,
+      finish: 'stop',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [],
+  };
+}
 
 describe('message-v2 compatibility regressions', () => {
   beforeEach(() => {
@@ -70,6 +109,52 @@ describe('message-v2 compatibility regressions', () => {
       role: 'user',
       sessionId: 'session-1',
       userId: 'user-1',
+    });
+  });
+
+  it('persists assistant provider usage on the V2 message info', () => {
+    mocks.sqliteGet.mockReturnValue({ max_seq: null });
+
+    const message = appendSessionMessageV2({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      messageId: 'message-usage',
+      createdAt: 123,
+      content: [{ type: 'text', text: 'ok' }],
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 130,
+        reasoningTokens: 5,
+        cacheReadTokens: 5,
+      },
+    });
+
+    expect(message.providerUsage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 130,
+      reasoningTokens: 5,
+      cacheReadTokens: 5,
+    });
+    const createdCall = mocks.emitEvent.mock.calls.find(
+      (call) =>
+        (call[0] as { definition?: { type?: string } }).definition?.type === 'message.created',
+    );
+    expect(createdCall?.[0]).toMatchObject({
+      data: {
+        info: {
+          role: 'assistant',
+          tokens: {
+            input: 100,
+            output: 20,
+            reasoning: 5,
+            cache: { read: 5, write: 0 },
+            total: 130,
+          },
+        },
+      },
     });
   });
 
@@ -151,5 +236,28 @@ describe('message-v2 compatibility regressions', () => {
       'user-1',
       'message-v2-only',
     ]);
+  });
+
+  it('orders compaction summary before retained tail messages', () => {
+    const compaction = userMessage('m3', [
+      {
+        id: asPartId('p1'),
+        sessionID: 'session-1',
+        messageID: asMessageId('m3'),
+        type: 'compaction',
+        auto: true,
+        tailStartID: asMessageId('m1'),
+      },
+    ]);
+    const result = filterCompacted([
+      userMessage('m0'),
+      userMessage('m1'),
+      userMessage('m2'),
+      compaction,
+      assistantSummary('m4', 'm3'),
+      userMessage('m5'),
+    ]);
+
+    expect(result.map((msg) => msg.info.id)).toEqual(['m3', 'm4', 'm1', 'm2', 'm5']);
   });
 });

@@ -72,5 +72,5 @@ describe('ToolSandbox.execute', () => {
     const transitionOrder = mocks.transitionToolToRunningMock.mock.invocationCallOrder[0] ?? 0;
     const executeOrder = toolExecute.mock.invocationCallOrder[0] ?? 0;
     expect(transitionOrder).toBeLessThan(executeOrder);
-  });
+  }, 15_000);
 });

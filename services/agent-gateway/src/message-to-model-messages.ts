@@ -50,12 +50,32 @@ export interface AssistantToolCall {
   arguments: string;
 }
 
+/**
+ * Per-block reasoning entry. Carries the verbatim text and any
+ * provider-specific opaque payload (e.g. Anthropic extended-thinking
+ * `signature`) needed to replay the block on subsequent turns.
+ */
+export interface AssistantReasoningBlock {
+  text: string;
+  /** Anthropic extended-thinking signature for this block. */
+  signature?: string;
+}
+
 export interface AssistantReasoning {
   text?: string;
   encryptedContent?: string;
   summary?: string;
   /** Response ID from Responses API, used as previous_response_id for caching. */
   responseId?: string;
+  /**
+   * Per-block reasoning entries — used when the upstream produced
+   * multiple reasoning blocks (e.g. Anthropic adaptive thinking) and we
+   * need to preserve per-block metadata (notably `signature`) instead of
+   * collapsing into a single aggregated `text`. When present, renderers
+   * that care about per-block fidelity should use `blocks`; renderers
+   * that only need the aggregated transcript can fall back to `text`.
+   */
+  blocks?: AssistantReasoningBlock[];
 }
 
 export interface AssistantMessageUnified {
@@ -68,6 +88,8 @@ export interface AssistantMessageUnified {
 export interface ToolResultMessage {
   role: 'tool';
   toolCallId: string;
+  toolName?: string;
+  isError?: boolean;
   content: string;
 }
 
@@ -77,16 +99,35 @@ export type UnifiedMessage =
   | AssistantMessageUnified
   | ToolResultMessage;
 
+/**
+ * Conversion options. Intentionally narrow — this matches opencode's
+ * `toModelMessagesEffect(input, model, options?)` shape and *deliberately*
+ * does NOT include any wall-clock-based stripping toggle.
+ *
+ * The previous OpenAWork-only `stripOldToolResults` flag rewrote any tool
+ * output older than 10 minutes (computed against `Date.now()` at the moment
+ * of upstream send) into a placeholder. That mutation was non-deterministic
+ * across rounds: the same DB row produced different bytes on round N vs
+ * round N+1 just because the wall clock advanced past the 10-minute
+ * boundary, which silently invalidated Anthropic / OpenAI prompt-cache
+ * prefixes mid-conversation. opencode never strips on render; instead it
+ * mutates `part.state.time.compacted` once during `SessionCompaction.prune`
+ * and lets `resolveToolOutput` consult that persistent flag on every
+ * subsequent render. We follow the same model: every render of the same DB
+ * state returns byte-identical bytes, period.
+ */
 export interface ToModelMessagesOptions {
-  /** Replace old tool_result content with placeholder (replaces microcompactByAge) */
-  stripOldToolResults?: boolean;
-  /** Age threshold in ms for stripping old tool results (default: 10 min) */
-  oldToolResultAgeMs?: number;
-  /** Current time override for testing */
-  now?: number;
+  /**
+   * Current upstream `(providerID, modelID)`. When supplied, assistant
+   * turns produced by a *different* provider/model have their reasoning
+   * metadata (signature / encryptedContent / summary) dropped, mirroring
+   * opencode `toModelMessagesEffect`'s `differentModel` branch
+   * (message-v2.ts:840). Without this, signed Anthropic thinking blocks
+   * from a previous Claude model would be replayed against e.g. an
+   * OpenAI model and the upstream would reject the unknown signature.
+   */
+  readonly currentModel?: { providerID: string; modelID: string };
 }
-
-const DEFAULT_OLD_TOOL_RESULT_AGE_MS = 10 * 60 * 1000; // 10 minutes
 
 const COMPACTED_TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared]';
 
@@ -198,6 +239,42 @@ export function filterCompacted(
 
   // Reverse back to chronological (time-ascending) order
   result.reverse();
+  let compactionIndex = -1;
+  for (let i = result.length - 1; i >= 0; i--) {
+    const msg = result[i]!;
+    if (
+      msg.info.role === 'user' &&
+      msg.parts.some(
+        (p): p is CompactionPart => p.type === 'compaction' && p.tailStartID !== undefined,
+      )
+    ) {
+      compactionIndex = i;
+      break;
+    }
+  }
+  const compaction = compactionIndex >= 0 ? result[compactionIndex] : undefined;
+  const part = compaction?.parts.find(
+    (p): p is CompactionPart => p.type === 'compaction' && p.tailStartID !== undefined,
+  );
+  const summaryIndex = compaction
+    ? result.findIndex(
+        (msg, index) =>
+          index > compactionIndex &&
+          msg.info.role === 'assistant' &&
+          msg.info.summary === true &&
+          msg.info.parentID === compaction.info.id,
+      )
+    : -1;
+  const tailIndex = part?.tailStartID
+    ? result.findIndex((msg) => msg.info.id === part.tailStartID)
+    : -1;
+  if (tailIndex >= 0 && tailIndex < compactionIndex && summaryIndex > compactionIndex) {
+    return [
+      ...result.slice(compactionIndex, summaryIndex + 1),
+      ...result.slice(tailIndex, compactionIndex),
+      ...result.slice(summaryIndex + 1),
+    ];
+  }
   return result;
 }
 
@@ -212,13 +289,23 @@ export function toModelMessages(
 ): UnifiedMessage[] {
   const result: UnifiedMessage[] = [];
   const emittedToolResultIds = new Set<string>();
-  const now = options?.now ?? Date.now();
-  const ageThreshold = options?.oldToolResultAgeMs ?? DEFAULT_OLD_TOOL_RESULT_AGE_MS;
 
-  const pushToolResult = (toolCallId: string, content: string, attachments?: FilePart[]) => {
+  const pushToolResult = (
+    toolCallId: string,
+    toolName: string,
+    content: string,
+    attachments?: FilePart[],
+    isError?: boolean,
+  ) => {
     if (emittedToolResultIds.has(toolCallId)) return;
     emittedToolResultIds.add(toolCallId);
-    result.push({ role: 'tool', toolCallId, content });
+    result.push({
+      role: 'tool',
+      toolCallId,
+      toolName,
+      content,
+      ...(isError ? { isError: true } : {}),
+    });
 
     // opencode parity: when a tool returns image attachments, follow the
     // tool result with a synthetic user message carrying the images.
@@ -256,11 +343,21 @@ export function toModelMessages(
         continue;
       }
 
-      const { text, toolCalls, reasoning } = buildAssistantParts(
-        msg.parts,
-        msg.info,
-        options?.stripOldToolResults === true ? { now, ageThreshold } : undefined,
+      // opencode parity: when the assistant turn was produced by a
+      // different provider/model than the one we are about to call,
+      // drop the reasoning metadata (signature/encryptedContent/summary)
+      // so we do not replay an opaque payload an unrelated model cannot
+      // understand. Falsy currentModel disables the check.
+      const differentModel = Boolean(
+        options?.currentModel &&
+        msg.info.providerID &&
+        msg.info.modelID &&
+        (options.currentModel.providerID !== msg.info.providerID ||
+          options.currentModel.modelID !== msg.info.modelID),
       );
+      const { text, toolCalls, reasoning } = buildAssistantParts(msg.parts, msg.info, {
+        differentModel,
+      });
 
       if (text.length > 0 || toolCalls.length > 0 || reasoning) {
         result.push({
@@ -283,10 +380,7 @@ export function toModelMessages(
               attachments?: FilePart[];
             };
           };
-          const output = resolveToolOutput(
-            completedPart,
-            options?.stripOldToolResults === true ? { now, ageThreshold } : undefined,
-          );
+          const output = resolveToolOutput(completedPart);
           // Skip attachments when the tool result has been compacted to
           // a placeholder — replaying images alongside a stub provides no
           // value and only inflates the prompt.
@@ -294,20 +388,26 @@ export function toModelMessages(
             output === COMPACTED_TOOL_RESULT_PLACEHOLDER
               ? undefined
               : completedPart.state.attachments;
-          pushToolResult(part.callID, output, attachments);
+          pushToolResult(part.callID, part.tool, output, attachments);
         } else if (part.state.status === 'error') {
           const errorPart = part as ToolPart & {
             state: { status: 'error'; error: string; metadata?: Record<string, unknown> };
           };
           const errorOutput = resolveToolErrorOutput(errorPart);
           if (errorOutput) {
-            pushToolResult(part.callID, errorOutput);
+            pushToolResult(part.callID, part.tool, errorOutput, undefined, true);
           }
         } else if (part.state.status === 'pending' || part.state.status === 'running') {
           // Pending/running tool calls need a synthetic error result
           // to prevent dangling tool_use blocks (Anthropic requires every
           // tool_use to have a corresponding tool_result)
-          pushToolResult(part.callID, '[Tool execution was interrupted]');
+          pushToolResult(
+            part.callID,
+            part.tool,
+            '[Tool execution was interrupted]',
+            undefined,
+            true,
+          );
         }
       }
       continue;
@@ -426,7 +526,7 @@ interface AssistantBuildResult {
 function buildAssistantParts(
   parts: MessagePart[],
   _info: AssistantMessage,
-  _stripOptions?: { now: number; ageThreshold: number },
+  options?: { differentModel?: boolean },
 ): AssistantBuildResult {
   // Text
   const text = parts
@@ -462,13 +562,54 @@ function buildAssistantParts(
     .map((p) => p.metadata?.['summary'])
     .find((v): v is string => typeof v === 'string' && v.length > 0);
 
+  // Per-block reasoning. Anthropic extended-thinking signatures are
+  // attached per-block under `metadata.anthropic.signature` (or
+  // `metadata.bedrock.signature` for Bedrock-hosted Claude); collapse
+  // them into per-block entries so the bridge to ModelMessage can emit
+  // distinct ReasoningPart entries each carrying their own provider
+  // metadata. We only emit the `blocks` array when at least one signed
+  // block is present, otherwise the existing aggregated `text` path is
+  // sufficient and equivalent.
+  const reasoningBlocks: AssistantReasoningBlock[] = [];
+  let hasSignedBlock = false;
+  for (const part of reasoningParts) {
+    const trimmed = part.text.trim();
+    if (trimmed.length === 0) continue;
+    const sigDirect = part.metadata?.['signature'];
+    const sigAnthropic = (part.metadata?.['anthropic'] as { signature?: unknown } | undefined)
+      ?.signature;
+    const sigBedrock = (part.metadata?.['bedrock'] as { signature?: unknown } | undefined)
+      ?.signature;
+    const signature =
+      typeof sigDirect === 'string' && sigDirect.length > 0
+        ? sigDirect
+        : typeof sigAnthropic === 'string' && sigAnthropic.length > 0
+          ? sigAnthropic
+          : typeof sigBedrock === 'string' && sigBedrock.length > 0
+            ? sigBedrock
+            : undefined;
+    if (signature) hasSignedBlock = true;
+    reasoningBlocks.push({ text: trimmed, ...(signature ? { signature } : {}) });
+  }
+
+  // opencode parity (message-v2.ts:879, 959-966): when replaying a
+  // reasoning turn against a *different* model, strip the opaque
+  // metadata (signature / encryptedContent / summary / responseId) so
+  // we do not send a Claude signature to GPT or vice-versa. The
+  // reasoning text is still carried verbatim.
+  const differentModel = Boolean(options?.differentModel);
+
   const reasoning: AssistantReasoning | undefined =
-    trimmedReasoningText.length > 0 || responseId || encryptedContent || summary
+    trimmedReasoningText.length > 0 ||
+    (!differentModel && (responseId || encryptedContent || summary))
       ? {
           ...(trimmedReasoningText.length > 0 ? { text: trimmedReasoningText } : {}),
-          ...(responseId ? { responseId } : {}),
-          ...(encryptedContent ? { encryptedContent } : {}),
-          ...(summary ? { summary } : {}),
+          ...(!differentModel && responseId ? { responseId } : {}),
+          ...(!differentModel && encryptedContent ? { encryptedContent } : {}),
+          ...(!differentModel && summary ? { summary } : {}),
+          ...(!differentModel && hasSignedBlock && reasoningBlocks.length > 0
+            ? { blocks: reasoningBlocks }
+            : {}),
         }
       : undefined;
 
@@ -511,17 +652,13 @@ function resolveToolOutput(
       time: { start: number; end: number; compacted?: number };
     };
   },
-  _stripOptions?: { now: number; ageThreshold: number },
 ): string {
+  // Persistent compaction flag — set by future `SessionCompaction.prune`
+  // (opencode parity). Once a tool part has been pruned, every subsequent
+  // render returns the same placeholder so the upstream prefix stays
+  // byte-identical across rounds (Anthropic / OpenAI prompt-cache friendly).
   if (part.state.time.compacted) {
     return COMPACTED_TOOL_RESULT_PLACEHOLDER;
-  }
-
-  if (_stripOptions) {
-    const age = _stripOptions.now - (part.state.time.start ?? 0);
-    if (age > _stripOptions.ageThreshold) {
-      return COMPACTED_TOOL_RESULT_PLACEHOLDER;
-    }
   }
 
   const output = part.state.output;

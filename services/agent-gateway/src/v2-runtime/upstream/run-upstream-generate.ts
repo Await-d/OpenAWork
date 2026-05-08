@@ -35,9 +35,15 @@
 
 import type { RequestOverrides } from '@openAwork/agent-core';
 import { generateText, type GenerateTextResult, type ModelMessage, type ToolSet } from 'ai';
-import { applyAnthropicCacheBreakpoints } from './cache-breakpoints.js';
+import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
 import { buildAISdkProvider } from './provider.js';
-import { buildProviderOptions, type ThinkingConfig } from './provider-options.js';
+import {
+  buildBaseProviderOptions,
+  buildProviderOptions,
+  mergeProviderOptions,
+  type ThinkingConfig,
+} from './provider-options.js';
+import { applyProviderMessageTransforms } from './message-transforms.js';
 
 export interface RunUpstreamGenerateInput {
   /** OpenAWork-side provider type (`openai`, `anthropic`, `gemini`, ...). */
@@ -50,6 +56,7 @@ export interface RunUpstreamGenerateInput {
   headers?: Record<string, string>;
   /** Model identifier (passed straight to AI SDK `languageModel`). */
   model: string;
+  sessionId?: string;
   /** Optional system prompt — short-circuited when empty. */
   system?: string;
   /** Conversation history in AI SDK ModelMessage shape. */
@@ -121,14 +128,28 @@ export async function runUpstreamGenerate(
 
   const omit = input.requestOverrides?.omitBodyKeys;
 
-  // Decorate the conversation with Anthropic prompt-cache breakpoints
-  // when applicable. This is a noop for non-anthropic providers.
-  const decoratedMessages = applyAnthropicCacheBreakpoints(input.messages, input.providerType);
-
-  const providerOptions = buildProviderOptions({
-    ...(input.thinking ? { thinking: input.thinking } : {}),
+  const transformedMessages = applyProviderMessageTransforms(input.messages, {
+    providerType: input.providerType,
     model: input.model,
   });
+
+  // Decorate the conversation with prompt-cache breakpoints when applicable.
+  const decoratedMessages = applyCaching(
+    transformedMessages,
+    buildPromptCacheModelInfo({ providerType: input.providerType, model: input.model }),
+  );
+
+  const providerOptions = mergeProviderOptions(
+    buildBaseProviderOptions({
+      providerType: input.providerType,
+      model: input.model,
+      sessionId: input.sessionId,
+    }),
+    buildProviderOptions({
+      ...(input.thinking ? { thinking: input.thinking } : {}),
+      model: input.model,
+    }),
+  );
 
   // `ai@5.x` types `generateText`'s model parameter as the V2 union
   // while `@ai-sdk/openai-compatible@2.x` already emits V3 handles.

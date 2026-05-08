@@ -32,11 +32,6 @@ export {
 } from './run-upstream-generate.js';
 
 export {
-  normalizedConversationToModelMessages,
-  normalizedMessageToModelMessages,
-} from './normalized-message-bridge.js';
-
-export {
   wrapToolForAiSdk,
   wrapToolsForAiSdk,
   wrapToolsForAiSdkDeclarationsOnly,
@@ -50,11 +45,18 @@ export {
 } from './unified-message-bridge.js';
 
 export {
+  buildBaseProviderOptions,
   buildProviderOptions,
+  buildProviderOptionsModelInfo,
+  mergeProviderOptions,
+  providerOptions,
+  type ProviderOptionsModelInfo,
   type ReasoningEffort,
   type ThinkingConfig,
 } from './provider-options.js';
 
-export { applyAnthropicCacheBreakpoints } from './cache-breakpoints.js';
-
-export { compareV1V2BridgeStructural, type BridgeDiffSummary } from './bridge-diff.js';
+export {
+  applyCaching,
+  buildPromptCacheModelInfo,
+  type PromptCacheModelInfo,
+} from './cache-breakpoints.js';

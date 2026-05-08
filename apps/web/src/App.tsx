@@ -9,7 +9,6 @@ export function useFileEditorContext() {
   return useContext(FileEditorContext);
 }
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { UnlockOverlay } from './components/UnlockOverlay.js';
 import { tauriInvoke } from './pages/settings/settings-page-helpers.js';
 import { useAuthStore } from './stores/auth.js';
@@ -32,6 +31,26 @@ import {
   startDesktopGateway,
   waitForGatewayHealth,
 } from './utils/desktop-gateway.js';
+
+type UnlistenFn = () => void;
+
+interface TauriEvent<T> {
+  payload: T;
+}
+
+interface TauriEventApi {
+  listen<T>(event: string, handler: (event: TauriEvent<T>) => void): Promise<UnlistenFn>;
+}
+
+const TAURI_EVENT_MODULE = ['@tauri-apps', 'api', 'event'].join('/');
+
+async function listenTauriEvent<T>(
+  event: string,
+  handler: (event: TauriEvent<T>) => void,
+): Promise<UnlistenFn> {
+  const api = (await import(/* @vite-ignore */ TAURI_EVENT_MODULE)) as TauriEventApi;
+  return api.listen(event, handler);
+}
 
 type Theme = 'dark' | 'light';
 
@@ -288,7 +307,7 @@ export default function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const fn = await listen<string>('theme-changed', (event) => {
+        const fn = await listenTauriEvent<string>('theme-changed', (event) => {
           const next = event.payload === 'dark' ? 'dark' : 'light';
           setTheme(next as 'dark' | 'light');
           localStorage.setItem('theme', next);
@@ -314,7 +333,7 @@ export default function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const fn = await listen<void>('tray:show-pairing-qr', () => {
+        const fn = await listenTauriEvent<void>('tray:show-pairing-qr', () => {
           navigate('/settings/desktop?show=pairing');
         });
         if (cancelled) {
@@ -344,7 +363,7 @@ export default function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const fn = await listen<{ port: number }>('gateway:crashed', (event) => {
+        const fn = await listenTauriEvent<{ port: number }>('gateway:crashed', (event) => {
           const port = event.payload.port ?? desktopRuntimeWebPort;
           const host = desktopRuntimeWebExposeLan ? '0.0.0.0' : '127.0.0.1';
           // 退避重试：1s / 3s / 5s。
@@ -402,7 +421,7 @@ export default function App() {
         // 获取失败则不启用空闲锁。
       }
       try {
-        const fn = await listen<{ locked: boolean; hasPin: boolean }>(
+        const fn = await listenTauriEvent<{ locked: boolean; hasPin: boolean }>(
           'lock-state-changed',
           (event) => {
             setDesktopLocked(event.payload.locked && event.payload.hasPin);

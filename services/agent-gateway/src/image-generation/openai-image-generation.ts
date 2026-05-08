@@ -117,6 +117,58 @@ function applyImageGenerationOverrides(
   return nextBody;
 }
 
+function setImageGenerationFormValue(form: FormData, key: string, value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value instanceof Blob) {
+    form.set(key, value);
+    return;
+  }
+
+  if (typeof value === 'string') {
+    form.set(key, value);
+    return;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    form.set(key, String(value));
+    return;
+  }
+
+  form.set(key, JSON.stringify(value));
+}
+
+function buildImageEditFormData(input: OpenAiImageEditInput): FormData {
+  const baseBody = {
+    model: input.model,
+    prompt: input.prompt,
+    size: input.size,
+    quality: input.quality,
+    output_format: input.outputFormat,
+    background: input.background,
+  } satisfies Record<string, unknown>;
+  const body = applyImageGenerationOverrides(baseBody, input.requestOverrides);
+  const form = new FormData();
+
+  for (const [key, value] of Object.entries(body)) {
+    setImageGenerationFormValue(form, key, value);
+  }
+
+  if (!input.requestOverrides.omitBodyKeys?.includes('image')) {
+    const imageBytes = new Uint8Array(input.inputImage.bytes.byteLength);
+    imageBytes.set(input.inputImage.bytes);
+    form.set(
+      'image',
+      new Blob([imageBytes.buffer], { type: input.inputImage.mimeType }),
+      input.inputImage.fileName,
+    );
+  }
+
+  return form;
+}
+
 function isAbortError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const candidate = error as { name?: unknown };
@@ -234,20 +286,7 @@ export async function editImageWithOpenAi(
     });
   }
 
-  const form = new FormData();
-  form.append('model', input.model);
-  form.append('prompt', input.prompt);
-  form.append('size', input.size);
-  form.append('quality', input.quality);
-  form.append('output_format', input.outputFormat);
-  form.append('background', input.background);
-  const imageBytes = new Uint8Array(input.inputImage.bytes.byteLength);
-  imageBytes.set(input.inputImage.bytes);
-  form.append(
-    'image',
-    new Blob([imageBytes.buffer], { type: input.inputImage.mimeType }),
-    input.inputImage.fileName,
-  );
+  const form = buildImageEditFormData(input);
 
   let response: Response;
   try {

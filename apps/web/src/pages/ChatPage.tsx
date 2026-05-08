@@ -115,6 +115,10 @@ import { ChatScrollBottomButton } from './chat-page/chat-scroll-bottom-button.js
 import { ChatStreamErrorBar } from './chat-page/chat-stream-error-bar.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
 import HistoryEditDialog from './chat-page/history-edit-dialog.js';
+import {
+  type ImageEditReferenceArtifact,
+  toImageEditReferenceArtifacts,
+} from './chat-page/image-edit-reference-artifacts.js';
 import { makeOrderedMessageId } from './chat-page/ordered-id.js';
 import { isAutoAcceptEnabled } from './chat-page/permission-auto-respond.js';
 import {
@@ -225,6 +229,7 @@ import { useSessionContentArtifactCount } from './chat-page/use-session-content-
 import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
 import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
+import { type SessionArtifactsResponse } from './artifacts/artifact-workspace-types.js';
 import {
   type SessionViewStreamingSnapshot,
   useSessionViewCache,
@@ -373,6 +378,12 @@ export default function ChatPage() {
     artifactTitle: string;
     modelLabel: string;
   } | null>(null);
+  const [sessionImageEditReferenceArtifacts, setSessionImageEditReferenceArtifacts] = useState<
+    ImageEditReferenceArtifact[]
+  >([]);
+  const [selectedImageEditReferenceArtifactId, setSelectedImageEditReferenceArtifactId] = useState<
+    string | null
+  >(null);
   const [inlineQuestionAnswers, setInlineQuestionAnswers] = useState<string[][]>([]);
   const [inlineQuestionCustomInputs, setInlineQuestionCustomInputs] = useState<string[]>([]);
   const [inlineQuestionReplyStatus, setInlineQuestionReplyStatus] = useState<
@@ -483,6 +494,35 @@ export default function ChatPage() {
       refreshKey: sessionReloadNonce + messages.length,
       token,
     });
+  const availableImageEditReferenceArtifacts = useMemo(() => {
+    if (!latestGeneratedImageResult) {
+      return sessionImageEditReferenceArtifacts;
+    }
+
+    if (
+      sessionImageEditReferenceArtifacts.some(
+        (artifact) => artifact.artifactId === latestGeneratedImageResult.artifactId,
+      )
+    ) {
+      return sessionImageEditReferenceArtifacts;
+    }
+
+    return [
+      {
+        artifactId: latestGeneratedImageResult.artifactId,
+        title: latestGeneratedImageResult.artifactTitle,
+        updatedAt: new Date().toISOString(),
+      },
+      ...sessionImageEditReferenceArtifacts,
+    ];
+  }, [latestGeneratedImageResult, sessionImageEditReferenceArtifacts]);
+  const selectedImageEditReferenceArtifact = useMemo(
+    () =>
+      availableImageEditReferenceArtifacts.find(
+        (artifact) => artifact.artifactId === selectedImageEditReferenceArtifactId,
+      ) ?? null,
+    [availableImageEditReferenceArtifacts, selectedImageEditReferenceArtifactId],
+  );
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog(Boolean(token));
   const TAB_CYCLE_ALLOWED_AGENT_IDS = new Set(['hephaestus', 'sisyphus', 'prometheus']);
   const agentOptions = useMemo(
@@ -528,6 +568,7 @@ export default function ChatPage() {
     imageGenerationMode,
     imageModelLabel,
     imagePluginEnabled,
+    setImageGenerationMode,
     toggleImageGenerationMode,
     updateImageGenerationDefaults,
   } = useChatImageGeneration({
@@ -706,7 +747,78 @@ export default function ChatPage() {
     setReportedStreamUsage(null);
     setMessageRatings({});
     setLatestGeneratedImageResult(null);
+    setSessionImageEditReferenceArtifacts([]);
+    setSelectedImageEditReferenceArtifactId(null);
   }, [currentSessionId]);
+
+  useEffect(() => {
+    if (!currentSessionId || !token) {
+      setSessionImageEditReferenceArtifacts([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    void fetch(`${gatewayUrl}/sessions/${currentSessionId}/artifacts`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        return (await response.json()) as SessionArtifactsResponse;
+      })
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+
+        setSessionImageEditReferenceArtifacts(
+          toImageEditReferenceArtifacts(payload.contentArtifacts ?? []),
+        );
+      })
+      .catch((error: unknown) => {
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) {
+          return;
+        }
+
+        setSessionImageEditReferenceArtifacts([]);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [currentSessionId, gatewayUrl, sessionReloadNonce, token]);
+
+  useEffect(() => {
+    if (!selectedImageEditReferenceArtifactId) {
+      return;
+    }
+
+    if (
+      !availableImageEditReferenceArtifacts.some(
+        (artifact) => artifact.artifactId === selectedImageEditReferenceArtifactId,
+      )
+    ) {
+      setSelectedImageEditReferenceArtifactId(null);
+    }
+  }, [availableImageEditReferenceArtifacts, selectedImageEditReferenceArtifactId]);
+
+  const continueEditingLatestGeneratedImage = useCallback(() => {
+    if (!latestGeneratedImageResult) {
+      return;
+    }
+
+    setSelectedImageEditReferenceArtifactId(latestGeneratedImageResult.artifactId);
+    setImageGenerationMode(true);
+    toast('已选择最新图片作为参考图，请继续输入编辑提示词。', 'success');
+  }, [latestGeneratedImageResult, setImageGenerationMode]);
 
   useEffect(() => {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
@@ -2143,6 +2255,42 @@ export default function ChatPage() {
         | Array<{ artifactId: string; fileName?: string; mimeType?: string }>
         | undefined;
       let localImageInputs: InputImageContent[] | undefined;
+      if (selectedImageEditReferenceArtifact && effectiveFiles.length > 0) {
+        const message = '当前图片编辑一次只支持一张参考图，请在会话图片和新上传图片之间二选一。';
+        setStreamError(message);
+        toast(message, 'warning');
+        return false;
+      }
+
+      if (selectedImageEditReferenceArtifact) {
+        imageEditArtifacts = [
+          {
+            artifactId: selectedImageEditReferenceArtifact.artifactId,
+            ...(selectedImageEditReferenceArtifact.fileName
+              ? { fileName: selectedImageEditReferenceArtifact.fileName }
+              : {}),
+            ...(selectedImageEditReferenceArtifact.mimeType
+              ? { mimeType: selectedImageEditReferenceArtifact.mimeType }
+              : {}),
+          },
+        ];
+        localImageInputs = [
+          {
+            type: 'input_image',
+            artifactId: selectedImageEditReferenceArtifact.artifactId,
+            ...(selectedImageEditReferenceArtifact.imageUrl
+              ? { imageUrl: selectedImageEditReferenceArtifact.imageUrl }
+              : {}),
+            ...(selectedImageEditReferenceArtifact.fileName
+              ? { fileName: selectedImageEditReferenceArtifact.fileName }
+              : {}),
+            ...(selectedImageEditReferenceArtifact.mimeType
+              ? { mimeType: selectedImageEditReferenceArtifact.mimeType }
+              : {}),
+          },
+        ];
+      }
+
       if (effectiveFiles.length > 0) {
         const invalidAttachment = effectiveFiles.find((file) => !file.type.startsWith('image/'));
         if (invalidAttachment) {
@@ -2226,7 +2374,12 @@ export default function ChatPage() {
         });
         setSessionReloadNonce((value) => value + 1);
         requestSessionListRefresh();
-        toast('图片已生成，可在产物工作区查看。', 'success');
+        toast(
+          imageEditArtifacts
+            ? '图片已处理，可在产物工作区查看。'
+            : '图片已生成，可在产物工作区查看。',
+          'success',
+        );
         return true;
       } catch (error) {
         if (activeSessionRef.current === sid) {
@@ -5211,6 +5364,7 @@ export default function ChatPage() {
             <ChatImageGenerationResultStrip
               artifactTitle={latestGeneratedImageResult.artifactTitle}
               modelLabel={latestGeneratedImageResult.modelLabel}
+              onContinueEditing={continueEditingLatestGeneratedImage}
               onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
             />
           )}
@@ -5233,6 +5387,7 @@ export default function ChatPage() {
             imageGenerationMode={imageGenerationMode}
             imageModelLabel={imageModelLabel}
             imagePluginEnabled={imagePluginEnabled}
+            imageReferenceArtifacts={availableImageEditReferenceArtifacts}
             webSearchEnabled={webSearchEnabled}
             thinkingEnabled={thinkingEnabled}
             input={input}
@@ -5274,8 +5429,10 @@ export default function ChatPage() {
             onToggleModelPicker={() => setShowModelPicker((v) => !v)}
             onToggleModelSettings={() => setShowModelSettings((v) => !v)}
             onToggleImageGenerationMode={toggleImageGenerationMode}
+            onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
             onToggleWebSearch={handleToggleWebSearch}
             onUpdateImageGenerationDefaults={updateImageGenerationDefaults}
+            selectedImageReferenceArtifactId={selectedImageEditReferenceArtifactId}
             agentOptions={agentOptions}
             manualAgentId={manualAgentId}
             defaultAgentLabel={defaultAgentLabel}

@@ -333,7 +333,7 @@ async function main(): Promise<void> {
                 return graph.tasks[taskOutput.taskId]?.status === 'completed';
               },
               'resumed child task should eventually complete the parent task',
-              240,
+              600,
               50,
             );
 

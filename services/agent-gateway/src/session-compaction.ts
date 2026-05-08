@@ -6,6 +6,7 @@ import {
   type CompactionTrigger,
 } from './compaction-metadata.js';
 import { sqliteRun } from './db.js';
+import type { UnifiedMessage } from './message-to-model-messages.js';
 import type { ModelRouteConfig } from './model-router.js';
 import {
   buildDurableCompactionSummary,
@@ -15,6 +16,11 @@ import {
 } from './session-message-store.js';
 import { appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage } from './message-v2-adapter.js';
 import { extractToolResultContentsFromMessage } from './tool-result-contract.js';
+import {
+  selectTailByTokenBudget,
+  boundPreserveTokens,
+  MIN_PRESERVE_RECENT_TOKENS,
+} from './compaction-tail-budget.js';
 
 /** Maximum consecutive auto-compaction failures before circuit-breaker trips. */
 export const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3;
@@ -27,8 +33,27 @@ export interface ExecuteSessionCompactionInput {
   prune?: boolean;
   /** Number of recent messages to keep verbatim after compaction.
    * When > 0, only messages before the keep-boundary are summarized;
-   * the boundary is adjusted to preserve tool_call/tool_result pairing. */
+   * the boundary is adjusted to preserve tool_call/tool_result pairing.
+   *
+   * When `preserveRecentTokens` is also set, the token-budget walker
+   * runs first and only falls back to this count if it cannot pick
+   * any non-empty tail. Setting just this field preserves the legacy
+   * count-only behaviour for callers that have not migrated yet. */
   recentMessagesKept?: number;
+  /**
+   * Token budget for the verbatim tail. When set, the compaction
+   * walker selects whole turns (each anchored at a `user` message)
+   * from the back of the conversation until the running estimate
+   * exceeds the budget, mirroring opencode's
+   * `preserve_recent_tokens` selector. Bounded by
+   * `MIN_PRESERVE_RECENT_TOKENS` / `MAX_PRESERVE_RECENT_TOKENS`.
+   */
+  preserveRecentTokens?: number;
+  /**
+   * Maximum number of recent turns the token-budget walker is allowed
+   * to consider. Defaults to 2 (matches opencode's `tail_turns`).
+   */
+  tailTurns?: number;
   route: ModelRouteConfig | null;
   sessionId: string;
   signal?: AbortSignal;
@@ -221,9 +246,30 @@ export async function executeSessionCompaction(
   input: ExecuteSessionCompactionInput,
 ): Promise<ExecuteSessionCompactionResult> {
   const recentMessagesKept = input.recentMessagesKept ?? 0;
-  const keepBoundary = calculateKeepBoundary(input.messages, recentMessagesKept);
+  // Prefer the opencode-style token-budget tail selection when the
+  // caller passes `preserveRecentTokens`. Falls back to the legacy
+  // message-count walker if no tail fits or the budget is unset.
+  const tailSelection =
+    typeof input.preserveRecentTokens === 'number' && input.preserveRecentTokens > 0
+      ? selectTailByTokenBudget({
+          messages: input.messages,
+          preserveRecentTokens: boundPreserveTokens(input.preserveRecentTokens),
+          maxTurns: input.tailTurns ?? 2,
+        })
+      : undefined;
+  const keepBoundary =
+    tailSelection && tailSelection.boundary < input.messages.length
+      ? tailSelection.boundary
+      : calculateKeepBoundary(input.messages, recentMessagesKept);
+  const tailStartMessageId =
+    tailSelection?.tailStartMessageId ??
+    (keepBoundary > 0 && keepBoundary < input.messages.length
+      ? input.messages[keepBoundary]?.id
+      : undefined);
   const messagesToSummarize = input.messages.slice(0, keepBoundary);
   const messagesToKeep = keepBoundary > 0 ? input.messages.slice(keepBoundary) : [];
+  // Suppress lint: kept for telemetry surface even when not yet exported in the result.
+  void MIN_PRESERVE_RECENT_TOKENS;
 
   // If there are no messages to summarize, nothing to compact
   if (messagesToSummarize.length === 0) {
@@ -259,11 +305,16 @@ export async function executeSessionCompaction(
   if (input.route) {
     const prunedMessages =
       input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
+    // `NormalizedConversationMessage` and `UnifiedMessage` are
+    // structurally equivalent for the role/content/toolCalls/reasoning
+    // fields the compaction LLM consumes; we cast at the boundary so
+    // `callCompactionLlm` (which now consumes `UnifiedMessage[]`)
+    // does not re-encode the same shape.
     const conversationMessages = buildPreparedUpstreamConversation(prunedMessages, {
       contextWindow: 1,
       metadataJson: input.metadataJson,
       persistedMemory: existingMemory,
-    }).normalizedMessages;
+    }).normalizedMessages as unknown as UnifiedMessage[];
     try {
       const result = await callCompactionLlm({
         conversationMessages,
@@ -317,6 +368,7 @@ export async function executeSessionCompaction(
     summary,
     trigger: input.trigger,
     omittedMessages: durableSummary?.totalRepresentedMessages ?? messagesToSummarize.length,
+    ...(tailStartMessageId ? { tailStartMessageId } : {}),
   });
 
   return {

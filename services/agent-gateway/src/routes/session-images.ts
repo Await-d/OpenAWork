@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { ArtifactManagerImpl } from '@openAwork/artifacts';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import { createArtifact } from '../artifact-content-store.js';
+import { createArtifact, getArtifactById } from '../artifact-content-store.js';
 import { sqliteGet } from '../db.js';
 import {
   imageGenerationRequestSchema,
@@ -64,6 +64,46 @@ function buildImageFileName(prompt: string, extension: string): string {
   return `${base || 'gpt-image-2'}-${createHash('sha1').update(prompt).digest('hex').slice(0, 8)}.${extension}`;
 }
 
+function inferImageFileExtension(mimeType: string): string {
+  if (mimeType === 'image/jpeg') {
+    return 'jpg';
+  }
+
+  if (mimeType === 'image/webp') {
+    return 'webp';
+  }
+
+  if (mimeType === 'image/gif') {
+    return 'gif';
+  }
+
+  if (mimeType === 'image/svg+xml') {
+    return 'svg';
+  }
+
+  return 'png';
+}
+
+function parseStoredImageArtifactContent(
+  content: string,
+): { bytes: Buffer; mimeType: string } | null {
+  const match = content.match(/^data:(image\/[^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const mimeType = match[1];
+  const base64 = match[2];
+  if (!mimeType || !base64) {
+    return null;
+  }
+
+  return {
+    bytes: Buffer.from(base64, 'base64'),
+    mimeType,
+  };
+}
+
 function buildMessageSummary(input: {
   edited: boolean;
   modelId: string;
@@ -79,22 +119,51 @@ function buildMessageSummary(input: {
   return base;
 }
 
-async function resolveInputArtifact(input: { artifactId: string; sessionId: string }) {
+async function resolveInputArtifact(input: {
+  artifactId: string;
+  sessionId: string;
+  userId: string;
+}) {
   const artifacts = await uploadedArtifactManager.list(input.sessionId);
   const artifact = artifacts.find((item) => item.id === input.artifactId);
-  if (!artifact?.path) {
+  if (artifact?.path) {
+    const mimeType = artifact.mimeType ?? 'application/octet-stream';
+    if (!mimeType.startsWith('image/')) {
+      return null;
+    }
+
+    return {
+      artifact,
+      bytes: await readFile(artifact.path),
+      fileName: artifact.name,
+      mimeType,
+    };
+  }
+
+  const contentArtifact = getArtifactById(input.userId, input.artifactId);
+  if (!contentArtifact || contentArtifact.sessionId !== input.sessionId) {
     return null;
   }
 
-  const mimeType = artifact.mimeType ?? 'application/octet-stream';
-  if (!mimeType.startsWith('image/')) {
+  const parsedContent = parseStoredImageArtifactContent(contentArtifact.content);
+  if (!parsedContent) {
     return null;
   }
+
+  const storedMimeType =
+    typeof contentArtifact.metadata['mimeType'] === 'string'
+      ? contentArtifact.metadata['mimeType']
+      : parsedContent.mimeType;
+  const mimeType = storedMimeType.startsWith('image/') ? storedMimeType : parsedContent.mimeType;
+  const storedFileName =
+    typeof contentArtifact.metadata['fileName'] === 'string'
+      ? contentArtifact.metadata['fileName']
+      : undefined;
 
   return {
-    artifact,
-    bytes: await readFile(artifact.path),
-    fileName: artifact.name,
+    artifact: { id: contentArtifact.id },
+    bytes: parsedContent.bytes,
+    fileName: storedFileName ?? `${contentArtifact.id}.${inferImageFileExtension(mimeType)}`,
     mimeType,
   };
 }
@@ -158,6 +227,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
           ? await resolveInputArtifact({
               artifactId: parsed.data.inputArtifacts[0].artifactId,
               sessionId,
+              userId: user.sub,
             })
           : null;
         if (parsed.data.inputArtifacts?.[0] && !inputArtifact) {
@@ -230,7 +300,7 @@ export async function sessionImagesRoutes(app: FastifyInstance): Promise<void> {
             requestId: generated.requestId,
           },
           createdBy: 'agent',
-          createdByNote: 'gpt-image-2 generation',
+          createdByNote: inputArtifact ? 'gpt-image-2 edit' : 'gpt-image-2 generation',
         });
 
         return reply.status(201).send({

@@ -1,6 +1,8 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260507-web-图片生成工作台实施](workflow/260507-web-图片生成工作台实施.md) — 为 Web 左侧新增专用图片工作台入口，收口独立页面下的文生图、图片编辑、结果历史与产物联动能力
+- [260507-image-workspace-新建图片工作区流程](workflow/260507-image-workspace-新建图片工作区流程.md) — 支持用户新建图片工作区，包含图片生成、编辑、历史记录等功能
 - [260418-net10-网关功能迁移清单图](workflow/260418-net10-网关功能迁移清单图.md) — .NET 10 gateway 一比一迁移总账：按波次、能力闭环、前置依赖、完成定义与去重规则维护，防止遗漏与重复
 - [260419-net10-wave1-agents-控制面迁移](workflow/260419-net10-wave1-agents-控制面迁移.md) — 收口 `.NET 10 gateway` Wave 1 控制面剩余的 `/agents` 管理面：复刻 TS catalog 语义、user_settings 持久化与集成测试
 - [260419-net10-wave1-workflows-控制面迁移](workflow/260419-net10-wave1-workflows-控制面迁移.md) — 收口 `.NET 10 gateway` Wave 1 控制面中的 `/workflows`：优先补 team-playbook 模板控制面与 saved-template 协议，再评估 optimize/translate 附属端点

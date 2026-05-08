@@ -741,6 +741,12 @@ export interface StreamThinkingEndChunk {
     encryptedContent?: string;
     summary?: string;
     responseId?: string;
+    /**
+     * Anthropic extended-thinking signature for this reasoning block.
+     * Required for replaying thinking blocks on subsequent turns
+     * (without it Anthropic rejects the assistant turn).
+     */
+    signature?: string;
   };
 }
 
@@ -919,6 +925,9 @@ export interface StreamUsageChunk {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   round: number;
   eventId?: string;
   runId?: string;

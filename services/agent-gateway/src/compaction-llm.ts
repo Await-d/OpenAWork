@@ -1,8 +1,8 @@
 import type { ModelRouteConfig } from './model-router.js';
-import type { NormalizedConversationMessage } from './routes/upstream-request.js';
+import type { UnifiedMessage } from './message-to-model-messages.js';
 import {
-  normalizedConversationToModelMessages,
   runUpstreamGenerate,
+  unifiedConversationToModelMessages,
 } from './v2-runtime/upstream/index.js';
 
 const COMPACTION_SYSTEM_PROMPT = `你是一个专门负责会话摘要的 AI 助手。
@@ -56,7 +56,7 @@ const COMPACTION_USER_PROMPT =
   '请详细总结以上对话，生成一份可供另一个助手继续工作的上下文摘要。\n不要调用任何工具，只输出摘要文本。';
 
 export interface CompactionLlmInput {
-  conversationMessages: NormalizedConversationMessage[];
+  conversationMessages: UnifiedMessage[];
   route: ModelRouteConfig;
   /** Session ID for prompt cache key routing. */
   sessionId?: string;
@@ -99,11 +99,11 @@ export async function callCompactionLlm(input: CompactionLlmInput): Promise<Comp
 }
 
 async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<CompactionLlmResult> {
-  const conversation: NormalizedConversationMessage[] = [
+  const conversation: UnifiedMessage[] = [
     ...input.conversationMessages,
     { role: 'user', content: COMPACTION_USER_PROMPT },
   ];
-  const messages = normalizedConversationToModelMessages(conversation);
+  const messages = unifiedConversationToModelMessages(conversation);
 
   const result = await runUpstreamGenerate({
     providerType: input.route.providerType ?? 'openai',
@@ -114,6 +114,7 @@ async function callCompactionLlmOnce(input: CompactionLlmInput): Promise<Compact
       ? { headers: input.route.requestOverrides.headers }
       : {}),
     model: input.route.model,
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     system: COMPACTION_SYSTEM_PROMPT,
     messages,
     maxOutputTokens: input.route.maxTokens,

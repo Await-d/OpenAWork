@@ -1,21 +1,13 @@
 import type { FileDiffContent, MessageContent, RunEvent, StreamChunk } from '@openAwork/shared';
 import type { WorkflowLogger, createRequestContext } from '@openAwork/logger';
 import { validateThinkingBlocks } from '../thinking-block-validator.js';
-import {
-  isContextOverflow,
-  type PreparedUpstreamConversationReport,
-} from '../session-message-store.js';
+import { isContextOverflow } from '../session-message-store.js';
+import { classifyUpstreamError } from '../retry-classify.js';
 import {
   toModelMessages,
   filterCompacted,
   type UnifiedMessage,
 } from '../message-to-model-messages.js';
-import {
-  ProviderAdapter,
-  type FunctionToolDefinition,
-  type PromptCacheConfig,
-} from '../provider-adapter.js';
-import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../anthropic-betas.js';
 import {
   appendSessionMessageV2,
   updateSessionMessagesStatusByRequestScope,
@@ -26,24 +18,15 @@ import { persistSessionSnapshot, createRequestSnapshotRef } from '../session-sna
 import { appendSnapshotPart, appendPatchPart } from '../message-v2-adapter.js';
 import type { MessageID } from '../message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
-import { resolveEofRoundDecision } from './stream-completion.js';
+import type { StreamUsageSummary } from './stream-usage.js';
 import {
-  isUpstreamContextOverflowError,
-  readUpstreamError,
-  type UpstreamErrorDescriptor,
-} from './upstream-error.js';
-import {
-  createStreamParseState,
-  parseUpstreamFrame,
-  ResponsesUpstreamEventError,
-  type StreamUsageSummary,
-} from './stream-protocol.js';
-import { buildSystemPromptChain, type SyntheticRequestContext } from './stream-system-prompts.js';
+  buildTwoPartSystemPrompts,
+  type SyntheticRequestContext,
+} from './stream-system-prompts.js';
 import type { resolveModelRoute } from '../model-router.js';
 import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
 import type { getEnabledTools } from './stream.js';
-import { fetchUpstreamStreamWithRetry } from './upstream-stream-retry.js';
 import { writeAuditLog } from '../audit-log.js';
 import {
   appendReasoningChunk,
@@ -60,15 +43,31 @@ import {
   persistStreamChunkAsSessionEvents,
 } from '../session-entry-store.js';
 import { makeSessionEventId } from '../session-event.js';
-import { isV2UpstreamForProviderType, isV2UpstreamShadow } from '../v2-runtime/index.js';
 import {
   buildAISdkProvider,
-  compareV1V2BridgeStructural,
   runUpstreamStream,
   unifiedConversationToModelMessages,
   wrapGatewayToolsForAiSdkDeclarationsOnly,
   type GatewayToolFunctionShape,
 } from '../v2-runtime/upstream/index.js';
+
+// `UpstreamErrorDescriptor` is preserved as a structural type so the
+// `RunResult.upstreamError` field stays stable for downstream recovery
+// detection in `routes/stream.ts`. The legacy `routes/upstream-error.ts`
+// runtime helper that classified upstream HTTP responses is no longer
+// reachable from the v2-only path; on v2-side errors we surface a plain
+// `{ code, message }` shape.
+type UpstreamErrorDescriptor = {
+  code: string;
+  message: string;
+  technicalDetail?: string;
+  /**
+   * Suggested wait time before the next attempt, in ms. Populated
+   * from `retry-after` / `retry-after-ms` headers when the upstream
+   * provider returned them. See `retry-classify.ts`.
+   */
+  retryAfterMs?: number;
+};
 
 type WorkflowStepHandle = ReturnType<WorkflowLogger['start']>;
 type StreamStopReason =
@@ -217,49 +216,6 @@ function createAccumulationState(): StreamAccumulationState {
     contentSegments: [],
     reasoningEncryptedContent: undefined,
     reasoningSummary: undefined,
-  };
-}
-
-function buildUpstreamTransformationReport(input: {
-  compactionSummary?: string | null;
-  memoryBlock?: string | null;
-  outboundBody: Record<string, unknown>;
-  outboundMessageCount: number;
-  preparedReport?: PreparedUpstreamConversationReport;
-  injectedPrompt?: string | null;
-  capabilityContext?: string | null;
-  lspGuidance?: string | null;
-  dialogueModePrompt?: string | null;
-  yoloModePrompt?: string | null;
-  companionPrompt?: string | null;
-  requestOverrides: { body?: Record<string, unknown>; omitBodyKeys?: string[] };
-  routeSystemPrompt?: string;
-  syntheticContinuationPrompt?: string;
-  thinkingApplied: boolean;
-  toolOutputReadbackGuidanceInjected: boolean;
-  upstreamProtocol: string;
-  workspaceCtx: string | null;
-}): Record<string, unknown> {
-  return {
-    prepared: input.preparedReport ?? null,
-    protocol: input.upstreamProtocol,
-    workspaceContextInjected: true,
-    routeSystemPromptInjected: true,
-    injectedPromptActive: !!input.injectedPrompt,
-    capabilityContextActive: !!input.capabilityContext,
-    lspGuidanceActive: !!input.lspGuidance,
-    dialogueModeActive: !!input.dialogueModePrompt,
-    yoloModeActive: !!input.yoloModePrompt,
-    companionPromptActive: !!input.companionPrompt,
-    memoryBlockInjected: true,
-    compactionSummaryInjected: !!input.compactionSummary,
-    toolOutputReadbackGuidanceInjected: true,
-    syntheticContinuationInjected: !!input.syntheticContinuationPrompt,
-    outboundMessageCount: input.outboundMessageCount,
-    requestOverrideBodyKeys: Object.keys(input.requestOverrides.body ?? {}),
-    omittedBodyKeys: input.requestOverrides.omitBodyKeys ?? [],
-    thinkingConfigApplied: input.thinkingApplied,
-    requestBodyKeys: Object.keys(input.outboundBody),
   };
 }
 
@@ -451,6 +407,9 @@ function buildAssistantContent(
           text: entry.text,
           ...(typeof entry.startedAt === 'number' ? { startedAt: entry.startedAt } : {}),
           ...(typeof entry.endedAt === 'number' ? { endedAt: entry.endedAt } : {}),
+          ...(typeof entry.signature === 'string' && entry.signature.length > 0
+            ? { signature: entry.signature }
+            : {}),
           ...(index === 0 && state.reasoningEncryptedContent
             ? { encryptedContent: state.reasoningEncryptedContent }
             : {}),
@@ -548,11 +507,13 @@ function buildOrderedAssistantContent(
       if (text.trim().length === 0 && !shouldAttachMeta) {
         continue;
       }
+      const signature = block?.signature;
       content.push({
         type: 'reasoning',
         text,
         ...(typeof startedAt === 'number' ? { startedAt } : {}),
         ...(typeof endedAt === 'number' ? { endedAt } : {}),
+        ...(typeof signature === 'string' && signature.length > 0 ? { signature } : {}),
         ...(shouldAttachMeta && state.reasoningEncryptedContent
           ? { encryptedContent: state.reasoningEncryptedContent }
           : {}),
@@ -597,6 +558,29 @@ import type { StreamRequest } from './stream.js';
 
 function createIntermediateAssistantRequestId(clientRequestId: string, round: number): string {
   return `${clientRequestId}:assistant:${round}`;
+}
+
+function mergeStreamUsageSummary(
+  previous: StreamUsageSummary | undefined,
+  next: StreamUsageSummary,
+): StreamUsageSummary {
+  if (!previous) {
+    return next;
+  }
+
+  const primary = next.totalTokens >= previous.totalTokens ? next : previous;
+  const fallback = primary === next ? previous : next;
+  const reasoningTokens = primary.reasoningTokens ?? fallback.reasoningTokens;
+  const cacheReadTokens = primary.cacheReadTokens ?? fallback.cacheReadTokens;
+  const cacheWriteTokens = primary.cacheWriteTokens ?? fallback.cacheWriteTokens;
+  return {
+    inputTokens: primary.inputTokens,
+    outputTokens: primary.outputTokens,
+    totalTokens: primary.totalTokens,
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+  };
 }
 
 export async function runModelRound(input: {
@@ -663,9 +647,23 @@ export async function runModelRound(input: {
   const messagesV2 = filterCompacted(
     streamMessagesWithParts({ sessionId: input.sessionId, userId: input.userId }),
   );
-  // Layer 1: MessageWithParts[] → UnifiedMessage[] (single conversion entry point)
+  // Layer 1: MessageWithParts[] → UnifiedMessage[] (single conversion entry point).
+  // Intentionally no `stripOldToolResults` here. The previous wall-clock-based
+  // 10-minute strip rewrote tool outputs differently across rounds within the
+  // same session, which silently invalidated the Anthropic / OpenAI prompt
+  // cache prefix mid-conversation. opencode-parity: rendering is pure w.r.t.
+  // DB state; bounded context size is enforced by `filterCompacted` + the
+  // compaction summary path, plus (future) opencode-style prune that sets
+  // `part.state.time.compacted` persistently.
+  // opencode parity (message-v2.ts:840): assistant turns produced by a
+  // different (providerID, modelID) than the current call have their
+  // reasoning metadata (signature/encryptedContent/summary) stripped so
+  // we never replay an opaque payload an unrelated model cannot consume.
   const unifiedMessages = toModelMessages(messagesV2, {
-    stripOldToolResults: true,
+    currentModel: {
+      providerID: input.route.providerType ?? 'unknown',
+      modelID: input.route.model,
+    },
   });
 
   // Apply thinking language hint to conversation
@@ -693,8 +691,17 @@ export async function runModelRound(input: {
     syntheticContext,
   );
 
-  // Layer 2: Declarative system prompt chain + UnifiedMessage[] → ProviderAdapter.render
-  const systemChain = buildSystemPromptChain({
+  // Layer 2: 2-segment system prompt (opencode `[header, rest]` pattern)
+  // + UnifiedMessage[] → ProviderAdapter.render.
+  //
+  // The system list is intentionally kept at exactly 2 messages so both
+  // segments line up with the 2 system-block cache breakpoints used by
+  // Anthropic / OpenRouter / Bedrock renderers and the v2 runtime
+  // applyCaching helper. Mixing dynamic content (orchestrator
+  // delegation tables, start-work boulder, slash-command instruction,
+  // memory block) into the stable prefix would invalidate the prefix
+  // hash on every round and tank cache hit rate.
+  const { stable: stableSystemContent, dynamic: dynamicSystemContent } = buildTwoPartSystemPrompts({
     workspaceCtx: input.workspaceCtx,
     routeSystemPrompt: input.route.systemPrompt,
     lspGuidance: input.lspGuidance,
@@ -706,11 +713,19 @@ export async function runModelRound(input: {
     commandContext: input.commandContext,
   });
 
+  const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';
+  const dynamicSystemTail = [dynamicSystemContent, memoryContent]
+    .filter((s) => s.length > 0)
+    .join('\n\n');
+
   // Compose final message list: system prompts + conversation + optional continuation
   const allUnifiedMessages: UnifiedMessage[] = [
-    ...systemChain.map((text): UnifiedMessage => ({ role: 'system', content: text })),
-    // Memory block as separate system message (for prompt cache optimization)
-    { role: 'system', content: input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。' },
+    ...(stableSystemContent.length > 0
+      ? [{ role: 'system' as const, content: stableSystemContent } satisfies UnifiedMessage]
+      : []),
+    ...(dynamicSystemTail.length > 0
+      ? [{ role: 'system' as const, content: dynamicSystemTail } satisfies UnifiedMessage]
+      : []),
     ...messagesWithSynthetic,
     ...(input.syntheticContinuationPrompt
       ? [{ role: 'user' as const, content: input.syntheticContinuationPrompt } as UnifiedMessage]
@@ -729,55 +744,11 @@ export async function runModelRound(input: {
     modelId,
   );
 
-  // Render to upstream request body via ProviderAdapter
-  const upstreamPath =
-    input.route.upstreamProtocol === 'responses'
-      ? '/responses'
-      : input.route.upstreamProtocol === 'anthropic_messages'
-        ? '/messages'
-        : '/chat/completions';
-  const promptCache: PromptCacheConfig = {
-    providerType: input.route.providerType,
-    sessionId: input.sessionId,
-  };
-  const upstreamBody = ProviderAdapter.render(allUnifiedMessages, {
-    protocol: input.route.upstreamProtocol,
-    model: input.route.model,
-    variant: input.route.variant,
-    maxTokens: input.route.maxTokens,
-    temperature: input.route.temperature,
-    tools: input.enabledTools as FunctionToolDefinition[],
-    requestOverrides: input.route.requestOverrides,
-    thinking: shouldApplyThinkingConfig
-      ? {
-          enabled: input.requestData.thinkingEnabled === true,
-          effort: input.requestData.reasoningEffort ?? 'medium',
-          providerType: input.route.providerType,
-          supportsThinking: input.route.supportsThinking,
-        }
-      : undefined,
-    cache: promptCache,
-  });
-  const transformationReport = buildUpstreamTransformationReport({
-    compactionSummary: null,
-    memoryBlock: input.memoryBlock,
-    outboundBody: upstreamBody,
-    outboundMessageCount: allUnifiedMessages.length,
-    preparedReport: undefined,
-    injectedPrompt: input.injectedPrompt,
-    capabilityContext: input.capabilityContext,
-    lspGuidance: input.lspGuidance,
-    dialogueModePrompt: input.dialogueModePrompt,
-    yoloModePrompt: input.yoloModePrompt,
-    companionPrompt: input.companionPrompt,
-    requestOverrides: input.route.requestOverrides,
-    routeSystemPrompt: input.route.systemPrompt,
-    syntheticContinuationPrompt: input.syntheticContinuationPrompt,
-    thinkingApplied: shouldApplyThinkingConfig,
-    toolOutputReadbackGuidanceInjected: true,
-    upstreamProtocol: input.route.upstreamProtocol,
-    workspaceCtx: input.workspaceCtx,
-  });
+  // Audit-log the outbound transformation summary. The legacy v1 path
+  // serialised a fully-rendered upstream body here; with v2 the AI SDK
+  // owns serialisation, so we only record the conversation-shape inputs
+  // that drove the call (sufficient for compliance/debug). The actual
+  // wire payload is reconstructable from the v2 stream events.
   writeAuditLog({
     sessionId: input.sessionId,
     category: 'llm',
@@ -786,12 +757,23 @@ export async function runModelRound(input: {
     input: {
       model: input.route.model,
       round: input.round,
-      transformationReport,
+      protocol: input.route.upstreamProtocol,
+      messageCount: allUnifiedMessages.length,
+      injectedPromptActive: !!input.injectedPrompt,
+      capabilityContextActive: !!input.capabilityContext,
+      lspGuidanceActive: !!input.lspGuidance,
+      dialogueModeActive: !!input.dialogueModePrompt,
+      yoloModeActive: !!input.yoloModePrompt,
+      companionPromptActive: !!input.companionPrompt,
+      memoryBlockInjected: !!input.memoryBlock,
+      syntheticContinuationInjected: !!input.syntheticContinuationPrompt,
+      thinkingConfigApplied: shouldApplyThinkingConfig,
+      requestOverrideBodyKeys: Object.keys(input.route.requestOverrides.body ?? {}),
+      omittedBodyKeys: input.route.requestOverrides.omitBodyKeys ?? [],
     },
     output: {
-      message: 'upstream transformation report',
+      message: 'upstream transformation report (v2 path)',
       protocol: input.route.upstreamProtocol,
-      requestBodyKeys: Object.keys(upstreamBody),
     },
     isError: false,
   });
@@ -878,7 +860,7 @@ export async function runModelRound(input: {
     }
   };
   let stepStream: WorkflowStepHandle | undefined;
-  const finalizeAssistant = (reason: StreamStopReason) => {
+  const finalizeAssistant = (reason: StreamStopReason, usage?: StreamUsageSummary) => {
     if (
       reason === 'cancelled' &&
       extractReasoningTexts(state.assistantThinkingBlocks).length === 0 &&
@@ -910,6 +892,7 @@ export async function runModelRound(input: {
       createdAt: stepStartedAt,
       completedAt: Date.now(),
       firstContentAt: state.firstContentAt,
+      ...(usage ? { usage } : {}),
     });
     if (reason === 'end_turn') {
       upsertArtifactsFromAssistantMessage({
@@ -965,703 +948,172 @@ export async function runModelRound(input: {
     });
   };
 
-  // ── Phase B.1 — v2 upstream early return ───────────────────────────
-  // When `OPENAWORK_RUNTIME_UPSTREAM=v2` and the route uses a protocol
-  // covered by the AI SDK provider factory, drive the round through
-  // `runUpstreamStream` instead of the legacy fetch+SSE-parser pipeline.
+  // ── v2-only upstream pipeline ─────────────────────────────────────
   //
-  // What is wired today:
-  //   - Provider construction + ModelMessage bridging from
-  //     UnifiedMessage[].
-  //   - Per-chunk dispatch reuses the same closures the v1 path uses
-  //     (`accumulateChunk`, `writeChunk`, `persistStreamChunkAsSessionEvents`,
-  //     `ensureStepStarted`, `finalizeAssistant`, `emitStepEnded`).
-  //   - Provider middleware (cache_control breakpoints, anthropic-beta
-  //     headers, providerOptions/thinking) runs through the v2 stack.
-  //
-  // What is intentionally deferred to later phases:
-  //   - Responses-API protocol (needs `@ai-sdk/openai`, see PROGRESS.md):
-  //     routes whose `upstreamProtocol === 'responses'` always run v1.
-  //   - Tool schema deferLoading parity — we *fall back* to v1 when
-  //     any enabled tool carries `deferLoading: true` (see the gate
-  //     below). Future work could implement schema-stripping on the
-  //     v2 side too.
-  //
-  // Production rollout uses `OPENAWORK_RUNTIME_UPSTREAM_PROVIDERS`
-  // (see `v2-runtime/runtime-flag.ts`) to canary by `providerType`,
-  // so even with the global flag flipped only the allowlisted
-  // providers actually take this branch.
-  //
-  // On any v2-side construction error we fall through to the legacy
-  // v1 path so the user-facing request still succeeds.
-  //
-  // `deferLoading` opts the entire round into a v1-specific
-  // parameter-stripping behaviour (the upstream renderer minimises
-  // tool schemas to placeholders). The v2 path hands AI SDK the full
-  // JSON Schema, which would diverge from v1 on the wire, so we
-  // refuse to take v2 when any tool carries the flag — the round
-  // continues on v1 unchanged.
-  const v2RouteSupported =
-    input.route.upstreamProtocol === 'chat_completions' ||
-    input.route.upstreamProtocol === 'anthropic_messages';
-  const anyToolDeferred = input.enabledTools.some((tool) => tool.function.deferLoading === true);
-  if (
-    v2RouteSupported &&
-    !anyToolDeferred &&
-    isV2UpstreamForProviderType(input.route.providerType)
-  ) {
-    try {
-      const provider = buildAISdkProvider({
-        providerType: input.route.providerType ?? 'custom',
-        ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
-        ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
-        model: input.route.model,
-        supportsThinking: input.route.supportsThinking,
-      });
-      const modelHandle = provider.languageModel(input.route.model);
-      const modelMessages = unifiedConversationToModelMessages(allUnifiedMessages);
-
-      // Phase B.2.b — declarations-only ToolSet for the v2 path. The
-      // gateway's `enabledTools` are already JSON-schema'd (the same
-      // shape it sends to the upstream wire), so we wrap them without
-      // an `execute` and rely on the existing OpenAWork agent loop in
-      // `routes/stream.ts` to pick up `tool_call_delta` chunks and
-      // drive sandboxed execution out-of-band.
-      const v2Tools =
-        input.enabledTools.length > 0
-          ? wrapGatewayToolsForAiSdkDeclarationsOnly(
-              input.enabledTools as unknown as GatewayToolFunctionShape[],
-            )
-          : undefined;
-
-      input.wl.succeed(stepUpstream, undefined, {
-        mode: 'v2',
-        toolCount: input.enabledTools.length,
-      });
-      stepStream = input.wl.start('upstream.stream', undefined, {
-        protocol: input.transport,
-        upstreamProtocol: input.route.upstreamProtocol,
-        round: input.round,
-        mode: 'v2',
-      });
-
-      let stopReason: StreamStopReason = 'end_turn';
-      let doneEmitted = false;
-      let v2Usage: StreamUsageSummary | undefined;
-      let v2UsageOccurredAt: number | undefined;
-
-      try {
-        for await (const chunk of runUpstreamStream({
-          model: modelHandle,
-          messages: modelMessages,
-          signal: input.signal,
-          runId: input.runId,
-          ...(input.agentId ? { agentId: input.agentId } : {}),
-          providerType: input.route.providerType,
-          ...(v2Tools ? { tools: v2Tools } : {}),
-          ...(typeof input.requestData.upstreamRetryMaxRetries === 'number'
-            ? { maxRetries: input.requestData.upstreamRetryMaxRetries }
-            : {}),
-          ...(shouldApplyThinkingConfig && input.route.providerType
-            ? {
-                thinking: {
-                  enabled: input.requestData.thinkingEnabled === true,
-                  effort: input.requestData.reasoningEffort ?? 'medium',
-                  providerType: input.route.providerType,
-                  supportsThinking: input.route.supportsThinking,
-                },
-              }
-            : {}),
-          onFinish: ({ usage }) => {
-            // The AI SDK reports tokens as `number | undefined`; fall
-            // back to 0 so RunResult.usage stays a stable shape for
-            // downstream cost / context-overflow code that already
-            // assumes the legacy v1 path's number-typed summary.
-            v2Usage = {
-              inputTokens: usage.inputTokens ?? 0,
-              outputTokens: usage.outputTokens ?? 0,
-              totalTokens:
-                usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
-            };
-            v2UsageOccurredAt = Date.now();
-          },
-        })) {
-          input.eventSequence.value += 1;
-          const meta = createRunEventMeta(input.runId, input.eventSequence);
-          const chunkWithMeta = { ...chunk, ...meta } as StreamChunk;
-
-          if (chunkWithMeta.type === 'done') {
-            doneEmitted = true;
-            stopReason = chunkWithMeta.stopReason;
-            input.writeChunk(chunkWithMeta as RunEvent);
-            break;
-          }
-
-          accumulateChunk(state, chunkWithMeta);
-          input.writeChunk(chunkWithMeta as RunEvent);
-          ensureStepStarted();
-          persistStreamChunkAsSessionEvents({
-            sessionId: input.sessionId,
-            userId: input.userId,
-            clientRequestId: input.clientRequestId,
-            chunk: chunkWithMeta,
-            state: streamSessionEventState,
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (stepStream && stepStream.status === 'pending') {
-          input.wl.fail(stepStream, message, { round: input.round });
-        }
-        writeAuditLog({
-          sessionId: input.sessionId,
-          category: 'stream',
-          sourceName: 'V2_UPSTREAM_ERROR',
-          requestId: input.clientRequestId,
-          input: { model: input.route.model, round: input.round },
-          output: { message },
-          isError: true,
-        });
-        markFailedRequestScopeMessages();
-        appendSessionMessageV2({
-          sessionId: input.sessionId,
-          userId: input.userId,
-          role: 'assistant',
-          content: buildErrorContent('V2_UPSTREAM_ERROR', message),
-          clientRequestId: input.clientRequestId,
-          status: 'error',
-        });
-        input.writeChunk(createStreamErrorChunk('V2_UPSTREAM_ERROR', message, input.runId));
-        input.wl.flush(input.ctx, 502);
-        emitStepEnded('error');
-        return {
-          overflow: false,
-          shouldContinue: false,
-          shouldStop: true,
-          stopReason: 'error',
-          statusCode: 502,
-          state,
-          usage: undefined,
-          usageOccurredAt: undefined,
-        };
-      }
-
-      // Synthesise a `done` chunk if the runner finished without
-      // emitting one (e.g. AbortSignal triggered before finish-step).
-      if (!doneEmitted) {
-        stopReason = input.signal.aborted ? 'cancelled' : 'end_turn';
-        input.writeChunk({
-          type: 'done',
-          stopReason,
-          ...createRunEventMeta(input.runId, input.eventSequence),
-        } as RunEvent);
-      }
-
-      if (stepStream && stepStream.status === 'pending') {
-        input.wl.succeed(stepStream, undefined, {
-          round: input.round,
-          stopReason,
-          mode: 'v2',
-        });
-      }
-      finalizeAssistant(stopReason);
-      emitStepEnded(stopReason);
-
-      const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
-      return {
-        overflow: false,
-        shouldContinue,
-        shouldStop: !shouldContinue,
-        stopReason,
-        statusCode: 200,
-        state,
-        ...(v2Usage ? { usage: v2Usage } : {}),
-        ...(v2UsageOccurredAt !== undefined ? { usageOccurredAt: v2UsageOccurredAt } : {}),
-      };
-    } catch (err) {
-      // Provider construction / bridge failure — log and fall through
-      // to the v1 path so the user-facing request still completes.
-      writeAuditLog({
-        sessionId: input.sessionId,
-        category: 'llm',
-        sourceName: 'V2_UPSTREAM_FALLBACK',
-        requestId: input.clientRequestId,
-        input: { providerType: input.route.providerType, model: input.route.model },
-        output: { message: err instanceof Error ? err.message : String(err) },
-        isError: true,
-      });
-    }
-  }
-
-  // ── Phase B.3.b — bridge-only shadow diff ─────────────────────────
-  // When `OPENAWORK_RUNTIME_UPSTREAM_SHADOW=1` is set we audit-log a
-  // structural comparison between the legacy `upstreamBody.messages`
-  // and the AI SDK `ModelMessage[]` the v2 bridge would have built
-  // for this exact request. No second LLM call is fired — the goal
-  // is to validate the bridge in production traffic ahead of the
-  // real cutover.
-  if (isV2UpstreamShadow()) {
-    try {
-      const v2Messages = unifiedConversationToModelMessages(allUnifiedMessages);
-      const v1Messages = (upstreamBody as Record<string, unknown>)['messages'];
-      const summary = compareV1V2BridgeStructural(
-        Array.isArray(v1Messages) ? (v1Messages as Array<Record<string, unknown>>) : [],
-        v2Messages,
-      );
-      writeAuditLog({
-        sessionId: input.sessionId,
-        category: 'llm',
-        sourceName: 'V2_BRIDGE_DIFF',
-        requestId: input.clientRequestId,
-        input: {
-          providerType: input.route.providerType,
-          model: input.route.model,
-          protocol: input.route.upstreamProtocol,
-        },
-        output: {
-          matched: summary.matched,
-          v1Count: summary.v1Count,
-          v2Count: summary.v2Count,
-          // Cap diff list to keep audit rows compact; first 8 entries
-          // are usually enough to spot the pattern.
-          diffs: summary.diffs.slice(0, 8),
-          diffsTruncated: summary.diffs.length > 8,
-        },
-        isError: !summary.matched,
-      });
-    } catch {
-      // Shadow telemetry must never break the v1 path.
-    }
-  }
+  // The legacy v1 fetch + manual SSE parser was removed in the v2
+  // cutover. Every round now goes through the AI SDK provider factory
+  // (`runUpstreamStream`) which handles cache breakpoints, message
+  // normalisation, provider-specific thinking options, and protocol
+  // decoding uniformly across `chat_completions`, `anthropic_messages`,
+  // and OpenAI-compatible Responses-flavoured endpoints (the latter
+  // currently downgrades to `chat_completions` since `@ai-sdk/openai`
+  // is not yet wired in).
+  void compactionAutoEnabled;
 
   try {
-    const anthropicBetas =
-      input.route.providerType === 'anthropic'
-        ? buildAnthropicBetas({
-            model: input.route.model,
-            supportsThinking: input.route.supportsThinking,
-          })
-        : [];
-    const isAnthropicNative = input.route.providerType === 'anthropic';
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(input.route.apiKey
-        ? isAnthropicNative
-          ? { 'x-api-key': input.route.apiKey, 'anthropic-version': '2023-06-01' }
-          : { Authorization: `Bearer ${input.route.apiKey}` }
+    const provider = buildAISdkProvider({
+      providerType: input.route.providerType ?? 'custom',
+      ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
+      ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
+      ...(input.route.requestOverrides.headers &&
+      Object.keys(input.route.requestOverrides.headers).length > 0
+        ? { headers: input.route.requestOverrides.headers }
         : {}),
-      ...(anthropicBetas.length > 0
-        ? { 'anthropic-beta': formatAnthropicBetaHeader(anthropicBetas) }
-        : {}),
-      ...(input.route.requestOverrides.headers ?? {}),
-    };
-
-    const upstreamUrl = `${input.route.apiBaseUrl}${upstreamPath}`;
-    const bodyJson = JSON.stringify(upstreamBody);
-
-    // Debug: log upstream request details for diagnosing format issues
-    const messageSummary = (upstreamBody as Record<string, unknown>).messages
-      ? ((upstreamBody as Record<string, unknown>).messages as Array<{
-          role: string;
-          content?: unknown;
-          tool_calls?: unknown[];
-        }>)
-      : undefined;
-    const inputSummary = (upstreamBody as Record<string, unknown>).input
-      ? `${((upstreamBody as Record<string, unknown>).input as unknown[]).length} items`
-      : undefined;
-
-    const debugStep = input.wl.startChild(stepUpstream, 'upstream.request.debug', undefined, {
-      url: upstreamUrl,
-      protocol: input.route.upstreamProtocol,
       model: input.route.model,
-      providerType: input.route.providerType ?? 'unknown',
-      messageCount: messageSummary?.length ?? 0,
-      messageRoles: messageSummary?.map((m) => m.role).join(',') ?? 'n/a',
-      inputItemCount: inputSummary ?? 'n/a',
-      toolsCount: (upstreamBody as Record<string, unknown>).tools
-        ? ((upstreamBody as Record<string, unknown>).tools as unknown[]).length
-        : 0,
-      bodyKeys: Object.keys(upstreamBody).join(','),
-      bodySizeBytes: bodyJson.length,
-      maxTokens: input.route.maxTokens,
-      temperature: input.route.temperature,
-      thinkingEnabled: input.requestData.thinkingEnabled ?? false,
-      reasoningEffort: input.requestData.reasoningEffort ?? 'n/a',
-      hasApiKey: !!input.route.apiKey,
+      supportsThinking: input.route.supportsThinking,
     });
-    input.wl.succeed(debugStep, undefined, {
-      bodyPreview: bodyJson.slice(0, 500),
+    const modelHandle = provider.languageModel(input.route.model);
+    const modelMessages = unifiedConversationToModelMessages(allUnifiedMessages);
+
+    // Declarations-only ToolSet — the gateway's `enabledTools` are
+    // already JSON-schema'd, so we wrap them without an `execute` and
+    // let the existing OpenAWork agent loop in `routes/stream.ts`
+    // pick up `tool_call_delta` chunks and drive sandboxed execution
+    // out-of-band.
+    const v2Tools =
+      input.enabledTools.length > 0
+        ? wrapGatewayToolsForAiSdkDeclarationsOnly(
+            input.enabledTools as unknown as GatewayToolFunctionShape[],
+          )
+        : undefined;
+
+    input.wl.succeed(stepUpstream, undefined, {
+      toolCount: input.enabledTools.length,
     });
-
-    const response = await fetchUpstreamStreamWithRetry({
-      url: `${input.route.apiBaseUrl}${upstreamPath}`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(upstreamBody),
-      },
-      signal: input.signal,
-      requireResponseBody: true,
-      retryOptions: {
-        maxAttempts: (input.requestData.upstreamRetryMaxRetries ?? 3) + 1,
-      },
-    });
-
-    if (!response.ok || !response.body) {
-      const upstreamError = await readUpstreamError(response);
-      input.wl.fail(stepUpstream, undefined, {
-        status: response.status,
-        errorCode: upstreamError.code,
-        errorMessage: upstreamError.message?.slice(0, 200),
-        errorDetail: upstreamError.technicalDetail?.slice(0, 500),
-      });
-      const contextOverflow = isUpstreamContextOverflowError({
-        response,
-        error: upstreamError,
-      });
-      writeAuditLog({
-        sessionId: input.sessionId,
-        category: 'llm',
-        sourceName: upstreamError.code,
-        requestId: input.clientRequestId,
-        input: {
-          model: input.route.model,
-          provider: input.route.apiBaseUrl,
-          round: input.round,
-        },
-        output: {
-          message: upstreamError.message,
-          status: response.status,
-          code: upstreamError.code,
-        },
-      });
-      if (contextOverflow && compactionAutoEnabled) {
-        return {
-          overflow: true,
-          shouldContinue: false,
-          shouldStop: false,
-          stopReason: 'error',
-          statusCode: response.status,
-          state,
-          upstreamError,
-          usage: undefined,
-          usageOccurredAt: undefined,
-        };
-      }
-      markFailedRequestScopeMessages();
-      appendSessionMessageV2({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: 'assistant',
-        content: buildErrorContent(upstreamError.code, upstreamError.message),
-        clientRequestId: input.clientRequestId,
-        status: 'error',
-      });
-      input.writeChunk({
-        ...createStreamErrorChunk(upstreamError.code, upstreamError.message, input.runId),
-        status: response.status,
-      } as RunEvent);
-      input.wl.flush(input.ctx, response.status);
-      emitStepEnded('error');
-      return {
-        overflow: false,
-        shouldContinue: false,
-        shouldStop: true,
-        stopReason: 'error',
-        statusCode: response.status,
-        state,
-        upstreamError,
-        usage: undefined,
-        usageOccurredAt: undefined,
-      };
-    }
-    input.wl.succeed(stepUpstream, undefined, { status: response.status });
-
-    // Diagnostic: capture upstream response headers for debugging empty body
-    writeAuditLog({
-      sessionId: input.sessionId,
-      category: 'stream',
-      sourceName: 'UPSTREAM_RESPONSE_HEADERS',
-      requestId: input.clientRequestId,
-      input: {
-        url: `${input.route.apiBaseUrl}${upstreamPath}`,
-        protocol: input.route.upstreamProtocol,
-        status: response.status,
-      },
-      output: {
-        contentType: response.headers.get('content-type'),
-        contentLength: response.headers.get('content-length'),
-        transferEncoding: response.headers.get('transfer-encoding'),
-        hasBody: !!response.body,
-      },
-      isError: false,
-    });
-
     stepStream = input.wl.start('upstream.stream', undefined, {
       protocol: input.transport,
       upstreamProtocol: input.route.upstreamProtocol,
       round: input.round,
     });
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const streamState = createStreamParseState(input.runId);
-    streamState.nextEventSequence = input.eventSequence.value;
-    if (input.agentId) {
-      streamState.agentId = input.agentId;
-    }
-    let buffer = '';
+
     let stopReason: StreamStopReason = 'end_turn';
+    let doneEmitted = false;
+    let v2Usage: StreamUsageSummary | undefined;
+    let v2UsageOccurredAt: number | undefined;
 
-    const completeRound = (
-      reason: StreamStopReason,
-      doneChunk?: {
-        type: 'done';
-        stopReason: StreamStopReason;
-        eventId?: string;
-        runId?: string;
-        occurredAt?: number;
-      },
-    ) => {
-      stopReason = reason;
-      // Propagate reasoning metadata from stream parser to accumulation state
-      // so it can be stored in the ReasoningContent part for multi-turn.
-      if (streamState.reasoningEncryptedContent) {
-        state.reasoningEncryptedContent = streamState.reasoningEncryptedContent;
-      }
-      if (streamState.reasoningSummary) {
-        state.reasoningSummary = streamState.reasoningSummary;
-      }
-      if (streamState.responseId) {
-        state.responseId = streamState.responseId;
-      }
-      finalizeAssistant(stopReason);
-      if (stopReason !== 'tool_use' || state.toolCalls.size === 0) {
-        input.writeChunk(
-          doneChunk ?? {
-            type: 'done',
-            stopReason,
-            ...createRunEventMeta(input.runId, input.eventSequence),
-          },
-        );
-      }
-      if (stepStream) {
-        input.wl.succeed(stepStream, undefined, { round: input.round, stopReason });
-      }
+    try {
+      for await (const chunk of runUpstreamStream({
+        model: modelHandle,
+        modelId: input.route.model,
+        messages: modelMessages,
+        signal: input.signal,
+        runId: input.runId,
+        ...(input.agentId ? { agentId: input.agentId } : {}),
+        sessionId: input.sessionId,
+        providerType: input.route.providerType,
+        temperature: input.route.temperature,
+        maxOutputTokens: input.route.maxTokens,
+        requestOverrides: input.route.requestOverrides,
+        ...(v2Tools ? { tools: v2Tools } : {}),
+        ...(typeof input.requestData.upstreamRetryMaxRetries === 'number'
+          ? { maxRetries: input.requestData.upstreamRetryMaxRetries }
+          : {}),
+        ...(shouldApplyThinkingConfig && input.route.providerType
+          ? {
+              thinking: {
+                enabled: input.requestData.thinkingEnabled === true,
+                effort: input.requestData.reasoningEffort ?? 'medium',
+                providerType: input.route.providerType,
+                supportsThinking: input.route.supportsThinking,
+              },
+            }
+          : {}),
+        onFinish: ({ usage }) => {
+          const reasoningTokens =
+            usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? 0;
+          const cacheReadTokens =
+            usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens ?? 0;
+          const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+          const rawInputTokens = usage.inputTokens ?? 0;
+          const rawOutputTokens = usage.outputTokens ?? 0;
+          const nextUsage: StreamUsageSummary = {
+            inputTokens: Math.max(0, rawInputTokens - cacheReadTokens - cacheWriteTokens),
+            outputTokens: Math.max(0, rawOutputTokens - reasoningTokens),
+            totalTokens: usage.totalTokens ?? rawInputTokens + rawOutputTokens,
+            ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
+            ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+            ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+          };
+          v2Usage = mergeStreamUsageSummary(v2Usage, nextUsage);
+          v2UsageOccurredAt = Date.now();
+        },
+      })) {
+        input.eventSequence.value += 1;
+        const meta = createRunEventMeta(input.runId, input.eventSequence);
+        const chunkWithMeta = { ...chunk, ...meta } as StreamChunk;
 
-      const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
-      const usage = streamState.usage;
-      const overflow =
-        !!usage &&
-        typeof input.route.contextWindow === 'number' &&
-        isContextOverflow(usage, input.route.contextWindow, input.compactionReservedTokens);
-      // Phase 2.2 — close the SessionEvent step boundary so the aggregator
-      // can finalise the assistant entry. Token usage is mapped where we
-      // have it; cost is filled in by downstream usage handlers and is
-      // intentionally left at 0 here.
-      emitStepEnded(stopReason, {
-        input: usage?.inputTokens ?? 0,
-        output: usage?.outputTokens ?? 0,
-      });
-      return {
-        overflow,
-        shouldContinue,
-        shouldStop: !shouldContinue,
-        stopReason,
-        statusCode: 200,
-        state,
-        usage,
-        usageOccurredAt: usage ? (doneChunk?.occurredAt ?? Date.now()) : undefined,
-      };
-    };
-
-    const applyParsedChunks = (parsedChunks: StreamChunk[]) => {
-      for (const parsedChunk of parsedChunks) {
-        input.eventSequence.value = streamState.nextEventSequence;
-        if (parsedChunk.type === 'done') {
-          return completeRound(parsedChunk.stopReason, parsedChunk);
+        if (chunkWithMeta.type === 'done') {
+          doneEmitted = true;
+          stopReason = chunkWithMeta.stopReason;
+          input.writeChunk(chunkWithMeta as RunEvent);
+          break;
         }
 
-        accumulateChunk(state, parsedChunk);
-        input.writeChunk(parsedChunk);
-
-        // Phase 2.2 — mirror this chunk into the typed SessionEvent log.
-        // The first persistable chunk also opens the assistant step.
+        accumulateChunk(state, chunkWithMeta);
+        input.writeChunk(chunkWithMeta as RunEvent);
         ensureStepStarted();
         persistStreamChunkAsSessionEvents({
           sessionId: input.sessionId,
           userId: input.userId,
           clientRequestId: input.clientRequestId,
-          chunk: parsedChunk,
+          chunk: chunkWithMeta,
           state: streamSessionEventState,
         });
       }
-
-      return null;
-    };
-
-    let frameCount = 0;
-    let emptyParseCount = 0;
-    const processBuffer = () => {
-      let normalized = buffer.replace(/\r\n/g, '\n');
-      let boundary = normalized.indexOf('\n\n');
-      while (boundary !== -1) {
-        const frame = normalized.slice(0, boundary);
-        buffer = normalized.slice(boundary + 2);
-        normalized = buffer.replace(/\r\n/g, '\n');
-        boundary = normalized.indexOf('\n\n');
-
-        frameCount++;
-        const parsedChunks = parseUpstreamFrame(frame, input.route.upstreamProtocol, streamState);
-        if (parsedChunks.length === 0) {
-          emptyParseCount++;
-        }
-        // Log first 3 frames and any frame that produces a done chunk for diagnostics
-        if (frameCount <= 3 || parsedChunks.some((c) => c.type === 'done')) {
-          writeAuditLog({
-            sessionId: input.sessionId,
-            category: 'stream',
-            sourceName: 'UPSTREAM_FRAME_DEBUG',
-            requestId: input.clientRequestId,
-            input: {
-              frameIndex: frameCount,
-              framePreview: frame.slice(0, 500),
-              protocol: input.route.upstreamProtocol,
-            },
-            output: {
-              parsedCount: parsedChunks.length,
-              parsedTypes: parsedChunks.map((c) => c.type).join(',') || 'empty',
-            },
-          });
-        }
-        const result = applyParsedChunks(parsedChunks);
-        if (result) {
-          return result;
-        }
+    } catch (err) {
+      // Re-throw cancellation so the outer try/catch handles it
+      // uniformly with the AbortSignal path.
+      if (input.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw err;
       }
-
-      input.eventSequence.value = streamState.nextEventSequence;
-      return null;
-    };
-
-    let readCallCount = 0;
-    let totalBytesRead = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      readCallCount++;
-      const chunkBytes = value?.byteLength ?? 0;
-      totalBytesRead += chunkBytes;
-      // Log first 3 reads and the final read
-      if (readCallCount <= 3 || done) {
-        writeAuditLog({
-          sessionId: input.sessionId,
-          category: 'stream',
-          sourceName: 'UPSTREAM_READER_READ',
-          requestId: input.clientRequestId,
-          input: {
-            readCall: readCallCount,
-            chunkBytes,
-            done,
-            totalBytesRead,
-          },
-          output: {
-            bufferLen: buffer.length + (value ? decoder.decode(value, { stream: true }).length : 0),
-            preview: value ? decoder.decode(value.slice(0, 200)) : '(empty)',
-          },
-          isError: false,
-        });
-      }
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      try {
-        const result = processBuffer();
-        if (result) {
-          return result;
-        }
-      } catch (error) {
-        const errorCode = error instanceof ResponsesUpstreamEventError ? error.code : 'PARSE_ERROR';
-        const errorMessage =
-          error instanceof ResponsesUpstreamEventError
-            ? error.message
-            : 'Failed to parse upstream stream chunk';
-        if (stepStream.status === 'pending') {
-          input.wl.fail(stepStream, errorMessage, {
-            round: input.round,
-          });
-        }
-        writeAuditLog({
-          sessionId: input.sessionId,
-          category: 'stream',
-          sourceName: errorCode,
-          requestId: input.clientRequestId,
-          input: { model: input.route.model, round: input.round, phase: 'mid-stream' },
-          output: { message: errorMessage, code: errorCode },
-        });
-        markFailedRequestScopeMessages();
-        appendSessionMessageV2({
-          sessionId: input.sessionId,
-          userId: input.userId,
-          role: 'assistant',
-          content: buildErrorContent(errorCode, errorMessage),
-          clientRequestId: input.clientRequestId,
-          status: 'error',
-        });
-        input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
-        input.wl.flush(input.ctx, 502);
-        emitStepEnded('error');
-        return {
-          overflow: false,
-          shouldContinue: false,
-          shouldStop: true,
-          stopReason: 'error',
-          statusCode: 502,
-          state,
-          usage: undefined,
-          usageOccurredAt: undefined,
-        };
-      }
-
-      if (done) break;
-    }
-
-    try {
-      const trailingFrame = buffer.replace(/\r\n/g, '\n').trim();
-      if (trailingFrame.length > 0) {
-        const trailingResult = applyParsedChunks(
-          parseUpstreamFrame(trailingFrame, input.route.upstreamProtocol, streamState),
-        );
-        if (trailingResult) {
-          return trailingResult;
-        }
-      }
-    } catch (error) {
-      const errorCode = error instanceof ResponsesUpstreamEventError ? error.code : 'PARSE_ERROR';
-      const errorMessage =
-        error instanceof ResponsesUpstreamEventError
-          ? error.message
-          : 'Failed to parse upstream stream chunk';
-      if (stepStream.status === 'pending') {
-        input.wl.fail(stepStream, errorMessage, {
-          round: input.round,
-        });
+      const message = err instanceof Error ? err.message : String(err);
+      // Classify rate-limit / overload / free-usage / 5xx so the
+      // recovery layer (`routes/stream.ts`) and the wire-level
+      // `upstreamError` surface keep the retry-after hint and a
+      // stable category — the AI SDK collapses these into opaque
+      // strings otherwise.
+      const classification = classifyUpstreamError(err);
+      if (stepStream && stepStream.status === 'pending') {
+        input.wl.fail(stepStream, message, { round: input.round });
       }
       writeAuditLog({
         sessionId: input.sessionId,
         category: 'stream',
-        sourceName: errorCode,
+        sourceName: 'V2_UPSTREAM_ERROR',
         requestId: input.clientRequestId,
-        input: { model: input.route.model, round: input.round, phase: 'trailing-frame' },
-        output: { message: errorMessage, code: errorCode },
+        input: { model: input.route.model, round: input.round },
+        output: {
+          message,
+          category: classification.category,
+          retryable: classification.retryable,
+          ...(classification.retryAfterMs !== undefined
+            ? { retryAfterMs: classification.retryAfterMs }
+            : {}),
+        },
+        isError: true,
       });
       markFailedRequestScopeMessages();
       appendSessionMessageV2({
         sessionId: input.sessionId,
         userId: input.userId,
         role: 'assistant',
-        content: buildErrorContent(errorCode, errorMessage),
+        content: buildErrorContent('V2_UPSTREAM_ERROR', classification.message ?? message),
         clientRequestId: input.clientRequestId,
         status: 'error',
       });
-      input.writeChunk(createStreamErrorChunk(errorCode, errorMessage, input.runId));
+      input.writeChunk(
+        createStreamErrorChunk('V2_UPSTREAM_ERROR', classification.message ?? message, input.runId),
+      );
       input.wl.flush(input.ctx, 502);
       emitStepEnded('error');
       return {
@@ -1671,38 +1123,57 @@ export async function runModelRound(input: {
         stopReason: 'error',
         statusCode: 502,
         state,
+        upstreamError: {
+          code: `V2_${classification.category.toUpperCase()}`,
+          message: classification.message ?? message,
+          technicalDetail: message,
+          ...(classification.retryAfterMs !== undefined
+            ? { retryAfterMs: classification.retryAfterMs }
+            : {}),
+        },
         usage: undefined,
         usageOccurredAt: undefined,
       };
     }
 
-    // Diagnostic: log EOF state when no finish reason was seen
-    writeAuditLog({
-      sessionId: input.sessionId,
-      category: 'stream',
-      sourceName: 'UPSTREAM_STREAM_EOF',
-      requestId: input.clientRequestId,
-      input: {
-        model: input.route.model,
-        protocol: input.route.upstreamProtocol,
+    // Synthesise a `done` chunk if the runner finished without
+    // emitting one (e.g. AbortSignal triggered before finish-step).
+    if (!doneEmitted) {
+      stopReason = input.signal.aborted ? 'cancelled' : 'end_turn';
+      input.writeChunk({
+        type: 'done',
+        stopReason,
+        ...createRunEventMeta(input.runId, input.eventSequence),
+      } as RunEvent);
+    }
+
+    if (stepStream && stepStream.status === 'pending') {
+      input.wl.succeed(stepStream, undefined, {
         round: input.round,
-      },
-      output: {
-        totalFrames: frameCount,
-        emptyParseFrames: emptyParseCount,
-        sawFinishReason: streamState.sawFinishReason,
-        stopReason: streamState.stopReason,
-        toolCallCount: state.toolCalls.size,
-        assistantTextLen: state.assistantText.length,
-        trailingBufferPreview: buffer.trim().slice(0, 300),
-      },
+        stopReason,
+      });
+    }
+    finalizeAssistant(stopReason, v2Usage);
+    emitStepEnded(stopReason, {
+      input: v2Usage?.inputTokens ?? 0,
+      output: v2Usage?.outputTokens ?? 0,
     });
-    const eofResolution = resolveEofRoundDecision({
-      sawFinishReason: streamState.sawFinishReason,
-      stopReason: streamState.stopReason,
-      toolCallCount: state.toolCalls.size,
-    });
-    return completeRound(eofResolution.stopReason);
+
+    const shouldContinue = isToolUseStopReason(stopReason) ? state.toolCalls.size > 0 : false;
+    const overflow =
+      !!v2Usage &&
+      typeof input.route.contextWindow === 'number' &&
+      isContextOverflow(v2Usage, input.route.contextWindow, input.compactionReservedTokens);
+    return {
+      overflow,
+      shouldContinue,
+      shouldStop: !shouldContinue,
+      stopReason,
+      statusCode: 200,
+      state,
+      ...(v2Usage ? { usage: v2Usage } : {}),
+      ...(v2UsageOccurredAt !== undefined ? { usageOccurredAt: v2UsageOccurredAt } : {}),
+    };
   } catch (err) {
     if (input.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
       finalizeAssistant('cancelled');

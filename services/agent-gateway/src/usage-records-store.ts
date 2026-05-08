@@ -1,6 +1,6 @@
 import { calculateTokenCost } from '@openAwork/agent-core';
 import { sqliteRun } from './db.js';
-import type { StreamUsageSummary } from './routes/stream-protocol.js';
+import type { StreamUsageSummary } from './routes/stream-usage.js';
 
 export function persistMonthlyUsageRecord(input: {
   occurredAt?: number;

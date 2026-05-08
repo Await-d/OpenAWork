@@ -12,6 +12,7 @@
 import type { Message, MessageContent, MessageRole } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
 import {
+  type AssistantMessage,
   type AssistantErrorObject,
   type MessageID,
   type PartID,
@@ -77,18 +78,38 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
       case 'text':
         content.push({ type: 'text', text: part.text });
         break;
-      case 'reasoning':
+      case 'reasoning': {
+        // Anthropic extended-thinking signature lives on either of:
+        //   - metadata.signature (legacy / direct write)
+        //   - metadata.anthropic.signature (opencode-shaped metadata)
+        //   - metadata.bedrock.signature (Bedrock-hosted Claude)
+        // Surface whichever is present so downstream renderers replay it.
+        const sigDirect = part.metadata?.['signature'];
+        const sigAnthropic = (part.metadata?.['anthropic'] as { signature?: unknown } | undefined)
+          ?.signature;
+        const sigBedrock = (part.metadata?.['bedrock'] as { signature?: unknown } | undefined)
+          ?.signature;
+        const signature =
+          typeof sigDirect === 'string' && sigDirect.length > 0
+            ? sigDirect
+            : typeof sigAnthropic === 'string' && sigAnthropic.length > 0
+              ? sigAnthropic
+              : typeof sigBedrock === 'string' && sigBedrock.length > 0
+                ? sigBedrock
+                : undefined;
         content.push({
           type: 'reasoning',
           text: part.text,
-          ...(part.metadata?.encryptedContent
-            ? { encryptedContent: part.metadata.encryptedContent as string }
+          ...(part.metadata?.['encryptedContent']
+            ? { encryptedContent: part.metadata['encryptedContent'] as string }
             : {}),
-          ...(part.metadata?.summary ? { summary: part.metadata.summary as string } : {}),
+          ...(part.metadata?.['summary'] ? { summary: part.metadata['summary'] as string } : {}),
+          ...(signature ? { signature } : {}),
           ...(typeof part.time?.start === 'number' ? { startedAt: part.time.start } : {}),
           ...(typeof part.time?.end === 'number' ? { endedAt: part.time.end } : {}),
         });
         break;
+      }
       case 'tool': {
         const toolPart = part;
         const storedToolResult = readStoredToolResultContent(
@@ -149,6 +170,8 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
     assistantTime?.firstContent != null
       ? assistantTime.firstContent - assistantTime.created
       : undefined;
+  const providerUsage =
+    info.role === 'assistant' ? buildProviderUsageFromAssistantTokens(info.tokens) : undefined;
 
   return {
     id: info.id,
@@ -160,6 +183,36 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
     ...(typeof firstTokenLatencyMs === 'number' && firstTokenLatencyMs > 0
       ? { firstTokenLatencyMs }
       : {}),
+    ...(providerUsage ? { providerUsage } : {}),
+  };
+}
+
+function normalizeTokenCount(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function buildProviderUsageFromAssistantTokens(
+  tokens: AssistantMessage['tokens'],
+): NonNullable<Message['providerUsage']> | undefined {
+  const inputTokens = normalizeTokenCount(tokens.input);
+  const outputTokens = normalizeTokenCount(tokens.output);
+  const reasoningTokens = normalizeTokenCount(tokens.reasoning);
+  const cacheReadTokens = normalizeTokenCount(tokens.cache.read);
+  const cacheWriteTokens = normalizeTokenCount(tokens.cache.write);
+  const summedTotal =
+    inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheWriteTokens;
+  const totalTokens = normalizeTokenCount(tokens.total ?? summedTotal);
+  if (summedTotal <= 0 && totalTokens <= 0) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: totalTokens > 0 ? totalTokens : summedTotal,
+    ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
   };
 }
 
@@ -315,6 +368,14 @@ export function appendSessionMessageV2(input: {
   messageId?: string;
   replaceExisting?: boolean;
   status?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
 }): Message {
   // Write-time validation: ensure tool_result references an existing tool_call.
   // This prevents orphaned tool_results that would cause upstream API errors
@@ -334,6 +395,18 @@ export function appendSessionMessageV2(input: {
 
   const msgId = (input.messageId ?? makeMessageId()) as MessageID;
   const timeCreated = input.createdAt ?? Date.now();
+  const assistantTokens: AssistantMessage['tokens'] = {
+    input: normalizeTokenCount(input.usage?.inputTokens),
+    output: normalizeTokenCount(input.usage?.outputTokens),
+    reasoning: normalizeTokenCount(input.usage?.reasoningTokens),
+    cache: {
+      read: normalizeTokenCount(input.usage?.cacheReadTokens),
+      write: normalizeTokenCount(input.usage?.cacheWriteTokens),
+    },
+    ...(typeof input.usage?.totalTokens === 'number' && Number.isFinite(input.usage.totalTokens)
+      ? { total: normalizeTokenCount(input.usage.totalTokens) }
+      : {}),
+  };
 
   // ── V2 write: message_v2 + part_v2 via SyncEvent ──
   const baseInfo = {
@@ -355,7 +428,7 @@ export function appendSessionMessageV2(input: {
               ...(input.firstContentAt ? { firstContent: input.firstContentAt } : {}),
             },
             cost: 0,
-            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            tokens: assistantTokens,
           }
         : input.role === 'tool'
           ? { ...baseInfo, role: 'tool', time: { created: timeCreated } }
@@ -396,11 +469,15 @@ export function appendSessionMessageV2(input: {
         type: 'reasoning',
         text: c.text,
         time: { start: startedAt, ...(typeof endedAt === 'number' ? { end: endedAt } : {}) },
-        ...(c.encryptedContent || c.summary
+        ...(c.encryptedContent || c.summary || c.signature
           ? {
               metadata: {
                 ...(c.encryptedContent ? { encryptedContent: c.encryptedContent } : {}),
                 ...(c.summary ? { summary: c.summary } : {}),
+                // Persist Anthropic signature in opencode-shaped metadata
+                // (anthropic.signature) so the bridge can replay it on
+                // subsequent turns without losing the namespace.
+                ...(c.signature ? { anthropic: { signature: c.signature } } : {}),
               },
             }
           : {}),
@@ -587,12 +664,16 @@ export function appendSessionMessageV2(input: {
     userId: input.userId,
   });
 
+  const providerUsage =
+    input.role === 'assistant' ? buildProviderUsageFromAssistantTokens(assistantTokens) : undefined;
+
   // Return a V1-compatible Message object
   return {
     id: msgId,
     role: input.role,
     createdAt: timeCreated,
     content: input.content,
+    ...(providerUsage ? { providerUsage } : {}),
   };
 }
 
@@ -605,6 +686,7 @@ export function appendCompactionMarkerMessageV2(input: {
   sessionId: string;
   signature?: string;
   summary: string;
+  tailStartMessageId?: string;
   trigger: string;
   userId: string;
 }): Message {

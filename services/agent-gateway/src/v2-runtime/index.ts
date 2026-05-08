@@ -18,8 +18,6 @@ export {
   isV2Services,
   isV2Storage,
   isV2Upstream,
-  isV2UpstreamForProviderType,
-  isV2UpstreamShadow,
   parseRuntimeVariant,
   readRuntimeFlags,
   refreshRuntimeFlagsForTesting,

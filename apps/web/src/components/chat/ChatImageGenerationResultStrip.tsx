@@ -3,12 +3,14 @@ import React from 'react';
 export interface ChatImageGenerationResultStripProps {
   artifactTitle: string;
   modelLabel: string;
+  onContinueEditing?: () => void;
   onOpenArtifactsWorkspace: () => void;
 }
 
 export function ChatImageGenerationResultStrip({
   artifactTitle,
   modelLabel,
+  onContinueEditing,
   onOpenArtifactsWorkspace,
 }: ChatImageGenerationResultStripProps) {
   return (
@@ -65,21 +67,40 @@ export function ChatImageGenerationResultStrip({
         </span>
       </div>
 
-      <button
-        type="button"
-        onClick={onOpenArtifactsWorkspace}
-        className="btn-secondary"
-        style={{
-          height: 30,
-          padding: '0 12px',
-          borderRadius: 9,
-          whiteSpace: 'nowrap',
-          fontSize: 11,
-          fontWeight: 700,
-        }}
-      >
-        打开产物工作区
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {onContinueEditing && (
+          <button
+            type="button"
+            onClick={onContinueEditing}
+            className="btn-secondary"
+            style={{
+              height: 30,
+              padding: '0 12px',
+              borderRadius: 9,
+              whiteSpace: 'nowrap',
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+          >
+            继续编辑这张图
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onOpenArtifactsWorkspace}
+          className="btn-secondary"
+          style={{
+            height: 30,
+            padding: '0 12px',
+            borderRadius: 9,
+            whiteSpace: 'nowrap',
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          打开产物工作区
+        </button>
+      </div>
     </div>
   );
 }

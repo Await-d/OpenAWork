@@ -101,6 +101,7 @@ export interface ChatMessage {
   firstTokenLatencyMs?: number;
   stopReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'error' | string;
   tokenEstimate?: number;
+  providerUsage?: Message['providerUsage'];
   toolCallCount?: number;
   modifiedFilesSummary?: ModifiedFilesSummaryContent;
   status?: 'streaming' | 'completed' | 'error';
@@ -1923,6 +1924,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
       typeof record['tokenEstimate'] === 'number' && Number.isFinite(record['tokenEstimate'])
         ? record['tokenEstimate']
         : undefined;
+    const providerUsage = normalizeProviderUsage(record['providerUsage']);
 
     if (typeof record['content'] === 'string') {
       if (role !== 'tool') {
@@ -1938,6 +1940,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           firstTokenLatencyMs,
           stopReason,
           tokenEstimate,
+          providerUsage,
           status:
             record['status'] === 'streaming' ||
             record['status'] === 'completed' ||
@@ -2020,6 +2023,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           firstTokenLatencyMs,
           stopReason,
           tokenEstimate,
+          providerUsage,
           status: 'completed',
         });
       }
@@ -2126,6 +2130,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
           stopReason,
           tokenEstimate:
             tokenEstimate ?? estimateTokenCount(buildReadableAssistantText(text, reasoningBlocks)),
+          providerUsage,
           toolCallCount: assistantToolCalls.length > 0 ? assistantToolCalls.length : undefined,
           modifiedFilesSummary: modifiedFilesSummary ?? undefined,
           status: 'completed',
@@ -2306,6 +2311,40 @@ function normalizeOptionalString(value: unknown): string | undefined {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeNonNegativeTokenCount(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
+function normalizeProviderUsage(value: unknown): Message['providerUsage'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const inputTokens = normalizeNonNegativeTokenCount(record['inputTokens']);
+  const outputTokens = normalizeNonNegativeTokenCount(record['outputTokens']);
+  const totalTokens = normalizeNonNegativeTokenCount(record['totalTokens']);
+  if (inputTokens === undefined || outputTokens === undefined || totalTokens === undefined) {
+    return undefined;
+  }
+
+  const reasoningTokens = normalizeNonNegativeTokenCount(record['reasoningTokens']);
+  const cacheReadTokens = normalizeNonNegativeTokenCount(record['cacheReadTokens']);
+  const cacheWriteTokens = normalizeNonNegativeTokenCount(record['cacheWriteTokens']);
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+  };
 }
 
 export function matchServerSlashCommand(

@@ -65,6 +65,48 @@ describe('unifiedMessageToModelMessages', () => {
     ]);
   });
 
+  it('emits per-block reasoning with anthropic.signature in providerOptions when blocks present', () => {
+    const result = unifiedMessageToModelMessages({
+      role: 'assistant',
+      content: 'OK',
+      reasoning: {
+        text: 'b1\n\nb2',
+        blocks: [
+          { text: 'b1', signature: 'sig-1' },
+          { text: 'b2', signature: 'sig-2' },
+        ],
+      },
+    });
+    const parts = result[0]!.content as unknown as Array<Record<string, unknown>>;
+    // [reasoning(b1, sig-1), text(' '), reasoning(b2, sig-2), text('OK')]
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toMatchObject({
+      type: 'reasoning',
+      text: 'b1',
+      providerOptions: { anthropic: { signature: 'sig-1' } },
+    });
+    expect(parts[1]).toEqual({ type: 'text', text: ' ' });
+    expect(parts[2]).toMatchObject({
+      type: 'reasoning',
+      text: 'b2',
+      providerOptions: { anthropic: { signature: 'sig-2' } },
+    });
+    expect(parts[3]).toEqual({ type: 'text', text: 'OK' });
+  });
+
+  it('does not insert single-space separator when blocks are unsigned', () => {
+    const result = unifiedMessageToModelMessages({
+      role: 'assistant',
+      content: null,
+      reasoning: {
+        text: 'a\n\nb',
+        blocks: [{ text: 'a' }, { text: 'b' }],
+      },
+    });
+    const parts = result[0]!.content as unknown as Array<Record<string, unknown>>;
+    expect(parts.map((p) => p['type'])).toEqual(['reasoning', 'reasoning']);
+  });
+
   it('drops empty assistant turns', () => {
     const result = unifiedMessageToModelMessages({
       role: 'assistant',
@@ -89,6 +131,7 @@ describe('unifiedMessageToModelMessages', () => {
     const result = unifiedMessageToModelMessages({
       role: 'tool',
       toolCallId: 'c1',
+      toolName: 'read',
       content: 'output',
     });
     expect(result).toEqual([
@@ -98,7 +141,7 @@ describe('unifiedMessageToModelMessages', () => {
           {
             type: 'tool-result',
             toolCallId: 'c1',
-            toolName: '',
+            toolName: 'read',
             output: { type: 'text', value: 'output' },
           },
         ],
@@ -114,10 +157,24 @@ describe('unifiedConversationToModelMessages', () => {
       { role: 'user', content: 'q' },
       { role: 'assistant', content: null },
       { role: 'assistant', content: 'a' },
-      { role: 'tool', toolCallId: 'c1', content: 'r' },
+      { role: 'tool', toolCallId: 'c1', toolName: 'read', content: 'r' },
     ];
     const result = unifiedConversationToModelMessages(messages);
     expect(result.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
+  });
+
+  it('preserves tool-to-user adjacency without injecting assistant acknowledgements', () => {
+    const messages: UnifiedMessage[] = [
+      {
+        role: 'assistant',
+        content: null,
+        toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }],
+      },
+      { role: 'tool', toolCallId: 'c1', toolName: 'read', content: 'r' },
+      { role: 'user', content: 'next' },
+    ];
+    const result = unifiedConversationToModelMessages(messages);
+    expect(result.map((m) => m.role)).toEqual(['assistant', 'tool', 'user']);
   });
 });
 

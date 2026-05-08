@@ -101,6 +101,12 @@ export interface ReasoningContent {
   startedAt?: number;
   /** UNIX millis when the upstream signalled (or fail-safe inferred) the block was complete. */
   endedAt?: number;
+  /**
+   * Anthropic extended-thinking signature for this block. Required to be
+   * replayed verbatim on subsequent turns; without it Anthropic rejects the
+   * assistant turn (`thinking ids found without signature` 400 error).
+   */
+  signature?: string;
 }
 
 export type MessageContent =
@@ -119,4 +125,12 @@ export interface Message {
   clientRequestId?: string;
   durationMs?: number;
   firstTokenLatencyMs?: number;
+  providerUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    reasoningTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
 }

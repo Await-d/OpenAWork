@@ -1,102 +1,187 @@
 /**
- * cache-breakpoints — annotate AI SDK `ModelMessage[]` with Anthropic
- * prompt-caching breakpoints so the upstream caches the leading
- * system / context messages and keeps the most recent two
- * user/assistant turns reusable across consecutive requests.
+ * cache-breakpoints — annotate AI SDK `ModelMessage[]` with prompt-caching
+ * breakpoints so the upstream caches the leading
+ *     system / context messages and keeps the most recent
+ * user/assistant turn reusable across consecutive requests.
  *
  * Why this lives here:
  *   - The legacy `applyCacheBreakpoints` (in routes/upstream-request.ts)
  *     decorates the wire-format Chat-Completions JSON directly. AI SDK
  *     hides the wire shape behind `ModelMessage`, so we have to
- *     inject the same `cache_control: { type: 'ephemeral' }` markers
- *     through `providerOptions.anthropic.cacheControl` on individual
- *     content parts instead.
- *   - The same heuristic (system + last 2 turns) keeps cache hit
+ *     inject the same prompt-cache markers through providerOptions.
+ *   - The same heuristic (system + last turn) keeps cache hit
  *     rates aligned between the legacy and v2 paths.
  *
- * Behaviour matrix (mirrors the legacy implementation):
- *   - Provider type `anthropic` / `claude`: full breakpoint application.
- *   - Provider type `openrouter`: same heuristic — OpenRouter passes
- *     the cache_control hint through to Anthropic-backed models.
- *   - All other providers: noop (the input is returned unchanged).
- *
- * Limitations:
- *   - We mark the entire message via `providerOptions.anthropic` on
- *     the message envelope, not on individual `TextPart`s. The
- *     Anthropic SDK applies the breakpoint to the message's last
- *     content block, which is what the legacy single-block JSON
- *     produced anyway.
+ * Behaviour matrix follows the reference provider transform:
+ *   - Select first 2 system messages plus the last 2 non-system
+ *     messages. The two trailing breakpoints create a rolling window
+ *     so subsequent turns hit the cache even after an extra
+ *     user/tool message is appended (matches opencode's
+ *     `applyCaching` semantics in `provider/transform.ts`).
+ *   - Anthropic / Bedrock use message-level providerOptions.
+ *   - Other providers with array content use the last content part.
  */
 
 import type { ModelMessage } from 'ai';
 
-const EPHEMERAL_CACHE_CONTROL = { type: 'ephemeral' as const };
+type ProviderOptionsRecord = Record<string, unknown>;
 
-function shouldApplyCacheBreakpoints(providerType: string | undefined): boolean {
-  if (!providerType) return false;
-  const kind = providerType.toLowerCase();
-  return kind === 'anthropic' || kind === 'claude' || kind === 'openrouter';
+export interface PromptCacheModelInfo {
+  providerID: string;
+  id: string;
+  api: {
+    id: string;
+    npm: string;
+  };
 }
 
-function withAnthropicCacheControl(message: ModelMessage): ModelMessage {
-  const existing = message.providerOptions ?? {};
-  const existingAnthropic = (existing['anthropic'] ?? {}) as Record<string, unknown>;
+const CACHE_PROVIDER_OPTIONS = {
+  anthropic: {
+    cacheControl: { type: 'ephemeral' },
+  },
+  openrouter: {
+    cacheControl: { type: 'ephemeral' },
+  },
+  bedrock: {
+    cachePoint: { type: 'default' },
+  },
+  openaiCompatible: {
+    cache_control: { type: 'ephemeral' },
+  },
+  copilot: {
+    copilot_cache_control: { type: 'ephemeral' },
+  },
+  alibaba: {
+    cacheControl: { type: 'ephemeral' },
+  },
+} satisfies ProviderOptionsRecord;
+
+function isRecord(value: unknown): value is ProviderOptionsRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function mergeDeep(
+  target: ProviderOptionsRecord,
+  source: ProviderOptionsRecord,
+): ProviderOptionsRecord {
+  const result: ProviderOptionsRecord = { ...target };
+  for (const [key, value] of Object.entries(source)) {
+    const current = result[key];
+    result[key] = isRecord(current) && isRecord(value) ? mergeDeep(current, value) : value;
+  }
+  return result;
+}
+
+function sdkNpmForProviderType(providerType: string): string {
+  if (providerType === 'anthropic' || providerType === 'claude') {
+    return '@ai-sdk/anthropic';
+  }
+  if (providerType.includes('bedrock')) {
+    return '@ai-sdk/amazon-bedrock';
+  }
+  if (providerType === 'alibaba') {
+    return '@ai-sdk/alibaba';
+  }
+  return '@ai-sdk/openai-compatible';
+}
+
+export function buildPromptCacheModelInfo(input: {
+  providerType?: string;
+  model?: string;
+}): PromptCacheModelInfo {
+  const providerType = (input.providerType ?? '').toLowerCase();
+  const providerID = providerType === 'claude' ? 'anthropic' : providerType;
+  const id = input.model ?? providerID;
   return {
-    ...message,
-    providerOptions: {
-      ...existing,
-      anthropic: {
-        ...existingAnthropic,
-        cacheControl: EPHEMERAL_CACHE_CONTROL,
-      },
+    providerID,
+    id,
+    api: {
+      id,
+      npm: sdkNpmForProviderType(providerType),
     },
   };
 }
 
-/**
- * Apply Anthropic prompt-caching breakpoints to a ModelMessage list.
- *
- * Strategy (matches the legacy `applyCacheBreakpoints`):
- *   - Mark up to the first 2 system messages.
- *   - Mark the last 2 non-system messages (user / assistant / tool).
- *
- * The function returns a new array; the input is not mutated.
- */
-export function applyAnthropicCacheBreakpoints(
-  messages: ModelMessage[],
-  providerType: string | undefined,
-): ModelMessage[] {
-  if (!shouldApplyCacheBreakpoints(providerType) || messages.length === 0) {
-    return messages;
-  }
-
-  const indicesToMark = new Set<number>();
-
-  // First two system messages.
-  let systemSeen = 0;
-  for (let i = 0; i < messages.length && systemSeen < 2; i++) {
-    if (messages[i]!.role === 'system') {
-      indicesToMark.add(i);
-      systemSeen++;
-    }
-  }
-
-  // Last two non-system messages.
-  const nonSystemIndices: number[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i]!.role !== 'system') {
-      nonSystemIndices.push(i);
-    }
-  }
-  for (const idx of nonSystemIndices.slice(-2)) {
-    indicesToMark.add(idx);
-  }
-
-  if (indicesToMark.size === 0) {
-    return messages;
-  }
-
-  return messages.map((message, idx) =>
-    indicesToMark.has(idx) ? withAnthropicCacheControl(message) : message,
+function shouldApplyCaching(model: PromptCacheModelInfo): boolean {
+  return (
+    (model.providerID === 'anthropic' ||
+      model.providerID === 'google-vertex-anthropic' ||
+      model.api.id.includes('anthropic') ||
+      model.api.id.includes('claude') ||
+      model.id.includes('anthropic') ||
+      model.id.includes('claude') ||
+      model.api.npm === '@ai-sdk/anthropic' ||
+      model.api.npm === '@ai-sdk/alibaba') &&
+    model.api.npm !== '@ai-sdk/gateway'
   );
+}
+
+function useMessageLevelOptions(model: PromptCacheModelInfo): boolean {
+  return (
+    model.providerID === 'anthropic' ||
+    model.providerID.includes('bedrock') ||
+    model.api.npm === '@ai-sdk/amazon-bedrock'
+  );
+}
+
+function uniqueMessages(messages: ModelMessage[]): ModelMessage[] {
+  const result: ModelMessage[] = [];
+  for (const message of messages) {
+    if (!result.includes(message)) {
+      result.push(message);
+    }
+  }
+  return result;
+}
+
+function mergeProviderOptionsIntoMessage(message: ModelMessage): void {
+  message.providerOptions = mergeDeep(
+    (message.providerOptions ?? {}) as ProviderOptionsRecord,
+    CACHE_PROVIDER_OPTIONS,
+  ) as NonNullable<ModelMessage['providerOptions']>;
+}
+
+function mergeProviderOptionsIntoContentPart(part: ProviderOptionsRecord): void {
+  part['providerOptions'] = mergeDeep(
+    (part['providerOptions'] ?? {}) as ProviderOptionsRecord,
+    CACHE_PROVIDER_OPTIONS,
+  );
+}
+
+export function applyCaching(
+  messages: ModelMessage[],
+  model: PromptCacheModelInfo,
+): ModelMessage[] {
+  if (!shouldApplyCaching(model)) {
+    return messages;
+  }
+
+  const system = messages.filter((message) => message.role === 'system').slice(0, 2);
+  const final = messages.filter((message) => message.role !== 'system').slice(-2);
+
+  for (const message of uniqueMessages([...system, ...final])) {
+    const shouldUseContentOptions =
+      !useMessageLevelOptions(model) &&
+      Array.isArray(message.content) &&
+      message.content.length > 0;
+
+    if (shouldUseContentOptions) {
+      const lastContent = message.content[message.content.length - 1] as
+        | ProviderOptionsRecord
+        | undefined;
+      if (
+        lastContent &&
+        typeof lastContent === 'object' &&
+        lastContent['type'] !== 'tool-approval-request' &&
+        lastContent['type'] !== 'tool-approval-response'
+      ) {
+        mergeProviderOptionsIntoContentPart(lastContent);
+        continue;
+      }
+    }
+
+    mergeProviderOptionsIntoMessage(message);
+  }
+
+  return messages;
 }

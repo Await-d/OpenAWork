@@ -7,6 +7,12 @@ import {
 } from '@openAwork/shared';
 import type { SavedChatImageDefaults } from '../../utils/chat-session-defaults.js';
 
+export interface ChatImageGenerationReferenceArtifact {
+  artifactId: string;
+  fileName?: string;
+  title: string;
+}
+
 export interface ChatImageGenerationControlsProps {
   busy: boolean;
   disabled: boolean;
@@ -15,7 +21,10 @@ export interface ChatImageGenerationControlsProps {
   imageMode: boolean;
   imageModelLabel: string;
   imagePluginEnabled?: boolean;
+  referenceArtifacts?: ChatImageGenerationReferenceArtifact[];
+  selectedReferenceArtifactId?: string | null;
   onToggleImageMode: () => void;
+  onSelectReferenceArtifactId?: (artifactId: string | null) => void;
   onUpdateImageDefaults: (updates: Partial<SavedChatImageDefaults>) => void;
   variant: 'toggle' | 'panel';
 }
@@ -51,13 +60,19 @@ export function ChatImageGenerationControls({
   imageMode,
   imageModelLabel,
   imagePluginEnabled = true,
+  referenceArtifacts = [],
+  selectedReferenceArtifactId = null,
   onToggleImageMode,
+  onSelectReferenceArtifactId,
   onUpdateImageDefaults,
   variant,
 }: ChatImageGenerationControlsProps) {
   const [forceCustomSize, setForceCustomSize] = useState(false);
   const pluginOff = !imagePluginEnabled;
   const toggleDisabled = disabled || !hasConfiguredModel || pluginOff;
+  const selectedReference = referenceArtifacts.find(
+    (artifact) => artifact.artifactId === selectedReferenceArtifactId,
+  );
 
   if (variant === 'toggle') {
     return (
@@ -200,6 +215,51 @@ export function ChatImageGenerationControls({
             <path d="M6 6l12 12" />
           </svg>
         </button>
+      </div>
+
+      <div style={{ display: 'grid', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>参考图</span>
+          <select
+            disabled={busy || disabled || !onSelectReferenceArtifactId}
+            value={selectedReferenceArtifactId ?? ''}
+            onChange={(event) => onSelectReferenceArtifactId?.(event.target.value || null)}
+            style={{ ...selectStyle, minHeight: 26, minWidth: 220, padding: '0 8px', fontSize: 11 }}
+          >
+            <option value="">不使用</option>
+            {referenceArtifacts.map((artifact) => (
+              <option key={artifact.artifactId} value={artifact.artifactId}>
+                {artifact.fileName ?? artifact.title}
+              </option>
+            ))}
+          </select>
+          {selectedReferenceArtifactId && onSelectReferenceArtifactId && (
+            <button
+              type="button"
+              disabled={busy || disabled}
+              onClick={() => onSelectReferenceArtifactId(null)}
+              style={{
+                borderRadius: 999,
+                border: '1px solid var(--border-subtle)',
+                background: 'transparent',
+                color: 'var(--text-2)',
+                padding: '2px 8px',
+                fontSize: 11,
+                cursor: busy || disabled ? 'default' : 'pointer',
+                opacity: busy || disabled ? 0.5 : 1,
+              }}
+            >
+              清除
+            </button>
+          )}
+        </div>
+        <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          {selectedReference
+            ? `当前将基于“${selectedReference.title}”执行编辑。`
+            : referenceArtifacts.length > 0
+              ? '可直接选择当前会话中的已有图片作为参考图，或上传一张新图片。'
+              : '当前会话暂无可复用的图片产物，仍可上传图片作为参考图。'}
+        </span>
       </div>
 
       {/* Size presets - compact */}

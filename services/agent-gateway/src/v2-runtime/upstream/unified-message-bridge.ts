@@ -50,6 +50,24 @@ import type {
 interface ReasoningPart {
   type: 'reasoning';
   text: string;
+  /**
+   * Provider-specific metadata, namespaced by SDK provider key (e.g.
+   * `anthropic`, `bedrock`). Used to carry Anthropic extended-thinking
+   * `signature` so the AI SDK serialises a `{type:"thinking", thinking,
+   * signature}` block on the wire.
+   *
+   * Typed loosely as `Record<string, Record<string, string>>` because
+   * the only field we currently emit is `signature: string`. The AI
+   * SDK's `ProviderOptions` requires `JSONValue` recursively so a
+   * fully-typed value would explode this surface; we narrow our local
+   * shape to the subset we need and cast at the assignment site.
+   */
+  providerOptions?: Record<string, Record<string, string>>;
+}
+
+interface TextLikePart {
+  type: 'text';
+  text: string;
 }
 
 function safeJsonParse(raw: string | undefined): unknown {
@@ -96,9 +114,47 @@ function bridgeUser(message: UserMessageUnified): UserModelMessage[] {
 function bridgeAssistant(message: AssistantMessageUnified): AssistantModelMessage[] {
   const parts: Array<TextPart | ReasoningPart | ToolCallPart> = [];
 
-  const reasoningText = message.reasoning?.text;
-  if (typeof reasoningText === 'string' && reasoningText.length > 0) {
-    parts.push({ type: 'reasoning', text: reasoningText });
+  // Per-block reasoning has priority — when present, each block is
+  // emitted as its own ReasoningPart carrying provider-specific
+  // metadata (notably Anthropic's extended-thinking `signature`). Only
+  // when `blocks` is absent do we fall back to the aggregated `text`.
+  const blocks = message.reasoning?.blocks ?? [];
+  const hasBlocks = blocks.length > 0;
+  if (hasBlocks) {
+    const hasAnySignature = blocks.some(
+      (b) => typeof b.signature === 'string' && b.signature.length > 0,
+    );
+    blocks.forEach((block, index) => {
+      const reasoningPart: ReasoningPart = {
+        type: 'reasoning',
+        text: block.text,
+        ...(typeof block.signature === 'string' && block.signature.length > 0
+          ? { providerOptions: { anthropic: { signature: block.signature } } }
+          : {}),
+      };
+      parts.push(reasoningPart);
+      // Anthropic adaptive thinking emits structural empty-text
+      // separators between consecutive signed reasoning blocks. The AI
+      // SDK strips empty text, and Anthropic rejects the resulting
+      // back-to-back thinking sequence with `tool_use ids found
+      // without tool_result blocks`. Insert a single space text part
+      // as a separator: it survives the SDK filter and does not alter
+      // the surrounding signed thinking bytes. Mirrors opencode
+      // message-v2.ts:866-868.
+      if (
+        hasAnySignature &&
+        index < blocks.length - 1 &&
+        typeof block.signature === 'string' &&
+        block.signature.length > 0
+      ) {
+        parts.push({ type: 'text', text: ' ' } satisfies TextLikePart);
+      }
+    });
+  } else {
+    const reasoningText = message.reasoning?.text;
+    if (typeof reasoningText === 'string' && reasoningText.length > 0) {
+      parts.push({ type: 'reasoning', text: reasoningText });
+    }
   }
 
   if (typeof message.content === 'string' && message.content.length > 0) {
@@ -117,7 +173,16 @@ function bridgeAssistant(message: AssistantMessageUnified): AssistantModelMessag
   if (parts.length === 0) {
     return [];
   }
-  return [{ role: 'assistant', content: parts }];
+  // The local `ReasoningPart` widens `providerOptions` for ergonomics
+  // (Record<string, Record<string, string>>); the AI SDK's
+  // `AssistantContent` expects the same field typed as
+  // `SharedV2ProviderOptions` (deep-JSONValue). Cast at the boundary.
+  return [
+    {
+      role: 'assistant',
+      content: parts as unknown as AssistantModelMessage['content'],
+    },
+  ];
 }
 
 function bridgeTool(message: ToolResultMessage): ModelMessage[] {
@@ -128,7 +193,7 @@ function bridgeTool(message: ToolResultMessage): ModelMessage[] {
         {
           type: 'tool-result',
           toolCallId: message.toolCallId,
-          toolName: '',
+          toolName: message.toolName ?? '',
           output: { type: 'text', value: message.content },
         },
       ],

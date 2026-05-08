@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@openAwork/shared';
 import {
   applyToolResultToLocalAssistantMessages,
+  normalizeChatMessages,
   partsFromOrderedAssistantContent,
   type ChatMessage,
   type ChatMessagePart,
@@ -33,6 +34,34 @@ import {
 } from './support.js';
 
 const MSG_ID = 'msg-1';
+
+describe('normalizeChatMessages', () => {
+  it('preserves assistant provider usage from recovered messages', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        createdAt: 1,
+        providerUsage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 130,
+          reasoningTokens: 5,
+          cacheReadTokens: 5,
+        },
+      },
+    ]);
+
+    expect(messages[0]?.providerUsage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 130,
+      reasoningTokens: 5,
+      cacheReadTokens: 5,
+    });
+  });
+});
 
 describe('partsFromOrderedAssistantContent', () => {
   it('preserves wire-arrival ordering of reasoning / text / tool segments', () => {

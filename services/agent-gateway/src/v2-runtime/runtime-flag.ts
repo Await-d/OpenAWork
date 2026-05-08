@@ -115,39 +115,6 @@ export function isV2Upstream(): boolean {
   return getRuntimeFlags().upstream === 'v2';
 }
 
-/**
- * Decide whether the v2 upstream path should be taken for a specific
- * route. Returns `false` when:
- *   - The global / per-layer flag is `v1`.
- *   - An allowlist is configured but the providerType is not in it.
- *
- * The check is intentionally case-insensitive on `providerType` so
- * configuration files (`anthropic`, `Anthropic`, `ANTHROPIC`) all
- * resolve to the same membership decision.
- */
-export function isV2UpstreamForProviderType(providerType: string | undefined): boolean {
-  const flags = getRuntimeFlags();
-  if (flags.upstream !== 'v2') return false;
-  if (flags.upstreamProviderAllowlist.size === 0) return true;
-  if (!providerType) return false;
-  return flags.upstreamProviderAllowlist.has(providerType.toLowerCase());
-}
-
-/**
- * Shadow-mode opt-in. When `OPENAWORK_RUNTIME_UPSTREAM_SHADOW=1` is
- * set, the gateway runs the v1 upstream path as usual *and* computes
- * the v2 bridge output offline so it can audit-log structural diffs
- * (no second LLM call). This is independent from the per-layer
- * upstream flag — operators may turn shadow on while keeping the
- * production path on v1.
- */
-export function isV2UpstreamShadow(env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = env['OPENAWORK_RUNTIME_UPSTREAM_SHADOW'];
-  if (!value) return false;
-  const normalised = value.trim().toLowerCase();
-  return normalised === '1' || normalised === 'true' || normalised === 'on';
-}
-
 export function isV2Services(): boolean {
   return getRuntimeFlags().services === 'v2';
 }

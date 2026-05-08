@@ -66,7 +66,7 @@ import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tool-sandbox.js';
-import { buildGatewayToolDefinitions } from './stream-protocol.js';
+import { buildGatewayToolDefinitions } from '../tool-definitions.js';
 import {
   loadDynamicToolsForWorkspace,
   buildDynamicGatewayToolDefinitions,
@@ -1871,7 +1871,9 @@ export async function handleStreamRequest(input: {
         parseStoredJson(compactionSettingsRow?.value),
       );
       let syntheticContinuationPrompt: string | undefined;
-      let lastRoundUsage: { inputTokens: number } | undefined;
+      let lastRoundUsage:
+        | { inputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+        | undefined;
 
       for (let round = 1; ; round += 1) {
         // P0: Proactive compaction — compact before overflow if token usage is near threshold.
@@ -2017,7 +2019,7 @@ export async function handleStreamRequest(input: {
         syntheticContinuationPrompt = undefined;
 
         if (result.usage) {
-          lastRoundUsage = { inputTokens: result.usage.inputTokens };
+          lastRoundUsage = result.usage;
           emitChunk(
             buildStreamUsageChunk({
               eventSequence,

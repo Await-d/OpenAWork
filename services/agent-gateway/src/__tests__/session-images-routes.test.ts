@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     editImageWithOpenAiMock: vi.fn(),
     createArtifactMock: vi.fn(),
     generateImageWithOpenAiMock: vi.fn(),
+    getArtifactByIdMock: vi.fn(),
     getImageProviderConfigMock: vi.fn(),
     listArtifactsMock: vi.fn(),
     parseStoredImageGenerationDefaultsMock: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('../db.js', () => ({
 
 vi.mock('../artifact-content-store.js', () => ({
   createArtifact: mocks.createArtifactMock,
+  getArtifactById: mocks.getArtifactByIdMock,
 }));
 
 vi.mock('@openAwork/artifacts', () => ({
@@ -93,6 +95,7 @@ describe('session images routes', () => {
     mocks.createArtifactMock.mockReset();
     mocks.editImageWithOpenAiMock.mockReset();
     mocks.generateImageWithOpenAiMock.mockReset();
+    mocks.getArtifactByIdMock.mockReset();
     mocks.getImageProviderConfigMock.mockReset();
     mocks.listArtifactsMock.mockReset();
     mocks.parseStoredImageGenerationDefaultsMock.mockReset();
@@ -144,6 +147,7 @@ describe('session images routes', () => {
       revisedPrompt: '一张极简蓝鲸海报',
       size: '1024x1024',
     });
+    mocks.getArtifactByIdMock.mockReturnValue(undefined);
     mocks.sqliteGetMock.mockImplementation((query: string) => {
       if (query.includes('FROM sessions')) {
         return { id: 'session-1' };
@@ -419,6 +423,73 @@ describe('session images routes', () => {
       messageSummary:
         '已编辑 1 张图片（gpt-image-2 · 1024x1024 · PNG）。 上游已对提示词做轻微改写。',
     });
+
+    await app.close();
+  });
+
+  it('uses stored content image artifacts as edit inputs when upload records are absent', async () => {
+    mocks.listArtifactsMock.mockResolvedValue([]);
+    mocks.getArtifactByIdMock.mockReturnValue({
+      id: 'artifact-generated-1',
+      sessionId: 'session-1',
+      userId: 'user-a',
+      type: 'image',
+      title: '已生成的蓝鲸图',
+      content: `data:image/webp;base64,${Buffer.from('stored-image-binary').toString('base64')}`,
+      version: 1,
+      parentVersionId: null,
+      metadata: {
+        fileName: 'generated-whale.webp',
+        mimeType: 'image/webp',
+      },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      updatedAt: '2026-04-22T00:00:00.000Z',
+    });
+    mocks.createArtifactMock.mockReturnValue({
+      id: 'artifact-image-edit-2',
+      sessionId: 'session-1',
+      userId: 'user-a',
+      type: 'image',
+      title: '继续编辑蓝鲸图',
+      content: 'data:image/png;base64,ZWRpdGVkLWltYWdlLWJpbmFyeQ==',
+      version: 1,
+      parentVersionId: null,
+      metadata: { modelId: 'gpt-image-2', sourceArtifactId: 'artifact-generated-1' },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      updatedAt: '2026-04-22T00:00:00.000Z',
+    });
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations',
+      payload: {
+        prompt: '把这张已生成图片改成海报风格',
+        inputArtifacts: [{ artifactId: 'artifact-generated-1' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mocks.editImageWithOpenAiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputImage: expect.objectContaining({
+          bytes: Buffer.from('stored-image-binary'),
+          fileName: 'generated-whale.webp',
+          mimeType: 'image/webp',
+        }),
+      }),
+    );
+    expect(mocks.createArtifactMock).toHaveBeenCalledWith(
+      'user-a',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          sourceArtifactId: 'artifact-generated-1',
+        }),
+      }),
+    );
 
     await app.close();
   });

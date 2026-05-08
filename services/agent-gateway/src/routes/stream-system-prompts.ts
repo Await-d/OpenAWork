@@ -364,6 +364,48 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
 }
 
 /**
+ * Split the system prompt chain into a stable header + dynamic tail.
+ *
+ * Anthropic prompt caching keys on byte-identical prefixes. Mixing
+ * dynamic per-round content (orchestrator delegation tables, start-work
+ * boulder state, slash-command instructions) with stable session-level
+ * content (route prompt, workspace context, LSP guidance, mode prompts,
+ * tool-output reference, thinking-language hint) inside one big system
+ * message means a single change in the dynamic part invalidates the
+ * cache prefix for *all* upstream rounds in the session.
+ *
+ * Mirrors opencode's `[header, rest.join("\n")]` 2-segment structure
+ * (`packages/opencode/src/session/llm.ts` ~lines 117–128) so the first
+ * Anthropic system block — which always carries `cache_control` — only
+ * contains the parts that change rarely.
+ */
+export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
+  stable: string;
+  dynamic: string;
+} {
+  const stableSlots: string[] = [
+    input.routeSystemPrompt ?? ROUTE_SYSTEM_PROMPT_PLACEHOLDER,
+    input.workspaceCtx ?? WORKSPACE_CTX_PLACEHOLDER,
+    input.lspGuidance ?? LSP_GUIDANCE_PLACEHOLDER,
+    input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
+    input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
+    TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
+  ];
+
+  const dynamicSlots: string[] = [
+    input.dynamicAgentPrompt ?? '',
+    input.startWorkContext ?? '',
+    input.commandContext ?? '',
+  ];
+
+  return {
+    stable: stableSlots.filter((s) => s.length > 0).join('\n\n'),
+    dynamic: dynamicSlots.filter((s) => s.length > 0).join('\n\n'),
+  };
+}
+
+/**
  * Build 2-part system messages optimized for prompt caching.
  *
  * Part 1 (stable prefix): content that rarely changes within a session.

@@ -82,7 +82,7 @@ export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<voi
   }
 
   try {
-    const rawOutput = await callTitleLlm(input.route, input.userMessage);
+    const rawOutput = await callTitleLlm(input.route, input.userMessage, input.sessionId);
     if (!rawOutput) return;
 
     const lines = rawOutput
@@ -112,7 +112,11 @@ export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<voi
   }
 }
 
-async function callTitleLlm(route: ModelRouteConfig, userMessage: string): Promise<string | null> {
+async function callTitleLlm(
+  route: ModelRouteConfig,
+  userMessage: string,
+  sessionId: string,
+): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
 
@@ -125,6 +129,7 @@ async function callTitleLlm(route: ModelRouteConfig, userMessage: string): Promi
         ? { headers: route.requestOverrides.headers }
         : {}),
       model: route.model,
+      sessionId,
       system: TITLE_SYSTEM_PROMPT,
       messages: [
         {

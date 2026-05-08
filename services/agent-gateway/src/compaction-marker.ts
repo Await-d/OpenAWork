@@ -15,6 +15,14 @@ export interface CompactionMarkerRecord {
   persistedMemory?: PersistedCompactionMemory | null;
   signature?: string;
   summary: string;
+  /**
+   * ID of the first message in the verbatim tail that the compaction
+   * preserved. Subsequent compaction rounds use it to know exactly
+   * where the prior summary stops, so they can re-summarize from
+   * the same boundary instead of re-deriving it from message counts.
+   * Mirrors opencode's `tail_start_id` on the compaction part.
+   */
+  tailStartMessageId?: string;
   trigger: string;
 }
 
@@ -24,6 +32,7 @@ export function buildCompactionMarkerPayload(
     persistedMemory?: unknown;
     signature?: string;
     summary: string;
+    tailStartMessageId?: string;
     trigger: string;
   } & CompactionMarkerCodecOptions,
 ): { payload: Record<string, unknown>; clientRequestId: string; text: string } {
@@ -41,6 +50,9 @@ export function buildCompactionMarkerPayload(
         : {}),
       ...(typeof input.omittedMessages === 'number'
         ? { omittedMessages: input.omittedMessages }
+        : {}),
+      ...(typeof input.tailStartMessageId === 'string' && input.tailStartMessageId.length > 0
+        ? { tailStartMessageId: input.tailStartMessageId }
         : {}),
     },
   };
@@ -84,6 +96,10 @@ export function parseCompactionMarkerText(
         : {}),
       ...(typeof parsed.payload.omittedMessages === 'number'
         ? { omittedMessages: parsed.payload.omittedMessages }
+        : {}),
+      ...(typeof parsed.payload.tailStartMessageId === 'string' &&
+      parsed.payload.tailStartMessageId.length > 0
+        ? { tailStartMessageId: parsed.payload.tailStartMessageId }
         : {}),
     };
   } catch {
@@ -135,6 +151,7 @@ export function buildCompactionMarkerContent(
     persistedMemory?: unknown;
     signature?: string;
     summary: string;
+    tailStartMessageId?: string;
     trigger: string;
   } & CompactionMarkerCodecOptions,
 ): { clientRequestId: string; content: MessageContent[] } {

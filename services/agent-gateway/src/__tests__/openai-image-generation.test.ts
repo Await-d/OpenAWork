@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateImageWithOpenAi } from '../image-generation/openai-image-generation.js';
+import {
+  editImageWithOpenAi,
+  generateImageWithOpenAi,
+} from '../image-generation/openai-image-generation.js';
 
 describe('generateImageWithOpenAi', () => {
   beforeEach(() => {
@@ -84,5 +87,85 @@ describe('generateImageWithOpenAi', () => {
     });
 
     await assertion;
+  });
+
+  it('applies request body overrides to image edit multipart requests', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: Buffer.from('edited-image').toString('base64') }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await editImageWithOpenAi({
+      apiBaseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai',
+      background: 'auto',
+      inputImage: {
+        bytes: Buffer.from('input-image'),
+        fileName: 'input.png',
+        mimeType: 'image/png',
+      },
+      model: 'gpt-image-2',
+      outputFormat: 'png',
+      prompt: '把图改成海报风格',
+      providerType: 'openai',
+      quality: 'medium',
+      requestOverrides: {
+        body: {
+          moderation: 'low',
+          user: 'user-1',
+        },
+      },
+      size: '1024x1024',
+    });
+
+    const fetchInit = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    expect(fetchInit?.body).toBeInstanceOf(FormData);
+    const form = fetchInit?.body as FormData;
+    expect(form.get('model')).toBe('gpt-image-2');
+    expect(form.get('moderation')).toBe('low');
+    expect(form.get('user')).toBe('user-1');
+    expect(form.get('image')).toBeInstanceOf(File);
+  });
+
+  it('allows request overrides to omit multipart edit fields', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: Buffer.from('edited-image').toString('base64') }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await editImageWithOpenAi({
+      apiBaseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai',
+      background: 'auto',
+      inputImage: {
+        bytes: Buffer.from('input-image'),
+        fileName: 'input.png',
+        mimeType: 'image/png',
+      },
+      model: 'gpt-image-2',
+      outputFormat: 'png',
+      prompt: '把图改成极简风格',
+      providerType: 'openai',
+      quality: 'medium',
+      requestOverrides: {
+        omitBodyKeys: ['background', 'image'],
+      },
+      size: '1024x1024',
+    });
+
+    const fetchInit = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    expect(fetchInit?.body).toBeInstanceOf(FormData);
+    const form = fetchInit?.body as FormData;
+    expect(form.has('background')).toBe(false);
+    expect(form.has('image')).toBe(false);
+    expect(form.get('prompt')).toBe('把图改成极简风格');
   });
 });

@@ -41,15 +41,26 @@
  */
 
 import type { StreamChunk, StreamDoneChunk, StreamErrorChunk } from '@openAwork/shared';
+import type { RequestOverrides } from '@openAwork/agent-core';
+import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
 import type { ModelMessage, StreamTextResult, ToolSet } from 'ai';
-import { streamText } from 'ai';
-import { applyAnthropicCacheBreakpoints } from './cache-breakpoints.js';
+import { streamText, tool as defineTool, jsonSchema } from 'ai';
+import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
 import type { V2LanguageModel } from './provider.js';
-import { buildProviderOptions, type ThinkingConfig } from './provider-options.js';
+import {
+  buildBaseProviderOptions,
+  buildProviderOptions,
+  buildProviderOptionsModelInfo,
+  providerOptions,
+  type ThinkingConfig,
+} from './provider-options.js';
+import { applyProviderMessageTransforms } from './message-transforms.js';
 
 export interface RunUpstreamStreamInput {
   /** AI SDK language model handle (build via `buildAISdkProvider`). */
   model: V2LanguageModel;
+  /** Model identifier used for provider transform decisions. */
+  modelId?: string;
   /** Conversation history in AI SDK's `ModelMessage` shape. */
   messages: ModelMessage[];
   /** Optional tool set — disabled by default during the migration. */
@@ -57,6 +68,7 @@ export interface RunUpstreamStreamInput {
   /** RNG-style identifiers carried into emitted StreamChunks for replay. */
   runId?: string;
   agentId?: string;
+  sessionId?: string;
   /** Abort signal forwarded to the AI SDK. */
   signal?: AbortSignal;
   /** Optional system prompt. */
@@ -65,9 +77,12 @@ export interface RunUpstreamStreamInput {
   temperature?: number;
   maxOutputTokens?: number;
   topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  requestOverrides?: RequestOverrides;
   /**
-   * Provider type — used to decide whether to apply Anthropic
-   * prompt-cache breakpoints. Pass the OpenAWork-side identifier
+   * Provider type — used to decide whether to apply prompt-cache
+   * breakpoints. Pass the OpenAWork-side identifier
    * (e.g. `'anthropic'`, `'openai'`, `'openrouter'`).
    */
   providerType?: string;
@@ -76,6 +91,16 @@ export interface RunUpstreamStreamInput {
    * derive AI SDK `providerOptions` automatically.
    */
   thinking?: ThinkingConfig;
+  /**
+   * When true, inject a `_noop` stub tool whenever the conversation
+   * history contains tool_call / tool_result parts but the caller
+   * passed no active tools. Mirrors opencode's LiteLLM/Bedrock
+   * compatibility shim — those proxies reject requests where the
+   * message history references tools but the request has no `tools`
+   * parameter (e.g. during compaction). Default: auto-detect via
+   * `providerType` containing "litellm" / "bedrock".
+   */
+  litellmProxy?: boolean;
   /**
    * Maximum number of retry attempts the AI SDK should perform on
    * transient transport / 5xx / 429 errors. Mirrors the legacy
@@ -99,6 +124,13 @@ export interface RunUpstreamStreamInput {
       totalTokens: number | undefined;
       reasoningTokens?: number | undefined;
       cachedInputTokens?: number | undefined;
+      inputTokenDetails?: {
+        cacheReadTokens?: number | undefined;
+        cacheWriteTokens?: number | undefined;
+      };
+      outputTokenDetails?: {
+        reasoningTokens?: number | undefined;
+      };
     };
   }) => void;
 }
@@ -120,9 +152,104 @@ function mapFinishReason(value: string | undefined): StreamDoneChunk['stopReason
   return FINISH_REASON_TO_STOP[value] ?? 'end_turn';
 }
 
+function shouldOmit(upstreamKeys: string[] | undefined, ...candidates: string[]): boolean {
+  if (!upstreamKeys || upstreamKeys.length === 0) return false;
+  return candidates.some((k) => upstreamKeys.includes(k));
+}
+
+type ProviderOptionsRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is ProviderOptionsRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function mergeDeep(
+  target: ProviderOptionsRecord,
+  source: ProviderOptionsRecord,
+): ProviderOptionsRecord {
+  const result: ProviderOptionsRecord = { ...target };
+  for (const [key, value] of Object.entries(source)) {
+    const current = result[key];
+    result[key] = isRecord(current) && isRecord(value) ? mergeDeep(current, value) : value;
+  }
+  return result;
+}
+
+function mergeProviderOptions(
+  ...items: Array<SharedV2ProviderOptions | undefined>
+): SharedV2ProviderOptions | undefined {
+  const merged = items.reduce<ProviderOptionsRecord>((acc, item) => {
+    if (!item) return acc;
+    return mergeDeep(acc, item as ProviderOptionsRecord);
+  }, {});
+  return Object.keys(merged).length > 0 ? (merged as SharedV2ProviderOptions) : undefined;
+}
+
+/**
+ * True if any message in the history carries a `tool-call` /
+ * `tool-result` part. Used to decide whether the LiteLLM/Bedrock
+ * `_noop` stub must be injected to satisfy proxies that demand a
+ * `tools` parameter whenever the conversation references tools.
+ *
+ * Mirrors opencode's `hasToolCalls` (`session/llm.ts`).
+ */
+function hasToolCallsInHistory(messages: ModelMessage[]): boolean {
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    for (const part of msg.content) {
+      const partType = (part as { type?: unknown }).type;
+      if (partType === 'tool-call' || partType === 'tool-result') return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Heuristic: does this provider need the LiteLLM/Bedrock `_noop`
+ * compatibility stub? Auto-detected from the OpenAWork-side provider
+ * type identifier; explicit `litellmProxy: true/false` always wins.
+ */
+function shouldInjectNoopStub(input: { litellmProxy?: boolean; providerType?: string }): boolean {
+  if (typeof input.litellmProxy === 'boolean') return input.litellmProxy;
+  const pt = (input.providerType ?? '').toLowerCase();
+  return pt.includes('litellm') || pt.includes('bedrock') || pt.includes('github-copilot');
+}
+
+const NOOP_TOOL_DEFINITION = defineTool({
+  description:
+    'Do not call this tool. It exists only for API compatibility and must never be invoked.',
+  inputSchema: jsonSchema({
+    type: 'object',
+    properties: {
+      reason: { type: 'string', description: 'Unused' },
+    },
+  }),
+  execute: async () => ({ output: '', title: '', metadata: {} }),
+});
+
+function buildRequestOverrideProviderOptions(input: {
+  model: string;
+  providerType?: string;
+  requestOverrides?: RequestOverrides;
+}): SharedV2ProviderOptions | undefined {
+  const body = input.requestOverrides?.body;
+  if (!body || Object.keys(body).length === 0) return undefined;
+  const omitted = new Set(input.requestOverrides?.omitBodyKeys ?? []);
+  const filteredBody = Object.fromEntries(
+    Object.entries(body).filter(([key]) => !omitted.has(key)),
+  );
+  if (Object.keys(filteredBody).length === 0) return undefined;
+  const modelInfo = buildProviderOptionsModelInfo({
+    providerType: input.providerType ?? 'custom',
+    model: input.model,
+  });
+  return providerOptions(modelInfo, { body: filteredBody as JSONValue });
+}
+
 interface RunnerState {
   runId?: string;
   agentId?: string;
+  sessionId?: string;
   thinkingActive: boolean;
   thinkingItemId?: string;
   /**
@@ -159,41 +286,104 @@ export async function* runUpstreamStream(
     doneEmitted: false,
   };
 
-  // Decorate the conversation with Anthropic prompt-cache breakpoints
-  // when applicable. Noop for non-anthropic / non-openrouter providers.
-  const decoratedMessages = applyAnthropicCacheBreakpoints(input.messages, input.providerType);
-
   // Synthesise AI SDK providerOptions for thinking / reasoning when
-  // a thinking config is provided. The model id used for the lookup
-  // is recovered from the model handle when possible (AI SDK
-  // V2/V3 expose `modelId`); fall back to the empty string otherwise
-  // — buildProviderOptions only needs it for vendor-specific gating.
+  // a thinking config is provided.
   const modelIdForOptions =
-    'modelId' in input.model && typeof (input.model as { modelId?: unknown }).modelId === 'string'
+    input.modelId ??
+    ('modelId' in input.model && typeof (input.model as { modelId?: unknown }).modelId === 'string'
       ? (input.model as { modelId: string }).modelId
-      : '';
-  const providerOptions = buildProviderOptions({
-    ...(input.thinking ? { thinking: input.thinking } : {}),
+      : '');
+  const transformedMessages = applyProviderMessageTransforms(input.messages, {
+    providerType: input.providerType,
     model: modelIdForOptions,
   });
+  // Decorate the conversation with prompt-cache breakpoints when applicable.
+  const decoratedMessages = applyCaching(
+    transformedMessages,
+    buildPromptCacheModelInfo({ providerType: input.providerType, model: modelIdForOptions }),
+  );
+  const omit = input.requestOverrides?.omitBodyKeys;
+  const providerOptions = mergeProviderOptions(
+    buildBaseProviderOptions({
+      model: modelIdForOptions,
+      providerType: input.providerType,
+      sessionId: input.sessionId,
+    }),
+    buildRequestOverrideProviderOptions({
+      model: modelIdForOptions,
+      providerType: input.providerType,
+      requestOverrides: input.requestOverrides,
+    }),
+    buildProviderOptions({
+      ...(input.thinking ? { thinking: input.thinking } : {}),
+      model: modelIdForOptions,
+    }),
+  );
+  const temperature = input.requestOverrides?.temperature ?? input.temperature;
+  const maxOutputTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
+  const topP = input.requestOverrides?.topP ?? input.topP;
+  const frequencyPenalty = input.requestOverrides?.frequencyPenalty ?? input.frequencyPenalty;
+  const presencePenalty = input.requestOverrides?.presencePenalty ?? input.presencePenalty;
 
   // `ai@5.x` types `streamText`'s model parameter as the V2 union, but
   // `@ai-sdk/openai-compatible@2.x` already emits V3 instances. Both
   // shapes are runtime-compatible; until the SDK aligns the type
   // surface we cast through `unknown` at this single boundary instead
   // of forcing every caller to do so.
+  // LiteLLM/Bedrock proxies reject requests where the message history
+  // references tools but no `tools` parameter is present. When there are
+  // no active tools (e.g. compaction round) inject a `_noop` stub.
+  const incomingTools = input.tools;
+  const needsStub =
+    (!incomingTools || Object.keys(incomingTools).length === 0) &&
+    hasToolCallsInHistory(decoratedMessages) &&
+    shouldInjectNoopStub({ litellmProxy: input.litellmProxy, providerType: input.providerType });
+  const effectiveTools: ToolSet | undefined = needsStub
+    ? ({ _noop: NOOP_TOOL_DEFINITION } as unknown as ToolSet)
+    : incomingTools;
+  const toolNameLookup = new Map<string, string>();
+  if (effectiveTools) {
+    for (const name of Object.keys(effectiveTools)) {
+      toolNameLookup.set(name.toLowerCase(), name);
+    }
+  }
+
   type StreamTextModelParam = Parameters<typeof streamText>[0]['model'];
   const result = streamText({
     model: input.model as unknown as StreamTextModelParam,
     messages: decoratedMessages,
-    ...(input.tools ? { tools: input.tools } : {}),
+    ...(effectiveTools ? { tools: effectiveTools } : {}),
+    // Repair tool calls whose name only differs in case before the AI
+    // SDK rejects them. Matches opencode's `experimental_repairToolCall`.
+    ...(effectiveTools
+      ? {
+          experimental_repairToolCall: (async (failed: { toolCall: { toolName: string } }) => {
+            const requested = failed.toolCall.toolName;
+            const lower = requested.toLowerCase();
+            const canonical = toolNameLookup.get(lower);
+            if (canonical && canonical !== requested) {
+              return { ...failed.toolCall, toolName: canonical };
+            }
+            return null;
+          }) as Parameters<typeof streamText>[0]['experimental_repairToolCall'],
+        }
+      : {}),
     ...(input.system ? { system: input.system } : {}),
     ...(providerOptions ? { providerOptions } : {}),
-    ...(typeof input.temperature === 'number' ? { temperature: input.temperature } : {}),
-    ...(typeof input.maxOutputTokens === 'number'
-      ? { maxOutputTokens: input.maxOutputTokens }
+    ...(typeof temperature === 'number' && !shouldOmit(omit, 'temperature') ? { temperature } : {}),
+    ...(typeof maxOutputTokens === 'number' &&
+    !shouldOmit(omit, 'max_tokens', 'max_output_tokens', 'maxOutputTokens')
+      ? { maxOutputTokens }
       : {}),
-    ...(typeof input.topP === 'number' ? { topP: input.topP } : {}),
+    ...(typeof topP === 'number' && !shouldOmit(omit, 'top_p', 'topP') ? { topP } : {}),
+    ...(typeof frequencyPenalty === 'number' &&
+    !shouldOmit(omit, 'frequency_penalty', 'frequencyPenalty')
+      ? { frequencyPenalty }
+      : {}),
+    ...(typeof presencePenalty === 'number' &&
+    !shouldOmit(omit, 'presence_penalty', 'presencePenalty')
+      ? { presencePenalty }
+      : {}),
     ...(typeof input.maxRetries === 'number' ? { maxRetries: input.maxRetries } : {}),
     abortSignal: input.signal,
   }) as unknown as StreamTextResult<ToolSet, never>;
@@ -239,9 +429,23 @@ export async function* runUpstreamStream(
         const itemId = 'id' in part && typeof part.id === 'string' ? part.id : state.thinkingItemId;
         state.thinkingActive = false;
         state.thinkingItemId = undefined;
+        // Anthropic extended thinking attaches the per-block signature
+        // here via providerMetadata.anthropic.signature (Bedrock-hosted
+        // Claude reuses the same shape under .bedrock). Forward it so
+        // downstream accumulators can persist it on the matching
+        // ReasoningPart for multi-turn replay.
+        const pmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
+        const anthropicMeta = (pmd?.['anthropic'] ?? pmd?.['bedrock']) as
+          | { signature?: unknown }
+          | undefined;
+        const signature =
+          typeof anthropicMeta?.signature === 'string' && anthropicMeta.signature.length > 0
+            ? anthropicMeta.signature
+            : undefined;
         yield {
           type: 'thinking_end',
           ...(itemId ? { itemId } : {}),
+          ...(signature ? { providerMetadata: { signature } } : {}),
           ...meta({}),
         };
         break;

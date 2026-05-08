@@ -7,6 +7,12 @@ export interface ReasoningBlock {
   startedAt?: number;
   /** UNIX millis recorded when the upstream signalled the block was complete. */
   endedAt?: number;
+  /**
+   * Anthropic extended-thinking signature for this block. Persisted on the
+   * matching ReasoningPart's `metadata.anthropic.signature` and replayed on
+   * subsequent turns so Anthropic accepts the thinking block.
+   */
+  signature?: string;
 }
 
 const LEGACY_REASONING_BLOCK_KEY = 'legacy:0';
@@ -71,23 +77,31 @@ export function closeAllOpenReasoningBlocks(
  */
 export function markReasoningBlockEnded(
   previousBlocks: ReasoningBlock[],
-  chunk: Pick<StreamThinkingEndChunk, 'itemId' | 'outputIndex' | 'summaryIndex' | 'occurredAt'>,
+  chunk: Pick<
+    StreamThinkingEndChunk,
+    'itemId' | 'outputIndex' | 'summaryIndex' | 'occurredAt' | 'providerMetadata'
+  >,
 ): ReasoningBlock[] {
   if (previousBlocks.length === 0) return previousBlocks;
   const endedAt = chunk.occurredAt ?? Date.now();
+  const signature = chunk.providerMetadata?.signature;
   const hasIdentity =
     (typeof chunk.itemId === 'string' && chunk.itemId.trim().length > 0) ||
     typeof chunk.outputIndex === 'number' ||
     typeof chunk.summaryIndex === 'number';
 
+  const finalize = (block: ReasoningBlock): ReasoningBlock => ({
+    ...block,
+    ...(block.endedAt ? {} : { endedAt }),
+    ...(typeof signature === 'string' && signature.length > 0 ? { signature } : {}),
+  });
+
   if (!hasIdentity) {
-    return previousBlocks.map((block) => (block.endedAt ? block : { ...block, endedAt }));
+    return previousBlocks.map((block) => (block.endedAt && !signature ? block : finalize(block)));
   }
 
   const targetKey = buildReasoningBlockKey(chunk);
-  return previousBlocks.map((block) =>
-    block.key === targetKey && !block.endedAt ? { ...block, endedAt } : block,
-  );
+  return previousBlocks.map((block) => (block.key === targetKey ? finalize(block) : block));
 }
 
 export function extractReasoningTexts(blocks: ReasoningBlock[]): string[] {
@@ -98,6 +112,8 @@ export interface ReasoningEntry {
   text: string;
   startedAt?: number;
   endedAt?: number;
+  /** Anthropic extended-thinking signature (when present). */
+  signature?: string;
 }
 
 /**
@@ -111,6 +127,9 @@ export function extractReasoningEntries(blocks: ReasoningBlock[]): ReasoningEntr
       text: block.text.trim(),
       startedAt: block.startedAt,
       endedAt: block.endedAt,
+      ...(typeof block.signature === 'string' && block.signature.length > 0
+        ? { signature: block.signature }
+        : {}),
     }))
     .filter((entry) => entry.text.length > 0);
 }

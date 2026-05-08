@@ -17,6 +17,7 @@ import {
 } from './chat-composer-primitives.js';
 import { detectThinkKeyword } from '../../pages/chat-page/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../utils/chat-session-defaults.js';
+import type { ChatImageGenerationReferenceArtifact } from './ChatImageGenerationControls.js';
 
 interface ChatComposerProps {
   variant: 'home' | 'session';
@@ -36,6 +37,8 @@ interface ChatComposerProps {
   imageGenerationMode: boolean;
   imageModelLabel: string;
   imagePluginEnabled?: boolean;
+  imageReferenceArtifacts?: ChatImageGenerationReferenceArtifact[];
+  selectedImageReferenceArtifactId?: string | null;
   webSearchEnabled: boolean;
   thinkingEnabled: boolean;
   input: string;
@@ -80,6 +83,7 @@ interface ChatComposerProps {
   onToggleModelPicker: () => void;
   onToggleModelSettings: () => void;
   onToggleImageGenerationMode: () => void;
+  onSelectImageReferenceArtifactId?: (artifactId: string | null) => void;
   onToggleWebSearch: () => void;
   onUpdateImageGenerationDefaults: (updates: Partial<SavedChatImageDefaults>) => void;
   onChangeManualAgentId: (agentId: string) => void;
@@ -107,6 +111,8 @@ export function ChatComposer({
   imageGenerationMode,
   imageModelLabel,
   imagePluginEnabled = true,
+  imageReferenceArtifacts = [],
+  selectedImageReferenceArtifactId = null,
   webSearchEnabled,
   thinkingEnabled,
   input,
@@ -124,6 +130,9 @@ export function ChatComposer({
   mentionItems,
   textareaRef,
   fileInputRef,
+  agentOptions,
+  manualAgentId,
+  defaultAgentLabel,
   onFileChange,
   onInputChange,
   onInputSelect,
@@ -143,11 +152,9 @@ export function ChatComposer({
   onToggleModelPicker,
   onToggleModelSettings,
   onToggleImageGenerationMode,
+  onSelectImageReferenceArtifactId,
   onToggleWebSearch,
   onUpdateImageGenerationDefaults,
-  agentOptions,
-  manualAgentId,
-  defaultAgentLabel,
   onChangeManualAgentId,
   onClearManualAgentId,
   onDropFiles,
@@ -594,7 +601,10 @@ export function ChatComposer({
               imageMode={imageGenerationMode}
               imageModelLabel={imageModelLabel}
               imagePluginEnabled={imagePluginEnabled}
+              referenceArtifacts={imageReferenceArtifacts}
+              selectedReferenceArtifactId={selectedImageReferenceArtifactId}
               onToggleImageMode={onToggleImageGenerationMode}
+              onSelectReferenceArtifactId={onSelectImageReferenceArtifactId}
               onUpdateImageDefaults={onUpdateImageGenerationDefaults}
               variant="panel"
             />

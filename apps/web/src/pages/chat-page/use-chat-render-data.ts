@@ -143,31 +143,36 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     let requestIndex = 0;
 
     for (const message of messages) {
-      const messageTokens = message.tokenEstimate ?? estimateTokenCount(message.content);
+      const providerUsage = message.role === 'assistant' ? message.providerUsage : undefined;
+      const messageTokens =
+        providerUsage?.outputTokens ?? message.tokenEstimate ?? estimateTokenCount(message.content);
 
       if (message.role === 'assistant') {
         requestIndex += 1;
+        const inputTokens = providerUsage?.inputTokens ?? contextTokens;
+        const outputTokens = providerUsage?.outputTokens ?? messageTokens;
+        const totalTokens = providerUsage?.totalTokens ?? inputTokens + outputTokens;
         const matchedPrice = resolveModelPriceEntry(modelPrices, [
           message.model,
           activeModelId,
           activeModelOption?.label,
         ]);
         const estimatedCostUsd = matchedPrice
-          ? (contextTokens * matchedPrice.inputPer1m + messageTokens * matchedPrice.outputPer1m) /
+          ? (inputTokens * matchedPrice.inputPer1m + outputTokens * matchedPrice.outputPer1m) /
             1_000_000
           : undefined;
 
         usageByMessageId.set(message.id, {
           requestIndex,
-          inputTokens: contextTokens,
-          outputTokens: messageTokens,
-          totalTokens: contextTokens + messageTokens,
+          inputTokens,
+          outputTokens,
+          totalTokens,
           estimatedCostUsd,
           durationMs: message.durationMs,
           firstTokenLatencyMs: message.firstTokenLatencyMs,
           tokensPerSecond:
             message.durationMs && message.durationMs > 0
-              ? messageTokens / (message.durationMs / 1000)
+              ? outputTokens / (message.durationMs / 1000)
               : undefined,
         });
       }
@@ -182,6 +187,17 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     return messages.reduce((sum, message) => {
       return sum + (message.tokenEstimate ?? estimateTokenCount(message.content));
     }, 0);
+  }, [messages]);
+
+  const latestHistoricalProviderTokens = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === 'assistant' && message.providerUsage) {
+        return message.providerUsage.totalTokens;
+      }
+    }
+
+    return undefined;
   }, [messages]);
 
   const streamingOutputTokens = useMemo(() => {
@@ -247,13 +263,14 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     () =>
       buildChatContextUsageSnapshot({
         contextWindow: activeModelOption?.contextWindow,
-        historicalTokens: messageInputTokens,
+        historicalTokens: latestHistoricalProviderTokens ?? messageInputTokens,
         reportedTotalTokens: effectiveReportedStreamUsage?.totalTokens,
         streamingTotalTokens: streamingUsageDetails?.totalTokens,
       }),
     [
       activeModelOption?.contextWindow,
       effectiveReportedStreamUsage?.totalTokens,
+      latestHistoricalProviderTokens,
       messageInputTokens,
       streamingUsageDetails?.totalTokens,
     ],
