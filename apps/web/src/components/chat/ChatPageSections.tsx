@@ -1166,7 +1166,6 @@ export function WelcomeScreen({
   const tips = [
     { key: '/', text: '输入 / 查看命令' },
     { key: '@', text: '输入 @ 引用文件' },
-    { key: '⌥', text: '编辑器模式浏览代码' },
   ];
 
   return (

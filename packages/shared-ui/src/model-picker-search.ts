@@ -95,11 +95,30 @@ export function buildFilteredModelGroups(
   });
 
   const needle = search.trim().toLowerCase();
-  const filtered = !needle
-    ? options
-    : fuzzysort
-        .go<SearchableModelOption>(needle, options, { keys: ['provider.name', 'name', 'id'] })
-        .map((result: { obj: SearchableModelOption }) => result.obj);
+  let filtered: SearchableModelOption[];
+  if (!needle) {
+    filtered = options;
+  } else {
+    // fuzzysort@3 occasionally drops candidates whose match path is
+    // obvious to a human (queries with spaces / version numbers, or
+    // when the needle straddles two non-adjacent runs in the target).
+    // Run fuzzysort first for ranking, then add any options whose
+    // label / id / provider name *contains* the needle as a plain
+    // case-insensitive substring — this matches the user mental model
+    // ("I can see the text in the option, why doesn't it match?") and
+    // keeps the chat picker on parity with the settings dropdown.
+    const fuzzyHits = fuzzysort
+      .go<SearchableModelOption>(needle, options, { keys: ['provider.name', 'name', 'id'] })
+      .map((result: { obj: SearchableModelOption }) => result.obj);
+    const seen = new Set(fuzzyHits.map((option) => `${option.provider.id}:${option.id}`));
+    const substringHits = options.filter((option) => {
+      const key = `${option.provider.id}:${option.id}`;
+      if (seen.has(key)) return false;
+      const haystack = `${option.provider.name} ${option.name} ${option.id}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+    filtered = [...fuzzyHits, ...substringHits];
+  }
 
   const grouped = new Map<string, ModelPickerGroup>();
   for (const option of filtered) {

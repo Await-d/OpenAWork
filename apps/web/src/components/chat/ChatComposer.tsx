@@ -300,7 +300,7 @@ export function ChatComposer({
           style={{ display: 'none' }}
           accept="image/*,text/*,.md,.json,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.cpp,.c,.h,.yaml,.yml,.toml,.csv"
         />
-        {composerMenu && currentItems.length > 0 && (
+        {composerMenu && (currentItems.length > 0 || composerMenu.type === 'mention') && (
           <div
             style={{
               position: 'absolute',
@@ -390,6 +390,31 @@ export function ChatComposer({
                   overflowY: 'auto',
                 }}
               >
+                {currentItems.length === 0 && composerMenu.type === 'mention' && (
+                  // Mention menu has no matching files. Render a short
+                  // explanation instead of staying silently invisible —
+                  // most often this means the current chat session has
+                  // not picked a working directory yet, so the file
+                  // tree never loaded any candidates.
+                  <div
+                    style={{
+                      padding: '14px 12px',
+                      color: 'var(--text-3)',
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                    }}
+                  >
+                    <span style={{ color: 'var(--text-2)', fontWeight: 600 }}>
+                      暂无可引用的工作区文件
+                    </span>
+                    <span>
+                      请先在左上角「打开工作目录」选择一个目录，索引完成后再用 @ 引用文件。
+                    </span>
+                  </div>
+                )}
                 {currentItems.map((item, index) => {
                   const selected = index === composerMenu.selectedIndex;
                   const slashItem =
@@ -757,10 +782,10 @@ export function ChatComposer({
                 onPaste={onInputPaste}
                 onKeyDown={wrappedOnKeyDown}
                 placeholder="发送消息…（Enter 发送，Shift+Enter 换行，Tab 切换代理）"
-                rows={1}
+                rows={3}
                 style={{
                   width: '100%',
-                  minHeight: 52,
+                  minHeight: 96,
                   background: 'transparent',
                   border: 'none',
                   padding: agentOptions.length > 1 ? '0 64px 0 0' : 0,
@@ -770,7 +795,7 @@ export function ChatComposer({
                   outline: 'none',
                   fontFamily: 'inherit',
                   lineHeight: 1.6,
-                  maxHeight: 130,
+                  maxHeight: 280,
                   overflowY: 'auto',
                   transition: 'min-height 220ms ease, font-size 220ms ease, max-height 220ms ease',
                 }}
@@ -1387,12 +1412,15 @@ export function ChatComposer({
                         });
                     }}
                     disabled={optimizeLoading}
-                    title="提示词优化"
+                    title={optimizeLoading ? '正在优化提示词…' : '提示词优化'}
+                    aria-busy={optimizeLoading}
                     className={`icon-btn${optimizeResult ? ' active' : ''}`}
                     style={{
-                      border: optimizeResult
-                        ? '1px solid color-mix(in oklch, var(--success, #10b981) 40%, var(--border-subtle))'
-                        : '1px solid var(--border-subtle)',
+                      border: optimizeLoading
+                        ? '1px solid color-mix(in oklch, var(--accent) 45%, var(--border-subtle))'
+                        : optimizeResult
+                          ? '1px solid color-mix(in oklch, var(--success, #10b981) 40%, var(--border-subtle))'
+                          : '1px solid var(--border-subtle)',
                       borderRadius: 8,
                       width: 26,
                       height: 26,
@@ -1400,30 +1428,52 @@ export function ChatComposer({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      background: optimizeResult
-                        ? 'color-mix(in oklch, var(--success, #10b981) 10%, transparent)'
-                        : 'var(--surface)',
-                      color: optimizeResult
-                        ? 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)'
-                        : 'color-mix(in oklch, var(--accent) 72%, white 28%)',
+                      background: optimizeLoading
+                        ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                        : optimizeResult
+                          ? 'color-mix(in oklch, var(--success, #10b981) 10%, transparent)'
+                          : 'var(--surface)',
+                      color: optimizeLoading
+                        ? 'color-mix(in oklch, var(--accent) 82%, white 18%)'
+                        : optimizeResult
+                          ? 'color-mix(in oklch, var(--success, #10b981) 82%, white 18%)'
+                          : 'color-mix(in oklch, var(--accent) 72%, white 28%)',
                       cursor: optimizeLoading ? 'wait' : 'pointer',
                       transition:
                         'background 150ms ease, color 150ms ease, border-color 150ms ease',
                     }}
                   >
-                    <svg
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
-                    </svg>
+                    {optimizeLoading ? (
+                      // Inline spinner — uses the global `@keyframes spin`
+                      // defined in `apps/web/src/index.css` so no extra
+                      // <style> tag is needed here.
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          border: '1.6px solid currentColor',
+                          borderTopColor: 'transparent',
+                          animation: 'spin 0.7s linear infinite',
+                          display: 'inline-block',
+                        }}
+                      />
+                    ) : (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
+                      </svg>
+                    )}
                   </button>
                 )}
                 {showQueueAction && (

@@ -547,6 +547,16 @@ export default function App() {
             }
           />
           <Route
+            path="/images/:sessionId?"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.images.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.images.title}
+              />
+            }
+          />
+          <Route
             path="/sessions"
             element={
               <LazyRoutePage

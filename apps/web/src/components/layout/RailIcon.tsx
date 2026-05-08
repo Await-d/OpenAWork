@@ -2,6 +2,7 @@ import React from 'react';
 
 export const railItems = [
   { to: '/chat', label: 'Chat' },
+  { to: '/images', label: 'Images' },
   { to: '/team', label: 'Team' },
   { to: '/templates', label: 'Templates' },
   { to: '/sessions', label: 'Sessions' },
@@ -13,6 +14,7 @@ export const railItems = [
 
 export const railLabelCn: Record<string, string> = {
   Chat: '对话',
+  Images: '图片',
   Sessions: '会话',
   Settings: '设置',
   Skills: '技能',
@@ -44,6 +46,14 @@ export function railIcon(label: string) {
   switch (label) {
     case 'Chat':
       return <I d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />;
+    case 'Images':
+      return (
+        <I>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <circle cx="8.5" cy="10" r="1.5" />
+          <path d="M21 15l-5-5L5 21" />
+        </I>
+      );
     case 'Sessions':
       return (
         <I>

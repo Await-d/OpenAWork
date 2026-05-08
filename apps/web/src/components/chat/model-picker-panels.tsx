@@ -143,7 +143,10 @@ export function ModelPicker({
       const el = anchorRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      const next = resolveFloatingPanelPosition(rect, 340, 430, 'start');
+      // Match the settings page model dropdown — wider panel keeps
+      // long model labels from getting elided, and gives the search
+      // results enough room to breathe.
+      const next = resolveFloatingPanelPosition(rect, 420, 480, 'start');
       setTop(next.top);
       setLeft(next.left);
       setMaxHeight(next.maxHeight);
@@ -305,9 +308,9 @@ export function ModelPicker({
           borderRadius: 12,
           padding: '6px 0 0',
           boxShadow: 'var(--shadow-lg)',
-          minWidth: 320,
-          width: 340,
-          maxWidth: 'min(340px, calc(100vw - 16px))',
+          minWidth: 360,
+          width: 420,
+          maxWidth: 'min(420px, calc(100vw - 16px))',
           maxHeight,
           overflow: 'hidden',
           display: 'flex',
@@ -371,7 +374,7 @@ export function ModelPicker({
                 border: 'none',
                 outline: 'none',
                 color: 'var(--text)',
-                fontSize: 11,
+                fontSize: 12.5,
               }}
             />
           </div>
@@ -382,6 +385,23 @@ export function ModelPicker({
           aria-label="模型列表"
           style={{ overflowY: 'auto', padding: '0 0 8px', flex: 1, overscrollBehavior: 'contain' }}
         >
+          {groups.length === 0 && (
+            <div
+              style={{
+                padding: '24px 16px',
+                textAlign: 'center',
+                color: 'var(--text-3)',
+                fontSize: 12,
+                lineHeight: 1.6,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <span style={{ color: 'var(--text-2)', fontWeight: 600 }}>未匹配到模型</span>
+              <span>试试提供商名、模型别名（如 sonnet / 4o / qwen）或模型 ID</span>
+            </div>
+          )}
           {groups.map(({ provider, models }) => (
             <div key={provider.id}>
               <div
@@ -419,7 +439,7 @@ export function ModelPicker({
                 </div>
                 <span
                   style={{
-                    fontSize: 9,
+                    fontSize: 10,
                     fontWeight: 700,
                     color: 'var(--text-3)',
                     textTransform: 'uppercase',
@@ -449,13 +469,13 @@ export function ModelPicker({
                     style={{
                       display: 'flex',
                       alignItems: 'flex-start',
-                      gap: 7,
+                      gap: 8,
                       width: '100%',
-                      padding: '8px 10px',
+                      padding: '9px 12px',
                       border: 'none',
                       background: isActive ? 'var(--accent-muted)' : 'transparent',
                       color: isActive ? 'var(--accent)' : 'var(--text)',
-                      fontSize: 11,
+                      fontSize: 12.5,
                       cursor: 'pointer',
                       textAlign: 'left',
                       borderRadius: 8,
@@ -509,7 +529,7 @@ export function ModelPicker({
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
                           fontWeight: 600,
-                          fontSize: 11,
+                          fontSize: 12.5,
                         }}
                       >
                         {model.name}

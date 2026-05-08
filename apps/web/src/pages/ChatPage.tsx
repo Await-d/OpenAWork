@@ -321,6 +321,7 @@ export default function ChatPage() {
   const lastParentTaskSyncMarkerRef = useRef<string | null>(null);
   const pendingBootstrapSessionRef = useRef<string | null>(null);
   const previousRouteSessionIdRef = useRef<string | null>(sessionId ?? null);
+  const hasAppliedSavedImageDefaultsRef = useRef(false);
   const savedChatDefaultsRef = useRef<{
     modelId: string;
     providerId: string;
@@ -944,7 +945,13 @@ export default function ChatPage() {
         });
 
         setProviders(loadedProviders);
-        applySavedImageDefaults(imageDefaults);
+        // Only seed chat-page image defaults from saved settings on first load.
+        // Re-applying on every sessionId change would silently revert any
+        // size/quality/format/background the user just adjusted in the composer.
+        if (!hasAppliedSavedImageDefaultsRef.current) {
+          applySavedImageDefaults(imageDefaults);
+          hasAppliedSavedImageDefaultsRef.current = true;
+        }
 
         if (!sessionId) {
           setThinkingEnabled(defaults.thinkingEnabled);
@@ -2083,7 +2090,10 @@ export default function ChatPage() {
         if (loadedDefaults) {
           savedDefaults = loadedDefaults.defaults;
           setProviders(loadedDefaults.providers);
-          applySavedImageDefaults(loadedDefaults.imageDefaults);
+          if (!hasAppliedSavedImageDefaultsRef.current) {
+            applySavedImageDefaults(loadedDefaults.imageDefaults);
+            hasAppliedSavedImageDefaultsRef.current = true;
+          }
         }
       } catch {
         savedDefaults = null;

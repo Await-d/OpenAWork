@@ -58,6 +58,40 @@ function toNotificationPreferenceMap(
   return nextPreferences;
 }
 
+interface NotificationTypeMeta {
+  bg: string;
+  color: string;
+  label: string;
+}
+
+const NOTIFICATION_TYPE_META: Record<string, NotificationTypeMeta> = {
+  permission_asked: {
+    bg: 'rgba(245, 158, 11, 0.12)',
+    color: '#d97706',
+    label: '权限请求',
+  },
+  question_asked: {
+    bg: 'rgba(59, 130, 246, 0.12)',
+    color: '#2563eb',
+    label: '提问',
+  },
+  task_update: {
+    bg: 'rgba(16, 185, 129, 0.12)',
+    color: '#059669',
+    label: '任务',
+  },
+};
+
+const NOTIFICATION_TYPE_FALLBACK: NotificationTypeMeta = {
+  bg: 'rgba(148, 163, 184, 0.16)',
+  color: 'var(--text-2)',
+  label: '通知',
+};
+
+function getNotificationTypeMeta(eventType: string): NotificationTypeMeta {
+  return NOTIFICATION_TYPE_META[eventType] ?? NOTIFICATION_TYPE_FALLBACK;
+}
+
 function isBrowserNotificationEnabled(
   eventType: string,
   preferences: NotificationPreferenceMap,
@@ -304,6 +338,30 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     DEFAULT_NOTIFICATION_PREFERENCES,
   );
   const notificationsAbortRef = useRef<AbortController | null>(null);
+  const notificationsContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!notificationsOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const container = notificationsContainerRef.current;
+      if (container && event.target instanceof Node && !container.contains(event.target)) {
+        setNotificationsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [notificationsOpen]);
 
   useEffect(() => {
     notificationPreferencesRef.current = notificationPreferences;
@@ -348,7 +406,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
       const effectivePreferences = options?.preferences ?? notificationPreferencesRef.current;
       try {
         const nextNotifications = await createNotificationsClient(gatewayUrl).list(accessToken, {
-          limit: 12,
+          limit: 30,
           signal: controller.signal,
           status: 'unread',
         });
@@ -403,6 +461,35 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     },
     [accessToken, gatewayUrl, navigate, preloadRoute],
   );
+
+  const handleDismissNotification = useCallback(
+    async (notification: NotificationRecord) => {
+      if (!accessToken) {
+        return;
+      }
+      setNotifications((previous) => previous.filter((item) => item.id !== notification.id));
+      try {
+        await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
+      } catch {
+        void loadNotifications().catch(() => undefined);
+      }
+    },
+    [accessToken, gatewayUrl, loadNotifications],
+  );
+
+  const handleMarkAllNotificationsRead = useCallback(async () => {
+    if (!accessToken) {
+      return;
+    }
+    const previousNotifications = notifications;
+    setNotifications([]);
+    try {
+      await createNotificationsClient(gatewayUrl).markAllRead(accessToken);
+    } catch {
+      setNotifications(previousNotifications);
+      toast('标记全部已读失败，请稍后重试', 'error');
+    }
+  }, [accessToken, gatewayUrl, notifications]);
 
   const applyPendingQuestion = useCallback(
     (
@@ -1147,7 +1234,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                 </span>
 
                 {accessToken && (
-                  <div style={{ position: 'relative' }}>
+                  <div style={{ position: 'relative' }} ref={notificationsContainerRef}>
                     <button
                       type="button"
                       onClick={() => {
@@ -1213,17 +1300,16 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                           position: 'absolute',
                           top: 36,
                           right: 0,
-                          width: 320,
-                          maxHeight: 420,
-                          overflow: 'auto',
+                          width: 360,
+                          maxHeight: 480,
                           borderRadius: 14,
                           border: '1px solid var(--border)',
                           background: 'var(--surface)',
                           boxShadow: 'var(--shadow-lg)',
-                          padding: 10,
                           zIndex: 40,
-                          display: 'grid',
-                          gap: 8,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          overflow: 'hidden',
                         }}
                       >
                         <div
@@ -1231,57 +1317,236 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
+                            padding: '10px 12px',
+                            borderBottom: '1px solid var(--border-subtle)',
                           }}
                         >
-                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                            通知中心
-                          </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                            {notifications.length} 条未读
-                          </span>
-                        </div>
-                        {notifications.length === 0 ? (
-                          <div
-                            style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 8px' }}
-                          >
-                            暂无未读通知
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                              通知中心
+                            </span>
+                            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                              {notifications.length === 0
+                                ? '已全部清空'
+                                : `${notifications.length} 条未读`}
+                            </span>
                           </div>
-                        ) : (
-                          notifications.map((notification) => (
+                          <div style={{ display: 'flex', gap: 4 }}>
                             <button
-                              key={notification.id}
                               type="button"
-                              onClick={() => void handleOpenNotification(notification)}
+                              title="刷新"
+                              onClick={() => void loadNotifications().catch(() => undefined)}
                               style={{
-                                textAlign: 'left',
-                                display: 'grid',
-                                gap: 4,
-                                padding: '10px 12px',
-                                borderRadius: 12,
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
                                 border: '1px solid var(--border-subtle)',
-                                background: 'var(--bg-2)',
+                                background: 'var(--surface)',
+                                color: 'var(--text-3)',
                                 cursor: 'pointer',
+                                display: 'grid',
+                                placeItems: 'center',
                               }}
                             >
-                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                                {notification.title}
-                              </span>
-                              <span
-                                style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
                               >
-                                {notification.body}
-                              </span>
-                              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                                {new Date(notification.createdAt).toLocaleString('zh-CN', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
+                                <polyline points="23 4 23 10 17 10" />
+                                <polyline points="1 20 1 14 7 14" />
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                              </svg>
                             </button>
-                          ))
-                        )}
+                            <button
+                              type="button"
+                              disabled={notifications.length === 0}
+                              onClick={() => void handleMarkAllNotificationsRead()}
+                              style={{
+                                fontSize: 11,
+                                padding: '4px 8px',
+                                borderRadius: 6,
+                                border: '1px solid var(--border-subtle)',
+                                background:
+                                  notifications.length === 0 ? 'var(--surface)' : 'var(--bg-2)',
+                                color:
+                                  notifications.length === 0 ? 'var(--text-3)' : 'var(--text-2)',
+                                cursor: notifications.length === 0 ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              全部已读
+                            </button>
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            overflowY: 'auto',
+                            padding: 8,
+                            display: 'grid',
+                            gap: 6,
+                          }}
+                        >
+                          {notifications.length === 0 ? (
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: 'var(--text-3)',
+                                padding: '24px 8px',
+                                textAlign: 'center',
+                              }}
+                            >
+                              暂无未读通知
+                            </div>
+                          ) : (
+                            notifications.map((notification) => {
+                              const typeMeta = getNotificationTypeMeta(notification.eventType);
+                              return (
+                                <div
+                                  key={notification.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => void handleOpenNotification(notification)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault();
+                                      void handleOpenNotification(notification);
+                                    }
+                                  }}
+                                  style={{
+                                    position: 'relative',
+                                    display: 'grid',
+                                    gridTemplateColumns: '4px 1fr',
+                                    gap: 10,
+                                    padding: '10px 32px 10px 10px',
+                                    borderRadius: 10,
+                                    border: '1px solid var(--border-subtle)',
+                                    background: 'var(--bg-2)',
+                                    cursor: 'pointer',
+                                    transition: 'background 150ms ease, border-color 150ms ease',
+                                  }}
+                                  onMouseEnter={(event) => {
+                                    event.currentTarget.style.background = 'var(--bg-1)';
+                                    event.currentTarget.style.borderColor = 'var(--border)';
+                                  }}
+                                  onMouseLeave={(event) => {
+                                    event.currentTarget.style.background = 'var(--bg-2)';
+                                    event.currentTarget.style.borderColor = 'var(--border-subtle)';
+                                  }}
+                                >
+                                  <span
+                                    aria-hidden="true"
+                                    style={{
+                                      width: 4,
+                                      borderRadius: 2,
+                                      background: typeMeta.color,
+                                    }}
+                                  />
+                                  <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                        flexWrap: 'wrap',
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          fontSize: 10,
+                                          fontWeight: 600,
+                                          padding: '1px 6px',
+                                          borderRadius: 999,
+                                          background: typeMeta.bg,
+                                          color: typeMeta.color,
+                                        }}
+                                      >
+                                        {typeMeta.label}
+                                      </span>
+                                      <span
+                                        style={{
+                                          fontSize: 12,
+                                          fontWeight: 700,
+                                          color: 'var(--text)',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap',
+                                          minWidth: 0,
+                                          flex: 1,
+                                        }}
+                                        title={notification.title}
+                                      >
+                                        {notification.title}
+                                      </span>
+                                    </div>
+                                    <span
+                                      style={{
+                                        fontSize: 12,
+                                        color: 'var(--text-2)',
+                                        lineHeight: 1.5,
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical',
+                                        overflow: 'hidden',
+                                      }}
+                                    >
+                                      {notification.body}
+                                    </span>
+                                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                                      {new Date(notification.createdAt).toLocaleString('zh-CN', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    title="标记已读"
+                                    aria-label="标记已读"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleDismissNotification(notification);
+                                    }}
+                                    style={{
+                                      position: 'absolute',
+                                      top: 6,
+                                      right: 6,
+                                      width: 20,
+                                      height: 20,
+                                      borderRadius: 6,
+                                      border: 'none',
+                                      background: 'transparent',
+                                      color: 'var(--text-3)',
+                                      cursor: 'pointer',
+                                      display: 'grid',
+                                      placeItems: 'center',
+                                    }}
+                                  >
+                                    <svg
+                                      width="12"
+                                      height="12"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <line x1="18" y1="6" x2="6" y2="18" />
+                                      <line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
                       </div>
                     ) : null}
                   </div>

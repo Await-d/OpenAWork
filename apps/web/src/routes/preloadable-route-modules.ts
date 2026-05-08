@@ -55,6 +55,11 @@ export const PRELOADABLE_ROUTE_MODULES = {
     '消息频道',
   ),
   chat: createPreloadableRouteModule('chat', () => import('../pages/ChatPage.js'), '会话工作台'),
+  images: createPreloadableRouteModule(
+    'images',
+    () => import('../pages/ImagesPage.js'),
+    '图片工作台',
+  ),
   schedules: createPreloadableRouteModule(
     'schedules',
     () => import('../pages/SchedulesPage.js'),
