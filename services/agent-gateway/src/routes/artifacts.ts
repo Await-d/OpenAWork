@@ -14,6 +14,7 @@ import {
   getArtifactById,
   listArtifactsBySession,
   listArtifactVersions,
+  listImageWorkbenchArtifacts,
   revertArtifactToVersion,
   updateArtifact,
 } from '../artifact-content-store.js';
@@ -120,6 +121,17 @@ async function ensureSessionOwned(sessionId: string, userId: string): Promise<bo
 }
 
 export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/image-workbench/artifacts', { preHandler: requireAuth }, async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const query = (request.query ?? {}) as { type?: string; limit?: string };
+    const limitNum = Number.parseInt(query.limit ?? '', 10);
+    const contentArtifacts = listImageWorkbenchArtifacts(user.sub, {
+      ...(query.type ? { type: query.type } : {}),
+      ...(Number.isFinite(limitNum) && limitNum > 0 ? { limit: limitNum } : {}),
+    });
+    return reply.send({ contentArtifacts });
+  });
+
   app.get<{ Params: { sessionId: string } }>(
     '/sessions/:sessionId/artifacts',
     { preHandler: requireAuth },

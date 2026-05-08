@@ -29,6 +29,7 @@ import {
   type OpenAICompatibleProviderSettings,
 } from '@ai-sdk/openai-compatible';
 import { createAnthropic, type AnthropicProviderSettings } from '@ai-sdk/anthropic';
+import { createOpenAI, type OpenAIProviderSettings } from '@ai-sdk/openai';
 import { buildAnthropicBetas, formatAnthropicBetaHeader } from '../../anthropic-betas.js';
 
 /**
@@ -44,7 +45,17 @@ type AnthropicLanguageModel = ReturnType<ReturnType<typeof createAnthropic>['lan
 type OpenAICompatibleLanguageModel = ReturnType<
   ReturnType<typeof createOpenAICompatible>['languageModel']
 >;
-export type V2LanguageModel = AnthropicLanguageModel | OpenAICompatibleLanguageModel;
+type OpenAIResponsesLanguageModel = ReturnType<ReturnType<typeof createOpenAI>['responses']>;
+// All three SDK adapters currently resolve to the same
+// `LanguageModelV3` shape. We collapse the union to a single alias
+// (so ESLint's `no-duplicate-type-constituents` rule stays clean) but
+// keep the per-vendor aliases above as documentation for the day a
+// future SDK bump diverges them again.
+export type V2LanguageModel = AnthropicLanguageModel;
+// Touch the per-vendor aliases so the build does not flag them as
+// unused while we wait for the SDK shapes to diverge again.
+export type _OpenAICompatibleLanguageModel = OpenAICompatibleLanguageModel;
+export type _OpenAIResponsesLanguageModel = OpenAIResponsesLanguageModel;
 
 export type UpstreamProtocolKind = 'anthropic_messages' | 'chat_completions' | 'responses';
 
@@ -77,6 +88,13 @@ export interface AISdkProviderConfig {
    * `fine-grained-tool-streaming-*` headers.
    */
   supportsThinking?: boolean;
+  /**
+   * Per-provider explicit upstream protocol override. When set to
+   * `'responses'`, the factory routes through `@ai-sdk/openai`'s
+   * Responses API (`/responses`). When omitted, the factory falls
+   * back to the protocol implied by `providerType`.
+   */
+  upstreamProtocol?: UpstreamProtocolKind;
 }
 
 export interface BuiltAISdkProvider {
@@ -136,6 +154,12 @@ function buildAnthropic(config: AISdkProviderConfig): BuiltAISdkProvider {
 function buildOpenAICompatible(config: AISdkProviderConfig): BuiltAISdkProvider {
   const settings: OpenAICompatibleProviderSettings = {
     name: config.name ?? config.providerType,
+    // Always request `stream_options.include_usage: true` so the
+    // upstream emits a final usage chunk on the SSE wire. OpenAWork
+    // depends on this for monthly usage accounting and cost
+    // reporting; without it the chat-completions provider would
+    // silently drop tokens for streaming requests.
+    includeUsage: true,
     ...(config.apiKey ? { apiKey: config.apiKey } : {}),
     ...(config.baseURL ? { baseURL: config.baseURL } : { baseURL: 'https://api.openai.com/v1' }),
     ...(config.headers ? { headers: config.headers } : {}),
@@ -144,6 +168,20 @@ function buildOpenAICompatible(config: AISdkProviderConfig): BuiltAISdkProvider 
   return {
     protocol: 'chat_completions',
     languageModel: (modelId) => provider.languageModel(modelId),
+  };
+}
+
+function buildOpenAIResponses(config: AISdkProviderConfig): BuiltAISdkProvider {
+  const settings: OpenAIProviderSettings = {
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+    ...(config.headers ? { headers: config.headers } : {}),
+    ...(config.name ? { name: config.name } : {}),
+  };
+  const provider = createOpenAI(settings);
+  return {
+    protocol: 'responses',
+    languageModel: (modelId) => provider.responses(modelId),
   };
 }
 
@@ -161,6 +199,13 @@ export function buildAISdkProvider(config: AISdkProviderConfig): BuiltAISdkProvi
   const kind = config.providerType.toLowerCase();
   if (kind === 'anthropic' || kind === 'claude') {
     return buildAnthropic(config);
+  }
+  // Honour explicit Responses protocol override even on non-OpenAI
+  // provider types: any OpenAI-compatible relay that exposes a
+  // `/responses` endpoint can be reached via `@ai-sdk/openai` once
+  // the user explicitly opts in.
+  if (config.upstreamProtocol === 'responses') {
+    return buildOpenAIResponses(config);
   }
   return buildOpenAICompatible(config);
 }

@@ -214,7 +214,19 @@ export function createWorkflowsClient(baseUrl: string): WorkflowsClient {
         body: JSON.stringify(input),
       });
       if (!response.ok) {
-        throw new Error(`Failed to optimize prompt: ${response.status}`);
+        // Surface the gateway's structured `error` field (e.g. the
+        // "未配置 AI_API_KEY" hint or a propagated upstream message)
+        // instead of the opaque "Failed to optimize prompt: 500".
+        let detail: string | undefined;
+        try {
+          const body = (await response.json()) as { error?: unknown };
+          if (typeof body?.error === 'string' && body.error.length > 0) {
+            detail = body.error;
+          }
+        } catch {
+          // ignore JSON parse errors — fall back to status-only message
+        }
+        throw new Error(detail ?? `Failed to optimize prompt: ${response.status}`);
       }
       return (await response.json()) as PromptOptimizerResult;
     },

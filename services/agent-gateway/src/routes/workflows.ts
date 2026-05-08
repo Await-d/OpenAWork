@@ -4,11 +4,99 @@ import { z } from 'zod';
 import { FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
+import type { AIProvider } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { buildFixedTeamTemplateDefaultBindings } from '../team-template-metadata.js';
 import * as agentCore from '@openAwork/agent-core';
+import { getFastProviderConfig, getActiveChatProviderConfig } from '../provider-config.js';
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
+
+interface UserSettingRow {
+  value: string;
+}
+
+/**
+ * Resolve the LLM credentials used by the lightweight workflow LLM
+ * (prompt optimizer / translator). Preference order:
+ *   1. user-configured "fast" provider (matches the chat composer's
+ *      「快速 / 内联」 model — what the user explicitly asked for here),
+ *   2. user-configured "chat" provider as fallback,
+ *   3. process env (`AI_API_BASE_URL` / `AI_API_KEY` / `AI_DEFAULT_MODEL`)
+ *      as the last-resort legacy path.
+ *
+ * Returns `null` when no usable credentials are found in any source —
+ * the caller is responsible for surfacing a structured 503 hint.
+ */
+interface ResolvedAuxiliaryLlmConfig {
+  apiBaseUrl: string;
+  apiKey: string;
+  model: string;
+  /** Forwarded so the workflow LLM picks the right AI SDK adapter. */
+  providerType?: AIProvider['type'];
+  /** Forwarded so per-provider Responses/anthropic_messages overrides apply. */
+  upstreamProtocol?: AIProvider['upstreamProtocol'];
+}
+
+async function resolveAuxiliaryLlmConfig(
+  userId: string,
+): Promise<ResolvedAuxiliaryLlmConfig | null> {
+  const providersRow = sqliteGet<UserSettingRow>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+    [userId],
+  );
+  const selectionRow = sqliteGet<UserSettingRow>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+    [userId],
+  );
+  const rawProviders = providersRow?.value ? JSON.parse(providersRow.value) : undefined;
+  const rawSelection = selectionRow?.value ? JSON.parse(selectionRow.value) : undefined;
+
+  const candidates = [
+    () => getFastProviderConfig(rawProviders, rawSelection),
+    () => getActiveChatProviderConfig(rawProviders, rawSelection),
+  ];
+  for (const lookup of candidates) {
+    const cfg = await lookup();
+    if (!cfg) continue;
+    const resolved = resolveProviderCredentials(cfg.provider, cfg.modelId);
+    if (resolved) return resolved;
+  }
+
+  const envBase = (process.env['AI_API_BASE_URL'] ?? '').trim();
+  const envKey = (process.env['AI_API_KEY'] ?? '').trim();
+  const envModel = (process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o').trim();
+  if (envBase && envKey) {
+    return { apiBaseUrl: envBase, apiKey: envKey, model: envModel };
+  }
+  return null;
+}
+
+function resolveProviderCredentials(
+  provider: AIProvider,
+  modelId: string,
+): ResolvedAuxiliaryLlmConfig | null {
+  const apiBaseUrl = (provider.baseUrl ?? '').trim();
+  if (!apiBaseUrl) return null;
+  const apiKey = pickProviderApiKey(provider);
+  if (!apiKey) return null;
+  return {
+    apiBaseUrl,
+    apiKey,
+    model: modelId,
+    providerType: provider.type,
+    ...(provider.upstreamProtocol ? { upstreamProtocol: provider.upstreamProtocol } : {}),
+  };
+}
+
+function pickProviderApiKey(provider: AIProvider): string | null {
+  if (provider.apiKey && provider.apiKey.length > 0) return provider.apiKey;
+  if (provider.apiKeyEnv) {
+    const fromEnv = process.env[provider.apiKeyEnv];
+    if (fromEnv && fromEnv.length > 0) return fromEnv;
+  }
+  return null;
+}
 
 type AgentCoreWithExtras = typeof agentCore & {
   PromptOptimizerImpl?: typeof agentCore.PromptOptimizerImpl;
@@ -201,26 +289,47 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
       }
 
-      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
-      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? 'https://api.openai.com/v1';
-      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
+      // Prefer the user's chat-configured "fast / inline" provider so
+      // the prompt optimizer reuses the same credentials the user
+      // already set up in 设置 → 提供商, instead of requiring a
+      // separate set of `AI_API_*` env vars on the gateway.
+      const user = request.user as JwtPayload;
+      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
+      if (!llmConfig) {
+        step.fail('no llm config');
+        return reply.status(503).send({
+          error:
+            '提示词优化器未找到可用模型：请在 设置 → 提供商 中启用一个「快速 / 内联」或「会话」模型并填写 API Key，或在网关环境变量中设置 AI_API_BASE_URL 与 AI_API_KEY 后重启网关。',
+        });
+      }
 
       const optimizer = new PromptOptimizerImpl(async (prompt: string) => {
         return requestWorkflowLlmCompletion({
-          apiBaseUrl: AI_API_BASE_URL,
-          apiKey: AI_API_KEY,
-          model: AI_DEFAULT_MODEL,
+          apiBaseUrl: llmConfig.apiBaseUrl,
+          apiKey: llmConfig.apiKey,
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt,
           temperature: 0.7,
         });
       });
 
-      const result = await optimizer.optimize(body.data);
-      step.succeed(undefined, {
-        requestId: result.requestId,
-        candidates: result.candidates.length,
-      });
-      return reply.send(result);
+      try {
+        const result = await optimizer.optimize(body.data);
+        step.succeed(undefined, {
+          requestId: result.requestId,
+          candidates: result.candidates.length,
+        });
+        return reply.send(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        step.fail(message);
+        // Bubble the upstream / parser error message into the JSON body
+        // so the frontend can show e.g. "AI_APICallError: 401" instead
+        // of the opaque "Failed to optimize prompt: 500".
+        return reply.status(500).send({ error: `优化提示词失败：${message}` });
+      }
     },
   );
 
@@ -235,15 +344,23 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
       }
 
-      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
-      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? 'https://api.openai.com/v1';
-      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
+      const user = request.user as JwtPayload;
+      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
+      if (!llmConfig) {
+        step.fail('no llm config');
+        return reply.status(503).send({
+          error:
+            '翻译工作流未找到可用模型：请在 设置 → 提供商 中启用一个「快速 / 内联」或「会话」模型并填写 API Key，或在网关环境变量中设置 AI_API_BASE_URL 与 AI_API_KEY 后重启网关。',
+        });
+      }
 
       const workflow = new TranslationWorkflowImpl(async (prompt: string) => {
         return requestWorkflowLlmCompletion({
-          apiBaseUrl: AI_API_BASE_URL,
-          apiKey: AI_API_KEY,
-          model: AI_DEFAULT_MODEL,
+          apiBaseUrl: llmConfig.apiBaseUrl,
+          apiKey: llmConfig.apiKey,
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt,
           temperature: 0.3,
         });

@@ -105,9 +105,14 @@ function applyImageGenerationOverrides(
   body: Record<string, unknown>,
   requestOverrides: RequestOverrides,
 ): Record<string, unknown> {
+  // Per-request body (model/prompt/size/quality/output_format/background) reflects
+  // the user's runtime selection on the chat page and must take precedence over
+  // provider-level requestOverrides.body, otherwise picking different size/quality
+  // in the chat composer silently does nothing whenever a model has overrides set.
+  // Provider overrides may still inject extra fields not present in `body`.
   const nextBody = {
-    ...body,
     ...(requestOverrides.body ?? {}),
+    ...body,
   };
 
   for (const key of requestOverrides.omitBodyKeys ?? []) {

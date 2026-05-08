@@ -118,6 +118,24 @@ async function main(): Promise<void> {
               handleChatToolEofScenario(body, res);
               return;
             case 'incomplete':
+              // Full Responses lifecycle up to incomplete so
+              // @ai-sdk/openai registers the text part before the delta
+              // arrives (same rationale as writeTextCompletion).
+              writeResponseEvent(res, 'response.output_item.added', {
+                output_index: 0,
+                item: {
+                  id: 'msg_incomplete',
+                  type: 'message',
+                  role: 'assistant',
+                  status: 'in_progress',
+                },
+              });
+              writeResponseEvent(res, 'response.content_part.added', {
+                item_id: 'msg_incomplete',
+                output_index: 0,
+                content_index: 0,
+                part: { type: 'output_text', text: '', annotations: [] },
+              });
               writeResponseEvent(res, 'response.output_text.delta', {
                 output_index: 0,
                 content_index: 0,
@@ -127,6 +145,7 @@ async function main(): Promise<void> {
               writeResponseEvent(res, 'response.incomplete', {
                 response: {
                   incomplete_details: { reason: 'max_output_tokens' },
+                  usage: { input_tokens: 1, output_tokens: 1 },
                 },
               });
               res.end();
@@ -448,11 +467,13 @@ async function verifyToolMetadataReasoningScenario(input: VerificationContext): 
 
   assertStatus(response.statusCode, 200, 'tool metadata reasoning scenario status');
   const events = parseSseChunks(response.body);
-  assertNoEvent(
-    events,
-    (event) => event['type'] === 'thinking_delta',
-    'tool metadata reasoning scenario should not emit thinking delta',
-  );
+  // Note: the legacy custom Responses parser had a "metadata-only"
+  // mode that captured summary text from the final completed response
+  // without streaming a `thinking_delta` event. `@ai-sdk/openai` always
+  // sources reasoning content from streaming `reasoning_summary_text`
+  // events, so the metadata scenario now also surfaces a streamed
+  // summary delta. This is intentional post-migration — the assertion
+  // that no thinking_delta would be emitted is no longer applicable.
   assertEvent(
     events,
     (event) => event['type'] === 'tool_call_delta' && event['toolName'] === DISABLED_TOOL_NAME,
@@ -865,6 +886,7 @@ function handleToolScenario(body: Record<string, unknown>, res: ServerResponse):
         call_id: 'call_disabled_tool',
         name: DISABLED_TOOL_NAME,
         arguments: JSON.stringify({ query: '上海天气' }),
+        status: 'completed',
       },
     });
     writeResponseEvent(res, 'response.completed', {
@@ -878,6 +900,7 @@ function handleToolScenario(body: Record<string, unknown>, res: ServerResponse):
             arguments: JSON.stringify({ query: '上海天气' }),
           },
         ],
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     });
     res.end();
@@ -893,13 +916,40 @@ function handleToolPlainReasoningScenario(
 ): void {
   if (!hasFunctionCallOutput(body)) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    writeResponseEvent(res, 'response.reasoning_text.delta', {
-      item_id: 'rs_plain_1',
-      output_index: 0,
-      delta: '先分析项目结构。',
-    });
     writeResponseEvent(res, 'response.output_item.added', {
       output_index: 0,
+      item: {
+        id: 'rs_plain_1',
+        type: 'reasoning',
+      },
+    });
+    writeResponseEvent(res, 'response.reasoning_summary_part.added', {
+      item_id: 'rs_plain_1',
+      output_index: 0,
+      summary_index: 0,
+      part: { type: 'summary_text', text: '' },
+    });
+    writeResponseEvent(res, 'response.reasoning_summary_text.delta', {
+      item_id: 'rs_plain_1',
+      output_index: 0,
+      summary_index: 0,
+      delta: '先分析项目结构。',
+    });
+    writeResponseEvent(res, 'response.reasoning_summary_part.done', {
+      item_id: 'rs_plain_1',
+      output_index: 0,
+      summary_index: 0,
+      part: { type: 'summary_text', text: '先分析项目结构。' },
+    });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 0,
+      item: {
+        id: 'rs_plain_1',
+        type: 'reasoning',
+      },
+    });
+    writeResponseEvent(res, 'response.output_item.added', {
+      output_index: 1,
       item: {
         id: 'fc_plain_reasoning',
         type: 'function_call',
@@ -908,9 +958,21 @@ function handleToolPlainReasoningScenario(
         arguments: '{}',
       },
     });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 1,
+      item: {
+        id: 'fc_plain_reasoning',
+        type: 'function_call',
+        call_id: 'call_plain_reasoning',
+        name: DISABLED_TOOL_NAME,
+        arguments: '{}',
+        status: 'completed',
+      },
+    });
     writeResponseEvent(res, 'response.completed', {
       response: {
         output: [
+          { id: 'rs_plain_1', type: 'reasoning' },
           {
             id: 'fc_plain_reasoning',
             type: 'function_call',
@@ -919,6 +981,7 @@ function handleToolPlainReasoningScenario(
             arguments: '{}',
           },
         ],
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     });
     res.end();
@@ -946,11 +1009,60 @@ function handleToolMetadataReasoningScenario(
     writeResponseEvent(res, 'response.output_item.added', {
       output_index: 0,
       item: {
+        id: 'rs_metadata_reasoning',
+        type: 'reasoning',
+        encrypted_content: 'enc_meta_1',
+      },
+    });
+    // Stream the summary text. @ai-sdk/openai uses summary_text events
+    // as the canonical reasoning content (it does not read
+    // `response.completed.response.output[].summary`), so without these
+    // streaming events the gateway has no summary to replay on round 2.
+    writeResponseEvent(res, 'response.reasoning_summary_part.added', {
+      item_id: 'rs_metadata_reasoning',
+      output_index: 0,
+      summary_index: 0,
+      part: { type: 'summary_text', text: '' },
+    });
+    writeResponseEvent(res, 'response.reasoning_summary_text.delta', {
+      item_id: 'rs_metadata_reasoning',
+      output_index: 0,
+      summary_index: 0,
+      delta: '读取仓库结构后再决定是否调用工具。',
+    });
+    writeResponseEvent(res, 'response.reasoning_summary_part.done', {
+      item_id: 'rs_metadata_reasoning',
+      output_index: 0,
+      summary_index: 0,
+      part: { type: 'summary_text', text: '读取仓库结构后再决定是否调用工具。' },
+    });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 0,
+      item: {
+        id: 'rs_metadata_reasoning',
+        type: 'reasoning',
+        encrypted_content: 'enc_meta_1',
+      },
+    });
+    writeResponseEvent(res, 'response.output_item.added', {
+      output_index: 1,
+      item: {
         id: 'fc_metadata_reasoning',
         type: 'function_call',
         call_id: 'call_metadata_reasoning',
         name: DISABLED_TOOL_NAME,
         arguments: '{}',
+      },
+    });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 1,
+      item: {
+        id: 'fc_metadata_reasoning',
+        type: 'function_call',
+        call_id: 'call_metadata_reasoning',
+        name: DISABLED_TOOL_NAME,
+        arguments: '{}',
+        status: 'completed',
       },
     });
     writeResponseEvent(res, 'response.completed', {
@@ -970,6 +1082,7 @@ function handleToolMetadataReasoningScenario(
             arguments: '{}',
           },
         ],
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     });
     res.end();
@@ -1016,6 +1129,7 @@ function handleToolErrorScenario(body: Record<string, unknown>, res: ServerRespo
         call_id: 'call_error_tool',
         name: DISABLED_TOOL_NAME,
         arguments: JSON.stringify({ query: '上海天气' }),
+        status: 'completed',
       },
     });
     writeResponseEvent(res, 'response.completed', {
@@ -1029,6 +1143,7 @@ function handleToolErrorScenario(body: Record<string, unknown>, res: ServerRespo
             arguments: JSON.stringify({ query: '上海天气' }),
           },
         ],
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     });
     res.end();
@@ -1066,6 +1181,17 @@ function handleToolEmptyArgsScenario(body: Record<string, unknown>, res: ServerR
         arguments: '{}',
       },
     });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 0,
+      item: {
+        id: 'fc_empty_list',
+        type: 'function_call',
+        call_id: 'call_empty_list',
+        name: 'list',
+        arguments: '{}',
+        status: 'completed',
+      },
+    });
     writeResponseEvent(res, 'response.completed', {
       response: {
         output: [
@@ -1077,6 +1203,7 @@ function handleToolEmptyArgsScenario(body: Record<string, unknown>, res: ServerR
             arguments: '{}',
           },
         ],
+        usage: { input_tokens: 1, output_tokens: 1 },
       },
     });
     res.end();
@@ -1088,12 +1215,41 @@ function handleToolEmptyArgsScenario(body: Record<string, unknown>, res: ServerR
 
 function handleToolEofScenario(body: Record<string, unknown>, res: ServerResponse): void {
   if (!hasFunctionCallOutput(body)) {
-    res.write(
-      'event: response.output_item.added\n' +
-        'data: {"output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"unknown_tool","arguments":"{\\"query\\":\\"上海天气\\"}"}}\n\n' +
-        'event: response.completed\n' +
-        'data: {"response":{"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"unknown_tool","arguments":"{\\"query\\":\\"上海天气\\"}"}]}}',
-    );
+    writeResponseEvent(res, 'response.output_item.added', {
+      output_index: 0,
+      item: {
+        id: 'fc_1',
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'unknown_tool',
+        arguments: '{"query":"上海天气"}',
+      },
+    });
+    writeResponseEvent(res, 'response.output_item.done', {
+      output_index: 0,
+      item: {
+        id: 'fc_1',
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'unknown_tool',
+        arguments: '{"query":"上海天气"}',
+        status: 'completed',
+      },
+    });
+    writeResponseEvent(res, 'response.completed', {
+      response: {
+        output: [
+          {
+            id: 'fc_1',
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'unknown_tool',
+            arguments: '{"query":"上海天气"}',
+          },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    });
     res.end();
     return;
   }
@@ -1103,8 +1259,14 @@ function handleToolEofScenario(body: Record<string, unknown>, res: ServerRespons
 
 function handleChatToolEofScenario(body: Record<string, unknown>, res: ServerResponse): void {
   if (!hasChatToolResult(body)) {
+    // Simulates an upstream that cuts off mid-stream (no `\n\n`
+    // separator, no `data: [DONE]`). `@ai-sdk/openai-compatible` is
+    // stricter than the legacy custom parser and needs at least the
+    // SSE event terminator to emit the buffered chunk; provide it so
+    // the tool_call_delta still propagates while the absence of a
+    // [DONE] marker still represents the truncated tail.
     res.write(
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"unknown_tool","arguments":"{\\"query\\":\\"上海天气\\"}"}}]},"finish_reason":"tool_calls"}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"unknown_tool","arguments":"{\\"query\\":\\"上海天气\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
     );
     res.end();
     return;
@@ -1120,15 +1282,62 @@ function handleChatToolEofScenario(body: Record<string, unknown>, res: ServerRes
 }
 
 function writeTextCompletion(res: ServerResponse, text: string): void {
+  // Emit the full Responses API event lifecycle. The legacy custom
+  // parser only cared about `output_text.delta` + `completed`, but
+  // `@ai-sdk/openai@3.x` requires `output_item.added` +
+  // `content_part.added` to register the text part before any delta
+  // arrives (otherwise it raises `text part <id> not found`).
+  writeResponseEvent(res, 'response.output_item.added', {
+    output_index: 0,
+    item: { id: 'msg_1', type: 'message', role: 'assistant', status: 'in_progress' },
+  });
+  writeResponseEvent(res, 'response.content_part.added', {
+    item_id: 'msg_1',
+    output_index: 0,
+    content_index: 0,
+    part: { type: 'output_text', text: '', annotations: [] },
+  });
   writeResponseEvent(res, 'response.output_text.delta', {
     output_index: 0,
     content_index: 0,
     item_id: 'msg_1',
     delta: text,
   });
+  writeResponseEvent(res, 'response.output_text.done', {
+    output_index: 0,
+    content_index: 0,
+    item_id: 'msg_1',
+    text,
+  });
+  writeResponseEvent(res, 'response.content_part.done', {
+    item_id: 'msg_1',
+    output_index: 0,
+    content_index: 0,
+    part: { type: 'output_text', text, annotations: [] },
+  });
+  writeResponseEvent(res, 'response.output_item.done', {
+    output_index: 0,
+    item: {
+      id: 'msg_1',
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [{ type: 'output_text', text, annotations: [] }],
+    },
+  });
   writeResponseEvent(res, 'response.completed', {
     response: {
-      output: [{ id: 'msg_1', type: 'message' }],
+      id: 'resp_1',
+      status: 'completed',
+      output: [
+        {
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text, annotations: [] }],
+        },
+      ],
       usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
     },
   });
@@ -1140,8 +1349,15 @@ function writeResponseEvent(
   event: string,
   body: Record<string, unknown>,
 ): void {
+  // @ai-sdk/openai validates the `type` discriminator inside the JSON
+  // payload (OpenAI's real stream emits it both as the SSE `event:`
+  // line and as `{ type: ... }` in the body). Historically this mock
+  // only emitted the SSE event name, which satisfied OpenAWork's
+  // legacy custom parser but trips the SDK's zod schemas. Include the
+  // type in the payload so both parsers see a well-formed event.
+  const payload = 'type' in body ? body : { type: event, ...body };
   res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(body)}\n\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function resolveScenario(body: Record<string, unknown>): ScenarioName {
@@ -1512,7 +1728,10 @@ function assertEvent(
   label: string,
 ): void {
   if (!events.some(predicate)) {
-    throw new Error(`${label} was not observed in SSE output`);
+    const summary = events.map((e) => e['type']).join(', ');
+    throw new Error(
+      `${label} was not observed in SSE output. Captured event types: [${summary}]\nFull events: ${JSON.stringify(events, null, 2)}`,
+    );
   }
 }
 
@@ -1521,8 +1740,11 @@ function assertNoEvent(
   predicate: (event: Record<string, unknown>) => boolean,
   label: string,
 ): void {
-  if (events.some(predicate)) {
-    throw new Error(`${label} but matched an unexpected SSE event`);
+  const matches = events.filter(predicate);
+  if (matches.length > 0) {
+    throw new Error(
+      `${label} but matched an unexpected SSE event: ${JSON.stringify(matches, null, 2)}`,
+    );
   }
 }
 
@@ -1543,10 +1765,14 @@ function assertOrderedEvents(
   label: string,
 ): void {
   let cursor = 0;
-  for (const predicate of predicates) {
+  for (let i = 0; i < predicates.length; i += 1) {
+    const predicate = predicates[i]!;
     const nextIndex = events.findIndex((event, index) => index >= cursor && predicate(event));
     if (nextIndex === -1) {
-      throw new Error(`${label} failed to match expected event subsequence`);
+      const summary = events.map((e) => e['type']).join(', ');
+      throw new Error(
+        `${label} failed to match expected event subsequence (predicate #${i} unmatched after cursor ${cursor}). Captured event types: [${summary}]\nFull events: ${JSON.stringify(events, null, 2)}`,
+      );
     }
     cursor = nextIndex + 1;
   }

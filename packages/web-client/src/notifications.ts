@@ -28,6 +28,7 @@ export interface NotificationsClient {
     token: string,
     options?: { channel?: NotificationPreferenceChannel; signal?: AbortSignal },
   ): Promise<NotificationPreferenceRecord[]>;
+  markAllRead(token: string): Promise<void>;
   markRead(token: string, notificationId: string): Promise<void>;
   updatePreferences(
     token: string,
@@ -62,6 +63,16 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
       }
       const data = (await response.json()) as { notifications?: NotificationRecord[] };
       return data.notifications ?? [];
+    },
+
+    async markAllRead(token) {
+      const response = await fetch(`${baseUrl}/notifications/read-all`, {
+        method: 'POST',
+        headers: authHeader(token),
+      });
+      if (!response.ok && response.status !== 204) {
+        throw new Error(`Failed to mark all notifications as read: ${response.status}`);
+      }
     },
 
     async markRead(token, notificationId) {

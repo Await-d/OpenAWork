@@ -182,7 +182,7 @@ function scrubClaudeToolIds(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
     if (!Array.isArray(message.content)) return message;
     if (message.role !== 'assistant' && message.role !== 'tool') return message;
-    const next = message.content.map((part) => {
+    const next = (message.content as unknown[]).map((part) => {
       if (!isRecord(part)) return part;
       const type = part['type'];
       if (type === 'tool-call' || type === 'tool-result') {
@@ -206,7 +206,7 @@ function scrubMistralToolIds(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
     if (!Array.isArray(message.content)) return message;
     if (message.role !== 'assistant' && message.role !== 'tool') return message;
-    const next = message.content.map((part) => {
+    const next = (message.content as unknown[]).map((part) => {
       if (!isRecord(part)) return part;
       const type = part['type'];
       if (type === 'tool-call' || type === 'tool-result') {
@@ -231,7 +231,7 @@ function scrubMistralToolIds(messages: ModelMessage[]): ModelMessage[] {
 function splitAnthropicAssistantToolCallText(messages: ModelMessage[]): ModelMessage[] {
   return messages.flatMap((message) => {
     if (message.role !== 'assistant' || !Array.isArray(message.content)) return [message];
-    const parts = message.content;
+    const parts = message.content as unknown[];
     const firstToolCall = parts.findIndex((part) => isRecord(part) && part['type'] === 'tool-call');
     if (firstToolCall === -1) return [message];
     const trailing = parts.slice(firstToolCall);
@@ -277,7 +277,8 @@ function withDeepSeekReasoning(messages: ModelMessage[]): ModelMessage[] {
     if (message.role !== 'assistant') return message;
     const content = message.content;
     if (Array.isArray(content)) {
-      if (content.some((part) => isRecord(part) && part['type'] === 'reasoning')) return message;
+      if ((content as unknown[]).some((part) => isRecord(part) && part['type'] === 'reasoning'))
+        return message;
       return { ...message, content: [...content, { type: 'reasoning', text: '' }] } as ModelMessage;
     }
     if (typeof content === 'string') {

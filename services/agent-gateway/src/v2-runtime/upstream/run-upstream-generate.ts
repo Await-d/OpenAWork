@@ -36,7 +36,7 @@
 import type { RequestOverrides } from '@openAwork/agent-core';
 import { generateText, type GenerateTextResult, type ModelMessage, type ToolSet } from 'ai';
 import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
-import { buildAISdkProvider } from './provider.js';
+import { buildAISdkProvider, type UpstreamProtocolKind } from './provider.js';
 import {
   buildBaseProviderOptions,
   buildProviderOptions,
@@ -48,6 +48,16 @@ import { applyProviderMessageTransforms } from './message-transforms.js';
 export interface RunUpstreamGenerateInput {
   /** OpenAWork-side provider type (`openai`, `anthropic`, `gemini`, ...). */
   providerType: string;
+  /**
+   * Per-provider explicit upstream protocol override. When the user
+   * has configured a provider with a specific `upstreamProtocol`
+   * (e.g. `'responses'` for an OpenAI-compatible relay that exposes
+   * `/responses`, or `'anthropic_messages'` for an Anthropic-shaped
+   * gateway), callers should forward it here so the AI SDK provider
+   * factory routes through the matching adapter instead of falling
+   * back to `chat_completions` based on `providerType` alone.
+   */
+  upstreamProtocol?: UpstreamProtocolKind;
   /** Upstream API key, when applicable. */
   apiKey?: string;
   /** Upstream base URL — required for non-OpenAI vendors / proxies. */
@@ -116,6 +126,7 @@ export async function runUpstreamGenerate(
 ): Promise<RunUpstreamGenerateResult> {
   const provider = buildAISdkProvider({
     providerType: input.providerType,
+    ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
     ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     ...(input.baseURL ? { baseURL: input.baseURL } : {}),
     ...(input.headers ? { headers: input.headers } : {}),

@@ -5,6 +5,7 @@ import { requireAuth } from '../auth.js';
 import {
   listNotificationPreferences,
   listNotifications,
+  markAllNotificationsRead,
   markNotificationRead,
   NOTIFICATION_PREFERENCE_CHANNELS,
   NOTIFICATION_PREFERENCE_EVENT_TYPES,
@@ -64,6 +65,18 @@ export async function notificationsRoutes(app: FastifyInstance): Promise<void> {
       });
       step.succeed(undefined, { count: notifications.length });
       return reply.send({ notifications });
+    },
+  );
+
+  app.post(
+    '/notifications/read-all',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { step } = startRequestWorkflow(request, 'notifications.read-all');
+      markAllNotificationsRead({ userId: user.sub });
+      step.succeed();
+      return reply.status(204).send();
     },
   );
 

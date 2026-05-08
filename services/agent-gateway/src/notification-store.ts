@@ -101,6 +101,15 @@ export function markNotificationRead(input: { id: string; userId: string }): voi
   );
 }
 
+export function markAllNotificationsRead(input: { userId: string }): void {
+  sqliteRun(
+    `UPDATE notifications
+     SET status = 'read', read_at = COALESCE(read_at, datetime('now'))
+     WHERE user_id = ? AND status = 'unread'`,
+    [input.userId],
+  );
+}
+
 export function listNotificationPreferences(input: {
   channel?: NotificationPreferenceChannel;
   userId: string;

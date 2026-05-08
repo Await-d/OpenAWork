@@ -260,6 +260,13 @@ interface RunnerState {
    */
   toolNamesById: Map<string, string>;
   /**
+   * Responses API encrypted reasoning payload captured from the
+   * provider's reasoning-start providerMetadata. Forwarded on
+   * reasoning-end so downstream accumulators can persist it for
+   * round-2 replay.
+   */
+  thinkingEncryptedContent?: string;
+  /**
    * AI SDK fires both `finish-step` (per round) and `finish` (overall)
    * for non-multi-step calls; legacy emits exactly one `done` chunk
    * per upstream completion. We collapse the two into a single emit
@@ -408,6 +415,22 @@ export async function* runUpstreamStream(
         const itemId = 'id' in part && typeof part.id === 'string' ? part.id : undefined;
         state.thinkingActive = true;
         state.thinkingItemId = itemId;
+        // Responses API encrypted reasoning replay: the OpenAI SDK
+        // attaches `encrypted_content` (and the source `itemId`) to the
+        // reasoning-start providerMetadata. Capture it so the
+        // reasoning-end emit can forward it downstream where the
+        // accumulator persists it for round-2 replay (`previous_response_id`
+        // / `input.reasoning` parity).
+        const startPmd = (part as { providerMetadata?: Record<string, unknown> }).providerMetadata;
+        const openaiStartMeta = startPmd?.['openai'] as
+          | { reasoningEncryptedContent?: unknown; itemId?: unknown }
+          | undefined;
+        if (
+          typeof openaiStartMeta?.reasoningEncryptedContent === 'string' &&
+          openaiStartMeta.reasoningEncryptedContent.length > 0
+        ) {
+          state.thinkingEncryptedContent = openaiStartMeta.reasoningEncryptedContent;
+        }
         yield {
           type: 'thinking_start',
           ...(itemId ? { itemId } : {}),
@@ -442,10 +465,19 @@ export async function* runUpstreamStream(
           typeof anthropicMeta?.signature === 'string' && anthropicMeta.signature.length > 0
             ? anthropicMeta.signature
             : undefined;
+        const encryptedContent = state.thinkingEncryptedContent;
+        state.thinkingEncryptedContent = undefined;
+        const providerMetadata =
+          signature || encryptedContent
+            ? {
+                ...(signature ? { signature } : {}),
+                ...(encryptedContent ? { encryptedContent } : {}),
+              }
+            : undefined;
         yield {
           type: 'thinking_end',
           ...(itemId ? { itemId } : {}),
-          ...(signature ? { providerMetadata: { signature } } : {}),
+          ...(providerMetadata ? { providerMetadata } : {}),
           ...meta({}),
         };
         break;
@@ -616,12 +648,17 @@ export async function* runUpstreamStream(
             : typeof part.error === 'string'
               ? part.error
               : 'unknown upstream error';
-        const errorChunk: StreamErrorChunk = {
-          type: 'error',
-          code: 'UPSTREAM_ERROR',
+        // Emit the legacy-compatible `MODEL_ERROR` code + HTTP-ish
+        // `status: 502` so SSE consumers (and the
+        // verify-openai-responses verifier) continue to see the same
+        // error shape the custom parser produced pre-migration.
+        const errorChunk = {
+          type: 'error' as const,
+          code: 'MODEL_ERROR',
+          status: 502,
           message,
           ...meta({}),
-        };
+        } as StreamErrorChunk;
         yield errorChunk;
         break;
       }

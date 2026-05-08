@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MockLanguageModelV2 } from 'ai/test';
+import { MockLanguageModelV3 as MockLanguageModelV2 } from 'ai/test';
 import type { StreamChunk } from '@openAwork/shared';
 import {
   buildAISdkProvider,
@@ -89,8 +89,8 @@ describe('runUpstreamStream', () => {
       { type: 'text-end', id: 't1' },
       {
         type: 'finish',
-        finishReason: 'stop',
-        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 1 }, outputTokens: { total: 2 } },
       },
     ]);
 
@@ -125,8 +125,8 @@ describe('runUpstreamStream', () => {
       { type: 'reasoning-end', id: 'r1' },
       {
         type: 'finish',
-        finishReason: 'stop',
-        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
       },
     ]);
 
@@ -170,8 +170,8 @@ describe('runUpstreamStream', () => {
       },
       {
         type: 'finish',
-        finishReason: 'tool-calls',
-        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
       },
     ]);
 
@@ -207,8 +207,8 @@ describe('runUpstreamStream', () => {
       },
       {
         type: 'finish',
-        finishReason: 'tool-calls',
-        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
       },
     ]);
 
@@ -247,7 +247,11 @@ describe('runUpstreamStream', () => {
     const errorChunk = chunks.find(
       (c): c is Extract<StreamChunk, { type: 'error' }> => c.type === 'error',
     );
-    expect(errorChunk?.code).toBe('UPSTREAM_ERROR');
+    // Legacy parser parity: upstream stream-runner errors surface as
+    // `MODEL_ERROR` + `status: 502` so SSE consumers and verifiers see
+    // the same error shape they did before the v2 SDK migration.
+    expect(errorChunk?.code).toBe('MODEL_ERROR');
+    expect((errorChunk as unknown as { status?: number })?.status).toBe(502);
     expect(errorChunk?.message).toContain('upstream blew up');
   });
 
@@ -257,8 +261,8 @@ describe('runUpstreamStream', () => {
       [
         {
           type: 'finish',
-          finishReason: 'stop',
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
         },
       ],
       (options) => calls.push(options),
@@ -292,8 +296,8 @@ describe('runUpstreamStream', () => {
       [
         {
           type: 'finish',
-          finishReason: 'stop',
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
         },
       ],
       (options) => calls.push(options),
@@ -353,8 +357,8 @@ describe('runUpstreamStream', () => {
       { type: 'text-end', id: 't1' },
       {
         type: 'finish',
-        finishReason: 'stop',
-        usage: { inputTokens: 5, outputTokens: 7, totalTokens: 12 },
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 5 }, outputTokens: { total: 7 } },
       },
     ]);
 
@@ -385,8 +389,8 @@ describe('runUpstreamStream', () => {
       { type: 'text-end', id: 't1' },
       {
         type: 'finish',
-        finishReason: 'stop',
-        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 1 }, outputTokens: { total: 2 } },
       },
     ]);
 

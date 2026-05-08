@@ -36,6 +36,7 @@ const sessionMetadataPatchSchema = z
     agentId: z.string().min(1).max(120).optional(),
     dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
     editSourceMessageId: z.string().min(1).max(200).optional(),
+    imageWorkbench: z.boolean().optional(),
     modelId: z.string().min(1).max(200).optional(),
     parentSessionId: z.string().min(1).max(200).optional(),
     planMode: z.boolean().optional(),

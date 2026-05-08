@@ -291,6 +291,21 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
 
   if (chunk.type === 'thinking_end') {
     state.assistantThinkingBlocks = markReasoningBlockEnded(state.assistantThinkingBlocks, chunk);
+    // Capture Responses-API encrypted reasoning payload (forwarded by
+    // the v2 stream-runner via thinking_end.providerMetadata) so the
+    // round-2 input replay includes the same encrypted reasoning item
+    // the upstream produced. Without this, OpenAI rejects round 2 as
+    // "missing reasoning replay".
+    const pmd = chunk.providerMetadata;
+    if (pmd && typeof pmd.encryptedContent === 'string' && pmd.encryptedContent.length > 0) {
+      state.reasoningEncryptedContent = pmd.encryptedContent;
+    }
+    if (pmd && typeof pmd.summary === 'string' && pmd.summary.length > 0) {
+      state.reasoningSummary = pmd.summary;
+    }
+    if (pmd && typeof pmd.responseId === 'string' && pmd.responseId.length > 0) {
+      state.responseId = pmd.responseId;
+    }
     // Mark every matching segment's endedAt. With the trailing-segment
     // accumulation strategy, a single reasoning block may have produced
     // multiple non-contiguous segments; closing all of them prevents the
@@ -955,14 +970,14 @@ export async function runModelRound(input: {
   // (`runUpstreamStream`) which handles cache breakpoints, message
   // normalisation, provider-specific thinking options, and protocol
   // decoding uniformly across `chat_completions`, `anthropic_messages`,
-  // and OpenAI-compatible Responses-flavoured endpoints (the latter
-  // currently downgrades to `chat_completions` since `@ai-sdk/openai`
-  // is not yet wired in).
+  // and Responses (`@ai-sdk/openai`) once the user opts in via
+  // `upstreamProtocol: 'responses'` in provider settings.
   void compactionAutoEnabled;
 
   try {
     const provider = buildAISdkProvider({
       providerType: input.route.providerType ?? 'custom',
+      upstreamProtocol: input.route.upstreamProtocol,
       ...(input.route.apiKey ? { apiKey: input.route.apiKey } : {}),
       ...(input.route.apiBaseUrl ? { baseURL: input.route.apiBaseUrl } : {}),
       ...(input.route.requestOverrides.headers &&
@@ -1055,8 +1070,30 @@ export async function runModelRound(input: {
         if (chunkWithMeta.type === 'done') {
           doneEmitted = true;
           stopReason = chunkWithMeta.stopReason;
-          input.writeChunk(chunkWithMeta as RunEvent);
+          // Suppress intermediate `done(tool_use)` chunks: the agent
+          // loop in `routes/stream.ts` continues into another round to
+          // dispatch the tool calls, and SSE consumers expect exactly
+          // one terminal `done` per stream. Only the final round —
+          // which ends with `end_turn` / `error` / `cancelled` etc. —
+          // surfaces a `done` event downstream.
+          if (chunkWithMeta.stopReason !== 'tool_use') {
+            input.writeChunk(chunkWithMeta as RunEvent);
+          }
           break;
+        }
+
+        // An error chunk from the upstream runner is terminal for this
+        // round: suppress the synthetic fallback `done` emission below
+        // so SSE consumers see only the error, matching the legacy
+        // custom-parser contract the verifier asserts. Also mark any
+        // pending assistant/tool messages from this round as `error`
+        // so the next turn's history-building (message-to-model-messages)
+        // prunes stale tool_use/tool_result pairs instead of replaying
+        // them into the recovery request.
+        if (chunkWithMeta.type === 'error') {
+          doneEmitted = true;
+          stopReason = 'error';
+          markFailedRequestScopeMessages();
         }
 
         accumulateChunk(state, chunkWithMeta);

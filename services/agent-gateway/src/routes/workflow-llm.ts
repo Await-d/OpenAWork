@@ -18,6 +18,7 @@
  */
 
 import type { AIProvider } from '@openAwork/agent-core';
+import type { UpstreamProtocolKind } from '../v2-runtime/upstream/provider.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
@@ -28,6 +29,21 @@ export interface WorkflowLlmRequestConfig {
   model: string;
   prompt: string;
   temperature: number;
+  /**
+   * OpenAWork provider type (`openai`, `anthropic`, ...) — when the
+   * caller already knows the configured provider type, forward it so
+   * we skip the lossy hostname-based inference below. The hostname
+   * fallback only sees the public OpenAI/Anthropic/etc. endpoints and
+   * defaults custom relays to OpenAI-compatible.
+   */
+  providerType?: AIProvider['type'];
+  /**
+   * Per-provider explicit upstream protocol override (e.g. when the
+   * configured provider uses Responses or anthropic_messages instead
+   * of chat_completions). Forwarded straight to the AI SDK provider
+   * factory.
+   */
+  upstreamProtocol?: UpstreamProtocolKind;
   /** Session ID — reserved for future cache-key routing. */
   sessionId?: string;
 }
@@ -69,14 +85,17 @@ function parseHostname(value: string): string | null {
 export async function requestWorkflowLlmCompletion(
   input: WorkflowLlmRequestConfig,
 ): Promise<string> {
-  // Vendor inference matches the legacy `buildWorkflowLlmRequest`
-  // exactly so existing routes do not see behaviour drift; an unknown
-  // vendor falls back to OpenAI-compatible (the same wire shape the
-  // legacy fetch+JSON path used).
-  const providerType = inferWorkflowProviderType(input.apiBaseUrl, input.model) ?? 'openai';
+  // Prefer the caller-supplied provider type (sourced from the user's
+  // configured provider record) so we do not lose vendor information
+  // for custom relays that share a host with the public OpenAI API.
+  // Vendor inference is kept as a fallback for legacy callers that
+  // only know the base URL.
+  const providerType =
+    input.providerType ?? inferWorkflowProviderType(input.apiBaseUrl, input.model) ?? 'openai';
 
   const result = await runUpstreamGenerate({
     providerType,
+    ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
     apiKey: input.apiKey,
     baseURL: input.apiBaseUrl,
     model: input.model,

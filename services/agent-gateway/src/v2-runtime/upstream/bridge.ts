@@ -122,9 +122,16 @@ export function buildAISdkProviderFromConfig(
   };
   const apiKey = selectApiKey(input.provider, env);
 
+  // Resolve the protocol up-front so the SDK factory can pick the
+  // matching provider implementation (e.g. Responses API → @ai-sdk/openai
+  // instead of @ai-sdk/openai-compatible). Without this the factory
+  // would silently fall back to /chat/completions even when the user
+  // explicitly opted into Responses mode.
+  const protocol = pickProtocol(input.provider);
   const sdkConfig: AISdkProviderConfig = {
     providerType: input.provider.type,
     name: input.provider.name,
+    upstreamProtocol: protocol,
     ...(apiKey ? { apiKey } : {}),
     ...(input.provider.baseUrl ? { baseURL: input.provider.baseUrl } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
@@ -135,12 +142,6 @@ export function buildAISdkProviderFromConfig(
   };
 
   const built = buildAISdkProvider(sdkConfig);
-
-  // Honor the explicit `upstreamProtocol` override even if the SDK
-  // factory picked a different default — this matches OpenAWork's
-  // existing behaviour where users can force Responses or Anthropic
-  // mode from settings.
-  const protocol = pickProtocol(input.provider);
 
   return {
     built: { ...built, protocol },

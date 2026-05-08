@@ -152,8 +152,25 @@ function bridgeAssistant(message: AssistantMessageUnified): AssistantModelMessag
     });
   } else {
     const reasoningText = message.reasoning?.text;
-    if (typeof reasoningText === 'string' && reasoningText.length > 0) {
-      parts.push({ type: 'reasoning', text: reasoningText });
+    const reasoningEncryptedContent = message.reasoning?.encryptedContent;
+    const hasReasoningPayload =
+      (typeof reasoningText === 'string' && reasoningText.length > 0) ||
+      (typeof reasoningEncryptedContent === 'string' && reasoningEncryptedContent.length > 0);
+    if (hasReasoningPayload) {
+      // Attach Responses-API `encrypted_content` (and optional summary)
+      // through the AI SDK's `providerOptions.openai` channel so
+      // `@ai-sdk/openai` re-emits the encrypted reasoning item on the
+      // next round. Without this, OpenAI rejects multi-turn reasoning
+      // continuity with a "missing reasoning replay" 400.
+      const openaiOpts =
+        typeof reasoningEncryptedContent === 'string' && reasoningEncryptedContent.length > 0
+          ? { reasoningEncryptedContent }
+          : undefined;
+      parts.push({
+        type: 'reasoning',
+        text: typeof reasoningText === 'string' ? reasoningText : '',
+        ...(openaiOpts ? { providerOptions: { openai: openaiOpts } } : {}),
+      });
     }
   }
 

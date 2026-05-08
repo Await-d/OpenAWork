@@ -10,6 +10,7 @@ import type {
 } from '@openAwork/artifacts';
 import { computeArtifactLineDiff, detectArtifactContentType } from '@openAwork/artifacts';
 import { db, sqliteAll, sqliteGet, sqliteRun } from './db.js';
+import type { SqliteBindableValue } from './sqlite-bind-params.js';
 
 interface ArtifactRow {
   id: string;
@@ -252,6 +253,37 @@ export function listArtifactsBySession(userId: string, sessionId: string): Artif
      WHERE user_id = ? AND session_id = ?
      ORDER BY datetime(updated_at) DESC, datetime(created_at) DESC`,
     [userId, sessionId],
+  );
+  return rows.map(rowToArtifactRecord);
+}
+
+/**
+ * 列出当前用户所有「图片工作台」session（metadata_json 上带 `"imageWorkbench": true`）
+ * 下的产物，按更新时间倒序。用于图片工作台页面的历史画廊跨会话聚合，
+ * 同时刻意把普通 chat session 的产物排除在外。
+ */
+export function listImageWorkbenchArtifacts(
+  userId: string,
+  options?: { type?: string; limit?: number },
+): ArtifactRecord[] {
+  const limit = Math.max(1, Math.min(options?.limit ?? 200, 500));
+  const params: SqliteBindableValue[] = [userId];
+  let typeClause = '';
+  if (options?.type) {
+    typeClause = ' AND a.type = ?';
+    params.push(options.type);
+  }
+  params.push(limit);
+
+  const rows = sqliteAll<ArtifactRow>(
+    `SELECT a.* FROM artifacts AS a
+     INNER JOIN sessions AS s ON s.id = a.session_id
+     WHERE a.user_id = ?
+       AND s.user_id = a.user_id
+       AND json_extract(s.metadata_json, '$.imageWorkbench') = 1${typeClause}
+     ORDER BY datetime(a.updated_at) DESC, datetime(a.created_at) DESC
+     LIMIT ?`,
+    params,
   );
   return rows.map(rowToArtifactRecord);
 }
