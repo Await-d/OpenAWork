@@ -544,9 +544,10 @@ export async function* runUpstreamStream(
               ? JSON.stringify(inputValue)
               : '';
         if (!state.toolNamesById.has(callId)) {
-          // No prior tool-input-start was emitted (legacy path);
-          // register name + emit zero-length delta first so
-          // downstream sees the binding before the JSON payload.
+          // No prior tool-input-start was emitted (legacy path, e.g.
+          // OpenAI Chat Completions `function_call`): register name +
+          // emit zero-length delta first so downstream sees the
+          // binding, then emit the full JSON payload below.
           state.toolNamesById.set(callId, toolName);
           yield {
             type: 'tool_call_delta',
@@ -555,16 +556,22 @@ export async function* runUpstreamStream(
             inputDelta: '',
             ...meta({}),
           };
+          if (inputDelta.length > 0) {
+            yield {
+              type: 'tool_call_delta',
+              toolCallId: callId,
+              toolName,
+              inputDelta,
+              ...meta({}),
+            };
+          }
         }
-        if (inputDelta.length > 0) {
-          yield {
-            type: 'tool_call_delta',
-            toolCallId: callId,
-            toolName,
-            inputDelta,
-            ...meta({}),
-          };
-        }
+        // If we *did* see a prior tool-input-start, the input has
+        // already been streamed via tool-input-delta chunks, so we
+        // must NOT emit the final `tool-call.input` again — doing so
+        // would double the JSON in the accumulator (e.g. `{}{}`),
+        // make `JSON.parse` fail, and force callers to fall back to
+        // `{ raw: '{}{}' }`, which Zod-validated tools then reject.
         break;
       }
       case 'tool-error': {
