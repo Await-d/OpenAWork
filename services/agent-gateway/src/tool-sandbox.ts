@@ -54,6 +54,8 @@ import { createEditTool } from './edit-tools.js';
 import { executeGenerateImageTool, generateImageToolDefinition } from './image-generation-tool.js';
 import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
+import { repoCloneToolDefinition } from './repo-clone-tools.js';
+import { repoOverviewToolDefinition } from './repo-overview-tools.js';
 import { lspManager } from './lsp/router.js';
 import {
   lspCallHierarchyToolDefinition,
@@ -65,6 +67,8 @@ import {
   lspRenameToolDefinition,
   lspSymbolsToolDefinition,
 } from './lsp-tools.js';
+import { parseFlatMcpToolName } from './mcp-tool-naming.js';
+import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from './plugin-host.js';
 import {
   callMcpToolForSession,
   getConfiguredMcpServerForSession,
@@ -124,7 +128,12 @@ import {
   shouldAutoApproveToolForSessionMetadata,
 } from './session-tool-visibility.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
-import { runSkillMcpTool, skillMcpToolDefinition } from './skill-mcp-tools.js';
+import {
+  isSkillMcpAllowedByEffective,
+  runSkillMcpTool,
+  skillMcpToolDefinition,
+} from './skill-mcp-tools.js';
+import { getEffectiveSkillsForSession } from './skill-selection-context.js';
 import { createSkillTool } from './skill-tools.js';
 import { resolveDelegatedAgent } from './task-agent-resolution.js';
 import {
@@ -164,7 +173,8 @@ import {
   todoWriteInputSchema,
   todoWriteTool,
 } from './todo-tools.js';
-import { websearchTool } from './tool-aliases.js';
+import { createWebsearchTool, websearchTool } from './tool-aliases.js';
+import { readWebsearchPolicy, WEBSEARCH_POLICY_KEY } from './websearch-policy.js';
 import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
 import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
 import {
@@ -287,6 +297,8 @@ const TOOL_WHITELIST = new Set<string>([
   'mcp_call',
   desktopAutomationToolDefinition.name,
   'generate_image',
+  repoCloneToolDefinition.name,
+  repoOverviewToolDefinition.name,
   ...WORKSPACE_TOOL_NAMES,
 ]);
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
@@ -1305,6 +1317,33 @@ function buildPermissionRequestContext(
         ? rawInput.filePath
         : null;
 
+  // Flat MCP tools (PR-C): `mcp__<serverId>__<toolName>` is dynamic and
+  // cannot be matched by the static `switch` below, so we intercept it
+  // up front. The permission scope mirrors the legacy `mcp_call` path
+  // (`serverId:toolName:fingerprint`) so users who already granted
+  // "always allow serverId:*" in the legacy UI don't see a second
+  // prompt after the flattening rollout.
+  const flatMcp = parseFlatMcpToolName(request.toolName);
+  if (flatMcp) {
+    try {
+      const server = getConfiguredMcpServerForSession(sessionId, flatMcp.serverId);
+      const serverFingerprint = getMcpServerFingerprint(server);
+      const previewArguments = JSON.stringify(rawInput).slice(0, 240);
+      return {
+        scope: `${flatMcp.serverId}:${flatMcp.toolName}:${serverFingerprint}`,
+        reason: '需要调用 MCP 工具',
+        riskLevel: 'high',
+        previewAction: `调用 ${flatMcp.serverId}/${flatMcp.toolName} ${previewArguments}`,
+        always: [`${flatMcp.serverId}:*`],
+      };
+    } catch {
+      // If the server is no longer configured (user removed it mid-turn),
+      // fall through to the generic permission prompt so the LLM gets a
+      // deterministic error rather than a silent null.
+      return null;
+    }
+  }
+
   switch (request.toolName) {
     case 'workspace_write_file': {
       const safePath = pathValue ? validateWorkspacePath(pathValue) : null;
@@ -1577,7 +1616,85 @@ function buildPermissionRequestContext(
   }
 }
 
+/**
+ * PR-D-Plugin entry wrapper: runs `tool.execute.before` to let
+ * plugins rewrite the rawInput, calls the original implementation,
+ * then runs `tool.execute.after` to let plugins rewrite the output.
+ *
+ * The hook contracts mirror opencode
+ * (`@/temp/opencode/packages/plugin/src/index.ts:170-200`):
+ *   - `output.args` is mutated in place by the before hook; we
+ *     replace `request.rawInput` with the (possibly rewritten)
+ *     value before dispatching the actual tool execution.
+ *   - `output.output` / `output.metadata.isError` are mutated by the
+ *     after hook; we propagate both back into the `ToolCallResult`.
+ *
+ * Hook errors are isolated inside the dispatcher (see
+ * `plugin-host.ts`); a misbehaving plugin can't crash a tool call.
+ */
 async function executeGatewayManagedTool(
+  sandbox: ToolSandbox,
+  sessionId: string,
+  request: ToolCallRequest,
+  signal: AbortSignal,
+  observability: PermissionRequestPayload['observability'] | undefined,
+  executionContext?: SandboxExecutionContext,
+): Promise<ToolCallResult | null> {
+  const beforeOutput = {
+    args: request.rawInput,
+  };
+  await dispatchToolExecuteBefore(
+    {
+      tool: request.toolName,
+      sessionID: sessionId,
+      callID: request.toolCallId,
+    },
+    beforeOutput,
+  );
+  // The hook mutates `args` in place; capture the post-mutation value
+  // for both downstream execution AND the `args` field of the after
+  // hook (so plugins see what actually ran, not the pre-mutation value).
+  const effectiveRequest: ToolCallRequest =
+    beforeOutput.args === request.rawInput
+      ? request
+      : {
+          ...request,
+          rawInput: beforeOutput.args as Record<string, unknown>,
+        };
+
+  const result = await executeGatewayManagedToolImpl(
+    sandbox,
+    sessionId,
+    effectiveRequest,
+    signal,
+    observability,
+    executionContext,
+  );
+
+  if (!result) return null;
+
+  const afterOutput = {
+    output: result.output,
+    metadata: { isError: result.isError ?? false } as Record<string, unknown>,
+  };
+  await dispatchToolExecuteAfter(
+    {
+      tool: request.toolName,
+      sessionID: sessionId,
+      callID: request.toolCallId,
+      args: effectiveRequest.rawInput,
+    },
+    afterOutput,
+  );
+
+  return {
+    ...result,
+    output: afterOutput.output,
+    isError: afterOutput.metadata['isError'] === true,
+  };
+}
+
+async function executeGatewayManagedToolImpl(
   sandbox: ToolSandbox,
   sessionId: string,
   request: ToolCallRequest,
@@ -1920,6 +2037,20 @@ async function executeGatewayManagedTool(
           durationMs: 0,
         };
       }
+      // Apply workspace skill selection filter: skill_mcp resolves an MCP
+      // server embedded in an installed skill. If that skill is not in the
+      // session's effective set, refuse the call so the model cannot bypass
+      // the selection by guessing an mcp_name.
+      const skillMcpEffective = getEffectiveSkillsForSession(sessionId);
+      if (!isSkillMcpAllowedByEffective(skillMcpEffective, parsed.data.mcp_name)) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Skill MCP server "${parsed.data.mcp_name}" is not allowed in current workspace/session.`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
       try {
         return {
           toolCallId: request.toolCallId,
@@ -2227,6 +2358,43 @@ async function executeGatewayManagedTool(
         isError: false,
         durationMs: 0,
       };
+    }
+
+    // Flat MCP tools (PR-C): each MCP tool exposed as
+    // `mcp__<serverId>__<toolName>` routes here. The arguments come
+    // through `rawInput` directly — no `arguments` envelope unlike
+    // `mcp_call`, since the LLM treats the flat tool exactly like
+    // any other top-level function. Permission gating already ran
+    // upstream via `buildPermissionRequestContext`.
+    {
+      const flatMcp = parseFlatMcpToolName(request.toolName);
+      if (flatMcp) {
+        try {
+          const output = await callMcpToolForSession(sessionId, {
+            serverId: flatMcp.serverId,
+            toolName: flatMcp.toolName,
+            arguments: rawInput,
+          });
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output,
+            isError: output.isError === true,
+            durationMs: 0,
+          };
+        } catch (err) {
+          // Server outages / config drift / disabled-mid-turn —
+          // surface as a tool-call error so the LLM can recover
+          // rather than the request itself failing.
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: err instanceof Error ? err.message : String(err),
+            isError: true,
+            durationMs: 0,
+          };
+        }
+      }
     }
 
     if (request.toolName === 'mcp_call') {
@@ -2654,7 +2822,8 @@ async function executeGatewayManagedTool(
         };
       }
 
-      const skillTool = createSkillTool(sessionId, userId);
+      const effective = getEffectiveSkillsForSession(sessionId) ?? undefined;
+      const skillTool = createSkillTool(sessionId, userId, { effective });
       const parsed = skillTool.inputSchema.safeParse(rawInput);
       if (!parsed.success) {
         return {
@@ -2905,7 +3074,17 @@ async function executeGatewayManagedTool(
 
       const taskManager = new AgentTaskManagerImpl();
       const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, sessionId);
-      const resolvedAgent = resolveDelegatedAgent(userId, parsed.data);
+      const parentEffective = getEffectiveSkillsForSession(sessionId) ?? undefined;
+      const resolvedAgent = resolveDelegatedAgent(userId, parsed.data, {
+        parentEffective,
+      });
+      if (resolvedAgent.droppedSkills.length > 0) {
+        // Audit only — do not block delegation. Spec calls for a single-line
+        // visibility log so observability can spot mis-configured filters.
+        console.warn(
+          `[task-delegate] dropped skills outside effective set: parentSession=${sessionId} dropped=${resolvedAgent.droppedSkills.join(',')}`,
+        );
+      }
       const selectedDelegatedModel = selectDelegatedModelForUser(
         userId,
         resolvedAgent.modelEntries,
@@ -4878,7 +5057,17 @@ export class ToolSandbox {
       rawInput: dispatchedRequest.normalized.normalizedFields,
     };
 
-    if (!this.whitelist.has(normalizedRequest.toolName)) {
+    // Flat MCP tools (PR-C) are dynamic — their names are constructed
+    // at request time from `(serverId, toolName)` pairs that the gateway
+    // discovered after listing the user's MCP servers, so they can't
+    // appear in the static `TOOL_WHITELIST`. Treat any name that
+    // parses as `mcp__<serverId>__<toolName>` as implicitly whitelisted;
+    // downstream permission gating (`buildPermissionRequestContext`)
+    // and execution (`executeGatewayManagedTool`) still validate that
+    // the server is configured and enabled for this user.
+    const isFlatMcpTool = parseFlatMcpToolName(normalizedRequest.toolName) !== null;
+
+    if (!isFlatMcpTool && !this.whitelist.has(normalizedRequest.toolName)) {
       const result: ToolCallResult = {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
@@ -5108,15 +5297,72 @@ export class ToolSandbox {
   }
 }
 
-export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
+export interface CreateDefaultSandboxOptions {
+  /**
+   * When supplied, the sandbox registers a user-aware `websearch`
+   * tool that consults the persisted `WEBSEARCH_POLICY_KEY` row
+   * before falling back to the legacy single-provider call. Callers
+   * that have no user context (verification scripts, ad-hoc tools)
+   * keep the legacy registration so behaviour is unchanged.
+   */
+  userId?: string;
+}
+
+export function createDefaultSandbox(
+  allowedTools: string[] = [],
+  options: CreateDefaultSandboxOptions = {},
+): ToolSandbox {
   const editTool = createEditTool('__sandbox__', '__sandbox__', '__sandbox__');
   const sandbox = new ToolSandbox({
     allowedTools: [...allowedTools, ...TOOL_WHITELIST],
     defaultTimeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
   });
-  sandbox.register<typeof websearchTool.inputSchema, typeof websearchTool.outputSchema>(
-    websearchTool,
-  );
+  // P2-WEBSEARCH: when we know the caller, swap in the factory
+  // variant that consults `user_settings.websearch_policy` and falls
+  // back to the legacy single-provider path otherwise. The resolver
+  // is invoked per-call so a `PUT /settings/websearch` takes effect
+  // for the very next tool invocation without rebuilding sandboxes.
+  if (options.userId) {
+    const userId = options.userId;
+    const userAwareWebsearchTool = createWebsearchTool({
+      resolveMultiConfig: () => {
+        try {
+          const row = sqliteGet<{ value: string }>(
+            `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+            [userId, WEBSEARCH_POLICY_KEY],
+          );
+          if (!row?.value) return null;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(row.value);
+          } catch {
+            return null;
+          }
+          const policy = readWebsearchPolicy(parsed);
+          // `readWebsearchPolicy` always returns a defaulted shape;
+          // we only forward to the multi-call path when the user
+          // actually opted in (≥1 provider configured).
+          if (policy.providers.length === 0) return null;
+          return {
+            providers: policy.providers,
+            rolloutMode: policy.rolloutMode,
+            ...(policy.timeoutMs !== undefined ? { timeoutMs: policy.timeoutMs } : {}),
+          };
+        } catch (err) {
+          console.warn('[websearch-policy] resolve failed —', String(err));
+          return null;
+        }
+      },
+    });
+    sandbox.register<
+      typeof userAwareWebsearchTool.inputSchema,
+      typeof userAwareWebsearchTool.outputSchema
+    >(userAwareWebsearchTool);
+  } else {
+    sandbox.register<typeof websearchTool.inputSchema, typeof websearchTool.outputSchema>(
+      websearchTool,
+    );
+  }
   sandbox.register<
     typeof codesearchToolDefinition.inputSchema,
     typeof codesearchToolDefinition.outputSchema
@@ -5221,5 +5467,13 @@ export function createDefaultSandbox(allowedTools: string[] = []): ToolSandbox {
     typeof interactiveBashToolDefinition.inputSchema,
     typeof interactiveBashToolDefinition.outputSchema
   >(interactiveBashToolDefinition);
+  sandbox.register<
+    typeof repoCloneToolDefinition.inputSchema,
+    typeof repoCloneToolDefinition.outputSchema
+  >(repoCloneToolDefinition);
+  sandbox.register<
+    typeof repoOverviewToolDefinition.inputSchema,
+    typeof repoOverviewToolDefinition.outputSchema
+  >(repoOverviewToolDefinition);
   return sandbox;
 }

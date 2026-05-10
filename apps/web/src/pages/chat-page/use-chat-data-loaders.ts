@@ -79,6 +79,7 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
             type?: string;
             status?: string;
             enabled?: boolean;
+            builtin?: boolean;
           }>;
         }) => {
           if (!cancelled) {
@@ -96,6 +97,7 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
                       : 'connecting',
                 toolCount: 0,
                 authType: server.type,
+                builtin: server.builtin === true,
               })),
             );
           }

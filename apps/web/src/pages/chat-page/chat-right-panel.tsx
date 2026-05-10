@@ -18,6 +18,7 @@ import type {
 } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import { TaskToolInline } from '../../components/chat/task-tool-inline.js';
+import SkillSettingsPanel from '../../components/chat/SkillSettingsPanel.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import {
@@ -410,6 +411,14 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                     <div style={sharedUiThemeVars}>
                       <MCPServerList servers={mcpServers} />
                     </div>
+                  )}
+                  {rightTab === 'skills' && (
+                    <SkillSettingsPanel
+                      sessionId={currentSessionId}
+                      workspacePath={effectiveWorkingDirectory}
+                      accessToken={token ?? null}
+                      gatewayUrl={gatewayUrl}
+                    />
                   )}
                 </div>
               </>

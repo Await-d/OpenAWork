@@ -87,6 +87,11 @@ export const PRELOADABLE_ROUTE_MODULES = {
     '工作流工作台',
   ),
   skills: createPreloadableRouteModule('skills', () => import('../pages/SkillsPage.js'), '技能库'),
+  skillSelection: createPreloadableRouteModule(
+    'skill-selection',
+    () => import('../pages/SkillSelectionPage.js'),
+    'Skill 工作区选择集',
+  ),
   usage: createPreloadableRouteModule('usage', () => import('../pages/UsagePage.js'), '用量统计'),
 } as const;
 

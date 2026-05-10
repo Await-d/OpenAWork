@@ -9,108 +9,66 @@ import { buildGatewayToolDefinitions, getVisibleToolName } from '../tool-definit
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listEnabledAgentCapabilitiesForUser } from '../agent-catalog.js';
 import { filterEnabledGatewayToolsForSession } from '../session-tool-visibility.js';
+import {
+  getEffectiveSkillsForSession,
+  getEffectiveSkillsForUser,
+} from '../skill-selection-context.js';
+import { BUILTIN_MCP_IDS } from '../builtin-mcps.js';
+import { loadConfiguredMcpServersForUser } from '../mcp-runtime.js';
 
 interface SessionMetadataRow {
   metadata_json: string;
 }
 
-const BUILTIN_MCPS: CapabilityDescriptor[] = [
-  {
-    id: 'websearch',
-    kind: 'mcp',
-    label: 'websearch',
-    description: '网页搜索 MCP server',
-    source: 'reference',
-    callable: false,
-    tags: ['websearch_web_search_exa'],
-  },
-  {
-    id: 'context7',
-    kind: 'mcp',
-    label: 'context7',
-    description: '文档检索 MCP server',
-    source: 'reference',
-    callable: false,
-    tags: ['context7_resolve-library-id', 'context7_query-docs'],
-  },
-];
-
-const REFERENCE_SKILLS: CapabilityDescriptor[] = [
-  {
-    id: 'playwright',
-    kind: 'skill',
-    label: 'playwright',
-    description: 'Browser automation skill/provider entry',
-    source: 'reference',
-    callable: false,
-  },
-  {
-    id: 'agent-browser',
-    kind: 'skill',
-    label: 'agent-browser',
-    description: 'Alternative browser provider skill',
-    source: 'reference',
-    callable: false,
-  },
-  {
-    id: 'playwright-cli',
-    kind: 'skill',
-    label: 'playwright-cli',
-    description: 'CLI-backed playwright skill implementation',
-    source: 'reference',
-    callable: false,
-  },
-  {
-    id: 'frontend-ui-ux',
-    kind: 'skill',
-    label: 'frontend-ui-ux',
-    description: 'Frontend UI/UX skill',
-    source: 'reference',
-    callable: false,
-  },
-  {
-    id: 'git-master',
-    kind: 'skill',
-    label: 'git-master',
-    description: 'Git workflow skill',
-    source: 'reference',
-    callable: false,
-  },
-  {
-    id: 'dev-browser',
-    kind: 'skill',
-    label: 'dev-browser',
-    description: 'Developer browser workflow skill',
-    source: 'reference',
-    callable: false,
-  },
-];
+// MCP 能力来自两条路径：
+// - 内置 MCP（websearch / grep_app）：硬编码远程 endpoint，运行时
+//   通过 `loadConfiguredMcpServersForUser` 自动合并到用户 server 列表。
+//   用户可在 settings 用同 id 覆盖（含禁用）。
+// - 用户配置 MCP：写在 user_settings.mcp_servers 的自定义项。
+//
+// REFERENCE_SKILLS（之前的虚晃 skill 占位列表）已移除，能力目录
+// 精确反映"实际安装"的 skill：BUILTIN_SKILLS + installedSkills。
 
 export function listCapabilitiesForUser(
   userId: string,
   sessionId?: string,
 ): CapabilityDescriptor[] {
+  // Effective skills drives both the installed_skills filter and the
+  // `skill` tool's description. When a sessionId is provided we resolve
+  // workspace path from session metadata; otherwise we query the user's
+  // global default ('__default__') selection set.
+  const effectiveSkills = sessionId
+    ? (getEffectiveSkillsForSession(sessionId) ??
+      getEffectiveSkillsForUser({ userId, workspacePath: null }))
+    : getEffectiveSkillsForUser({ userId, workspacePath: null });
+  const enabledInstalledIds = new Set(
+    effectiveSkills
+      .filter((entry) => entry.enabled && entry.origin !== 'builtin')
+      .map((entry) => entry.skillId),
+  );
   const installedRow = sqliteGet<{ value: string }>(
     `SELECT json_group_array(manifest_json) AS value FROM installed_skills WHERE user_id = ? AND enabled = 1 ORDER BY skill_id`,
     [userId],
   );
-  const mcpRow = sqliteGet<{ value: string }>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'mcp_servers'`,
-    [userId],
-  );
+  // mcp_servers 不再在这里直接读 —— 走 `loadConfiguredMcpServersForUser`
+  // 拿到的是"用户配置 + 内置 MCP"合并结果，避免漏掉内置 MCP 的展示。
 
   const installedSkills = (() => {
     try {
       const manifests = JSON.parse(installedRow?.value ?? '[]') as string[];
-      return manifests.map<CapabilityDescriptor>((manifestJson) => {
-        const manifest = JSON.parse(manifestJson) as {
-          id: string;
-          displayName?: string;
-          name?: string;
-          description?: string;
-          capabilities?: string[];
-        };
-        return {
+      return manifests
+        .map((manifestJson) => {
+          const manifest = JSON.parse(manifestJson) as {
+            id: string;
+            displayName?: string;
+            name?: string;
+            description?: string;
+            capabilities?: string[];
+          };
+          return manifest;
+        })
+        .filter((manifest) => enabledInstalledIds.has(manifest.id))
+        .map<CapabilityDescriptor>((manifest) => ({
           id: manifest.id,
           kind: 'skill',
           label: manifest.displayName ?? manifest.name ?? manifest.id,
@@ -118,8 +76,7 @@ export function listCapabilitiesForUser(
           source: 'installed',
           callable: false,
           tags: manifest.capabilities ?? [],
-        };
-      });
+        }));
     } catch {
       return [] as CapabilityDescriptor[];
     }
@@ -135,27 +92,26 @@ export function listCapabilitiesForUser(
     tags: manifest.capabilities,
   }));
 
-  const configuredMcps = (() => {
-    try {
-      const servers = JSON.parse(mcpRow?.value ?? '[]') as Array<{
-        id?: string;
-        name?: string;
-        enabled?: boolean;
-        type?: string;
-      }>;
-      return servers.map<CapabilityDescriptor>((server) => ({
-        id: server.id ?? server.name ?? 'mcp',
-        kind: 'mcp',
-        label: server.name ?? server.id ?? 'MCP',
-        description: `用户配置的 MCP server (${server.type ?? 'unknown'})`,
-        source: 'configured',
-        callable: false,
-        enabled: server.enabled !== false,
-      }));
-    } catch {
-      return [] as CapabilityDescriptor[];
-    }
-  })();
+  // MCP 能力目录走 `loadConfiguredMcpServersForUser`，它会**自动合并**
+  // 内置 MCP（websearch / grep_app）与用户配置；同 id 用户配置覆盖
+  // 内置项。这里不再单独读 user_settings 行，避免双份解析与漏掉
+  // 内置 MCP。`mcpRow` 仅作"用户是否做过自定义"的提示信号。
+  const builtinMcpIdSet = new Set<string>(BUILTIN_MCP_IDS);
+  const mergedMcps = loadConfiguredMcpServersForUser(userId);
+  const mcps = mergedMcps.map<CapabilityDescriptor>((server) => {
+    const isBuiltin = builtinMcpIdSet.has(server.id);
+    return {
+      id: server.id,
+      kind: 'mcp',
+      label: server.name,
+      description: isBuiltin
+        ? `内置 MCP server（${server.transport}）`
+        : `用户配置的 MCP server（${server.transport}）`,
+      source: isBuiltin ? 'builtin' : 'configured',
+      callable: false,
+      enabled: server.enabled !== false,
+    };
+  });
 
   const sessionMetadataRow = sessionId
     ? sqliteGet<SessionMetadataRow>(
@@ -163,12 +119,10 @@ export function listCapabilitiesForUser(
         [sessionId, userId],
       )
     : undefined;
+  const definitions = buildGatewayToolDefinitions({ effectiveSkills });
   const visibleTools = sessionMetadataRow?.metadata_json
-    ? filterEnabledGatewayToolsForSession(
-        buildGatewayToolDefinitions(),
-        sessionMetadataRow.metadata_json,
-      )
-    : buildGatewayToolDefinitions();
+    ? filterEnabledGatewayToolsForSession(definitions, sessionMetadataRow.metadata_json)
+    : definitions;
 
   const tools = visibleTools.map<CapabilityDescriptor>((tool) => ({
     id: getVisibleToolName(tool.function.name),
@@ -192,10 +146,8 @@ export function listCapabilitiesForUser(
   return [
     ...listEnabledAgentCapabilitiesForUser(userId),
     ...builtinSkills,
-    ...REFERENCE_SKILLS,
     ...installedSkills,
-    ...BUILTIN_MCPS,
-    ...configuredMcps,
+    ...mcps,
     ...tools,
     ...commands,
   ].sort((left, right) => {

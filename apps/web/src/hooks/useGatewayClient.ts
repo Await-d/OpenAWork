@@ -6,6 +6,7 @@ import type {
   InputImageContent,
   RunEvent,
   RunEventEnvelope,
+  StreamCancellationSummary,
   StreamChunk,
   StreamDoneChunk,
   StreamThinkingChunk,
@@ -26,7 +27,11 @@ interface StreamCallbacks {
   onThinkingDelta?: (chunk: StreamThinkingChunk) => void;
   onThinkingEnd?: (chunk: StreamThinkingEndChunk) => void;
   onToolCall?: (chunk: StreamToolCallChunk) => void;
-  onDone: (stopReason?: StreamDoneChunk['stopReason'] | 'cancelled', agentId?: string) => void;
+  onDone: (
+    stopReason?: StreamDoneChunk['stopReason'] | 'cancelled',
+    agentId?: string,
+    cancellation?: StreamCancellationSummary,
+  ) => void;
   onError: (code: string, message?: string) => void;
   onReconnectRequired?: (reason: 'attach_stream_disconnected') => void;
   model?: string;
@@ -202,7 +207,7 @@ export function connectAttachEventSource(
           settled = true;
           cleanup(true, eventSource);
           callbacks.onEvent?.(chunk);
-          callbacks.onDone(chunk.stopReason, chunk.agentId);
+          callbacks.onDone(chunk.stopReason, chunk.agentId, chunk.cancellation);
           return;
         case 'error':
           settled = true;
@@ -677,7 +682,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
             settled = true;
             cleanup();
             callbacks.onEvent?.(chunk);
-            callbacks.onDone(chunk.stopReason, chunk.agentId);
+            callbacks.onDone(chunk.stopReason, chunk.agentId, chunk.cancellation);
             return;
           case 'error':
             settled = true;

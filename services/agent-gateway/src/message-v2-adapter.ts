@@ -76,7 +76,11 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
   for (const part of parts) {
     switch (part.type) {
       case 'text':
-        content.push({ type: 'text', text: part.text });
+        content.push({
+          type: 'text',
+          text: part.text,
+          ...(part.synthetic ? { synthetic: true } : {}),
+        });
         break;
       case 'reasoning': {
         // Anthropic extended-thinking signature lives on either of:
@@ -117,6 +121,15 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
             ? toolPart.state.metadata
             : undefined,
         );
+        // Round-trip persisted `tool-call.providerMetadata` (e.g. the
+        // OpenAI Responses `openai.itemId`) so listSessionMessagesV2
+        // consumers — most importantly `toModelMessages` →
+        // `unifiedConversationToModelMessages` → AI SDK — can replay
+        // the original `function_call.id` on subsequent rounds.
+        const persistedToolCallProviderMetadata =
+          toolPart.metadata && typeof toolPart.metadata['providerMetadata'] === 'object'
+            ? (toolPart.metadata['providerMetadata'] as Record<string, Record<string, unknown>>)
+            : undefined;
         // Emit tool_call
         content.push({
           type: 'tool_call',
@@ -124,6 +137,9 @@ function v2ToV1Message(withParts: MessageWithParts): Message {
           toolName: toolPart.tool,
           input: (toolPart.state as ToolStatePending | ToolStateRunning).input,
           rawArguments: (toolPart.state as ToolStatePending).raw,
+          ...(persistedToolCallProviderMetadata
+            ? { providerMetadata: persistedToolCallProviderMetadata }
+            : {}),
         });
         if (toolPart.state.status !== 'running') {
           const toolResult =
@@ -452,6 +468,7 @@ export function appendSessionMessageV2(input: {
         messageID: msgId,
         type: 'text',
         text: c.text,
+        ...(c.synthetic ? { synthetic: true } : {}),
       };
       emitEvent({
         definition: MessageEvents.PartCreated,
@@ -522,6 +539,17 @@ export function appendSessionMessageV2(input: {
           input: c.input,
           raw: normalizeToolArgumentsForStorage(c.rawArguments ?? c.input),
         },
+        // Persist provider-attached metadata (e.g. OpenAI Responses
+        // `openai.itemId` / `fc_xxx`) at the part level so it survives
+        // every subsequent state transition (running / completed /
+        // error) and can be replayed on later rounds via
+        // `providerOptions.openai.itemId`. This is what keeps the
+        // upstream prompt-cache prefix byte-stable across turns when
+        // a tool call sits in history (otherwise AI SDK falls back
+        // to the call_id and OpenAI re-keys the function_call item).
+        ...(c.providerMetadata && Object.keys(c.providerMetadata).length > 0
+          ? { metadata: { providerMetadata: c.providerMetadata } }
+          : {}),
       };
       emitEvent({
         definition: MessageEvents.PartCreated,

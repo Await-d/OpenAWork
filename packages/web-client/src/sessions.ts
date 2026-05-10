@@ -409,8 +409,23 @@ export interface DeleteSessionErrorData {
   state_status?: string;
 }
 
+/**
+ * Optional filters that the gateway `/sessions` route honours
+ * (P3-PATH, opencode #24849 parity). Older gateway versions ignore
+ * unknown query params, so omitting these is safe.
+ */
+export interface SessionsListOptions {
+  /** Absolute filesystem path to scope the list to. */
+  path?: string;
+  /**
+   * When `path` is set, controls whether descendants of that path
+   * also match. Defaults to `true` server-side.
+   */
+  includeDescendants?: boolean;
+}
+
 export interface SessionsClient {
-  list(token: string): Promise<Session[]>;
+  list(token: string, options?: SessionsListOptions): Promise<Session[]>;
   listSharedWithMe(
     token: string,
     options?: { limit?: number; offset?: number; signal?: AbortSignal },
@@ -552,6 +567,20 @@ export interface SessionsClient {
   stopActiveStream(token: string, sessionId: string): Promise<boolean>;
   stopStream(token: string, sessionId: string, clientRequestId: string): Promise<boolean>;
   importSession(token: string, data: SessionImportInput): Promise<SessionImportResult>;
+  /**
+   * P3-WARP stage 0 (workflow 260509): rebind a session's
+   * `workingDirectory`. Without `force`, the gateway preserves the
+   * legacy "first workspace wins" lock and returns a 409 if the
+   * session is already bound to a different path. `force: true` is
+   * the user-explicit warp opt-in — the gateway records a
+   * `workspaceWarpHistory` entry alongside the rebind so audits can
+   * reconstruct the move later.
+   */
+  warpWorkspace(
+    token: string,
+    sessionId: string,
+    input: { workingDirectory: string | null; force?: boolean },
+  ): Promise<{ ok: true; workingDirectory: string | null; warped?: boolean }>;
 }
 
 export class HttpError<T = unknown> extends Error {
@@ -613,8 +642,16 @@ function appendBooleanQuery(
 
 export function createSessionsClient(gatewayUrl: string): SessionsClient {
   return {
-    async list(token) {
-      const res = await fetch(`${gatewayUrl}/sessions?limit=100`, {
+    async list(token, options) {
+      const params = new URLSearchParams();
+      params.set('limit', '100');
+      if (options?.path && options.path.trim().length > 0) {
+        params.set('path', options.path.trim());
+        if (options.includeDescendants === false) {
+          params.set('includeDescendants', '0');
+        }
+      }
+      const res = await fetch(`${gatewayUrl}/sessions?${params.toString()}`, {
         headers: authHeader(token),
       });
       if (!res.ok) throw new HttpError(`Failed to list sessions: ${res.status}`, res.status);
@@ -1164,6 +1201,36 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       });
       if (!res.ok) throw new HttpError(`Failed to import session: ${res.status}`, res.status);
       return res.json() as Promise<SessionImportResult>;
+    },
+
+    async warpWorkspace(token, sessionId, input) {
+      const res = await fetch(`${gatewayUrl}/sessions/${encodeURIComponent(sessionId)}/workspace`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+        body: JSON.stringify({
+          workingDirectory: input.workingDirectory,
+          ...(input.force ? { force: true } : {}),
+        }),
+      });
+      if (!res.ok) {
+        // Surface the body when the gateway returns a structured
+        // error (the immutable-workspace 409 carries an `error`
+        // field the UI can show verbatim) so callers can
+        // distinguish "user needs to confirm warp" from generic
+        // network failures.
+        let payload: unknown;
+        try {
+          payload = await res.json();
+        } catch {
+          payload = undefined;
+        }
+        throw new HttpError(`Failed to warp workspace: ${res.status}`, res.status, payload);
+      }
+      return res.json() as Promise<{
+        ok: true;
+        workingDirectory: string | null;
+        warped?: boolean;
+      }>;
     },
   };
 }

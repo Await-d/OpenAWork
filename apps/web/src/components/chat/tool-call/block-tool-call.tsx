@@ -203,6 +203,31 @@ export function BlockToolCall({
       const lhs = fp ? `look_at ${trimPath(fp)}` : hasImage ? 'look_at <image>' : 'look_at';
       return goal ? `${lhs} · "${goal.slice(0, 50)}"` : lhs;
     }
+    if (normalized === 'repo_clone') {
+      // P1-SCOUT: surface the repo identifier + status badge (cached /
+      // cloned / refreshed) in the header so users see at a glance
+      // whether scout actually did network work or reused the cache.
+      const repository = typeof input.repository === 'string' ? input.repository.trim() : '';
+      const branch = typeof input.branch === 'string' ? input.branch.trim() : '';
+      const refresh = input.refresh === true;
+      const lhs = repository ? `repo_clone ${repository}` : 'repo_clone';
+      const flags: string[] = [];
+      if (branch) flags.push(`branch=${branch}`);
+      if (refresh) flags.push('refresh');
+      return flags.length > 0 ? `${lhs} (${flags.join(', ')})` : lhs;
+    }
+    if (normalized === 'repo_overview') {
+      // Either repository or path is required; show whichever was used.
+      const repository = typeof input.repository === 'string' ? input.repository.trim() : '';
+      const pathInput = typeof input.path === 'string' ? input.path.trim() : '';
+      const depth = typeof input.depth === 'number' ? input.depth : undefined;
+      const lhs = repository
+        ? `repo_overview ${repository}`
+        : pathInput
+          ? `repo_overview ${trimPath(pathInput)}`
+          : 'repo_overview';
+      return depth ? `${lhs} · depth=${depth}` : lhs;
+    }
     if (normalized === 'desktop_automation') {
       // Discriminated union on `action`. Show the action verb plus the most
       // salient parameter for that action (url for goto, selector for click,

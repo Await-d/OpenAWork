@@ -67,10 +67,198 @@ const GEMINI_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
   xhigh: 24576,
 };
 
-function mapGeminiThinkingLevel(effort: ReasoningEffort): 'low' | 'medium' | 'high' {
-  if (effort === 'minimal' || effort === 'low') return 'low';
-  if (effort === 'high' || effort === 'xhigh') return 'high';
-  return effort;
+// ---------------------------------------------------------------------------
+// Gemini thinking-control alignment (mirrors opencode #26279).
+//
+// Gemini exposes two different thinking knobs depending on the model family:
+//
+//   gemini-2.5  → numeric `thinking_budget` token cap. Max 32_768 for the
+//                 `pro` (non-flash) variant, 24_576 elsewhere. The flash and
+//                 lite variants accept `thinking_budget: 0` to fully disable
+//                 thinking; gemini-2.5-pro requires a non-zero budget so we
+//                 send a tiny 128 to keep thinking nominally enabled.
+//
+//   gemini-3    → string `thinking_level`. Each sub-model exposes a different
+//                 subset:
+//                   gemini-3-flash-image → ['minimal', 'high']
+//                   gemini-3-pro-image   → ['high']
+//                   gemini-3-flash       → ['minimal', 'low', 'medium', 'high']
+//                   gemini-3 (other)     → ['low', 'medium', 'high']
+//
+// Sending a level outside the supported subset (e.g. `low` to pro-image, or
+// `medium` to flash-image) produces a 400 from the upstream. The helpers
+// below clamp the requested effort into the model's supported subset.
+// ---------------------------------------------------------------------------
+
+type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+
+const GEMINI_LEVEL_RANK: Record<GeminiThinkingLevel, number> = {
+  minimal: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+};
+
+function googleThinkingLevels(apiId: string): readonly GeminiThinkingLevel[] {
+  if (!apiId.includes('gemini-3')) {
+    // gemini-2.5 and below — fallback when callers ask "what level subset?"
+    return ['low', 'high'];
+  }
+  if (apiId.includes('flash-image')) return ['minimal', 'high'];
+  if (apiId.includes('pro-image')) return ['high'];
+  if (apiId.includes('flash')) return ['minimal', 'low', 'medium', 'high'];
+  return ['low', 'medium', 'high'];
+}
+
+function googleThinkingBudgetMax(apiId: string): number {
+  // gemini-2.5-pro (non-flash) accepts up to 32_768; everything else 24_576.
+  if (apiId.includes('2.5') && apiId.includes('pro') && !apiId.includes('flash')) {
+    return 32_768;
+  }
+  return 24_576;
+}
+
+function googleThinkingLevelForEffort(apiId: string, effort: ReasoningEffort): GeminiThinkingLevel {
+  const supported = googleThinkingLevels(apiId);
+  // Map our 5-tier effort onto the 4-tier Gemini level scale.
+  const requestedLevel: GeminiThinkingLevel =
+    effort === 'minimal'
+      ? 'minimal'
+      : effort === 'low'
+        ? 'low'
+        : effort === 'medium'
+          ? 'medium'
+          : 'high'; // both 'high' and 'xhigh' map to 'high'
+  if (supported.includes(requestedLevel)) return requestedLevel;
+  const targetRank = GEMINI_LEVEL_RANK[requestedLevel];
+  const sortedDesc = [...supported].sort((a, b) => GEMINI_LEVEL_RANK[b] - GEMINI_LEVEL_RANK[a]);
+  for (const lv of sortedDesc) {
+    if (GEMINI_LEVEL_RANK[lv] <= targetRank) return lv;
+  }
+  return sortedDesc[sortedDesc.length - 1] as GeminiThinkingLevel;
+}
+
+function googleThinkingBudgetForEffort(apiId: string, effort: ReasoningEffort): number {
+  const max = googleThinkingBudgetMax(apiId);
+  if (effort === 'xhigh') return max;
+  return Math.min(GEMINI_THINKING_BUDGETS[effort], max);
+}
+
+function googleThinkingLowestLevel(apiId: string): GeminiThinkingLevel {
+  const supported = googleThinkingLevels(apiId);
+  if (supported.includes('minimal')) return 'minimal';
+  if (supported.includes('low')) return 'low';
+  return 'high';
+}
+
+function googleSmallThinkingBudget(apiId: string): number {
+  // gemini-2.5-pro doesn't support thinking_budget=0 — drop to the smallest
+  // legal non-zero budget. Other 2.5 variants accept 0 as "off".
+  return googleThinkingBudgetMax(apiId) === 32_768 ? 128 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// GPT-5 family reasoning_effort tier alignment (mirrors opencode #26268).
+//
+// OpenAI does not expose every effort tier on every GPT-5 sub-model; sending
+// an effort outside the supported subset produces a 400 from the upstream.
+// The mapping below tracks the subsets observed in OpenAI's model docs:
+//
+//   gpt-5-pro                         → ['high']  (no tunable knob)
+//   gpt-5-{2+}-pro                    → ['medium', 'high', 'xhigh']
+//   gpt-5-{x}-chat                    → ['medium']
+//   gpt-5.1 / gpt-5-1                 → ['low', 'medium', 'high']
+//   gpt-5.{2+} (incl. nano/mini)      → ['low', 'medium', 'high', 'xhigh']
+//   gpt-5-{x}-codex (v ≥ 3)           → ['low', 'medium', 'high', 'xhigh']
+//   gpt-5-{x}-codex-max / v ≥ 2       → ['low', 'medium', 'high', 'xhigh']
+//   gpt-5-{x}-codex (default)         → ['low', 'medium', 'high']
+//   any other GPT-5 (e.g. plain 'gpt-5') → full ['low', 'medium', 'high', 'xhigh']
+//
+// OpenAWork's `ReasoningEffort` does not include `'none'`, so the lower bound
+// is `'low'`. The clamp picks the largest supported effort ≤ the requested
+// effort, falling back to the smallest supported effort when the request is
+// below the model's floor.
+// ---------------------------------------------------------------------------
+
+const EFFORT_RANK: Record<ReasoningEffort, number> = {
+  minimal: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  xhigh: 4,
+};
+
+const GPT5_FAMILY_RE = /(?:^|\/)gpt-5(?:[.-]|$)/;
+const GPT5_VERSION_RE = /(?:^|\/)gpt-5[.-](\d+)(?:[.-]|$)/;
+const GPT5_PRO_RE = /(?:^|\/)gpt-5[.-]?pro(?:[.-]|$)/;
+const GPT5_VERSIONED_PRO_RE = /(?:^|\/)gpt-5[.-]\d+[.-]pro(?:[.-]|$)/;
+
+const GPT5_PRO_EFFORTS: readonly ReasoningEffort[] = ['high'];
+const GPT5_VERSIONED_PRO_EFFORTS: readonly ReasoningEffort[] = ['medium', 'high', 'xhigh'];
+const GPT5_CHAT_EFFORTS: readonly ReasoningEffort[] = ['medium'];
+const GPT5_1_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
+const GPT5_2_PLUS_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GPT5_CODEX_3_PLUS_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GPT5_CODEX_XHIGH_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const GPT5_CODEX_DEFAULT_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
+const GPT5_DEFAULT_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+
+function gpt5Version(apiId: string): number | undefined {
+  const match = GPT5_VERSION_RE.exec(apiId);
+  if (!match) return undefined;
+  const v = Number(match[1]);
+  return Number.isFinite(v) ? v : undefined;
+}
+
+function gpt5SupportedEfforts(apiId: string): readonly ReasoningEffort[] | undefined {
+  if (!GPT5_FAMILY_RE.test(apiId)) return undefined;
+  if (apiId.includes('-chat')) {
+    // chat models only expose `medium`
+    return GPT5_CHAT_EFFORTS;
+  }
+  if (GPT5_VERSIONED_PRO_RE.test(apiId)) return GPT5_VERSIONED_PRO_EFFORTS;
+  if (GPT5_PRO_RE.test(apiId)) return GPT5_PRO_EFFORTS;
+  if (apiId.includes('codex')) {
+    const version = gpt5Version(apiId);
+    if (version !== undefined && version >= 3) return GPT5_CODEX_3_PLUS_EFFORTS;
+    if (apiId.includes('codex-max') || (version !== undefined && version >= 2)) {
+      return GPT5_CODEX_XHIGH_EFFORTS;
+    }
+    return GPT5_CODEX_DEFAULT_EFFORTS;
+  }
+  const version = gpt5Version(apiId);
+  if (version === 1) return GPT5_1_EFFORTS;
+  if (version !== undefined && version >= 2) return GPT5_2_PLUS_EFFORTS;
+  return GPT5_DEFAULT_EFFORTS;
+}
+
+/**
+ * Clamp a requested {@link ReasoningEffort} to the subset supported by
+ * `modelId`. Returns the requested effort unchanged when:
+ *   - the model is not part of the GPT-5 family, or
+ *   - the requested effort is already in the supported subset.
+ *
+ * Otherwise picks the largest supported effort that does not exceed the
+ * requested effort (conservative downgrade), or the smallest supported
+ * effort when the request is below the model's floor.
+ *
+ * Mirrors opencode #26268.
+ */
+export function clampReasoningEffortForModel(
+  modelId: string,
+  requested: ReasoningEffort,
+): ReasoningEffort {
+  const id = modelId.toLowerCase();
+  const supported = gpt5SupportedEfforts(id);
+  if (!supported || supported.length === 0) return requested;
+  if (supported.includes(requested)) return requested;
+  const targetRank = EFFORT_RANK[requested];
+  const sortedDesc = [...supported].sort((a, b) => EFFORT_RANK[b] - EFFORT_RANK[a]);
+  for (const eff of sortedDesc) {
+    if (EFFORT_RANK[eff] <= targetRank) return eff;
+  }
+  // Requested is below every supported tier — return the smallest supported.
+  return sortedDesc[sortedDesc.length - 1] as ReasoningEffort;
 }
 
 function supportsOpenRouterReasoning(model: string): boolean {
@@ -272,8 +460,11 @@ export function buildProviderOptions(input: {
       if (!thinking.enabled) {
         return undefined;
       }
+      // GPT-5 sub-models accept different reasoning_effort subsets;
+      // clamp before send to avoid 400s on e.g. gpt-5.1 (no `minimal`),
+      // gpt-5-pro (only `high`), gpt-5-chat (only `medium`).
       return providerOptions(modelInfo, {
-        reasoningEffort: thinking.effort,
+        reasoningEffort: clampReasoningEffortForModel(input.model, thinking.effort),
       });
     }
 
@@ -281,9 +472,12 @@ export function buildProviderOptions(input: {
       if (!supportsOpenRouterReasoning(model)) {
         return undefined;
       }
+      // OpenRouter routes GPT-5 traffic to OpenAI; the same per-model
+      // effort subset rules apply when the upstream is GPT-5.
+      const effort = clampReasoningEffortForModel(input.model, thinking.effort);
       return providerOptions(modelInfo, {
         body: {
-          reasoning: thinking.enabled ? { effort: thinking.effort } : { enabled: false },
+          reasoning: thinking.enabled ? { effort } : { enabled: false },
         },
       });
     }
@@ -304,8 +498,21 @@ export function buildProviderOptions(input: {
 
     case 'gemini': {
       if (!thinking.enabled) {
+        if (model.includes('gemini-3')) {
+          // gemini-3 only accepts thinking_level (string), not numeric
+          // thinking_budget. Use the lowest supported level for "off".
+          return providerOptions(modelInfo, {
+            body: {
+              google: {
+                thinking_config: { thinking_level: googleThinkingLowestLevel(model) },
+              },
+            },
+          });
+        }
         return providerOptions(modelInfo, {
-          body: { google: { thinking_config: { thinking_budget: 0 } } },
+          body: {
+            google: { thinking_config: { thinking_budget: googleSmallThinkingBudget(model) } },
+          },
         });
       }
       if (model.includes('gemini-3')) {
@@ -314,7 +521,7 @@ export function buildProviderOptions(input: {
             google: {
               thinking_config: {
                 include_thoughts: true,
-                thinking_level: mapGeminiThinkingLevel(thinking.effort),
+                thinking_level: googleThinkingLevelForEffort(model, thinking.effort),
               },
             },
           },
@@ -325,7 +532,7 @@ export function buildProviderOptions(input: {
           google: {
             thinking_config: {
               include_thoughts: true,
-              thinking_budget: GEMINI_THINKING_BUDGETS[thinking.effort],
+              thinking_budget: googleThinkingBudgetForEffort(model, thinking.effort),
             },
           },
         },

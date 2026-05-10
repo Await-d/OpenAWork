@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction-policy.js';
+import { collectDeadCodeDiagnostics, formatDeadCodeCandidates } from '../dead-code-diagnostics.js';
 import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
 import { resolveCompactionRoute, type ModelRouteConfig } from '../model-router.js';
 import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider-config.js';
@@ -218,6 +219,9 @@ export async function commandsRoutes(app: FastifyInstance): Promise<void> {
           break;
         case 'refactor_session':
           result = await executeRefactorCommand(cmdParams);
+          break;
+        case 'remove_deadcode':
+          result = await executeRemoveDeadcodeCommand(cmdParams);
           break;
         case 'start_work':
           result = await executeStartWorkCommand(cmdParams);
@@ -1234,6 +1238,112 @@ async function executeRefactorCommand(params: {
   };
 }
 
+/**
+ * `/remove-deadcode` — P2-DEADCODE (workflow 260509).
+ *
+ * Mirrors `executeRefactorCommand`: registers a tracked task on the
+ * graph, stamps `removeDeadcodeStartedAt` onto session metadata so
+ * `detectActiveCommandContext` keeps re-injecting the workflow
+ * instruction across rounds, and emits a status card so the UI sees
+ * the run kicked off.
+ *
+ * Args (all optional, parsed via `parseCommandArgs`):
+ *   - positional → free-form scope description (file path, package
+ *     name, glob, etc.). Falls back to "当前会话上下文" when omitted
+ *     so the LLM still has something to anchor on.
+ *   - `--mode=strict|opt-in` (default `strict`) — `strict` requires
+ *     deterministic LSP/AST evidence before any deletion; `opt-in`
+ *     also allows comment-out / TODO-marker style removals.
+ *   - `--scope=file|module|project` (default `module`) — bounds the
+ *     discovery scan, mirroring `/refactor`.
+ */
+async function executeRemoveDeadcodeCommand(params: {
+  args: string[];
+  commandId: string;
+  graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
+  messages: Message[];
+  metadataJson: string;
+  rawInput?: string;
+  sessionId: string;
+  userId: string;
+}): Promise<CommandExecutionResult> {
+  const startedAt = Date.now();
+  const parsedArgs = parseCommandArgs(params.args);
+  const scope = parseRefactorScope(parsedArgs.named['scope']);
+  const mode = parseDeadcodeMode(parsedArgs.named['mode']);
+  const target = parsedArgs.positional.join(' ') || '当前会话上下文';
+  // T-DEAD-01/02 (workflow 260509): pull a deterministic candidate
+  // list from the LSP layer's diagnostics codes (TS6133 / F401 / …)
+  // and surface it on the status card. This converts the slash from
+  // a generic "go look for dead code" prompt into one that already
+  // carries the evidence the LLM is supposed to delete from. Failures
+  // fall back to an empty list — the executor still creates the task
+  // so the user can manually scope the work.
+  const deadCodeCandidates = await collectDeadCodeDiagnostics().catch(() => []);
+  const task = taskManager.addTask(params.graph, {
+    title: '死代码清理',
+    description: `基于 LSP/AST 证据移除已死代码：${target}`,
+    status: 'pending',
+    blockedBy: [],
+    sessionId: params.sessionId,
+    priority: 'high',
+    tags: ['deadcode', 'lsp'],
+  });
+  taskManager.startTask(params.graph, task.id);
+  await taskManager.save(params.graph);
+  const metadata = mergeMetadata(params.metadataJson, {
+    removeDeadcodeStartedAt: startedAt,
+    removeDeadcodeMode: mode,
+    removeDeadcodeScope: scope,
+    removeDeadcodeTarget: target,
+    removeDeadcodeCandidateCount: deadCodeCandidates.length,
+  });
+  const candidateBlock = formatDeadCodeCandidates(deadCodeCandidates);
+  const card = {
+    type: 'status' as const,
+    title: '/remove-deadcode 已启动',
+    message: [
+      `死代码清理工作流已创建。`,
+      `目标：${target}`,
+      `范围：${scope}`,
+      `模式：${mode}`,
+      `LSP 候选：${deadCodeCandidates.length} 条`,
+      `下一步：逐项校验 LSP find_references 为空 → 删除 → 重跑诊断验证。`,
+      `任务：${task.title}`,
+      `任务 ID：${task.id}`,
+      ``,
+      candidateBlock,
+    ].join('\n'),
+    tone: 'info' as const,
+  };
+  appendCommandCardArtifacts({
+    sessionId: params.sessionId,
+    userId: params.userId,
+    card,
+  });
+  sqliteRun(
+    "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+    [JSON.stringify(metadata), params.sessionId, params.userId],
+  );
+  return {
+    sessionId: params.sessionId,
+    events: [
+      {
+        type: 'task_update',
+        taskId: task.id,
+        label: task.title,
+        status: 'in_progress',
+        sessionId: params.sessionId,
+        parentTaskId: task.parentTaskId,
+        eventId: `${params.sessionId}:${task.id}:task`,
+        runId: `command:${params.sessionId}:${params.commandId}`,
+        occurredAt: Date.now(),
+      },
+    ],
+    card,
+  };
+}
+
 async function executeStartWorkCommand(params: {
   args: string[];
   commandId: string;
@@ -1622,6 +1732,16 @@ function parseRefactorScope(value: string | boolean | undefined): 'file' | 'modu
 
 function parseRefactorMode(value: string | boolean | undefined): 'safe' | 'aggressive' {
   return value === 'aggressive' ? 'aggressive' : 'safe';
+}
+
+/**
+ * `/remove-deadcode --mode=…` parser. `strict` (default) requires
+ * deterministic LSP/AST evidence before deletions; `opt-in` lets the
+ * agent comment out / mark candidates instead of deleting them, used
+ * when the user explicitly asks for a softer first pass.
+ */
+function parseDeadcodeMode(value: string | boolean | undefined): 'strict' | 'opt-in' {
+  return value === 'opt-in' ? 'opt-in' : 'strict';
 }
 
 async function collectWorkflowMarkdownFiles(dirPath: string): Promise<string[]> {

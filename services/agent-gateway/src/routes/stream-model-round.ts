@@ -20,6 +20,8 @@ import type { MessageID } from '../message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
 import type { StreamUsageSummary } from './stream-usage.js';
 import {
+  THINKING_LANGUAGE_HINT_MARKERS,
+  buildSyntheticRequestContextBlock,
   buildTwoPartSystemPrompts,
   type SyntheticRequestContext,
 } from './stream-system-prompts.js';
@@ -81,7 +83,24 @@ type StreamStopReason =
 interface StreamAccumulationState {
   assistantThinkingBlocks: ReasoningBlock[];
   assistantText: string;
-  toolCalls: Map<string, { toolName: string; inputText: string }>;
+  /**
+   * Per-call accumulator. `providerMetadata` is attached when the
+   * upstream `tool-call` event surfaces a `providerMetadata` payload —
+   * the OpenAI Responses adapter sends `openai.itemId` (`fc_xxx`)
+   * here, and replaying it on subsequent rounds is required for the
+   * upstream prompt-cache prefix to stay byte-stable across turns
+   * (without it, AI SDK rebuilds `function_call.id` from the call_id
+   * fallback, OpenAI re-keys the item, and every subsequent round 2+
+   * cache-prefix from this point on misses).
+   */
+  toolCalls: Map<
+    string,
+    {
+      toolName: string;
+      inputText: string;
+      providerMetadata?: Record<string, Record<string, unknown>>;
+    }
+  >;
   /**
    * Ordered record of every reasoning / text / tool_call segment as it arrives
    * over the wire. `buildAssistantContent` uses this to persist messages in
@@ -154,7 +173,16 @@ function buildThinkingLanguageHint(
 
 /**
  * UnifiedMessage version of applyThinkingLanguageHintToConversation.
- * Appends the thinking language hint to the last user message.
+ *
+ * Legacy in-memory fallback for sessions whose user messages were stored
+ * before persist-time thinking-hint injection landed. New user messages
+ * carry the hint as a `synthetic: true` trailing text part written by
+ * `persistStreamUserMessage` → `resolvePersistedUserContent`, which keeps
+ * the prompt-cache prefix byte-stable across turns. When the latest user
+ * message already contains a known hint marker (post-fix or already-
+ * injected legacy session) we skip injection so we don't double-append
+ * and re-introduce the byte-instability the caching fix was designed to
+ * eliminate.
  */
 function applyThinkingLanguageHintToUnifiedMessages(
   messages: UnifiedMessage[],
@@ -165,6 +193,16 @@ function applyThinkingLanguageHintToUnifiedMessages(
   for (let i = result.length - 1; i >= 0; i--) {
     const msg = result[i]!;
     if (msg.role === 'user') {
+      const content = typeof msg.content === 'string' ? msg.content : '';
+      // Skip injection when the persisted user content already carries a
+      // recognised thinking-language hint (post-fix sessions write it as
+      // a `synthetic: true` trailing text part in DB).
+      const alreadyHasHint = THINKING_LANGUAGE_HINT_MARKERS.some((marker) =>
+        content.includes(marker),
+      );
+      if (alreadyHasHint) {
+        break;
+      }
       msg.content = `${msg.content}\n\n[${hint}]`;
       break;
     }
@@ -174,9 +212,20 @@ function applyThinkingLanguageHintToUnifiedMessages(
 
 /**
  * UnifiedMessage version of injectSyntheticRequestContext.
- * Injects per-request dynamic context into the last user message.
+ *
+ * Legacy in-memory fallback for sessions whose user messages were stored
+ * before persist-time synthetic injection landed. New user messages get the
+ * synthetic block stored as a `synthetic: true` text part by
+ * `persistStreamUserMessage` → `resolvePersistedUserContent`, which keeps
+ * the prompt-cache prefix byte-stable across turns (the websearch low-cache-
+ * hit root cause). When the latest user message already starts with the
+ * persisted `<system-reminder>` envelope we skip injection so we don't
+ * double-prepend (and thus don't mutate the byte-identical prefix that the
+ * upstream prompt cache is pointing at).
  */
-function injectSyntheticRequestContextUnified(
+// Exported for unit tests; production code should keep going through
+// `runModelRound`. See `__tests__/inject-synthetic-request-context.test.ts`.
+export function injectSyntheticRequestContextUnified(
   messages: UnifiedMessage[],
   context: SyntheticRequestContext,
 ): UnifiedMessage[] {
@@ -187,25 +236,18 @@ function injectSyntheticRequestContextUnified(
   for (let i = result.length - 1; i >= 0; i--) {
     const msg = result[i]!;
     if (msg.role === 'user') {
+      // Skip injection when the persisted user content already carries the
+      // `<system-reminder>` envelope (post-fix sessions). Mirrors the
+      // marker emitted by `resolvePersistedUserContent`.
+      const content = typeof msg.content === 'string' ? msg.content : '';
+      if (content.startsWith('<system-reminder>\n')) {
+        break;
+      }
       msg.content = `<system-reminder>\n${block}\n</system-reminder>\n\n${msg.content}`;
       break;
     }
   }
   return result;
-}
-
-function buildSyntheticRequestContextBlock(input: SyntheticRequestContext): string | null {
-  const parts: string[] = [];
-  if (input.injectedPrompt && input.injectedPrompt.trim().length > 0) {
-    parts.push(input.injectedPrompt);
-  }
-  if (input.capabilityContext && input.capabilityContext.trim().length > 0) {
-    parts.push(input.capabilityContext);
-  }
-  if (input.companionPrompt && input.companionPrompt.trim().length > 0) {
-    parts.push(input.companionPrompt);
-  }
-  return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
 }
 
 function createAccumulationState(): StreamAccumulationState {
@@ -336,9 +378,21 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
 
   if (chunk.type !== 'tool_call_delta') return;
   const existing = state.toolCalls.get(chunk.toolCallId);
+  // Merge provider metadata across deltas. The streaming opener and
+  // per-input deltas leave it undefined; the *closer* delta emitted at
+  // tool-call resolution is what ferries `openai.itemId` (`fc_xxx`)
+  // and any sibling provider keys. Earlier metadata (if any) wins for
+  // a given (provider, key) tuple — we only fill empty slots so a
+  // closer that re-affirms `openai.itemId` does not clobber it.
+  const incomingMetadata = chunk.providerMetadata;
+  const mergedMetadata = mergeToolCallProviderMetadata(
+    existing?.providerMetadata,
+    incomingMetadata,
+  );
   state.toolCalls.set(chunk.toolCallId, {
     toolName: chunk.toolName,
     inputText: `${existing?.inputText ?? ''}${chunk.inputDelta}`,
+    ...(mergedMetadata ? { providerMetadata: mergedMetadata } : {}),
   });
   // Order-preserving mirror: ensure exactly one tool_call segment per
   // toolCallId, positioned where it first appeared in the wire stream.
@@ -356,6 +410,39 @@ function accumulateChunk(state: StreamAccumulationState, chunk: StreamChunk): vo
       toolName: chunk.toolName,
     });
   }
+}
+
+/**
+ * Merge two `tool-call.providerMetadata` records, preferring values
+ * that already exist on the in-flight accumulator. Both arguments are
+ * allowed to be undefined; the result is undefined when neither side
+ * supplied a non-empty payload, so callers can spread the return into
+ * `{ ...(merged ? { providerMetadata: merged } : {}) }` without
+ * persisting an empty object.
+ *
+ * Why "earlier-wins": the OpenAI Responses adapter in @ai-sdk/openai
+ * 3.x emits `openai.itemId` on the first `tool-call` event for a
+ * given call_id. A late re-emit (e.g. after a retry) carrying the
+ * same id is harmless, but a closer that arrives with an empty
+ * payload must NOT overwrite the previously-captured itemId.
+ */
+function mergeToolCallProviderMetadata(
+  existing: Record<string, Record<string, unknown>> | undefined,
+  incoming: Record<string, Record<string, unknown>> | undefined,
+): Record<string, Record<string, unknown>> | undefined {
+  if (!existing && !incoming) return undefined;
+  if (!existing) return incoming;
+  if (!incoming) return existing;
+  const merged: Record<string, Record<string, unknown>> = { ...existing };
+  for (const [providerKey, providerValue] of Object.entries(incoming)) {
+    const previous = merged[providerKey];
+    if (!previous) {
+      merged[providerKey] = providerValue;
+      continue;
+    }
+    merged[providerKey] = { ...providerValue, ...previous };
+  }
+  return merged;
 }
 
 function parseToolInput(raw: string): Record<string, unknown> {
@@ -447,6 +534,9 @@ function buildAssistantContent(
       toolName: toolCall.toolName,
       input: parseToolInput(inputText),
       ...(inputText.length > 0 ? { rawArguments: inputText } : {}),
+      ...(toolCall.providerMetadata && Object.keys(toolCall.providerMetadata).length > 0
+        ? { providerMetadata: toolCall.providerMetadata }
+        : {}),
     });
   });
 
@@ -550,6 +640,9 @@ function buildOrderedAssistantContent(
       toolName: toolCallEntry.toolName,
       input: parseToolInput(inputText),
       ...(inputText.length > 0 ? { rawArguments: inputText } : {}),
+      ...(toolCallEntry.providerMetadata && Object.keys(toolCallEntry.providerMetadata).length > 0
+        ? { providerMetadata: toolCallEntry.providerMetadata }
+        : {}),
     });
   }
 
@@ -626,6 +719,12 @@ export async function runModelRound(input: {
   dynamicAgentPrompt?: string | null;
   startWorkContext?: string | null;
   commandContext?: string | null;
+  /**
+   * Optional pinned skills section (PR3). Captured per-session at first turn
+   * and rendered into the stable system prompt prefix. See
+   * `pinned-skills-prompt.ts`.
+   */
+  pinnedSkillsPrompt?: string | null;
   syntheticContinuationPrompt?: string;
   memoryBlock?: string | null;
   /** Agent ID for the current stream round (for per-agent color rendering). */
@@ -726,6 +825,7 @@ export async function runModelRound(input: {
     dynamicAgentPrompt: input.dynamicAgentPrompt,
     startWorkContext: input.startWorkContext,
     commandContext: input.commandContext,
+    pinnedSkillsPrompt: input.pinnedSkillsPrompt,
   });
 
   const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';

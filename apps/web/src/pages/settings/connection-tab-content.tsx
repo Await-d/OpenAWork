@@ -14,6 +14,8 @@ import {
 import type { ProviderEditData, ThinkingDefaultsRef, ThinkingModeRef } from '../settings-types.js';
 import { BP, IS, SS, ST, UV } from './settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
+import { WebsearchSection } from './websearch-section.js';
+import type { WebsearchPolicy } from './use-settings-websearch.js';
 
 interface ConnectionTabContentProps {
   providers: AIProviderRef[];
@@ -40,6 +42,7 @@ interface ConnectionTabContentProps {
   mcpServers: MCPServerEntry[];
   setMcpServers: React.Dispatch<React.SetStateAction<MCPServerEntry[]>>;
   mcpStatuses: MCPServerStatus[];
+  onRetryMcp?: (serverId: string) => void;
   urlInput: string;
   setUrlInput: React.Dispatch<React.SetStateAction<string>>;
   saveGatewayUrl: () => void;
@@ -63,6 +66,11 @@ interface ConnectionTabContentProps {
   upstreamRetryMaxRetries: number;
   saveUpstreamRetrySettings: () => void;
   savedUpstreamRetryMaxRetries: number;
+  websearchPolicy: WebsearchPolicy;
+  websearchSavedPolicy: WebsearchPolicy;
+  websearchSaving: boolean;
+  setWebsearchPolicy: React.Dispatch<React.SetStateAction<WebsearchPolicy>>;
+  saveWebsearchPolicy: () => void;
 }
 
 export function ConnectionTabContent({
@@ -86,6 +94,7 @@ export function ConnectionTabContent({
   mcpServers,
   setMcpServers,
   mcpStatuses,
+  onRetryMcp,
   urlInput,
   setUrlInput,
   saveGatewayUrl,
@@ -103,6 +112,11 @@ export function ConnectionTabContent({
   upstreamRetryMaxRetries,
   saveUpstreamRetrySettings,
   savedUpstreamRetryMaxRetries,
+  websearchPolicy,
+  websearchSavedPolicy,
+  websearchSaving,
+  setWebsearchPolicy,
+  saveWebsearchPolicy,
 }: ConnectionTabContentProps) {
   return (
     <>
@@ -198,6 +212,13 @@ export function ConnectionTabContent({
         onSave={saveUpstreamRetrySettings}
         savedMaxRetries={savedUpstreamRetryMaxRetries}
       />
+      <WebsearchSection
+        isSaving={websearchSaving}
+        policy={websearchPolicy}
+        savedPolicy={websearchSavedPolicy}
+        setPolicy={setWebsearchPolicy}
+        onSave={saveWebsearchPolicy}
+      />
       <div>
         <h3 style={{ ...ST, marginBottom: 12 }}>模型与提供商</h3>
         <div style={{ ...SS, marginBottom: 12 }}>
@@ -269,7 +290,7 @@ export function ConnectionTabContent({
       <section style={SS}>
         <h3 style={ST}>MCP 服务器状态</h3>
         <div style={UV}>
-          <MCPServerList servers={mcpStatuses} />
+          <MCPServerList servers={mcpStatuses} onRetry={onRetryMcp} />
         </div>
       </section>
     </>

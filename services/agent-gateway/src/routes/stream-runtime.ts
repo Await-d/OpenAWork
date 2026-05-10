@@ -127,7 +127,10 @@ async function continueFromApprovedToolResult(input: {
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);
   const filteredTools = filterEnabledGatewayToolsForSession(
-    getEnabledTools(webSearchEnabled),
+    // Per-turn model-aware tool filter (mirrors opencode
+    // `tool/registry.ts:303-315`). See routes/stream.ts getEnabledTools
+    // doc for the full GPT-5 vs edit/write split rationale.
+    getEnabledTools(webSearchEnabled, { modelId: route.model }),
     sessionContext.metadataJson,
   );
   const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
@@ -459,7 +462,7 @@ export async function resumeApprovedPermissionRequest(input: {
       title: input.payload.toolName,
     });
 
-    const sandbox = createDefaultSandbox();
+    const sandbox = createDefaultSandbox([], { userId: input.userId });
     const toolResult = await sandbox.execute(
       {
         toolCallId: input.payload.toolCallId,

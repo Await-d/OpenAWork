@@ -115,7 +115,7 @@ function normalizeTaskResponse(task: Awaited<ReturnType<typeof loadGraph>>['task
 
 export const taskCreateToolDefinition: ToolDefinition<typeof taskCreateInputSchema, z.ZodString> = {
   name: 'task_create',
-  description: 'Create a new task with auto-generated ID and pending status.',
+  description: '创建一个新任务：ID 自动生成，状态为 pending。',
   inputSchema: taskCreateInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -126,7 +126,7 @@ export const taskCreateToolDefinition: ToolDefinition<typeof taskCreateInputSche
 
 export const taskGetToolDefinition: ToolDefinition<typeof taskGetInputSchema, z.ZodString> = {
   name: 'task_get',
-  description: 'Retrieve a task by ID.',
+  description: '按 ID 获取任务。',
   inputSchema: taskGetInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -137,7 +137,7 @@ export const taskGetToolDefinition: ToolDefinition<typeof taskGetInputSchema, z.
 
 export const taskListToolDefinition: ToolDefinition<typeof taskListInputSchema, z.ZodString> = {
   name: 'task_list',
-  description: 'List all active tasks with summary information.',
+  description: '列出所有活动任务及其概要信息。',
   inputSchema: taskListInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -148,7 +148,7 @@ export const taskListToolDefinition: ToolDefinition<typeof taskListInputSchema, 
 
 export const taskUpdateToolDefinition: ToolDefinition<typeof taskUpdateInputSchema, z.ZodString> = {
   name: 'task_update',
-  description: 'Update an existing task with new values.',
+  description: '使用新值更新已存在的任务。',
   inputSchema: taskUpdateInputSchema,
   outputSchema: z.string(),
   timeout: 30000,

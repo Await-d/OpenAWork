@@ -17,18 +17,18 @@ export function buildCallOmoAgentBackgroundOutput(input: {
   taskId: string;
 }): string {
   return [
-    'Background agent task launched successfully.',
+    '后台 agent 任务已成功启动。',
     '',
-    `Task ID: ${input.taskId}`,
-    `Session ID: ${input.sessionId}`,
-    `Description: ${input.description}`,
-    `Agent: ${input.agent} (subagent)`,
-    `Status: ${input.status}`,
+    `任务 ID：${input.taskId}`,
+    `会话 ID：${input.sessionId}`,
+    `描述：${input.description}`,
+    `Agent：${input.agent}（subagent）`,
+    `状态：${input.status}`,
     '',
-    'The system will notify you when the task completes.',
-    `Use \`background_output\` tool with task_id="${input.taskId}" to check progress:`,
-    '- block=false (default): Check status immediately - returns full status info',
-    '- block=true: Wait for completion (rarely needed since system notifies)',
+    '任务完成时系统会主动通知你。',
+    `检查进度：调 \`background_output\` 并传 task_id="${input.taskId}"：`,
+    '- block=false（默认）：立刻检查状态 - 返回完整状态信息',
+    '- block=true：等任务完成（一般不需要，系统会主动通知）',
   ].join('\n');
 }
 
@@ -57,7 +57,7 @@ function buildFallbackText(input: { fallbackText?: string; isError?: boolean }):
     return fallback;
   }
 
-  return 'Error: No assistant or tool response found';
+  return '错误：未找到助手或工具响应';
 }
 
 function collectRelevantMessageText(messages: Message[]): string {

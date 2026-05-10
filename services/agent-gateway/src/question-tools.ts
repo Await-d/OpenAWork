@@ -28,7 +28,7 @@ export const questionToolDefinition: ToolDefinition<
 > = {
   name: 'question',
   description:
-    'Ask the user one or more structured questions and wait for their answer before continuing. Use this only when the missing choice truly blocks execution.',
+    '向用户提出一个或多个结构化问题，等待回答后再继续。**仅当**缺失的选择真的阻塞推进时使用。',
   inputSchema: questionToolInputSchema,
   outputSchema: questionToolOutputSchema,
   timeout: 30000,

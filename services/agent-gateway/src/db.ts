@@ -8,6 +8,7 @@ import {
   parseConfiguredWorkspaceRoots,
   parseWorkspaceAccessMode,
 } from './workspace-config.js';
+import { loadAppVersion } from './app-version.js';
 import { resolveGatewayDatabasePath } from './storage-paths.js';
 import {
   normalizeToolArgumentsForStorage,
@@ -697,6 +698,82 @@ export async function migrate(): Promise<void> {
     )
   `);
 
+  // ─── Chat Workspace Skill Selection (PR1 of skill-workspace-selection spec) ───
+  // Per-user skill selection set keyed by chat workspace path. Empty table
+  // means "never configured" → runtime falls back to installed_skills.enabled.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_workspace_skill_selections (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workspace_path TEXT NOT NULL,
+      skill_id TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      reason TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, workspace_path, skill_id)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_cwss_user_path ON chat_workspace_skill_selections(user_id, workspace_path)',
+  );
+  // `priority` controls the rendering / truncation order of pinned skills in
+  // the system prompt section (see `pinned-skills-prompt.ts`). Lower values
+  // appear first; equal values fall back to alphabetic skill_id ordering.
+  // Added via `ensureColumn` so existing deployments upgrade in place
+  // without losing data — older rows default to 0 which keeps current
+  // behavior (insertion-order rendering).
+  ensureColumn('chat_workspace_skill_selections', 'priority', 'INTEGER NOT NULL DEFAULT 0');
+
+  // Marker table that records *whether* a (user, workspace_path) tuple has
+  // been explicitly configured, even when the resulting selection set is
+  // empty. Without this row, an empty `chat_workspace_skill_selections`
+  // result is ambiguous — it could either mean "never configured" (→ fall
+  // back to installed_skills.enabled) or "user explicitly disabled
+  // everything" (→ effective set should be BUILTIN-only). The PUT handler
+  // upserts here on every save so the resolver can disambiguate.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_workspace_skill_configured (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workspace_path TEXT NOT NULL,
+      configured_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, workspace_path)
+    )
+  `);
+
+  // Per-session override. Row means the user explicitly flipped this skill
+  // for the current session. pinned is nullable — null means "inherit from
+  // workspace default for pinned", only enabled is overridden.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_session_skill_overrides (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      skill_id TEXT NOT NULL,
+      enabled INTEGER NOT NULL,
+      pinned INTEGER,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, skill_id)
+    )
+  `);
+
+  // Audit trail for the one-click AI recommendation workflow. applied=0 rows
+  // are pending review; applied=1 rows have been committed to
+  // chat_workspace_skill_selections with source='ai-recommend'.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_workspace_skill_recommendations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workspace_path TEXT NOT NULL,
+      signal_digest TEXT NOT NULL,
+      model_id TEXT,
+      result_json TEXT NOT NULL,
+      applied INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_cwsr_user_path_created ON chat_workspace_skill_recommendations(user_id, workspace_path, created_at DESC)',
+  );
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS registry_sources (
       id TEXT NOT NULL,
@@ -870,6 +947,90 @@ export async function migrate(): Promise<void> {
   ensureColumn('sessions', 'summary_diffs', 'TEXT DEFAULT NULL');
   ensureColumn('sessions', 'revert', 'TEXT DEFAULT NULL');
   ensureColumn('sessions', 'permission', 'TEXT DEFAULT NULL');
+
+  // ─── App meta：跨版本状态戳 ───
+  // 卸载桌面端但「保留用户数据」时，旧的 sqlite 仍在新版本启动时被复用。
+  // 这里建立一张轻量的 key/value meta 表，为后续「按版本号触发兼容修补」
+  // 提供锚点；同时在每次 migrate 完成后落入「当前版本号」，记录上一次
+  // 启动时的版本（previous_app_version），供观测/日志使用。
+  ensureAppMetaTable();
+  stampCurrentAppVersion();
+}
+
+function ensureAppMetaTable(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+/** 读取 app_meta 中的某个 key；表/行不存在时返回 undefined。 */
+export function getAppMetaValue(key: string): string | undefined {
+  try {
+    const row = db.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1').get(key) as
+      | { value: string }
+      | undefined;
+    return row?.value;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setAppMetaValue(key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+  ).run(key, value);
+}
+
+const APP_META_KEY_APP_VERSION = 'app_version';
+const APP_META_KEY_PREVIOUS_APP_VERSION = 'previous_app_version';
+const APP_META_KEY_FIRST_SEEN_VERSION = 'first_seen_app_version';
+
+export interface AppVersionStamp {
+  /** 本次启动写入的当前版本号。 */
+  currentVersion: string;
+  /** 上一次启动写入的版本号；首次启动 / 旧库无戳时为 null。 */
+  previousVersion: string | null;
+  /** 库里第一次见到的版本号（用于排查老用户最初安装版本）。 */
+  firstSeenVersion: string;
+  /** 与上次版本不一致 → upgrade（也包含 downgrade）。 */
+  upgraded: boolean;
+}
+
+/**
+ * 把当前进程的 app version 写入 `app_meta`，并返回对比结果。
+ * 调用方可以根据 `upgraded` 决定是否打日志或触发未来的兼容修补。
+ */
+export function stampCurrentAppVersion(): AppVersionStamp {
+  const currentVersion = loadAppVersion();
+  const previousRaw = getAppMetaValue(APP_META_KEY_APP_VERSION);
+  const previousVersion = previousRaw && previousRaw.length > 0 ? previousRaw : null;
+  const firstSeenStored = getAppMetaValue(APP_META_KEY_FIRST_SEEN_VERSION);
+
+  if (previousVersion && previousVersion !== currentVersion) {
+    setAppMetaValue(APP_META_KEY_PREVIOUS_APP_VERSION, previousVersion);
+    // 升级/降级日志走 stdout，避免 pull `WorkflowLogger` 造成循环依赖。
+    // 该日志在 gateway 启动时输出一行，便于排查「卸载未清数据 → 升级后行为异常」类问题。
+    console.log(
+      `[app-version] gateway boot detected version change: ${previousVersion} -> ${currentVersion}`,
+    );
+  }
+
+  setAppMetaValue(APP_META_KEY_APP_VERSION, currentVersion);
+  if (!firstSeenStored) {
+    setAppMetaValue(APP_META_KEY_FIRST_SEEN_VERSION, currentVersion);
+  }
+
+  return {
+    currentVersion,
+    previousVersion,
+    firstSeenVersion: firstSeenStored ?? currentVersion,
+    upgraded: previousVersion !== null && previousVersion !== currentVersion,
+  };
 }
 
 function ensureColumn(table: string, column: string, definition: string): void {

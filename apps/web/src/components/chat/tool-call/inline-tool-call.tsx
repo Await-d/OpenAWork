@@ -14,6 +14,11 @@ import {
 } from './shared/input-summary.js';
 import { buildLspInlineSummary } from './shared/lsp-summary.js';
 import { ToolApprovalActions } from './shared/tool-approval-actions.js';
+import {
+  extractTodosFromOutput,
+  type TodoLikeItem,
+  TodoListPreview,
+} from './previews/todo-list-preview.js';
 import { ToolInputPreview } from './tool-input-preview.js';
 import { ToolOutputPreview } from './tool-output-preview.js';
 
@@ -151,7 +156,19 @@ export function InlineToolCall({
   const canExpand = !isLsp && (hasInput || hasOutput);
   // Default expanded so users see the parameters/output of every tool
   // call without an extra click. They can still toggle via the chevron.
-  const [expanded, setExpanded] = useState(canExpand);
+  //
+  // Important: we use `true` (not `canExpand`) here because streaming
+  // tool calls render *before* their args arrive — on the first tick
+  // `input` is `{}` and `output` is undefined, so `canExpand` evaluates
+  // to `false` and `useState` locks the initial value in. By the time
+  // input.todos / output stream in, `canExpand` flips to `true` but the
+  // `expanded` state is still `false` — the bug the user flagged where
+  // todowrite cards always rendered collapsed. LSP tools (canExpand
+  // never true) still hide the panel via the `expanded && canExpand`
+  // render guard below, and the chevron + click handler only attach
+  // when canExpand is true, so the harmless `true` default for the
+  // LSP path has no visual effect.
+  const [expanded, setExpanded] = useState(true);
 
   // Surface a short red error line in the header on failure so users
   // see *what went wrong* without expanding. The full payload (stack
@@ -160,6 +177,29 @@ export function InlineToolCall({
     () => (visualState === 'failed' ? extractErrorSummary(output, isError) : null),
     [visualState, output, isError],
   );
+
+  // Todo-family tools (todowrite/subtodowrite/todoread/subtodoread) all
+  // resolve to the same checklist: write echoes input back as
+  // metadata.todos, read returns metadata.todos directly. Rendering
+  // both `参数` (input.todos) and `输出` (metadata.todos) showed the
+  // identical list twice with two heavy uppercase labels — the layout
+  // the user flagged as ugly. Collapse them into a single panel here.
+  // Prefer output (post-execution authoritative) and fall back to
+  // input.todos so an in-flight write still renders before the output
+  // streams in. Returning null lets a malformed call fall through to
+  // the generic params/output render.
+  const isTodoFamily =
+    normalized === 'todowrite' ||
+    normalized === 'subtodowrite' ||
+    normalized === 'todoread' ||
+    normalized === 'subtodoread';
+  const todoFamilyTodos = useMemo<TodoLikeItem[] | null>(() => {
+    if (!isTodoFamily) return null;
+    const fromOutput = extractTodosFromOutput(output);
+    if (fromOutput !== null) return fromOutput;
+    if (Array.isArray(input.todos)) return input.todos as TodoLikeItem[];
+    return null;
+  }, [isTodoFamily, input, output]);
 
   return (
     <div className="tool-call-inline-wrap" data-tool-status={visualState}>
@@ -189,17 +229,27 @@ export function InlineToolCall({
       </div>
       {expanded && canExpand && (
         <div className="tool-call-inline-output">
-          {hasInput && (
-            <div className="tool-call-inline-section" data-inline-row="true">
-              <div className="tool-call-inline-section-label">参数</div>
-              <ToolInputPreview toolName={toolName} input={input} />
-            </div>
-          )}
-          {hasOutput && (
-            <div className="tool-call-inline-section">
-              <div className="tool-call-inline-section-label">输出</div>
-              <ToolOutputPreview toolName={toolName} output={output} />
-            </div>
+          {isTodoFamily && todoFamilyTodos !== null ? (
+            todoFamilyTodos.length === 0 ? (
+              <div className="tool-call-inline-empty">（暂无待办项）</div>
+            ) : (
+              <TodoListPreview todos={todoFamilyTodos} />
+            )
+          ) : (
+            <>
+              {hasInput && (
+                <div className="tool-call-inline-section" data-inline-row="true">
+                  <div className="tool-call-inline-section-label">参数</div>
+                  <ToolInputPreview toolName={toolName} input={input} />
+                </div>
+              )}
+              {hasOutput && (
+                <div className="tool-call-inline-section">
+                  <div className="tool-call-inline-section-label">输出</div>
+                  <ToolOutputPreview toolName={toolName} output={output} />
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

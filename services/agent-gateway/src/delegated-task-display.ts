@@ -40,19 +40,19 @@ export function buildTaskToolBackgroundMessage(input: {
   taskId: string;
 }): string {
   return [
-    'Background task launched successfully.',
+    '后台任务已成功启动。',
     '',
-    `Task ID: ${input.taskId}`,
-    `Session ID: ${input.sessionId}`,
-    `Description: ${input.description}`,
-    `Agent: ${input.agent}${input.category ? ` (category: ${input.category})` : ''}`,
-    `Status: ${input.status}`,
+    `任务 ID：${input.taskId}`,
+    `会话 ID：${input.sessionId}`,
+    `描述：${input.description}`,
+    `Agent：${input.agent}${input.category ? `（category：${input.category}）` : ''}`,
+    `状态：${input.status}`,
     '',
-    'The system will notify you when the task completes.',
-    `Use \`background_output\` tool with task_id="${input.taskId}" to check progress:`,
-    '- block=false (default): Check status immediately - returns full status info',
-    '- block=true: Wait for completion (rarely needed since system notifies)',
-    `To continue this session: session_id="${input.sessionId}"`,
+    '任务完成时系统会主动通知你。',
+    `检查进度：调 \`background_output\` 并传 task_id="${input.taskId}"：`,
+    '- block=false（默认）：立刻检查状态 - 返回完整状态信息',
+    '- block=true：等任务完成（一般不需要，系统会主动通知）',
+    `要继续这个会话：session_id="${input.sessionId}"`,
   ].join('\n');
 }
 
@@ -67,15 +67,11 @@ export function buildTaskToolTerminalMessage(input: {
   status: 'cancelled' | 'done' | 'failed';
 }): string {
   const fallback =
-    input.status === 'failed'
-      ? 'Task failed.'
-      : input.status === 'cancelled'
-        ? 'Task cancelled.'
-        : '';
+    input.status === 'failed' ? '任务失败。' : input.status === 'cancelled' ? '任务已取消。' : '';
   const body = input.errorMessage?.trim() || input.resultText?.trim() || fallback;
 
   return [
-    `task_id: ${input.sessionId} (for resuming to continue this task if needed)`,
+    `task_id: ${input.sessionId}（如需继续本任务可用来 resume）`,
     '',
     '<task_result>',
     body,
@@ -95,7 +91,7 @@ export function buildBackgroundTaskStatusMessage(input: {
   status: string;
   taskId: string;
 }): string {
-  const durationLabel = input.status === 'pending' ? 'Queued for' : 'Duration';
+  const durationLabel = input.status === 'pending' ? '已排队' : '耗时';
   const duration =
     input.status === 'pending'
       ? formatDuration(input.queuedAt, undefined)
@@ -103,20 +99,20 @@ export function buildBackgroundTaskStatusMessage(input: {
 
   const statusNote =
     input.status === 'pending'
-      ? '> **Queued**: Task is waiting for a concurrency slot to become available.'
+      ? '> **排队中**：任务正在等待并发名额。'
       : input.status === 'running'
-        ? '> **Note**: No need to wait explicitly - the system will notify you when this task completes.'
+        ? '> **提示**：不需要主动等待，任务完成时系统会主动通知。'
         : input.status === 'failed'
-          ? '> **Failed**: The task encountered an error. Check the last message for details.'
+          ? '> **失败**：任务遇到错误。查看最后一条消息了解详情。'
           : input.status === 'cancelled'
-            ? '> **Cancelled**: The task was stopped before it could finish.'
+            ? '> **已取消**：任务在完成之前被停止。'
             : '';
 
   const lastMessageSection =
     input.lastMessage && input.lastMessage.trim().length > 0
       ? [
           '',
-          `## Last Message (${formatIsoTime(input.lastMessageAt)})`,
+          `## 最后一条消息（${formatIsoTime(input.lastMessageAt)}）`,
           '',
           '```',
           truncateText(input.lastMessage, 500),
@@ -125,18 +121,18 @@ export function buildBackgroundTaskStatusMessage(input: {
       : '';
 
   return [
-    '# Task Status',
+    '# 任务状态',
     '',
-    '| Field | Value |',
+    '| 字段 | 值 |',
     '|-------|-------|',
-    `| Task ID | \`${input.taskId}\` |`,
-    `| Description | ${input.description} |`,
+    `| 任务 ID | \`${input.taskId}\` |`,
+    `| 描述 | ${input.description} |`,
     `| Agent | ${input.agent} |`,
-    `| Status | **${input.status}** |`,
+    `| 状态 | **${input.status}** |`,
     `| ${durationLabel} | ${duration} |`,
-    `| Session ID | \`${input.sessionId}\` |`,
+    `| 会话 ID | \`${input.sessionId}\` |`,
     ...(statusNote ? ['', statusNote] : []),
-    '## Original Prompt',
+    '## 原始 Prompt',
     '',
     '```',
     truncateText(input.prompt, 500),
@@ -155,17 +151,17 @@ export function buildBackgroundTaskResultMessage(input: {
   taskId: string;
 }): string {
   return [
-    'Task Result',
+    '任务结果',
     '',
-    `Task ID: ${input.taskId}`,
-    `Description: ${input.description}`,
-    `Agent: ${input.agent}`,
-    `Duration: ${formatDuration(input.startedAt, input.completedAt)}`,
-    `Session ID: ${input.sessionId}`,
+    `任务 ID：${input.taskId}`,
+    `描述：${input.description}`,
+    `Agent：${input.agent}`,
+    `耗时：${formatDuration(input.startedAt, input.completedAt)}`,
+    `会话 ID：${input.sessionId}`,
     '',
     '---',
     '',
-    input.resultText?.trim() || '(No assistant or tool response found)',
+    input.resultText?.trim() || '（未找到助手或工具响应）',
   ].join('\n');
 }
 
@@ -180,13 +176,13 @@ export function buildBackgroundCancelAllMessage(input: {
   }>;
 }): string {
   if (input.tasks.length === 0) {
-    return 'No running or pending background tasks to cancel.';
+    return '没有运行中或排队中的后台任务可取消。';
   }
 
   const rows = input.tasks
     .map(
       (task) =>
-        `| \`${task.taskId}\` | ${task.description} | ${task.status} | ${task.sessionId ? `\`${task.sessionId}\`` : '(not started)'} |`,
+        `| \`${task.taskId}\` | ${task.description} | ${task.status} | ${task.sessionId ? `\`${task.sessionId}\`` : '（未启动）'} |`,
     )
     .join('\n');
 
@@ -196,9 +192,9 @@ export function buildBackgroundCancelAllMessage(input: {
       ? ''
       : [
           '',
-          '## Continue Instructions',
+          '## 继续说明',
           '',
-          'To continue a cancelled task, use:',
+          '要继续被取消的任务，使用：',
           '```',
           buildResumeTemplate({
             agent: resumable[0]?.agent ?? 'explore',
@@ -207,17 +203,17 @@ export function buildBackgroundCancelAllMessage(input: {
           }),
           '```',
           '',
-          'Continuable sessions:',
+          '可继续的会话：',
           ...resumable.map(
             (task) =>
-              `- \`${task.sessionId}\` (${task.description}) → ${buildResumeTemplate({ agent: task.agent, requestedSkills: task.requestedSkills, sessionId: task.sessionId ?? '<session_id>' })}`,
+              `- \`${task.sessionId}\`（${task.description}）→ ${buildResumeTemplate({ agent: task.agent, requestedSkills: task.requestedSkills, sessionId: task.sessionId ?? '<session_id>' })}`,
           ),
         ].join('\n');
 
   return [
-    `Cancelled ${input.tasks.length} background task(s):`,
+    `已取消 ${input.tasks.length} 个后台任务：`,
     '',
-    '| Task ID | Description | Status | Session ID |',
+    '| 任务 ID | 描述 | 状态 | 会话 ID |',
     '|---------|-------------|--------|------------|',
     rows,
     resumeSection,
@@ -230,17 +226,14 @@ export function buildBackgroundCancelSingleMessage(input: {
   status: string;
   taskId: string;
 }): string {
-  const header =
-    input.sessionId === undefined
-      ? 'Pending task cancelled successfully'
-      : 'Task cancelled successfully';
+  const header = input.sessionId === undefined ? '排队中的任务已成功取消' : '任务已成功取消';
   return [
     header,
     '',
-    `Task ID: ${input.taskId}`,
-    `Description: ${input.description}`,
-    ...(input.sessionId ? [`Session ID: ${input.sessionId}`] : []),
-    `Status: ${input.status}`,
+    `任务 ID：${input.taskId}`,
+    `描述：${input.description}`,
+    ...(input.sessionId ? [`会话 ID：${input.sessionId}`] : []),
+    `状态：${input.status}`,
   ].join('\n');
 }
 

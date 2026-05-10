@@ -114,12 +114,12 @@ function parseAstGrepStdout(stdout: string): AstGrepResultItem[] {
 
 function formatAstGrepSearchResults(results: AstGrepResultItem[], context: number): string {
   if (results.length === 0) {
-    return 'No matches found.';
+    return '未找到匹配。';
   }
   const header =
     context > 0
-      ? `Found ${results.length} matches (context=${context}):`
-      : `Found ${results.length} matches:`;
+      ? `找到 ${results.length} 处匹配（上下文=${context}）：`
+      : `找到 ${results.length} 处匹配：`;
   return [
     header,
     ...results.map((result) => {
@@ -132,9 +132,9 @@ function formatAstGrepSearchResults(results: AstGrepResultItem[], context: numbe
 
 function formatAstGrepReplaceResults(results: AstGrepResultItem[], dryRun: boolean): string {
   if (results.length === 0) {
-    return dryRun ? 'Dry run: no changes.' : 'No changes applied.';
+    return dryRun ? '试运行：无可应用的改动。' : '无任何替换被应用。';
   }
-  const prefix = dryRun ? 'Dry run preview:' : 'Applied replacements:';
+  const prefix = dryRun ? '试运行预览：' : '已应用替换：';
   return [
     prefix,
     ...results.map((result) => {
@@ -142,7 +142,7 @@ function formatAstGrepReplaceResults(results: AstGrepResultItem[], dryRun: boole
       const column = (result.range?.start?.column ?? 0) + 1;
       return `${result.file ?? 'unknown'}:${line}:${column}\n${(result.lines ?? '').trim()}`;
     }),
-    ...(dryRun ? ['\nUse dryRun=false to apply changes.'] : []),
+    ...(dryRun ? ['\n如需真正写入改动，请传 dryRun=false。'] : []),
   ].join('\n\n');
 }
 
@@ -165,8 +165,7 @@ export const astGrepSearchToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'ast_grep_search',
-  description:
-    'Search code patterns across filesystem using AST-aware matching. Supports 25 languages.',
+  description: '在文件系统上基于 AST 感知匹配代码模式。支持 25 种语言。',
   inputSchema: astGrepSearchInputSchema,
   outputSchema: z.string(),
   timeout: 60000,
@@ -185,8 +184,7 @@ export const astGrepReplaceToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'ast_grep_replace',
-  description:
-    'Replace code patterns across filesystem with AST-aware rewriting. Dry-run by default.',
+  description: '在文件系统上基于 AST 感知重写代码模式。默认 dry-run。',
   inputSchema: astGrepReplaceInputSchema,
   outputSchema: z.string(),
   timeout: 60000,

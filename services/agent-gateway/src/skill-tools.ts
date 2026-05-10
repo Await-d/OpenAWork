@@ -3,6 +3,7 @@ import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { z } from 'zod';
 import { sqliteAll, sqliteGet } from './db.js';
+import type { EffectiveSkill } from './skill-selection.js';
 
 const skillInputSchema = z
   .object({
@@ -50,6 +51,53 @@ function normalizeSkillName(value: string): string {
   return value.trim().toLowerCase();
 }
 
+/**
+ * Render the `<skill_files>` block listing the manifest's declared
+ * reference files, mirroring opencode's `tool/skill.ts` skill loader
+ * which appends a sampled file list so the model knows what bundled
+ * resources (scripts, references, templates) the skill ships with —
+ * without guessing paths.
+ *
+ * OpenAWork-specific note: opencode reads files directly from a
+ * `SKILL.md` directory via ripgrep. We don't have that ground truth —
+ * BUILTIN_SKILLS are packaged in code, cached skills are fetched via
+ * HTTPS, and the installed-skills manifest doesn't carry a filesystem
+ * location. The semantically-equivalent source is
+ * `SkillManifest.references[].path`, which the manifest author
+ * declares as the skill's bundled resources at install/publish time.
+ *
+ * Returns an empty array when no references are declared so the
+ * caller can splice without producing an empty block (which would
+ * still bloat the prompt-cache prefix byte-for-byte).
+ */
+export function renderSkillReferenceFilesBlock(manifest: SkillManifestLike): string[] {
+  const refs = Array.isArray(manifest.references) ? manifest.references : [];
+  const files: string[] = [];
+  for (const ref of refs) {
+    // Defensive narrowing: SkillManifest typing requires `loadAt` but
+    // some persisted/cached manifests written by older versions may
+    // omit it. Treat any entry with a non-empty `path` as a valid
+    // reference candidate so the model still sees the bundled file.
+    const candidatePath =
+      ref && typeof (ref as { path?: unknown }).path === 'string'
+        ? ((ref as { path: string }).path.trim() ?? '')
+        : '';
+    if (candidatePath.length > 0) {
+      files.push(`<file>${candidatePath}</file>`);
+    }
+  }
+  if (files.length === 0) return [];
+  return [
+    '',
+    '<skill_files>',
+    'Bundled resources (relative paths declared by the skill manifest;',
+    'access via `read` / `list` once you have resolved them under the',
+    'workspace skill root):',
+    ...files,
+    '</skill_files>',
+  ];
+}
+
 function parseManifest(raw: string): SkillManifestLike {
   return JSON.parse(raw) as SkillManifestLike;
 }
@@ -84,6 +132,7 @@ function buildBuiltinSkillContent(manifest: SkillManifestLike): string {
     ...(descriptionForModel ? ['', 'Instructions for model:', descriptionForModel] : []),
     ...(capabilities.length > 0 ? ['', `Capabilities: ${capabilities.join(', ')}`] : []),
     ...(permissions.length > 0 ? ['', `Permissions: ${permissions}`] : []),
+    ...renderSkillReferenceFilesBlock(manifest),
     '</skill_content>',
   ].join('\n');
 }
@@ -161,26 +210,90 @@ function findCachedSkillEntry(
   return JSON.parse(row.entry_json) as SkillEntryLike;
 }
 
+export interface CreateSkillToolOptions {
+  /**
+   * Effective skill set for the (session, workspace, user) tuple. When
+   * supplied, the tool's `description` enumerates only enabled installed/local
+   * skills and BUILTIN entries; `execute` rejects requests for installed/local
+   * skills outside this set. When omitted, the tool falls back to the legacy
+   * permissive behaviour — used for the static `__tool-definitions__` instance
+   * that never executes user requests directly.
+   */
+  effective?: EffectiveSkill[];
+}
+
+const BASE_DESCRIPTION =
+  'Load an installed or built-in skill and inject its instructions into the conversation context. Use the exact skill name when possible.';
+
+function describeEffectiveSkills(effective: EffectiveSkill[] | undefined): string {
+  if (!effective || effective.length === 0) return BASE_DESCRIPTION;
+  const enabled = effective.filter((entry) => entry.enabled);
+  if (enabled.length === 0) {
+    return `${BASE_DESCRIPTION}\n\n(No skills enabled for this workspace; the tool will refuse non-builtin requests.)`;
+  }
+  const lines = enabled.map((entry) => {
+    const name = entry.manifest?.displayName ?? entry.manifest?.name ?? entry.skillId;
+    const desc = entry.manifest?.description?.trim() ?? '';
+    const tag = entry.origin === 'builtin' ? '[builtin]' : entry.pinned ? '[pinned]' : '[enabled]';
+    return desc.length > 0 ? `- ${name} ${tag} — ${desc}` : `- ${name} ${tag}`;
+  });
+  return [BASE_DESCRIPTION, '', 'Available skills (this session):', ...lines].join('\n');
+}
+
+function buildAllowedNames(effective: EffectiveSkill[] | undefined): Set<string> {
+  const allowed = new Set<string>();
+  if (!effective) return allowed;
+  for (const entry of effective) {
+    if (!entry.enabled) continue;
+    const candidates = [
+      entry.skillId,
+      entry.manifest?.id,
+      entry.manifest?.name,
+      entry.manifest?.displayName,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        allowed.add(normalizeSkillName(candidate));
+      }
+    }
+  }
+  return allowed;
+}
+
 export function createSkillTool(
   sessionId: string,
   userId: string,
+  options: CreateSkillToolOptions = {},
 ): ToolDefinition<typeof skillInputSchema, typeof skillOutputSchema> {
+  const { effective } = options;
+  const description = describeEffectiveSkills(effective);
+  const allowedNames = buildAllowedNames(effective);
+  const enforce = effective !== undefined;
+
   return {
     name: 'skill',
-    description:
-      'Load an installed or built-in skill and inject its instructions into the conversation context. Use the exact skill name when possible.',
+    description,
     inputSchema: skillInputSchema,
     outputSchema: skillOutputSchema,
     timeout: 30000,
     execute: async (input) => {
       void sessionId;
+      // BUILTIN bypass: even when an effective set is provided, BUILTIN remain
+      // unconditionally available (per spec — they are not filterable).
+      const builtinContentEarly = findBuiltinSkillContent(input.name);
+      if (builtinContentEarly) {
+        return builtinContentEarly;
+      }
+
+      // Enforce selection when caller plumbed effective. Reject installed/local
+      // skills outside the enabled set with a deterministic message so the
+      // model can recover instead of silently retrying.
+      if (enforce && !allowedNames.has(normalizeSkillName(input.name))) {
+        throw new Error(`Skill not allowed in current workspace/session: ${input.name}`);
+      }
+
       const installed = findInstalledSkill(userId, input.name);
       if (!installed) {
-        const builtinContent = findBuiltinSkillContent(input.name);
-        if (builtinContent) {
-          return builtinContent;
-        }
-
         throw new Error(`Skill not found: ${input.name}`);
       }
 
@@ -190,6 +303,7 @@ export function createSkillTool(
         return [
           `<skill_content name="${installed.manifest.displayName ?? installed.manifest.name ?? input.name}">`,
           content.trim(),
+          ...renderSkillReferenceFilesBlock(installed.manifest),
           '</skill_content>',
         ].join('\n');
       }

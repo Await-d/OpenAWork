@@ -62,7 +62,7 @@ const sessionInfoInputSchema = z.object({
 export const sessionListToolDefinition: ToolDefinition<typeof sessionListInputSchema, z.ZodString> =
   {
     name: 'session_list',
-    description: 'List all OpenCode sessions with optional filtering.',
+    description: '列出所有 OpenAWork 会话，可选过滤。',
     inputSchema: sessionListInputSchema,
     outputSchema: z.string(),
     timeout: 30000,
@@ -74,7 +74,7 @@ export const sessionListToolDefinition: ToolDefinition<typeof sessionListInputSc
 export const sessionReadToolDefinition: ToolDefinition<typeof sessionReadInputSchema, z.ZodString> =
   {
     name: 'session_read',
-    description: 'Read messages and history from an OpenCode session.',
+    description: '读取 OpenAWork 会话的消息与历史。',
     inputSchema: sessionReadInputSchema,
     outputSchema: z.string(),
     timeout: 30000,
@@ -88,7 +88,7 @@ export const sessionSearchToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'session_search',
-  description: 'Search for content within OpenCode session messages.',
+  description: '在 OpenAWork 会话消息中搜索内容。',
   inputSchema: sessionSearchInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -100,7 +100,7 @@ export const sessionSearchToolDefinition: ToolDefinition<
 export const sessionInfoToolDefinition: ToolDefinition<typeof sessionInfoInputSchema, z.ZodString> =
   {
     name: 'session_info',
-    description: 'Get metadata and statistics about an OpenCode session.',
+    description: '获取某个 OpenAWork 会话的元数据与统计信息。',
     inputSchema: sessionInfoInputSchema,
     outputSchema: z.string(),
     timeout: 30000,

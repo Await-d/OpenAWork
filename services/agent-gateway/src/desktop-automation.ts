@@ -88,7 +88,7 @@ export const desktopAutomationToolDefinition: ToolDefinition<
 > = {
   name: 'desktop_automation',
   description:
-    'Control the desktop-only browser automation runtime through a single action-based interface. Use only when the gateway is running as the desktop sidecar.',
+    '通过统一的 action 接口控制桌面端专属的浏览器自动化运行时。仅在 gateway 作为桌面 sidecar 运行时可用。',
   inputSchema: desktopAutomationToolInputSchema,
   outputSchema: z.string(),
   timeout: 120000,

@@ -3,6 +3,20 @@ export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 export interface TextContent {
   type: 'text';
   text: string;
+  /**
+   * Synthetic content authored by the gateway (e.g. capability context,
+   * keyword-detector reminder, companion prompt) rather than the user.
+   * Persisting this as a separate part with a stable marker keeps the
+   * upstream Anthropic / OpenAI prompt-cache prefix byte-stable across
+   * turns: each user message carries its own snapshot of the synthetic
+   * block instead of having it re-prepended to whichever message
+   * currently happens to be the latest user turn.
+   *
+   * Mirrors opencode's `synthetic: true` text-part flag (see
+   * `temp/opencode/packages/opencode/src/session/prompt.ts insertReminders`,
+   * which writes synthetic parts back through `sessions.updatePart()`).
+   */
+  synthetic?: boolean;
 }
 
 export interface InputImageContent {
@@ -21,6 +35,20 @@ export interface ToolCallContent {
   toolName: string;
   input: Record<string, unknown>;
   rawArguments?: string;
+  /**
+   * Provider-attached metadata captured from the upstream `tool-call`
+   * stream chunk's `providerMetadata`. The OpenAI Responses API in
+   * particular emits an `openai.itemId` (`fc_xxx`) that is *separate*
+   * from the call_id surfaced as `toolCallId` (`call_xxx`); both must
+   * round-trip across turns or the AI SDK falls back to using the
+   * call_id as the function_call.id, OpenAI re-keys the item, and
+   * the entire prompt-cache prefix from that function_call onward
+   * misses on every subsequent request.
+   *
+   * Persisted as-is (a free-form record keyed by provider name)
+   * mirroring AI SDK 5's `tool-call.providerMetadata` shape.
+   */
+  providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 export interface ToolCallObservabilityAnnotation {

@@ -5,6 +5,7 @@ import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@open
 import { listManagedAgentsForUser } from '../agent-catalog.js';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
+import { resolveAuxiliaryLlmConfig } from '../auxiliary-llm-config.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import {
@@ -1806,11 +1807,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
-      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? '';
-      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
-      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
-
-      if (!AI_API_BASE_URL || !AI_API_KEY) {
+      // Use the same auxiliary LLM resolver as workflows.ts: prefer the
+      // user's configured "fast / inline" provider (with full
+      // providerType + upstreamProtocol so non–chat-completions
+      // providers are honoured), falling back to env vars only as a
+      // last resort.
+      const user = request.user as JwtPayload;
+      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
+      if (!llmConfig) {
         step.fail('no llm config');
         return reply.status(503).send({ error: 'Interaction agent LLM is not configured' });
       }
@@ -1838,9 +1842,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       try {
         const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
         const rewritten = await requestWorkflowLlmCompletion({
-          apiBaseUrl: AI_API_BASE_URL,
-          apiKey: AI_API_KEY,
-          model: AI_DEFAULT_MODEL,
+          apiBaseUrl: llmConfig.apiBaseUrl,
+          apiKey: llmConfig.apiKey,
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt,
           temperature: 0.3,
         });
@@ -1957,11 +1963,13 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
-      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? '';
-      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
-      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
-
-      if (!AI_API_BASE_URL || !AI_API_KEY) {
+      // See the rewrite handler above for why this prefers the user's
+      // configured fast/inline provider before falling back to env
+      // vars: it is the only path that carries providerType +
+      // upstreamProtocol, without which custom-protocol providers
+      // silently degrade to chat_completions.
+      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
+      if (!llmConfig) {
         step.fail('no llm config');
         return reply.status(503).send({ error: 'Team leader LLM is not configured' });
       }
@@ -2134,9 +2142,11 @@ REVIEW GATE CHECKLIST:
       try {
         const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
         const analysis = await requestWorkflowLlmCompletion({
-          apiBaseUrl: AI_API_BASE_URL,
-          apiKey: AI_API_KEY,
-          model: AI_DEFAULT_MODEL,
+          apiBaseUrl: llmConfig.apiBaseUrl,
+          apiKey: llmConfig.apiKey,
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt,
           temperature: 0.3,
         });

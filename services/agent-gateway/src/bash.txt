@@ -1,117 +1,117 @@
-Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+在持久化的 shell 会话中执行给定的 bash 命令，可选超时，并保证安全机制到位。
 
-Be aware: OS: ${os}, Shell: ${shell}
+请注意：操作系统：${os}，Shell：${shell}
 
-All commands run in the current working directory by default. Use the `workdir` parameter if you need to run a command in a different directory. AVOID using `cd <directory> && <command>` patterns - use `workdir` instead.
+默认所有命令都在当前工作目录运行。如果需要在其他目录执行，请使用 `workdir` 参数。**不要**使用 `cd <directory> && <command>` 这种写法，改用 `workdir`。
 
-IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
+重要：本工具用于终端操作（git、npm、docker 等）。**不要**用它做文件操作（读、写、编辑、搜索、查找文件）——这些操作请使用对应的专用工具。
 
-Before executing the command, please follow these steps:
+执行命令前，请遵循以下步骤：
 
-1. Directory Verification:
-   - If the command will create new directories or files, first use `ls` to verify the parent directory exists and is the correct location
-   - For example, before running "mkdir foo/bar", first use `ls foo` to check that "foo" exists and is the intended parent directory
+1. 目录校验：
+   - 如果命令会创建新目录或文件，先用 `ls` 确认父目录存在且位置正确
+   - 例如，运行 `mkdir foo/bar` 之前，先 `ls foo` 确认 `foo` 是预期的父目录
 
-2. Command Execution:
-   - Always quote file paths that contain spaces with double quotes (e.g., rm "path with spaces/file.txt")
-   - Examples of proper quoting:
-     - mkdir "/Users/name/My Documents" (correct)
-     - mkdir /Users/name/My Documents (incorrect - will fail)
-     - python "/path/with spaces/script.py" (correct)
-     - python /path/with spaces/script.py (incorrect - will fail)
-   - After ensuring proper quoting, execute the command.
-   - Capture the output of the command.
+2. 命令执行：
+   - 包含空格的文件路径必须用双引号包裹（例如 `rm "path with spaces/file.txt"`）
+   - 引号示例：
+     - `mkdir "/Users/name/My Documents"` ✅
+     - `mkdir /Users/name/My Documents` ❌（会失败）
+     - `python "/path/with spaces/script.py"` ✅
+     - `python /path/with spaces/script.py` ❌（会失败）
+   - 确认引号正确后再执行命令
+   - 捕获命令输出
 
-Usage notes:
-  - The command argument is required.
-  - You can specify an optional timeout in milliseconds. If not specified, commands will time out after 120000ms (2 minutes).
-  - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
-  - If the output exceeds ${maxLines} lines or ${maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use `head`, `tail`, or other truncation commands to limit output; the full output will already be captured to a file for more precise searching.
+使用须知：
+  - command 参数必填
+  - 可选 `timeout`（毫秒）。未指定时默认 120000ms（2 分钟）超时
+  - 强烈建议在 `description` 里用 5–10 个字清楚说明这条命令做什么
+  - 输出超过 ${maxLines} 行或 ${maxBytes} 字节会被截断，完整输出会被写入文件。可用 Read 配合 offset/limit 读取指定段，或用 Grep 在完整内容中检索。**不要**用 `head` / `tail` 等命令自行截断——完整输出已落盘，便于精确检索。
 
-  - Avoid using Bash with the `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
-    - File search: Use Glob (NOT find or ls)
-    - Content search: Use Grep (NOT grep or rg)
-    - Read files: Use Read (NOT cat/head/tail)
-    - Edit files: Use Edit (NOT sed/awk)
-    - Write files: Use Write (NOT echo >/cat <<EOF)
-    - Communication: Output text directly (NOT echo/printf)
-  - When issuing multiple commands:
-    - If the commands are independent and can run in parallel, make multiple Bash tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two Bash tool calls in parallel.
+  - 除非任务确实需要或被明确要求，否则避免用 Bash 调 `find` / `grep` / `cat` / `head` / `tail` / `sed` / `awk` / `echo`，请始终优先使用专用工具：
+    - 文件查找：用 Glob（不要用 find / ls）
+    - 内容搜索：用 Grep（不要用 grep / rg）
+    - 读文件：用 Read（不要用 cat / head / tail）
+    - 编辑文件：用 Edit（不要用 sed / awk）
+    - 写文件：用 Write（不要用 echo > / cat <<EOF）
+    - 通信：直接输出文本（不要用 echo / printf）
+  - 同时执行多个命令时：
+    - 命令之间相互独立可并行时，请在**同一条消息**里发起多次 Bash 工具调用。例如同时跑 `git status` 与 `git diff`，请用一条消息发两次并行的 Bash 调用
     - ${chaining}
-    - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
-    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)
-  - AVOID using `cd <directory> && <command>`. Use the `workdir` parameter to change directories instead.
+    - 仅当你需要按序执行但**不在意前面命令是否失败**时，使用 `;`
+    - **不要**用换行分隔命令（仅在引号字符串内允许换行）
+  - **不要**用 `cd <directory> && <command>`，改用 `workdir` 参数：
     <good-example>
-    Use workdir="/foo/bar" with command: pytest tests
+    workdir="/foo/bar"，command: pytest tests
     </good-example>
     <bad-example>
     cd /foo/bar && pytest tests
     </bad-example>
 
-# Committing changes with git
+# 用 git 提交改动
 
-Only create commits when requested by the user. If unclear, ask first. When the user asks you to create a new git commit, follow these steps carefully:
+仅在用户明确要求时才创建 commit。不确定时先问。当用户要求新建 git commit 时，严格按以下步骤：
 
-Git Safety Protocol:
-- NEVER update the git config
-- NEVER run destructive/irreversible git commands (like push --force, hard reset, etc) unless the user explicitly requests them
-- NEVER skip hooks (--no-verify, --no-gpg-sign, etc) unless the user explicitly requests it
-- NEVER run force push to main/master, warn the user if they request it
-- Avoid git commit --amend. ONLY use --amend when ALL conditions are met:
-  (1) User explicitly requested amend, OR the commit succeeded and pre-commit hooks auto-modified files that need including — verify by checking `git log` that HEAD is the new commit before amending
-  (2) HEAD commit was created by you in this conversation (verify: git log -1 --format='%an %ae')
-  (3) Commit has NOT been pushed to remote (verify: git status shows "Your branch is ahead")
-- CRITICAL: If commit FAILED or was REJECTED by hook, NEVER amend - fix the issue and create a NEW commit
-- CRITICAL: If you already pushed to remote, NEVER amend unless user explicitly requests it (requires force push)
-- NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive.
+Git 安全协议：
+- **绝不**修改 git 配置
+- 除非用户明确要求，**绝不**执行破坏性 / 不可逆的 git 命令（如 push --force、hard reset 等）
+- 除非用户明确要求，**绝不**跳过 hooks（--no-verify、--no-gpg-sign 等）
+- **绝不**对 main / master 强推；用户要求时先警告
+- 避免 `git commit --amend`。**仅当**以下条件**全部**满足才允许 amend：
+  (1) 用户明确要求 amend，或 commit 已成功且 pre-commit hook 自动改了文件需要补进去——通过 `git log` 确认 HEAD 是新 commit 后再 amend
+  (2) HEAD 的 commit 是本对话中由你创建的（验证：`git log -1 --format='%an %ae'`）
+  (3) Commit **尚未**推送到远端（验证：`git status` 显示 "Your branch is ahead"）
+- 关键：commit **失败**或被 hook **拒绝**时，**绝不** amend——修复问题后创建**新的** commit
+- 关键：已推送到远端后**绝不** amend，除非用户明确要求（需要 force push）
+- 除非用户明确要求，**绝不**自行提交。仅在用户明确要求时提交是非常重要的，否则用户会觉得你过度主动
 
-1. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following bash commands in parallel, each using the Bash tool:
-  - Run a git status command to see all untracked files.
-  - Run a git diff command to see both staged and unstaged changes that will be committed.
-  - Run a git log command to see recent commit messages, so that you can follow this repository's commit message style.
-2. Analyze all staged changes (both previously staged and newly added) and draft a commit message:
-  - Summarize the nature of the changes (eg. new feature, enhancement to an existing feature, bug fix, refactoring, test, docs, etc.). Ensure the message accurately reflects the changes and their purpose (i.e. "add" means a wholly new feature, "update" means an enhancement to an existing feature, "fix" means a bug fix, etc.).
-  - Do not commit files that likely contain secrets (.env, credentials.json, etc.). Warn the user if they specifically request to commit those files
-  - Draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what"
-  - Ensure it accurately reflects the changes and their purpose
-3. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following commands:
-   - Add relevant untracked files to the staging area.
-   - Create the commit with a message
-   - Run git status after the commit completes to verify success.
-   Note: git status depends on the commit completing, so run it sequentially after the commit.
-4. If the commit fails due to pre-commit hook, fix the issue and create a NEW commit (see amend rules above)
+1. 多个独立信息可以一次请求并预期都会成功时，可在同一条消息里并行调用多次 Bash 工具：
+  - `git status` 查看所有未跟踪文件
+  - `git diff` 查看已暂存和未暂存的改动
+  - `git log` 查看近期的 commit message 风格
+2. 综合所有 staged 改动（包含已 stage 的与新加进来的）起草 commit message：
+  - 概括改动性质（新功能 / 增强 / bug fix / 重构 / 测试 / 文档 等）。Message 必须准确反映改动与意图（"add" 表示全新功能，"update" 表示对已有功能的增强，"fix" 表示修复缺陷，等等）
+  - 不要把可能含密钥的文件纳入 commit（.env、credentials.json 等）。如用户特别要求提交这些文件，请先警告
+  - 起草简洁的 commit message（1–2 句），聚焦"为什么"而非"做了什么"
+  - 必须准确反映改动与意图
+3. 多个独立操作可并行时同样并行调用 Bash：
+   - 把相关未跟踪文件加入暂存区
+   - 创建带 message 的 commit
+   - commit 完成后跑 `git status` 验证成功
+   注：`git status` 依赖 commit 完成，请在 commit 之后顺序执行
+4. 若 commit 因 pre-commit hook 失败，修问题后创建**新的** commit（参见上方 amend 规则）
 
-Important notes:
-- NEVER run additional commands to read or explore code, besides git bash commands
-- NEVER use the TodoWrite or Task tools
-- DO NOT push to the remote repository unless the user explicitly asks you to do so
-- IMPORTANT: Never use git commands with the -i flag (like git rebase -i or git add -i) since they require interactive input which is not supported.
-- If there are no changes to commit (i.e., no untracked files and no modifications), do not create an empty commit
+重要事项：
+- 除 git 相关 bash 命令外，**绝不**额外跑命令读取或探索代码
+- **绝不**使用 TodoWrite 或 Task 工具
+- 用户没有明确要求时**不要** push 到远端
+- 关键：**绝不**用 `-i` 标志（如 `git rebase -i` 或 `git add -i`）——这些需要交互输入，不被支持
+- 若没有可提交的内容（既无未跟踪文件也无修改），不要创建空 commit
 
-# Creating pull requests
-Use the gh command via the Bash tool for ALL GitHub-related tasks including working with issues, pull requests, checks, and releases. If given a GitHub URL use the gh command to get the information needed.
+# 创建 Pull Request
+所有 GitHub 相关任务（issue、pull request、checks、release）都通过 Bash 调 `gh` 命令完成。给到 GitHub URL 时，用 `gh` 获取所需信息。
 
-IMPORTANT: When the user asks you to create a pull request, follow these steps carefully:
+重要：用户要求创建 PR 时，严格按以下步骤：
 
-1. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following bash commands in parallel using the Bash tool, in order to understand the current state of the branch since it diverged from the main branch:
-   - Run a git status command to see all untracked files
-   - Run a git diff command to see both staged and unstaged changes that will be committed
-   - Check if the current branch tracks a remote branch and is up to date with the remote, so you know if you need to push to the remote
-   - Run a git log command and `git diff [base-branch]...HEAD` to understand the full commit history for the current branch (from the time it diverged from the base branch)
-2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits (NOT just the latest commit, but ALL commits that will be included in the pull request!!!), and draft a pull request summary
-3. You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. run the following commands in parallel:
-   - Create new branch if needed
-   - Push to remote with -u flag if needed
-   - Create PR using gh pr create with the format below. Use a HEREDOC to pass the body to ensure correct formatting.
+1. 多个独立信息一次请求时并行调用 Bash，理解当前分支自从分叉出来以后的状态：
+   - `git status` 查看所有未跟踪文件
+   - `git diff` 查看已暂存和未暂存的改动
+   - 查看当前分支是否有跟踪的远端分支以及是否同步——用以判断是否需要 push
+   - `git log` 与 `git diff [base-branch]...HEAD` 了解当前分支自分叉以来的完整提交历史
+2. 综合所有进入 PR 的改动（**所有** commit，不仅是最新一个）起草 PR summary
+3. 多个独立操作并行调 Bash：
+   - 必要时新建分支
+   - 必要时带 -u 推到远端
+   - 用 `gh pr create` 按下方格式创建 PR；body 用 HEREDOC 传入以保证格式
 <example>
 gh pr create --title "the pr title" --body "$(cat <<'EOF'
 ## Summary
 <1-3 bullet points>
 </example>
 
-Important:
-- DO NOT use the TodoWrite or Task tools
-- Return the PR URL when you're done, so the user can see it
+重要事项：
+- **不要**使用 TodoWrite 或 Task 工具
+- 完成后返回 PR URL，方便用户查看
 
-# Other common operations
-- View comments on a GitHub PR: gh api repos/foo/bar/pulls/123/comments
+# 其他常用操作
+- 查看 GitHub PR 评论：`gh api repos/foo/bar/pulls/123/comments`

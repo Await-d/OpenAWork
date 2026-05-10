@@ -1,6 +1,7 @@
 import type { DialogueMode } from '@openAwork/shared';
 import type { GatewayToolDefinition } from './tool-definitions.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import { parseFlatMcpToolName } from './mcp-tool-naming.js';
 
 interface ChannelToolPermissionsLike {
   allowShell?: boolean;
@@ -44,6 +45,13 @@ function readChannelPermissions(
 }
 
 function resolveChannelToolKey(toolName: string): string | null {
+  // Flat MCP tools (PR-C) inherit the legacy `mcp_call` channel/visibility
+  // class so per-session toggles for "MCP" continue to apply uniformly,
+  // regardless of whether the model called via `mcp_call` or via the
+  // flattened `mcp__<server>__<tool>` direct entry point.
+  if (parseFlatMcpToolName(toolName)) {
+    return 'mcp';
+  }
   switch (toolName) {
     case 'websearch':
     case 'codesearch':

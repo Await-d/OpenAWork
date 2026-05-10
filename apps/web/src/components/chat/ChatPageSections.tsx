@@ -114,7 +114,19 @@ export function MessageRow({
   const displayName = isUser ? email || '你' : assistantModelLabel;
   const timestamp = formatShortTime(message.createdAt);
   const tokenCount = message.tokenEstimate ?? estimateTokenCount(message.content);
-  const durationLabel = !isUser ? formatDurationLabel(message.durationMs) : null;
+  // During streaming, `message.durationMs` on the live virtual assistant
+  // message is not yet set (it's only attached when the round finalizes via
+  // `closeCurrentStreamingRoundIntoMessage` / on stream done). However the
+  // render layer already computes a live `usageDetails.durationMs`
+  // (`activeDurationMs = Date.now() - visibleStreamStartedAt`). Prefer that
+  // so the assistant footer shows a real "耗时 5.2s" instead of "耗时 --"
+  // while the model is still streaming. For finalized assistant messages
+  // both values agree because `assistantUsageDetails` mirrors
+  // `message.durationMs`, so this also keeps historical rows unchanged.
+  const effectiveDurationMs = !isUser
+    ? (usageDetails?.durationMs ?? message.durationMs)
+    : undefined;
+  const durationLabel = !isUser ? formatDurationLabel(effectiveDurationMs) : null;
   const stopReasonLabel = !isUser ? formatStopReasonLabel(message.stopReason) : null;
   const providerLabel =
     !isUser && resolvedProviderId && normalizedAssistantLabel !== normalizedResolvedProvider

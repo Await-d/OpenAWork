@@ -71,7 +71,7 @@ export const interactiveBashToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'interactive_bash',
-  description: 'WARNING: This is TMUX ONLY. Pass tmux subcommands directly (without tmux prefix).',
+  description: '注意：本工具仅用于 TMUX。直接传 tmux 子命令（不要带 tmux 前缀）。',
   inputSchema: interactiveBashInputSchema,
   outputSchema: z.string(),
   timeout: 60000,

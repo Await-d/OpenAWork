@@ -28,8 +28,7 @@ export const batchToolDefinition: ToolDefinition<
   typeof batchToolOutputSchema
 > = {
   name: 'batch',
-  description:
-    'Execute multiple runtime tool calls in parallel. Use only for independent calls that do not rely on each other or require strict ordering.',
+  description: '并行执行多个运行时工具调用。仅用于相互独立、不要求严格顺序的调用。',
   inputSchema: batchToolInputSchema,
   outputSchema: batchToolOutputSchema,
   timeout: 120000,

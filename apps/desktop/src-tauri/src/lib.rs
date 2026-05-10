@@ -780,6 +780,12 @@ async fn spawn_gateway_sidecar(
 
     // gateway 已编译为独立 Bun 二进制（binaries/agent-gateway-<triple>），
     // 无需传 entry 路径，也不依赖 node_modules，直接启动即可。
+    //
+    // OPENAWORK_APP_VERSION：必须显式从 Tauri `package_info` 注入，否则在
+    // 「卸载但保留用户数据 → 安装新版本」场景下，gateway 会因为找不到磁盘
+    // 上的 root package.json 而退化到兜底版本号 '0.0.1'，导致前端「设置 →
+    // 工作区」展示的「当前版本」与实际安装包版本不一致。
+    let app_version = app.package_info().version.to_string();
     let mut command = app
         .shell()
         .sidecar("agent-gateway")
@@ -789,6 +795,7 @@ async fn spawn_gateway_sidecar(
         .env("DESKTOP_AUTOMATION", "1")
         .env("OPENAWORK_DESKTOP_AUTH_TOKEN", desktop_auth_token)
         .env("OPENAWORK_DATA_DIR", data_dir.to_string_lossy().to_string())
+        .env("OPENAWORK_APP_VERSION", app_version)
         // 让 sidecar 监视 Tauri 主进程；主进程被强杀 / 系统崩溃 / 安装器卸载
         // 时未走 RunEvent::Exit 的场景下，sidecar 自我退出避免变孤儿。
         .env("OPENAWORK_PARENT_PID", std::process::id().to_string());

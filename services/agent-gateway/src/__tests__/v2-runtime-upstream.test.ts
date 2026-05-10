@@ -225,6 +225,107 @@ describe('runUpstreamStream', () => {
     expect(JSON.parse(toolDeltas[1]!.inputDelta)).toEqual({ path: 'b.ts', content: 'x' });
   });
 
+  // Regression: OpenAI Responses adapter attaches `openai.itemId`
+  // (`fc_xxx`) on the resolved `tool-call` part. The runner must
+  // surface it as a closer `tool_call_delta` so the round accumulator
+  // can persist it and later replay `function_call.id` on round 2 —
+  // without it, OpenAI re-keys the function_call item and the
+  // upstream prompt-cache prefix from this point on misses on every
+  // subsequent request (the original bug report: "搜索工具调用后
+  // 缓存全失").
+  it('emits a closer tool_call_delta carrying providerMetadata when present', async () => {
+    const model = buildMockModel([
+      {
+        type: 'tool-input-start',
+        id: 'call_websearch',
+        toolName: 'web_search',
+      },
+      {
+        type: 'tool-input-delta',
+        id: 'call_websearch',
+        toolName: 'web_search',
+        delta: '{"query":"r"}',
+      },
+      {
+        type: 'tool-input-end',
+        id: 'call_websearch',
+        toolName: 'web_search',
+      },
+      {
+        // The resolved tool-call event carries the OpenAI itemId
+        // alongside the call_id; downstream must keep both.
+        type: 'tool-call',
+        toolCallId: 'call_websearch',
+        toolName: 'web_search',
+        input: { query: 'r' },
+        providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+      },
+      {
+        type: 'finish',
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
+      },
+    ] as unknown as Parameters<typeof buildMockModel>[0]);
+
+    const chunks = await collectChunks(
+      runUpstreamStream({ model, messages: [{ role: 'user', content: '?' }] }),
+    );
+    const toolDeltas = chunks.filter(
+      (c): c is Extract<StreamChunk, { type: 'tool_call_delta' }> => c.type === 'tool_call_delta',
+    );
+    // opener (zero-length) + 1 streaming delta + closer (zero-length)
+    // carrying providerMetadata. The closer MUST NOT re-emit the
+    // already-streamed input or the JSON would double up.
+    expect(toolDeltas).toHaveLength(3);
+    const closer = toolDeltas[2]!;
+    expect(closer.toolCallId).toBe('call_websearch');
+    expect(closer.inputDelta).toBe('');
+    expect(closer.providerMetadata).toEqual({ openai: { itemId: 'fc_websearch_001' } });
+  });
+
+  it('does not emit an extra closer delta when tool-call carries no providerMetadata', async () => {
+    const model = buildMockModel([
+      {
+        type: 'tool-input-start',
+        id: 'call-3',
+        toolName: 'read',
+      },
+      {
+        type: 'tool-input-delta',
+        id: 'call-3',
+        toolName: 'read',
+        delta: '{"path":"a"}',
+      },
+      {
+        type: 'tool-input-end',
+        id: 'call-3',
+        toolName: 'read',
+      },
+      {
+        type: 'tool-call',
+        toolCallId: 'call-3',
+        toolName: 'read',
+        input: { path: 'a' },
+        // No providerMetadata — the streaming closer must not fire.
+      },
+      {
+        type: 'finish',
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
+      },
+    ]);
+
+    const chunks = await collectChunks(
+      runUpstreamStream({ model, messages: [{ role: 'user', content: '?' }] }),
+    );
+    const toolDeltas = chunks.filter(
+      (c): c is Extract<StreamChunk, { type: 'tool_call_delta' }> => c.type === 'tool_call_delta',
+    );
+    // opener + 1 streaming delta. No closer because no metadata.
+    expect(toolDeltas).toHaveLength(2);
+    expect(toolDeltas.every((c) => c.providerMetadata === undefined)).toBe(true);
+  });
+
   // NOTE: `tool-error` and `abort` are TextStreamPart events synthesised
   // by AI SDK at the run-tools-transformation layer (when a tool
   // execute() throws or an AbortSignal fires). They are NOT

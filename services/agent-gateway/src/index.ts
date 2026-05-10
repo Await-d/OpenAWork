@@ -28,6 +28,8 @@ async function seedDefaultAdmin(): Promise<void> {
 }
 import { startModelsDevRefresh } from '@openAwork/agent-core';
 import { skillsRoutes } from './routes/skills.js';
+import { skillSelectionRoutes } from './routes/skill-selection.js';
+import { skillRecommendRoutes } from './routes/skill-recommend.js';
 import { localSkillsRoutes } from './routes/local-skills.js';
 import { capabilitiesRoutes } from './routes/capabilities.js';
 import { sessionsRoutes } from './routes/sessions.js';
@@ -57,6 +59,9 @@ import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
 import { notificationsRoutes } from './routes/notifications.js';
 import { sessionImagesRoutes } from './routes/session-images.js';
+import { mcpEventsRoutes } from './routes/mcp-events.js';
+import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
+import { ensurePluginsLoaded } from './plugin-host.js';
 
 const app = Fastify({ logger: true, disableRequestLogging: true });
 
@@ -89,11 +94,15 @@ await app.register(toolsRoutes);
 await app.register(artifactsRoutes);
 await app.register(localSkillsRoutes);
 await app.register(skillsRoutes);
+await app.register(skillSelectionRoutes);
+await app.register(skillRecommendRoutes);
 await app.register(capabilitiesRoutes);
 await app.register(pairingRoutes);
 await app.register(memoriesRoutes);
 await app.register(notificationsRoutes);
 await app.register(sessionImagesRoutes);
+await app.register(mcpEventsRoutes);
+await app.register(mcpOAuthRoutes);
 
 app.get('/health', (request, reply) => {
   const { step } = startRequestWorkflow(request, 'gateway.health');
@@ -171,6 +180,15 @@ try {
 
   step = bootLogger.start('gateway.seed-default-workflow-templates');
   ensureDefaultWorkflowTemplatesForAllUsers();
+  bootLogger.succeed(step);
+
+  // PR-D-Plugin: load operator-configured plugins listed in
+  // OPENAWORK_PLUGINS. Idempotent + failure-tolerant — a broken
+  // plugin path logs a warning but doesn't abort boot. Without this
+  // call the dispatch* functions silently run an empty plugin list,
+  // so failure to load is itself a (correct) bootable state.
+  step = bootLogger.start('gateway.load-plugins');
+  await ensurePluginsLoaded();
   bootLogger.succeed(step);
 
   step = bootLogger.start('gateway.reconcile-session-runtimes');

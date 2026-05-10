@@ -4,6 +4,7 @@ export const RIGHT_PANEL_TABS = [
   { id: 'overview', label: '概览' },
   { id: 'plan', label: '计划' },
   { id: 'tools', label: '工具' },
+  { id: 'skills', label: 'Skills' },
   { id: 'history', label: '历史' },
   { id: 'viz', label: '可视化' },
   { id: 'mcp', label: 'MCP' },
@@ -17,6 +18,10 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     overview: { title: '会话概览', description: '查看当前会话、上下文注入与运行摘要。' },
     plan: { title: '计划面板', description: '聚焦当前任务拆解、优先级与执行进度。' },
     tools: { title: '工具记录', description: '浏览工具调用、筛选分类，并快速定位输出。' },
+    skills: {
+      title: 'Skill 设置',
+      description: '调整 workspace 默认与本会话覆盖：拖拽排序、AI 推荐、导入/导出。',
+    },
     history: { title: '会话历史', description: '查看子会话、审批、计划记录与历史待办。' },
     viz: { title: '执行可视化', description: '从图谱与事件时间线理解当前执行路径。' },
     mcp: { title: 'MCP 状态', description: '检查 MCP 服务连接状态与可用能力。' },
@@ -61,6 +66,16 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
     return (
       <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
         <path d="M14.5 6.5a4 4 0 0 0 4.9 4.9l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l8.2-8.2a4 4 0 0 0-2.4-6.8" />
+      </svg>
+    );
+  }
+  if (tabId === 'skills') {
+    // Sparkle / star — signals "configurable capabilities" without colliding
+    // with the wrench used by the tools tab.
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <path d="M12 4l1.7 4.6L18 10l-4.3 1.4L12 16l-1.7-4.6L6 10l4.3-1.4L12 4z" />
+        <path d="M19 14l.8 2.1L22 17l-2.2.9L19 20l-.8-2.1L16 17l2.2-.9z" />
       </svg>
     );
   }

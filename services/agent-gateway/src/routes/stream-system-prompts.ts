@@ -4,6 +4,42 @@ import type { DialogueMode } from '@openAwork/shared';
 export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
   '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量直接传 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。只有在当前会话历史里确实出现了 [tool_output_reference] 且拿不到 toolCallId 时，才允许使用 useLatestReferenced=true。单纯复制/粘贴 UI 上的提示、命令或片段，不等于拥有当前会话里的引用依据。';
 
+/**
+ * 网络搜索 / 代码搜索 工具的路由策略。
+ *
+ * 系统同时存在两条搜索路径，目的不同，**必须**按下面规则路由，避免
+ * LLM 把 `web_search` 工具与 `websearch` MCP 视作同义工具反复试用：
+ *
+ *   1. `web_search`（原生 tool）— 多 provider 竞速 / 合并 / 顺序兜底，
+ *      由用户在 settings 中自行配置 provider 与 API key（DDG / Tavily /
+ *      Exa / Serper / SearXNG / Bocha / 智谱 / Google / Bing 任选）。
+ *      具备 race / merge / sequential 三种 rollout 策略，是**首选**。
+ *
+ *   2. `mcp_call({ serverId: "websearch", toolName: "web_search_exa", ... })`
+ *      — 系统内置 Exa MCP，零配置可用（部署方注入 EXA_API_KEY 体验更好，
+ *      否则走匿名免费额度），仅作为 `web_search` 不可用时的兜底。
+ *
+ *   3. `mcp_call({ serverId: "grep_app", ... })` — grep.app 公开 GitHub
+ *      仓库代码检索，`web_search` 不擅长这种「查代码示例」场景，遇到
+ *      "搜搜开源项目里 X 怎么用 / Y 是怎么实现的" 时直接走 grep_app。
+ */
+export const WEB_SEARCH_ROUTING_SYSTEM_PROMPT = [
+  '网络搜索 / 代码搜索 路由策略：',
+  '',
+  '【网页与时效性信息】',
+  '- 优先使用 `web_search` 工具（原生多 provider，用户已付费配置）',
+  '- 仅当 `web_search` 不可用、或者用户未配置任何 provider 时，才回退到 `mcp_call({ serverId: "websearch", toolName: "web_search_exa", ... })`',
+  '- 不要在同一轮中既调 `web_search` 又调 `websearch` MCP — 它们是同一类能力的两条路径',
+  '',
+  '【公开仓库的代码检索】',
+  '- 想搜「开源项目里 X 是怎么用的 / Y 的真实实现」走 `mcp_call({ serverId: "grep_app", ... })`，不要用 `web_search`',
+  '- 工作区内部的代码搜索仍然走原生 `grep` / `glob` / LSP，不要用 grep_app（grep_app 只搜公开 GitHub）',
+  '',
+  '【何时不需要任何搜索】',
+  '- 用户问的是工作区内的事实（已有代码 / 配置 / 文档）→ 优先 read / grep / lsp，不要先去搜外网',
+  '- 时效性不强的语言/库基础知识可以直接回答，不必每问必搜',
+].join('\n');
+
 export const DIALOGUE_MODE_SYSTEM_PROMPTS: Record<DialogueMode, string> = {
   clarify: [
     'OpenAWork 对话模式提醒：clarify（澄清）',
@@ -205,6 +241,12 @@ interface RequestScopedPromptOptions {
   yoloMode?: boolean;
 }
 
+// Note: pinnedSkillsPrompt is intentionally not surfaced through
+// `buildRequestScopedSystemPrompts` — that helper is for non-stream call
+// sites (capability snapshots, etc.) that don't need the per-session
+// snapshot. Stream/round paths feed pinnedSkillsPrompt through
+// `buildTwoPartSystemPrompts` / `buildSystemPromptChain` directly.
+
 export function buildRequestScopedSystemPrompts(
   message: string,
   capabilityContext: string,
@@ -268,14 +310,73 @@ export interface SyntheticRequestContext {
   injectedPrompt?: string | null;
   capabilityContext?: string | null;
   companionPrompt?: string | null;
+  /**
+   * Per-turn thinking-language hint persisted as a *trailing* synthetic
+   * text part on the user message. Was previously injected in-memory
+   * inside `runModelRound` against whichever message currently happened
+   * to be the latest user turn, which mutated the bytes of earlier user
+   * turns across rounds and tanked the Anthropic / OpenAI prompt-cache
+   * prefix (websearch low-cache-hit root cause).
+   *
+   * Mirrors opencode's `insertReminders` flow which writes `synthetic`
+   * parts back to `sessions.updatePart()` instead of decorating the
+   * outbound conversation each turn.
+   */
+  thinkingLanguageHint?: string | null;
 }
+
+const CJK_RANGE = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/;
+
+/**
+ * Detect a thinking-language hint from a single user-message text.
+ *
+ * Stateless variant of the legacy `detectUserLanguageHint` — we only look
+ * at the message currently being persisted instead of scanning the
+ * entire history, because each user message gets its own hint snapshot
+ * baked in at write time. Cross-turn cache stability is the goal; if a
+ * user switches language mid-session, subsequent turns will simply
+ * persist the new language's hint on the new user message.
+ *
+ * Returns null when no CJK characters are present.
+ */
+export function detectThinkingLanguageHintFromText(text: string): string | null {
+  if (!text || !CJK_RANGE.test(text)) return null;
+  const jaRatio = (text.match(/[\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
+  const krRatio = (text.match(/[\uac00-\ud7af]/g) || []).length;
+  const zhRatio = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  if (krRatio > zhRatio && krRatio > jaRatio) {
+    return '한국어로 생각하세요. 한국어로만 사고하세요.';
+  }
+  if (jaRatio > zhRatio) {
+    return '日本語で思考してください。必ず日本語のみで思考してください。';
+  }
+  return '请用中文进行思考。你必须全程使用中文思考，绝对不要切换到英文。';
+}
+
+/**
+ * Markers used to detect whether a user-message string already carries a
+ * persisted thinking-language hint. Used by the legacy in-memory
+ * fallback in `injectThinkingLanguageHintUnified` to avoid double-
+ * appending and breaking byte stability across rounds.
+ */
+export const THINKING_LANGUAGE_HINT_MARKERS = [
+  '请用中文进行思考',
+  '한국어로 생각하세요',
+  '日本語で思考してください',
+] as const;
 
 /**
  * Build per-request synthetic content block to inject into the last user message.
  * Modeled after oh-my-opencode's experimental.chat.messages.transform hook
  * which inserts synthetic parts into user messages for dynamic per-turn context.
+ *
+ * Exported so the persistence layer (`persistStreamUserMessage`) can compute
+ * the same block at write time and store it as a `synthetic: true` text part.
+ * That keeps Anthropic / OpenAI prompt-cache prefixes byte-stable across turns
+ * — see `injectSyntheticRequestContextUnified` for the legacy in-memory
+ * fallback used when older sessions lack a persisted synthetic part.
  */
-function buildSyntheticRequestContextBlock(input: SyntheticRequestContext): string | null {
+export function buildSyntheticRequestContextBlock(input: SyntheticRequestContext): string | null {
   const parts: string[] = [];
   if (input.injectedPrompt && input.injectedPrompt.trim().length > 0) {
     parts.push(input.injectedPrompt);
@@ -324,6 +425,12 @@ export interface SystemPromptChainInput {
   dynamicAgentPrompt?: string | null;
   startWorkContext?: string | null;
   commandContext?: string | null;
+  /**
+   * Optional pinned skills section (PR3 of skill-workspace-selection spec).
+   * Lives in the stable prefix because the snapshot is captured on session
+   * creation and does not change mid-session.
+   */
+  pinnedSkillsPrompt?: string | null;
 }
 
 /**
@@ -353,10 +460,13 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     // Slot 8: YOLO mode prompt
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
-    // Slot 9: Tool output reference strategy
+    // Slot 9: Tool output reference strategy + 网络/代码搜索 路由策略
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
     // Slot 10: Thinking language hint
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
+    // Slot 11: Pinned skills section (PR3 of skill-workspace-selection spec)
+    input.pinnedSkillsPrompt ?? '',
   ];
 
   // Filter out empty strings (slots with no content and no placeholder)
@@ -390,7 +500,12 @@ export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
+    // Pinned skills section: stable for the lifetime of a session because
+    // the snapshot is captured at session start. Empty string is filtered
+    // below so absence does not affect cache shape.
+    input.pinnedSkillsPrompt ?? '',
   ];
 
   const dynamicSlots: string[] = [
@@ -425,6 +540,7 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     input.dynamicAgentPrompt,
     input.startWorkContext,
@@ -447,6 +563,12 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
  *
  * Content is wrapped in <system-reminder> tags to distinguish it from user input,
  * similar to Claude Code's prependUserContext pattern.
+ *
+ * Note: production callers use `injectSyntheticRequestContextUnified`
+ * (UnifiedMessage-aware variant in `routes/stream-model-round.ts`). This
+ * legacy `{role, content}` overload is kept for compatibility only and
+ * mirrors the same idempotency guard so any future revival path stays
+ * byte-stable across rounds.
  */
 export function injectSyntheticRequestContext<T extends { role: string; content: string | null }>(
   messages: T[],
@@ -459,6 +581,12 @@ export function injectSyntheticRequestContext<T extends { role: string; content:
   for (let i = result.length - 1; i >= 0; i--) {
     const msg = result[i]!;
     if (msg.role === 'user' && msg.content && !('tool_call_id' in msg)) {
+      // Skip injection when the persisted user content already carries the
+      // `<system-reminder>` envelope (post-fix sessions) — re-prepending
+      // would invalidate the upstream prompt-cache prefix on every round.
+      if (msg.content.startsWith('<system-reminder>\n')) {
+        break;
+      }
       msg.content = `<system-reminder>\n${block}\n</system-reminder>\n\n${msg.content}`;
       break;
     }

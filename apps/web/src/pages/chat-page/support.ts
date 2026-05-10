@@ -2579,6 +2579,17 @@ function extractTextFragments(value: unknown): string[] {
     (type === 'text' || type === 'input_text' || type === 'output_text') &&
     typeof content['text'] === 'string'
   ) {
+    // Synthetic text parts (e.g. `<system-reminder>` capability blocks
+    // and `[thinking-hint]` trailing tags) are persisted on the user
+    // message body so the prompt-cache prefix stays byte-stable across
+    // turns, but they are *internal* state: they must never surface in
+    // the chat transcript. Without this filter, recovery payloads put
+    // the system reminder + hint around the user's typed text, which
+    // makes the user feel their message was lost / replaced after a
+    // refresh — see persistStreamUserMessage's `synthetic: true` parts.
+    if (content['synthetic'] === true) {
+      return [];
+    }
     return content['text'].trim().length > 0 ? [content['text']] : [];
   }
 

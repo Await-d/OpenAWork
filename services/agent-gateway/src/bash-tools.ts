@@ -122,26 +122,24 @@ function assertSafeBashCommand(command: string): void {
 }
 
 const bashInputSchema = z.object({
-  command: z.string().min(1).describe('The command to execute'),
+  command: z.string().min(1).describe('要执行的命令'),
   timeout: z
     .number()
     .int()
     .positive()
     .max(MAX_BASH_TIMEOUT_MS)
     .optional()
-    .describe('Optional timeout in milliseconds'),
+    .describe('可选超时时间（毫秒）'),
   workdir: z
     .string()
     .min(1)
     .optional()
-    .describe(
-      "The working directory to run the command in. Defaults to the workspace root. Use this instead of 'cd' commands.",
-    ),
+    .describe("命令执行的工作目录，默认为工作区根目录。请使用该参数而不是 'cd' 命令。"),
   description: z
     .string()
     .min(1)
     .describe(
-      "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
+      "用 5-10 个词清晰描述这条命令的作用。示例：\n输入：ls\n输出：列出当前目录的文件\n\n输入：git status\n输出：查看工作树状态\n\n输入：npm install\n输出：安装 npm 依赖\n\n输入：mkdir foo\n输出：创建目录 'foo'",
     ),
 });
 
@@ -208,7 +206,7 @@ function loadDescriptionTemplate(): string {
   // Fallback: a terse stub so the tool stays usable even if the template
   // file is missing (e.g. broken bundle). The model still sees enough to
   // know how to call it.
-  return 'Executes a given bash command. Use `workdir` instead of `cd`. Provide `description` in 5-10 words.';
+  return '执行给定的 bash 命令。使用 `workdir` 参数代替 `cd`。`description` 请用 5-10 个词说明。';
 }
 
 const RAW_DESCRIPTION_TEMPLATE = loadDescriptionTemplate();
@@ -217,8 +215,8 @@ function renderDescription(): string {
   const shellName = pickShellName();
   const chaining =
     shellName === 'powershell' || shellName === 'pwsh'
-      ? "If the commands depend on each other and must run sequentially, avoid '&&' in this shell because Windows PowerShell 5.1 does not support it. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands must depend on earlier success."
-      : 'If the commands depend on each other and must run sequentially, use a single Bash call with \'&&\' to chain them together (e.g., `git add . && git commit -m "message" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead.';
+      ? "命令之间有依赖、必须串行时，该 shell 下请避免使用 '&&'（Windows PowerShell 5.1 不支持）。后一条命令需要前一条成功后才跑时，使用 PowerShell 条件如 `cmd1; if ($?) { cmd2 }`。"
+      : '命令之间有依赖、必须串行时，请在同一次 Bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 Write、git commit 之前先 git add），应该串行运行。';
   return RAW_DESCRIPTION_TEMPLATE.replaceAll('${os}', process.platform)
     .replaceAll('${shell}', shellName)
     .replaceAll('${chaining}', chaining)

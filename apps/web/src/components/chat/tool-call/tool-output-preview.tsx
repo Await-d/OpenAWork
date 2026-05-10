@@ -15,6 +15,11 @@ import {
   GrepContentHitsPreview,
 } from './previews/grep-content-hits-preview.js';
 import { extractGrepCountsFromOutput, GrepCountsPreview } from './previews/grep-counts-preview.js';
+import { extractRepoCloneFromOutput, RepoClonePreview } from './previews/repo-clone-preview.js';
+import {
+  extractRepoOverviewFromOutput,
+  RepoOverviewPreview,
+} from './previews/repo-overview-preview.js';
 import {
   extractReviewChangesFromOutput,
   ReviewStatusPreview,
@@ -96,6 +101,19 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
   if (normalized === 'workspace_review_status') {
     const data = extractReviewChangesFromOutput(output);
     if (data) return <ReviewStatusPreview data={data} />;
+  }
+
+  // P1-SCOUT: structured cards for the repo_clone / repo_overview
+  // gateway tools. Both fall through to the generic envelope path
+  // when the output is malformed (e.g. an error envelope), so we do
+  // not need to special-case errors here.
+  if (normalized === 'repo_clone') {
+    const data = extractRepoCloneFromOutput(output);
+    if (data) return <RepoClonePreview data={data} />;
+  }
+  if (normalized === 'repo_overview') {
+    const data = extractRepoOverviewFromOutput(output);
+    if (data) return <RepoOverviewPreview data={data} />;
   }
 
   if (normalized === 'workspace_create_directory' || normalized === 'workspace_review_revert') {

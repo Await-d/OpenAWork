@@ -7,7 +7,7 @@ export const lspDiagnosticsTool: ToolDefinition<
 > = {
   name: 'lsp_diagnostics',
   description:
-    'Get LSP diagnostics (errors, warnings) for a file or all open files. Returns a map of filePath → diagnostic array.',
+    '获取 LSP 诊断（错误、警告）：可针对单个文件或全部打开的文件。返回 filePath → 诊断数组的映射。',
   inputSchema: z.object({
     filePath: z.string().optional(),
   }),
@@ -41,8 +41,7 @@ export const lspTouchTool: ToolDefinition<
   z.ZodObject<{ ok: z.ZodBoolean }>
 > = {
   name: 'lsp_touch',
-  description:
-    'Notify the LSP server that a file has been modified. Optionally waits for diagnostics to update before returning.',
+  description: '通知 LSP 服务器某个文件已被修改。可选等待诊断更新后再返回。',
   inputSchema: z.object({
     path: z.string(),
     waitForDiagnostics: z.boolean().default(true),
@@ -130,54 +129,51 @@ export interface LspToolMetadata {
 
 export const lspGotoDefinitionMeta: LspToolMetadata = {
   name: 'lsp_goto_definition',
-  description: 'Jump to symbol definition. Find WHERE something is defined.',
+  description: '跳转到符号定义处。用于查找某个东西**在哪里被定义**。',
   inputSchema: gotoDefinitionInputSchema,
 };
 
 export const lspGotoImplementationMeta: LspToolMetadata = {
   name: 'lsp_goto_implementation',
-  description:
-    'Jump to symbol implementation. Find WHERE an interface or abstract method is concretely implemented.',
+  description: '跳转到符号实现处。用于查找某个接口或抽象方法**被具体实现在哪里**。',
   inputSchema: gotoImplementationInputSchema,
 };
 
 export const lspFindReferencesMeta: LspToolMetadata = {
   name: 'lsp_find_references',
-  description: 'Find ALL usages/references of a symbol across the entire workspace.',
+  description: '查找符号在整个工作区中的**所有**使用/引用点。',
   inputSchema: findReferencesInputSchema,
 };
 
 export const lspSymbolsMeta: LspToolMetadata = {
   name: 'lsp_symbols',
   description:
-    "Get symbols from file (document) or search across workspace. Use scope='document' for file outline, scope='workspace' for project-wide symbol search.",
+    "获取文件符号列表（document）或在工作区范围内搜索。scope='document' 返回文件大纲，scope='workspace' 返回项目级符号搜索结果。",
   inputSchema: symbolsInputSchema,
 };
 
 export const lspPrepareRenameMeta: LspToolMetadata = {
   name: 'lsp_prepare_rename',
-  description: 'Check if rename is valid. Use BEFORE lsp_rename.',
+  description: '检查重命名是否可行。**调用 lsp_rename 之前**使用。',
   inputSchema: prepareRenameInputSchema,
 };
 
 export const lspRenameMeta: LspToolMetadata = {
   name: 'lsp_rename',
   description:
-    'Rename symbol across entire workspace. APPLIES changes to all files. Use lsp_prepare_rename first to verify.',
+    '在整个工作区重命名符号。**会将改动应用到所有文件**。请先调 lsp_prepare_rename 验证。',
   inputSchema: renameInputSchema,
 };
 
 export const lspHoverMeta: LspToolMetadata = {
   name: 'lsp_hover',
-  description:
-    'Get hover information (type signature, documentation) for a symbol at a given position. Returns human-readable text.',
+  description: '获取指定位置上符号的 hover 信息（类型签名、文档），返回人可读文本。',
   inputSchema: hoverInputSchema,
 };
 
 export const lspCallHierarchyMeta: LspToolMetadata = {
   name: 'lsp_call_hierarchy',
-  description:
-    'Get call hierarchy for a symbol: who calls it (incoming) and what it calls (outgoing). Single-hop only.',
+  description: '获取符号的调用层次：谁调用了它（incoming）以及它调用了谁（outgoing）。仅返回一跳。',
   inputSchema: callHierarchyInputSchema,
 };
 

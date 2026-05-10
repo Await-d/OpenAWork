@@ -670,8 +670,7 @@ export const workspaceTreeTool: ToolDefinition<
   typeof workspaceTreeOutputSchema
 > = {
   name: 'workspace_tree',
-  description:
-    'List a safe recursive tree for a workspace directory. Use this to inspect folders before reading files.',
+  description: '列出工作区目录的递归树状结构（带安全限制）。读取文件前先用它检视文件夹。',
   inputSchema: workspaceTreeInputSchema,
   outputSchema: workspaceTreeOutputSchema,
   timeout: 10000,
@@ -695,7 +694,7 @@ export const listTool: ToolDefinition<
 > = {
   name: 'list',
   description:
-    'List files and directories in a workspace path. Use this first to inspect folder structure before reading files. Required JSON input: {"path":"/absolute/workspace/path","depth":2}.',
+    '列出工作区路径下的文件与目录。读取文件前先用它检视目录结构。必填 JSON：{"path":"/absolute/workspace/path","depth":2}。',
   inputSchema: workspaceTreeInputSchema,
   outputSchema: workspaceTreeOutputSchema,
   timeout: workspaceTreeTool.timeout,
@@ -778,7 +777,7 @@ export const workspaceReadFileTool: ToolDefinition<
 > = {
   name: 'workspace_read_file',
   description:
-    'Read a UTF-8 text file from the workspace with size limits and agentignore protection. Supports offset (1-based starting line) and limit (max lines, default 2000) for paginated reads of large files; lines longer than 2000 characters are truncated.',
+    '从工作区读取 UTF-8 文本文件（带大小限制与 agentignore 保护）。支持 offset（1-基起始行号）与 limit（最多行数，默认 2000）以分页读取大文件；超过 2000 字符的行会被截断。',
   inputSchema: workspaceReadFileInputSchema,
   outputSchema: workspaceReadFileOutputSchema,
   timeout: 10000,
@@ -792,7 +791,7 @@ export const workspaceReadFileTool: ToolDefinition<
 export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputSchema> = {
   name: 'read',
   description:
-    'Read a UTF-8 text file (or list a directory) from the workspace. Supports offset (1-based starting line) and limit (max lines, default 2000) for paginated reads of large files; lines longer than 2000 characters are truncated. Use list first when you need to inspect folders before choosing a file to read.',
+    '从工作区读取 UTF-8 文本文件（或列出目录）。支持 offset（1-基起始行号）与 limit（最多行数，默认 2000）以分页读取大文件；超过 2000 字符的行会被截断。需要先检视目录再选文件时，请先调 list。',
   inputSchema: readInputSchema,
   outputSchema: readOutputSchema,
   timeout: workspaceReadFileTool.timeout,
@@ -819,7 +818,7 @@ export const readTool: ToolDefinition<typeof readInputSchema, typeof readOutputS
 
 export const globTool: ToolDefinition<typeof globToolInputSchema, typeof globToolOutputSchema> = {
   name: 'glob',
-  description: 'Fast file pattern matching tool with safety limits (60s timeout, 100 file limit).',
+  description: '快速文件 glob 模式匹配（带安全限制：60s 超时、最多 100 个文件）。',
   inputSchema: globToolInputSchema,
   outputSchema: globToolOutputSchema,
   timeout: 10000,
@@ -831,8 +830,7 @@ export const workspaceSearchTool: ToolDefinition<
   typeof workspaceSearchOutputSchema
 > = {
   name: 'workspace_search',
-  description:
-    'Search literal text within workspace files. Use this to find symbols, strings, or implementation references.',
+  description: '在工作区文件中搜索字面文本。用于查找符号、字符串或实现引用。',
   inputSchema: workspaceSearchInputSchema,
   outputSchema: workspaceSearchOutputSchema,
   timeout: 15000,
@@ -841,7 +839,7 @@ export const workspaceSearchTool: ToolDefinition<
 
 export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputSchema> = {
   name: 'grep',
-  description: 'Fast content search tool with safety limits (60s timeout, 256KB output).',
+  description: '快速内容搜索工具（带安全限制：60s 超时、输出上限 256KB）。',
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
   timeout: workspaceSearchTool.timeout,
@@ -853,8 +851,7 @@ export const workspaceReviewStatusTool: ToolDefinition<
   typeof workspaceReviewStatusOutputSchema
 > = {
   name: 'workspace_review_status',
-  description:
-    'List git working tree changes for a workspace root, including added, modified, deleted, and renamed files.',
+  description: '列出工作区根目录的 git 工作树变更，包含新增、修改、删除与重命名的文件。',
   inputSchema: workspaceReviewStatusInputSchema,
   outputSchema: workspaceReviewStatusOutputSchema,
   timeout: 10000,
@@ -875,7 +872,7 @@ export const workspaceReviewDiffTool: ToolDefinition<
   typeof workspaceReviewDiffOutputSchema
 > = {
   name: 'workspace_review_diff',
-  description: 'Read the git diff for a changed file inside a workspace root.',
+  description: '读取工作区根目录下某个变更文件的 git diff。',
   inputSchema: workspaceReviewDiffInputSchema,
   outputSchema: workspaceReviewDiffOutputSchema,
   timeout: 10000,
@@ -905,7 +902,7 @@ export const workspaceWriteFileTool: ToolDefinition<
   typeof workspaceWriteFileOutputSchema
 > = {
   name: 'workspace_write_file',
-  description: 'Overwrite an existing workspace file with UTF-8 text content.',
+  description: '以 UTF-8 文本覆盖工作区中已存在的文件。',
   inputSchema: workspaceWriteFileInputSchema,
   outputSchema: workspaceWriteFileOutputSchema,
   timeout: 10000,
@@ -957,7 +954,7 @@ export async function executeWorkspaceWriteFile(
 export const writeTool: ToolDefinition<typeof writeInputSchema, typeof writeOutputSchema> = {
   name: 'write',
   description:
-    'Write UTF-8 text into a workspace file, creating it when it does not exist and overwriting it when it already exists. Read the file first before modifying existing content.',
+    '向工作区文件写入 UTF-8 文本：不存在则创建，已存在则覆盖。修改现有内容前请先读文件。',
   inputSchema: writeInputSchema,
   outputSchema: writeOutputSchema,
   timeout: workspaceWriteFileTool.timeout,
@@ -1002,7 +999,7 @@ export const workspaceCreateFileTool: ToolDefinition<
   typeof workspaceCreateFileOutputSchema
 > = {
   name: 'workspace_create_file',
-  description: 'Create a new workspace file if it does not already exist.',
+  description: '在工作区创建一个新文件（仅当该文件尚不存在）。',
   inputSchema: workspaceCreateFileInputSchema,
   outputSchema: workspaceCreateFileOutputSchema,
   timeout: 10000,
@@ -1046,7 +1043,7 @@ export const workspaceCreateDirectoryTool: ToolDefinition<
   typeof workspaceCreateDirectoryOutputSchema
 > = {
   name: 'workspace_create_directory',
-  description: 'Create a new directory inside the workspace when the parent already exists.',
+  description: '在工作区创建新目录（仅当父目录已存在）。',
   inputSchema: workspaceCreateDirectoryInputSchema,
   outputSchema: workspaceCreateDirectoryOutputSchema,
   timeout: 10000,
@@ -1072,7 +1069,7 @@ export const workspaceReviewRevertTool: ToolDefinition<
   typeof workspaceReviewRevertOutputSchema
 > = {
   name: 'workspace_review_revert',
-  description: 'Revert a changed file inside the workspace review set back to HEAD.',
+  description: '在 review 集合内将某个变更文件回退到 HEAD。',
   inputSchema: workspaceReviewRevertInputSchema,
   outputSchema: workspaceReviewRevertOutputSchema,
   timeout: 10000,

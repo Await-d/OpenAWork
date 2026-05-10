@@ -596,6 +596,16 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/skills/selection"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.skillSelection.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.skillSelection.title}
+              />
+            }
+          />
           <Route path="/channels" element={<Navigate to="/settings/channels" replace />} />
           <Route
             path="/workflows"

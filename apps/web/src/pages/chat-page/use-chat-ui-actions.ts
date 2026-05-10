@@ -5,7 +5,7 @@ import { executeServerCommand } from './server-command-item.js';
 import { requestSessionListRefresh } from '../../utils/session-list-events.js';
 import { applyChatRightPanelEvent, type ChatRightPanelState } from '../chat-stream-state.js';
 
-type RightPanelTabId = 'agent' | 'mcp' | 'plan' | 'tools' | 'overview' | 'history' | 'viz';
+import type { RightPanelTabId } from './right-panel-tabs.js';
 type CapabilityKind = 'agent' | 'mcp' | 'skill' | 'tool';
 
 export interface ChatUiActionsDeps {

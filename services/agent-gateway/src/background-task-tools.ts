@@ -63,7 +63,7 @@ export const backgroundOutputToolDefinition: ToolDefinition<
 > = {
   name: 'background_output',
   description:
-    'Get output from background task. Use full_session=true to fetch session messages with filters. System notifies on completion, so block=true rarely needed. Timeout values are in milliseconds (ms), NOT seconds.',
+    '获取后台任务输出。传 full_session=true 可以返回会话消息并支持过滤。后台任务完成时系统会主动通知，block=true 极少使用。Timeout 取值是**毫秒 ms**，不是秒。',
   inputSchema: backgroundOutputInputSchema,
   outputSchema: z.unknown(),
   timeout: 30000,
@@ -77,7 +77,7 @@ export const backgroundCancelToolDefinition: ToolDefinition<
   z.ZodUnknown
 > = {
   name: 'background_cancel',
-  description: 'Cancel running background task(s). Use all=true to cancel ALL before final answer.',
+  description: '取消运行中的后台任务。传 all=true 可在输出最终答复前取消全部。',
   inputSchema: backgroundCancelInputSchema,
   outputSchema: z.unknown(),
   timeout: 30000,

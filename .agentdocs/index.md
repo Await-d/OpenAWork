@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260509-skill-workspace-selection-spec](workflow/260509-skill-workspace-selection-spec.md) — 让用户在 chat 工作区维度可控地选择启用哪些 skill（workspace 默认 + session 覆盖），支持 AI 一键根据项目特征推荐勾选集；BUILTIN 始终可用、不参与过滤；pinned 仅首轮注入 system prompt
 - [260507-web-图片生成工作台实施](workflow/260507-web-图片生成工作台实施.md) — 为 Web 左侧新增专用图片工作台入口，收口独立页面下的文生图、图片编辑、结果历史与产物联动能力
 - [260507-image-workspace-新建图片工作区流程](workflow/260507-image-workspace-新建图片工作区流程.md) — 支持用户新建图片工作区，包含图片生成、编辑、历史记录等功能
 - [260418-net10-网关功能迁移清单图](workflow/260418-net10-网关功能迁移清单图.md) — .NET 10 gateway 一比一迁移总账：按波次、能力闭环、前置依赖、完成定义与去重规则维护，防止遗漏与重复
@@ -18,6 +19,15 @@
 - [260416-team-创建实施方案](workflow/260416-team-创建实施方案.md) — Team 会话创建向导、DTO/API、template metadata 与测试落地计划
 
 ## Done Workflows
+- [260509-opencode借鉴升级总览](workflow/done/260509-opencode借鉴升级总览.md) — ✅ 已归档 2026-05-09：8 份子工作流（P0×1 + P1×3 + P2×2 + P3×2）整批落地或显式推迟决议；agent-gateway 测试 335 → 472（+137），agent-core 新增 14 项；新增 6 个源码模块；修复 mutex 泄漏 / sandbox 未注册 / dev-browser 误导 prompt / GPT-5 400 / overloaded 重试 共 4 个真实 bug；推迟项跟踪表见文末
+- [260509-p0-provider兼容性修复批](workflow/done/260509-p0-provider兼容性修复批.md) — ✅ P0 五项已完成 2026-05-09：GPT-5 reasoning clamp + Gemini-3/2.5 thinking 子集对齐 + `server_is_overloaded` 显式分支 + 工具确定性排序 + Anthropic adaptive thinking 空 text 保留（已存在），typecheck + 335/335 vitest 通过
+- [260509-p1-compaction锚点摘要升级](workflow/done/260509-p1-compaction锚点摘要升级.md) — ✅ P1 已完成 2026-05-09：新建 `compaction-prompt.ts` 引入锚点风格 system prompt 与 `<previous-summary>` 更新指令；S3/S4/S5（工具截断、PRUNE_PROTECTED_TOOLS、summary/tail 顺序）已存在；8 项 prompt 单元 + 353/353 全量通过
+- [260509-p1-子任务取消正确传播](workflow/done/260509-p1-子任务取消正确传播.md) — ✅ P1 核心已完成 2026-05-09：`cancel-descendant-streams.ts` 在 stream.ts 父 abort 分支 await BFS 级联取消（10s timeout、visited 防环、per-child 错误吞掉）；10 项单元 + 345/345 全量；UI reason 推迟
+- [260509-p1-scout-agent与repo研究工具](workflow/done/260509-p1-scout-agent与repo研究工具.md) — ✅ P1 backend 完成 2026-05-09：`repo-reference.ts` / `repo-clone-tools.ts` / `repo-overview-tools.ts` + scout 内置 agent；并修复 mutex 内存泄漏 + tool-sandbox 未注册的两个 bug；67 项单元 + 420/420 全量；UI 卡片推迟
+- [260509-p2-并行websearch-rollout](workflow/done/260509-p2-并行websearch-rollout.md) — ✅ P2 core 层完成 2026-05-09：`searchMultiProvider` + first-success/merge/sequential 三档 + canonical URL 去 utm_ + weight 排序；14 项单元 + agent-gateway 436/436 未受影响；settings UI 推迟
+- [260509-p2-task工具schema与slashcommand补齐](workflow/done/260509-p2-task工具schema与slashcommand补齐.md) — ✅ P2-DELEGATE 已完成 2026-05-09：盘点发现 `session_id` 替代 `resume` 早就到位；本批补 `command` 为 reserved no-op + 15 项 schema 单元；T-DEADCODE 推迟独立工作流
+- [260509-p3-session-warping评估](workflow/done/260509-p3-session-warping评估.md) — ✅ P3 ADR 产出 2026-05-09：结论不实施完整 warping（OpenAWork 单 instance 无 sync 层，`owner_id` 不适用），推荐阶段 0 但本批不做；ADR 全文见 `done/260509-session-warping-ADR.md`
+- [260509-p3-会话路径过滤与devbrowser-skill](workflow/done/260509-p3-会话路径过滤与devbrowser-skill.md) — ✅ P3 后端完成 2026-05-09：(1) `/sessions?path=&includeDescendants=` + `session-path-filter.ts` 纯函数 + `/a` vs `/abc` 守卫 + 18 项单元；(2) `dev-browser` SKILL prompt 从虚假 oh-my-opencode API 改写到真实 `desktop_automation` 6 action + 反回归 token 黑名单 18 项单元；51 文件 / 472 全过
 - [260422-gpt-image2-集成方案](workflow/done/260422-gpt-image2-集成方案.md) — 已完成 GPT Image 2 从设置、生成路由、Web/Desktop 聊天、生图结果联动、多模态 `input_image` 到移动端补齐的最小全链路闭环，并通过收口后的移动端安全/入口修复与复查
 - [260420-net10-wave2-stop-active迁移](workflow/done/260420-net10-wave2-stop-active迁移.md) — 已完成 RUN-006 的最小 stop-active 收口：`.NET` 现已提供 `POST /sessions/{id}/stream/stop-active`，具备 owner/auth 校验、`{ stopped: boolean }` 返回、等待清理后返回，以及 session 级原子 active-slot 管理与 replay-slot 释放修复
 - [260421-net10-wave2-run-008-question-reply-resume迁移](workflow/done/260421-net10-wave2-run-008-question-reply-resume迁移.md) — 已完成 RUN-008 的最小 owner-session question reply / resume 子切片：`.NET` 现已提供 `GET /sessions/{id}/questions/pending` 与 `POST /sessions/{id}/questions/reply`，支持 answered/dismissed、`ExitPlanMode`、owner-session runtime resume、规范化 observability 与严格 `nextRound` 约束

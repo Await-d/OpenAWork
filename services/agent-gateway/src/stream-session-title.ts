@@ -14,6 +14,10 @@ import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { isTaskParentAutoResumeClientRequestId } from './task-parent-auto-resume.js';
 import { appendSessionEvent } from './session-entry-store.js';
 import { makeSessionEventId } from './session-event.js';
+import {
+  buildSyntheticRequestContextBlock,
+  type SyntheticRequestContext,
+} from './routes/stream-system-prompts.js';
 
 export interface PersistStreamUserMessageInput {
   clientRequestId: string;
@@ -26,6 +30,15 @@ export interface PersistStreamUserMessageInput {
   route?: ModelRouteConfig;
   /** Dedicated route for LLM title generation (typically the fast model). Falls back to route. */
   titleRoute?: ModelRouteConfig;
+  /**
+   * Per-request dynamic context (capability list, keyword-detector reminder,
+   * companion prompt, ...) that mirrors oh-my-opencode's
+   * `experimental.chat.messages.transform` injection. Persisted as a
+   * `synthetic: true` text part *before* the user's text part so the prompt-
+   * cache prefix stays byte-stable across turns instead of being mutated in
+   * memory only when a message is the latest user turn.
+   */
+  syntheticContext?: SyntheticRequestContext;
 }
 
 const gatewayArtifactsIndexPath = resolveGatewayArtifactsIndexPath();
@@ -75,14 +88,58 @@ function resolvePersistedUserContent(
   sessionId: string,
   content: MessageContent[] | undefined,
   text: string,
+  syntheticContext: SyntheticRequestContext | undefined,
 ) {
-  if (!content || content.length === 0) {
-    return [{ type: 'text', text }] satisfies MessageContent[];
-  }
+  const baseContent: MessageContent[] =
+    !content || content.length === 0
+      ? [{ type: 'text', text }]
+      : content.map((item) =>
+          item.type === 'input_image' ? resolveInputImageContent(sessionId, item) : item,
+        );
 
-  return content.map((item) =>
-    item.type === 'input_image' ? resolveInputImageContent(sessionId, item) : item,
-  );
+  // Persist per-turn synthetic content as `synthetic: true` text parts
+  // surrounding the user's own content:
+  //
+  //   - leading  block (`<system-reminder>...</system-reminder>`):
+  //       injectedPrompt + capabilityContext + companionPrompt
+  //   - trailing block (`[hint]`):
+  //       thinkingLanguageHint
+  //
+  // Both directions mirror opencode's `insertReminders` →
+  // `sessions.updatePart()` flow so the per-turn dynamic blocks become part
+  // of the message body and stay byte-stable across subsequent turns,
+  // instead of being mutated only on whichever message currently happens to
+  // be the latest user turn (which broke prompt-cache prefixes — see
+  // `injectSyntheticRequestContextUnified` history).
+  const leadingPart: MessageContent | null = (() => {
+    if (!syntheticContext) return null;
+    const block = buildSyntheticRequestContextBlock(syntheticContext);
+    if (!block) return null;
+    return {
+      type: 'text',
+      text: `<system-reminder>\n${block}\n</system-reminder>`,
+      synthetic: true,
+    };
+  })();
+  // Trailing thinking-language hint: kept *after* the user's text so the
+  // final rendered string matches the legacy `${userText}\n\n[${hint}]`
+  // shape (the leading `\n` here combines with `buildUserInput`'s `\n`
+  // join separator to produce the expected `\n\n` gap).
+  const trailingPart: MessageContent | null =
+    syntheticContext?.thinkingLanguageHint &&
+    syntheticContext.thinkingLanguageHint.trim().length > 0
+      ? {
+          type: 'text',
+          text: `\n[${syntheticContext.thinkingLanguageHint}]`,
+          synthetic: true,
+        }
+      : null;
+
+  return [
+    ...(leadingPart ? [leadingPart] : []),
+    ...baseContent,
+    ...(trailingPart ? [trailingPart] : []),
+  ];
 }
 
 export function persistStreamUserMessage(input: PersistStreamUserMessageInput): string {
@@ -101,7 +158,12 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
     sessionId: input.sessionId,
     userId: input.userId,
     role: 'user',
-    content: resolvePersistedUserContent(input.sessionId, input.content, text),
+    content: resolvePersistedUserContent(
+      input.sessionId,
+      input.content,
+      text,
+      input.syntheticContext,
+    ),
     clientRequestId: input.clientRequestId,
   });
   appendSessionEvent({

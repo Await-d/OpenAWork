@@ -23,8 +23,7 @@ export const enterPlanModeToolDefinition: ToolDefinition<
   typeof planModeOutputSchema
 > = {
   name: 'EnterPlanMode',
-  description:
-    'Enter plan mode for complex tasks. This should switch the session into a read-first planning state before implementation.',
+  description: '针对复杂任务进入 plan 模式。会将会话切换为实现前的"先读后规划"状态。',
   inputSchema: enterPlanModeInputSchema,
   outputSchema: planModeOutputSchema,
   timeout: 30000,
@@ -38,8 +37,7 @@ export const exitPlanModeToolDefinition: ToolDefinition<
   typeof planModeOutputSchema
 > = {
   name: 'ExitPlanMode',
-  description:
-    'Present the current plan for approval and exit plan mode when the user confirms implementation should start.',
+  description: '将当前计划提交审批；用户确认可以开始实现后退出 plan 模式。',
   inputSchema: exitPlanModeInputSchema,
   outputSchema: planModeOutputSchema,
   timeout: 30000,
@@ -64,18 +62,18 @@ export function buildExitPlanModeQuestionInput(input: ExitPlanModeInput): {
     questions: [
       {
         question: summary
-          ? `Do you approve this plan and want implementation to start now?\n\n${summary}`
-          : 'Do you approve the current plan and want implementation to start now?',
-        header: 'Plan approval',
+          ? `是否批准当前计划并立即开始实现？\n\n${summary}`
+          : '是否批准当前计划并立即开始实现？',
+        header: '计划审批',
         multiple: false,
         options: [
           {
             label: EXIT_PLAN_MODE_APPROVE_LABEL,
-            description: 'Approve the plan and let the session leave plan mode.',
+            description: '批准计划并让会话退出 plan 模式。',
           },
           {
             label: EXIT_PLAN_MODE_CONTINUE_LABEL,
-            description: 'Keep plan mode active and continue refining the plan.',
+            description: '保持 plan 模式激活并继续调优计划。',
           },
         ],
       },

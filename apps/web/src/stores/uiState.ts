@@ -47,6 +47,26 @@ export interface UIStateStore {
   setActiveSessionWorkspace: (sessionId: string, path: string | null) => void;
   clearActiveSessionWorkspace: (sessionId?: string) => void;
 
+  /**
+   * P3-PATH: when on, the sessions sidebar list is scoped to the
+   * `selectedWorkspacePath` (or, when none is selected, to the
+   * active chat session's workspace) via the `path=` query param
+   * supported by `/sessions`. Off by default — the existing
+   * workspace-grouping UI already covers the bulk of users.
+   */
+  sessionListPathFilterEnabled: boolean;
+  setSessionListPathFilterEnabled: (v: boolean) => void;
+
+  /**
+   * P3-PATH (T-PATH-04): admin-style global kill switch for the
+   * `/sessions?path=` query. When `false`, the sidebar toggle is
+   * hidden entirely and the per-call `path` filter is dropped, even
+   * when `sessionListPathFilterEnabled` is `true`. Defaults to
+   * `true` so existing users keep the feature.
+   */
+  sessionListPathFilterFeatureEnabled: boolean;
+  setSessionListPathFilterFeatureEnabled: (v: boolean) => void;
+
   // Editor mode
   editorMode: boolean;
   setEditorMode: (v: boolean) => void;
@@ -205,6 +225,13 @@ export const useUIStateStore = create<UIStateStore>()(
           return { activeSessionWorkspace: null };
         }),
 
+      // P3-PATH session list scoping
+      sessionListPathFilterEnabled: false,
+      setSessionListPathFilterEnabled: (v) => set({ sessionListPathFilterEnabled: v }),
+      sessionListPathFilterFeatureEnabled: true,
+      setSessionListPathFilterFeatureEnabled: (v) =>
+        set({ sessionListPathFilterFeatureEnabled: v }),
+
       // Editor
       editorMode: false,
       setEditorMode: (v) => set({ editorMode: v }),
@@ -244,6 +271,10 @@ export const useUIStateStore = create<UIStateStore>()(
 
         if (typeof nextState.lastChatPath !== 'string') {
           nextState.lastChatPath = null;
+        }
+
+        if (typeof nextState.sessionListPathFilterEnabled !== 'boolean') {
+          nextState.sessionListPathFilterEnabled = false;
         }
 
         return nextState;

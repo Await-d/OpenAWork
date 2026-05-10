@@ -58,6 +58,7 @@ import {
 } from './settings/settings-page-helpers.js';
 import { useSettingsEnvironment } from './settings/use-settings-environment.js';
 import { useSettingsUpstreamRetry } from './settings/use-settings-upstream-retry.js';
+import { useSettingsWebsearch } from './settings/use-settings-websearch.js';
 import { WorkspaceTabContent } from './settings/workspace-tab-content.js';
 import { SecurityTabContent } from './settings/security-tab-content.js';
 import { UsageTabContent } from './settings/usage-tab-content.js';
@@ -198,6 +199,14 @@ export default function SettingsPage() {
     setUpstreamRetryMaxRetries,
     upstreamRetryMaxRetries,
   } = useSettingsUpstreamRetry({ apiFetch, token });
+  const {
+    loadWebsearchPolicy,
+    saveWebsearchPolicy,
+    savedPolicy: websearchSavedPolicy,
+    saving: websearchSaving,
+    setPolicy: setWebsearchPolicy,
+    policy: websearchPolicy,
+  } = useSettingsWebsearch({ apiFetch, token });
   const memoryManagement = useMemoryManagement({
     apiFetch,
     token,
@@ -749,7 +758,13 @@ export default function SettingsPage() {
       .then((response) =>
         response.ok
           ? (response.json() as Promise<{
-              servers: Array<{ id: string; name: string; type?: string; status?: string }>;
+              servers: Array<{
+                id: string;
+                name: string;
+                type?: string;
+                status?: string;
+                builtin?: boolean;
+              }>;
             }>)
           : Promise.resolve({ servers: [] }),
       )
@@ -758,6 +773,11 @@ export default function SettingsPage() {
           (d.servers ?? []).map((server) => ({
             id: server.id,
             name: server.name,
+            // 后端可能返回 'disabled'（来自 PR-D-Plugin retry 路由的
+            // mcp-status 增强），在前端列表里和 'disconnected' 同处理：
+            // 列表只渲染 connected/connecting/disconnected/error 四
+            // 种；disabled 等价于灰点，但 retry 按钮仍会出现，让用户
+            // 知道点了之后会因 enabled=false 短路返回 disabled。
             status:
               server.status === 'connected' ||
               server.status === 'connecting' ||
@@ -766,6 +786,7 @@ export default function SettingsPage() {
                 : 'disconnected',
             toolCount: 0,
             authType: server.type,
+            builtin: server.builtin === true,
           })),
         ),
       );
@@ -804,6 +825,7 @@ export default function SettingsPage() {
       .then((d) => setGithubTriggers(d.triggers ?? []))
       .catch(() => undefined);
     void loadUpstreamRetrySettings().catch(() => undefined);
+    void loadWebsearchPolicy().catch(() => undefined);
     void checkVersionUpdate();
     void fetch(`${gatewayUrl}/channels`, { headers: h })
       .then(async (response) => {
@@ -853,6 +875,7 @@ export default function SettingsPage() {
     loadDevLogs,
     loadDiagnostics,
     loadUpstreamRetrySettings,
+    loadWebsearchPolicy,
     loadSshConnections,
     loadWorkers,
     checkVersionUpdate,
@@ -945,6 +968,102 @@ export default function SettingsPage() {
         }
         return next;
       });
+    },
+    [token, gatewayUrl],
+  );
+
+  /**
+   * 触发"重试连接 / 安装"。三段式：
+   *   1) 立刻在状态里把 retryFeedback 设为 pending → 按钮转灰；
+   *   2) POST /settings/mcp-servers/{id}/retry，后端实际跑 disconnect
+   *      + 重连（stdio 用 npx -y 时顺带按需安装包）；
+   *   3) 解析 200 响应里的 status：
+   *      - `connected` → status 染绿、retryFeedback 为 ok，刷新
+   *        toolCount；
+   *      - `error` → retryFeedback 携带错误信息；
+   *      - `disabled` → 把状态置为 disconnected（按当前列表设计，
+   *        disabled 在加载阶段就被规整成 disconnected，这里保持
+   *        一致）。
+   *   网络错误 / 4xx 也染红，避免 UI 死挂在 pending。
+   */
+  const handleRetryMcp = React.useCallback(
+    (serverId: string) => {
+      if (!token) return;
+      setMcpStatuses((prev) =>
+        prev.map((server) =>
+          server.id === serverId
+            ? { ...server, retryFeedback: { kind: 'pending' as const } }
+            : server,
+        ),
+      );
+
+      void (async () => {
+        try {
+          const response = await fetch(
+            `${gatewayUrl}/settings/mcp-servers/${encodeURIComponent(serverId)}/retry`,
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `HTTP ${response.status}`);
+          }
+          const data = (await response.json()) as {
+            status: 'connected' | 'error' | 'disabled';
+            toolCount: number;
+            durationMs: number;
+            error?: string;
+          };
+          setMcpStatuses((prev) =>
+            prev.map((server) => {
+              if (server.id !== serverId) return server;
+              if (data.status === 'connected') {
+                return {
+                  ...server,
+                  status: 'connected' as const,
+                  toolCount: data.toolCount,
+                  retryFeedback: {
+                    kind: 'ok' as const,
+                    toolCount: data.toolCount,
+                    durationMs: data.durationMs,
+                  },
+                };
+              }
+              if (data.status === 'error') {
+                return {
+                  ...server,
+                  status: 'error' as const,
+                  retryFeedback: {
+                    kind: 'fail' as const,
+                    error: data.error ?? '未知错误',
+                  },
+                };
+              }
+              // disabled — 按钮点了等于无操作；归位到 disconnected 灰点。
+              return {
+                ...server,
+                status: 'disconnected' as const,
+                retryFeedback: undefined,
+              };
+            }),
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setMcpStatuses((prev) =>
+            prev.map((server) =>
+              server.id === serverId
+                ? {
+                    ...server,
+                    status: 'error' as const,
+                    retryFeedback: { kind: 'fail' as const, error: message },
+                  }
+                : server,
+            ),
+          );
+        }
+      })();
     },
     [token, gatewayUrl],
   );
@@ -1518,6 +1637,7 @@ export default function SettingsPage() {
                     mcpServers={mcpServers}
                     setMcpServers={setMcpServers}
                     mcpStatuses={mcpStatuses}
+                    onRetryMcp={handleRetryMcp}
                     urlInput={urlInput}
                     setUrlInput={setUrlInput}
                     saveGatewayUrl={saveGatewayUrl}
@@ -1537,6 +1657,13 @@ export default function SettingsPage() {
                       void saveUpstreamRetrySettings();
                     }}
                     savedUpstreamRetryMaxRetries={savedUpstreamRetryMaxRetries}
+                    websearchPolicy={websearchPolicy}
+                    websearchSavedPolicy={websearchSavedPolicy}
+                    websearchSaving={websearchSaving}
+                    setWebsearchPolicy={setWebsearchPolicy}
+                    saveWebsearchPolicy={() => {
+                      void saveWebsearchPolicy();
+                    }}
                   />
                 )}
                 {activeTab === 'channels' && (

@@ -61,6 +61,60 @@ describe('normalizeChatMessages', () => {
       cacheReadTokens: 5,
     });
   });
+
+  // Regression: persistStreamUserMessage wraps the user's typed text with
+  // `synthetic: true` text parts (`<system-reminder>` capability block before,
+  // `[thinking-hint]` after) so the prompt-cache prefix stays byte-stable
+  // across turns. Those parts must NEVER surface in the displayed message
+  // — without filtering, an upstream error (e.g. context_length_exceeded)
+  // followed by a recovery reload makes the user feel their typed text was
+  // lost / replaced because the recovery payload's user message renders
+  // as the synthetic blocks wrapped around their original text.
+  it('drops synthetic text parts from recovered user messages', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'user-1',
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: '<system-reminder>\nCAPS\n</system-reminder>',
+            synthetic: true,
+          },
+          { type: 'text', text: 'search for React 19' },
+          {
+            type: 'text',
+            text: '\n[请用中文进行思考。]',
+            synthetic: true,
+          },
+        ],
+        createdAt: 1,
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.role).toBe('user');
+    expect(messages[0]?.content).toBe('search for React 19');
+  });
+
+  it('drops synthetic-only user messages so empty system reminders never surface', () => {
+    const messages = normalizeChatMessages([
+      {
+        id: 'user-1',
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: '<system-reminder>\nCAPS\n</system-reminder>',
+            synthetic: true,
+          },
+        ],
+        createdAt: 1,
+      },
+    ]);
+
+    expect(messages).toHaveLength(0);
+  });
 });
 
 describe('partsFromOrderedAssistantContent', () => {

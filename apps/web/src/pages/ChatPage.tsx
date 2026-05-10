@@ -111,6 +111,7 @@ import {
   type SessionsClientWithActiveStop,
 } from './chat-page/chat-page-utils.js';
 import { ChatRightPanel } from './chat-page/chat-right-panel.js';
+import type { RightPanelTabId } from './chat-page/right-panel-tabs.js';
 import { ChatScrollBottomButton } from './chat-page/chat-scroll-bottom-button.js';
 import { ChatStreamErrorBar } from './chat-page/chat-stream-error-bar.js';
 import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
@@ -329,9 +330,7 @@ export default function ChatPage() {
     thinkingEnabled: boolean;
   } | null>(null);
 
-  const [rightTab, setRightTab] = useState<
-    'overview' | 'plan' | 'tools' | 'viz' | 'history' | 'mcp' | 'agent'
-  >('overview');
+  const [rightTab, setRightTab] = useState<RightPanelTabId>('overview');
   const [toolFilter, setToolFilter] = useState<'all' | 'lsp' | 'file' | 'network' | 'other'>('all');
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
   const [rightOpen, setRightOpen] = useState(false);
@@ -2827,6 +2826,16 @@ export default function ChatPage() {
         }
 
         if (event.type === 'tool_call_delta') {
+          // First-token latency is "time-to-first-content of any kind".
+          // Without this, reasoning-heavy rounds that emit tool calls before
+          // any text delta would render "首 token --" forever even though the
+          // model has clearly started producing output. The same observation
+          // is later attached to the first finalized round (gated by
+          // `firstTokenLatencyAttached`) so this does not double-count.
+          if (firstTokenObservedAt === null) {
+            firstTokenObservedAt = event.occurredAt ?? Date.now();
+            setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
+          }
           toolCallIds.add(event.toolCallId);
           const previous = liveToolCalls.get(event.toolCallId);
           const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
@@ -3124,6 +3133,17 @@ export default function ChatPage() {
           return;
         }
 
+        // First-token latency tracks "time-to-first-content of any kind".
+        // For reasoning models, the very first response chunk is typically
+        // a thinking delta (sometimes minutes before any text token), so we
+        // must capture it here too — otherwise rounds that emit reasoning
+        // and then a tool call without text would render "首 token --" even
+        // when the gateway has clearly delivered tokens.
+        if (firstTokenObservedAt === null) {
+          firstTokenObservedAt = Date.now();
+          setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
+        }
+
         if (liveToolCalls.size > 0) {
           closeCurrentStreamingRoundIntoMessage(Date.now());
         }
@@ -3177,7 +3197,7 @@ export default function ChatPage() {
           }
         }
       },
-      onDone: (stopReason, streamAgentId) => {
+      onDone: (stopReason, streamAgentId, cancellation) => {
         if (activeSessionRef.current !== sid) {
           requestSessionListRefresh();
           return;
@@ -3191,6 +3211,40 @@ export default function ChatPage() {
         const finishedAt = Date.now();
         const resolvedStopReason = stopReason ?? 'end_turn';
         const wasCancelled = String(resolvedStopReason) === 'cancelled';
+        // P1-CANCEL / T-CANCEL-08: render a precise toast based on
+        // the cascade reason. Three branches:
+        //   - `parent_aborted` / `ancestor_aborted` → this session is
+        //     a descendant; the user did NOT click stop here, the
+        //     parent did. We tell them so they understand why their
+        //     stream just terminated.
+        //   - `user_aborted` with a non-empty cascade → the user
+        //     stopped this session and the gateway also took N
+        //     children down with it; show that count.
+        //   - everything else (`user_aborted` + no cascade) → bare
+        //     "已停止" remains the default and we do not toast.
+        if (wasCancelled && cancellation) {
+          const suffix = cancellation.timedOut ? '（超时）' : '';
+          if (
+            cancellation.reason === 'parent_aborted' ||
+            cancellation.reason === 'ancestor_aborted'
+          ) {
+            toast(
+              `本会话由${cancellation.reason === 'parent_aborted' ? '父' : '上游'}会话中断${suffix}`,
+              'info',
+              3200,
+            );
+          } else if (cancellation.descendantSessions > 0) {
+            const desc = cancellation.descendantSessions;
+            const streams = cancellation.cancelledStreams;
+            toast(
+              `已停止当前会话 + ${desc} 个子会话${
+                streams > 0 ? `（共 ${streams} 个运行中请求）` : ''
+              }${suffix}`,
+              'success',
+              3200,
+            );
+          }
+        }
         const isPausedForPermission = resolvedStopReason === 'tool_permission';
         const finalAccumulatedText = wasCancelled ? streamRevealVisibleRef.current : accumulated;
         const traceFinalStatus = wasCancelled
@@ -4105,6 +4159,14 @@ export default function ChatPage() {
           }
 
           if (event.type === 'tool_call_delta') {
+            // Mirror the main stream handler: capture first-token latency on
+            // the first tool_call_delta when no text has arrived yet, so
+            // attach replays of reasoning-heavy rounds also show "首 token X"
+            // instead of "首 token --".
+            if (firstTokenObservedAt === null) {
+              firstTokenObservedAt = event.occurredAt ?? Date.now();
+              setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
+            }
             const previous = liveToolCalls.get(event.toolCallId);
             const nextInputText = `${previous?.inputText ?? ''}${event.inputDelta}`;
             liveToolCalls.set(event.toolCallId, {
@@ -4401,6 +4463,14 @@ export default function ChatPage() {
             return;
           }
           ensureAttachStateInitialized();
+          // Mirror the main stream handler: reasoning chunks are real model
+          // output, so capturing first-token latency here keeps the assistant
+          // footer showing "首 token X" on attach replays of reasoning-heavy
+          // rounds instead of "首 token --".
+          if (firstTokenObservedAt === null) {
+            firstTokenObservedAt = Date.now();
+            setActiveStreamFirstTokenLatencyMs(firstTokenObservedAt - requestStartedAt);
+          }
           if (liveToolCalls.size > 0) {
             closeCurrentAttachRoundIntoMessage(Date.now());
           }
@@ -4447,7 +4517,7 @@ export default function ChatPage() {
             setRightTab('tools');
           }
         },
-        onDone: (stopReason, streamAgentId) => {
+        onDone: (stopReason, streamAgentId, cancellation) => {
           if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
             requestSessionListRefresh();
             return;

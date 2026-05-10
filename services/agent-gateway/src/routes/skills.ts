@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import { db, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { db, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../db.js';
 import {
   SkillRegistryClientImpl,
   RegistrySourceManager,
@@ -1161,10 +1161,29 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: `Skill not installed: ${skillId}` });
       }
 
-      sqliteRun('DELETE FROM installed_skills WHERE skill_id = ? AND user_id = ?', [
-        skillId,
-        user.sub,
-      ]);
+      // Wrap the row removal + cascade cleanup in a single transaction so
+      // we never leave dangling selection / override rows pointing at a
+      // skill that no longer exists in `installed_skills`. The
+      // `chat_workspace_skill_configured` marker is *deliberately* kept
+      // intact: if the user explicitly configured a workspace and then
+      // uninstalls a skill, their choice ("explicitly configured this set")
+      // still holds — the resolver just observes a smaller selection.
+      sqliteTransaction(() => {
+        sqliteRun('DELETE FROM installed_skills WHERE skill_id = ? AND user_id = ?', [
+          skillId,
+          user.sub,
+        ]);
+        sqliteRun(
+          'DELETE FROM chat_workspace_skill_selections WHERE user_id = ? AND skill_id = ?',
+          [user.sub, skillId],
+        );
+        sqliteRun(
+          `DELETE FROM chat_session_skill_overrides
+           WHERE skill_id = ?
+             AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)`,
+          [skillId, user.sub],
+        );
+      });
 
       step.succeed(undefined, { skillId });
       return reply.send({ removed: true, skillId });

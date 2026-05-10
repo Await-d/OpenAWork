@@ -9,6 +9,7 @@ import { appendSessionMessageV2 as appendSessionMessage } from './message-v2-ada
 import { validateWorkspacePath } from './workspace-paths.js';
 import { getProviderConfigForSelection } from './provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from './model-router.js';
+import type { UpstreamProtocol } from './routes/upstream-protocol.js';
 import { runUpstreamGenerate } from './v2-runtime/upstream/index.js';
 import type { UserContent } from 'ai';
 import { listManagedAgentsForUser } from './agent-catalog.js';
@@ -54,8 +55,7 @@ const lookAtInputSchema = z
 
 export const lookAtToolDefinition: ToolDefinition<typeof lookAtInputSchema, z.ZodString> = {
   name: 'look_at',
-  description:
-    'Extract basic information from local images or text files using the configured multimodal path.',
+  description: '使用配置好的多模态通道，从本地图片或文本文件中提取基本信息。',
   inputSchema: lookAtInputSchema,
   outputSchema: z.string(),
   timeout: 120000,
@@ -123,10 +123,10 @@ async function readPdfAsText(filePath: string): Promise<string> {
 
 function buildLookAtPrompt(goal: string, filename: string, mimeType: string): string {
   return [
-    `Analyze the provided file and extract the information relevant to this goal: ${goal}`,
-    `Filename: ${filename}`,
-    `MIME type: ${mimeType}`,
-    'Be concise and only return the useful extracted result.',
+    `分析所提供的文件，提取与以下目标相关的信息：${goal}`,
+    `文件名：${filename}`,
+    `MIME 类型：${mimeType}`,
+    '保持简洁，只返回提取出的有用结果。',
   ].join('\n');
 }
 
@@ -190,6 +190,13 @@ async function requestLookAtText(input: {
   mimeType: string;
   model: string;
   providerType?: string;
+  /**
+   * Resolved upstream protocol (e.g. `anthropic_messages`, `responses`).
+   * Forwarding this is required for multimodal calls that target a non-
+   * OpenAI provider; without it the AI SDK silently degrades to OpenAI
+   * Chat Completions which most providers do not support.
+   */
+  upstreamProtocol?: UpstreamProtocol;
   prompt: string;
   requestOverrides: RequestOverrides;
   systemPrompt?: string;
@@ -212,6 +219,7 @@ async function requestLookAtText(input: {
 
   const result = await runUpstreamGenerate({
     providerType: input.providerType ?? 'openai',
+    ...(input.upstreamProtocol ? { upstreamProtocol: input.upstreamProtocol } : {}),
     ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     ...(input.apiBaseUrl ? { baseURL: input.apiBaseUrl } : {}),
     ...(input.requestOverrides.headers && Object.keys(input.requestOverrides.headers).length > 0
@@ -295,6 +303,9 @@ export async function runLookAtTool(input: {
       mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
+      ...(routeConfig.route.upstreamProtocol
+        ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
+        : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
@@ -307,6 +318,9 @@ export async function runLookAtTool(input: {
       mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
+      ...(routeConfig.route.upstreamProtocol
+        ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
+        : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),
@@ -320,6 +334,9 @@ export async function runLookAtTool(input: {
       mimeType,
       model: routeConfig.route.model,
       ...(routeConfig.route.providerType ? { providerType: routeConfig.route.providerType } : {}),
+      ...(routeConfig.route.upstreamProtocol
+        ? { upstreamProtocol: routeConfig.route.upstreamProtocol }
+        : {}),
       prompt,
       requestOverrides: routeConfig.route.requestOverrides,
       ...(routeConfig.route.systemPrompt ? { systemPrompt: routeConfig.route.systemPrompt } : {}),

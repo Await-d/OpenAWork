@@ -100,7 +100,15 @@ export {
   LSP_RICHER_TOOL_METADATA,
   ALL_LSP_TOOL_NAMES,
 } from './tools/lsp.js';
-export { webSearchTool, WEB_SEARCH_TOOLS } from './tools/web-search.js';
+export {
+  webSearchTool,
+  WEB_SEARCH_TOOLS,
+  searchMultiProvider,
+  canonicaliseSearchUrl,
+  type WebSearchMultiEntry,
+  type WebSearchMultiConfig,
+  type WebSearchRolloutMode,
+} from './tools/web-search.js';
 export * from './tools/hash-edit.js';
 
 export type {

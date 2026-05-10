@@ -1,5 +1,8 @@
 export { MCPClientAdapterImpl } from './adapter.js';
+export type { MCPAuthProviderLike } from './adapter.js';
 export { ToolRegistryImpl } from './registry.js';
+export { runOAuthCodeExchange } from './oauth.js';
+export type { OAuthCodeExchangeResult } from './oauth.js';
 export type {
   MCPClientAdapter,
   MCPServerRef,

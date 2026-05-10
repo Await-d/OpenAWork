@@ -48,6 +48,19 @@ export interface AssistantToolCall {
   id: string;
   name: string;
   arguments: string;
+  /**
+   * Provider-attached metadata round-tripped from the originating
+   * `tool-call.providerMetadata` payload. The OpenAI Responses API
+   * surfaces an `openai.itemId` (`fc_xxx`) here that is *separate*
+   * from the call_id surfaced as `id`; replaying it on subsequent
+   * rounds via `providerOptions.openai.itemId` is what keeps the
+   * upstream prompt-cache prefix byte-stable across turns.
+   *
+   * Different-model replay still drops this (mirroring how reasoning
+   * metadata is dropped) since `fc_xxx` is provider-scoped — see the
+   * `differentModel` guard in the renderer.
+   */
+  providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 /**
@@ -536,13 +549,30 @@ function buildAssistantParts(
     .trim();
 
   // Tool calls
+  const differentModelForTools = Boolean(options?.differentModel);
   const toolCalls: AssistantToolCall[] = parts
     .filter((p): p is ToolPart => p.type === 'tool')
-    .map((part) => ({
-      id: part.callID,
-      name: part.tool,
-      arguments: resolveToolArguments(part),
-    }));
+    .map((part) => {
+      // Round-trip provider-scoped metadata (most importantly
+      // `openai.itemId`) when replaying against the same provider.
+      // We strip it on `differentModel` for the same reason we drop
+      // reasoning signatures: an opaque provider-issued id has no
+      // meaning to a foreign model and would either be ignored or
+      // rejected, while still bloating the prefix.
+      const persisted =
+        !differentModelForTools &&
+        part.metadata &&
+        typeof part.metadata['providerMetadata'] === 'object' &&
+        part.metadata['providerMetadata'] !== null
+          ? (part.metadata['providerMetadata'] as Record<string, Record<string, unknown>>)
+          : undefined;
+      return {
+        id: part.callID,
+        name: part.tool,
+        arguments: resolveToolArguments(part),
+        ...(persisted && Object.keys(persisted).length > 0 ? { providerMetadata: persisted } : {}),
+      };
+    });
 
   // Reasoning
   const reasoningParts = parts.filter((p): p is ReasoningPart => p.type === 'reasoning');

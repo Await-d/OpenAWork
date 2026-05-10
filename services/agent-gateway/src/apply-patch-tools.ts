@@ -387,7 +387,7 @@ export const applyPatchToolDefinition: ToolDefinition<
 > = {
   name: 'apply_patch',
   description:
-    'Apply a structured patch envelope to workspace files. Supports Add File, Update File, Delete File, and Move to operations inside a Begin/End Patch block.',
+    '将结构化补丁信封应用到工作区文件上。在 Begin/End Patch 块内支持 Add File、Update File、Delete File、Move to 等操作。',
   inputSchema: applyPatchInputSchema,
   outputSchema: applyPatchOutputSchema,
   timeout: 120000,

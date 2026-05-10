@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { findSkillMcpServer, skillMcpPool } from './skill-mcp-connection-pool.js';
+import type { EffectiveSkill } from './skill-selection.js';
 
 const skillMcpInputSchema = z
   .object({
@@ -29,7 +30,7 @@ type SkillMcpInput = z.infer<typeof skillMcpInputSchema>;
 
 export const skillMcpToolDefinition: ToolDefinition<typeof skillMcpInputSchema, z.ZodString> = {
   name: 'skill_mcp',
-  description: 'Invoke MCP servers embedded by installed skills using tool/resource/prompt access.',
+  description: '通过 tool / resource / prompt 访问已安装 skill 中内嵌的 MCP 服务器。',
   inputSchema: skillMcpInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -51,6 +52,39 @@ function parseArguments(value: SkillMcpInput['arguments']): Record<string, unkno
     throw new Error('arguments must be a JSON object');
   }
   return parsed as Record<string, unknown>;
+}
+
+/**
+ * Gate `skill_mcp` execution by the session's effective skill set so a model
+ * cannot bypass workspace selection by guessing an `mcp_name`.
+ *
+ * Returns `true` when:
+ *   - `effective` is `null` (legacy / unscoped session — preserve back-compat).
+ *   - `effective` contains an enabled entry whose id / name / displayName /
+ *     manifest.mcp.id matches `mcpName` (case-insensitive, trimmed).
+ *
+ * Returns `false` only when an effective set was provided and `mcpName` is
+ * not in it. Caller should refuse the call with a user-visible error.
+ */
+export function isSkillMcpAllowedByEffective(
+  effective: EffectiveSkill[] | null | undefined,
+  mcpName: string,
+): boolean {
+  if (effective === null || effective === undefined) return true;
+  const requested = mcpName.trim().toLowerCase();
+  return effective.some((entry) => {
+    if (!entry.enabled) return false;
+    const candidates = [
+      entry.skillId,
+      entry.manifest?.id,
+      entry.manifest?.name,
+      entry.manifest?.displayName,
+      entry.manifest?.mcp?.id,
+    ];
+    return candidates.some(
+      (value) => typeof value === 'string' && value.trim().toLowerCase() === requested,
+    );
+  });
 }
 
 function applyGrepFilter(output: string, pattern: string | undefined): string {

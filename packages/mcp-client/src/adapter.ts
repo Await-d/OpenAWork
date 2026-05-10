@@ -22,6 +22,16 @@ interface MCPClientEntry {
 type SDKClient = {
   connect(transport: unknown): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Register a notification handler. The MCP SDK keys handlers by the
+   * notification's Zod schema (e.g. `ToolListChangedNotificationSchema`).
+   * We accept `unknown` here because the schemas are loaded lazily from
+   * the SDK in {@link MCPClientAdapterImpl.subscribeToolListChanged}.
+   */
+  setNotificationHandler(
+    schema: unknown,
+    handler: (notification: unknown) => void | Promise<void>,
+  ): void;
   listTools(opts?: { cursor?: string }): Promise<{
     tools: Array<{ name: string; description?: string; inputSchema: unknown }>;
     nextCursor?: string;
@@ -49,19 +59,65 @@ type SDKClient = {
   ): Promise<{ content: MCPToolResult['content']; structuredContent?: unknown; isError?: boolean }>;
 };
 
+/**
+ * Subset of the SDK's OAuth provider contract we surface through the
+ * adapter API. Mirrors `@modelcontextprotocol/sdk/client/auth.js`'s
+ * `OAuthClientProvider` interface (PR-D-OAuth). Declared structurally
+ * so callers can pass any conforming object — typically gateway's
+ * `McpOAuthProvider` from `services/agent-gateway/src/mcp-oauth-provider.ts`.
+ */
+export interface MCPAuthProviderLike {
+  readonly redirectUrl: string | URL;
+  readonly clientMetadata: unknown;
+  clientInformation(): Promise<unknown>;
+  saveClientInformation?(info: unknown): Promise<void>;
+  tokens(): Promise<unknown>;
+  saveTokens(tokens: unknown): Promise<void>;
+  redirectToAuthorization(authorizationUrl: URL): Promise<void>;
+  saveCodeVerifier(codeVerifier: string): Promise<void>;
+  codeVerifier(): Promise<string>;
+}
+
+/**
+ * Optional second argument the SDK transports accept. We pass
+ * `authProvider` when the caller configured OAuth on the upstream
+ * MCP server; the SDK then wires the OAuth handshake into the
+ * transport's outgoing requests automatically.
+ */
+type TransportOpts = { authProvider?: MCPAuthProviderLike };
+
 type SDKModule = {
   Client: new (
     info: { name: string; version: string },
     opts: { capabilities: Record<string, unknown> },
   ) => SDKClient;
-  StreamableHTTPClientTransport: new (url: URL) => unknown;
-  SSEClientTransport: new (url: URL) => unknown;
+  StreamableHTTPClientTransport: new (url: URL, opts?: TransportOpts) => unknown;
+  SSEClientTransport: new (url: URL, opts?: TransportOpts) => unknown;
   StdioClientTransport: new (config: {
     command: string;
     args?: string[];
     env?: Record<string, string>;
   }) => unknown;
 };
+
+/**
+ * Cached `ToolListChangedNotificationSchema` reference.
+ *
+ * The MCP SDK keys notification handlers by Zod schema instance —
+ * passing the same imported reference to multiple
+ * `setNotificationHandler` calls is required for correct dispatch.
+ * We cache the dynamic import so every adapter hooked into the same
+ * MCP server receives the same schema object.
+ */
+let cachedToolListChangedSchema: unknown;
+async function loadToolListChangedSchema(): Promise<unknown> {
+  if (cachedToolListChangedSchema) return cachedToolListChangedSchema;
+  const typesMod = (await import('@modelcontextprotocol/sdk/types.js')) as {
+    ToolListChangedNotificationSchema: unknown;
+  };
+  cachedToolListChangedSchema = typesMod.ToolListChangedNotificationSchema;
+  return cachedToolListChangedSchema;
+}
 
 async function loadSDK(): Promise<SDKModule> {
   const [clientMod, streamMod, sseMod, stdioMod] = await Promise.all([
@@ -104,7 +160,20 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
   }
 
   async connect(
-    server: MCPServerRef & { disabledTools?: string[]; headers?: Record<string, string> },
+    server: MCPServerRef & {
+      disabledTools?: string[];
+      headers?: Record<string, string>;
+      /**
+       * Optional OAuth provider. When supplied, the SSE / Streamable
+       * HTTP transport will negotiate OAuth on the first request and
+       * persist tokens via the provider's `saveTokens` callback. Pass
+       * a `McpOAuthProvider` from `services/agent-gateway`.
+       *
+       * Stdio transports ignore this argument — OAuth is meaningless
+       * for local subprocesses.
+       */
+      authProvider?: MCPAuthProviderLike;
+    },
   ): Promise<void> {
     const proc = (globalThis as unknown as { process?: { env?: Record<string, string> } }).process;
     const env = proc?.env ?? {};
@@ -138,11 +207,14 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
         throw new Error(`MCP server ${server.id} is missing url`);
       }
       const baseUrl = new URL(server.url);
+      const transportOpts: TransportOpts | undefined = server.authProvider
+        ? { authProvider: server.authProvider }
+        : undefined;
 
       try {
-        await client.connect(new sdk.StreamableHTTPClientTransport(baseUrl));
+        await client.connect(new sdk.StreamableHTTPClientTransport(baseUrl, transportOpts));
       } catch {
-        await client.connect(new sdk.SSEClientTransport(baseUrl));
+        await client.connect(new sdk.SSEClientTransport(baseUrl, transportOpts));
       }
     }
 
@@ -235,6 +307,44 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
 
   getServerHeaders(serverId: string): Record<string, string> {
     return this.entries.get(serverId)?.headers ?? {};
+  }
+
+  /**
+   * Subscribe to the MCP server's `notifications/tools/list_changed`
+   * push (`@modelcontextprotocol/sdk` `ToolListChangedNotificationSchema`).
+   *
+   * Mirrors opencode's `mcp/index.ts:472-484` `watch()` helper which
+   * registers a notification handler on the SDK client right after the
+   * initial `listTools()` snapshot. Whenever the server signals that
+   * its tool list mutated, our caller (`mcp-tool-catalog.ts` in
+   * agent-gateway) re-fetches the tools and pushes the new snapshot to
+   * subscribers (UI, downstream LLM-tools dictionary).
+   *
+   * Throws if the connection isn't yet established — call this AFTER
+   * `connect()` has resolved (the connection-pool wires it up inside
+   * `createConnection`).
+   *
+   * The SDK keys notification handlers by the Zod schema, so we
+   * dynamic-import the schema from `@modelcontextprotocol/sdk/types.js`
+   * to avoid coupling this package's public surface to the SDK's type
+   * exports. The schema is cached after the first call.
+   */
+  async subscribeToolListChanged(
+    serverId: string,
+    handler: () => void | Promise<void>,
+  ): Promise<void> {
+    const client = this.getClient(serverId);
+    const schema = await loadToolListChangedSchema();
+    client.setNotificationHandler(schema, async () => {
+      try {
+        await handler();
+      } catch (err) {
+        // Swallow listener errors so a buggy subscriber can't take
+        // down the SDK transport — the SDK rethrows handler errors as
+        // protocol-level failures otherwise.
+        console.warn(`MCP tool-list-changed handler for ${serverId} threw:`, err);
+      }
+    });
   }
 
   async callTool(

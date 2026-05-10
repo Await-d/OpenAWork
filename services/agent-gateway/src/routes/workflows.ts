@@ -4,99 +4,12 @@ import { z } from 'zod';
 import { FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
-import type { AIProvider } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
 import { buildFixedTeamTemplateDefaultBindings } from '../team-template-metadata.js';
 import * as agentCore from '@openAwork/agent-core';
-import { getFastProviderConfig, getActiveChatProviderConfig } from '../provider-config.js';
+import { resolveAuxiliaryLlmConfig } from '../auxiliary-llm-config.js';
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
-
-interface UserSettingRow {
-  value: string;
-}
-
-/**
- * Resolve the LLM credentials used by the lightweight workflow LLM
- * (prompt optimizer / translator). Preference order:
- *   1. user-configured "fast" provider (matches the chat composer's
- *      「快速 / 内联」 model — what the user explicitly asked for here),
- *   2. user-configured "chat" provider as fallback,
- *   3. process env (`AI_API_BASE_URL` / `AI_API_KEY` / `AI_DEFAULT_MODEL`)
- *      as the last-resort legacy path.
- *
- * Returns `null` when no usable credentials are found in any source —
- * the caller is responsible for surfacing a structured 503 hint.
- */
-interface ResolvedAuxiliaryLlmConfig {
-  apiBaseUrl: string;
-  apiKey: string;
-  model: string;
-  /** Forwarded so the workflow LLM picks the right AI SDK adapter. */
-  providerType?: AIProvider['type'];
-  /** Forwarded so per-provider Responses/anthropic_messages overrides apply. */
-  upstreamProtocol?: AIProvider['upstreamProtocol'];
-}
-
-async function resolveAuxiliaryLlmConfig(
-  userId: string,
-): Promise<ResolvedAuxiliaryLlmConfig | null> {
-  const providersRow = sqliteGet<UserSettingRow>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
-    [userId],
-  );
-  const selectionRow = sqliteGet<UserSettingRow>(
-    `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
-    [userId],
-  );
-  const rawProviders = providersRow?.value ? JSON.parse(providersRow.value) : undefined;
-  const rawSelection = selectionRow?.value ? JSON.parse(selectionRow.value) : undefined;
-
-  const candidates = [
-    () => getFastProviderConfig(rawProviders, rawSelection),
-    () => getActiveChatProviderConfig(rawProviders, rawSelection),
-  ];
-  for (const lookup of candidates) {
-    const cfg = await lookup();
-    if (!cfg) continue;
-    const resolved = resolveProviderCredentials(cfg.provider, cfg.modelId);
-    if (resolved) return resolved;
-  }
-
-  const envBase = (process.env['AI_API_BASE_URL'] ?? '').trim();
-  const envKey = (process.env['AI_API_KEY'] ?? '').trim();
-  const envModel = (process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o').trim();
-  if (envBase && envKey) {
-    return { apiBaseUrl: envBase, apiKey: envKey, model: envModel };
-  }
-  return null;
-}
-
-function resolveProviderCredentials(
-  provider: AIProvider,
-  modelId: string,
-): ResolvedAuxiliaryLlmConfig | null {
-  const apiBaseUrl = (provider.baseUrl ?? '').trim();
-  if (!apiBaseUrl) return null;
-  const apiKey = pickProviderApiKey(provider);
-  if (!apiKey) return null;
-  return {
-    apiBaseUrl,
-    apiKey,
-    model: modelId,
-    providerType: provider.type,
-    ...(provider.upstreamProtocol ? { upstreamProtocol: provider.upstreamProtocol } : {}),
-  };
-}
-
-function pickProviderApiKey(provider: AIProvider): string | null {
-  if (provider.apiKey && provider.apiKey.length > 0) return provider.apiKey;
-  if (provider.apiKeyEnv) {
-    const fromEnv = process.env[provider.apiKeyEnv];
-    if (fromEnv && fromEnv.length > 0) return fromEnv;
-  }
-  return null;
-}
 
 type AgentCoreWithExtras = typeof agentCore & {
   PromptOptimizerImpl?: typeof agentCore.PromptOptimizerImpl;

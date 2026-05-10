@@ -917,6 +917,9 @@ export function SessionSidebar({
             padding: '4px 6px',
             flexShrink: 0,
             borderBottom: '1px solid var(--border-subtle)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
           }}
         >
           <input
@@ -936,6 +939,7 @@ export function SessionSidebar({
               boxSizing: 'border-box',
             }}
           />
+          <SessionPathFilterToggle />
         </div>
       )}
 
@@ -1510,5 +1514,63 @@ export function SessionSidebar({
         }}
       />
     </>
+  );
+}
+
+/**
+ * Compact toggle row that scopes the sessions list to the user's
+ * `selectedWorkspacePath` via the gateway `?path=` query param
+ * (P3-PATH). Disabled when no workspace is selected — without a path
+ * to scope to, the toggle would be a confusing no-op.
+ */
+function SessionPathFilterToggle(): React.ReactElement | null {
+  const enabled = useUIStateStore((s) => s.sessionListPathFilterEnabled);
+  const setEnabled = useUIStateStore((s) => s.setSessionListPathFilterEnabled);
+  const featureEnabled = useUIStateStore((s) => s.sessionListPathFilterFeatureEnabled);
+  const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
+
+  const hasWorkspace = Boolean(selectedWorkspacePath);
+  // Auto-disable the toggle when the user clears the selected
+  // workspace, otherwise the next list call would silently fall back
+  // to "no path filter" with no UI cue.
+  useEffect(() => {
+    if (!hasWorkspace && enabled) {
+      setEnabled(false);
+    }
+  }, [hasWorkspace, enabled, setEnabled]);
+
+  // T-PATH-04: when the settings-level kill switch is off, hide the
+  // toggle entirely. The hook in `useSessions` also drops the path
+  // query in that state, so leaving the toggle visible would be
+  // misleading ("ON but no effect").
+  if (!featureEnabled) {
+    return null;
+  }
+  if (!hasWorkspace) {
+    return null;
+  }
+
+  return (
+    <label
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 11,
+        color: 'var(--text-3)',
+        cursor: 'pointer',
+        padding: '2px 4px',
+        userSelect: 'none',
+      }}
+      title="仅显示与当前工作区目录关联的会话"
+    >
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => setEnabled(e.target.checked)}
+        style={{ margin: 0, cursor: 'pointer' }}
+      />
+      仅当前目录
+    </label>
   );
 }

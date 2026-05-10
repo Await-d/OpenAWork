@@ -179,11 +179,36 @@ function bridgeAssistant(message: AssistantMessageUnified): AssistantModelMessag
   }
 
   for (const call of message.toolCalls ?? []) {
+    // Forward provider-attached metadata via `providerOptions` so the
+    // AI SDK's per-provider tool-call serialiser can read e.g.
+    // `openai.itemId` (`fc_xxx`) and rebuild the original
+    // `function_call.id` on the wire. Without this, the OpenAI
+    // Responses adapter falls back to using the `toolCallId`
+    // (`call_xxx`) for both `id` and `call_id`, OpenAI re-keys the
+    // function_call item against its prior issued id, and the
+    // upstream prompt-cache prefix from this point on misses on
+    // every subsequent round.
+    //
+    // The shape we persist (`Record<string, Record<string, unknown>>`)
+    // matches the wire shape `@ai-sdk/openai`'s tool-call ingest emits.
+    // The AI SDK 5 typing for `ToolCallPart.providerOptions` requires
+    // `JSONValue`-deep payloads — every observed key (`itemId`,
+    // `namespace`, ...) is already a string at runtime, so we cast at
+    // this single boundary instead of recursively re-typing the
+    // record up through the unified message layer.
+    const providerMetadata = call.providerMetadata;
     parts.push({
       type: 'tool-call',
       toolCallId: call.id,
       toolName: call.name,
       input: safeJsonParse(call.arguments),
+      ...(providerMetadata && Object.keys(providerMetadata).length > 0
+        ? {
+            providerOptions: providerMetadata as unknown as NonNullable<
+              ToolCallPart['providerOptions']
+            >,
+          }
+        : {}),
     });
   }
 

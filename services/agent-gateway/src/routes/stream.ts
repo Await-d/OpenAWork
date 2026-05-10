@@ -5,6 +5,7 @@ import type {
   DialogueMode,
   FileDiffContent,
   InputImageContent,
+  StreamCancellationSummary,
   ManagedAgentRecord,
   MessageContent,
   RunEvent,
@@ -47,6 +48,7 @@ import {
   DIALOGUE_MODE_SYSTEM_PROMPTS,
   LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
   YOLO_MODE_SYSTEM_PROMPT,
+  detectThinkingLanguageHintFromText,
 } from './stream-system-prompts.js';
 import { KeywordDetectorImpl } from '@openAwork/agent-core';
 import {
@@ -66,7 +68,19 @@ import { persistSessionFileDiffs } from '../session-file-diff-store.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tool-result-contract.js';
 import { createDefaultSandbox } from '../tool-sandbox.js';
 import type { SandboxExecutionContext } from '../tool-sandbox.js';
+import { cancelDescendantSessionStreams } from '../cancel-descendant-streams.js';
 import { buildGatewayToolDefinitions } from '../tool-definitions.js';
+import { buildFlatMcpToolDefinitions } from '../mcp-flat-tool-defs.js';
+import { listMcpToolsForSession } from '../mcp-runtime.js';
+import { isFlatMcpToolsDisabled } from '../mcp-tool-naming.js';
+import { getEffectiveSkillsFromSessionContext } from '../skill-selection-context.js';
+import type { EffectiveSkill } from '../skill-selection.js';
+import {
+  applyPinnedSnapshot,
+  buildPinnedSkillsPromptSection,
+  snapshotFromEffective,
+  type PinnedSkillsSnapshot,
+} from '../pinned-skills-prompt.js';
 import {
   loadDynamicToolsForWorkspace,
   buildDynamicGatewayToolDefinitions,
@@ -83,6 +97,7 @@ import {
   clearInFlightStreamRequest,
   getAnyInFlightStreamRequestForSession,
   getInFlightStreamRequest,
+  readPendingCancelReason,
   registerInFlightStreamRequest,
 } from './stream-cancellation.js';
 import {
@@ -124,6 +139,7 @@ import {
 } from '../prometheus-md-only.js';
 import { shouldInjectNotepadDirective, NOTEPAD_DIRECTIVE } from '../sisyphus-junior-notepad.js';
 import { runModelRound } from './stream-model-round.js';
+import { dispatchChatMessage } from '../plugin-host.js';
 import {
   clearSessionRuntimeThread,
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
@@ -174,8 +190,22 @@ export async function buildWorkspaceContext(metadataJson: string): Promise<strin
   try {
     const entries = await fsp.readdir(safeWorkingDirectory, { withFileTypes: true });
     const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.DS_Store']);
+    // Sort entries by name for deterministic output. `fsp.readdir` does
+    // not guarantee a stable order across calls (filesystem-dependent),
+    // and any reshuffle invalidates the workspace context byte prefix —
+    // which is the very first segment of the stable system message that
+    // upstream prompt-caching keys on. Mirrors opencode `directoryListing`
+    // which also sorts before rendering. Directories first, then files,
+    // each alphabetically — this gives a tree-like grouping that is
+    // both human-readable and prompt-cache-stable across rounds.
+    const sortedEntries = entries.slice().sort((a, b) => {
+      const aDir = a.isDirectory() ? 0 : 1;
+      const bDir = b.isDirectory() ? 0 : 1;
+      if (aDir !== bDir) return aDir - bDir;
+      return a.name.localeCompare(b.name);
+    });
     const lines: string[] = [];
-    for (const e of entries.slice(0, 100)) {
+    for (const e of sortedEntries.slice(0, 100)) {
       if (IGNORED.has(e.name)) continue;
       lines.push((e.isDirectory() ? '📁 ' : '📄 ') + e.name);
     }
@@ -275,7 +305,19 @@ async function collectRuleFilesRecursive(
     return;
   }
 
-  for (const entry of entries) {
+  // Sort by name for deterministic recursion order. Same rationale as
+  // `buildWorkspaceContext`: rule files are concatenated into the stable
+  // system prompt, and any reshuffle invalidates the upstream prompt-cache
+  // prefix (Anthropic / OpenAI). Recurse directories before files so the
+  // resulting <project_rules> block has a depth-first stable ordering.
+  const sortedEntries = entries.slice().sort((a, b) => {
+    const aDir = a.isDirectory() ? 0 : 1;
+    const bDir = b.isDirectory() ? 0 : 1;
+    if (aDir !== bDir) return aDir - bDir;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const entry of sortedEntries) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       await collectRuleFilesRecursive(fullPath, workspaceRoot, seen, results);
@@ -602,10 +644,71 @@ export function recordTaskToolCallOrThrow(
   }
 }
 
-export function getEnabledTools(webSearchEnabled: boolean) {
-  return buildGatewayToolDefinitions().filter((tool) => {
-    if (tool.function.name === 'websearch' || tool.function.name === 'webfetch') {
+/**
+ * Determine whether the given model string should use `apply_patch` (the
+ * OpenAI v1 Responses-API patch tool) instead of the generic
+ * `edit / multi_edit / write` triplet for code mutations.
+ *
+ * Mirrors opencode's `tool/registry.ts` filter logic
+ * (@/temp/opencode/packages/opencode/src/tool/registry.ts:309-312):
+ *
+ * ```ts
+ * const usePatch =
+ *   input.modelID.includes("gpt-") &&
+ *   !input.modelID.includes("oss") &&
+ *   !input.modelID.includes("gpt-4")
+ * ```
+ *
+ * Rationale: GPT-5 generation models are trained to emit unified-diff
+ * patches via `apply_patch` and degrade noticeably when handed
+ * `edit/write`. GPT-4 / open-source forks (`*oss*`) still expect
+ * `edit/write`. Anthropic and other providers always use `edit/write`
+ * here because they have their own tool-call shape and don't ship
+ * `apply_patch` training data.
+ *
+ * Returns:
+ * - `true`  → emit `apply_patch`, hide `edit/multi_edit/write`
+ * - `false` → emit `edit/multi_edit/write`, hide `apply_patch`
+ * - `null`  → "I don't know" (model id missing) — caller should fall
+ *             back to the legacy expose-everything surface so that
+ *             dev fixtures / tests / callers that haven't plumbed the
+ *             model selection in keep working unchanged.
+ */
+export function shouldUseApplyPatch(modelId: string | undefined): boolean | null {
+  if (typeof modelId !== 'string' || modelId.length === 0) return null;
+  const lower = modelId.toLowerCase();
+  return lower.includes('gpt-') && !lower.includes('oss') && !lower.includes('gpt-4');
+}
+
+const MODEL_AWARE_TOOL_FILTER_DISABLED =
+  globalThis.process?.env?.['OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER'] === '1';
+
+export function getEnabledTools(
+  webSearchEnabled: boolean,
+  ctx: {
+    effectiveSkills?: EffectiveSkill[];
+    modelId?: string;
+  } = {},
+) {
+  // When the operator opts out we fall back to the pre-PR-A behaviour:
+  // every model sees both `apply_patch` and `edit/write`, leaving tool
+  // selection up to the model. This is the escape hatch for sites that
+  // depend on a homogeneous tool surface across providers — set
+  // `OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER=1` to enable.
+  const usePatch = MODEL_AWARE_TOOL_FILTER_DISABLED ? null : shouldUseApplyPatch(ctx.modelId);
+
+  return buildGatewayToolDefinitions(ctx).filter((tool) => {
+    const name = tool.function.name;
+    if (name === 'websearch' || name === 'webfetch') {
       return webSearchEnabled;
+    }
+    // Three-state: null means "no model-aware decision available" →
+    // legacy expose-everything; true/false drive the patch-vs-edit
+    // mutual exclusion.
+    if (usePatch === null) return true;
+    if (name === 'apply_patch') return usePatch;
+    if (name === 'edit' || name === 'multi_edit' || name === 'write') {
+      return !usePatch;
     }
     return true;
   });
@@ -1136,7 +1239,7 @@ export async function executeToolCalls(input: {
   writeChunk: (chunk: RunEvent) => void;
   workspaceRoot?: string;
 }): Promise<{ hasPendingPermission: boolean }> {
-  const sandbox = createDefaultSandbox();
+  const sandbox = createDefaultSandbox([], { userId: input.userId });
   const sessionMetadata = parseSessionMetadataJson(input.sessionContext.metadataJson);
   const workingDirectory =
     typeof sessionMetadata['workingDirectory'] === 'string'
@@ -1571,6 +1674,29 @@ export async function handleStreamRequest(input: {
     throw error;
   }
 
+  // PR-D-Plugin: notify `chat.message` plugins that a new user
+  // message is being processed. This is the earliest point at which
+  // we know both the resolved model and the user's message text;
+  // matches opencode's `chat.message` hook
+  // (`@/temp/opencode/packages/plugin/src/index.ts:115-130`).
+  //
+  // The output object is currently advisory — plugins read but should
+  // not rely on mutations being honoured. (Future revisions may let
+  // plugins rewrite `parts` to inject system context; this MVP keeps
+  // the contract narrow because the surrounding stream pipeline
+  // doesn't re-read `requestData.message` after this point.)
+  await dispatchChatMessage(
+    {
+      sessionID: input.sessionId,
+      modelId: route.model,
+      messageID: requestData.clientRequestId,
+    },
+    {
+      message: { role: 'user', content: requestData.message },
+      parts: [],
+    },
+  );
+
   const workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson);
   const interactionModes = resolveStreamInteractionModes({
     metadataJson: input.sessionContext.metadataJson,
@@ -1813,6 +1939,21 @@ export async function handleStreamRequest(input: {
           })
         : undefined;
 
+      // Per-turn thinking-language hint snapshot (CJK detector).
+      //
+      // We compute it here at write-time rather than in `runModelRound`
+      // because the legacy in-memory path always appended the hint to
+      // *whichever* user message currently happened to be the latest,
+      // which mutated earlier user-turn bytes across rounds and broke
+      // upstream Anthropic / OpenAI prompt-cache prefixes (the websearch
+      // low-cache-hit root cause). Snapshotting at persist time freezes
+      // the hint onto the user message that triggered it, so subsequent
+      // rounds reload byte-identical content from the DB.
+      const thinkingLanguageHint =
+        requestData.thinkingEnabled === true
+          ? detectThinkingLanguageHintFromText(requestData.message)
+          : null;
+
       persistStreamUserMessage({
         content: buildStreamUserContent({
           inputParts: requestData.inputParts,
@@ -1825,6 +1966,17 @@ export async function handleStreamRequest(input: {
         userId: input.user.sub,
         route,
         titleRoute,
+        // Persist the per-request synthetic block as part of the user
+        // message so subsequent turns see byte-identical bytes for it
+        // (Anthropic / OpenAI prompt-cache prefix stability — was the
+        // root cause of the websearch low-cache-hit bug, mirrors
+        // opencode's `insertReminders` → `sessions.updatePart()` flow).
+        syntheticContext: {
+          injectedPrompt,
+          capabilityContext,
+          companionPrompt,
+          thinkingLanguageHint,
+        },
       });
 
       // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
@@ -1840,11 +1992,106 @@ export async function handleStreamRequest(input: {
         );
       }
 
-      const baseTools = getEnabledTools(webSearchEnabled);
-      const allTools =
-        dynamicToolDefs.length > 0
-          ? [...baseTools, ...buildDynamicGatewayToolDefinitions(dynamicToolDefs)]
-          : baseTools;
+      const effectiveSkills = getEffectiveSkillsFromSessionContext({
+        userId: input.user.sub,
+        sessionId: input.sessionId,
+        metadataJson: input.sessionContext.metadataJson,
+      });
+
+      // ── Pinned skills snapshot (PR3) ──
+      // Capture the pinned skill ids on the first turn we ever render. Once
+      // captured, the snapshot lives on `sessions.metadata.pinnedSkillsSnapshot`
+      // and is reused for every subsequent turn — UI changes to pinned only
+      // take effect for newly-created sessions, matching the toast contract.
+      //
+      // Persistence is unconditional (even an empty skillIds list is saved)
+      // so that mid-session pinning by the user does NOT leak into this
+      // session: `applyPinnedSnapshot` reads an empty snapshot as "session
+      // started without pinned, suppress any newly pinned entries".
+      let pinnedSnapshot: PinnedSkillsSnapshot | null =
+        (sessionMeta['pinnedSkillsSnapshot'] as PinnedSkillsSnapshot | undefined) ?? null;
+      if (!pinnedSnapshot) {
+        const captured = snapshotFromEffective(effectiveSkills);
+        pinnedSnapshot = captured;
+        // Persist back to sessions.metadata_json so subsequent turns and
+        // any replay path reads the same list. Re-read the row first to
+        // avoid clobbering metadata mutations made between read and write.
+        const sessionRowForSnapshot = sqliteGet<{ metadata_json: string }>(
+          'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+          [input.sessionId, input.user.sub],
+        );
+        const currentMetadata = sessionRowForSnapshot
+          ? parseSessionMetadataJson(sessionRowForSnapshot.metadata_json)
+          : {};
+        currentMetadata['pinnedSkillsSnapshot'] = captured;
+        sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
+          JSON.stringify(currentMetadata),
+          input.sessionId,
+          input.user.sub,
+        ]);
+      }
+
+      const pinnedSection = buildPinnedSkillsPromptSection(
+        applyPinnedSnapshot(effectiveSkills, pinnedSnapshot),
+      );
+      const pinnedSkillsPrompt = pinnedSection.section;
+
+      const baseTools = getEnabledTools(webSearchEnabled, {
+        effectiveSkills,
+        // Per-turn model-aware tool filter (mirrors opencode
+        // `tool/registry.ts:303-315`): GPT-5 generation models get
+        // `apply_patch` and lose `edit/multi_edit/write`; other models
+        // keep `edit/multi_edit/write` and lose `apply_patch`. Falls
+        // back to the legacy "expose everything" behaviour when
+        // `route.model` is missing or `OPENAWORK_DISABLE_MODEL_AWARE_TOOL_FILTER=1`.
+        modelId: route.model,
+      });
+
+      // Flatten MCP tools into the LLM tool dictionary (PR-C).
+      // Mirrors opencode's `mcp.tools()` injection
+      // (`@/temp/opencode/packages/opencode/src/session/prompt.ts:458-525`):
+      // each MCP tool becomes its own top-level function under the
+      // `mcp__<server>__<tool>` namespace, eliminating the legacy
+      // `mcp_list_tools` → `mcp_call` two-step. We `await` the catalog
+      // warmup so this turn sees a stable surface; the connection
+      // pool keeps subsequent turns hot. Failures degrade gracefully
+      // — MCP outages must NOT block the assistant turn.
+      let flatMcpDefs: ReturnType<typeof buildFlatMcpToolDefinitions>['definitions'] = [];
+      const flatModeOn = !isFlatMcpToolsDisabled();
+      if (flatModeOn) {
+        try {
+          const catalogs = await listMcpToolsForSession(input.sessionId);
+          const built = buildFlatMcpToolDefinitions(catalogs);
+          flatMcpDefs = built.definitions;
+        } catch (err) {
+          console.warn(
+            `[stream] Failed to build flat MCP tool defs: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      // PR-C.4 — compatibility window:
+      //   - When flat mode is ON: hide the legacy `mcp_list_tools` /
+      //     `mcp_call` wrapper tools from the LLM so the model sees a
+      //     single canonical entry point per MCP capability (no
+      //     duplicates, smaller prompt, stable cache prefix). The
+      //     sandbox keeps both execution paths registered so resumed
+      //     sessions whose history contains old `mcp_call` invocations
+      //     still replay cleanly.
+      //   - When flat mode is OFF: leave the wrappers in place — sites
+      //     that opted out via `OPENAWORK_DISABLE_MCP_FLAT_TOOLS=1`
+      //     continue with the pre-PR-C contract.
+      const baseToolsForTurn = flatModeOn
+        ? baseTools.filter(
+            (tool) => tool.function.name !== 'mcp_list_tools' && tool.function.name !== 'mcp_call',
+          )
+        : baseTools;
+
+      const allTools = [
+        ...baseToolsForTurn,
+        ...flatMcpDefs,
+        ...(dynamicToolDefs.length > 0 ? buildDynamicGatewayToolDefinitions(dynamicToolDefs) : []),
+      ];
       const filteredTools = filterEnabledGatewayToolsForSession(
         allTools,
         input.sessionContext.metadataJson,
@@ -2011,6 +2258,7 @@ export async function handleStreamRequest(input: {
           dynamicAgentPrompt,
           startWorkContext,
           commandContext: commandContext?.instruction ?? null,
+          pinnedSkillsPrompt,
           syntheticContinuationPrompt,
           memoryBlock,
           agentId: route.effectiveAgentId ?? requestData.agentId,
@@ -2356,13 +2604,64 @@ export async function handleStreamRequest(input: {
       });
       unsubscribeSessionEvents();
     }
-  })().catch((err) => {
+  })().catch(async (err) => {
     if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
       console.log('[STREAM_ABORT] session', input.sessionId, 'stream aborted —', String(err));
+      // Propagate the abort to any in-flight descendant session streams
+      // (delegate_task / look_at / call_omo_agent etc. spawn independent
+      // streams keyed by `metadata_json.parentSessionId`). Awaiting the
+      // cascade before we emit `done` guarantees the descendant streams
+      // have finished writing their tool results / run events so the
+      // parent's "cancelled" state is consistent across the lineage.
+      // Mirrors opencode #25798 (`fix: task cancellation should
+      // propagate`). Bounded by the helper's 10s default budget so a
+      // hung child cannot block the user's stop UX indefinitely.
+      let cascadeSummary: StreamCancellationSummary | undefined;
+      try {
+        const cascade = await cancelDescendantSessionStreams({
+          rootSessionId: input.sessionId,
+          userId: input.user.sub,
+          reason: 'parent_aborted',
+        });
+        if (cascade.cancelledStreamCount > 0 || cascade.visitedDescendantSessionIds.length > 0) {
+          console.log(
+            '[STREAM_ABORT_CASCADE] session',
+            input.sessionId,
+            'descendants',
+            cascade.visitedDescendantSessionIds.length,
+            'cancelledStreams',
+            cascade.cancelledStreamCount,
+            'durationMs',
+            cascade.durationMs,
+            cascade.timedOut ? '(timed out)' : '',
+          );
+        }
+        // Surface the cascade as a structured payload on the `done`
+        // chunk so the UI can render a meaningful toast instead of a
+        // bare "cancelled". The reason is read from the in-flight
+        // entry the cancellation registry stamped — for the user's
+        // own stop it stays `user_aborted`; for streams aborted by
+        // an upstream cascade it carries the propagated tag so
+        // descendant UIs can show "由父会话中断" (T-CANCEL-08).
+        const propagatedReason = readPendingCancelReason(
+          input.sessionId,
+          requestData.clientRequestId,
+        );
+        cascadeSummary = {
+          reason: propagatedReason,
+          descendantSessions: cascade.visitedDescendantSessionIds.length,
+          cancelledStreams: cascade.cancelledStreamCount,
+          cascadeDurationMs: cascade.durationMs,
+          timedOut: cascade.timedOut,
+        };
+      } catch (cascadeErr) {
+        console.warn('[STREAM_ABORT_CASCADE] failed —', input.sessionId, String(cascadeErr));
+      }
       emitChunk({
         type: 'done',
         stopReason: 'cancelled',
         ...createRunEventMeta(runId, eventSequence),
+        ...(cascadeSummary ? { cancellation: cascadeSummary } : {}),
       });
       wl.flush(ctx, 200);
       setPersistedSessionStateStatus({

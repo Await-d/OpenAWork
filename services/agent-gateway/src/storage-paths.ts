@@ -46,3 +46,14 @@ export function resolveGatewayArtifactsIndexPath(): string {
 export function resolveGatewayFileBackupsDir(): string {
   return join(resolveGatewayDataDir(), 'file-backups');
 }
+
+/**
+ * Cache root for the `repo_clone` / `repo_overview` tools (P1-SCOUT).
+ *
+ * Children paths are organised as `<host>/<owner>/<repo>` so the same
+ * GitHub project always resolves to a stable absolute path across
+ * sessions and processes. Mirrors opencode's `Global.Path.repos`.
+ */
+export function resolveGatewayReposDir(): string {
+  return join(resolveGatewayDataDir(), 'repos');
+}

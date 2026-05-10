@@ -4,6 +4,10 @@ const mocked = vi.hoisted(() => ({
   connectMock: vi.fn(async () => undefined),
   disconnectMock: vi.fn(async () => undefined),
   callToolMock: vi.fn(async () => ({ content: [{ type: 'text', text: 'result' }] })),
+  // Capture the listener the pool registers post-connect so tests
+  // can simulate a `notifications/tools/list_changed` push and verify
+  // the pool fans out to its registered listeners.
+  subscribeMock: vi.fn(),
 }));
 
 vi.mock('@openAwork/mcp-client', () => ({
@@ -11,6 +15,7 @@ vi.mock('@openAwork/mcp-client', () => ({
     connect = mocked.connectMock;
     disconnect = mocked.disconnectMock;
     callTool = mocked.callToolMock;
+    subscribeToolListChanged = mocked.subscribeMock;
   },
 }));
 
@@ -102,5 +107,40 @@ describe('skill-mcp-connection-pool', () => {
     await skillMcpPool.disconnectUserConnection('user-1', 'test');
     expect(skillMcpPool.isConnected('user-1', 'test')).toBe(false);
     expect(mocked.disconnectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fans out tool-list-changed notifications to registered listeners with the originating tuple', async () => {
+    // The pool's `createConnection` registers a notification handler
+    // by calling `adapter.subscribeToolListChanged(serverId, sdkHandler)`.
+    // We capture the SDK handler from the mock so we can synthesise a
+    // server-pushed notification.
+    let capturedSdkHandler: (() => void | Promise<void>) | null = null;
+    mocked.subscribeMock.mockImplementation(
+      async (_serverId: string, sdkHandler: () => void | Promise<void>) => {
+        capturedSdkHandler = sdkHandler;
+      },
+    );
+
+    const events: Array<{ userId: string; mcpName: string; serverId: string }> = [];
+    const unsubscribe = skillMcpPool.onToolListChanged((evt) => {
+      events.push(evt);
+    });
+
+    await skillMcpPool.getOrCreateConnection('user-1', 'gh-mcp', {
+      ...TEST_SERVER_REF,
+      id: 'gh-mcp-server',
+    });
+    expect(capturedSdkHandler).not.toBeNull();
+
+    // Simulate the MCP server pushing notifications/tools/list_changed.
+    await capturedSdkHandler!();
+
+    expect(events).toEqual([{ userId: 'user-1', mcpName: 'gh-mcp', serverId: 'gh-mcp-server' }]);
+
+    unsubscribe();
+
+    // After unsubscribe, further pushes must not deliver to the listener.
+    await capturedSdkHandler!();
+    expect(events).toHaveLength(1);
   });
 });

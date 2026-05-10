@@ -23,10 +23,65 @@
 
 /* ── Todo list preview (todowrite/subtodowrite expand panel) ── */
 
+/* Outer panel that wraps the summary header + checklist into one card. The
+ * subtle inset background and rounded corners give the unified todo view a
+ * single visual frame after we dropped the duplicate "参数 / 输出" section
+ * labels from InlineToolCall — without it the bare list felt unanchored. */
+.tool-call-todo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--surface-2) 45%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+}
+
+/* Compact recap row above the list — one chip per non-zero status plus a
+ * leading "<n> 项" total. Mirrors the InlineToolCall pill summary so the
+ * collapsed and expanded states read with the same rhythm. */
+.tool-call-todo-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 0 2px 4px;
+  border-bottom: 1px dashed color-mix(in oklch, var(--border) 45%, transparent);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-call-todo-summary-total {
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+}
+
+.tool-call-todo-summary-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+}
+
+.tool-call-todo-summary-stat[data-status='in_progress'] {
+  color: var(--accent);
+}
+
+.tool-call-todo-summary-stat[data-status='completed'] {
+  color: var(--success, color-mix(in oklch, var(--accent) 60%, var(--text-2)));
+}
+
+.tool-call-todo-summary-stat[data-status='cancelled'] {
+  color: color-mix(in oklch, var(--text-3) 80%, var(--text-2));
+}
+
 .tool-call-todo-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0;
+  padding: 2px 0 0;
   display: flex;
   flex-direction: column;
   gap: 2px;

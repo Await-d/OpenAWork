@@ -115,6 +115,55 @@ describe('unifiedMessageToModelMessages', () => {
     expect(result).toEqual([]);
   });
 
+  // Regression: OpenAI Responses API requires `function_call.id`
+  // (`fc_xxx`) on round-2 input or it re-keys the item and the
+  // upstream prompt-cache prefix from this point on misses on every
+  // subsequent request. The persisted `tool-call.providerMetadata`
+  // (e.g. `openai.itemId`) must round-trip into AI SDK's
+  // `tool-call.providerOptions` so the OpenAI Responses adapter
+  // rebuilds the original `id` rather than falling back to the
+  // call_id (`call_xxx`).
+  it('forwards tool-call.providerMetadata into ToolCallPart.providerOptions', () => {
+    const result = unifiedMessageToModelMessages({
+      role: 'assistant',
+      content: null,
+      toolCalls: [
+        {
+          id: 'call_websearch',
+          name: 'web_search',
+          arguments: '{"query":"React 19"}',
+          providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+        },
+      ],
+    });
+    expect(result).toHaveLength(1);
+    const assistant = result[0]!;
+    expect(assistant.role).toBe('assistant');
+    if (!Array.isArray(assistant.content)) throw new Error('expected array content');
+    const toolCallPart = assistant.content.find((p) => p.type === 'tool-call');
+    expect(toolCallPart).toBeDefined();
+    if (toolCallPart && toolCallPart.type === 'tool-call') {
+      expect(toolCallPart.toolCallId).toBe('call_websearch');
+      expect(toolCallPart.providerOptions).toEqual({
+        openai: { itemId: 'fc_websearch_001' },
+      });
+    }
+  });
+
+  it('omits providerOptions when no tool-call providerMetadata is supplied', () => {
+    const result = unifiedMessageToModelMessages({
+      role: 'assistant',
+      content: null,
+      toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }],
+    });
+    if (!Array.isArray(result[0]!.content)) throw new Error('expected array content');
+    const toolCallPart = result[0]!.content.find((p) => p.type === 'tool-call');
+    expect(toolCallPart).toBeDefined();
+    if (toolCallPart && toolCallPart.type === 'tool-call') {
+      expect(toolCallPart.providerOptions).toBeUndefined();
+    }
+  });
+
   it('falls back to raw arguments when JSON parsing fails', () => {
     const result = unifiedMessageToModelMessages({
       role: 'assistant',

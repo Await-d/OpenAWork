@@ -1,6 +1,7 @@
 import type { ManagedAgentRecord } from '@openAwork/shared';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { listManagedAgentsForUser } from './agent-catalog.js';
+import type { EffectiveSkill } from './skill-selection.js';
 import {
   getTaskCategoryDescription,
   getTaskCategoryPromptAppend,
@@ -28,7 +29,18 @@ export interface ResolvedDelegatedAgent {
   modelEntries: ReferenceModelEntry[];
   modelVariant?: string;
   requestedSkills: string[];
+  /**
+   * Skills the caller requested but that aren't in the parent session's
+   * effective skill set (and aren't BUILTIN). Surfaced to caller so it can
+   * audit-log the divergence; child session never sees them.
+   */
+  droppedSkills: string[];
   systemPrompt?: string;
+}
+
+export interface ResolveDelegatedAgentOptions {
+  /** Effective skill set of the parent session — used to filter `load_skills`. */
+  parentEffective?: EffectiveSkill[];
 }
 
 function normalizeOptionalText(value: string | undefined): string | undefined {
@@ -186,11 +198,64 @@ function buildDelegatedSystemPrompt(input: {
   return sections.join('\n\n');
 }
 
+/**
+ * Drop requested skills that aren't allowed by the parent session's effective
+ * set. BUILTIN skills bypass the filter so they remain delegate-friendly even
+ * when the parent has a narrow workspace selection. Returns the kept list and
+ * the dropped names; callers can audit-log the dropped portion.
+ */
+function filterRequestedSkillsByEffective(
+  requested: string[],
+  parentEffective: EffectiveSkill[] | undefined,
+): { kept: string[]; dropped: string[] } {
+  if (!parentEffective || parentEffective.length === 0 || requested.length === 0) {
+    return { kept: requested, dropped: [] };
+  }
+  const allowed = new Set<string>();
+  for (const entry of parentEffective) {
+    if (!entry.enabled) continue;
+    const candidates = [
+      entry.skillId,
+      entry.manifest?.id,
+      entry.manifest?.name,
+      entry.manifest?.displayName,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        allowed.add(candidate.trim().toLowerCase());
+      }
+    }
+  }
+  // BUILTIN names are always allowed.
+  for (const { manifest } of BUILTIN_SKILLS) {
+    for (const candidate of [manifest.id, manifest.name, manifest.displayName]) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        allowed.add(candidate.trim().toLowerCase());
+      }
+    }
+  }
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const skill of requested) {
+    if (allowed.has(skill.trim().toLowerCase())) {
+      kept.push(skill);
+    } else {
+      dropped.push(skill);
+    }
+  }
+  return { kept, dropped };
+}
+
 export function resolveDelegatedAgent(
   userId: string,
   input: RawDelegatedTaskInput,
+  options: ResolveDelegatedAgentOptions = {},
 ): ResolvedDelegatedAgent {
-  const requestedSkills = normalizeSkills(input.load_skills);
+  const allRequested = normalizeSkills(input.load_skills);
+  const { kept: requestedSkills, dropped: droppedSkills } = filterRequestedSkillsByEffective(
+    allRequested,
+    options.parentEffective,
+  );
   const category = normalizeOptionalText(input.category);
   const subagentType = normalizeOptionalText(input.subagent_type);
 
@@ -209,6 +274,7 @@ export function resolveDelegatedAgent(
       modelEntries: managedModelEntries.length > 0 ? managedModelEntries : referenceModelEntries,
       modelVariant: matchedAgent?.variant,
       requestedSkills,
+      droppedSkills,
       systemPrompt: buildDelegatedSystemPrompt({
         agentPrompt: matchedAgent?.systemPrompt,
         requestedSkills,
@@ -230,6 +296,7 @@ export function resolveDelegatedAgent(
       categoryManagedEntries.length > 0 ? categoryManagedEntries : categoryReferenceEntries,
     modelVariant: categoryAgent?.variant,
     requestedSkills,
+    droppedSkills,
     systemPrompt: buildDelegatedSystemPrompt({
       agentPrompt: categoryAgent?.systemPrompt,
       category,

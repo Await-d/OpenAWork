@@ -58,6 +58,11 @@ export function useSessions() {
   const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
+  const sessionListPathFilterEnabled = useUIStateStore((s) => s.sessionListPathFilterEnabled);
+  const sessionListPathFilterFeatureEnabled = useUIStateStore(
+    (s) => s.sessionListPathFilterFeatureEnabled,
+  );
+  const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const tokenStore: TokenStore = useMemo(
     () => ({
       getAccessToken: () => useAuthStore.getState().accessToken,
@@ -101,8 +106,24 @@ export function useSessions() {
     try {
       const data = await withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
         const activeStreamSessionId = readPersistedActiveStreamSessionId();
+        // P3-PATH: when the user opted into "scope sidebar to current
+        // workspace", thread the selected path through the list call.
+        // We only forward it when both (a) the toggle is on AND (b) the
+        // user has actually picked a workspace, otherwise we keep the
+        // legacy global list behaviour.
+        // T-PATH-04: the feature flag in settings short-circuits the
+        // toggle entirely so an admin can pin the legacy global
+        // listing for the whole user without forcing them to clear
+        // the per-tab toggle they may have already enabled.
+        const listOptions =
+          sessionListPathFilterFeatureEnabled &&
+          sessionListPathFilterEnabled &&
+          selectedWorkspacePath
+            ? { path: selectedWorkspacePath }
+            : undefined;
         const listedSessions = (await createSessionsClient(gatewayUrl).list(
           token,
+          listOptions,
         )) as unknown as Session[];
         const hydratedSessions = await hydrateMissingParentSessions(
           listedSessions,
@@ -150,7 +171,17 @@ export function useSessions() {
         void navigate('/');
       }
     }
-  }, [accessToken, gatewayUrl, tokenStore, clearAuth, navigate, mergeSavedWorkspacePaths]);
+  }, [
+    accessToken,
+    gatewayUrl,
+    tokenStore,
+    clearAuth,
+    navigate,
+    mergeSavedWorkspacePaths,
+    sessionListPathFilterEnabled,
+    sessionListPathFilterFeatureEnabled,
+    selectedWorkspacePath,
+  ]);
 
   const newSession = useCallback(
     async (workspacePath?: string | null, parentSessionId?: string | null) => {

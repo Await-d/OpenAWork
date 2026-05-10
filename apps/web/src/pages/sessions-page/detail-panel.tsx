@@ -11,6 +11,7 @@ import { FileChangeReviewPanel } from '@openAwork/shared-ui';
 import type { FileChange } from '@openAwork/shared-ui';
 import { extractWorkingDirectory } from '../../utils/session-metadata.js';
 import type { SessionRow } from './session-page-types.js';
+import { WorkspaceWarpDialog } from './workspace-warp-dialog.js';
 import { statusBadgeBg, statusBadgeFg, statusLabel } from './session-page-utils.js';
 
 const CARD_STYLE: CSSProperties = {
@@ -398,6 +399,10 @@ export function DetailPanel({
     () => extractWorkingDirectory(selected.metadata_json),
     [selected.metadata_json],
   );
+  // P3-WARP stage 0: surface a "切换工作区" dialog from the detail
+  // panel header. The dialog itself owns its draft state; we just
+  // track open/closed here.
+  const [warpDialogOpen, setWarpDialogOpen] = useState(false);
   const [reviewChanges, setReviewChanges] = useState<FileChange[]>([]);
   const [reviewDiff, setReviewDiff] = useState<Record<string, string>>({});
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -630,419 +635,457 @@ export function DetailPanel({
   ]);
 
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        background: 'var(--bg-2)',
-      }}
-    >
-      <div
-        style={{
-          padding: '1.25rem 1.5rem',
-          borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <div
-              style={{
-                fontSize: 16,
-                fontWeight: 700,
-                color: 'var(--text)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                marginBottom: 6,
-              }}
-            >
-              {selected.title ?? (
-                <span style={{ color: 'var(--text-3)', fontFamily: 'monospace', fontSize: 14 }}>
-                  {selected.id.slice(0, 8)}…
-                </span>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <span
-                style={{
-                  fontSize: 11,
-                  padding: '2px 9px',
-                  borderRadius: 99,
-                  background: statusBadgeBg(selected.state_status),
-                  color: statusBadgeFg(selected.state_status),
-                  fontWeight: 600,
-                }}
-              >
-                {statusLabel(selected.state_status)}
-              </span>
-              <SummaryPill
-                label="更新时间"
-                value={new Date(selected.updated_at).toLocaleString()}
-              />
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onOpenChat}
-            onPointerEnter={onPreloadChat}
-            onFocus={onPreloadChat}
-            style={{
-              background: 'var(--accent)',
-              color: 'var(--accent-text)',
-              border: 'none',
-              borderRadius: 8,
-              padding: '7px 18px',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            打开对话
-          </button>
-        </div>
-      </div>
+    <>
       <div
         style={{
           flex: 1,
-          overflowY: 'auto',
-          padding: '1.25rem 1.5rem',
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
+          overflow: 'hidden',
+          background: 'var(--bg-2)',
         }}
       >
         <div
           style={{
-            ...CARD_STYLE,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: '1rem 1.25rem',
-            padding: '1rem 1.25rem',
-          }}
-        >
-          <DetailField label="状态" value={statusLabel(selected.state_status)} />
-          <DetailField label="更新时间" value={new Date(selected.updated_at).toLocaleString()} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span
-              style={{
-                fontSize: 10,
-                color: 'var(--text-3)',
-                textTransform: 'uppercase',
-                letterSpacing: 0.6,
-              }}
-            >
-              会话 ID
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace' }}>
-                {selected.id.slice(0, 8)}…
-              </span>
-              <button
-                type="button"
-                onClick={onCopyId}
-                style={{ ...ACTION_BUTTON_STYLE, padding: '3px 8px' }}
-              >
-                {copiedId ? '已复制' : '复制'}
-              </button>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <button type="button" onClick={onExport} style={ACTION_BUTTON_STYLE}>
-              导出会话
-            </button>
-          </div>
-        </div>
-
-        <section
-          style={{
-            ...CARD_STYLE,
-            padding: '1rem 1.1rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
+            padding: '1.25rem 1.5rem',
+            borderBottom: '1px solid var(--border)',
+            flexShrink: 0,
           }}
         >
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
+              alignItems: 'flex-start',
               justifyContent: 'space-between',
-              gap: 10,
+              gap: 12,
               flexWrap: 'wrap',
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
-                会话文件快照
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div
+                style={{
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: 'var(--text)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  marginBottom: 6,
+                }}
+              >
+                {selected.title ?? (
+                  <span style={{ color: 'var(--text-3)', fontFamily: 'monospace', fontSize: 14 }}>
+                    {selected.id.slice(0, 8)}…
+                  </span>
+                )}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                查看本会话记录下来的文件变更、对比旧快照与最新状态，并执行恢复预览或恢复。
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: '2px 9px',
+                    borderRadius: 99,
+                    background: statusBadgeBg(selected.state_status),
+                    color: statusBadgeFg(selected.state_status),
+                    fontWeight: 600,
+                  }}
+                >
+                  {statusLabel(selected.state_status)}
+                </span>
+                <SummaryPill
+                  label="更新时间"
+                  value={new Date(selected.updated_at).toLocaleString()}
+                />
               </div>
             </div>
-            {readModel?.sessionSummary ? (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <SummaryPill label="快照" value={String(readModel.sessionSummary.snapshotCount)} />
-                <SummaryPill label="回合" value={String(readModel.sessionSummary.turnCount)} />
-                <SummaryPill label="文件" value={String(readModel.sessionSummary.totalFileDiffs)} />
-                <SummaryPill
-                  label="保证"
-                  value={formatGuaranteeLevel(readModel.sessionSummary.weakestGuaranteeLevel)}
-                />
+            <button
+              type="button"
+              onClick={onOpenChat}
+              onPointerEnter={onPreloadChat}
+              onFocus={onPreloadChat}
+              style={{
+                background: 'var(--accent)',
+                color: 'var(--accent-text)',
+                border: 'none',
+                borderRadius: 8,
+                padding: '7px 18px',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              打开对话
+            </button>
+          </div>
+        </div>
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '1.25rem 1.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              ...CARD_STYLE,
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: '1rem 1.25rem',
+              padding: '1rem 1.25rem',
+            }}
+          >
+            <DetailField label="状态" value={statusLabel(selected.state_status)} />
+            <DetailField label="更新时间" value={new Date(selected.updated_at).toLocaleString()} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  color: 'var(--text-3)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.6,
+                }}
+              >
+                会话 ID
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace' }}>
+                  {selected.id.slice(0, 8)}…
+                </span>
+                <button
+                  type="button"
+                  onClick={onCopyId}
+                  style={{ ...ACTION_BUTTON_STYLE, padding: '3px 8px' }}
+                >
+                  {copiedId ? '已复制' : '复制'}
+                </button>
               </div>
-            ) : null}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setWarpDialogOpen(true)}
+                style={ACTION_BUTTON_STYLE}
+                title="P3-WARP 阶段 0：将本会话绑定到另一个绝对路径"
+              >
+                切换工作区
+              </button>
+              <button type="button" onClick={onExport} style={ACTION_BUTTON_STYLE}>
+                导出会话
+              </button>
+            </div>
           </div>
 
-          {readModelLoading ? (
-            <InlineInfo text="正在加载会话文件快照…" />
-          ) : readModelError ? (
-            <InlineInfo tone="error" text={readModelError} />
-          ) : !readModel || turns.length === 0 ? (
-            <InlineInfo text="当前会话还没有可比较或恢复的文件快照。" />
-          ) : (
-            <>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <SummaryPill label="新增" value={`+${readModel.sessionSummary.totalAdditions}`} />
-                <SummaryPill label="删除" value={`-${readModel.sessionSummary.totalDeletions}`} />
-                <SummaryPill
-                  label="来源"
-                  value={
-                    readModel.sessionSummary.sourceKinds
-                      .map((item) => formatSourceKind(item))
-                      .join(' / ') || '无'
-                  }
-                />
+          <section
+            style={{
+              ...CARD_STYLE,
+              padding: '1rem 1.1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
+                  会话文件快照
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                  查看本会话记录下来的文件变更、对比旧快照与最新状态，并执行恢复预览或恢复。
+                </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {turns.map((turn) => {
-                  const active = turn.snapshotRef === activeTurn?.snapshotRef;
-                  const comparisonLoading =
-                    comparisonState.loading && comparisonState.snapshotRef === turn.snapshotRef;
-                  const previewLoading =
-                    previewState.loading && previewState.snapshotRef === turn.snapshotRef;
-                  const applyLoading =
-                    applyState.status === 'loading' && applyState.snapshotRef === turn.snapshotRef;
-                  const applyMessage =
-                    applyState.snapshotRef === turn.snapshotRef ? applyState.message : null;
-                  const applyTone =
-                    applyState.status === 'success'
-                      ? 'success'
-                      : applyState.status === 'error'
-                        ? 'warning'
-                        : 'neutral';
+              {readModel?.sessionSummary ? (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <SummaryPill
+                    label="快照"
+                    value={String(readModel.sessionSummary.snapshotCount)}
+                  />
+                  <SummaryPill label="回合" value={String(readModel.sessionSummary.turnCount)} />
+                  <SummaryPill
+                    label="文件"
+                    value={String(readModel.sessionSummary.totalFileDiffs)}
+                  />
+                  <SummaryPill
+                    label="保证"
+                    value={formatGuaranteeLevel(readModel.sessionSummary.weakestGuaranteeLevel)}
+                  />
+                </div>
+              ) : null}
+            </div>
 
-                  return (
-                    <div
-                      key={turn.snapshotRef}
-                      style={{
-                        borderRadius: 12,
-                        border: active
-                          ? '1px solid var(--accent)'
-                          : '1px solid var(--border-subtle)',
-                        background: active
-                          ? 'var(--accent-muted)'
-                          : 'color-mix(in oklch, var(--surface) 90%, var(--bg-2) 10%)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setActiveSnapshotRef(turn.snapshotRef)}
+            {readModelLoading ? (
+              <InlineInfo text="正在加载会话文件快照…" />
+            ) : readModelError ? (
+              <InlineInfo tone="error" text={readModelError} />
+            ) : !readModel || turns.length === 0 ? (
+              <InlineInfo text="当前会话还没有可比较或恢复的文件快照。" />
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <SummaryPill label="新增" value={`+${readModel.sessionSummary.totalAdditions}`} />
+                  <SummaryPill label="删除" value={`-${readModel.sessionSummary.totalDeletions}`} />
+                  <SummaryPill
+                    label="来源"
+                    value={
+                      readModel.sessionSummary.sourceKinds
+                        .map((item) => formatSourceKind(item))
+                        .join(' / ') || '无'
+                    }
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {turns.map((turn) => {
+                    const active = turn.snapshotRef === activeTurn?.snapshotRef;
+                    const comparisonLoading =
+                      comparisonState.loading && comparisonState.snapshotRef === turn.snapshotRef;
+                    const previewLoading =
+                      previewState.loading && previewState.snapshotRef === turn.snapshotRef;
+                    const applyLoading =
+                      applyState.status === 'loading' &&
+                      applyState.snapshotRef === turn.snapshotRef;
+                    const applyMessage =
+                      applyState.snapshotRef === turn.snapshotRef ? applyState.message : null;
+                    const applyTone =
+                      applyState.status === 'success'
+                        ? 'success'
+                        : applyState.status === 'error'
+                          ? 'warning'
+                          : 'neutral';
+
+                    return (
+                      <div
+                        key={turn.snapshotRef}
                         style={{
-                          width: '100%',
-                          padding: '10px 11px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 8,
-                          alignItems: 'stretch',
-                          textAlign: 'left',
-                          cursor: 'pointer',
+                          borderRadius: 12,
+                          border: active
+                            ? '1px solid var(--accent)'
+                            : '1px solid var(--border-subtle)',
+                          background: active
+                            ? 'var(--accent-muted)'
+                            : 'color-mix(in oklch, var(--surface) 90%, var(--bg-2) 10%)',
+                          overflow: 'hidden',
                         }}
                       >
-                        <div
+                        <button
+                          type="button"
+                          onClick={() => setActiveSnapshotRef(turn.snapshotRef)}
                           style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 8,
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            <SummaryPill label="时间" value={formatSnapshotTime(turn.createdAt)} />
-                            <SummaryPill
-                              label="范围"
-                              value={formatScopeKind(turn.summary.scopeKind)}
-                            />
-                            {turn.snapshotRef === latestSnapshotRef ? (
-                              <SummaryPill label="位置" value="最新" />
-                            ) : null}
-                          </div>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              color: 'var(--text-3)',
-                              fontFamily: 'monospace',
-                            }}
-                          >
-                            {compactSnapshotRef(turn.snapshotRef)}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <SummaryPill label="文件" value={String(turn.summary.files)} />
-                          <SummaryPill label="新增" value={`+${turn.summary.additions}`} />
-                          <SummaryPill label="删除" value={`-${turn.summary.deletions}`} />
-                          <SummaryPill
-                            label="保证"
-                            value={formatGuaranteeLevel(turn.summary.guaranteeLevel)}
-                          />
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
-                          {renderTurnFiles(turn.files) || '该回合暂无文件条目'}
-                        </div>
-                      </button>
-
-                      {active ? (
-                        <div
-                          style={{
+                            width: '100%',
+                            padding: '10px 11px',
                             display: 'flex',
                             flexDirection: 'column',
                             gap: 8,
-                            padding: '0 11px 11px',
+                            alignItems: 'stretch',
+                            textAlign: 'left',
+                            cursor: 'pointer',
                           }}
                         >
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            <button
-                              type="button"
-                              onClick={() => void handleCompareToLatest()}
-                              disabled={turn.snapshotRef === latestSnapshotRef || comparisonLoading}
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 8,
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <SummaryPill
+                                label="时间"
+                                value={formatSnapshotTime(turn.createdAt)}
+                              />
+                              <SummaryPill
+                                label="范围"
+                                value={formatScopeKind(turn.summary.scopeKind)}
+                              />
+                              {turn.snapshotRef === latestSnapshotRef ? (
+                                <SummaryPill label="位置" value="最新" />
+                              ) : null}
+                            </div>
+                            <span
                               style={{
-                                ...ACTION_BUTTON_STYLE,
-                                opacity: turn.snapshotRef === latestSnapshotRef ? 0.55 : 1,
+                                fontSize: 10,
+                                color: 'var(--text-3)',
+                                fontFamily: 'monospace',
                               }}
                             >
-                              {turn.snapshotRef === latestSnapshotRef
-                                ? '已是最新快照'
-                                : comparisonLoading
-                                  ? '对比中…'
-                                  : '与最新对比'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handlePreviewRestore()}
-                              disabled={previewLoading}
-                              style={ACTION_BUTTON_STYLE}
-                            >
-                              {previewLoading ? '预览中…' : '恢复预览'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleApplyRestore()}
-                              disabled={applyLoading}
-                              style={{
-                                ...ACTION_BUTTON_STYLE,
-                                borderColor: hasPreviewConflicts
-                                  ? 'color-mix(in oklch, var(--warning) 38%, var(--border))'
-                                  : 'var(--border)',
-                                color: hasPreviewConflicts ? 'var(--warning)' : 'var(--text-2)',
-                              }}
-                            >
-                              {applyLoading
-                                ? '恢复中…'
-                                : hasPreviewConflicts
-                                  ? '应用恢复（强制）'
-                                  : '应用恢复'}
-                            </button>
+                              {compactSnapshotRef(turn.snapshotRef)}
+                            </span>
                           </div>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <SummaryPill label="文件" value={String(turn.summary.files)} />
+                            <SummaryPill label="新增" value={`+${turn.summary.additions}`} />
+                            <SummaryPill label="删除" value={`-${turn.summary.deletions}`} />
+                            <SummaryPill
+                              label="保证"
+                              value={formatGuaranteeLevel(turn.summary.guaranteeLevel)}
+                            />
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                            {renderTurnFiles(turn.files) || '该回合暂无文件条目'}
+                          </div>
+                        </button>
 
-                          {comparisonState.snapshotRef === turn.snapshotRef &&
-                          comparisonState.error ? (
-                            <InlineInfo tone="error" text={comparisonState.error} />
-                          ) : null}
-                          {previewState.snapshotRef === turn.snapshotRef && previewState.error ? (
-                            <InlineInfo tone="error" text={previewState.error} />
-                          ) : null}
-                          {applyMessage ? (
-                            <InlineInfo tone={applyTone} text={applyMessage} />
-                          ) : null}
-                          {activeComparison ? (
-                            <ComparisonPanel comparison={activeComparison} />
-                          ) : null}
-                          {activePreview ? <RestorePreviewPanel preview={activePreview} /> : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </section>
+                        {active ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 8,
+                              padding: '0 11px 11px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => void handleCompareToLatest()}
+                                disabled={
+                                  turn.snapshotRef === latestSnapshotRef || comparisonLoading
+                                }
+                                style={{
+                                  ...ACTION_BUTTON_STYLE,
+                                  opacity: turn.snapshotRef === latestSnapshotRef ? 0.55 : 1,
+                                }}
+                              >
+                                {turn.snapshotRef === latestSnapshotRef
+                                  ? '已是最新快照'
+                                  : comparisonLoading
+                                    ? '对比中…'
+                                    : '与最新对比'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handlePreviewRestore()}
+                                disabled={previewLoading}
+                                style={ACTION_BUTTON_STYLE}
+                              >
+                                {previewLoading ? '预览中…' : '恢复预览'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleApplyRestore()}
+                                disabled={applyLoading}
+                                style={{
+                                  ...ACTION_BUTTON_STYLE,
+                                  borderColor: hasPreviewConflicts
+                                    ? 'color-mix(in oklch, var(--warning) 38%, var(--border))'
+                                    : 'var(--border)',
+                                  color: hasPreviewConflicts ? 'var(--warning)' : 'var(--text-2)',
+                                }}
+                              >
+                                {applyLoading
+                                  ? '恢复中…'
+                                  : hasPreviewConflicts
+                                    ? '应用恢复（强制）'
+                                    : '应用恢复'}
+                              </button>
+                            </div>
 
-        {selected.metadata_json && selectedWorkingDirectory ? (
-          <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {reviewLoading ? (
-              <InlineInfo text="正在加载工作区文件改动审阅…" />
-            ) : reviewError ? (
-              <InlineInfo tone="error" text={reviewError} />
-            ) : reviewChanges.length > 0 ? (
-              <FileChangeReviewPanel
-                changes={reviewChanges}
-                loadDiff={async (filePath: string) => {
-                  const cached = reviewDiff[filePath];
-                  if (cached !== undefined) return cached;
-                  const response = await fetch(
-                    `${gatewayUrl}/workspace/review/diff?path=${encodeURIComponent(selectedWorkingDirectory)}&filePath=${encodeURIComponent(filePath)}`,
-                    { headers: { Authorization: `Bearer ${token}` } },
-                  );
-                  if (!response.ok) return '';
-                  const data = (await response.json()) as { diff: string };
-                  setReviewDiff((prev) => ({ ...prev, [filePath]: data.diff ?? '' }));
-                  return data.diff ?? '';
-                }}
-                onAccept={(filePath: string) => {
-                  setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
-                }}
-                onRevert={async (filePath: string) => {
-                  const response = await fetch(`${gatewayUrl}/workspace/review/revert`, {
-                    method: 'POST',
-                    headers: {
-                      Authorization: `Bearer ${token}`,
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                      path: selectedWorkingDirectory,
-                      filePath,
-                    }),
-                  });
-                  if (!response.ok) {
-                    throw new Error('revert failed');
-                  }
-                  setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
-                  setReviewDiff((prev) => {
-                    const next = { ...prev };
-                    delete next[filePath];
-                    return next;
-                  });
-                }}
-              />
-            ) : (
-              <InlineInfo text="当前工作区没有需要审阅的未提交改动。" />
+                            {comparisonState.snapshotRef === turn.snapshotRef &&
+                            comparisonState.error ? (
+                              <InlineInfo tone="error" text={comparisonState.error} />
+                            ) : null}
+                            {previewState.snapshotRef === turn.snapshotRef && previewState.error ? (
+                              <InlineInfo tone="error" text={previewState.error} />
+                            ) : null}
+                            {applyMessage ? (
+                              <InlineInfo tone={applyTone} text={applyMessage} />
+                            ) : null}
+                            {activeComparison ? (
+                              <ComparisonPanel comparison={activeComparison} />
+                            ) : null}
+                            {activePreview ? <RestorePreviewPanel preview={activePreview} /> : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </section>
-        ) : null}
+
+          {selected.metadata_json && selectedWorkingDirectory ? (
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {reviewLoading ? (
+                <InlineInfo text="正在加载工作区文件改动审阅…" />
+              ) : reviewError ? (
+                <InlineInfo tone="error" text={reviewError} />
+              ) : reviewChanges.length > 0 ? (
+                <FileChangeReviewPanel
+                  changes={reviewChanges}
+                  loadDiff={async (filePath: string) => {
+                    const cached = reviewDiff[filePath];
+                    if (cached !== undefined) return cached;
+                    const response = await fetch(
+                      `${gatewayUrl}/workspace/review/diff?path=${encodeURIComponent(selectedWorkingDirectory)}&filePath=${encodeURIComponent(filePath)}`,
+                      { headers: { Authorization: `Bearer ${token}` } },
+                    );
+                    if (!response.ok) return '';
+                    const data = (await response.json()) as { diff: string };
+                    setReviewDiff((prev) => ({ ...prev, [filePath]: data.diff ?? '' }));
+                    return data.diff ?? '';
+                  }}
+                  onAccept={(filePath: string) => {
+                    setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
+                  }}
+                  onRevert={async (filePath: string) => {
+                    const response = await fetch(`${gatewayUrl}/workspace/review/revert`, {
+                      method: 'POST',
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        path: selectedWorkingDirectory,
+                        filePath,
+                      }),
+                    });
+                    if (!response.ok) {
+                      throw new Error('revert failed');
+                    }
+                    setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
+                    setReviewDiff((prev) => {
+                      const next = { ...prev };
+                      delete next[filePath];
+                      return next;
+                    });
+                  }}
+                />
+              ) : (
+                <InlineInfo text="当前工作区没有需要审阅的未提交改动。" />
+              )}
+            </section>
+          ) : null}
+        </div>
       </div>
-    </div>
+      <WorkspaceWarpDialog
+        isOpen={warpDialogOpen}
+        onClose={() => setWarpDialogOpen(false)}
+        sessionId={selected.id}
+        currentWorkingDirectory={selectedWorkingDirectory}
+        sessionsClient={sessionsClient}
+        token={token}
+        onComplete={() => {
+          // After a successful warp the gateway has rewritten the
+          // session's metadata; refreshing the list pulls the new
+          // workingDirectory into the selected row so the next render
+          // of the detail panel reflects reality. Errors stay inside
+          // the dialog and never reach this callback.
+          void onRefreshSessions?.();
+        }}
+      />
+    </>
   );
 }

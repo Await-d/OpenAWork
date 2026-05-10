@@ -46,6 +46,7 @@ import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
 import type { ModelMessage, StreamTextResult, ToolSet } from 'ai';
 import { streamText, tool as defineTool, jsonSchema } from 'ai';
 import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
+import { dispatchChatParams } from '../../plugin-host.js';
 import type { V2LanguageModel } from './provider.js';
 import {
   buildBaseProviderOptions,
@@ -137,6 +138,27 @@ export interface RunUpstreamStreamInput {
 
 export type RunUpstreamStreamEvent = StreamChunk;
 
+/**
+ * Return a copy of `tools` whose entries are ordered by tool name
+ * (`localeCompare`). The serialised tool list is hashed as part of the
+ * prompt-cache key by Anthropic, OpenAI Responses, and Bedrock; running
+ * with a stable subset of tools but inconsistent iteration order would
+ * therefore cause spurious cache misses across requests in the same
+ * session. Mirrors opencode #26370.
+ *
+ * Returns `undefined` when `tools` is `undefined` so callers can
+ * forward "no tools" through unchanged.
+ */
+export function sortToolsByName(tools: ToolSet | undefined): ToolSet | undefined {
+  if (!tools) return undefined;
+  // `Array#toSorted` is ES2023 and our typecheck lib targets ES2022.
+  // Use `slice().sort()` for the same non-mutating semantics.
+  const sortedEntries = Object.entries(tools)
+    .slice()
+    .sort(([a]: [string, unknown], [b]: [string, unknown]) => a.localeCompare(b));
+  return Object.fromEntries(sortedEntries) as ToolSet;
+}
+
 const FINISH_REASON_TO_STOP: Record<string, StreamDoneChunk['stopReason']> = {
   stop: 'end_turn',
   length: 'max_tokens',
@@ -216,12 +238,11 @@ function shouldInjectNoopStub(input: { litellmProxy?: boolean; providerType?: st
 }
 
 const NOOP_TOOL_DEFINITION = defineTool({
-  description:
-    'Do not call this tool. It exists only for API compatibility and must never be invoked.',
+  description: '请勿调用此工具。它仅为 API 兼容性而存在，绝不应被调用。',
   inputSchema: jsonSchema({
     type: 'object',
     properties: {
-      reason: { type: 'string', description: 'Unused' },
+      reason: { type: 'string', description: '未使用' },
     },
   }),
   execute: async () => ({ output: '', title: '', metadata: {} }),
@@ -326,11 +347,58 @@ export async function* runUpstreamStream(
       model: modelIdForOptions,
     }),
   );
-  const temperature = input.requestOverrides?.temperature ?? input.temperature;
-  const maxOutputTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
-  const topP = input.requestOverrides?.topP ?? input.topP;
-  const frequencyPenalty = input.requestOverrides?.frequencyPenalty ?? input.frequencyPenalty;
-  const presencePenalty = input.requestOverrides?.presencePenalty ?? input.presencePenalty;
+  let temperature = input.requestOverrides?.temperature ?? input.temperature;
+  let maxOutputTokens = input.requestOverrides?.maxTokens ?? input.maxOutputTokens;
+  let topP = input.requestOverrides?.topP ?? input.topP;
+  let frequencyPenalty = input.requestOverrides?.frequencyPenalty ?? input.frequencyPenalty;
+  let presencePenalty = input.requestOverrides?.presencePenalty ?? input.presencePenalty;
+
+  // PR-D-Plugin: `chat.params` hook — let plugins override sampling
+  // params + arbitrary `options` immediately before the AI SDK
+  // `streamText` call. Mirrors opencode's
+  // `@/temp/opencode/packages/plugin/src/index.ts:140-160` contract:
+  // plugins receive the resolved params as a mutable output object,
+  // mutate fields in place, and we read the mutations back into the
+  // local `let` bindings. The shared `options` bag carries
+  // frequency/presence penalty + future provider extensions.
+  //
+  // Hook errors are isolated inside the dispatcher (see
+  // `plugin-host.ts`) so a misbehaving plugin can't crash a turn.
+  const chatParamsOutput: {
+    temperature?: number;
+    topP?: number;
+    topK?: number;
+    maxOutputTokens?: number;
+    options: Record<string, unknown>;
+  } = {
+    options: {},
+  };
+  if (typeof temperature === 'number') chatParamsOutput.temperature = temperature;
+  if (typeof topP === 'number') chatParamsOutput.topP = topP;
+  if (typeof maxOutputTokens === 'number') chatParamsOutput.maxOutputTokens = maxOutputTokens;
+  if (typeof frequencyPenalty === 'number')
+    chatParamsOutput.options['frequencyPenalty'] = frequencyPenalty;
+  if (typeof presencePenalty === 'number')
+    chatParamsOutput.options['presencePenalty'] = presencePenalty;
+
+  await dispatchChatParams(
+    {
+      sessionID: input.sessionId ?? '',
+      modelId: input.modelId ?? '',
+    },
+    chatParamsOutput,
+  );
+
+  // Read the (possibly-mutated) values back. We deliberately allow
+  // plugins to NULL these out (set to `undefined`) — that's a valid
+  // signal "stop sending this param to the model".
+  temperature = chatParamsOutput.temperature;
+  topP = chatParamsOutput.topP;
+  maxOutputTokens = chatParamsOutput.maxOutputTokens;
+  const optsFreq = chatParamsOutput.options['frequencyPenalty'];
+  frequencyPenalty = typeof optsFreq === 'number' ? optsFreq : undefined;
+  const optsPres = chatParamsOutput.options['presencePenalty'];
+  presencePenalty = typeof optsPres === 'number' ? optsPres : undefined;
 
   // `ai@5.x` types `streamText`'s model parameter as the V2 union, but
   // `@ai-sdk/openai-compatible@2.x` already emits V3 instances. Both
@@ -345,9 +413,16 @@ export async function* runUpstreamStream(
     (!incomingTools || Object.keys(incomingTools).length === 0) &&
     hasToolCallsInHistory(decoratedMessages) &&
     shouldInjectNoopStub({ litellmProxy: input.litellmProxy, providerType: input.providerType });
+  // Sort tool entries by name for deterministic ordering. Many providers
+  // hash the serialised tool list as part of the prompt-cache key (Anthropic
+  // prompt caching, OpenAI Responses cached tools, Bedrock prompt-cache),
+  // so even a stable subset of tools that arrives in shifting insertion
+  // order causes spurious cache misses across requests in the same session.
+  // Mirrors opencode #26370.
+  const sortedIncomingTools = sortToolsByName(incomingTools);
   const effectiveTools: ToolSet | undefined = needsStub
     ? ({ _noop: NOOP_TOOL_DEFINITION } as unknown as ToolSet)
-    : incomingTools;
+    : sortedIncomingTools;
   const toolNameLookup = new Map<string, string>();
   if (effectiveTools) {
     for (const name of Object.keys(effectiveTools)) {
@@ -543,6 +618,18 @@ export async function* runUpstreamStream(
             : inputValue !== undefined
               ? JSON.stringify(inputValue)
               : '';
+        // Capture provider metadata so it can ride on the *closer*
+        // delta we emit below. The OpenAI Responses adapter attaches
+        // `openai.itemId` (`fc_xxx`) here — without persisting it,
+        // round-2 input rebuilds `function_call.id` from the
+        // call_id (`call_xxx`), OpenAI re-keys the item, and the
+        // prompt-cache prefix from this point on misses on every
+        // subsequent request.
+        const providerMetadata = (
+          part as {
+            providerMetadata?: Record<string, Record<string, unknown>>;
+          }
+        ).providerMetadata;
         if (!state.toolNamesById.has(callId)) {
           // No prior tool-input-start was emitted (legacy path, e.g.
           // OpenAI Chat Completions `function_call`): register name +
@@ -572,6 +659,21 @@ export async function* runUpstreamStream(
         // would double the JSON in the accumulator (e.g. `{}{}`),
         // make `JSON.parse` fail, and force callers to fall back to
         // `{ raw: '{}{}' }`, which Zod-validated tools then reject.
+        //
+        // We *do* emit a zero-length closer delta carrying
+        // `providerMetadata` whenever the provider supplied one, so
+        // the accumulator can attach `openai.itemId` (and any future
+        // provider-specific metadata) without re-streaming the input.
+        if (providerMetadata && Object.keys(providerMetadata).length > 0) {
+          yield {
+            type: 'tool_call_delta',
+            toolCallId: callId,
+            toolName,
+            inputDelta: '',
+            providerMetadata,
+            ...meta({}),
+          };
+        }
         break;
       }
       case 'tool-error': {

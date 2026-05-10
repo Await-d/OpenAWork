@@ -92,10 +92,10 @@ describe('bash-tools', () => {
   describe('description template', () => {
     it('exposes opencode bash.txt template with placeholders resolved', () => {
       const description = bashToolDefinition.description;
-      // Lifted verbatim from opencode bash.txt — proves the template was
-      // bundled correctly and the placeholders were substituted (no leftover
-      // `${...}` markers in the rendered text).
-      expect(description).toMatch(/Executes a given bash command/);
+      // 校验 bash.txt 模板已被正确加载（OpenAWork 已统一为中文模板，见
+      // services/agent-gateway/src/bash.txt）。同时确保占位符已被替换，没有
+      // 残留 `${...}` 标记。
+      expect(description).toMatch(/在持久化的 shell 会话中执行给定的 bash 命令/);
       expect(description).toMatch(/workdir/);
       expect(description).not.toMatch(/\$\{os\}/);
       expect(description).not.toMatch(/\$\{shell\}/);

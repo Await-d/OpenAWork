@@ -10,6 +10,7 @@ import {
 } from '@openAwork/shared-ui';
 import type { DevtoolsSourceState, SettingsVersionInfo } from '../settings-types.js';
 import { InlineFailureNotice } from './devtools-workbench-primitives.js';
+import { useUIStateStore } from '../../stores/uiState.js';
 
 interface GitHubTriggerConfig {
   appId: string;
@@ -374,6 +375,7 @@ export function WorkspaceTabContent({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <SessionListPathFilterFeatureToggle />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'start' }}>
         <div style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={ROW}>
@@ -1101,6 +1103,57 @@ export function WorkspaceTabContent({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * T-PATH-04 (workflow 260509): admin-style toggle that disables the
+ * sidebar's "仅当前目录" feature outright. Off → useSessions drops
+ * the `path=` query AND the SessionSidebar hides the per-tab toggle,
+ * effectively pinning the legacy global session listing for users
+ * who don't want the path-scoping UX.
+ */
+function SessionListPathFilterFeatureToggle(): React.ReactElement {
+  const enabled = useUIStateStore((s) => s.sessionListPathFilterFeatureEnabled);
+  const setEnabled = useUIStateStore((s) => s.setSessionListPathFilterFeatureEnabled);
+  return (
+    <div
+      style={{
+        ...CARD,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: '10px 12px',
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={SECTION_TITLE}>会话路径过滤</div>
+        <p style={{ ...SECTION_SUB, marginTop: 4 }}>
+          开启后，侧边栏会出现「仅当前目录」开关，可把会话列表限定在当前选中的工作区目录下。
+          关闭则全局停用，所有 list 调用回到无过滤模式。
+        </p>
+      </div>
+      <label
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 11,
+          color: 'var(--text-2)',
+          cursor: 'pointer',
+          userSelect: 'none',
+          flexShrink: 0,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          style={{ margin: 0 }}
+        />
+        启用
+      </label>
     </div>
   );
 }

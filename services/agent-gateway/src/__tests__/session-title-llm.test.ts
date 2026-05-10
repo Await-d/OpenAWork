@@ -24,18 +24,21 @@ import { generateSessionTitleLlm } from '../session-title-llm.js';
 
 function createRoute(overrides?: {
   requestOverrides?: ModelRouteConfig['requestOverrides'];
-  upstreamProtocol?: 'chat_completions' | 'responses';
+  upstreamProtocol?: 'chat_completions' | 'responses' | 'anthropic_messages';
+  providerType?: 'openai' | 'anthropic';
+  model?: string;
+  apiBaseUrl?: string;
 }): ModelRouteConfig {
   return {
-    model: 'gpt-4o-mini',
-    apiBaseUrl: 'https://api.openai.com/v1',
+    model: overrides?.model ?? 'gpt-4o-mini',
+    apiBaseUrl: overrides?.apiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: 'sk-test',
     maxTokens: 256,
     temperature: 0.5,
     upstreamProtocol: overrides?.upstreamProtocol ?? 'chat_completions',
     requestOverrides: overrides?.requestOverrides ?? {},
     supportsThinking: false,
-    providerType: 'openai',
+    providerType: overrides?.providerType ?? 'openai',
   };
 }
 
@@ -85,6 +88,37 @@ describe('generateSessionTitleLlm', () => {
       expect.stringContaining("AND COALESCE(TRIM(title), '') = ''"),
       ['升级后的标题', 'session-2', 'user-2'],
     );
+  });
+
+  it("forwards the route's upstreamProtocol to runUpstreamGenerate", async () => {
+    // Regression: prior to forwarding, anthropic / openai-responses providers
+    // silently degraded to OpenAI Chat Completions inside session-title.
+    mocks.sqliteGet.mockReturnValue({ title: '' });
+    mocks.runUpstreamGenerate.mockResolvedValue({
+      text: '标题',
+      inputTokens: 0,
+      outputTokens: 0,
+      finishReason: 'stop',
+    });
+
+    await generateSessionTitleLlm({
+      route: createRoute({
+        upstreamProtocol: 'anthropic_messages',
+        providerType: 'anthropic',
+        model: 'claude-3-5-sonnet-latest',
+        apiBaseUrl: 'https://api.anthropic.com/v1',
+      }),
+      userMessage: '修复标题',
+      sessionId: 'session-anthropic',
+      userId: 'user-1',
+    });
+
+    expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
+    const callArgs = mocks.runUpstreamGenerate.mock.calls[0]?.[0] as
+      | { providerType?: string; upstreamProtocol?: string }
+      | undefined;
+    expect(callArgs?.providerType).toBe('anthropic');
+    expect(callArgs?.upstreamProtocol).toBe('anthropic_messages');
   });
 
   it('swallows upstream errors and keeps the heuristic title', async () => {

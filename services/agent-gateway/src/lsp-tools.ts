@@ -272,7 +272,7 @@ export const lspGotoDefinitionToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'lsp_goto_definition',
-  description: 'Jump to symbol definition. Find WHERE something is defined.',
+  description: '跳转到符号定义处。用于查找某个东西**在哪里被定义**。',
   inputSchema: gotoDefinitionInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -294,8 +294,7 @@ export const lspGotoImplementationToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'lsp_goto_implementation',
-  description:
-    'Jump to symbol implementation. Find WHERE an interface or abstract method is concretely implemented.',
+  description: '跳转到符号实现处。用于查找某个接口或抽象方法**被具体实现在哪里**。',
   inputSchema: gotoImplementationInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -317,7 +316,7 @@ export const lspFindReferencesToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'lsp_find_references',
-  description: 'Find ALL usages/references of a symbol across the entire workspace.',
+  description: '查找符号在整个工作区中的**所有**使用/引用点。',
   inputSchema: findReferencesInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -338,7 +337,7 @@ export const lspFindReferencesToolDefinition: ToolDefinition<
 export const lspSymbolsToolDefinition: ToolDefinition<typeof symbolsInputSchema, z.ZodString> = {
   name: 'lsp_symbols',
   description:
-    "Get symbols from file (document) or search across workspace. Use scope='document' for file outline, scope='workspace' for project-wide symbol search.",
+    "获取文件符号列表（document）或在工作区范围内搜索。scope='document' 返回文件大纲，scope='workspace' 返回项目级符号搜索结果。",
   inputSchema: symbolsInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -374,7 +373,7 @@ export const lspPrepareRenameToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'lsp_prepare_rename',
-  description: 'Check if rename is valid. Use BEFORE lsp_rename.',
+  description: '检查重命名是否可行。**调用 lsp_rename 之前**使用。',
   inputSchema: prepareRenameInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -396,7 +395,7 @@ export const lspRenameToolDefinition: ToolDefinition<
 > = {
   name: 'lsp_rename',
   description:
-    'Rename symbol across entire workspace. APPLIES changes to all files. Use lsp_prepare_rename first to verify.',
+    '在整个工作区重命名符号。**会将改动应用到所有文件**。请先调 lsp_prepare_rename 验证。',
   inputSchema: renameInputSchema,
   outputSchema: renameOutputSchema,
   timeout: 30000,
@@ -461,8 +460,7 @@ function formatHoverResult(result: unknown): string {
 
 export const lspHoverToolDefinition: ToolDefinition<typeof hoverInputSchema, z.ZodString> = {
   name: 'lsp_hover',
-  description:
-    'Get hover information (type signature, documentation) for a symbol at a given position. Returns human-readable text.',
+  description: '获取指定位置上符号的 hover 信息（类型签名、文档），返回人可读文本。',
   inputSchema: hoverInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -511,8 +509,7 @@ export const lspCallHierarchyToolDefinition: ToolDefinition<
   z.ZodString
 > = {
   name: 'lsp_call_hierarchy',
-  description:
-    'Get call hierarchy for a symbol: who calls it (incoming) and what it calls (outgoing). Single-hop only.',
+  description: '获取符号的调用层次：谁调用了它（incoming）以及它调用了谁（outgoing）。仅返回一跳。',
   inputSchema: callHierarchyInputSchema,
   outputSchema: z.string(),
   timeout: 30000,

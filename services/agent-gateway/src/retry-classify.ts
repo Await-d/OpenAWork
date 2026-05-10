@@ -200,6 +200,24 @@ export function classifyUpstreamError(error: unknown): UpstreamRetryClassificati
           retryAfterMs: computeRetryDelayMs(1, info.responseHeaders),
         };
       }
+      // Anthropic mid-stream overload events arrive as
+      // `{ "type": "error", "error": { "type": "server_is_overloaded" | "overloaded_error", ... } }`.
+      // The lowercase substring check above already catches the rendered JSON
+      // string, but recognising the structured shape here keeps the category
+      // stable even if upstream stops including the literal "overloaded" word
+      // in the rendered message. Mirrors opencode #25888.
+      if (
+        json.type === 'error' &&
+        typeof json.error?.type === 'string' &&
+        /(?:^|_)overloaded(?:_|$)/i.test(json.error.type)
+      ) {
+        return {
+          retryable: true,
+          category: 'overloaded',
+          message: 'Provider is overloaded',
+          retryAfterMs: computeRetryDelayMs(1, info.responseHeaders),
+        };
+      }
       if (typeof json.code === 'string' && /(exhausted|unavailable)/i.test(json.code)) {
         return {
           retryable: true,

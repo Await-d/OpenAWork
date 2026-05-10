@@ -16,9 +16,7 @@ const codeSearchInputSchema = z.object({
   query: z
     .string()
     .min(1)
-    .describe(
-      'Search query to find relevant context for APIs, libraries, SDKs, or real-world code usage.',
-    ),
+    .describe('搜索关键词：用于查找 API、库、SDK 或真实代码使用示例的上下文。'),
   tokensNum: z
     .number()
     .int()
@@ -26,13 +24,12 @@ const codeSearchInputSchema = z.object({
     .max(50000)
     .optional()
     .default(5000)
-    .describe('Number of tokens to return from Exa code context search.'),
+    .describe('从 Exa code context 搜索返回的 token 数量。'),
 });
 
 export const codesearchToolDefinition: ToolDefinition<typeof codeSearchInputSchema, z.ZodString> = {
   name: 'codesearch',
-  description:
-    'Search real-world code examples and API usage context through Exa code context search.',
+  description: '通过 Exa code context 搜索查找真实代码示例与 API 使用上下文。',
   inputSchema: codeSearchInputSchema,
   outputSchema: z.string(),
   timeout: 30000,

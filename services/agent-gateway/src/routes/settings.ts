@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
+import { loadAppVersion } from '../app-version.js';
+import { resolveAuxiliaryLlmConfig } from '../auxiliary-llm-config.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
 import {
   COMPACTION_SETTINGS_KEY,
@@ -22,10 +22,21 @@ import {
 import { startRequestWorkflow } from '../request-workflow.js';
 import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
 import {
+  isMcpServerConnectedForUser,
+  loadConfiguredMcpServersForUser,
+  retryMcpConnectionForUser,
+} from '../mcp-runtime.js';
+import { BUILTIN_MCP_IDS } from '../builtin-mcps.js';
+import {
   readUpstreamRetrySettings,
   UPSTREAM_RETRY_SETTINGS_KEY,
   upstreamRetrySettingsSchema,
 } from '../upstream-retry-policy.js';
+import {
+  readWebsearchPolicy,
+  WEBSEARCH_POLICY_KEY,
+  websearchPolicySchema,
+} from '../websearch-policy.js';
 import {
   buildCompanionFeatureState,
   companionSettingsUpdateSchema,
@@ -40,46 +51,6 @@ import {
 } from '@openAwork/agent-core';
 import { WORKSPACE_ROOT } from '../db.js';
 import { z } from 'zod';
-
-interface RootPackageJson {
-  name?: string;
-  version?: string;
-}
-
-function readPackageJsonVersion(filePath: string): RootPackageJson | null {
-  try {
-    const content = readFileSync(filePath, 'utf-8');
-    return JSON.parse(content) as RootPackageJson;
-  } catch {
-    return null;
-  }
-}
-
-function loadAppVersion(): string {
-  const cwd = process.cwd();
-  const currentPackage = readPackageJsonVersion(resolve(cwd, 'package.json'));
-  let cursor = cwd;
-
-  while (true) {
-    const candidate = readPackageJsonVersion(resolve(cursor, 'package.json'));
-    if (candidate?.name === 'openAwork' && typeof candidate.version === 'string') {
-      return candidate.version;
-    }
-
-    const parent = dirname(cursor);
-    if (parent === cursor) {
-      break;
-    }
-
-    cursor = parent;
-  }
-
-  if (typeof currentPackage?.version === 'string') {
-    return currentPackage.version;
-  }
-
-  return process.env['OPENAWORK_APP_VERSION'] ?? process.env['npm_package_version'] ?? '0.0.1';
-}
 
 const APP_VERSION = loadAppVersion();
 
@@ -388,41 +359,82 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'settings.mcp-status.get');
       const user = request.user as JwtPayload;
 
+      // 走 mcp-runtime 而不是直接读 SQL，让前端展示同时包含
+      // 内置 MCP（websearch / grep_app）与用户自定义项；同 id 的
+      // 用户配置已在 runtime 层完成覆盖。`mcp-status` 仅用于展示，
+      // PUT/GET `/settings/mcp-servers` 仍只镜像用户原始 JSON，
+      // 避免内置项被错误写回 SQLite。
       const loadStep = child('load');
-      const row = sqliteGet<UserSettingRow>(
-        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'mcp_servers'`,
-        [user.sub],
-      );
-      loadStep.succeed(undefined, { found: row !== undefined });
+      const merged = loadConfiguredMcpServersForUser(user.sub);
+      loadStep.succeed(undefined, { servers: merged.length });
 
-      const parseStep = child('parse-json');
-      let servers: unknown[] = [];
-      if (row?.value) {
-        try {
-          const parsed = JSON.parse(row.value) as unknown[];
-          servers = Array.isArray(parsed)
-            ? parsed.map((server) => {
-                const normalized = server as Record<string, unknown>;
-                return {
-                  id: normalized['id'] ?? '',
-                  name: normalized['name'] ?? '',
-                  type: normalized['type'] ?? 'stdio',
-                  status: 'unknown',
-                  enabled: normalized['enabled'] ?? true,
-                };
-              })
-            : [];
-          parseStep.succeed(undefined, { servers: servers.length });
-        } catch {
-          parseStep.fail('invalid mcp_servers JSON');
-          servers = [];
-        }
-      } else {
-        parseStep.succeed(undefined, { servers: 0 });
-      }
+      const builtinIds = new Set<string>(BUILTIN_MCP_IDS);
+      // Real connection status — `isMcpServerConnectedForUser` is a
+      // peek-only `Map.has` against the pool, so polling this
+      // endpoint never warms an idle connection. Disabled servers
+      // and servers we've never tried still report `disconnected`,
+      // which the frontend renders as a grey dot.
+      const servers = merged.map((server) => ({
+        id: server.id,
+        name: server.name,
+        type: server.transport,
+        status: !server.enabled
+          ? ('disabled' as const)
+          : isMcpServerConnectedForUser(user.sub, server)
+            ? ('connected' as const)
+            : ('disconnected' as const),
+        enabled: server.enabled,
+        builtin: builtinIds.has(server.id),
+      }));
 
       step.succeed(undefined, { servers: servers.length });
       return reply.send({ servers });
+    },
+  );
+
+  app.post(
+    '/settings/mcp-servers/:id/retry',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.mcp-servers.retry');
+      const user = request.user as JwtPayload;
+      const params = request.params as { id?: string };
+      const serverId = (params.id ?? '').trim();
+      if (!serverId) {
+        step.fail('serverId required');
+        return reply.code(400).send({ error: 'serverId required' });
+      }
+
+      try {
+        const result = await retryMcpConnectionForUser(user.sub, serverId);
+        // Note: we deliberately call `succeed` even when
+        // `result.status === 'error'` — the route processed
+        // successfully, the *MCP* failed. We surface
+        // `result.error` in the workflow fields so an operator
+        // grepping logs by `status: 'error'` immediately sees the
+        // SDK / transport message without having to chase across
+        // request ids.
+        step.succeed(undefined, {
+          serverId: result.serverId,
+          status: result.status,
+          toolCount: result.toolCount,
+          durationMs: result.durationMs,
+          ...(result.error ? { mcpError: result.error } : {}),
+        });
+        // We deliberately return 200 even on `status: 'error'` —
+        // the failure is a successful diagnostic outcome, not a
+        // protocol error. The frontend uses `result.status` and
+        // `result.error` to render red/green chips.
+        return reply.send(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        step.fail(msg);
+        // The only path here is `getConfiguredServerByIdForUser`
+        // throwing because the id genuinely doesn't exist in either
+        // the user's settings or the builtin list. 404 is the
+        // honest answer.
+        return reply.code(404).send({ error: msg });
+      }
     },
   );
 
@@ -912,6 +924,60 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // P2-WEBSEARCH (workflow 260509): persisted multi-provider rollout
+  // policy. The gateway tool path currently still uses the legacy
+  // single-provider call; this endpoint stores the user's intended
+  // configuration so a future switch to `searchMultiProvider` can
+  // pick it up without a UI re-roll. Default state keeps the legacy
+  // behaviour (`sequential`, no providers) so saving an empty
+  // configuration is a no-op.
+  app.get(
+    '/settings/websearch',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.websearch.get');
+      const user = request.user as JwtPayload;
+      const loadStep = child('load');
+      const row = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+        [user.sub, WEBSEARCH_POLICY_KEY],
+      );
+      loadStep.succeed(undefined, { found: row !== undefined });
+      const settings = readWebsearchPolicy(parseStoredJson(row?.value));
+      step.succeed(undefined, {
+        providers: settings.providers.length,
+        rolloutMode: settings.rolloutMode,
+      });
+      return reply.send(settings);
+    },
+  );
+
+  app.put(
+    '/settings/websearch',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.websearch.put');
+      const user = request.user as JwtPayload;
+      const parsed = websearchPolicySchema.safeParse(request.body);
+      if (!parsed.success) {
+        step.fail('invalid body');
+        return reply.status(400).send({ error: 'Invalid websearch policy' });
+      }
+      const saveStep = child('save');
+      sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        [user.sub, WEBSEARCH_POLICY_KEY, JSON.stringify(parsed.data)],
+      );
+      saveStep.succeed(undefined, {
+        providers: parsed.data.providers.length,
+        rolloutMode: parsed.data.rolloutMode,
+      });
+      step.succeed(undefined, { saved: true });
+      return reply.send(parsed.data);
+    },
+  );
+
   app.get(
     '/settings/compaction',
     { onRequest: [requireAuth] },
@@ -1311,11 +1377,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
-      const AI_API_BASE_URL = process.env['AI_API_BASE_URL'] ?? '';
-      const AI_API_KEY = process.env['AI_API_KEY'] ?? '';
-      const AI_DEFAULT_MODEL = process.env['AI_DEFAULT_MODEL'] ?? 'gpt-4o';
-
-      if (!AI_API_BASE_URL || !AI_API_KEY) {
+      // Use the shared auxiliary LLM resolver so the companion chat
+      // route honours the user's configured fast/inline provider
+      // — critically, with providerType + upstreamProtocol forwarded so
+      // anthropic_messages / responses providers do not silently fall
+      // back to chat_completions. Env vars stay as the last-resort
+      // fallback inside the resolver itself.
+      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
+      if (!llmConfig) {
         step.fail('no llm config');
         return reply.status(503).send({ error: 'Companion chat LLM is not configured' });
       }
@@ -1373,9 +1442,11 @@ ${contextBlock}
       try {
         const { requestWorkflowLlmCompletion } = await import('./workflow-llm.js');
         const response = await requestWorkflowLlmCompletion({
-          apiBaseUrl: AI_API_BASE_URL,
-          apiKey: AI_API_KEY,
-          model: AI_DEFAULT_MODEL,
+          apiBaseUrl: llmConfig.apiBaseUrl,
+          apiKey: llmConfig.apiKey,
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
           prompt,
           temperature: 0.7,
         });

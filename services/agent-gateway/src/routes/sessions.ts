@@ -51,6 +51,7 @@ import {
   sanitizeSessionMetadataJson,
   validateSessionMetadataPatch,
 } from '../session-workspace-metadata.js';
+import { filterSessionsByPath } from '../session-path-filter.js';
 import { listSessionTodoLanes, listSessionTodos } from '../todo-tools.js';
 import { terminateChildSession } from '../tool-sandbox.js';
 import { clearPendingTaskParentAutoResumesForSession } from '../task-parent-auto-resume.js';
@@ -1330,6 +1331,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         .object({
           limit: z.coerce.number().min(1).max(100).default(20),
           offset: z.coerce.number().min(0).default(0),
+          // P3-PATH (opencode #24849): optional absolute path that scopes the
+          // list to sessions whose resolved `workingDirectory` sits under it.
+          // `includeDescendants` defaults to true so callers opt in to strict
+          // equality by explicitly passing "0" / "false".
+          path: z.string().min(1).optional(),
+          includeDescendants: z.coerce.boolean().optional().default(true),
         })
         .safeParse((request as FastifyRequest & { query: unknown }).query);
 
@@ -1338,26 +1345,48 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid query params' });
       }
 
-      const { limit, offset } = query.data;
-      const sessions = await reconcileSessionRuntimeRowsForResponse(
-        sqliteAll<SessionRow>(
-          'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
-          [user.sub, limit, offset],
-        ).map((session) => ({
-          ...session,
-          metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
-        })),
-        user.sub,
-      ).then((rows) =>
-        rows.map((session) => ({
-          ...session,
-          fileChangesSummary: buildSessionFileChangesSummary({
-            sessionId: session.id,
-            userId: user.sub,
-          }),
-        })),
+      const { limit, offset, path, includeDescendants } = query.data;
+
+      // When a path filter is requested we have to pull the full candidate
+      // set first, filter, and only then apply pagination — otherwise the
+      // SQL LIMIT/OFFSET windows would exclude valid matches that happen
+      // to fall outside the top-20 most-recently-updated rows.
+      const baseRows = path
+        ? sqliteAll<SessionRow>(
+            'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC',
+            [user.sub],
+          )
+        : sqliteAll<SessionRow>(
+            'SELECT id, state_status, metadata_json, title, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+            [user.sub, limit, offset],
+          );
+
+      const sanitized = baseRows.map((session) => ({
+        ...session,
+        metadata_json: sanitizeSessionMetadataJson(session.metadata_json),
+      }));
+
+      const filtered = path
+        ? filterSessionsByPath(sanitized, { path, includeDescendants }).slice(
+            offset,
+            offset + limit,
+          )
+        : sanitized;
+
+      const sessions = await reconcileSessionRuntimeRowsForResponse(filtered, user.sub).then(
+        (rows) =>
+          rows.map((session) => ({
+            ...session,
+            fileChangesSummary: buildSessionFileChangesSummary({
+              sessionId: session.id,
+              userId: user.sub,
+            }),
+          })),
       );
-      step.succeed(undefined, { count: sessions.length });
+      step.succeed(undefined, {
+        count: sessions.length,
+        ...(path ? { pathFiltered: true, includeDescendants } : {}),
+      });
       return reply.send({ sessions });
     },
   );
@@ -2384,8 +2413,20 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // P3-WARP stage 0 (workflow 260509): the legacy contract bound a
+  // session to its first workspace forever via
+  // `isSessionWorkspaceRebindingAttempt`, which the ADR identified as
+  // the primary blocker for "continue this session in another
+  // workspace". The endpoint now accepts an explicit `force=true`
+  // opt-in: by default the immutable lock still applies (existing
+  // callers continue to get 409 if they try to rebind), but a caller
+  // that knows what it is doing can flip the toggle to warp the
+  // session forward. Each successful warp is logged into
+  // `metadata.workspaceWarpHistory` so the workspace-resolution chain
+  // and operators can audit the move trail.
   const patchWorkspaceSchema = z.object({
     workingDirectory: z.string().nullable(),
+    force: z.boolean().optional(),
   });
 
   app.patch(
@@ -2414,10 +2455,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
 
       const metadata = parseSessionMetadataJson(session.metadata_json);
       const currentWorkingDirectory = extractSessionWorkingDirectory(metadata);
-      const { workingDirectory } = body.data;
+      const { workingDirectory, force } = body.data;
+      const isForcedWarp = force === true;
       let safeWorkingDirectory: string | null = null;
       if (workingDirectory === null) {
-        if (isSessionWorkspaceRebindingAttempt(metadata, null)) {
+        if (!isForcedWarp && isSessionWorkspaceRebindingAttempt(metadata, null)) {
           step.fail('workspace immutable');
           return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
         }
@@ -2431,7 +2473,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(403).send({ error: 'Forbidden' });
         }
 
-        if (isSessionWorkspaceRebindingAttempt(metadata, safeWorkingDirectory)) {
+        if (!isForcedWarp && isSessionWorkspaceRebindingAttempt(metadata, safeWorkingDirectory)) {
           step.fail('workspace immutable');
           return reply.status(409).send({ error: SESSION_WORKSPACE_IMMUTABLE_ERROR });
         }
@@ -2443,13 +2485,35 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.send({ ok: true, workingDirectory: currentWorkingDirectory });
       }
 
+      // Append a warp-history entry whenever we accept a forced rebind
+      // so future audits can reconstruct which workspaces the session
+      // has visited. We never throw on a malformed history blob — it
+      // is purely additive metadata.
+      if (isForcedWarp && currentWorkingDirectory !== null) {
+        const existing = metadata['workspaceWarpHistory'];
+        const history = Array.isArray(existing) ? [...existing] : [];
+        history.push({
+          from: currentWorkingDirectory,
+          to: safeWorkingDirectory,
+          at: new Date().toISOString(),
+        });
+        // Cap the history to a reasonable size so a runaway script
+        // can't unbound-grow the metadata blob.
+        const TRIM = 50;
+        metadata['workspaceWarpHistory'] = history.slice(-TRIM);
+      }
+
       sqliteRun(
         "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
         [JSON.stringify(metadata), sessionId, user.sub],
       );
 
-      step.succeed();
-      return reply.send({ ok: true, workingDirectory: safeWorkingDirectory });
+      step.succeed(undefined, isForcedWarp ? { warped: true } : undefined);
+      return reply.send({
+        ok: true,
+        workingDirectory: safeWorkingDirectory,
+        ...(isForcedWarp ? { warped: true } : {}),
+      });
     },
   );
 

@@ -4,183 +4,179 @@ import { db, sqliteAll, sqliteRun } from './db.js';
 const todoStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'cancelled']);
 const todoPrioritySchema = z.enum(['high', 'medium', 'low']);
 
-const TODO_WRITE_DESCRIPTION = `Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
-It also helps the user understand the progress of the task and overall progress of their requests.
+const TODO_WRITE_DESCRIPTION = `使用该工具创建和维护当前编码会话的结构化任务清单。它能帮你跟踪进度、组织复杂任务、并向用户展现你的周全考虑。
+同时也让用户能看到任务进度与请求的整体推进。
 
-## When to Use This Tool
-Use this tool proactively in these scenarios:
+## 何时使用本工具
+在以下场景主动使用：
 
-1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
-2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
-3. User explicitly requests todo list - When the user directly asks you to use the todo list
-4. User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
-5. After receiving new instructions - Immediately capture user requirements as todos. Feel free to edit the todo list based on new information
-6. When you start working on a task - Mark exactly one relevant todo as in_progress BEFORE beginning work whenever active work remains
-7. After completing a task - Mark it as completed immediately and add any new follow-up tasks discovered during implementation
+1. 复杂的多步骤任务——任务涉及 3 个及以上独立步骤或动作
+2. 需要认真规划或多项操作的任务
+3. 用户明确要求使用 todo list
+4. 用户一次提供多项任务（编号列表或逗号分隔）
+5. 接到新指令后——立刻将用户需求记入 todo。允许根据新信息随时调整该清单
+6. 开始推进某项任务时——动手之前先将一项相关 todo 标为 in_progress（仅当仍有未完任务时）
+7. 完成某项任务后——立刻标为 completed，并把实现过程中发现的后续工作加入 todo
 
-## Language Requirements
+## 语言要求
 
-- Write every todo item's content in the same language as the user's latest request or the established conversation language.
-- If the user is speaking Chinese, write todos in Chinese. If the user is speaking English, write todos in English.
-- Do NOT translate user-facing todo items into English unless the user is already using English or explicitly requests English.
-- Keep the wording natural for that language while still being concise and actionable.
+- todo 内容**使用与用户最近请求或会话语言一致的语言**。
+- 用户说中文则 todo 写中文，用户说英文则写英文。
+- 除非用户本就使用英文或明确要求英文，否则不要把面向用户的 todo 翻译为英文。
+- 保持该语言下的自然表达，同时简洁、可执行。
 
-## When NOT to Use This Tool
+## 何时不要使用本工具
 
-Skip using this tool when:
-1. There is only a single, straightforward task
-2. The task is trivial and tracking it provides no organizational benefit
-3. The task can be completed in less than 3 trivial steps
-4. The task is purely conversational or informational
+以下情况跳过：
+1. 只有单一、明确的任务
+2. 任务轻微，跟踪不带来价值
+3. 任务可以在不到 3 个轻微步骤内完成
+4. 纯对话 / 信息性需求
 
-NOTE that you should not use this tool if there is only one trivial task to do. In this case you are better off just doing the task directly.
+请注意：只有一项轻微任务时不要调本工具，直接动手更高效。
 
-## Examples of When to Use the Todo List
+## 使用示例（应当使用）
 
 <example>
-User: I want to add a dark mode toggle to the application settings. Make sure you run the tests and build when you're done!
-Assistant: *Creates todo list with the following items:*
-1. Create dark mode toggle component in Settings page
-2. Add dark mode state management
-3. Update styles to support theme switching
-4. Run tests and build, addressing any failures
-5. Mark one task as in_progress and begin implementation
+用户：帮我在设置页加个深色模式开关，完事后记得跑测试和构建！
+助手：*创建 todo 列表：*
+1. 在 Settings 页面创建深色模式开关组件
+2. 增加深色模式状态管理
+3. 更新样式以支持主题切换
+4. 跑测试和构建，修复失败项
+5. 将一项任务标为 in_progress 并开始实现
 
 <reasoning>
-The assistant used the todo list because:
-1. Adding dark mode is a multi-step feature requiring UI, state management, and validation work
-2. The user explicitly requested tests and build be run afterward
-3. The todo list helps track implementation progress and follow-up validation
+助手使用 todo list 的原因：
+1. 加深色模式是多步骤功能，涉及 UI、状态管理与验证
+2. 用户明确要求后续跑测试和构建
+3. todo list 便于跟踪实现进度与验证
 </reasoning>
 </example>
 
 <example>
-User: Help me rename the function getCwd to getCurrentWorkingDirectory across my project
-Assistant: *Searches the codebase to understand the scope of the rename*
-Assistant: *Creates todo list with the affected files and keeps one rename task in_progress while applying the change*
+用户：把项目里的 getCwd 函数重命名为 getCurrentWorkingDirectory
+助手：*在代码库中检索重命名范围*
+助手：*为受影响的文件建一份 todo，保持一项 in_progress 执行重命名*
 
 <reasoning>
-The assistant used the todo list because:
-1. The rename affects multiple files and requires coordinated edits
-2. Tracking each file reduces the chance of missing a reference
-3. The todo list provides clear progress updates while the rename is underway
+使用 todo list 原因：
+1. 重命名跨多文件，需协同修改
+2. 逐个文件跟踪可减少漏改风险
+3. 重命名过程中 todo list 能提供清晰进度反馈
 </reasoning>
 </example>
 
-## Examples of When NOT to Use the Todo List
+## 使用示例（不当使用）
 
 <example>
-User: How do I print 'Hello World' in Python?
-Assistant: In Python, you can print "Hello World" with this simple code:
+用户：Python 里怎么输出 Hello World？
+助手：用以下代码：
 
 python
 print("Hello World")
 
 <reasoning>
-The assistant did not use the todo list because this is a single, trivial request that can be answered directly.
+不使用 todo list：这是单一且轻微的问题，可直接回答。
 </reasoning>
 </example>
 
 <example>
-User: Run npm install for me and tell me what happens.
-Assistant: *Executes npm install and reports the result directly*
+用户：帮我跑 npm install 并告诉我结果。
+助手：*执行 npm install 后直接返回结果*
 
 <reasoning>
-The assistant did not use the todo list because this is a single command execution with immediate results.
+不使用 todo list：单一命令、结果立即可见。
 </reasoning>
 </example>
 
-## Task States and Management
+## 任务状态与管理
 
-1. **Task States**: Use these states to track progress:
-   - pending: Task not yet started
-   - in_progress: Currently working on
-   - completed: Task finished successfully
-   - cancelled: Task no longer needed
+1. **任务状态**：使用以下状态跟踪进度：
+   - pending：未开始
+   - in_progress：正在执行
+   - completed：成功完成
+   - cancelled：不再需要
 
-2. **Task Management**:
-   - Update task status in real time as you work
-   - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
-   - While active work remains, keep exactly ONE task in_progress at a time
-   - Complete the current task before starting a different one
-   - Cancel tasks that become irrelevant instead of leaving stale entries behind
+2. **任务管理**：
+   - 并行推进时实时更新任务状态
+   - 一旦完成马上标为 completed（不要批量完结）
+   - 存在未完任务时，同一时间**只保持一项**为 in_progress
+   - 先完成当前任务再起新任务
+   - 任务不再需要时请 cancelled，不要留陈旧项
 
-3. **Task Completion Requirements**:
-   - ONLY mark a task as completed when you have FULLY accomplished it
-   - If you encounter blockers, unresolved errors, or partial implementation, keep the task as in_progress or add a follow-up todo
-   - Never mark a task as completed if tests are still failing, the implementation is partial, or critical follow-up work remains
+3. **任务完成要求**：
+   - **仅**在**完全**完成后才标为 completed
+   - 遇到阻碍、未解决错误、部分实现，保持 in_progress 或补一项后续 todo
+   - 测试仍在失败、实现不完整、有关键后续未做时**绝不**标为 completed
 
-4. **Task Breakdown**:
-   - Create specific, actionable items
-   - Break complex tasks into smaller, manageable steps
-   - Use clear, descriptive task names
+4. **任务拆分**：
+   - 产出具体、可行动的条目
+   - 将复杂任务拆为可控的小步
+   - 使用清晰、具描述性的任务名称
 
-5. **Input Requirements**:
-   - Every todo item in this tool must include content, status, and priority
-   - Keep content concise, actionable, and written as the task to be done
-   - Write content in the user's current language rather than defaulting to English
+5. **输入要求**：
+   - 每项 todo 必须包含 content、status、priority
+   - content 保持简洁、可行动，描述为"要做什么"
+   - **使用用户当前语言**，不要默认英文
 
-When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.`;
+拿不准是否该用时，就用。主动任务管理能体现认真并确保需求都被认真处理。`;
 
-const TODO_READ_DESCRIPTION = `Use this tool to read the current main todo list for the session. Use it proactively whenever you need to understand the current plan before acting.
+const TODO_READ_DESCRIPTION = `使用该工具读取当前会话的主 todo 列表。在动手前需要了解当前计划时主动使用。
 
-Use this tool in these situations:
-- At the beginning of a session or when resuming work to see the latest main todos
-- Before starting a new task so you can verify what is pending or already in progress
-- When the user asks about current progress, previous plans, or remaining work
-- After completing or updating work to confirm what main-lane tasks are still relevant
-- Whenever you are uncertain about what to do next and need to ground yourself in the current tracked work
+何时使用：
+- 会话初始或恢复工作时，查看最新的主 todos
+- 开新任务前，核实哪些还 pending 或已在 in_progress
+- 用户询问当前进度、之前计划或剩余工作时
+- 完成/更新某项工作后，确认仍有哪些主道 todo 仍适用
+- 不确定接下来该做什么、需要重新锚定到当前已跟踪的工作上时
 
-Usage:
-- This tool takes no parameters. Leave the input blank or empty.
-- DO NOT include a dummy object, placeholder string, or keys like "input" or "empty".
-- Returns the current main-lane todo items with their status, priority, and content.
-- Use subtodoread if you need to inspect the temporary lane instead of the main todo list.
-- If no main-lane todos exist yet, an empty list will be returned.`;
+用法：
+- 本工具不接受参数。输入留空即可。
+- **不要**传入占位对象、占位字符串，或者诸如 "input" / "empty" 这样的键。
+- 返回当前主道 todo 项及其 status、priority、content。
+- 要查看临时道而不是主道，请用 subtodoread。
+- 主道上还没有 todo 时，返回空列表。`;
 
-const SUBTODO_WRITE_DESCRIPTION = `Use this tool to create and manage the temporary todo lane for the current coding session. Use it for side thoughts, parking-lot items, follow-ups, or temporary ideas that should not replace the main todo list.
+const SUBTODO_WRITE_DESCRIPTION = `使用该工具创建和维护当前会话的临时 todo 道。用于记录边角思考、停车区项、后续事项、不应取代主道的临时想法。
 
-Use this tool when:
-- You discover useful but non-blocking follow-up work during implementation
-- You want to park an idea, question, or investigation thread without interrupting the main plan
-- You need to track temporary notes that may later be promoted into the main todo list
+何时使用：
+- 实现过程中发现有价值但不阻塞主路的后续工作
+- 想把某个点子、问题、调查线索先存下来，不打断当前主计划
+- 需要跟踪临时笔记，后续可能提升进主 todo 列表
 
-Guidelines:
-- The temporary lane supplements the main todo list; it should not replace it.
-- Keep temporary todo items concise, actionable, and relevant to the current session.
-- Write temporary todo items in the same language as the user's latest request or established conversation language.
-- Every todo item in this tool must include content, status, and priority.
-- If a temporary item becomes committed execution work, add it to the main todo list with todowrite.`;
+准则：
+- 临时道是主 todo 的补充，不应取代。
+- 临时 todo 也要简洁、可行动、与当前会话相关。
+- 使用与用户最近请求或会话语言一致的语言。
+- 每项 todo 必须包含 content、status、priority。
+- 临时项一旦转成正式执行工作，请用 todowrite 添加到主 todo 中。`;
 
-const SUBTODO_READ_DESCRIPTION = `Use this tool to read the temporary todo lane for the current coding session.
+const SUBTODO_READ_DESCRIPTION = `使用该工具读取当前会话的临时 todo 道。
 
-Use this tool when:
-- You want to review parked ideas, side investigations, or follow-up items without touching the main todo list
-- You need to decide whether a temporary item should stay parked, be updated, or be promoted into the main lane
-- You want to inspect temporary notes before continuing work
+何时使用：
+- 希望复看暂存的点子、边角调查、后续事项，又不动主 todo
+- 需要决定某个临时项是继续存放、更新，还是提升进主道
+- 继续推进前想看一眼临时笔记
 
-Usage:
-- This tool takes no parameters. Leave the input blank or empty.
-- DO NOT include a dummy object, placeholder string, or keys like "input" or "empty".
-- Returns the current temporary-lane todo items only.
-- Use todoread if you need the main todo list instead of the temporary lane.
-- If no temporary todos exist yet, an empty list will be returned.`;
+用法：
+- 本工具不接受参数。输入留空即可。
+- **不要**传入占位对象、占位字符串，或者诸如 "input" / "empty" 这样的键。
+- 仅返回当前临时道上的 todo 项。
+- 要查看主道请用 todoread。
+- 临时道上还没有 todo 时，返回空列表。`;
 
 const sessionTodoSchema = z
   .object({
-    content: z
-      .string()
-      .describe("Brief imperative description of the task written in the user's current language"),
-    status: todoStatusSchema.describe(
-      'Current status of the task: pending, in_progress, completed, cancelled',
-    ),
-    priority: todoPrioritySchema.describe('Priority level of the task: high, medium, low'),
+    content: z.string().describe('用用户当前语言写的任务简要祈使描述'),
+    status: todoStatusSchema.describe('任务当前状态：pending、in_progress、completed、cancelled'),
+    priority: todoPrioritySchema.describe('任务优先级：high、medium、low'),
   })
   .strict();
 
 export const todoWriteInputSchema = z
   .object({
-    todos: z.array(sessionTodoSchema).describe('The updated todo list for the current session'),
+    todos: z.array(sessionTodoSchema).describe('当前会话更新后的 todo 列表'),
   })
   .strict();
 

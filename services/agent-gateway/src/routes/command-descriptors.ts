@@ -5,7 +5,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-compact',
       label: '/compact',
-      description: 'Compact the current session — 压缩当前会话上下文（别名：/summarize）',
+      description: '压缩当前会话上下文（别名：/summarize）',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'compact_session' },
@@ -13,7 +13,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-summarize',
       label: '/summarize',
-      description: 'Summarize the current session — /compact 的别名',
+      description: '压缩当前会话——/compact 的别名',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'compact_session' },
@@ -21,7 +21,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-handoff',
       label: '/handoff',
-      description: 'Generate continuation-ready handoff context — 生成可续跑的结构化交接摘要',
+      description: '生成可续跑的结构化交接摘要',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'generate_handoff' },
@@ -29,7 +29,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-buddy',
       label: '/buddy',
-      description: 'Open Buddy companion panel — 打开 Buddy 伴侣面板并显式唤起陪跑模式',
+      description: '打开 Buddy 伴侣面板并显式唤起陪跑模式',
       contexts: ['composer'],
       execution: 'client',
       action: { kind: 'open_companion_panel' },
@@ -71,7 +71,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-init-deep',
       label: '/init-deep',
-      description: 'Inject deep AGENTS context — 递归汇总已有 AGENTS.md 到当前会话',
+      description: '递归汇总已有 AGENTS.md 到当前会话',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'init_deep' },
@@ -79,7 +79,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-ralph-loop',
       label: '/ralph-loop',
-      description: 'Start Ralph Loop — 启动自引用持续开发循环（默认上限 100 轮）',
+      description: '启动 Ralph Loop 自引用持续开发循环（默认上限 100 轮）',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'start_ralph_loop' },
@@ -87,7 +87,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-ulw-loop',
       label: '/ulw-loop',
-      description: 'Start ULW Loop — 启动需要验证收尾的 UltraWork 循环',
+      description: '启动需要验证收尾的 UltraWork 循环',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'start_ulw_loop' },
@@ -95,7 +95,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-ulw-verify',
       label: '/ulw-verify',
-      description: 'Verify ULW result — 用 --pass / --fail 提交 ULW 验证结果',
+      description: '用 --pass / --fail 提交 ULW 验证结果',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'verify_ulw_loop' },
@@ -103,7 +103,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-cancel-ralph',
       label: '/cancel-ralph',
-      description: 'Cancel active loop state — 取消当前活动中的 Ralph/ULW 循环',
+      description: '取消当前活动中的 Ralph / ULW 循环',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'cancel_ralph_loop' },
@@ -111,7 +111,7 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-stop-continuation',
       label: '/stop-continuation',
-      description: 'Stop continuation systems — 停止当前 continuation / loop 状态',
+      description: '停止当前 continuation / loop 状态',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'stop_continuation' },
@@ -119,15 +119,23 @@ export function buildCommandDescriptors(): CommandDescriptor[] {
     {
       id: 'slash-refactor',
       label: '/refactor',
-      description: 'Start refactor workflow — 启动带任务追踪与验证预期的重构流程',
+      description: '启动带任务追踪与验证预期的重构流程',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'refactor_session' },
     },
     {
+      id: 'slash-remove-deadcode',
+      label: '/remove-deadcode',
+      description: '用 LSP/AST 证据驱动的多阶段死代码清理流程',
+      contexts: ['composer'],
+      execution: 'server',
+      action: { kind: 'remove_deadcode' },
+    },
+    {
       id: 'slash-start-work',
       label: '/start-work',
-      description: 'Resume work from plan/task state — 从计划或任务状态恢复执行',
+      description: '从计划或任务状态恢复执行',
       contexts: ['composer'],
       execution: 'server',
       action: { kind: 'start_work' },

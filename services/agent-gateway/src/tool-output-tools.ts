@@ -60,7 +60,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 > = {
   name: 'read_tool_output',
   description:
-    'Read a previously produced tool result from the current session. When a toolCallId is available in current-session history, use it. Set useLatestReferenced=true only as a fallback when the history contains [tool_output_reference] but no toolCallId is available; pasted UI text or copied commands are not enough. Supports line-based text reading and jsonPath/item pagination for structured data so you can recover only the detail needed for the next reasoning step.',
+    '从当前会话中读取此前产生的工具调用结果。当历史中能拿到 toolCallId 时，使用它。仅当历史中含有 [tool_output_reference] 但拿不到 toolCallId 时，才使用 useLatestReferenced=true 兜底；粘贴的 UI 文本或复制的命令不足以替代。支持按行读取文本，以及对结构化数据按 jsonPath / item 分页，让你只取下一步推理所需的细节。',
   inputSchema: readToolOutputInputSchema,
   outputSchema: readToolOutputOutputSchema,
   timeout: 30000,

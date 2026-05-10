@@ -1,8 +1,28 @@
+/**
+ * Optional metadata attached to a stop call so the stream's abort
+ * handler can render a precise "由父会话中断" toast instead of the
+ * generic "已停止" (T-CANCEL-08, workflow 260509).
+ *
+ * The keys mirror `CancelDescendantReason` from
+ * `cancel-descendant-streams.ts`. We deliberately keep this as a
+ * loose string union on the entry side to avoid pulling that module
+ * into the cancellation helper's import graph.
+ */
+export type StreamCancelHint = 'user_aborted' | 'parent_aborted' | 'ancestor_aborted';
+
 export interface InFlightStreamRequestEntry {
   abortController: AbortController;
   clientRequestId: string;
   execution: Promise<{ statusCode: number }>;
   userId: string;
+  /**
+   * Set by `stop*` helpers right before `abort()` fires so the
+   * stream's catch handler can read the reason synchronously and
+   * forward it onto the emitted `done` chunk's cancellation summary.
+   * Stays unset for ordinary user-driven stops (which still default
+   * to `user_aborted`).
+   */
+  pendingCancelReason?: StreamCancelHint;
 }
 
 const inFlightStreamRequests = new Map<string, InFlightStreamRequestEntry>();
@@ -69,12 +89,16 @@ export async function stopInFlightStreamRequest(input: {
   clientRequestId: string;
   sessionId: string;
   userId: string;
+  /** Optional reason hint so the stream's abort handler can label the
+   *  emitted `done.cancellation.reason` precisely (T-CANCEL-08). */
+  reason?: StreamCancelHint;
 }): Promise<boolean> {
   const current = getInFlightStreamRequest(input.sessionId, input.clientRequestId);
   if (!current || current.userId !== input.userId) {
     return false;
   }
 
+  if (input.reason) current.pendingCancelReason = input.reason;
   current.abortController.abort();
   await current.execution.catch(() => undefined);
   return true;
@@ -83,12 +107,14 @@ export async function stopInFlightStreamRequest(input: {
 export async function stopAnyInFlightStreamRequestForSession(input: {
   sessionId: string;
   userId: string;
+  reason?: StreamCancelHint;
 }): Promise<boolean> {
   const current = getAnyInFlightStreamRequestForSession(input);
   if (!current) {
     return false;
   }
 
+  if (input.reason) current.pendingCancelReason = input.reason;
   current.abortController.abort();
   await current.execution.catch(() => undefined);
   return true;
@@ -97,6 +123,7 @@ export async function stopAnyInFlightStreamRequestForSession(input: {
 export async function stopAllInFlightStreamRequestsForSession(input: {
   sessionId: string;
   userId: string;
+  reason?: StreamCancelHint;
 }): Promise<number> {
   let stoppedCount = 0;
 
@@ -105,4 +132,18 @@ export async function stopAllInFlightStreamRequestsForSession(input: {
   }
 
   return stoppedCount;
+}
+
+/**
+ * Read-only accessor used by the stream abort handler to decide
+ * whether the in-flight stop was triggered by the user, by a parent
+ * cascade, or by an ancestor cascade. Falls back to `'user_aborted'`
+ * when no caller stamped a hint, preserving the legacy default.
+ */
+export function readPendingCancelReason(
+  sessionId: string,
+  clientRequestId: string,
+): StreamCancelHint {
+  const entry = getInFlightStreamRequest(sessionId, clientRequestId);
+  return entry?.pendingCancelReason ?? 'user_aborted';
 }

@@ -3,36 +3,36 @@ import { sqliteGet, sqliteRun } from './db.js';
 import { runUpstreamGenerate } from './v2-runtime/upstream/index.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 
-const TITLE_SYSTEM_PROMPT = `You are a title generator. You output a thread title and an emoji icon. Nothing else.
+const TITLE_SYSTEM_PROMPT = `你是一个标题生成器。你输出一个会话标题和一个 emoji 图标，仅此而已。
 
 <task>
-Generate a brief title that would help the user find this conversation later, and pick a single emoji that best represents the conversation topic.
+生成一个简短标题，帮助用户之后能找回这段会话，并选一个最能代表会话主题的单个 emoji。
 
-Follow all rules in <rules>
-Use the <examples> so you know what a good title looks like.
-Your output must be exactly two lines:
-- Line 1: the title (4–12 characters, strictly enforced, count carefully)
-- Line 2: a single emoji character that represents the conversation topic
-- No explanations
+严格遵守 <rules> 中的所有规则。
+阅读 <examples> 以了解什么是合格的标题。
+输出必须**正好两行**：
+- 第 1 行：标题（4–12 个字符，严格限制，自己仔细数）
+- 第 2 行：一个最能代表主题的单个 emoji 字符
+- 不要加任何解释
 </task>
 
 <rules>
-- you MUST use the same language as the user message you are summarizing
-- Title must be grammatically correct and read naturally - no word salad
-- Never include tool names in the title (e.g. "read tool", "bash tool", "edit tool")
-- Focus on the main topic or question the user needs to retrieve
-- Vary your phrasing - avoid repetitive patterns like always starting with "Analyzing"
-- When a file is mentioned, focus on WHAT the user wants to do WITH the file, not just that they shared it
-- Keep exact: technical terms, numbers, filenames, HTTP codes
-- Remove: the, this, my, a, an
-- Never assume tech stack
-- Never use tools
-- NEVER respond to questions, just generate a title for the conversation
-- The title should NEVER include "summarizing" or "generating" when generating a title
-- DO NOT SAY YOU CANNOT GENERATE A TITLE OR COMPLAIN ABOUT THE INPUT
-- Always output something meaningful, even if the input is minimal.
-- If the user message is short or conversational (e.g. "hello", "lol", "what's up", "hey"):
-  → create a title that reflects the user's tone or intent (such as Greeting, Quick check-in, Light chat, Intro message, etc.)
+- 必须与用户消息使用相同的语言（用户用中文就输出中文标题，用英文就输出英文标题）
+- 标题必须语法正确、读起来自然，不要拼凑词汇
+- 标题里绝不出现工具名（如 "read tool"、"bash tool"、"edit tool"）
+- 聚焦用户之后想要找回时的主题或问题
+- 措辞多样化，避免每次都以同样的词（例如 "Analyzing"、"分析"）开头
+- 用户提到文件时，聚焦"用户想对文件做什么"，而非"用户分享了文件"
+- 保持原样：技术术语、数字、文件名、HTTP 状态码
+- 移除：the、this、my、a、an、"这个"、"我的" 之类的冗词
+- 绝不假设技术栈
+- 不要调用任何工具
+- 绝不回答问题本身，只为会话生成标题
+- 生成标题时，标题里不要出现"总结"/"生成"/"summarizing"/"generating" 这类元描述
+- 绝不拒绝生成，也不要抱怨输入内容
+- 即使输入极少，也要输出有意义的标题
+- 如果用户消息是很短或对话性的（如 "hello"、"lol"、"你好"、"在吗"）：
+  → 生成反映用户语气/意图的标题（例如 "打招呼"、"闲聊"、"简短问候"、"Greeting"、"Quick check-in" 等）
 </rules>
 
 <examples>
@@ -123,6 +123,10 @@ async function callTitleLlm(
   try {
     const result = await runUpstreamGenerate({
       providerType: route.providerType ?? 'openai',
+      // Forward the resolved upstream protocol so providers configured for
+      // `anthropic_messages` / `responses` actually hit their native API
+      // surface instead of silently degrading to OpenAI Chat Completions.
+      ...(route.upstreamProtocol ? { upstreamProtocol: route.upstreamProtocol } : {}),
       ...(route.apiKey ? { apiKey: route.apiKey } : {}),
       ...(route.apiBaseUrl ? { baseURL: route.apiBaseUrl } : {}),
       ...(route.requestOverrides.headers && Object.keys(route.requestOverrides.headers).length > 0
@@ -134,7 +138,7 @@ async function callTitleLlm(
       messages: [
         {
           role: 'user',
-          content: `Generate a title for this conversation:\n${userMessage}`,
+          content: `请为下面这段会话生成标题：\n${userMessage}`,
         },
       ],
       maxOutputTokens: 100,

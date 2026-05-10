@@ -34,6 +34,32 @@ describe('classifyUpstreamError', () => {
     expect(result.retryable).toBe(true);
   });
 
+  it('treats raw Anthropic server_is_overloaded as overloaded retryable (opencode #25888)', () => {
+    const result = classifyUpstreamError({ message: 'server_is_overloaded' });
+    expect(result.category).toBe('overloaded');
+    expect(result.retryable).toBe(true);
+  });
+
+  it('treats structured Anthropic server_is_overloaded envelope as overloaded retryable', () => {
+    const json = JSON.stringify({
+      type: 'error',
+      error: { type: 'server_is_overloaded', message: 'upstream busy' },
+    });
+    const result = classifyUpstreamError({ message: json });
+    expect(result.category).toBe('overloaded');
+    expect(result.retryable).toBe(true);
+  });
+
+  it('treats structured Anthropic overloaded_error envelope as overloaded retryable', () => {
+    const json = JSON.stringify({
+      type: 'error',
+      error: { type: 'overloaded_error', message: 'Anthropic overloaded' },
+    });
+    const result = classifyUpstreamError({ message: json });
+    expect(result.category).toBe('overloaded');
+    expect(result.retryable).toBe(true);
+  });
+
   it('classifies 429 status / rate-limit phrasing as rate_limit', () => {
     expect(classifyUpstreamError({ message: 'Rate limit exceeded' }).category).toBe('rate_limit');
     expect(classifyUpstreamError({ data: { statusCode: 429 } }).category).toBe('rate_limit');

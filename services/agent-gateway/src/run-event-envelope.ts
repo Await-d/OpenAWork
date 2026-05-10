@@ -32,6 +32,13 @@ export function deriveRunEventBookend(event: RunEvent): RunEventBookend | undefi
           terminal: true,
           replayable: true,
           stopReason: event.stopReason,
+          // Forward the optional cascade summary so historical run
+          // events keep "stopped by parent / N children cancelled"
+          // information after the live `done` chunk is gone
+          // (T-CANCEL-07, workflow 260509). Producers that emit a
+          // bare `done` (no cascade) leave this undefined and the
+          // existing UI path keeps working unchanged.
+          ...(event.cancellation ? { cancellation: event.cancellation } : {}),
         };
       }
 

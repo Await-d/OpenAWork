@@ -12,36 +12,36 @@ import {
 import { createArtifact } from './artifact-content-store.js';
 
 const generateImageInputSchema = z.object({
-  prompt: z.string().min(1).max(4000).describe('The text prompt describing the image to generate.'),
+  prompt: z.string().min(1).max(4000).describe('描述要生成图片的文本 prompt。'),
   size: z
     .string()
     .optional()
     .describe(
       [
-        'Image size in WxH format. Pick a preset whenever possible:',
-        '• 1K (default tier): "1024x1024" (1:1), "1536x1024" (3:2), "1024x1536" (2:3).',
-        '• 2K (high detail; quality is auto-raised to "high"): "2048x2048" (1:1), "2048x1152" (16:9), "1152x2048" (9:16).',
-        '• 4K (experimental, relay-only, may take ~6 minutes): "3840x2160" (16:9), "2160x3840" (9:16).',
-        "Custom sizes are accepted but must satisfy ALL of: max edge ≤ 3840px, both width and height multiples of 16, aspect ratio ≤ 3:1, total pixels between 655,360 and 8,294,400. Defaults to the user's configured default size when omitted.",
+        '图片尺寸，WxH 格式。可能时优先选预设：',
+        '• 1K（默认档）："1024x1024"（1:1）、"1536x1024"（3:2）、"1024x1536"（2:3）。',
+        '• 2K（高细节；quality 会被服务端自动提到 "high"）："2048x2048"（1:1）、"2048x1152"（16:9）、"1152x2048"（9:16）。',
+        '• 4K（实验性、仅走 relay、可能耗时 ~6 分钟）："3840x2160"（16:9）、"2160x3840"（9:16）。',
+        '也接受自定义尺寸，但必须同时满足：最长边 ≤ 3840px、宽高都是 16 的倍数、长宽比 ≤ 3:1、总像素在 655,360 – 8,294,400 之间。不传时使用用户配置的默认尺寸。',
       ].join(' '),
     ),
   quality: z
     .enum(['low', 'medium', 'high'])
     .optional()
     .describe(
-      'Image quality: "low" for speed, "medium" for balance, "high" for detail. 2K/4K sizes are auto-raised to "high" by the server. Defaults to user setting.',
+      '图片质量："low"重速度、"medium"平衡、"high"重细节。2K / 4K 尺寸会被服务端自动提到 "high"。不传时用用户配置。',
     ),
   outputFormat: z
     .enum(['png', 'jpeg', 'webp'])
     .optional()
     .describe(
-      'Output file format: "png" (default, lossless), "jpeg" (smaller file, no transparency), "webp" (modern, smaller). Defaults to user setting.',
+      '输出文件格式："png"（默认，无损）、"jpeg"（文件较小、不支持透明）、"webp"（现代、较小）。不传时用用户配置。',
     ),
   background: z
     .enum(['auto', 'opaque'])
     .optional()
     .describe(
-      'Background handling: "auto" lets the model decide (may produce transparency on PNG/WebP); "opaque" forces a solid background. Defaults to user setting.',
+      '背景处理："auto" 由模型决定（PNG/WebP 下可能产生透明）；"opaque" 强制不透明。不传时用用户配置。',
     ),
 });
 
@@ -55,11 +55,11 @@ export const generateImageToolDefinition: ToolDefinition<
 > = {
   name: 'generate_image',
   description:
-    'Generate an image based on a text prompt using the configured image generation model (GPT Image 2 family). ' +
-    'Use this tool when the user asks you to create, draw, design, or generate an image or picture. ' +
-    'The generated image will be displayed inline in the conversation. ' +
-    'You do NOT need the user to toggle image mode — this tool works directly within normal chat. ' +
-    'Pick the smallest size tier that satisfies the request (1K is fastest; 2K is for posters / detailed art; 4K is experimental and slow — only use 4K when the user explicitly asks for ultra-high resolution).',
+    '使用配置好的图片生成模型（GPT Image 2 系列）按文本 prompt 生成图片。' +
+    '用户要你创建、画、设计、生成图片时使用本工具。' +
+    '生成的图片会在对话中内联展示。' +
+    '**不需要**用户切到图片模式——本工具在普通聊天中直接可用。' +
+    '请选择能满足需求的最小尺寸档（1K 最快；2K 适海报 / 精细画面；4K 实验性且慢，仅在用户明确要求超高分辨率时使用）。',
   inputSchema: generateImageInputSchema,
   outputSchema: generateImageOutputSchema,
   execute: async () => {

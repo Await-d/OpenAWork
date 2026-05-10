@@ -37,7 +37,7 @@ const DEFAULT_INSTALLED_SKILLS: DefaultInstalledSkill[] = [
       displayName: 'Agentdocs Orchestrator',
       version: '1.0.0',
       description:
-        'Advanced task orchestration system integrated with agentdocs knowledge management. Decomposes complex requests into atomic tasks, auto-creates workflow planning documents, manages multi-agent parallel execution, and syncs task status.',
+        '与 agentdocs 知识管理集成的高级任务编排系统。将复杂请求拆解为原子任务、自动创建工作流规划文档、管理多 agent 并行执行、并同步任务状态。',
       author: 'Await-d',
       capabilities: ['orchestration', 'planning', 'documentation'],
       permissions: [],
@@ -51,8 +51,7 @@ const DEFAULT_INSTALLED_SKILLS: DefaultInstalledSkill[] = [
       name: 'schema-architect',
       displayName: 'Schema Architect',
       version: '1.0.0',
-      description:
-        'Design database table schemas from any relationship description, including full index strategy analysis.',
+      description: '从任何关系描述设计数据库表结构，含完整的索引策略分析。',
       author: 'Await-d',
       capabilities: ['database', 'schema-design', 'analysis'],
       permissions: [],

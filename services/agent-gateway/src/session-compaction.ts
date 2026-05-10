@@ -2,6 +2,7 @@ import type { Message } from '@openAwork/shared';
 import { callCompactionLlm } from './compaction-llm.js';
 import {
   mergeCompactionMetadata,
+  readLastCompactionLlmSummary,
   readPersistedCompactionMemory,
   type CompactionTrigger,
 } from './compaction-metadata.js';
@@ -293,6 +294,11 @@ export async function executeSessionCompaction(
   }
 
   const existingMemory = readPersistedCompactionMemory(input.metadataJson);
+  // Anchor-update path: when the session has already been compacted before,
+  // pass the previous LLM summary back as the anchor so the model can
+  // merge new facts in place instead of re-summarising from scratch.
+  // Mirrors opencode #23870.
+  const previousLlmSummary = readLastCompactionLlmSummary(input.metadataJson);
   const durableSummary = buildDurableCompactionSummary({
     existingMemory,
     messages: messagesToSummarize,
@@ -321,6 +327,7 @@ export async function executeSessionCompaction(
         route: input.route,
         sessionId: input.sessionId,
         signal: input.signal,
+        ...(previousLlmSummary ? { previousSummary: previousLlmSummary } : {}),
       });
       llmSummary = result.summary;
     } catch (error: unknown) {

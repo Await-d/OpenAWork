@@ -36,7 +36,7 @@ vi.mock('../session-search-store.js', () => ({
 }));
 
 import { appendSessionMessageV2 } from '../message-v2-adapter.js';
-import { filterCompacted } from '../message-to-model-messages.js';
+import { filterCompacted, toModelMessages } from '../message-to-model-messages.js';
 import { hasSessionMessage } from '../session-message-rating-store.js';
 import type { MessageID, MessageWithParts, PartID } from '../message-v2-schema.js';
 
@@ -259,5 +259,142 @@ describe('message-v2 compatibility regressions', () => {
     ]);
 
     expect(result.map((msg) => msg.info.id)).toEqual(['m3', 'm4', 'm1', 'm2', 'm5']);
+  });
+
+  // Regression: OpenAI Responses API tool_call cache stability.
+  // The persisted-message → AI SDK round-trip must preserve
+  // `tool-call.providerMetadata.openai.itemId` (`fc_xxx`) all the
+  // way through V1 (`ToolCallContent.providerMetadata`) → V2
+  // (`ToolPart.metadata.providerMetadata`) → V1 (read path) →
+  // unified (`AssistantToolCall.providerMetadata`) so the bridge
+  // can rebuild `function_call.id` on later rounds. Otherwise the
+  // upstream prompt-cache prefix from this point on misses on every
+  // subsequent request after a tool call (the original bug report:
+  // "搜索工具调用后缓存全失").
+  it('persists tool_call.providerMetadata as ToolPart.metadata.providerMetadata on append', () => {
+    mocks.sqliteGet.mockReturnValue({ max_seq: null });
+
+    appendSessionMessageV2({
+      sessionId: 'session-1',
+      userId: 'user-1',
+      role: 'assistant',
+      messageId: 'message-tool-call',
+      createdAt: 123,
+      content: [
+        {
+          type: 'tool_call',
+          toolCallId: 'call_websearch',
+          toolName: 'web_search',
+          input: { query: 'react 19' },
+          providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+        },
+      ],
+    });
+
+    const partCreated = mocks.emitEvent.mock.calls.find(
+      (call) =>
+        (call[0] as { definition?: { type?: string } }).definition?.type === 'message.part.created',
+    );
+    expect(partCreated).toBeDefined();
+    const part = (
+      partCreated?.[0] as {
+        data: { part: { type: string; metadata?: Record<string, unknown> } };
+      }
+    ).data.part;
+    expect(part.type).toBe('tool');
+    expect(part.metadata).toEqual({
+      providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+    });
+  });
+
+  it('round-trips ToolPart.metadata.providerMetadata into AssistantToolCall via toModelMessages', () => {
+    const sessionId = 'session-1';
+    const messageId = asMessageId('m-assistant-1');
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: asPartId('p1'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'tool',
+          callID: 'call_websearch',
+          tool: 'web_search',
+          state: { status: 'pending', input: { query: 'r' }, raw: '{"query":"r"}' },
+          metadata: {
+            providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+          },
+        },
+      ],
+    };
+
+    const unified = toModelMessages([message]);
+    // toModelMessages may also synthesise a follow-up tool result
+    // entry for any pending ToolPart (so the prompt is well-formed
+    // even mid-flight); we only care that the assistant turn carries
+    // the round-tripped providerMetadata.
+    const assistant = unified.find((m) => m.role === 'assistant');
+    expect(assistant).toBeDefined();
+    if (assistant?.role !== 'assistant') return;
+    expect(assistant.toolCalls).toEqual([
+      {
+        id: 'call_websearch',
+        name: 'web_search',
+        arguments: '{"query":"r"}',
+        providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+      },
+    ]);
+  });
+
+  it('drops ToolPart.metadata.providerMetadata when replaying against a different model', () => {
+    const sessionId = 'session-1';
+    const messageId = asMessageId('m-assistant-2');
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        // Synthetic provider/model on the persisted assistant turn so
+        // toModelMessages can recognise the cross-model replay case.
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      },
+      parts: [
+        {
+          id: asPartId('p1'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'tool',
+          callID: 'call_websearch',
+          tool: 'web_search',
+          state: { status: 'pending', input: {}, raw: '{}' },
+          metadata: {
+            providerMetadata: { openai: { itemId: 'fc_websearch_001' } },
+          },
+        },
+      ],
+    };
+
+    const unified = toModelMessages([message], {
+      currentModel: { providerID: 'anthropic', modelID: 'claude-sonnet-4-5' },
+    });
+    const assistant = unified.find((m) => m.role === 'assistant');
+    expect(assistant).toBeDefined();
+    if (assistant?.role !== 'assistant') return;
+    expect(assistant.toolCalls).toEqual([
+      { id: 'call_websearch', name: 'web_search', arguments: '{}' },
+    ]);
   });
 });
