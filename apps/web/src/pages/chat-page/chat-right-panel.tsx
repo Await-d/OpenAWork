@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
   PlanPanel,
   ToolCallCard,
@@ -24,6 +24,7 @@ import type { SessionTerminalView } from './terminals-api.js';
 import { deleteSessionTerminal } from './terminals-api.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
+import { BuiltInBrowser } from '../../components/chat/BuiltInBrowser.js';
 import {
   RIGHT_PANEL_TABS,
   RIGHT_PANEL_TAB_META,
@@ -162,6 +163,7 @@ export interface ChatRightPanelProps {
   sessionTerminalsPendingKillIds?: Set<string>;
   onKillTerminal?: (terminalId: string) => Promise<void>;
   onReloadTerminals?: () => void;
+  browserPreviewUrl?: string | null;
 }
 
 export function ChatRightPanel(props: ChatRightPanelProps) {
@@ -211,8 +213,16 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     yoloMode,
   } = props;
 
+  // Once the browser tab has been activated (user clicked or auto-preview
+  // triggered), keep BuiltInBrowser mounted so the Tauri webview / iframe
+  // preserves page state across tab switches.
+  const [browserMounted, setBrowserMounted] = useState(false);
+  useEffect(() => {
+    if (rightTab === 'browser' || props.browserPreviewUrl) setBrowserMounted(true);
+  }, [rightTab, props.browserPreviewUrl]);
+
   const rightPanelWidth = rightOpen
-    ? rightTab === 'agent'
+    ? rightTab === 'agent' || rightTab === 'browser'
       ? 'clamp(360px, 40vw, 520px)'
       : 'clamp(320px, 32vw, 400px)'
     : 0;
@@ -326,6 +336,17 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
               background: 'color-mix(in oklch, var(--surface) 98%, var(--bg) 2%)',
             }}
           >
+            {browserMounted && (
+              <BuiltInBrowser
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  ...(rightTab !== 'browser' && { display: 'none' as const }),
+                }}
+                previewUrl={props.browserPreviewUrl}
+                hidden={rightTab !== 'browser'}
+              />
+            )}
             {rightTab === 'agent' && (
               <div
                 style={{
@@ -352,7 +373,7 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                 />
               </div>
             )}
-            {rightTab !== 'agent' && (
+            {rightTab !== 'agent' && rightTab !== 'browser' && (
               <>
                 <div
                   data-testid={`chat-right-panel-header-${rightTab}`}

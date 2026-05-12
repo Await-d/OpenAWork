@@ -14,6 +14,10 @@
     "updater:default",
     "dialog:default",
     "notification:default",
-    "autostart:default"
+    "autostart:default",
+    "core:webview:allow-create-webview",
+    "core:webview:allow-set-size",
+    "core:webview:allow-set-position",
+    "core:webview:allow-close"
   ]
 }

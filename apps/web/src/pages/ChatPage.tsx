@@ -229,6 +229,7 @@ import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
 import { useScrollManager } from './chat-page/use-scroll-manager.js';
 import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
 import { useSessionTerminals } from './chat-page/use-session-terminals.js';
+import { detectDevServerUrl, isLikelyDevServerCommand } from './chat-page/dev-server-detect.js';
 import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
 import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
@@ -396,6 +397,8 @@ export default function ChatPage() {
     decision: PermissionDecision;
     requestId: string;
   } | null>(null);
+  const [browserPreviewUrl, setBrowserPreviewUrl] = useState<string | null>(null);
+  const devServerDetectedTerminalIdsRef = useRef<Set<string>>(new Set());
   const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
@@ -756,6 +759,8 @@ export default function ChatPage() {
     setLatestGeneratedImageResult(null);
     setSessionImageEditReferenceArtifacts([]);
     setSelectedImageEditReferenceArtifactId(null);
+    setBrowserPreviewUrl(null);
+    devServerDetectedTerminalIdsRef.current = new Set();
   }, [currentSessionId]);
 
   useEffect(() => {
@@ -2884,6 +2889,37 @@ export default function ChatPage() {
           event.type === 'terminal_exited'
         ) {
           sessionTerminals.applyRunEvent(event);
+
+          // Auto-detect dev-server URLs from terminal output
+          if (
+            (event.type === 'terminal_output' || event.type === 'terminal_started') &&
+            !devServerDetectedTerminalIdsRef.current.has(
+              (event as { terminalId: string }).terminalId,
+            )
+          ) {
+            const terminalId = (event as { terminalId: string }).terminalId;
+            const outputText =
+              event.type === 'terminal_output' ? (event as { outputTail: string }).outputTail : '';
+            const command =
+              event.type === 'terminal_started' ? (event as { command: string }).command : '';
+
+            if (
+              event.type === 'terminal_started' &&
+              command &&
+              !isLikelyDevServerCommand(command)
+            ) {
+              // Not a dev-server command — mark as skip so future output events are ignored
+              devServerDetectedTerminalIdsRef.current.add(terminalId);
+            } else if (outputText) {
+              const detected = detectDevServerUrl(outputText);
+              if (detected) {
+                devServerDetectedTerminalIdsRef.current.add(terminalId);
+                setBrowserPreviewUrl(detected.url);
+                setRightOpen(true);
+                setRightTab('browser');
+              }
+            }
+          }
         }
 
         if (event.type === 'tool_progress') {
@@ -4293,6 +4329,39 @@ export default function ChatPage() {
             event.type === 'terminal_exited'
           ) {
             sessionTerminals.applyRunEvent(event);
+
+            // Auto-detect dev-server URLs from terminal output (attach path)
+            if (
+              (event.type === 'terminal_output' || event.type === 'terminal_started') &&
+              !devServerDetectedTerminalIdsRef.current.has(
+                (event as { terminalId: string }).terminalId,
+              )
+            ) {
+              const terminalId = (event as { terminalId: string }).terminalId;
+              const outputText =
+                event.type === 'terminal_output'
+                  ? (event as { outputTail: string }).outputTail
+                  : '';
+              const command =
+                event.type === 'terminal_started' ? (event as { command: string }).command : '';
+
+              if (
+                event.type === 'terminal_started' &&
+                command &&
+                !isLikelyDevServerCommand(command)
+              ) {
+                // Not a dev-server command — mark as skip
+                devServerDetectedTerminalIdsRef.current.add(terminalId);
+              } else if (outputText) {
+                const detected = detectDevServerUrl(outputText);
+                if (detected) {
+                  devServerDetectedTerminalIdsRef.current.add(terminalId);
+                  setBrowserPreviewUrl(detected.url);
+                  setRightOpen(true);
+                  setRightTab('browser');
+                }
+              }
+            }
           }
 
           if (event.type === 'session_child') {
@@ -5640,6 +5709,7 @@ export default function ChatPage() {
         sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
         onKillTerminal={sessionTerminals.killTerminal}
         onReloadTerminals={sessionTerminals.reload}
+        browserPreviewUrl={browserPreviewUrl}
       />
     </div>
   );

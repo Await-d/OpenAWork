@@ -10,6 +10,7 @@ export const RIGHT_PANEL_TABS = [
   { id: 'viz', label: '可视化' },
   { id: 'mcp', label: 'MCP' },
   { id: 'agent', label: '代理' },
+  { id: 'browser', label: '浏览器' },
 ] as const;
 
 export type RightPanelTabId = (typeof RIGHT_PANEL_TABS)[number]['id'];
@@ -31,6 +32,7 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     viz: { title: '执行可视化', description: '从图谱与事件时间线理解当前执行路径。' },
     mcp: { title: 'MCP 状态', description: '检查 MCP 服务连接状态与可用能力。' },
     agent: { title: '代理详情', description: '查看子代理会话、日志与运行细节。' },
+    browser: { title: '内置浏览器', description: '在面板中直接浏览网页，桌面端使用原生 Webview。' },
   };
 
 export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
@@ -110,6 +112,16 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
         <circle cx="18" cy="14" r="2.5" />
         <path d="M8 16.7l2.5-7" />
         <path d="M13.8 7.5l2.4 4.8" />
+      </svg>
+    );
+  }
+  if (tabId === 'browser') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3.6 9h16.8" />
+        <path d="M3.6 15h16.8" />
+        <path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9z" />
       </svg>
     );
   }
