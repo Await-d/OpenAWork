@@ -61,6 +61,10 @@ export function extractSessionIcon(metadataJson?: string): string | undefined {
   return parseSessionMetadata(metadataJson).icon;
 }
 
+export function extractDialogueMode(metadataJson?: string): SessionDialogueMode {
+  return parseSessionMetadata(metadataJson).dialogueMode;
+}
+
 function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
   if (!metadataJson) {
     return FALLBACK_PARSED_SESSION_METADATA;

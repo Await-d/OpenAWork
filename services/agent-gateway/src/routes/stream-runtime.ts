@@ -360,6 +360,7 @@ async function continueFromApprovedToolResult(input: {
             input.payload.clientRequestId,
             round + 1,
             requestData,
+            input.userId,
           ),
           enabledToolNames,
           eventSequence,
@@ -475,6 +476,7 @@ export async function resumeApprovedPermissionRequest(input: {
         input.payload.clientRequestId,
         input.payload.nextRound,
         streamRequestSchema.parse(input.payload.requestData),
+        input.userId,
       ),
     );
 

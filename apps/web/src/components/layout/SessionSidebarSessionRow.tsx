@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { Session } from '../../hooks/useSessions.js';
 import {
+  extractDialogueMode,
   extractSessionIcon,
   getSessionModeLabels,
   hasParentSession,
@@ -79,6 +80,10 @@ export function SessionSidebarSessionRow({
   );
   const sessionIcon = useMemo(
     () => extractSessionIcon(session.metadata_json),
+    [session.metadata_json],
+  );
+  const dialogueMode = useMemo(
+    () => extractDialogueMode(session.metadata_json),
     [session.metadata_json],
   );
 
@@ -208,6 +213,38 @@ export function SessionSidebarSessionRow({
             <span aria-hidden="true" style={{ fontSize: 14, lineHeight: 1 }}>
               {sessionIcon}
             </span>
+          ) : dialogueMode === 'coding' ? (
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+          ) : dialogueMode === 'programmer' ? (
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="M8 9l-3 3 3 3" />
+              <path d="M16 9l3 3-3 3" />
+              <path d="M12 7l-2 10" />
+            </svg>
           ) : (
             <svg
               width="13"

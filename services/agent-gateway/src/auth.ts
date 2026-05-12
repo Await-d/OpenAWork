@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { redis, sqliteGet, sqliteRun } from './db.js';
 import { ensureDefaultInstalledSkills } from './default-skills.js';
 import { ensureDefaultWorkflowTemplates } from './default-workflow-templates.js';
+import { syncSystemSkillsForUser } from './system-skills.js';
 import { startRequestWorkflow } from './request-workflow.js';
 
 const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-production-min-32-chars';
@@ -331,6 +332,10 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     ]);
     ensureDefaultInstalledSkills(id);
     ensureDefaultWorkflowTemplates(id);
+    await syncSystemSkillsForUser(id).catch(() => {
+      // System skills are best-effort: a missing or unreadable
+      // ~/.claude/skills must not break user signup.
+    });
     createUserStep.succeed();
     step.succeed(undefined, { userId: id });
 

@@ -78,7 +78,7 @@ function SessionModeBadgesInner({
           key={label}
           style={{
             ...badgeStyle,
-            ...(label === '澄清'
+            ...(label.startsWith('澄清')
               ? CLARIFY_BADGE_STYLE
               : label === '编程'
                 ? CODING_BADGE_STYLE

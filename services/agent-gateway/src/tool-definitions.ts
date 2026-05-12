@@ -29,6 +29,11 @@ import {
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
 import {
+  bashKillToolDefinition,
+  bashOutputToolDefinition,
+  runBashInBackgroundToolDefinition,
+} from './run-background-bash-tools.js';
+import {
   sessionInfoToolDefinition,
   sessionListToolDefinition,
   sessionReadToolDefinition,
@@ -149,6 +154,9 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   skillTool,
   batchToolDefinition,
   bashToolDefinition,
+  runBashInBackgroundToolDefinition,
+  bashOutputToolDefinition,
+  bashKillToolDefinition,
   applyPatchToolDefinition,
   questionToolDefinition,
   enterPlanModeToolDefinition,
@@ -741,6 +749,57 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['command'],
+        additionalProperties: false,
+      };
+    case 'run_bash_in_background':
+      return {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: '要在后台运行的单行 shell 命令' },
+          description: {
+            type: 'string',
+            description: '5-10 个词描述该后台命令的作用',
+          },
+          workdir: {
+            type: 'string',
+            description: '可选：命令执行的工作区绝对路径',
+          },
+          timeout: {
+            type: 'integer',
+            minimum: 1,
+            description: '可选：命令超时（毫秒），默认 24h',
+          },
+        },
+        required: ['command', 'description'],
+        additionalProperties: false,
+      };
+    case 'bash_output':
+      return {
+        type: 'object',
+        properties: {
+          terminal_id: {
+            type: 'string',
+            description: 'run_bash_in_background 返回的 terminalId',
+          },
+          since_bytes: {
+            type: 'integer',
+            minimum: 0,
+            description: '只返回累计输出超过此字节数之后的尾段；默认 0 返回全部缓存的 tail',
+          },
+        },
+        required: ['terminal_id'],
+        additionalProperties: false,
+      };
+    case 'bash_kill':
+      return {
+        type: 'object',
+        properties: {
+          terminal_id: {
+            type: 'string',
+            description: '要终止的后台终端 id',
+          },
+        },
+        required: ['terminal_id'],
         additionalProperties: false,
       };
     case 'apply_patch':

@@ -15,15 +15,11 @@ import {
   SkillsToolbar,
   sharedUiThemeVars,
 } from '../components/skills/SkillsPageSections.js';
+import { DEFAULT_PREINSTALLED_SKILL_IDS } from './skills-shared-constants.js';
 
 type ActiveTab = 'market' | 'local' | 'installed';
 
 const MARKET_PAGE_SIZE = 24;
-
-const DEFAULT_PREINSTALLED_SKILL_IDS = new Set([
-  'github:Await-d/agentdocs-orchestrator/agentdocs-orchestrator',
-  'github:Await-d/agentdocs-orchestrator/schema-architect',
-]);
 
 interface SkillEntryDto {
   id: string;
@@ -66,9 +62,7 @@ type LocalWorkspaceSkill = (MarketSkill & Partial<MarketSkillDetail>) & {
 };
 
 function toMarketSkill(entry: SkillEntryDto): MarketSkill & Partial<MarketSkillDetail> {
-  const installable = !(
-    entry.sourceId === 'builtin' || (entry.sourceId ? entry.sourceId.startsWith('github:') : false)
-  );
+  const installable = entry.sourceId !== 'builtin';
   return {
     id: entry.id,
     name: entry.displayName ?? entry.name ?? entry.id,
@@ -169,13 +163,18 @@ function useSkillsApi() {
         manifest: { name: string; version: string };
         sourceId: string;
         enabled: boolean;
+        latestVersion?: string | null;
       }>;
     };
     return data.skills.map((s) => ({
       id: s.skillId,
       name: s.manifest.name,
       version: s.manifest.version,
-      latestVersion: s.manifest.version,
+      // Backend now writes the real remote version from the periodic
+      // checker. Fall back to local version when the check hasn't run
+      // yet (newly-installed skill, or non-GitHub source that we
+      // don't probe at all).
+      latestVersion: s.latestVersion ?? s.manifest.version,
       source: s.sourceId,
       enabled: s.enabled,
       preinstalled: DEFAULT_PREINSTALLED_SKILL_IDS.has(s.skillId),
@@ -208,6 +207,26 @@ function useSkillsApi() {
     [gatewayUrl, getHeaders],
   );
 
+  const toggleInstalledSkill = useCallback(
+    async (skillId: string, enabled: boolean): Promise<void> => {
+      const res = await fetch(
+        `${gatewayUrl}/skills/installed/${encodeURIComponent(skillId)}/enable`,
+        {
+          method: 'PATCH',
+          headers: getHeaders(),
+          body: JSON.stringify({ enabled }),
+        },
+      );
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({ error: `Toggle failed: ${res.status}` }))) as {
+          error?: string;
+        };
+        throw new Error(err.error ?? `Toggle failed: ${res.status}`);
+      }
+    },
+    [gatewayUrl, getHeaders],
+  );
+
   const discoverLocalSkills = useCallback(async (): Promise<LocalSkillEntryDto[]> => {
     const res = await fetch(`${gatewayUrl}/skills/local/discover`, { headers: getHeaders() });
     if (!res.ok) throw new Error(`Failed to discover local skills: ${res.status}`);
@@ -233,6 +252,30 @@ function useSkillsApi() {
     },
     [gatewayUrl, getHeaders],
   );
+
+  const resyncSystemSkills = useCallback(async (): Promise<{
+    added: number;
+    updated: number;
+    removed: number;
+    total: number;
+  }> => {
+    const res = await fetch(`${gatewayUrl}/skills/system/resync`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({ error: `Resync failed: ${res.status}` }))) as {
+        error?: string;
+      };
+      throw new Error(err.error ?? `Resync failed: ${res.status}`);
+    }
+    return (await res.json()) as {
+      added: number;
+      updated: number;
+      removed: number;
+      total: number;
+    };
+  }, [gatewayUrl, getHeaders]);
 
   const fetchSources = useCallback(async (): Promise<RegistrySource[]> => {
     const res = await fetch(`${gatewayUrl}/skills/registry-sources`, { headers: getHeaders() });
@@ -333,6 +376,7 @@ function useSkillsApi() {
     fetchInstalled,
     installSkill,
     uninstallSkill,
+    toggleInstalledSkill,
     fetchSources,
     syncSources,
     addSource,
@@ -341,6 +385,7 @@ function useSkillsApi() {
     fetchSkillDetail,
     discoverLocalSkills,
     installLocalSkill,
+    resyncSystemSkills,
   };
 }
 
@@ -384,6 +429,7 @@ export default function SkillsPage() {
     fetchInstalled,
     installSkill,
     uninstallSkill,
+    toggleInstalledSkill,
     fetchSources,
     syncSources,
     addSource,
@@ -392,6 +438,7 @@ export default function SkillsPage() {
     fetchSkillDetail,
     discoverLocalSkills,
     installLocalSkill,
+    resyncSystemSkills,
   } = useSkillsApi();
 
   const loadMarket = useCallback(
@@ -605,6 +652,25 @@ export default function SkillsPage() {
     void loadInstalled();
   }
 
+  async function handleToggle(id: string, nextEnabled: boolean) {
+    // Optimistic update so the switch animates instantly. If the
+    // request fails, the eventually-consistent reload below pulls
+    // the canonical state back from the server.
+    setInstalledSkills((prev) =>
+      prev.map((skill) => (skill.id === id ? { ...skill, enabled: nextEnabled } : skill)),
+    );
+    try {
+      await toggleInstalledSkill(id, nextEnabled);
+    } catch {
+      // Swallowed: a failed toggle just means the optimistic update
+      // gets reverted by `loadInstalled()`. We deliberately don't
+      // surface a toast here because (a) there's no toast system
+      // wired into this page, and (b) the row will visibly snap back.
+    } finally {
+      void loadInstalled();
+    }
+  }
+
   function handleUpdate(id: string) {
     const installedSkill = installedSkills.find((skill) => skill.id === id);
     if (!installedSkill) {
@@ -627,11 +693,34 @@ export default function SkillsPage() {
       return;
     }
 
+    // System-installed skills (auto-discovered from `~/.claude/skills` etc.)
+    // can't go through the market-install path — their source_id is the
+    // scan root, not a registry URL. Rescan the well-known OS dirs instead;
+    // the resync updates manifest_json for any SKILL.md whose content
+    // changed since the last sync.
+    if (installedSkill.source.startsWith('local-system:')) {
+      void (async () => {
+        try {
+          await resyncSystemSkills();
+        } finally {
+          await loadInstalled();
+        }
+      })();
+      return;
+    }
+
     void handleInstall({ mode: 'market', skillId: id, sourceId: installedSkill.source });
   }
 
   function handleCheckUpdates() {
-    void loadInstalled();
+    void (async () => {
+      // System-skill resync first so any newly-added/edited SKILL.md in
+      // `~/.claude/skills`-style dirs surfaces before we re-render the
+      // installed list. Swallow errors — the legacy reload below is
+      // still useful even if the FS scan flaked out.
+      await resyncSystemSkills().catch(() => {});
+      await loadInstalled();
+    })();
   }
 
   function handleSelectSkill(
@@ -849,6 +938,7 @@ export default function SkillsPage() {
               onUninstall={(id) => void handleUninstall(id)}
               onUpdate={handleUpdate}
               onCheckUpdates={handleCheckUpdates}
+              onToggle={(id, next) => void handleToggle(id, next)}
               onAddSource={(url) => {
                 void (async () => {
                   await addSource(url);

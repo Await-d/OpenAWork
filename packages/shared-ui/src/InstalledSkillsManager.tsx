@@ -16,6 +16,24 @@ export interface InstalledSkillsManagerProps {
   onUninstall: (id: string) => void;
   onUpdate: (id: string) => void;
   onCheckUpdates: () => void;
+  /**
+   * Optional handler for toggling a skill's enabled flag. When provided,
+   * the status cell renders an interactive switch; otherwise the cell
+   * stays a read-only badge (preserves the legacy call-sites' rendering).
+   *
+   * The handler receives the *next* boolean state, not a delta — so
+   * implementations can simply forward to a PATCH endpoint that takes
+   * `{enabled}`.
+   */
+  onToggle?: (id: string, nextEnabled: boolean) => void;
+  /**
+   * Optional predicate that, when it returns a non-empty string for a
+   * given skill, hides that row's toggle and shows the returned string
+   * as the disabled-reason tooltip. Use for skills that the user must
+   * not be able to disable (e.g. system-mandated preinstalled ones).
+   * No-op when `onToggle` itself is not supplied.
+   */
+  toggleDisabledReason?: (skill: InstalledSkill) => string | null;
 }
 
 const cell: CSSProperties = {
@@ -40,6 +58,41 @@ const preinstalledBadge: CSSProperties = {
   border: '1px solid rgba(56,189,248,0.22)',
 };
 
+const systemBadge: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  marginLeft: 8,
+  padding: '2px 6px',
+  borderRadius: 999,
+  fontSize: 10,
+  fontWeight: 700,
+  color: '#a78bfa',
+  background: 'rgba(167,139,250,0.14)',
+  border: '1px solid rgba(167,139,250,0.22)',
+};
+
+function isSystemSourced(source: string): boolean {
+  return source.startsWith('local-system:');
+}
+
+/**
+ * Render a human-readable source label. For local-system entries the
+ * full path (e.g. `local-system:/home/alice/.claude/skills`) gets
+ * shortened to the trailing two path segments so the column stays
+ * readable on narrow viewports.
+ */
+function formatSourceLabel(source: string): string {
+  if (!isSystemSourced(source)) return source;
+  const path = source.slice('local-system:'.length);
+  // Split on both POSIX `/` and Windows `\` so a path like
+  // `C:\Users\alice\AppData\Roaming\OpenAWork\skills` still gets
+  // shortened to `…/OpenAWork/skills` on Windows installs.
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  if (parts.length <= 2) return path;
+  return `…/${parts.slice(-2).join('/')}`;
+}
+
 function btn(color: string): CSSProperties {
   return {
     background: `${color}22`,
@@ -59,6 +112,8 @@ export function InstalledSkillsManager({
   onUninstall,
   onUpdate,
   onCheckUpdates,
+  onToggle,
+  toggleDisabledReason,
 }: InstalledSkillsManagerProps) {
   const updateCount = skills.filter((s) => s.latestVersion && s.latestVersion !== s.version).length;
   const [confirmingRemovalId, setConfirmingRemovalId] = useState<string | null>(null);
@@ -155,6 +210,14 @@ export function InstalledSkillsManager({
                     >
                       <div style={{ fontWeight: 600 }}>{skill.name}</div>
                       {skill.preinstalled && <span style={preinstalledBadge}>系统预装</span>}
+                      {isSystemSourced(skill.source) && (
+                        <span
+                          style={systemBadge}
+                          title="自动从系统目录（如 ~/.claude/skills）发现并启用，重启时同步更新"
+                        >
+                          系统目录
+                        </span>
+                      )}
                     </div>
                     <div
                       style={{ fontSize: 11, color: 'var(--color-muted, #94a3b8)', marginTop: 1 }}
@@ -181,11 +244,17 @@ export function InstalledSkillsManager({
                     )}
                   </td>
                   <td style={muted}>
-                    <span style={{ fontSize: 12 }}>{skill.source}</span>
+                    <span style={{ fontSize: 12 }} title={skill.source}>
+                      {formatSourceLabel(skill.source)}
+                    </span>
                   </td>
                   <td style={cell}>
-                    <span
-                      style={{
+                    {(() => {
+                      const disabledReason = onToggle
+                        ? (toggleDisabledReason?.(skill) ?? null)
+                        : null;
+                      const showSwitch = !!onToggle && !disabledReason;
+                      const badgeStyle: CSSProperties = {
                         fontSize: 11,
                         fontWeight: 700,
                         padding: '2px 6px',
@@ -196,10 +265,64 @@ export function InstalledSkillsManager({
                         color: skill.enabled ? '#34d399' : '#64748b',
                         textTransform: 'uppercase' as const,
                         letterSpacing: 0.3,
-                      }}
-                    >
-                      {skill.enabled ? '已启用' : '已禁用'}
-                    </span>
+                      };
+                      if (!showSwitch) {
+                        return (
+                          <span style={badgeStyle} title={disabledReason ?? undefined}>
+                            {skill.enabled ? '已启用' : '已禁用'}
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={skill.enabled}
+                          aria-label={`${skill.enabled ? '禁用' : '启用'} ${skill.name}`}
+                          onClick={() => onToggle?.(skill.id, !skill.enabled)}
+                          title={skill.enabled ? '点击禁用' : '点击启用'}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: 0,
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            style={{
+                              position: 'relative',
+                              width: 28,
+                              height: 16,
+                              borderRadius: 999,
+                              background: skill.enabled
+                                ? 'rgba(52,211,153,0.55)'
+                                : 'rgba(100,116,139,0.45)',
+                              transition: 'background 160ms ease',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <span
+                              style={{
+                                position: 'absolute',
+                                top: 2,
+                                left: skill.enabled ? 14 : 2,
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                background: '#fff',
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.25)',
+                                transition: 'left 160ms ease',
+                              }}
+                            />
+                          </span>
+                          <span style={badgeStyle}>{skill.enabled ? '已启用' : '已禁用'}</span>
+                        </button>
+                      );
+                    })()}
                   </td>
                   <td style={cell}>
                     <div style={{ display: 'flex', gap: 6 }}>

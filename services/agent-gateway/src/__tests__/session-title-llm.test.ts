@@ -53,8 +53,11 @@ describe('generateSessionTitleLlm', () => {
     vi.restoreAllMocks();
   });
 
-  it('skips the LLM request when the session already has a title', async () => {
-    mocks.sqliteGet.mockReturnValue({ title: '人工标题' });
+  it('skips the LLM request when the session already has both title and icon', async () => {
+    mocks.sqliteGet.mockReturnValue({
+      title: '人工标题',
+      metadata_json: JSON.stringify({ icon: '🔑' }),
+    });
 
     await generateSessionTitleLlm({
       route: createRoute(),
@@ -65,6 +68,38 @@ describe('generateSessionTitleLlm', () => {
 
     expect(mocks.runUpstreamGenerate).not.toHaveBeenCalled();
     expect(mocks.sqliteRun).not.toHaveBeenCalled();
+  });
+
+  it('calls LLM and saves only icon when title exists but icon is missing', async () => {
+    mocks.sqliteGet
+      .mockReturnValueOnce({ title: '启发式标题', metadata_json: null })
+      .mockReturnValue({ metadata_json: null });
+    mocks.runUpstreamGenerate.mockResolvedValue({
+      text: '启发式标题\n🔧',
+      inputTokens: 10,
+      outputTokens: 5,
+      finishReason: 'stop',
+    });
+
+    await generateSessionTitleLlm({
+      route: createRoute(),
+      userMessage: '帮我修复标题',
+      sessionId: 'session-icon-only',
+      userId: 'user-1',
+    });
+
+    expect(mocks.runUpstreamGenerate).toHaveBeenCalledTimes(1);
+    // Title update should NOT be called (title already exists)
+    const titleUpdateCall = mocks.sqliteRun.mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && call[0].includes("COALESCE(TRIM(title), '') = ''"),
+    );
+    expect(titleUpdateCall).toBeUndefined();
+    // Icon update SHOULD be called
+    const iconUpdateCall = mocks.sqliteRun.mock.calls.find(
+      (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('metadata_json'),
+    );
+    expect(iconUpdateCall).toBeDefined();
   });
 
   it('calls upstream and updates the session title when title is empty', async () => {

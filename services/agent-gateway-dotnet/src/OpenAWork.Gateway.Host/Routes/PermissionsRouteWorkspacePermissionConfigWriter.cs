@@ -38,29 +38,17 @@ internal static class PermissionsRouteWorkspacePermissionConfigWriter
                 ? await File.ReadAllTextAsync(filePath, cancellationToken)
                 : null;
             var config = await LoadWorkspacePermissionConfigAsync(filePath, cancellationToken);
-            var grantedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var category = ResolvePermissionCategory(toolName);
-            var permanentGrants = config["permanentGrants"] as JsonArray ?? new JsonArray();
             var rules = config["rules"] as JsonArray ?? new JsonArray();
 
+            // Permanent grants are stored exclusively in `rules` so the
+            // TS settings panel (which reads/writes `rules`) is the single
+            // source of truth. Legacy `permanentGrants` entries from older
+            // config files are still honoured via the TS
+            // `listEffectiveWorkspacePermissionRules` merger and are
+            // migrated the first time the user saves the settings page.
             foreach (var pattern in patterns)
             {
-                if (!permanentGrants.Any((item) =>
-                    item is JsonObject grant
-                    && string.Equals(ReadJsonString(grant, "toolName"), category, StringComparison.Ordinal)
-                    && string.Equals(ReadJsonString(grant, "scope"), pattern, StringComparison.Ordinal)
-                    && string.Equals(ReadJsonString(grant, "decision"), "permanent", StringComparison.Ordinal)))
-                {
-                    permanentGrants.Add(new JsonObject
-                    {
-                        ["id"] = $"{category}:{pattern}:{grantedAt}",
-                        ["toolName"] = category,
-                        ["scope"] = pattern,
-                        ["grantedAt"] = grantedAt,
-                        ["decision"] = "permanent",
-                    });
-                }
-
                 if (!rules.Any((item) =>
                     item is JsonObject rule
                     && string.Equals(ReadJsonString(rule, "permission"), category, StringComparison.Ordinal)
@@ -76,7 +64,6 @@ internal static class PermissionsRouteWorkspacePermissionConfigWriter
                 }
             }
 
-            config["permanentGrants"] = permanentGrants;
             config["rules"] = rules;
             await WriteWorkspacePermissionConfigAsync(filePath, config, cancellationToken);
             return new WorkspacePermissionMaterializationResult(workspaceRoot, filePath, fileExisted, originalContent);

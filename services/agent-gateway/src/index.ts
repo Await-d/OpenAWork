@@ -7,7 +7,11 @@ import { connectDb, closeDb, db, migrate, sqliteGet, sqliteRun } from './db.js';
 import { bootV2Runtime, getRuntimeFlags, shutdownV2Runtime } from './v2-runtime/index.js';
 import { skillMcpPool } from './skill-mcp-connection-pool.js';
 import { ensureDefaultInstalledSkillsForAllUsers } from './default-skills.js';
+import { syncSystemSkillsForAllUsers } from './system-skills.js';
 import { ensureDefaultWorkflowTemplatesForAllUsers } from './default-workflow-templates.js';
+import { backgroundScheduler } from './background-scheduler.js';
+import { refreshRegistryCaches } from './routes/skills.js';
+import { checkInstalledSkillUpdates } from './skill-update-checker.js';
 import { createHash, randomUUID } from 'crypto';
 import requestWorkflowPlugin, { startRequestWorkflow } from './request-workflow.js';
 import { startParentProcessWatch } from './parent-watch.js';
@@ -31,6 +35,7 @@ import { skillsRoutes } from './routes/skills.js';
 import { skillSelectionRoutes } from './routes/skill-selection.js';
 import { skillRecommendRoutes } from './routes/skill-recommend.js';
 import { localSkillsRoutes } from './routes/local-skills.js';
+import { systemSkillsRoutes } from './routes/system-skills.js';
 import { capabilitiesRoutes } from './routes/capabilities.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { permissionsRoutes } from './routes/permissions.js';
@@ -54,11 +59,13 @@ import { sshRoutes } from './routes/ssh.js';
 import { toolsRoutes } from './routes/tools.js';
 import { artifactsRoutes } from './routes/artifacts.js';
 import { reconcileAllSessionRuntimes } from './session-runtime-reconciler.js';
+import { reconcileStaleRunningTerminalsAtBoot } from './session-terminal-registry.js';
 import qrcodeTerminal from 'qrcode-terminal';
 import { pairingManager, pairingRoutes } from './routes/pairing.js';
 import { memoriesRoutes } from './routes/memories.js';
 import { notificationsRoutes } from './routes/notifications.js';
 import { sessionImagesRoutes } from './routes/session-images.js';
+import { sessionTerminalsRoutes } from './routes/session-terminals.js';
 import { mcpEventsRoutes } from './routes/mcp-events.js';
 import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
 import { ensurePluginsLoaded } from './plugin-host.js';
@@ -93,6 +100,7 @@ await app.register(sshRoutes);
 await app.register(toolsRoutes);
 await app.register(artifactsRoutes);
 await app.register(localSkillsRoutes);
+await app.register(systemSkillsRoutes);
 await app.register(skillsRoutes);
 await app.register(skillSelectionRoutes);
 await app.register(skillRecommendRoutes);
@@ -101,6 +109,7 @@ await app.register(pairingRoutes);
 await app.register(memoriesRoutes);
 await app.register(notificationsRoutes);
 await app.register(sessionImagesRoutes);
+await app.register(sessionTerminalsRoutes);
 await app.register(mcpEventsRoutes);
 await app.register(mcpOAuthRoutes);
 
@@ -119,6 +128,11 @@ app.addHook('onClose', async () => {
     cronScheduler.stopAll();
   } catch (err) {
     app.log.error({ err }, 'cronScheduler.stopAll failed');
+  }
+  try {
+    await backgroundScheduler.stopAll();
+  } catch (err) {
+    app.log.error({ err }, 'backgroundScheduler.stopAll failed');
   }
   try {
     await channelManager.stopAll();
@@ -178,6 +192,79 @@ try {
   ensureDefaultInstalledSkillsForAllUsers();
   bootLogger.succeed(step);
 
+  step = bootLogger.start('gateway.sync-system-skills');
+  try {
+    const summary = await syncSystemSkillsForAllUsers();
+    bootLogger.succeed(step, undefined, {
+      users: summary.users,
+      added: summary.added,
+      updated: summary.updated,
+      removed: summary.removed,
+      total: summary.total,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    bootLogger.fail(step, message);
+  }
+
+  step = bootLogger.start('gateway.register-skill-background-tasks');
+  try {
+    const minutes = (n: number) => n * 60 * 1000;
+    const hours = (n: number) => n * 60 * 60 * 1000;
+
+    /**
+     * Resolve a millisecond-valued env var with a safe default.
+     * Guards against `""` → 0 and `"not-a-number"` → NaN which
+     * would both send setTimeout into tight-loop territory.
+     */
+    const envMs = (name: string, fallback: number): number => {
+      const raw = globalThis.process?.env[name];
+      if (raw === undefined || raw === null || raw.trim() === '') return fallback;
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+      return parsed;
+    };
+
+    const systemSkillIntervalMs = envMs('SKILL_SYSTEM_SYNC_INTERVAL_MS', minutes(10));
+    const cacheRefreshIntervalMs = envMs('SKILL_REGISTRY_CACHE_REFRESH_INTERVAL_MS', hours(2));
+    const versionCheckIntervalMs = envMs('SKILL_VERSION_CHECK_INTERVAL_MS', hours(12));
+
+    backgroundScheduler.register({
+      name: 'system-skills.periodic-sync',
+      intervalMs: systemSkillIntervalMs,
+      initialDelayMs: minutes(1),
+      run: async () => {
+        await syncSystemSkillsForAllUsers();
+      },
+    });
+
+    backgroundScheduler.register({
+      name: 'registry-cache.refresh',
+      intervalMs: cacheRefreshIntervalMs,
+      initialDelayMs: minutes(5),
+      run: refreshRegistryCaches,
+    });
+
+    backgroundScheduler.register({
+      name: 'installed-skills.version-check',
+      intervalMs: versionCheckIntervalMs,
+      initialDelayMs: minutes(30),
+      run: async () => {
+        await checkInstalledSkillUpdates();
+      },
+    });
+
+    bootLogger.succeed(step, undefined, {
+      tasks: backgroundScheduler.listTaskNames().join(','),
+      systemSkillIntervalMs,
+      cacheRefreshIntervalMs,
+      versionCheckIntervalMs,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    bootLogger.fail(step, message);
+  }
+
   step = bootLogger.start('gateway.seed-default-workflow-templates');
   ensureDefaultWorkflowTemplatesForAllUsers();
   bootLogger.succeed(step);
@@ -207,6 +294,18 @@ try {
     pausedCount: reconciliationResult.pausedCount,
     resetCount: reconciliationResult.resetCount,
   });
+
+  // Any session_terminals row still marked `running` after a gateway
+  // restart points at a process that died with the previous instance.
+  // Flip those rows to `stale` so the UI doesn't show ghost terminals.
+  step = bootLogger.start('gateway.reconcile-session-terminals');
+  try {
+    const staleCount = reconcileStaleRunningTerminalsAtBoot();
+    bootLogger.succeed(step, undefined, { staleCount });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLogger.fail(step, message);
+  }
 
   step = bootLogger.start('gateway.autostart-channels');
   await autoStartConfiguredChannels((channel, error) => {

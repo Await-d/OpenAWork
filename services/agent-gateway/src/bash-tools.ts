@@ -47,7 +47,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '@openAwork/agent-core';
-import type { FileDiffContent } from '@openAwork/shared';
+import type { FileDiffContent, SessionTerminalKind } from '@openAwork/shared';
 import { z } from 'zod';
 import { bashCommandScope } from './bash-arity.js';
 import {
@@ -57,6 +57,12 @@ import {
   truncateBashOutput,
 } from './bash-output-truncator.js';
 import { WORKSPACE_ROOT } from './db.js';
+import {
+  appendTerminalOutput,
+  markTerminalExited,
+  registerTerminal,
+  setTerminalPid,
+} from './session-terminal-registry.js';
 import { validateWorkspacePath } from './workspace-paths.js';
 import {
   captureWorkspaceReconcileSnapshot,
@@ -288,6 +294,44 @@ async function resolveBashWorkdir(workdir: string | undefined): Promise<string> 
 
 // ---------- Process orchestration ----------
 
+/**
+ * Tracking metadata threaded into `runBashCommand` so the session-wide
+ * terminal registry can record this invocation, broadcast `terminal_*`
+ * RunEvents, and allow targeted kill from the UI without aborting the
+ * whole LLM turn.
+ *
+ * Foreground bash and background bash both go through this same path; the
+ * `kind` discriminates which sandbox dispatch produced the call.
+ */
+export interface BashRunTracking {
+  sessionId: string;
+  userId: string;
+  clientRequestId?: string;
+  toolCallId?: string;
+  toolName: string;
+  kind: SessionTerminalKind;
+  description?: string;
+  /**
+   * Optional abort controller that `killTerminal()` will `.abort()` to
+   * terminate this specific run. When provided, the caller is also
+   * expected to pass `signal: abortController.signal` so the existing
+   * abort path picks it up.
+   */
+  abortController?: AbortController;
+  /**
+   * Optional pre-allocated terminalId. Used by `run_bash_in_background`
+   * so it can return the id to the model *before* `runBashCommand`
+   * begins, allowing the model's follow-up `bash_output(terminalId)`
+   * call to look the registry up by id.
+   */
+  terminalId?: string;
+  /**
+   * Optional metadata persisted on the registry row (e.g. background
+   * timeout, originating tool args).
+   */
+  metadata?: Record<string, unknown>;
+}
+
 interface RunOptions {
   signal?: AbortSignal;
   /**
@@ -298,6 +342,13 @@ interface RunOptions {
    * still running; the final value lands in the resolved `rawOutput`.
    */
   onPartialOutput?: (text: string) => void;
+  /**
+   * Session terminal tracking. When provided, the bash invocation is
+   * registered into `session-terminal-registry` for the lifetime of the
+   * process, so the UI can observe it and the user can kill it
+   * individually without aborting the LLM stream.
+   */
+  tracking?: BashRunTracking;
 }
 
 interface SpawnOutcome {
@@ -321,6 +372,7 @@ function spawnAndCollect(
   timeoutMs: number,
   externalSignal: AbortSignal | undefined,
   onPartialOutput: ((text: string) => void) | undefined,
+  onPidAssigned?: (pid: number | undefined) => void,
 ): Promise<SpawnOutcome> {
   return new Promise((resolve) => {
     const choice = pickShell();
@@ -356,6 +408,16 @@ function spawnAndCollect(
         spawnError: error instanceof Error ? error : new Error(String(error)),
       });
       return;
+    }
+
+    // Notify the registry of the child's pid as soon as spawn succeeds so
+    // the UI can render it before the first chunk of output arrives.
+    if (onPidAssigned) {
+      try {
+        onPidAssigned(child.pid);
+      } catch {
+        /* swallow — never fail the tool because of a tracking hook */
+      }
     }
 
     let exited = false;
@@ -514,6 +576,32 @@ export async function runBashCommand(
   const cwd = await resolveBashWorkdir(input.workdir);
   const timeoutMs = input.timeout ?? DEFAULT_BASH_TIMEOUT_MS;
 
+  // Register the terminal up-front if tracking is requested. This lets
+  // the UI render an in-flight row even before any output arrives, and
+  // gives `killTerminal` an abortController handle for targeted cancel.
+  let trackingTerminalId: string | undefined;
+  if (options.tracking) {
+    const registered = registerTerminal({
+      sessionId: options.tracking.sessionId,
+      userId: options.tracking.userId,
+      ...(options.tracking.clientRequestId
+        ? { clientRequestId: options.tracking.clientRequestId }
+        : {}),
+      ...(options.tracking.toolCallId ? { toolCallId: options.tracking.toolCallId } : {}),
+      toolName: options.tracking.toolName,
+      kind: options.tracking.kind,
+      command: input.command,
+      ...(input.description ? { description: input.description } : {}),
+      cwd,
+      ...(options.tracking.abortController
+        ? { abortController: options.tracking.abortController }
+        : {}),
+      ...(options.tracking.terminalId ? { terminalId: options.tracking.terminalId } : {}),
+      ...(options.tracking.metadata ? { metadata: options.tracking.metadata } : {}),
+    });
+    trackingTerminalId = registered.terminalId;
+  }
+
   // Snapshot files in the workspace before exec so we can compute diffs
   // produced by the command (kept identical to the prior implementation).
   // collectWorkspaceReconcileDiffs needs both `before` and `after` snapshots
@@ -525,12 +613,33 @@ export async function runBashCommand(
     beforeSnapshot = undefined;
   }
 
+  // When tracking is on, wrap the user-supplied onPartialOutput so the
+  // registry sees every snapshot the model would see. The original
+  // callback (e.g. the batch tool live preview) still fires unchanged.
+  const wrappedPartialOutput =
+    trackingTerminalId !== undefined
+      ? (text: string) => {
+          try {
+            appendTerminalOutput(trackingTerminalId, text);
+          } catch {
+            /* swallow — never disrupt the hot stream */
+          }
+          options.onPartialOutput?.(text);
+        }
+      : options.onPartialOutput;
+
+  const onPidAssigned =
+    trackingTerminalId !== undefined
+      ? (pid: number | undefined) => setTerminalPid(trackingTerminalId, pid)
+      : undefined;
+
   const outcome = await spawnAndCollect(
     input.command,
     cwd,
     timeoutMs,
     options.signal,
-    options.onPartialOutput,
+    wrappedPartialOutput,
+    onPidAssigned,
   );
 
   let diffs: FileDiffContent[] | undefined;
@@ -575,6 +684,31 @@ export async function runBashCommand(
   let finalOutput = truncated.content || '(no output)';
   if (metadataLines.length > 0) {
     finalOutput += `\n\n<bash_metadata>\n${metadataLines.join('\n')}\n</bash_metadata>`;
+  }
+
+  // Finalize the registry row: the spawn outcome's `kind` is already in
+  // sync with the registry status taxonomy ('exit' → 'exited',
+  // 'aborted'/'timeout'/'spawn_error' map 1:1).
+  if (trackingTerminalId !== undefined) {
+    const finalStatus =
+      outcome.kind === 'exit'
+        ? 'exited'
+        : outcome.kind === 'aborted'
+          ? 'aborted'
+          : outcome.kind === 'timeout'
+            ? 'timeout'
+            : 'spawn_error';
+    try {
+      markTerminalExited({
+        terminalId: trackingTerminalId,
+        status: finalStatus,
+        exitCode: outcome.code,
+        ...(truncated.outputPath ? { outputPath: truncated.outputPath } : {}),
+        finalSnapshot: outcome.rawOutput,
+      });
+    } catch {
+      /* swallow — registry must never break the tool result */
+    }
   }
 
   const result: BashExecutionResult = {

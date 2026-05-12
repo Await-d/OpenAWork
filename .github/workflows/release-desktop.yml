@@ -524,6 +524,23 @@ jobs:
             --required-platform darwin-aarch64
           gh release upload "${{ needs.resolve-release-notes.outputs.release_tag }}" latest.json --clobber
 
+      - name: Publish proxied updater JSON for China users
+        if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Generate latest-cn.json with download URLs routed through ghp.ci proxy
+          node scripts/build-tauri-updater-json.mjs \
+            --input-file release.json \
+            --output-file latest-cn.json \
+            --notes-file temp/release-notes/release-notes.md \
+            --version "${{ needs.resolve-release-notes.outputs.version }}" \
+            --required-platform linux-x86_64 \
+            --required-platform windows-x86_64 \
+            --required-platform darwin-aarch64 \
+            --proxy-prefix 'https://ghp.ci/'
+          gh release upload "${{ needs.resolve-release-notes.outputs.release_tag }}" latest-cn.json --clobber
+
       # 把 latest.json 镜像到滚动 tag `desktop-latest-preview`，让 tauri.conf.json
       # 里固定的 endpoint URL 始终能拿到最新 preview 元数据；同时把它覆盖回所有
       # 历史 `desktop-v*-preview` release，让仍持有旧 endpoint URL（曾经用过
@@ -542,7 +559,7 @@ jobs:
               --notes '此 release 由 release-desktop.yml 自动维护，资产 latest.json 始终指向最新 preview 版本，供 Tauri updater 拉取。请勿手动修改。' \
               --prerelease
           fi
-          gh release upload "$rolling_tag" latest.json --clobber
+          gh release upload "$rolling_tag" latest.json latest-cn.json --clobber
 
       - name: Backfill updater JSON to historical preview releases
         if: ${{ needs.build.result == 'success' && steps.release_state.outputs.release_found == 'true' && needs.resolve-release-notes.outputs.release_channel == 'preview' }}
@@ -560,9 +577,9 @@ jobs:
             if [ "$tag" = "$CURRENT_TAG" ]; then
               continue
             fi
-            echo "Backfilling latest.json to $tag"
-            if ! gh release upload "$tag" latest.json --clobber; then
-              echo "::warning::Failed to backfill latest.json to $tag (release may have been deleted)"
+            echo "Backfilling latest.json + latest-cn.json to $tag"
+            if ! gh release upload "$tag" latest.json latest-cn.json --clobber; then
+              echo "::warning::Failed to backfill updater JSON to $tag (release may have been deleted)"
             fi
           done
 

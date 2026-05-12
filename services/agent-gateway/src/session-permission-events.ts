@@ -1,8 +1,9 @@
 import type { InteractionRecord, RunEvent } from '@openAwork/shared';
-import type {
-  PermissionDecision,
-  PermissionRequestStatus,
-  PermissionRiskLevel,
+import {
+  parsePermissionAlwaysJson,
+  type PermissionDecision,
+  type PermissionRequestStatus,
+  type PermissionRiskLevel,
 } from './permission-contract.js';
 import { sqliteAll } from './db.js';
 
@@ -14,6 +15,7 @@ interface PermissionRequestEventRow {
   reason: string;
   risk_level: PermissionRiskLevel;
   preview_action: string | null;
+  always_json: string | null;
   status: PermissionRequestStatus | 'consumed';
   decision: PermissionDecision | null;
   created_at: string;
@@ -21,6 +23,7 @@ interface PermissionRequestEventRow {
 }
 
 export function createPermissionAskedEvent(input: {
+  always?: string[];
   occurredAt?: number;
   previewAction?: string;
   reason: string;
@@ -37,6 +40,7 @@ export function createPermissionAskedEvent(input: {
     reason: input.reason,
     riskLevel: input.riskLevel,
     ...(input.previewAction ? { previewAction: input.previewAction } : {}),
+    ...(input.always && input.always.length > 0 ? { always: input.always } : {}),
     eventId: `permission:${input.requestId}:asked`,
     runId: `permission:${input.requestId}`,
     occurredAt: input.occurredAt ?? Date.now(),
@@ -96,7 +100,7 @@ export function createPermissionInteractionRecord(input: {
 
 export function listSessionPermissionRunEvents(sessionId: string): RunEvent[] {
   const rows = sqliteAll<PermissionRequestEventRow>(
-    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, created_at, updated_at
+    `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, always_json, status, decision, created_at, updated_at
      FROM permission_requests
      WHERE session_id = ?
      ORDER BY created_at ASC`,
@@ -104,6 +108,7 @@ export function listSessionPermissionRunEvents(sessionId: string): RunEvent[] {
   );
 
   return rows.flatMap((row) => {
+    const alwaysPatterns = parsePermissionAlwaysJson(row.always_json);
     const events: RunEvent[] = [
       createPermissionAskedEvent({
         requestId: row.id,
@@ -112,6 +117,7 @@ export function listSessionPermissionRunEvents(sessionId: string): RunEvent[] {
         reason: row.reason,
         riskLevel: row.risk_level,
         previewAction: row.preview_action ?? undefined,
+        ...(alwaysPatterns.length > 0 ? { always: alwaysPatterns } : {}),
         occurredAt: normalizeTimestamp(row.created_at),
       }),
     ];

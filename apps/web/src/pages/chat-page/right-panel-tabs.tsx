@@ -4,6 +4,7 @@ export const RIGHT_PANEL_TABS = [
   { id: 'overview', label: '概览' },
   { id: 'plan', label: '计划' },
   { id: 'tools', label: '工具' },
+  { id: 'terminals', label: '终端' },
   { id: 'skills', label: 'Skills' },
   { id: 'history', label: '历史' },
   { id: 'viz', label: '可视化' },
@@ -18,6 +19,10 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     overview: { title: '会话概览', description: '查看当前会话、上下文注入与运行摘要。' },
     plan: { title: '计划面板', description: '聚焦当前任务拆解、优先级与执行进度。' },
     tools: { title: '工具记录', description: '浏览工具调用、筛选分类，并快速定位输出。' },
+    terminals: {
+      title: '终端管理',
+      description: '查看当前会话的运行/已完成终端，查看输出或快速终止。',
+    },
     skills: {
       title: 'Skill 设置',
       description: '调整 workspace 默认与本会话覆盖：拖拽排序、AI 推荐、导入/导出。',
@@ -66,6 +71,15 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
     return (
       <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
         <path d="M14.5 6.5a4 4 0 0 0 4.9 4.9l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l8.2-8.2a4 4 0 0 0-2.4-6.8" />
+      </svg>
+    );
+  }
+  if (tabId === 'terminals') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M7 15h4" />
+        <path d="M7 9l3 3-3 3" />
       </svg>
     );
   }

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { AIProviderRef } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth.js';
+import { SkillsPluginPanel } from './skills-plugin-panel.js';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -223,7 +224,13 @@ export function PluginsTabContent({
   );
 
   // Plugin list definition
-  const PLUGINS = [
+  const PLUGINS: Array<{
+    id: string;
+    icon: React.ReactElement;
+    label: string;
+    description: string;
+    enabled?: boolean;
+  }> = [
     {
       id: 'image-generation',
       icon: (
@@ -245,6 +252,28 @@ export function PluginsTabContent({
       label: '图片插件',
       description: '为 Agent 提供专用图片生成 Tool。',
       enabled: imgPlugin.enabled,
+    },
+    {
+      id: 'skills',
+      icon: (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 2l2.5 5 5.5.8-4 3.9.9 5.5L12 14.7 7.1 17.2l.9-5.5-4-3.9 5.5-.8L12 2z" />
+        </svg>
+      ),
+      label: '技能',
+      description: '管理已安装 Agent 技能，控制每条技能是否启用。',
+      // Skill enablement is per-row inside the panel, so there's no
+      // single global "enabled" badge to display in the sidebar.
+      enabled: undefined,
     },
   ];
 
@@ -315,7 +344,14 @@ export function PluginsTabContent({
       </div>
 
       {/* ── Right: Plugin detail ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/*
+        `minWidth: 0` lets the `1fr` grid column shrink below the
+        intrinsic width of its child. Without this, wide content
+        (e.g. SkillsPluginPanel's 5-column table) forces the column
+        wider than the viewport and triggers a horizontal scrollbar
+        on the whole settings page.
+       */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
         {selectedPlugin && selectedPluginId === 'image-generation' && (
           <>
             {/* Header */}
@@ -516,6 +552,8 @@ export function PluginsTabContent({
             )}
           </>
         )}
+
+        {selectedPlugin && selectedPluginId === 'skills' && <SkillsPluginPanel />}
       </div>
     </div>
   );

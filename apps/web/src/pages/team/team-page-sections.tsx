@@ -1049,6 +1049,7 @@ export function TeamSharedSessionsPanel({
                       reason={pendingPermission.reason}
                       riskLevel={pendingPermission.riskLevel}
                       previewAction={pendingPermission.previewAction}
+                      always={pendingPermission.always}
                       errorMessage={sharedOperateError ?? undefined}
                       onDecide={onReplyPermission}
                       style={{ maxWidth: '100%', position: 'static', boxShadow: 'none' }}

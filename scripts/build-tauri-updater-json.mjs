@@ -8,6 +8,7 @@ function parseArgs(argv) {
     version: null,
     token: process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '',
     requiredPlatforms: [],
+    proxyPrefix: null,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -30,6 +31,9 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === '--required-platform') {
       options.requiredPlatforms.push(next);
+      index += 1;
+    } else if (arg === '--proxy-prefix') {
+      options.proxyPrefix = next;
       index += 1;
     }
   }
@@ -109,9 +113,14 @@ async function buildUpdaterJson(options) {
       throw new Error(`Missing signature asset for ${platform}: ${asset.name}.sig`);
     }
 
+    // Apply proxy prefix to download URL if specified
+    const downloadUrl = options.proxyPrefix
+      ? `${options.proxyPrefix}${asset.browser_download_url}`
+      : asset.browser_download_url;
+
     platforms[platform] = {
       signature: await downloadText(signatureAsset.browser_download_url, options.token),
-      url: asset.browser_download_url,
+      url: downloadUrl,
     };
   }
 

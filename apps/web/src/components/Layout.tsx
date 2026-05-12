@@ -367,11 +367,34 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     notificationPreferencesRef.current = notificationPreferences;
   }, [notificationPreferences]);
 
-  const updatePendingPermission = useCallback((next: SessionPendingPermissionState | null) => {
-    setPendingPermission(next);
-    setPermissionReplyPendingDecision(null);
-    setPermissionReplyError(null);
-  }, []);
+  const updatePendingPermission = useCallback(
+    (next: SessionPendingPermissionState | null) => {
+      setPendingPermission(next);
+      setPermissionReplyPendingDecision(null);
+      setPermissionReplyError(null);
+
+      // Asynchronously resolve the session title so the prompt can show
+      // which session the permission request originates from.
+      if (next && !next.sessionTitle && accessToken) {
+        createSessionsClient(gatewayUrl)
+          .get(accessToken, next.targetSessionId)
+          .then((session) => {
+            const title = session?.title?.trim();
+            if (title) {
+              setPendingPermission((current) =>
+                current?.requestId === next.requestId
+                  ? { ...current, sessionTitle: title }
+                  : current,
+              );
+            }
+          })
+          .catch(() => {
+            /* best-effort — prompt still works without the title */
+          });
+      }
+    },
+    [accessToken, gatewayUrl],
+  );
 
   const loadNotificationPreferences = useCallback(async (): Promise<NotificationPreferenceMap> => {
     if (!accessToken) {
@@ -560,23 +583,24 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     }
   }, [isChatRoute, isNarrowViewport, setLeftSidebarOpen]);
 
+  // Global real-time permission subscription: accept events from ANY
+  // session so the prompt is actionable even when the user is on a non-chat
+  // page (e.g. Skills, Settings).  The targetSessionId inside the payload
+  // ensures the reply is sent to the correct session.
   useEffect(() => {
-    if (!accessToken || !currentChatSessionId) {
+    if (!accessToken) {
       updatePendingPermission(null);
       return;
     }
-
-    updatePendingPermission(null);
-
-    return subscribeSessionPendingPermission((sessionId, permission) => {
-      if (sessionId === currentChatSessionId) {
-        updatePendingPermission(permission);
-      }
+    return subscribeSessionPendingPermission((_sessionId, permission) => {
+      updatePendingPermission(permission);
     });
-  }, [accessToken, currentChatSessionId, updatePendingPermission]);
+  }, [accessToken, updatePendingPermission]);
 
   useEffect(() => {
-    if (!currentChatSessionId) {
+    if (!accessToken || !currentChatSessionId) {
+      // Don't clear pendingPermission here — it may come from another
+      // session and should stay visible on non-chat pages.
       applyPendingQuestion(null);
       return;
     }
@@ -593,7 +617,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     );
 
     return () => controller.abort();
-  }, [applyPendingQuestion, currentChatSessionId, loadPendingInteractionState]);
+  }, [accessToken, applyPendingQuestion, currentChatSessionId, loadPendingInteractionState]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -962,6 +986,9 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
 
   return (
     <>
+      <style>{`@keyframes toast-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+@keyframes permissionSlideIn { from { opacity:0; transform:translateY(-12px); } to { opacity:1; transform:translateY(0); } }
+@keyframes permissionPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.6; transform:scale(1.35); } }`}</style>
       <CommandPalette
         commands={paletteCommands}
         emptyLabel={
@@ -981,12 +1008,27 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           reason={pendingPermission.reason}
           riskLevel={pendingPermission.riskLevel}
           previewAction={pendingPermission.previewAction}
+          always={pendingPermission.always}
           pendingDecision={permissionReplyPendingDecision}
           errorMessage={permissionReplyError ?? undefined}
           onDecide={(requestId: string, decision: PermissionDecision) => {
             void handlePermissionDecision(requestId, decision);
           }}
-          style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 500 }}
+          sessionTitle={pendingPermission.sessionTitle}
+          onNavigateToSession={
+            pendingPermission.targetSessionId
+              ? () => {
+                  navigate(`/chat/${pendingPermission.targetSessionId}`);
+                }
+              : undefined
+          }
+          style={{
+            position: 'fixed',
+            top: 56,
+            right: 16,
+            zIndex: 500,
+            animation: 'permissionSlideIn 0.25s ease',
+          }}
         />
       )}
       {pendingQuestion && !isChatRoute && (
@@ -1044,54 +1086,50 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
             position: 'relative',
           }}
         >
+          <NavRail clearAuth={clearAuth} />
+
           <div
+            aria-hidden={!leftSidebarOpen || !isChatRoute}
             style={{
+              width: shouldOverlaySessionSidebar
+                ? sessionSidebarWidth
+                : isChatRoute && leftSidebarOpen
+                  ? sessionSidebarWidth
+                  : 0,
+              flexShrink: 0,
               display: 'flex',
-              flex: 1,
+              flexDirection: 'column',
               overflow: 'hidden',
-              borderRadius: 12,
-              background: 'var(--bg-glass)',
-              border: '1px solid var(--bg-glass-border)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              boxShadow: 'var(--shadow-sm), var(--shadow-md), var(--shadow-lg)',
+              height: '100%',
+              borderRight:
+                isChatRoute && leftSidebarOpen ? '1px solid var(--border-subtle)' : 'none',
+              transition: shouldOverlaySessionSidebar
+                ? 'transform 200ms ease, opacity 200ms ease'
+                : 'width 200ms ease',
+              pointerEvents: isChatRoute && leftSidebarOpen ? undefined : 'none',
+              position: shouldOverlaySessionSidebar ? 'absolute' : 'relative',
+              left: shouldOverlaySessionSidebar ? 0 : undefined,
+              top: shouldOverlaySessionSidebar ? 0 : undefined,
+              bottom: shouldOverlaySessionSidebar ? 0 : undefined,
+              zIndex: shouldOverlaySessionSidebar ? 35 : undefined,
+              transform: shouldOverlaySessionSidebar
+                ? leftSidebarOpen
+                  ? 'translateX(0)'
+                  : 'translateX(-100%)'
+                : undefined,
+              opacity: shouldOverlaySessionSidebar ? (leftSidebarOpen ? 1 : 0) : 1,
+              boxShadow:
+                shouldOverlaySessionSidebar && leftSidebarOpen ? 'var(--shadow-lg)' : 'none',
+              background: shouldOverlaySessionSidebar ? 'var(--surface)' : undefined,
             }}
           >
-            <NavRail clearAuth={clearAuth} />
-
             <div
-              aria-hidden={!leftSidebarOpen || !isChatRoute}
               style={{
-                width: shouldOverlaySessionSidebar
-                  ? sessionSidebarWidth
-                  : isChatRoute && leftSidebarOpen
-                    ? sessionSidebarWidth
-                    : 0,
-                flexShrink: 0,
                 display: 'flex',
                 flexDirection: 'column',
-                overflow: 'hidden',
                 height: '100%',
-                borderRight:
-                  isChatRoute && leftSidebarOpen ? '1px solid var(--border-subtle)' : 'none',
-                transition: shouldOverlaySessionSidebar
-                  ? 'transform 200ms ease, opacity 200ms ease'
-                  : 'width 200ms ease',
-                pointerEvents: isChatRoute && leftSidebarOpen ? undefined : 'none',
-                position: shouldOverlaySessionSidebar ? 'absolute' : 'relative',
-                left: shouldOverlaySessionSidebar ? 0 : undefined,
-                top: shouldOverlaySessionSidebar ? 0 : undefined,
-                bottom: shouldOverlaySessionSidebar ? 0 : undefined,
-                zIndex: shouldOverlaySessionSidebar ? 35 : undefined,
-                transform: shouldOverlaySessionSidebar
-                  ? leftSidebarOpen
-                    ? 'translateX(0)'
-                    : 'translateX(-100%)'
-                  : undefined,
-                opacity: shouldOverlaySessionSidebar ? (leftSidebarOpen ? 1 : 0) : 1,
-                boxShadow:
-                  shouldOverlaySessionSidebar && leftSidebarOpen ? 'var(--shadow-lg)' : 'none',
-                background: shouldOverlaySessionSidebar ? 'var(--surface)' : undefined,
+                width: sessionSidebarWidth,
+                maxWidth: '100%',
               }}
             >
               <div
@@ -1293,6 +1331,21 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                           {notifications.length > 9 ? '9+' : notifications.length}
                         </span>
                       ) : null}
+                      {pendingPermission && notifications.length === 0 && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: -2,
+                            right: -2,
+                            width: 10,
+                            height: 10,
+                            borderRadius: 999,
+                            background: '#f59e0b',
+                            boxShadow: '0 0 0 2px var(--surface)',
+                            animation: 'permissionPulse 1.5s ease-in-out infinite',
+                          }}
+                        />
+                      )}
                     </button>
                     {notificationsOpen ? (
                       <div
@@ -1504,6 +1557,29 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                                         minute: '2-digit',
                                       })}
                                     </span>
+                                    {notification.eventType === 'permission_asked' &&
+                                      notification.sessionId && (
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            void handleOpenNotification(notification);
+                                          }}
+                                          style={{
+                                            fontSize: 10,
+                                            fontWeight: 600,
+                                            padding: '3px 8px',
+                                            borderRadius: 5,
+                                            border: '1px solid rgba(245,158,11,0.35)',
+                                            background: 'rgba(245,158,11,0.1)',
+                                            color: '#d97706',
+                                            cursor: 'pointer',
+                                            justifySelf: 'start',
+                                          }}
+                                        >
+                                          去审批
+                                        </button>
+                                      )}
                                   </div>
                                   <button
                                     type="button"

@@ -39,6 +39,7 @@ import {
   WelcomeScreen,
 } from '../components/chat/ChatPageSections.js';
 import { ChatTopBar } from '../components/chat/ChatTopBar.js';
+import { SessionTerminalsChip } from '../components/chat/SessionTerminalsChip.js';
 import {
   ChatMessageGroupList,
   type ChatRenderEntry,
@@ -227,6 +228,7 @@ import { useModelPrices } from './chat-page/use-model-prices.js';
 import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
 import { useScrollManager } from './chat-page/use-scroll-manager.js';
 import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
+import { useSessionTerminals } from './chat-page/use-session-terminals.js';
 import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
 import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
@@ -494,6 +496,11 @@ export default function ChatPage() {
       refreshKey: sessionReloadNonce + messages.length,
       token,
     });
+  const sessionTerminals = useSessionTerminals({
+    currentSessionId,
+    gatewayUrl,
+    token,
+  });
   const availableImageEditReferenceArtifacts = useMemo(() => {
     if (!latestGeneratedImageResult) {
       return sessionImageEditReferenceArtifacts;
@@ -2871,6 +2878,14 @@ export default function ChatPage() {
           setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
         }
 
+        if (
+          event.type === 'terminal_started' ||
+          event.type === 'terminal_output' ||
+          event.type === 'terminal_exited'
+        ) {
+          sessionTerminals.applyRunEvent(event);
+        }
+
         if (event.type === 'tool_progress') {
           const previous = liveToolCalls.get(event.toolCallId);
           liveToolCalls.set(event.toolCallId, {
@@ -4272,6 +4287,14 @@ export default function ChatPage() {
             setReportedStreamUsage((previous) => mergeChatBackendUsageSnapshot(previous, event));
           }
 
+          if (
+            event.type === 'terminal_started' ||
+            event.type === 'terminal_output' ||
+            event.type === 'terminal_exited'
+          ) {
+            sessionTerminals.applyRunEvent(event);
+          }
+
           if (event.type === 'session_child') {
             setChildSessions((previous) => {
               if (previous.some((session) => session.id === event.sessionId)) {
@@ -5103,6 +5126,22 @@ export default function ChatPage() {
             contextUsedTokens={contextUsageSnapshot?.usedTokens}
             contextMaxTokens={contextUsageSnapshot?.maxTokens}
             contextIsEstimated={contextUsageSnapshot?.estimated}
+            terminalsChip={
+              currentSessionId ? (
+                <SessionTerminalsChip
+                  terminals={sessionTerminals.terminals}
+                  runningCount={sessionTerminals.runningCount}
+                  loading={sessionTerminals.loading}
+                  error={sessionTerminals.error}
+                  pendingKillIds={sessionTerminals.pendingKillIds}
+                  onKillTerminal={sessionTerminals.killTerminal}
+                  onReload={sessionTerminals.reload}
+                  gatewayUrl={gatewayUrl}
+                  token={token}
+                  sessionId={currentSessionId}
+                />
+              ) : null
+            }
           />
           {showModelPicker && (
             <ModelPicker
@@ -5594,6 +5633,13 @@ export default function ChatPage() {
         sessionStateStatus={sessionStateStatus}
         workspaceFileItems={workspaceFileItems}
         yoloMode={yoloMode}
+        sessionTerminals={sessionTerminals.terminals}
+        sessionTerminalsRunningCount={sessionTerminals.runningCount}
+        sessionTerminalsLoading={sessionTerminals.loading}
+        sessionTerminalsError={sessionTerminals.error}
+        sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
+        onKillTerminal={sessionTerminals.killTerminal}
+        onReloadTerminals={sessionTerminals.reload}
       />
     </div>
   );

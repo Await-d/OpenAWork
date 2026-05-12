@@ -1,3 +1,4 @@
+import React from 'react';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import { ContextPanel, PlanHistoryPanel } from '@openAwork/shared-ui';
 import type { AttachmentItem, ContextItem, HistoricalPlan } from '@openAwork/shared-ui';
@@ -614,6 +615,43 @@ export function ChatHistoryTabContent(props: {
                     {permission.scope} · {permission.riskLevel}
                     {permission.previewAction ? ` · ${permission.previewAction}` : ''}
                   </div>
+                  {permission.always && permission.always.length > 0
+                    ? (() => {
+                        const broad = permission.always.filter(
+                          (pattern) => pattern !== permission.scope,
+                        );
+                        if (broad.length === 0) return null;
+                        return (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: 4,
+                              marginTop: 4,
+                            }}
+                          >
+                            {broad.map((pattern) => (
+                              <code
+                                key={pattern}
+                                title="批准会话/永久后将自动覆盖该模式"
+                                style={{
+                                  fontFamily: 'var(--font-mono, monospace)',
+                                  fontSize: 9,
+                                  padding: '1px 6px',
+                                  borderRadius: 999,
+                                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                                  border:
+                                    '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+                                  color: 'var(--accent)',
+                                }}
+                              >
+                                {pattern}
+                              </code>
+                            ))}
+                          </div>
+                        );
+                      })()
+                    : null}
                   {resolveInlinePermissionActions &&
                     (() => {
                       const approvalActions = resolveInlinePermissionActions(permission.requestId);
@@ -774,38 +812,6 @@ export function ChatOverviewTabContent(props: {
       : contentArtifactCountStatus === 'error'
         ? '暂不可用'
         : `${contentArtifactCount} 个`;
-  const artifactDescription = !currentSessionId
-    ? '创建或切换到一个会话后，就可以直接进入对应的产物工作区。'
-    : contentArtifactCountStatus === 'loading'
-      ? '正在同步当前会话的内容型产物统计。'
-      : contentArtifactCountStatus === 'error'
-        ? '当前会话的产物统计暂时不可用，但仍可尝试进入工作区。'
-        : contentArtifactCount > 0
-          ? `当前会话已沉淀 ${contentArtifactCount} 个内容型产物，可直接切到工作区继续编辑。`
-          : '当前会话还没有内容型产物，但你仍然可以进入工作区查看和创建。';
-
-  const overviewRows = [
-    { label: '会话 ID', value: currentSessionId ? `${currentSessionId.slice(0, 8)}…` : '—' },
-    { label: '消息数量', value: `${messages.length} 条` },
-    { label: '工作区', value: effectiveWorkingDirectory ?? '未绑定' },
-    {
-      label: '对话模式',
-      value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
-    },
-    { label: 'YOLO 模式', value: yoloMode ? '开启' : '关闭' },
-    {
-      label: '上下文用量',
-      value: contextUsageSnapshot
-        ? `${contextUsageSnapshot.estimated ? '≈' : ''}${Math.round((contextUsageSnapshot.usedTokens / Math.max(1, contextUsageSnapshot.maxTokens)) * 100)}% · ${fmtOverviewTokens(contextUsageSnapshot.usedTokens)}/${fmtOverviewTokens(contextUsageSnapshot.maxTokens)}`
-        : '—',
-    },
-    { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
-    { label: '子会话', value: `${childSessions.length} 个` },
-    { label: '任务', value: `${sessionTasks.length} 项` },
-    { label: '主待办', value: `${mainActiveCount}/${mainTodos.length} 项` },
-    { label: '临时待办', value: `${tempActiveCount}/${tempTodos.length} 项` },
-    { label: '待处理审批', value: `${pendingPermissions.length} 项` },
-  ];
   const contextItems: ContextItem[] = [
     ...attachmentItems.map((item) => ({
       id: item.id,
@@ -830,9 +836,6 @@ export function ChatOverviewTabContent(props: {
         ]
       : []),
   ];
-  const contextSummaryText = contextUsageSnapshot
-    ? `${contextUsageSnapshot.estimated ? '估算' : '精确'}用量 ${Math.round((contextUsageSnapshot.usedTokens / Math.max(1, contextUsageSnapshot.maxTokens)) * 100)}%`
-    : '当前模型未暴露上下文窗口';
   const recoverySummary =
     sessionStateStatus === 'paused'
       ? pendingPermissions.length > 0
@@ -844,157 +847,268 @@ export function ChatOverviewTabContent(props: {
         ? '当前会话已有最近检查点，可刷新页面后继续同步恢复。'
         : '当前会话没有最近检查点，主要依赖实时 attach / replay 恢复。';
 
+  const sectionDivider = (
+    <div
+      style={{
+        borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)',
+        margin: '0',
+      }}
+    />
+  );
+
+  const metaGrid: Array<{ label: string; value: string; highlight?: boolean }> = [
+    {
+      label: '会话 ID',
+      value: currentSessionId ? `${currentSessionId.slice(0, 8)}…` : '—',
+    },
+    { label: '消息数量', value: `${messages.length} 条` },
+    {
+      label: '工作区',
+      value: effectiveWorkingDirectory ?? '未绑定',
+    },
+    {
+      label: '对话模式',
+      value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
+    },
+    { label: 'YOLO', value: yoloMode ? '开启' : '关闭', highlight: yoloMode },
+    {
+      label: '上下文用量',
+      value: contextUsageSnapshot
+        ? `${contextUsageSnapshot.estimated ? '≈' : ''}${Math.round((contextUsageSnapshot.usedTokens / Math.max(1, contextUsageSnapshot.maxTokens)) * 100)}% · ${fmtOverviewTokens(contextUsageSnapshot.usedTokens)}/${fmtOverviewTokens(contextUsageSnapshot.maxTokens)}`
+        : '—',
+    },
+    { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
+  ];
+
+  const statsGrid: Array<{ label: string; value: string; accent?: boolean }> = [
+    { label: '子会话', value: `${childSessions.length} 个` },
+    { label: '任务', value: `${sessionTasks.length} 项` },
+    {
+      label: '主待办',
+      value: `${mainActiveCount}/${mainTodos.length} 项`,
+      accent: mainActiveCount > 0,
+    },
+    {
+      label: '临时待办',
+      value: `${tempActiveCount}/${tempTodos.length} 项`,
+      accent: tempActiveCount > 0,
+    },
+    {
+      label: '待处理审批',
+      value: `${pendingPermissions.length} 项`,
+      accent: pendingPermissions.length > 0,
+    },
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* 会话元信息 */}
       <div
         style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '2px 10px',
-          padding: '6px 4px',
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr',
+          columnGap: 10,
+          rowGap: 3,
+          padding: '8px 4px',
           fontSize: 11,
-          lineHeight: 1.5,
-          color: 'var(--text-3)',
         }}
       >
-        {overviewRows.map(({ label, value }) => (
-          <span key={label} title={value}>
-            <span style={{ fontWeight: 600 }}>{label}</span>{' '}
-            <span style={{ color: 'var(--text-2)' }}>{value}</span>
-          </span>
+        {metaGrid.map(({ label, value, highlight }) => (
+          <React.Fragment key={label}>
+            <span style={{ color: 'var(--text-3)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {label}
+            </span>
+            <span
+              style={{
+                color: highlight ? 'var(--accent)' : 'var(--text-2)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={value}
+            >
+              {value}
+            </span>
+          </React.Fragment>
         ))}
       </div>
 
+      {sectionDivider}
+
+      {/* 活跃状态统计 */}
       <div
         style={{
-          borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)',
-          margin: '2px 0',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 4,
+          padding: '8px 4px',
         }}
-      />
+      >
+        {statsGrid.map(({ label, value, accent }) => (
+          <div
+            key={label}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1,
+              padding: '5px 7px',
+              borderRadius: 7,
+              background: 'color-mix(in oklch, var(--surface) 70%, transparent)',
+              border: accent
+                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border))'
+                : '1px solid transparent',
+            }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-3)', lineHeight: 1 }}>
+              {label}
+            </span>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: accent ? 'var(--accent)' : 'var(--text)',
+                lineHeight: 1.2,
+              }}
+            >
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 4px' }}>
+      {sectionDivider}
+
+      {/* 恢复策略 */}
+      <div style={{ padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div
           style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             justifyContent: 'space-between',
-            gap: 8,
+            gap: 6,
           }}
         >
-          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
-            <span style={{ fontWeight: 700, color: 'var(--text)' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: sessionStateStatus === 'paused' ? 'var(--warning, #f59e0b)' : 'var(--text)',
+                marginBottom: 2,
+              }}
+            >
               {sessionStateStatus === 'paused' ? '等待处理' : '恢复就绪'}
-            </span>
-            {' · '}
-            {recoverySummary}
-          </span>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+              {recoverySummary}
+            </div>
+          </div>
           <button
             type="button"
             onClick={onOpenRecoveryStrategy}
             style={{
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--accent)',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text-2)',
               cursor: 'pointer',
               fontSize: 10,
-              fontWeight: 700,
-              padding: '1px 4px',
+              fontWeight: 600,
+              padding: '3px 8px',
+              borderRadius: 6,
               flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
-            恢复详情 →
+            恢复详情
           </button>
         </div>
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-          }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}
         >
-          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
-            <span style={{ fontWeight: 600 }}>产物</span> {artifactCountLabel}
+          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+            产物工作区
+            <span style={{ color: 'var(--text-2)', fontWeight: 600, marginLeft: 6 }}>
+              {artifactCountLabel}
+            </span>
           </span>
           {artifactsWorkspaceHref ? (
             <Link
               to={artifactsWorkspaceHref}
               style={{
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--accent)',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text-2)',
                 fontSize: 10,
-                fontWeight: 700,
-                padding: '1px 4px',
+                fontWeight: 600,
+                padding: '3px 8px',
+                borderRadius: 6,
                 flexShrink: 0,
                 textDecoration: 'none',
+                whiteSpace: 'nowrap',
               }}
             >
-              产物工作区 →
+              进入工作区
             </Link>
           ) : (
             <span
               style={{
                 fontSize: 10,
-                fontWeight: 700,
                 color: 'var(--text-3)',
-                opacity: 0.56,
-                padding: '1px 4px',
+                opacity: 0.5,
+                padding: '3px 8px',
                 flexShrink: 0,
               }}
             >
-              产物工作区 →
+              进入工作区
             </span>
           )}
         </div>
       </div>
 
-      <div
-        style={{
-          borderTop: '1px solid color-mix(in oklch, var(--border) 50%, transparent)',
-          margin: '2px 0',
-        }}
-      />
+      {sectionDivider}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 4px' }}>
+      {/* 上下文 */}
+      <div style={{ padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div
           style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             justifyContent: 'space-between',
-            gap: 8,
+            gap: 6,
           }}
         >
-          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
-            <span style={{ fontWeight: 700, color: 'var(--text)' }}>上下文</span>
-            {' · '}
-            {contextSummaryText}
-          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>
+              上下文
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+              {[
+                yoloMode ? '⚡ YOLO' : '',
+                attachmentItems.length > 0 ? `📎 ${attachmentItems.length} 附件` : '',
+                workspaceFileItems.length > 0 ? `📂 ${workspaceFileItems.length} 索引文件` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ') || '无额外上下文注入'}
+            </div>
+          </div>
           <button
             type="button"
             onClick={onCompactSession}
             style={{
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--accent)',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text-2)',
               cursor: 'pointer',
               fontSize: 10,
-              fontWeight: 700,
-              padding: '1px 4px',
+              fontWeight: 600,
+              padding: '3px 8px',
+              borderRadius: 6,
               flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
-            压缩会话 →
+            压缩会话
           </button>
-        </div>
-        <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.45 }}>
-          {[
-            yoloMode ? '⚡ YOLO' : '',
-            attachmentItems.length > 0 ? `📎 ${attachmentItems.length} 附件` : '',
-            workspaceFileItems.length > 0 ? `📂 ${workspaceFileItems.length} 索引文件` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ') || '无额外上下文注入'}
         </div>
         <ContextPanel
           items={contextItems}

@@ -1602,11 +1602,13 @@ export function createStreamExecutionContext(
   clientRequestId: string,
   nextRound: number,
   requestData: StreamRequest,
+  userId?: string,
 ): SandboxExecutionContext {
   return {
     clientRequestId,
     nextRound,
     requestData,
+    ...(userId ? { userId } : {}),
   };
 }
 
@@ -2557,6 +2559,7 @@ export async function handleStreamRequest(input: {
             requestData.clientRequestId,
             round + 1,
             requestData,
+            input.user.sub,
           ),
           enabledToolNames,
           eventSequence,

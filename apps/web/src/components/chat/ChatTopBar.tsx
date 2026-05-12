@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react';
 import DialogueModeToggle from '../../pages/DialogueModeToggle.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
 import { ContextUsageMeter } from './context-usage-meter.js';
@@ -14,6 +15,12 @@ interface ChatTopBarProps {
   contextUsedTokens?: number;
   contextMaxTokens?: number;
   contextIsEstimated?: boolean;
+  /**
+   * Optional terminals chip (running terminal indicator + popover trigger).
+   * Rendered inside the right-side pill so it sits next to the YOLO toggle
+   * without forcing a layout shift when undefined.
+   */
+  terminalsChip?: ReactNode;
 }
 
 export function ChatTopBar({
@@ -28,6 +35,7 @@ export function ChatTopBar({
   contextUsedTokens,
   contextMaxTokens,
   contextIsEstimated,
+  terminalsChip,
 }: ChatTopBarProps) {
   const showContextMeter =
     contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0;
@@ -96,6 +104,7 @@ export function ChatTopBar({
             />
           </>
         ) : null}
+        {terminalsChip}
         <button
           type="button"
           aria-pressed={yoloMode}

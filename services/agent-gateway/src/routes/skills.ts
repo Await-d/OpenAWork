@@ -19,6 +19,13 @@ interface InstalledSkillRow {
   enabled: number;
   installed_at: number;
   updated_at: number;
+  latest_version_check_json?: string | null;
+}
+
+interface LatestVersionCheckRecord {
+  latestVersion: string | null;
+  checkedAt: number;
+  error: string | null;
 }
 
 interface RegistrySourceRow {
@@ -47,6 +54,18 @@ interface RegistrySourceSyncResult {
 }
 
 function rowToInstalledSkill(row: InstalledSkillRow) {
+  let latestVersion: string | null = null;
+  let latestVersionCheckedAt: number | null = null;
+  if (row.latest_version_check_json) {
+    try {
+      const parsed = JSON.parse(row.latest_version_check_json) as LatestVersionCheckRecord;
+      if (typeof parsed.latestVersion === 'string') latestVersion = parsed.latestVersion;
+      if (typeof parsed.checkedAt === 'number') latestVersionCheckedAt = parsed.checkedAt;
+    } catch {
+      // Corrupt JSON — leave both fields null and let the background
+      // checker overwrite on next run.
+    }
+  }
   return {
     skillId: row.skill_id,
     sourceId: row.source_id,
@@ -55,6 +74,8 @@ function rowToInstalledSkill(row: InstalledSkillRow) {
     enabled: row.enabled === 1,
     installedAt: row.installed_at,
     updatedAt: row.updated_at,
+    latestVersion,
+    latestVersionCheckedAt,
   };
 }
 
@@ -187,11 +208,12 @@ interface GitHubSourceCacheEntry {
   items: SkillEntry[];
 }
 
-const GITHUB_SOURCE_CACHE_TTL_MS = 30 * 60 * 1000;
-const GITHUB_SOURCE_STALE_IF_ERROR_MS = 6 * 60 * 60 * 1000;
+const GITHUB_SOURCE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+const GITHUB_SOURCE_STALE_IF_ERROR_MS = 24 * 60 * 60 * 1000;
 const GITHUB_FETCH_TIMEOUT_MS = 8000;
 const GITHUB_SOURCE_MAX_DIRECTORY_REQUESTS = 120;
 const GITHUB_SOURCE_MAX_SKILL_FILES = 200;
+const GITHUB_SOURCE_FETCH_CONCURRENCY = 6;
 const githubSourceCache = new Map<string, GitHubSourceCacheEntry>();
 const registrySourceSyncInflight = new Map<string, Promise<RegistrySourceSyncResult>>();
 
@@ -397,6 +419,246 @@ export const BUILTIN_REGISTRY_SOURCES: BuiltinRegistrySource[] = [
           'https://raw.githubusercontent.com/Await-d/agentdocs-orchestrator/229dec2616341c68382ebfee8f462add420c3483/schema-architect/SKILL.md',
       },
     ],
+  }),
+  createBuiltinGitHubSource({
+    name: 'Cloudflare Skills',
+    owner: 'cloudflare',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 18,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Expo Skills',
+    owner: 'expo',
+    repo: 'skills',
+    rootPaths: ['plugins'],
+    maxDepth: 4,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 19,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Firebase Skills',
+    owner: 'firebase',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 20,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Angular Skills',
+    owner: 'angular',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 21,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Auth0 Agent Skills',
+    owner: 'auth0',
+    repo: 'agent-skills',
+    rootPaths: ['plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 22,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Apollo GraphQL Skills',
+    owner: 'apollographql',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 23,
+  }),
+  createBuiltinGitHubSource({
+    name: 'fal.ai Skills',
+    owner: 'fal-ai-community',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 24,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Resend Email Skills',
+    owner: 'resend',
+    repo: 'resend-skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 25,
+  }),
+  createBuiltinGitHubSource({
+    name: 'CodeRabbit Skills',
+    owner: 'coderabbitai',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 26,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Better Auth Skills',
+    owner: 'better-auth',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 27,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Browserbase Skills',
+    owner: 'browserbase',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 28,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Remotion Video Skills',
+    owner: 'remotion-dev',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 29,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Composio Skills',
+    owner: 'composiohq',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 30,
+  }),
+  createBuiltinGitHubSource({
+    name: 'AWS Labs Agent Plugins',
+    owner: 'awslabs',
+    repo: 'agent-plugins',
+    rootPaths: ['plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 31,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Adobe Skills',
+    owner: 'adobe',
+    repo: 'skills',
+    rootPaths: ['plugins'],
+    maxDepth: 5,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 32,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Microsoft Azure Skills',
+    owner: 'microsoft',
+    repo: 'azure-skills',
+    rootPaths: ['skills', 'plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 33,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Pydantic Skills',
+    owner: 'pydantic',
+    repo: 'skills',
+    rootPaths: ['plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 34,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Shopify Liquid Skills',
+    owner: 'Shopify',
+    repo: 'liquid-skills',
+    rootPaths: ['plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 35,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Bright Data Skills',
+    owner: 'brightdata',
+    repo: 'skills',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 36,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Wix Skills',
+    owner: 'wix',
+    repo: 'skills',
+    rootPaths: ['plugins'],
+    maxDepth: 4,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 37,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Railway Skills',
+    owner: 'railwayapp',
+    repo: 'railway-skills',
+    rootPaths: ['plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 38,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Amplitude MCP Marketplace',
+    owner: 'amplitude',
+    repo: 'mcp-marketplace',
+    rootPaths: ['plugins'],
+    maxDepth: 3,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 39,
+  }),
+  createBuiltinGitHubSource({
+    name: 'AI Skills Store Marketplace',
+    owner: 'aiskillstore',
+    repo: 'marketplace',
+    rootPaths: ['skills'],
+    maxDepth: 2,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 40,
+  }),
+  createBuiltinGitHubSource({
+    name: 'Alireza Rezvani Claude Skills',
+    owner: 'alirezarezvani',
+    repo: 'claude-skills',
+    rootPaths: [''],
+    maxDepth: 4,
+    discoveryMode: 'code-search',
+    metadataMode: 'path',
+    priority: 41,
   }),
   {
     id: 'builtin',
@@ -734,10 +996,11 @@ function buildGitHubSkillName(filePath: string): string {
 }
 
 function buildGitHubRawUrl(source: BuiltinRegistrySource, filePath: string): string | undefined {
-  if (!source.repo?.ref) {
+  if (!source.repo) {
     return undefined;
   }
-  return `https://raw.githubusercontent.com/${source.repo.owner}/${source.repo.repo}/${source.repo.ref}/${encodeGitHubPath(filePath)}`;
+  const ref = source.repo.ref ?? 'main';
+  return `https://raw.githubusercontent.com/${source.repo.owner}/${source.repo.repo}/${ref}/${encodeGitHubPath(filePath)}`;
 }
 
 function isGitHubSkillPathWithinBounds(filePath: string, repo: GitHubRepoConfig): boolean {
@@ -981,6 +1244,56 @@ async function listGitHubSkillFiles(
   return files;
 }
 
+async function pMapConcurrent<T, R>(
+  items: ReadonlyArray<T>,
+  fn: (item: T) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+let prewarmScheduled = false;
+
+export function prewarmGitHubSkillsCache(): void {
+  if (prewarmScheduled) return;
+  prewarmScheduled = true;
+  setTimeout(() => {
+    fetchGitHubSkills(BUILTIN_REGISTRY_SOURCES, '').catch(() => {
+      /* prewarm best-effort */
+    });
+    fetchClaudeMarketplaceSkills('').catch(() => {
+      /* prewarm best-effort */
+    });
+  }, 3000);
+}
+
+/**
+ * Re-runnable variant of `prewarmGitHubSkillsCache` for the background
+ * scheduler's periodic cache refresh task. Awaits both fetches so the
+ * scheduler's "skip overlapping ticks" guard works correctly — a slow
+ * GitHub round-trip should NOT race the next tick.
+ *
+ * Errors are swallowed: the underlying `fetchGitHubSkills` /
+ * `fetchClaudeMarketplaceSkills` already implement stale-if-error
+ * fallbacks, so a transient HTTP failure here just means the cache
+ * keeps serving stale data, which is the desired behaviour.
+ */
+export async function refreshRegistryCaches(): Promise<void> {
+  await Promise.allSettled([
+    fetchGitHubSkills(BUILTIN_REGISTRY_SOURCES, ''),
+    fetchClaudeMarketplaceSkills(''),
+  ]);
+}
+
 export async function fetchGitHubSkills(
   sources: ReadonlyArray<BuiltinRegistrySource>,
   query?: string,
@@ -992,8 +1305,9 @@ export async function fetchGitHubSkills(
 
   const normalizedQuery = query?.trim().toLowerCase() ?? '';
   const githubSources = sources.filter((source) => source.repo && source.enabled);
-  const sourceResults = await Promise.all(
-    githubSources.map(async (source) => {
+  const sourceResults = await pMapConcurrent(
+    githubSources,
+    async (source) => {
       const cacheKey = buildGitHubSourceCacheKey(source, normalizedQuery);
       const cached = githubSourceCache.get(cacheKey);
       const isQueryScoped = source.repo?.discoveryMode === 'code-search';
@@ -1036,10 +1350,142 @@ export async function fetchGitHubSkills(
         }
         return [];
       }
-    }),
+    },
+    GITHUB_SOURCE_FETCH_CONCURRENCY,
   );
 
   return sourceResults.flat();
+}
+
+interface ClaudeMarketplacePlugin {
+  name: string;
+  description?: string;
+  author?: { name?: string; email?: string };
+  category?: string;
+  homepage?: string;
+  source?:
+    | string
+    | {
+        source?: string;
+        url?: string;
+        path?: string;
+        ref?: string;
+        sha?: string;
+      };
+  tags?: string[];
+}
+
+interface ClaudeMarketplaceJson {
+  name?: string;
+  description?: string;
+  plugins?: ClaudeMarketplacePlugin[];
+}
+
+interface ClaudeMarketplaceSource {
+  id: string;
+  name: string;
+  url: string;
+  homepage: string;
+}
+
+const CLAUDE_MARKETPLACES: ClaudeMarketplaceSource[] = [
+  {
+    id: 'claude-marketplace:anthropics-official',
+    name: 'Claude Code Official Marketplace',
+    url: 'https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json',
+    homepage: 'https://github.com/anthropics/claude-plugins-official',
+  },
+  {
+    id: 'claude-marketplace:anthropics-skills',
+    name: 'Anthropic Agent Skills Marketplace',
+    url: 'https://raw.githubusercontent.com/anthropics/skills/main/.claude-plugin/marketplace.json',
+    homepage: 'https://github.com/anthropics/skills',
+  },
+];
+
+const claudeMarketplaceCache = new Map<string, GitHubSourceCacheEntry>();
+
+function categoryFromMarketplace(raw: string | undefined): SkillEntry['category'] {
+  if (!raw) return 'other';
+  const c = raw.toLowerCase();
+  if (c.includes('develop')) return 'development';
+  if (c.includes('product')) return 'productivity';
+  if (c.includes('data') || c.includes('database')) return 'data';
+  if (c.includes('communic') || c.includes('messaging')) return 'communication';
+  if (c.includes('creat') || c.includes('design')) return 'creative';
+  if (c.includes('automat') || c.includes('deploy') || c.includes('monitor')) return 'automation';
+  if (c.includes('system') || c.includes('security')) return 'system';
+  return 'other';
+}
+
+function pluginToSkillEntry(
+  plugin: ClaudeMarketplacePlugin,
+  marketplace: ClaudeMarketplaceSource,
+): SkillEntry | undefined {
+  if (!plugin.name) return undefined;
+  const skillId = `${marketplace.id}/${plugin.name}`;
+  const author = plugin.author?.name ?? '';
+  const sourceUrl = typeof plugin.source === 'string' ? undefined : plugin.source?.url;
+  const tagSet = new Set<string>();
+  if (plugin.category) tagSet.add(plugin.category);
+  if (author) tagSet.add(author);
+  if (plugin.tags) for (const t of plugin.tags) tagSet.add(t);
+
+  return {
+    id: skillId,
+    name: plugin.name,
+    displayName: plugin.name,
+    version: '1.0.0',
+    description: plugin.description ?? `${plugin.name} plugin from ${marketplace.name}`,
+    category: categoryFromMarketplace(plugin.category),
+    sourceId: marketplace.id,
+    tags: [...tagSet],
+    author,
+    manifestUrl: sourceUrl ?? plugin.homepage,
+  };
+}
+
+async function fetchClaudeMarketplace(marketplace: ClaudeMarketplaceSource): Promise<SkillEntry[]> {
+  const cached = claudeMarketplaceCache.get(marketplace.id);
+  if (cached && isGitHubCacheFresh(cached)) {
+    return cached.items;
+  }
+  try {
+    const res = await fetchWithTimeout(marketplace.url, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      if (cached && isGitHubCacheUsableOnError(cached)) return cached.items;
+      return [];
+    }
+    const data = (await res.json()) as ClaudeMarketplaceJson;
+    const plugins = data.plugins ?? [];
+    const entries: SkillEntry[] = [];
+    for (const plugin of plugins) {
+      const entry = pluginToSkillEntry(plugin, marketplace);
+      if (entry) entries.push(entry);
+    }
+    claudeMarketplaceCache.set(marketplace.id, {
+      fetchedAt: Date.now(),
+      items: entries,
+    });
+    return entries;
+  } catch {
+    if (cached && isGitHubCacheUsableOnError(cached)) return cached.items;
+    return [];
+  }
+}
+
+export async function fetchClaudeMarketplaceSkills(query?: string): Promise<SkillEntry[]> {
+  const normalizedQuery = query?.trim().toLowerCase() ?? '';
+  const all = await pMapConcurrent(
+    CLAUDE_MARKETPLACES,
+    (marketplace) => fetchClaudeMarketplace(marketplace),
+    GITHUB_SOURCE_FETCH_CONCURRENCY,
+  );
+  const merged = all.flat();
+  if (!normalizedQuery) return merged;
+  return merged.filter((item) => matchesGitHubSkillQuery(item, normalizedQuery));
 }
 
 function builtinsToSkillEntries(): SkillEntry[] {
@@ -1067,6 +1513,8 @@ function createRegistryClient(userId: string): SkillRegistryClientImpl {
 }
 
 export async function skillsRoutes(app: FastifyInstance): Promise<void> {
+  prewarmGitHubSkillsCache();
+
   app.get(
     '/skills/installed',
     { onRequest: [requireAuth] },
@@ -1095,13 +1543,100 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'skillId is required' });
       }
 
-      const client = createRegistryClient(user.sub);
+      const isGitHubSource =
+        body.sourceId?.startsWith('github:') || body.skillId.startsWith('github:');
+      const isClaudeMarketplace =
+        body.sourceId?.startsWith('claude-marketplace:') ||
+        body.skillId.startsWith('claude-marketplace:');
 
       try {
-        const record = await client.install(body.skillId, {
-          sourceId: body.sourceId,
-          skipSignatureVerification: true,
-        });
+        let manifestJson: string;
+        let sourceId: string;
+        let skillId: string;
+
+        if (isClaudeMarketplace) {
+          skillId = body.skillId;
+          const marketplace = CLAUDE_MARKETPLACES.find((m) => skillId.startsWith(`${m.id}/`));
+          sourceId = marketplace?.id ?? body.sourceId ?? skillId.split('/')[0]!;
+
+          const skills = await fetchClaudeMarketplaceSkills('').catch((): SkillEntry[] => []);
+          const found = skills.find((s) => s.id === skillId);
+          if (!found) {
+            throw new Error(`Plugin not found in Claude marketplace: ${skillId}`);
+          }
+          const pluginName = skillId.split('/').slice(1).join('/');
+          const manifest = {
+            apiVersion: 'agent-skill/v1' as const,
+            id: skillId,
+            name: pluginName || found.name,
+            displayName: found.name,
+            version: '1.0.0',
+            description: found.description,
+            author: found.author ?? 'Anthropic Marketplace',
+            license: 'See source repository',
+            capabilities: ['claude-plugin'],
+            permissions: [] as Array<{ type: string; scope: string; required: boolean }>,
+            references: found.manifestUrl
+              ? [{ type: 'homepage' as const, url: found.manifestUrl }]
+              : [],
+          };
+          manifestJson = JSON.stringify(manifest);
+        } else if (isGitHubSource) {
+          skillId = body.skillId;
+          const matchingSource = BUILTIN_REGISTRY_SOURCES.find(
+            (s) => s.repo && s.enabled && skillId.startsWith(`${s.id}/`),
+          );
+          // Prefer authoritative source id; fall back to body.sourceId; finally
+          // extract `github:owner/repo` from skillId (split takes 2 segments
+          // because the prefix `github:owner` is the first segment).
+          sourceId =
+            matchingSource?.id ?? body.sourceId ?? skillId.split('/').slice(0, 2).join('/');
+
+          const relPath = matchingSource
+            ? skillId.slice(matchingSource.id.length + 1)
+            : skillId.replace(/^github:[^/]+\/[^/]+\//, '');
+          const owner = matchingSource?.repo?.owner ?? sourceId.split(':')[1]?.split('/')[0] ?? '';
+          const repo = matchingSource?.repo?.repo ?? sourceId.split('/')[1] ?? '';
+          const ref = matchingSource?.repo?.ref ?? 'main';
+
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${relPath}/SKILL.md`;
+          let skillContent = '';
+          let fm: SkillFrontmatter = {};
+          try {
+            const mdRes = await fetchWithTimeout(rawUrl, {});
+            if (mdRes.ok) {
+              skillContent = await mdRes.text();
+              fm = parseSkillFrontmatter(skillContent);
+            }
+          } catch {
+            // Fallback: use cached entry metadata
+          }
+
+          const skillName = fm.name?.trim() || buildGitHubSkillName(relPath);
+          const manifest = {
+            apiVersion: 'agent-skill/v1' as const,
+            id: skillId,
+            name: skillName,
+            displayName: fm.name?.trim() || skillName,
+            version: '1.0.0',
+            description: fm.description ?? `Skill from ${owner}/${repo}`,
+            author: owner,
+            license: fm.license ?? 'MIT',
+            capabilities: ['general'],
+            permissions: [] as Array<{ type: string; scope: string; required: boolean }>,
+            readme: skillContent,
+          };
+          manifestJson = JSON.stringify(manifest);
+        } else {
+          const client = createRegistryClient(user.sub);
+          const record = await client.install(body.skillId, {
+            sourceId: body.sourceId,
+            skipSignatureVerification: true,
+          });
+          skillId = record.skillId;
+          sourceId = record.sourceId;
+          manifestJson = JSON.stringify(record.manifest);
+        }
 
         const now = Date.now();
         sqliteRun(
@@ -1112,24 +1647,16 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
              manifest_json = excluded.manifest_json,
              granted_permissions_json = excluded.granted_permissions_json,
              updated_at = excluded.updated_at`,
-          [
-            record.skillId,
-            user.sub,
-            record.sourceId,
-            JSON.stringify(record.manifest),
-            JSON.stringify(record.grantedPermissions),
-            now,
-            now,
-          ],
+          [skillId, user.sub, sourceId, manifestJson, '[]', now, now],
         );
 
-        step.succeed(undefined, { skillId: record.skillId });
+        step.succeed(undefined, { skillId });
         return reply.status(201).send(
           rowToInstalledSkill({
-            skill_id: record.skillId,
-            source_id: record.sourceId,
-            manifest_json: JSON.stringify(record.manifest),
-            granted_permissions_json: JSON.stringify(record.grantedPermissions),
+            skill_id: skillId,
+            source_id: sourceId,
+            manifest_json: manifestJson,
+            granted_permissions_json: '[]',
             enabled: 1,
             installed_at: now,
             updated_at: now,
@@ -1237,25 +1764,32 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
       const limit = query.limit ? Number(query.limit) : 20;
       const offset = query.offset ? Number(query.offset) : 0;
 
-      const [cachedUserSourceResults, officialResults, githubSkills] = await Promise.all([
-        Promise.resolve(listCachedRegistrySourceSkills(user.sub, query.q, query.category)),
-        client
-          .search({
-            query: query.q,
-            category: query.category as never,
-            sourceIds: [OFFICIAL_REGISTRY_SOURCE.id],
-          })
-          .catch((): SkillEntry[] => []),
-        fetchGitHubSkills(
-          BUILTIN_REGISTRY_SOURCES,
-          (query.q ?? '').toLowerCase(),
-          query.category,
-        ).catch((): SkillEntry[] => []),
-      ]);
+      const [cachedUserSourceResults, officialResults, githubSkills, claudeMarketplaceSkills] =
+        await Promise.all([
+          Promise.resolve(listCachedRegistrySourceSkills(user.sub, query.q, query.category)),
+          client
+            .search({
+              query: query.q,
+              category: query.category as never,
+              sourceIds: [OFFICIAL_REGISTRY_SOURCE.id],
+            })
+            .catch((): SkillEntry[] => []),
+          fetchGitHubSkills(
+            BUILTIN_REGISTRY_SOURCES,
+            (query.q ?? '').toLowerCase(),
+            query.category,
+          ).catch((): SkillEntry[] => []),
+          fetchClaudeMarketplaceSkills((query.q ?? '').toLowerCase()).catch((): SkillEntry[] => []),
+        ]);
 
       const remoteResults = dedupeSkillEntries([...officialResults, ...cachedUserSourceResults]);
       const builtins = builtinsToSkillEntries();
-      const combined = dedupeSkillEntries([...remoteResults, ...githubSkills, ...builtins]);
+      const combined = dedupeSkillEntries([
+        ...remoteResults,
+        ...claudeMarketplaceSkills,
+        ...githubSkills,
+        ...builtins,
+      ]);
       const filtered = filterSkillEntries(combined, query.q, query.category);
       const total = filtered.length;
       const paginated = filtered.slice(offset, offset + limit);
@@ -1580,14 +2114,31 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      if (skillId.startsWith('claude-marketplace:')) {
+        const marketplace = CLAUDE_MARKETPLACES.find((m) => skillId.startsWith(`${m.id}/`));
+        if (marketplace) {
+          const skills = await fetchClaudeMarketplaceSkills('').catch((): SkillEntry[] => []);
+          const found = skills.find((s) => s.id === skillId);
+          if (found) {
+            step.succeed(undefined, { source: 'claude-marketplace' });
+            return reply.send({
+              ...found,
+              readme: `# ${found.name}\n\n${found.description}\n\n**Source**: ${found.manifestUrl ?? marketplace.homepage}\n\n**Author**: ${found.author || 'Anthropic Marketplace'}\n\n**Category**: ${found.category}\n\nTo install this plugin in Claude Code, run:\n\n\`\`\`\n/plugin marketplace add ${marketplace.homepage}\n/plugin install ${found.name}\n\`\`\``,
+              license: 'See source repository',
+              permissions: [],
+              downloads: 0,
+              verified: true,
+            });
+          }
+        }
+      }
+
       const githubSources = BUILTIN_REGISTRY_SOURCES.filter((s) => s.repo && s.enabled);
       for (const source of githubSources) {
-        if (!skillId.startsWith(source.id)) continue;
+        if (!skillId.startsWith(`${source.id}/`)) continue;
         const relPath = skillId.slice(source.id.length + 1);
-        const rawUrl = source.repo?.ref
-          ? `https://raw.githubusercontent.com/${source.repo.owner}/${source.repo.repo}/${source.repo.ref}/${relPath}/SKILL.md`
-          : undefined;
-        if (!rawUrl) continue;
+        const ref = source.repo?.ref ?? 'main';
+        const rawUrl = `https://raw.githubusercontent.com/${source.repo!.owner}/${source.repo!.repo}/${ref}/${relPath}/SKILL.md`;
         try {
           const mdRes = await fetchWithTimeout(rawUrl, {});
           if (mdRes.ok) {

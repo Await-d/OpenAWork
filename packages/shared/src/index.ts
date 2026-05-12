@@ -678,6 +678,15 @@ export interface PermissionRequestBase {
   reason: string;
   riskLevel: PermissionRiskLevel;
   previewAction?: string;
+  /**
+   * Broad-approval patterns computed at request time (mirrors opencode's
+   * ctx.ask `always` array — e.g. `["ls *"]` for `bash ls -la`). When the
+   * user picks "本会话允许" or "永久允许", every subsequent same-category
+   * request whose scope wildcard-matches one of these patterns auto-resolves
+   * without re-prompting. Surfacing them in the UI lets the user understand
+   * exactly what the broad approval covers before clicking through.
+   */
+  always?: string[];
 }
 
 export interface PendingPermissionRequest extends PermissionRequestBase {
@@ -980,6 +989,85 @@ export interface StreamAuditRefChunk {
   occurredAt?: number;
 }
 
+/**
+ * Lifecycle status of a tracked terminal in a chat session. See
+ * `.agentdocs/workflow/260512-session-terminal-tracking-spec.md` for the
+ * authoritative state machine. `tmux-spawned` / `tmux-killed` are pseudo
+ * terminal states emitted by interactive_bash lifecycle commands — the
+ * underlying tmux session has no pid we own, so there is no `running`
+ * transient state for them.
+ */
+export type SessionTerminalStatus =
+  | 'running'
+  | 'exited'
+  | 'aborted'
+  | 'timeout'
+  | 'spawn_error'
+  | 'killed'
+  | 'stale'
+  | 'tmux-spawned'
+  | 'tmux-killed';
+
+export type SessionTerminalKind = 'foreground' | 'background' | 'tmux';
+
+export interface SessionTerminalSummary {
+  terminalId: string;
+  sessionId: string;
+  clientRequestId?: string;
+  toolName: string;
+  kind: SessionTerminalKind;
+  command: string;
+  description?: string;
+  cwd: string;
+  pid?: number;
+  status: SessionTerminalStatus;
+  exitCode?: number;
+  startedAtMs: number;
+  endedAtMs?: number;
+  lastActivityMs: number;
+  outputBytesTotal: number;
+  outputTail: string;
+  outputPath?: string;
+}
+
+export interface StreamTerminalStartedChunk {
+  type: 'terminal_started';
+  terminalId: string;
+  sessionId: string;
+  toolName: string;
+  kind: SessionTerminalKind;
+  command: string;
+  description?: string;
+  cwd: string;
+  startedAtMs: number;
+  clientRequestId?: string;
+  toolCallId?: string;
+  eventId?: string;
+  runId?: string;
+  occurredAt?: number;
+}
+
+export interface StreamTerminalOutputChunk {
+  type: 'terminal_output';
+  terminalId: string;
+  outputTail: string;
+  outputBytesTotal: number;
+  occurredAt?: number;
+  eventId?: string;
+  runId?: string;
+}
+
+export interface StreamTerminalExitedChunk {
+  type: 'terminal_exited';
+  terminalId: string;
+  status: SessionTerminalStatus;
+  exitCode?: number;
+  endedAtMs: number;
+  occurredAt?: number;
+  eventId?: string;
+  runId?: string;
+}
+
 export type StreamChunk =
   | StreamTextChunk
   | StreamThinkingStartChunk
@@ -1002,7 +1090,10 @@ export type RunEvent =
   | StreamCompactionChunk
   | StreamUsageChunk
   | StreamAuditRefChunk
-  | StreamToolProgressChunk;
+  | StreamToolProgressChunk
+  | StreamTerminalStartedChunk
+  | StreamTerminalOutputChunk
+  | StreamTerminalExitedChunk;
 
 export interface RunEventCursor {
   clientRequestId: string;

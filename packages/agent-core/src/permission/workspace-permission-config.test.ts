@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   PERMISSION_CATEGORIES,
   evaluateWorkspacePermissionRules,
+  listEffectiveWorkspacePermissionRules,
   resolvePermissionCategory,
+  upsertWorkspacePermanentPermission,
+  type WorkspacePermissionConfig,
   type WorkspacePermissionRule,
 } from './workspace-permission-config.js';
 
@@ -97,5 +100,159 @@ describe('default permission rule evaluation', () => {
     expect(effectiveActionFor('skill_mcp')).toBe('ask');
     expect(effectiveActionFor('mcp_call')).toBe('ask');
     expect(effectiveActionFor('lsp_rename')).toBe('ask');
+  });
+});
+
+describe('upsertWorkspacePermanentPermission', () => {
+  it('writes the permanent grant exclusively to `rules` so the settings panel sees it', () => {
+    const before: WorkspacePermissionConfig = {};
+    const after = upsertWorkspacePermanentPermission(before, {
+      toolName: 'bash',
+      scope: 'ls *',
+    });
+
+    expect(after.rules).toEqual([{ permission: 'bash', pattern: 'ls *', action: 'allow' }]);
+    // No longer also writes to the legacy `permanentGrants` array.
+    expect(after.permanentGrants ?? []).toEqual([]);
+  });
+
+  it('is idempotent — repeated calls do not duplicate the rule', () => {
+    let cfg: WorkspacePermissionConfig = {};
+    cfg = upsertWorkspacePermanentPermission(cfg, { toolName: 'bash', scope: 'ls *' });
+    cfg = upsertWorkspacePermanentPermission(cfg, { toolName: 'bash', scope: 'ls *' });
+    cfg = upsertWorkspacePermanentPermission(cfg, { toolName: 'bash', scope: 'ls *' });
+
+    expect(cfg.rules).toEqual([{ permission: 'bash', pattern: 'ls *', action: 'allow' }]);
+  });
+
+  it('preserves unrelated pre-existing rules', () => {
+    const before: WorkspacePermissionConfig = {
+      rules: [{ permission: 'edit', pattern: 'src/**', action: 'ask' }],
+    };
+    const after = upsertWorkspacePermanentPermission(before, {
+      toolName: 'bash',
+      scope: 'ls *',
+    });
+
+    expect(after.rules).toEqual([
+      { permission: 'edit', pattern: 'src/**', action: 'ask' },
+      { permission: 'bash', pattern: 'ls *', action: 'allow' },
+    ]);
+  });
+
+  it('preserves (does not migrate or mutate) legacy permanentGrants on the input config', () => {
+    // Migration is the PUT handler's job, not this helper's.
+    const before: WorkspacePermissionConfig = {
+      permanentGrants: [
+        {
+          id: 'legacy-1',
+          toolName: 'read',
+          scope: 'docs/**',
+          grantedAt: 1700000000000,
+          decision: 'permanent',
+        },
+      ],
+    };
+    const after = upsertWorkspacePermanentPermission(before, {
+      toolName: 'bash',
+      scope: 'ls *',
+    });
+
+    expect(after.permanentGrants).toEqual(before.permanentGrants);
+    expect(after.rules).toEqual([{ permission: 'bash', pattern: 'ls *', action: 'allow' }]);
+  });
+});
+
+describe('listEffectiveWorkspacePermissionRules (legacy compatibility)', () => {
+  it('surfaces legacy permanentGrants entries as allow rules so they remain editable', () => {
+    const config: WorkspacePermissionConfig = {
+      permanentGrants: [
+        {
+          id: 'legacy-1',
+          toolName: 'bash',
+          scope: 'ls *',
+          grantedAt: 1700000000000,
+          decision: 'permanent',
+        },
+      ],
+      rules: [],
+    };
+
+    expect(listEffectiveWorkspacePermissionRules(config)).toEqual([
+      { permission: 'bash', pattern: 'ls *', action: 'allow' },
+    ]);
+  });
+
+  it('deduplicates a legacy permanentGrants entry against an equivalent `rules` entry', () => {
+    const config: WorkspacePermissionConfig = {
+      permanentGrants: [
+        {
+          id: 'legacy-1',
+          toolName: 'bash',
+          scope: 'ls *',
+          grantedAt: 1700000000000,
+          decision: 'permanent',
+        },
+      ],
+      rules: [{ permission: 'bash', pattern: 'ls *', action: 'allow' }],
+    };
+
+    expect(listEffectiveWorkspacePermissionRules(config)).toEqual([
+      { permission: 'bash', pattern: 'ls *', action: 'allow' },
+    ]);
+  });
+
+  it('migration round-trip: GET-merged rules + cleared permanentGrants preserves grants', () => {
+    // Simulates the GET → PUT round-trip the settings panel performs:
+    // 1. Backend GET returns merged effective rules.
+    // 2. User saves without changes — UI POSTs that merged list back.
+    // 3. PUT handler writes `{ rules, permanentGrants: [] }`.
+    // After the round-trip, every previously-granted scope is still
+    // honoured, but the file no longer contains the legacy field.
+    const legacy: WorkspacePermissionConfig = {
+      permanentGrants: [
+        {
+          id: 'legacy-1',
+          toolName: 'bash',
+          scope: 'ls *',
+          grantedAt: 1700000000000,
+          decision: 'permanent',
+        },
+      ],
+    };
+
+    const merged = listEffectiveWorkspacePermissionRules(legacy);
+    const afterPut: WorkspacePermissionConfig = {
+      ...legacy,
+      rules: merged,
+      permanentGrants: [],
+    };
+
+    expect(afterPut.permanentGrants).toEqual([]);
+    expect(listEffectiveWorkspacePermissionRules(afterPut)).toEqual([
+      { permission: 'bash', pattern: 'ls *', action: 'allow' },
+    ]);
+  });
+
+  it('deletion round-trip: clearing rules + permanentGrants removes the grant entirely', () => {
+    const legacy: WorkspacePermissionConfig = {
+      permanentGrants: [
+        {
+          id: 'legacy-1',
+          toolName: 'bash',
+          scope: 'ls *',
+          grantedAt: 1700000000000,
+          decision: 'permanent',
+        },
+      ],
+    };
+
+    const afterDeletion: WorkspacePermissionConfig = {
+      ...legacy,
+      rules: [],
+      permanentGrants: [],
+    };
+
+    expect(listEffectiveWorkspacePermissionRules(afterDeletion)).toEqual([]);
   });
 });

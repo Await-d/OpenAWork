@@ -29,7 +29,7 @@ const CODE_BLOCK_FOLD_THRESHOLD = 100;
 // How long the copy button stays in its "✓ 已复制" confirmation state.
 const COPY_FEEDBACK_MS = 1500;
 
-type StaticPreviewKind = 'html' | 'css' | 'javascript';
+type StaticPreviewKind = 'html' | 'css' | 'javascript' | 'svg';
 
 // Memoized: props are primitives (content / streaming) and shallow comparison
 // hits 100% when the message content has not changed. Without this, every
@@ -406,6 +406,10 @@ function getStaticPreviewKind(language: string | undefined): StaticPreviewKind |
     return 'javascript';
   }
 
+  if (language === 'svg' || language === 'xml') {
+    return 'svg';
+  }
+
   return null;
 }
 
@@ -477,7 +481,19 @@ function buildPreviewDocument(previewKind: StaticPreviewKind, code: string): str
       ? `<style>
 ${escapeForStyleTag(code)}
       </style>`
-      : '';
+      : previewKind === 'svg'
+        ? `<style>
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      svg {
+        max-width: 100%;
+        max-height: 100%;
+      }
+    </style>`
+        : '';
   const previewScript =
     previewKind === 'javascript'
       ? `<script>
@@ -613,6 +629,10 @@ function getPreviewBadgeLabel(previewKind: StaticPreviewKind): string {
     return '脚本预览';
   }
 
+  if (previewKind === 'svg') {
+    return '矢量预览';
+  }
+
   return '静态预览';
 }
 
@@ -625,6 +645,10 @@ function getPreviewTitle(previewKind: StaticPreviewKind): string {
     return 'JavaScript 预览';
   }
 
+  if (previewKind === 'svg') {
+    return 'SVG 预览';
+  }
+
   return 'HTML 预览';
 }
 
@@ -635,6 +659,10 @@ function getPreviewNote(previewKind: StaticPreviewKind): string {
 
   if (previewKind === 'javascript') {
     return '当前脚本仅在隔离 iframe 中运行：允许脚本执行，但不会获得宿主页同源权限。';
+  }
+
+  if (previewKind === 'svg') {
+    return '直接在白底沙箱中渲染矢量内容，便于检查图标与图示。';
   }
 
   return '安全沙箱预览：用户脚本已移除，外链将在新窗口打开。';

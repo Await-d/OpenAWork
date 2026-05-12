@@ -3,9 +3,11 @@ import { findFirstPendingPermission } from '@openAwork/web-client';
 
 export interface SessionPendingPermissionState extends Pick<
   PendingPermissionRequest,
-  'requestId' | 'toolName' | 'scope' | 'reason' | 'riskLevel' | 'previewAction'
+  'requestId' | 'toolName' | 'scope' | 'reason' | 'riskLevel' | 'previewAction' | 'always'
 > {
   targetSessionId: string;
+  /** Resolved session title — filled in asynchronously after the event arrives. */
+  sessionTitle?: string;
 }
 
 export function toSessionPendingPermissionStateFromRequest(
@@ -23,6 +25,7 @@ export function toSessionPendingPermissionStateFromRequest(
     scope: request.scope,
     targetSessionId: request.sessionId,
     toolName: request.toolName,
+    ...(request.always && request.always.length > 0 ? { always: request.always } : {}),
   };
 }
 

@@ -265,6 +265,7 @@ export function SkillsInstalledSection({
   onUninstall,
   onUpdate,
   onCheckUpdates,
+  onToggle,
   onAddSource,
   onRemoveSource,
   onToggleSource,
@@ -275,6 +276,7 @@ export function SkillsInstalledSection({
   onUninstall: (id: string) => void;
   onUpdate: (id: string) => void;
   onCheckUpdates: () => void;
+  onToggle?: (id: string, nextEnabled: boolean) => void;
   onAddSource: (url: string) => void;
   onRemoveSource: (id: string) => void;
   onToggleSource: (id: string, enabled: boolean) => void;
@@ -301,6 +303,10 @@ export function SkillsInstalledSection({
               onUninstall={onUninstall}
               onUpdate={onUpdate}
               onCheckUpdates={onCheckUpdates}
+              onToggle={onToggle}
+              toggleDisabledReason={(skill) =>
+                skill.preinstalled ? '系统预装技能，不允许禁用' : null
+              }
             />
           </div>
         )}

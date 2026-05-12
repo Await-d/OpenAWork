@@ -27,6 +27,14 @@ import {
   backgroundOutputToolDefinition,
 } from './background-task-tools.js';
 import { bashToolDefinition, runBashCommand } from './bash-tools.js';
+import {
+  bashKillToolDefinition,
+  bashOutputToolDefinition,
+  dispatchBashKill,
+  dispatchBashOutput,
+  dispatchRunBashInBackground,
+  runBashInBackgroundToolDefinition,
+} from './run-background-bash-tools.js';
 import { BATCH_TOOL_DISALLOWED, BATCH_TOOL_MAX_CALLS } from './batch-tools.js';
 import {
   buildCallOmoAgentBackgroundOutput,
@@ -52,7 +60,10 @@ import type { DynamicToolEntry } from './dynamic-tool-loader.js';
 import { dynamicEntryToToolDefinition } from './dynamic-tool-loader.js';
 import { createEditTool } from './edit-tools.js';
 import { executeGenerateImageTool, generateImageToolDefinition } from './image-generation-tool.js';
-import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
+import {
+  interactiveBashToolDefinition,
+  runInteractiveBashCommand,
+} from './interactive-bash-tools.js';
 import { lookAtToolDefinition, runLookAtTool } from './look-at-tools.js';
 import { repoCloneToolDefinition } from './repo-clone-tools.js';
 import { repoOverviewToolDefinition } from './repo-overview-tools.js';
@@ -86,6 +97,10 @@ import {
   listSessionMessagesByRequestScope,
 } from './message-v2-adapter.js';
 import { createMultiEditTool } from './multi-edit-tool.js';
+import {
+  approvalCoversScope,
+  type PermissionApprovalCandidateRow,
+} from './permission-approval-match.js';
 import {
   type PermissionDecision,
   type PermissionRiskLevel,
@@ -252,6 +267,9 @@ const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
 const TOOL_WHITELIST = new Set<string>([
   'apply_patch',
   'bash',
+  runBashInBackgroundToolDefinition.name,
+  bashOutputToolDefinition.name,
+  bashKillToolDefinition.name,
   'codesearch',
   websearchTool.name,
   webfetchTool.name,
@@ -359,6 +377,13 @@ export interface SandboxExecutionContext {
    * without waiting for the whole batch to finish.
    */
   onPartialOutput?: (text: string) => void;
+  /**
+   * Owning user id, threaded down so terminal-tracked tool dispatchers
+   * (bash / run_bash_in_background) can register session_terminals rows
+   * with the right user. Falls back to `getSessionOwnerUserId(sessionId)`
+   * when not provided.
+   */
+  userId?: string;
 }
 
 interface PermissionRequestPayload {
@@ -3908,10 +3933,30 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
+      // Resolve owner user id for session_terminals bookkeeping. Falls
+      // back to the session row if the execution context didn't thread
+      // a userId explicitly (e.g. some non-stream call paths).
+      const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
+
       const output = await runBashCommand(parsed.data, {
         signal,
         ...(executionContext?.onPartialOutput
           ? { onPartialOutput: executionContext.onPartialOutput }
+          : {}),
+        ...(ownerUserId
+          ? {
+              tracking: {
+                sessionId,
+                userId: ownerUserId,
+                toolName: 'bash',
+                kind: 'foreground' as const,
+                ...(executionContext?.clientRequestId
+                  ? { clientRequestId: executionContext.clientRequestId }
+                  : {}),
+                ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
+                ...(parsed.data.description ? { description: parsed.data.description } : {}),
+              },
+            }
           : {}),
       });
       return {
@@ -3919,6 +3964,133 @@ async function executeGatewayManagedToolImpl(
         toolName: request.toolName,
         output,
         isError: output.exitCode !== 0,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'interactive_bash') {
+      const parsedTmux = interactiveBashToolDefinition.inputSchema.safeParse(rawInput);
+      if (!parsedTmux.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatValidationIssues(parsedTmux.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
+      const output = await runInteractiveBashCommand(
+        parsedTmux.data.tmux_command,
+        ownerUserId
+          ? {
+              sessionId,
+              userId: ownerUserId,
+              ...(executionContext?.clientRequestId
+                ? { clientRequestId: executionContext.clientRequestId }
+                : {}),
+              toolCallId: request.toolCallId,
+            }
+          : undefined,
+      );
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output,
+        isError: typeof output === 'string' && output.startsWith('Error:'),
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'run_bash_in_background') {
+      const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
+      if (!ownerUserId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'run_bash_in_background 无法解析会话 owner，请稍后再试。',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const result = await dispatchRunBashInBackground({
+        context: {
+          sessionId,
+          userId: ownerUserId,
+          ...(executionContext?.clientRequestId
+            ? { clientRequestId: executionContext.clientRequestId }
+            : {}),
+          toolCallId: request.toolCallId,
+        },
+        rawInput,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: result.ok ? result.output : result.error,
+        isError: !result.ok,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'bash_output') {
+      const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
+      if (!ownerUserId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'bash_output 无法解析会话 owner，请稍后再试。',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const result = dispatchBashOutput({
+        context: {
+          sessionId,
+          userId: ownerUserId,
+          ...(executionContext?.clientRequestId
+            ? { clientRequestId: executionContext.clientRequestId }
+            : {}),
+          toolCallId: request.toolCallId,
+        },
+        rawInput,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: result.ok ? result.output : result.error,
+        isError: !result.ok,
+        durationMs: 0,
+      };
+    }
+
+    if (request.toolName === 'bash_kill') {
+      const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
+      if (!ownerUserId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: 'bash_kill 无法解析会话 owner，请稍后再试。',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const result = dispatchBashKill({
+        context: {
+          sessionId,
+          userId: ownerUserId,
+          ...(executionContext?.clientRequestId
+            ? { clientRequestId: executionContext.clientRequestId }
+            : {}),
+          toolCallId: request.toolCallId,
+        },
+        rawInput,
+      });
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: result.ok ? result.output : result.error,
+        isError: !result.ok,
         durationMs: 0,
       };
     }
@@ -4672,26 +4844,27 @@ function findApprovedPermission(
   scope: string,
 ): PermissionApprovalRow | null {
   const userId = getSessionOwnerUserId(sessionId);
-  // Match exact scope OR wildcard '*' so that a session-level "always" approval
-  // (scope='*') covers all subsequent requests in the same category.
-  const direct =
-    sqliteGet<PermissionApprovalRow>(
-      `SELECT pr.id, pr.decision
-       FROM permission_requests pr
-       JOIN sessions s ON s.id = pr.session_id
-       WHERE pr.tool_name = ?
-         AND (pr.scope = ? OR pr.scope = '*')
-         AND pr.status = 'approved'
-         AND (
-           (pr.session_id = ? AND pr.decision IN ('once', 'session'))
-           OR (s.user_id = ? AND pr.decision = 'permanent')
-         )
-       ORDER BY pr.updated_at DESC, pr.created_at DESC
-       LIMIT 1`,
-      [toolName, scope, sessionId, userId],
-    ) ?? null;
-  if (direct) {
-    return direct;
+  // Pull every still-approved row for this category visible to this session.
+  // `findApprovedPermission` runs once per tool call; the per-session row
+  // count is bounded by user prompts so a full scan + JS-side wildcard
+  // matching is cheaper and safer than encoding glob semantics in SQL.
+  const candidates = sqliteAll<PermissionApprovalCandidateRow>(
+    `SELECT pr.id, pr.decision, pr.scope, pr.always_json
+     FROM permission_requests pr
+     JOIN sessions s ON s.id = pr.session_id
+     WHERE pr.tool_name = ?
+       AND pr.status = 'approved'
+       AND (
+         (pr.session_id = ? AND pr.decision IN ('once', 'session'))
+         OR (s.user_id = ? AND pr.decision = 'permanent')
+       )
+     ORDER BY pr.updated_at DESC, pr.created_at DESC`,
+    [toolName, sessionId, userId],
+  );
+  for (const row of candidates) {
+    if (approvalCoversScope(row, scope)) {
+      return { id: row.id, decision: row.decision };
+    }
   }
 
   // Session lineage: inherit session-level approvals from parent session.
@@ -4701,20 +4874,21 @@ function findApprovedPermission(
     [sessionId],
   );
   if (parentRow?.parent_id) {
-    return (
-      sqliteGet<PermissionApprovalRow>(
-        `SELECT pr.id, pr.decision
-         FROM permission_requests pr
-         WHERE pr.tool_name = ?
-           AND (pr.scope = ? OR pr.scope = '*')
-           AND pr.session_id = ?
-           AND pr.status = 'approved'
-           AND pr.decision = 'session'
-         ORDER BY pr.updated_at DESC
-         LIMIT 1`,
-        [toolName, scope, parentRow.parent_id],
-      ) ?? null
+    const parentCandidates = sqliteAll<PermissionApprovalCandidateRow>(
+      `SELECT pr.id, pr.decision, pr.scope, pr.always_json
+       FROM permission_requests pr
+       WHERE pr.tool_name = ?
+         AND pr.session_id = ?
+         AND pr.status = 'approved'
+         AND pr.decision = 'session'
+       ORDER BY pr.updated_at DESC, pr.created_at DESC`,
+      [toolName, parentRow.parent_id],
     );
+    for (const row of parentCandidates) {
+      if (approvalCoversScope(row, scope)) {
+        return { id: row.id, decision: row.decision };
+      }
+    }
   }
 
   return null;
@@ -4781,6 +4955,7 @@ function createPendingPermissionRequest(
       reason: context.reason,
       riskLevel: context.riskLevel,
       previewAction: context.previewAction,
+      ...(context.always && context.always.length > 0 ? { always: context.always } : {}),
     }),
     payload ? { clientRequestId: payload.clientRequestId } : undefined,
   );

@@ -45,6 +45,7 @@ import {
   loadCompanionSettingsForUser,
 } from '../companion-settings.js';
 import {
+  listEffectiveWorkspacePermissionRules,
   loadWorkspacePermissionConfig,
   writeWorkspacePermissionConfig,
   PERMISSION_CATEGORIES,
@@ -478,7 +479,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step } = startRequestWorkflow(request, 'settings.permission-rules.list');
       const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
-      const rules = config.rules ?? [];
+      // Return the merged effective view so legacy `permanentGrants`
+      // entries (from before permanent grants were stored as `rules`)
+      // are visible and editable from the settings panel.
+      const rules = listEffectiveWorkspacePermissionRules(config);
       step.succeed(undefined, { count: rules.length });
       return reply.send({ rules, categories: PERMISSION_CATEGORIES });
     },
@@ -504,7 +508,11 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid input', issues: parsed.error.issues });
       }
       const config = loadWorkspacePermissionConfig(WORKSPACE_ROOT);
-      const next = { ...config, rules: parsed.data.rules };
+      // Clear legacy `permanentGrants` on save so deletions from the
+      // settings panel actually take effect. The GET handler already
+      // surfaces these entries as `rules`, so any grant the user wanted
+      // to keep is round-tripped through `parsed.data.rules`.
+      const next = { ...config, rules: parsed.data.rules, permanentGrants: [] };
       writeWorkspacePermissionConfig(WORKSPACE_ROOT, next);
       step.succeed(undefined, { count: parsed.data.rules.length });
       return reply.send({ ok: true, rules: parsed.data.rules });

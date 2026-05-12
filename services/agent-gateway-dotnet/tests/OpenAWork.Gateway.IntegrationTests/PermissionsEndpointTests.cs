@@ -457,10 +457,12 @@ public sealed class PermissionsEndpointTests : IClassFixture<GatewayWebApplicati
         var permissionConfigPath = Path.Combine(workspaceRoot, ".openawork.permissions.json");
         Assert.True(File.Exists(permissionConfigPath));
         using var configDocument = JsonDocument.Parse(await File.ReadAllTextAsync(permissionConfigPath));
-        var permanentGrants = configDocument.RootElement.GetProperty("permanentGrants");
-        Assert.Contains(permanentGrants.EnumerateArray(), (grant) =>
-            grant.GetProperty("toolName").GetString() == "bash"
-            && grant.GetProperty("scope").GetString() == "/repo");
+        // Permanent grants are now stored exclusively in `rules` — the
+        // legacy `permanentGrants` array is no longer written to.
+        Assert.False(
+            configDocument.RootElement.TryGetProperty("permanentGrants", out var permanentGrants)
+            && permanentGrants.GetArrayLength() > 0,
+            "permanentGrants should be absent or empty after the single-source-of-truth migration");
         var rules = configDocument.RootElement.GetProperty("rules");
         Assert.Contains(rules.EnumerateArray(), (rule) =>
             rule.GetProperty("permission").GetString() == "bash"

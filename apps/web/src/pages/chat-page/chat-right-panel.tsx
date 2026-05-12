@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   PlanPanel,
   ToolCallCard,
@@ -20,6 +20,9 @@ import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/
 import { TaskToolInline } from '../../components/chat/task-tool-inline.js';
 import SkillSettingsPanel from '../../components/chat/SkillSettingsPanel.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
+import type { SessionTerminalView } from './terminals-api.js';
+import { deleteSessionTerminal } from './terminals-api.js';
+import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import {
   RIGHT_PANEL_TABS,
@@ -32,6 +35,37 @@ import type { ChatContextUsageSnapshot } from './context-usage.js';
 import type { SessionStateStatus, SessionTodoItem } from './session-runtime.js';
 import type { TaskToolRuntimeLookup, TaskToolRuntimeSnapshot } from './task-tool-runtime.js';
 import type { DialogueMode } from '../dialogue-mode.js';
+
+const EMPTY_KILL_SET = new Set<string>();
+
+const TERMINAL_STATUS_LABELS: Record<SessionTerminalStatus, string> = {
+  running: '运行中',
+  exited: '已退出',
+  aborted: '已取消',
+  timeout: '超时',
+  spawn_error: '启动失败',
+  killed: '已终止',
+  stale: '已失效',
+  'tmux-spawned': 'tmux 运行中',
+  'tmux-killed': 'tmux 已关闭',
+};
+
+const TERMINAL_STATUS_COLORS: Record<SessionTerminalStatus, string> = {
+  running: '#34d399',
+  exited: '#94a3b8',
+  aborted: '#f59e0b',
+  timeout: '#f59e0b',
+  spawn_error: '#ef4444',
+  killed: '#ef4444',
+  stale: '#64748b',
+  'tmux-spawned': '#3b82f6',
+  'tmux-killed': '#94a3b8',
+};
+
+const ACTIVE_TERMINAL_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set([
+  'running',
+  'tmux-spawned',
+]);
 
 interface CompactionItem {
   id: string;
@@ -121,6 +155,13 @@ export interface ChatRightPanelProps {
   sessionStateStatus: SessionStateStatus | null;
   workspaceFileItems: WorkspaceFileMentionItem[];
   yoloMode: boolean;
+  sessionTerminals?: SessionTerminalView[];
+  sessionTerminalsRunningCount?: number;
+  sessionTerminalsLoading?: boolean;
+  sessionTerminalsError?: string | null;
+  sessionTerminalsPendingKillIds?: Set<string>;
+  onKillTerminal?: (terminalId: string) => Promise<void>;
+  onReloadTerminals?: () => void;
 }
 
 export function ChatRightPanel(props: ChatRightPanelProps) {
@@ -407,6 +448,20 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       onOpenRecoveryStrategy={onOpenRecoveryStrategy}
                     />
                   )}
+                  {rightTab === 'terminals' && (
+                    <RightPanelTerminalsContent
+                      terminals={props.sessionTerminals ?? []}
+                      runningCount={props.sessionTerminalsRunningCount ?? 0}
+                      loading={props.sessionTerminalsLoading ?? false}
+                      error={props.sessionTerminalsError ?? null}
+                      pendingKillIds={props.sessionTerminalsPendingKillIds ?? EMPTY_KILL_SET}
+                      onKill={props.onKillTerminal}
+                      onReload={props.onReloadTerminals}
+                      gatewayUrl={gatewayUrl}
+                      token={token}
+                      sessionId={currentSessionId}
+                    />
+                  )}
                   {rightTab === 'mcp' && (
                     <div style={sharedUiThemeVars}>
                       <MCPServerList servers={mcpServers} />
@@ -426,6 +481,242 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RightPanelTerminalsContent({
+  terminals,
+  runningCount,
+  loading,
+  error,
+  pendingKillIds,
+  onKill,
+  onReload,
+  gatewayUrl,
+  token,
+  sessionId,
+}: {
+  terminals: SessionTerminalView[];
+  runningCount: number;
+  loading: boolean;
+  error: string | null;
+  pendingKillIds: Set<string>;
+  onKill?: (terminalId: string) => Promise<void>;
+  onReload?: () => void;
+  gatewayUrl: string;
+  token: string | null | undefined;
+  sessionId: string | null;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const active = terminals.filter((t) => ACTIVE_TERMINAL_STATUSES.has(t.status));
+  const closed = terminals.filter((t) => !ACTIVE_TERMINAL_STATUSES.has(t.status));
+  const sorted = [...active, ...closed];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          {runningCount > 0 ? `${runningCount} 个运行中` : '无运行中终端'}
+          {' / '}共 {terminals.length} 条
+        </span>
+        {onReload && (
+          <button
+            type="button"
+            onClick={onReload}
+            style={{
+              fontSize: 10,
+              border: '1px solid var(--border-subtle)',
+              background: 'transparent',
+              color: 'var(--text-2)',
+              padding: '2px 8px',
+              borderRadius: 5,
+              cursor: 'pointer',
+            }}
+          >
+            刷新
+          </button>
+        )}
+        {loading && <span style={{ fontSize: 10, color: 'var(--text-3)' }}>加载中…</span>}
+      </div>
+      {error && <div style={{ fontSize: 11, color: '#ef4444', padding: '4px 0' }}>{error}</div>}
+      {sorted.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '6px 2px' }}>
+          当前会话还没有跑过终端命令。
+        </div>
+      ) : (
+        sorted.map((terminal) => {
+          const isActive = ACTIVE_TERMINAL_STATUSES.has(terminal.status);
+          const isExpanded = expandedId === terminal.terminalId;
+          const isPendingKill = pendingKillIds.has(terminal.terminalId);
+          const statusColor = TERMINAL_STATUS_COLORS[terminal.status] ?? '#94a3b8';
+          const statusLabel = TERMINAL_STATUS_LABELS[terminal.status] ?? terminal.status;
+          return (
+            <div
+              key={terminal.terminalId}
+              style={{
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 8,
+                padding: '8px 10px',
+                background: isActive
+                  ? 'color-mix(in oklch, var(--surface) 94%, #34d399 6%)'
+                  : 'var(--surface)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '1px 7px',
+                    borderRadius: 9999,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: statusColor,
+                    background: `${statusColor}1a`,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: statusColor,
+                      animation: isActive ? 'pulse 1.4s ease-in-out infinite' : undefined,
+                    }}
+                  />
+                  {statusLabel}
+                </span>
+                <code
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                    textOverflow: 'ellipsis',
+                    fontSize: 11,
+                    fontFamily: 'var(--font-mono, monospace)',
+                    color: 'var(--text)',
+                  }}
+                  title={terminal.command}
+                >
+                  {terminal.command}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(isExpanded ? null : terminal.terminalId)}
+                  style={{
+                    fontSize: 10,
+                    border: '1px solid var(--border-subtle)',
+                    background: 'transparent',
+                    color: 'var(--text-2)',
+                    padding: '2px 7px',
+                    borderRadius: 5,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isExpanded ? '收起' : '详情'}
+                </button>
+                {isActive && onKill ? (
+                  <button
+                    type="button"
+                    disabled={isPendingKill}
+                    onClick={() => void onKill(terminal.terminalId)}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      border: '1px solid color-mix(in srgb, #ef4444 50%, transparent)',
+                      background: 'color-mix(in srgb, #ef4444 14%, transparent)',
+                      color: '#ef4444',
+                      padding: '2px 7px',
+                      borderRadius: 5,
+                      cursor: isPendingKill ? 'wait' : 'pointer',
+                      opacity: isPendingKill ? 0.6 : 1,
+                    }}
+                  >
+                    {isPendingKill ? '终止中…' : '终止'}
+                  </button>
+                ) : !isActive && sessionId && token ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void deleteSessionTerminal({
+                        gatewayUrl,
+                        sessionId,
+                        terminalId: terminal.terminalId,
+                        token,
+                      }).then(() => onReload?.());
+                    }}
+                    style={{
+                      fontSize: 10,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'transparent',
+                      color: 'var(--text-3)',
+                      padding: '2px 7px',
+                      borderRadius: 5,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    清理
+                  </button>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  fontSize: 10,
+                  color: 'var(--text-3)',
+                }}
+              >
+                <span>{terminal.toolName}</span>
+                <span
+                  style={{
+                    maxWidth: 200,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={terminal.cwd}
+                >
+                  {terminal.cwd}
+                </span>
+                {terminal.exitCode !== undefined && (
+                  <span style={{ color: terminal.exitCode === 0 ? '#34d399' : '#ef4444' }}>
+                    exit {terminal.exitCode}
+                  </span>
+                )}
+              </div>
+              {isExpanded && (
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: '6px 8px',
+                    background: 'color-mix(in srgb, var(--surface) 60%, #000 30%)',
+                    color: '#dcdcdc',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 6,
+                    maxHeight: 220,
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    fontSize: 10.5,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {terminal.outputTail || '(无输出)'}
+                </pre>
+              )}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

@@ -77,7 +77,9 @@ export interface TitleLlmInput {
 }
 
 export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<void> {
-  if (!isSessionTitleEmpty(input.sessionId, input.userId)) {
+  const { titleEmpty, iconEmpty } = getSessionTitleAndIconState(input.sessionId, input.userId);
+  // Skip only when both title and icon are already set
+  if (!titleEmpty && !iconEmpty) {
     return;
   }
 
@@ -94,17 +96,18 @@ export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<voi
 
     const titleLine = lines[0]!;
     const finalTitle = titleLine.length > 12 ? titleLine.substring(0, 12) : titleLine;
-    if (finalTitle.length < 4) return;
 
     const emojiLine = lines.length >= 2 ? lines[1] : undefined;
     const emoji = emojiLine && isValidEmoji(emojiLine) ? emojiLine : undefined;
 
-    sqliteRun(
-      "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ? AND COALESCE(TRIM(title), '') = ''",
-      [finalTitle, input.sessionId, input.userId],
-    );
+    if (titleEmpty && finalTitle.length >= 4) {
+      sqliteRun(
+        "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ? AND COALESCE(TRIM(title), '') = ''",
+        [finalTitle, input.sessionId, input.userId],
+      );
+    }
 
-    if (emoji) {
+    if (iconEmpty && emoji) {
       saveSessionIcon(input.sessionId, input.userId, emoji);
     }
   } catch (error: unknown) {
@@ -155,11 +158,13 @@ async function callTitleLlm(
   }
 }
 
-const EMOJI_REGEX = /^\p{Emoji_Presentation}(\u200d\p{Emoji_Presentation}|\uFE0F)*$/u;
+const EMOJI_REGEX = /^\p{Emoji}[\uFE0F\u20E3]?(?:\u200D\p{Emoji}[\uFE0F]?)*$/u;
 
 function isValidEmoji(text: string): boolean {
   const trimmed = text.trim();
-  if (trimmed.length === 0 || trimmed.length > 8) return false;
+  if (trimmed.length === 0 || trimmed.length > 10) return false;
+  // Reject bare ASCII/digit/keycap characters that technically carry the Emoji property
+  if (/^[0-9*#]$/.test(trimmed)) return false;
   return EMOJI_REGEX.test(trimmed);
 }
 
@@ -190,10 +195,28 @@ export function isFirstUserMessage(sessionId: string, userId: string): boolean {
   return count === 1;
 }
 
-export function isSessionTitleEmpty(sessionId: string, userId: string): boolean {
-  const row = sqliteGet<{ title: string | null }>(
-    'SELECT title FROM sessions WHERE id = ? AND user_id = ?',
+function getSessionTitleAndIconState(
+  sessionId: string,
+  userId: string,
+): { titleEmpty: boolean; iconEmpty: boolean } {
+  const row = sqliteGet<{ title: string | null; metadata_json: string | null }>(
+    'SELECT title, metadata_json FROM sessions WHERE id = ? AND user_id = ?',
     [sessionId, userId],
   );
-  return !row?.title || row.title.trim() === '';
+  const titleEmpty = !row?.title || row.title.trim() === '';
+  let iconEmpty = true;
+  if (row?.metadata_json) {
+    try {
+      const meta = JSON.parse(row.metadata_json) as Record<string, unknown>;
+      const icon = meta['icon'];
+      iconEmpty = !icon || typeof icon !== 'string' || icon.trim().length === 0;
+    } catch {
+      iconEmpty = true;
+    }
+  }
+  return { titleEmpty, iconEmpty };
+}
+
+export function isSessionTitleEmpty(sessionId: string, userId: string): boolean {
+  return getSessionTitleAndIconState(sessionId, userId).titleEmpty;
 }

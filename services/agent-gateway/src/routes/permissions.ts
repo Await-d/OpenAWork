@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   mapPermissionRequestRow,
   parseApprovedPermissionResumePayload,
+  parsePermissionAlwaysJson,
   parsePermissionRequestClientRequestId,
   permissionDecisionSchema,
   permissionRiskLevelSchema,
@@ -35,6 +36,7 @@ const createPermissionRequestSchema = z.object({
   riskLevel: permissionRiskLevelSchema,
   previewAction: z.string().optional(),
   clientRequestId: z.string().min(1).max(128).optional(),
+  always: z.array(z.string().min(1)).optional(),
 });
 
 const replyPermissionSchema = z.object({
@@ -62,19 +64,6 @@ interface PermissionRequestRow {
   expires_at: number | null;
   always_json: string | null;
   created_at: string;
-}
-
-function parseAlwaysJson(raw: string | null): string[] {
-  if (!raw) return ['*'];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed.filter((v): v is string => typeof v === 'string' && v.length > 0);
-    }
-  } catch {
-    // fall through
-  }
-  return ['*'];
 }
 
 export function expirePendingPermissionRequests(input: {
@@ -127,7 +116,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const requests = sqliteAll<PermissionRequestRow>(
-        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
          FROM permission_requests
          WHERE session_id = ? AND status = 'pending'
          ORDER BY created_at ASC`,
@@ -165,10 +154,12 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
 
       const requestId = randomUUID();
       const clientRequestId = body.data.clientRequestId ?? `permission:${requestId}`;
+      const alwaysPatterns =
+        body.data.always && body.data.always.length > 0 ? body.data.always : null;
       sqliteRun(
         `INSERT INTO permission_requests
-         (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           requestId,
           sessionId,
@@ -179,6 +170,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           body.data.previewAction ?? null,
           JSON.stringify({ clientRequestId }),
           null,
+          alwaysPatterns ? JSON.stringify(alwaysPatterns) : null,
         ],
       );
 
@@ -191,43 +183,35 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           reason: body.data.reason,
           riskLevel: body.data.riskLevel,
           previewAction: body.data.previewAction,
+          ...(alwaysPatterns ? { always: alwaysPatterns } : {}),
         }),
         { clientRequestId },
       );
 
       const createdRequest = sqliteGet<PermissionRequestRow>(
-        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, created_at
+        `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
          FROM permission_requests
          WHERE id = ? AND session_id = ?
          LIMIT 1`,
         [requestId, sessionId],
       );
 
+      const fallback = {
+        requestId,
+        sessionId,
+        toolName: body.data.toolName,
+        scope: body.data.scope,
+        reason: body.data.reason,
+        riskLevel: body.data.riskLevel,
+        previewAction: body.data.previewAction,
+        ...(alwaysPatterns ? { always: alwaysPatterns } : {}),
+        status: 'pending' as const,
+        createdAt: new Date().toISOString(),
+      };
+
       step.succeed(undefined, { requestId });
       return reply.status(201).send({
-        request: createdRequest
-          ? (mapPermissionRequestRow(createdRequest) ?? {
-              requestId,
-              sessionId,
-              toolName: body.data.toolName,
-              scope: body.data.scope,
-              reason: body.data.reason,
-              riskLevel: body.data.riskLevel,
-              previewAction: body.data.previewAction,
-              status: 'pending',
-              createdAt: new Date().toISOString(),
-            })
-          : {
-              requestId,
-              sessionId,
-              toolName: body.data.toolName,
-              scope: body.data.scope,
-              reason: body.data.reason,
-              riskLevel: body.data.riskLevel,
-              previewAction: body.data.previewAction,
-              status: 'pending',
-              createdAt: new Date().toISOString(),
-            },
+        request: createdRequest ? (mapPermissionRequestRow(createdRequest) ?? fallback) : fallback,
       });
     },
   );
@@ -297,14 +281,62 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       if (body.data.decision === 'permanent') {
         // Use always patterns (from opencode ctx.ask always) for broad approval.
         // e.g. approving edit with always:["*"] → write rule { permission: "edit", pattern: "*" }
+        // Legacy rows without an `always_json` (column added later) fall back
+        // to the original request scope so we never silently broaden a
+        // permanent grant to "*" just because the column was missing.
         const category = resolvePermissionCategory(permissionRequest.tool_name);
-        const alwaysPatterns = parseAlwaysJson(permissionRequest.always_json);
+        const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
+        const alwaysPatterns = parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
         for (const pattern of alwaysPatterns) {
           persistWorkspacePermanentPermission({
             sessionId,
             toolName: category,
             scope: pattern,
           });
+        }
+      } else if (body.data.decision === 'session') {
+        // Mirror opencode's `permission.ask reply='always'` semantics: when
+        // the user picks 本会话允许, push every `always` pattern into the set
+        // of approved scopes for this session so subsequent requests in the
+        // same category whose scope matches one of those patterns auto-resolve
+        // without re-prompting (e.g. approving `ls -la` covers `ls /tmp`,
+        // `ls -a` etc. via the arity pattern `ls *`).
+        //
+        // We persist as synthetic `permission_requests` rows (status='approved',
+        // decision='session', scope=<pattern>) — `findApprovedPermission` then
+        // matches via wildcard. Synthetic rows are keyed by (tool_name, scope)
+        // to stay idempotent if the same broad approval is granted twice.
+        const category = resolvePermissionCategory(permissionRequest.tool_name);
+        const parsedAlways = parsePermissionAlwaysJson(permissionRequest.always_json);
+        const alwaysPatterns = parsedAlways.length > 0 ? parsedAlways : [permissionRequest.scope];
+        for (const pattern of alwaysPatterns) {
+          const existing = sqliteGet<{ id: string }>(
+            `SELECT id FROM permission_requests
+             WHERE session_id = ? AND tool_name = ? AND scope = ?
+               AND status = 'approved' AND decision = 'session'
+             LIMIT 1`,
+            [sessionId, category, pattern],
+          );
+          if (existing) continue;
+          // Avoid clashing with the original row that has scope = literal command.
+          if (category === permissionRequest.tool_name && pattern === permissionRequest.scope) {
+            continue;
+          }
+          sqliteRun(
+            `INSERT INTO permission_requests
+             (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status, decision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'approved', 'session')`,
+            [
+              randomUUID(),
+              sessionId,
+              category,
+              pattern,
+              permissionRequest.reason,
+              permissionRequest.risk_level,
+              permissionRequest.preview_action,
+              JSON.stringify([pattern]),
+            ],
+          );
         }
       }
 

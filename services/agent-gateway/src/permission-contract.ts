@@ -21,6 +21,7 @@ export const permissionRiskLevelSchema = z.enum(['low', 'medium', 'high']);
 export const permissionDecisionSchema = z.enum(['once', 'session', 'permanent', 'reject']);
 
 interface PermissionRequestRowLike {
+  always_json?: string | null;
   created_at: string;
   decision: PermissionDecision | null;
   id: string;
@@ -31,6 +32,37 @@ interface PermissionRequestRowLike {
   session_id: string;
   status: PermissionRequestStatus | 'consumed';
   tool_name: string;
+}
+
+/**
+ * Parse the `always_json` column on `permission_requests`.
+ *
+ * The column stores the `PermissionRequestContext.always` array built at
+ * request time (e.g. `["ls *"]` for `bash ls -la`). When the user approves
+ * with decision `session` or `permanent`, those patterns are the broad
+ * approval scopes opencode-style ctx.ask uses to suppress re-prompting on
+ * subsequent same-category invocations (see
+ * `@/temp/opencode/packages/opencode/src/permission/index.ts` ask handler).
+ *
+ * Returns `[]` when the JSON is missing or malformed. Callers that want a
+ * fallback (legacy rows persisted before the column existed) must supply
+ * one explicitly — e.g. routes/permissions.ts falls back to the original
+ * request scope, while the approval matcher prefers exact/scope-glob over
+ * silently widening to "*".
+ */
+export function parsePermissionAlwaysJson(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(
+        (value): value is string => typeof value === 'string' && value.length > 0,
+      );
+    }
+  } catch {
+    // fall through to empty array
+  }
+  return [];
 }
 
 export function resolvePermissionRequestTimeoutMs(): number | undefined {
@@ -54,6 +86,8 @@ export function mapPermissionRequestRow(
     return null;
   }
 
+  const alwaysPatterns = parsePermissionAlwaysJson(row.always_json ?? null);
+
   return {
     requestId: row.id,
     sessionId: row.session_id,
@@ -62,6 +96,7 @@ export function mapPermissionRequestRow(
     reason: row.reason,
     riskLevel: row.risk_level,
     previewAction: row.preview_action ?? undefined,
+    ...(alwaysPatterns.length > 0 ? { always: alwaysPatterns } : {}),
     status: row.status,
     decision: row.decision ?? undefined,
     createdAt: row.created_at,

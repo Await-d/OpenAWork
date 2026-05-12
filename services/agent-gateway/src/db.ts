@@ -407,6 +407,40 @@ export async function migrate(): Promise<void> {
     )
   `);
 
+  // session_terminals — tracks every bash / interactive_bash / background bash
+  // invocation per session so the UI can render "currently running terminals"
+  // and the user can kill an individual command without aborting the whole
+  // LLM run. See .agentdocs/workflow/260512-session-terminal-tracking-spec.md.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_terminals (
+      terminal_id        TEXT PRIMARY KEY,
+      session_id         TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_request_id  TEXT,
+      tool_name          TEXT NOT NULL,
+      kind               TEXT NOT NULL,
+      command            TEXT NOT NULL,
+      description        TEXT,
+      cwd                TEXT NOT NULL,
+      pid                INTEGER,
+      status             TEXT NOT NULL,
+      exit_code          INTEGER,
+      started_at_ms      INTEGER NOT NULL,
+      ended_at_ms        INTEGER,
+      last_activity_ms   INTEGER NOT NULL,
+      output_bytes_total INTEGER NOT NULL DEFAULT 0,
+      output_tail        TEXT NOT NULL DEFAULT '',
+      output_path        TEXT,
+      metadata_json      TEXT NOT NULL DEFAULT '{}'
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_terminals_session ON session_terminals(session_id, started_at_ms DESC)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_terminals_status ON session_terminals(status, session_id)',
+  );
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_snapshots (
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -697,6 +731,10 @@ export async function migrate(): Promise<void> {
       PRIMARY KEY (skill_id, user_id)
     )
   `);
+  // Populated by the periodic GitHub-version check background task; lets
+  // the UI surface an "更新可用" badge for installed-from-market skills.
+  // Stored shape: {"latestVersion": string|null, "checkedAt": number, "error": string|null}.
+  ensureColumn('installed_skills', 'latest_version_check_json', 'TEXT');
 
   // ─── Chat Workspace Skill Selection (PR1 of skill-workspace-selection spec) ───
   // Per-user skill selection set keyed by chat workspace path. Empty table

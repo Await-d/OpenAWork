@@ -117,30 +117,21 @@ export function hasWorkspacePersistentPermission(
 export function upsertWorkspacePermanentPermission(
   config: WorkspacePermissionConfig,
   input: {
+    /** @deprecated Kept for backwards compat with callers; ignored. */
     grantedAt?: number;
     scope: string;
     toolName: string;
   },
 ): WorkspacePermissionConfig {
-  const grantedAt = input.grantedAt ?? Date.now();
-  const permanentGrants = [...(config.permanentGrants ?? [])];
+  // Permanent grants are stored exclusively in `rules` so the settings
+  // panel (which reads/writes `rules`) is the single source of truth.
+  // Legacy `permanentGrants` entries from older config files are still
+  // honoured via `listEffectiveWorkspacePermissionRules`, and are
+  // migrated to `rules` (and the legacy array cleared) the first time
+  // the user saves the settings page — see the PUT
+  // `/settings/permission-rules` handler.
+  void input.grantedAt;
   const rules = [...(config.rules ?? [])];
-
-  const hasGrant = permanentGrants.some(
-    (grant) =>
-      grant.toolName === input.toolName &&
-      grant.scope === input.scope &&
-      grant.decision === 'permanent',
-  );
-  if (!hasGrant) {
-    permanentGrants.push({
-      id: `${input.toolName}:${input.scope}:${grantedAt}`,
-      toolName: input.toolName,
-      scope: input.scope,
-      grantedAt,
-      decision: 'permanent',
-    });
-  }
 
   const hasRule = rules.some(
     (rule) =>
@@ -154,7 +145,7 @@ export function upsertWorkspacePermanentPermission(
     });
   }
 
-  return { ...config, permanentGrants, rules };
+  return { ...config, rules };
 }
 
 // ---------------------------------------------------------------------------
