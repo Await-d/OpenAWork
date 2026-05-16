@@ -652,6 +652,37 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.delete(
+    '/team/workspaces/:teamWorkspaceId',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
+      const { step } = startRequestWorkflow(request, 'team.workspace.delete', undefined, {
+        teamWorkspaceId,
+      });
+      const user = request.user as JwtPayload;
+
+      const existing = sqliteGet<{ id: string }>(
+        `SELECT id FROM team_workspaces WHERE user_id = ? AND id = ? LIMIT 1`,
+        [user.sub, teamWorkspaceId],
+      );
+      if (!existing) {
+        step.fail('workspace not found');
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+
+      // 仅删除 team_workspaces 行；session 数据保留（仍然按 metadata_json
+      // 中的 teamWorkspaceId 孤立存在），符合\"删除工作区不破坏历史会话\"的保守策略。
+      sqliteRun(`DELETE FROM team_workspaces WHERE user_id = ? AND id = ?`, [
+        user.sub,
+        teamWorkspaceId,
+      ]);
+
+      step.succeed(undefined, { teamWorkspaceId });
+      return reply.status(204).send();
+    },
+  );
+
   app.post(
     '/team/workspaces/:teamWorkspaceId/sessions',
     { onRequest: [requireAuth] },

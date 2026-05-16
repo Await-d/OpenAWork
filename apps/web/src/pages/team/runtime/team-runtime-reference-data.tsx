@@ -64,6 +64,8 @@ export interface TeamRuntimeReferenceViewData {
     description?: string;
     defaultWorkingRoot?: string;
   }) => Promise<boolean>;
+  renameWorkspace: (workspaceId: string, name: string) => Promise<boolean>;
+  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
   defaultSelectedAgentId: string;
   defaultSelectedTeamId: string;
   error: string | null;
@@ -219,6 +221,12 @@ const EMPTY_VIEW_DATA: TeamRuntimeReferenceViewData = {
     return false;
   },
   async createWorkspace() {
+    return false;
+  },
+  async renameWorkspace() {
+    return false;
+  },
+  async deleteWorkspace() {
     return false;
   },
   defaultSelectedAgentId: 'leader',
@@ -562,6 +570,46 @@ export function useResolvedTeamRuntimeReferenceData(
           description: input.description ?? null,
           defaultWorkingRoot: input.defaultWorkingRoot ?? null,
         });
+        await collaboration.refresh();
+        options.onWorkspacesChanged?.();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
+  );
+
+  const renameWorkspace = useCallback(
+    async (workspaceId: string, name: string) => {
+      if (!accessToken || !workspaceId || !name.trim()) {
+        return false;
+      }
+      setSessionActionBusy(true);
+      try {
+        await teamClient.updateWorkspace(accessToken, workspaceId, { name: name.trim() });
+        await collaboration.refresh();
+        options.onWorkspacesChanged?.();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setSessionActionBusy(false);
+      }
+    },
+    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
+  );
+
+  const deleteWorkspace = useCallback(
+    async (workspaceId: string) => {
+      if (!accessToken || !workspaceId) {
+        return false;
+      }
+      setSessionActionBusy(true);
+      try {
+        await teamClient.deleteWorkspace(accessToken, workspaceId);
         await collaboration.refresh();
         options.onWorkspacesChanged?.();
         return true;
@@ -1332,6 +1380,8 @@ export function useResolvedTeamRuntimeReferenceData(
       createSession,
       createTemplate: workflowTemplates.createTemplate,
       createWorkspace,
+      renameWorkspace,
+      deleteWorkspace,
       createTask,
       defaultSelectedAgentId: roleChips[0]?.id ?? 'leader',
       defaultSelectedTeamId,
@@ -1426,6 +1476,8 @@ export function useResolvedTeamRuntimeReferenceData(
     workflowTemplates.templateCards,
     createSession,
     createWorkspace,
+    renameWorkspace,
+    deleteWorkspace,
     createTask,
     moveTask,
     replyReview,

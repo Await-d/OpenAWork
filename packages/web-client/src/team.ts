@@ -200,6 +200,7 @@ export interface TeamClient {
     teamWorkspaceId: string,
     input: UpdateTeamWorkspaceInput,
   ): Promise<TeamWorkspaceDetail>;
+  deleteWorkspace(token: string, teamWorkspaceId: string): Promise<void>;
   createThread(
     token: string,
     teamWorkspaceId: string,
@@ -331,6 +332,19 @@ export function createTeamClient(baseUrl: string): TeamClient {
         throw new Error(`Failed to update team workspace: ${response.status}`);
       }
       return (await response.json()) as TeamWorkspaceDetail;
+    },
+
+    async deleteWorkspace(token: string, teamWorkspaceId: string): Promise<void> {
+      const response = await fetch(
+        `${baseUrl}/team/workspaces/${encodeURIComponent(teamWorkspaceId)}`,
+        {
+          method: 'DELETE',
+          headers: buildAuthHeaders(token),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to delete team workspace: ${response.status}`);
+      }
     },
 
     async createThread(

@@ -64,6 +64,7 @@ import { TeamSessionListSidebar } from './team/runtime/TeamSessionListSidebar.js
 import { WorkspaceSwitcher } from './team/runtime/WorkspaceSwitcher.js';
 import { TeamHeaderMetrics } from './team/runtime/TeamHeaderMetrics.js';
 import { NewTeamWorkspaceModal } from './team/runtime/NewTeamWorkspaceModal.js';
+import { ConfirmDeleteWorkspaceModal } from './team/runtime/ConfirmDeleteWorkspaceModal.js';
 import {
   useBreakpoint,
   useTeamPageMode,
@@ -79,6 +80,7 @@ import {
 import { OfficeThreeCanvas } from './team/runtime/OfficeThreeCanvas.js';
 import { useOfficeSceneState } from './team/runtime/OfficeScene.js';
 import type { TeamSessionCreationDraft } from './team/runtime/team-session-creation.types.js';
+import type { TeamWorkspaceSummary } from '@openAwork/web-client';
 
 // ───── 尺寸常量 ─────
 
@@ -227,6 +229,9 @@ export default function TeamPageV2() {
   const [officeCollapsed, setOfficeCollapsed] = useState(true);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
+  const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<TeamWorkspaceSummary | null>(
+    null,
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('teamV2.leftSidebar.collapsed') === '1';
@@ -451,6 +456,8 @@ export default function TeamPageV2() {
               loading={workspaceState.loading}
               onSelect={(id) => navigate(`/team/${id}`)}
               onCreateNew={() => setShowNewWorkspaceModal(true)}
+              onRename={data.renameWorkspace}
+              onRequestDelete={(ws) => setDeleteWorkspaceTarget(ws)}
             />
             {selectedTeamMeta ? (
               <span
@@ -794,6 +801,31 @@ export default function TeamPageV2() {
             onCreated={() => {
               // 刷新工作区列表，让新创建的工作区出现在 dropdown 中
               workspaceState.refresh();
+            }}
+          />
+        ) : null}
+
+        {deleteWorkspaceTarget ? (
+          <ConfirmDeleteWorkspaceModal
+            workspace={deleteWorkspaceTarget}
+            workspaceGroups={data.workspaceGroups}
+            onCancel={() => setDeleteWorkspaceTarget(null)}
+            onConfirm={async () => {
+              const target = deleteWorkspaceTarget;
+              if (!target) return false;
+              const ok = await data.deleteWorkspace(target.id);
+              if (!ok) return false;
+              setDeleteWorkspaceTarget(null);
+              // 若删除的是当前激活工作区，切换到第一个剩余工作区
+              if (target.id === resolvedTeamWorkspaceId) {
+                const next = workspaceState.workspaces.find((ws) => ws.id !== target.id);
+                if (next) {
+                  navigate(`/team/${next.id}`, { replace: true });
+                } else {
+                  navigate('/team', { replace: true });
+                }
+              }
+              return true;
             }}
           />
         ) : null}
