@@ -208,6 +208,18 @@ export default function TeamPageV2() {
   const navigate = useNavigate();
   const workspaceState = useTeamWorkspaceState(teamWorkspaceId);
   const resolvedTeamWorkspaceId = teamWorkspaceId ?? workspaceState.workspaces[0]?.id ?? null;
+
+  // 当 URL 没指定工作区但已加载到工作区列表时，自动跳转到第一个工作区。
+  // 这样 useTeamWorkspaceState 的 activeWorkspace 才能正确加载，
+  // 顶部 WorkspaceSwitcher 与会话列表也能显示对应工作区的内容。
+  useEffect(() => {
+    if (!teamWorkspaceId && workspaceState.workspaces.length > 0 && !workspaceState.loading) {
+      const firstId = workspaceState.workspaces[0]?.id;
+      if (firstId) {
+        navigate(`/team/${firstId}`, { replace: true });
+      }
+    }
+  }, [teamWorkspaceId, workspaceState.workspaces, workspaceState.loading, navigate]);
   const workspaceSnapshotState = useTeamWorkspaceSnapshotState(
     resolvedTeamWorkspaceId ?? undefined,
   );
