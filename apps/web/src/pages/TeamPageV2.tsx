@@ -577,6 +577,7 @@ export default function TeamPageV2() {
               selectedTeamId={selectedTeamId}
               onSelectTeam={handleSelectTeam}
               teamWorkspaceId={resolvedTeamWorkspaceId ?? undefined}
+              workspaceLabel={workspaceState.activeWorkspace?.name}
               onSubmitDraft={handleSubmitDraft}
               onDeleteSession={handleDeleteSession}
               selectedWorkspacePath={selectedWorkspacePath}

@@ -117,9 +117,9 @@ const TIME_BUCKET_ORDER: TimeBucket[] = ['今天', '昨天', '更早'];
 
 const ITEM_STYLE: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
+  alignItems: 'flex-start',
   gap: 10,
-  padding: '10px 14px',
+  padding: '11px 14px 11px 13px',
   border: 'none',
   borderLeft: '3px solid transparent',
   background: 'transparent',
@@ -128,22 +128,26 @@ const ITEM_STYLE: CSSProperties = {
   fontSize: 12,
   color: 'var(--text)',
   cursor: 'pointer',
-  borderRadius: '0 8px 8px 0',
+  borderRadius: '0 10px 10px 0',
   transition: 'all 120ms ease',
+  position: 'relative',
 };
 
 const ITEM_ACTIVE_STYLE: CSSProperties = {
   ...ITEM_STYLE,
   borderLeftColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
+  background:
+    'linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%, color-mix(in srgb, var(--accent) 4%, var(--surface)) 100%)',
   color: 'var(--text)',
 };
 
 const STATUS_DOT_BASE: CSSProperties = {
   flexShrink: 0,
-  width: 8,
-  height: 8,
+  width: 10,
+  height: 10,
   borderRadius: 999,
+  marginTop: 4,
+  position: 'relative',
 };
 
 const COLLAPSE_BTN_STYLE: CSSProperties = {
@@ -205,16 +209,17 @@ const CREATE_BTN_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 4,
-  padding: '5px 10px',
+  gap: 5,
+  padding: '6px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 14%, var(--surface))',
   color: 'var(--accent)',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
+  letterSpacing: '0.02em',
 };
 
 const CONTEXT_MENU_STYLE: CSSProperties = {
@@ -550,8 +555,59 @@ export function TeamSessionListSidebar({
       }}
     >
       <header style={HEADER_STYLE}>
-        <strong style={{ fontSize: 12, color: 'var(--text-2)' }}>会话</strong>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+          <strong
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: 'var(--text)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            会话
+          </strong>
+          {(() => {
+            const total = workspaceGroups.reduce((acc, g) => acc + g.sessions.length, 0);
+            const running = workspaceGroups.reduce(
+              (acc, g) => acc + g.sessions.filter((s) => s.status === 'running').length,
+              0,
+            );
+            if (total === 0) return null;
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                  background: 'color-mix(in srgb, var(--text-3) 14%, transparent)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: 'var(--text-2)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+                title={`共 ${total} 个会话，${running} 个运行中`}
+              >
+                {running > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: 'var(--success, #22c55e)',
+                      boxShadow:
+                        '0 0 0 2px color-mix(in srgb, var(--success, #22c55e) 30%, transparent)',
+                    }}
+                  />
+                ) : null}
+                {running > 0 ? `${running}/${total}` : total}
+              </span>
+            );
+          })()}
+        </div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
           {onSubmitDraft ? (
             <button
               type="button"
@@ -571,10 +627,24 @@ export function TeamSessionListSidebar({
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background =
-                  'color-mix(in srgb, var(--accent) 12%, var(--surface))';
+                  'color-mix(in srgb, var(--accent) 14%, var(--surface))';
               }}
             >
-              + 新建
+              <svg
+                aria-hidden="true"
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              新建
             </button>
           ) : null}
           <button
@@ -629,14 +699,84 @@ export function TeamSessionListSidebar({
       ) : null}
 
       <div style={{ padding: '8px 10px 0' }}>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="搜索会话..."
-          style={SEARCH_INPUT_STYLE}
-          aria-label="搜索会话"
-        />
+        <div style={{ position: 'relative' }}>
+          <svg
+            aria-hidden="true"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              position: 'absolute',
+              left: 10,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: 'var(--text-3)',
+              pointerEvents: 'none',
+            }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="搜索会话..."
+            style={{ ...SEARCH_INPUT_STYLE, paddingLeft: 30, paddingRight: searchQuery ? 28 : 10 }}
+            aria-label="搜索会话"
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="清除搜索"
+              title="清除"
+              style={{
+                position: 'absolute',
+                right: 6,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: 20,
+                height: 20,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-3)',
+                cursor: 'pointer',
+                borderRadius: 4,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background =
+                  'color-mix(in srgb, var(--text-3) 16%, transparent)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              <svg
+                aria-hidden="true"
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div style={SCROLL_STYLE}>
@@ -716,6 +856,7 @@ export function TeamSessionListSidebar({
                     <span style={TIME_BUCKET_LABEL_STYLE}>{bucket}</span>
                     {sessions.map((session) => {
                       const active = session.id === selectedTeamId;
+                      const dot = dotColor(session.status);
                       return (
                         <button
                           key={session.id}
@@ -738,10 +879,16 @@ export function TeamSessionListSidebar({
                             }
                           }}
                         >
+                          {/* 状态点（running 带脉冲） */}
                           <span
+                            aria-hidden="true"
                             style={{
                               ...STATUS_DOT_BASE,
-                              background: dotColor(session.status),
+                              background: dot,
+                              boxShadow:
+                                session.status === 'running'
+                                  ? `0 0 0 3px color-mix(in srgb, ${dot} 28%, transparent)`
+                                  : 'none',
                             }}
                           />
                           <span
@@ -749,9 +896,10 @@ export function TeamSessionListSidebar({
                               flex: 1,
                               minWidth: 0,
                               display: 'grid',
-                              gap: 2,
+                              gap: 4,
                             }}
                           >
+                            {/* 第一行：标题 + 时间 */}
                             <span
                               style={{
                                 display: 'flex',
@@ -768,7 +916,7 @@ export function TeamSessionListSidebar({
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',
                                   fontSize: 13,
-                                  fontWeight: 600,
+                                  fontWeight: active ? 700 : 600,
                                   color: 'var(--text)',
                                 }}
                               >
@@ -781,24 +929,75 @@ export function TeamSessionListSidebar({
                                     fontSize: 10,
                                     color: 'var(--text-3)',
                                     fontWeight: 400,
+                                    fontVariantNumeric: 'tabular-nums',
                                   }}
                                 >
                                   {formatRelativeTime(session.updatedAt)}
                                 </span>
                               ) : null}
                             </span>
-                            {session.subtitle || session.lastMessage ? (
+
+                            {/* 第二行：状态徽章 + 副标题 */}
+                            <span
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                minWidth: 0,
+                              }}
+                            >
                               <span
                                 style={{
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  fontSize: 11,
-                                  color: 'var(--text-3)',
-                                  lineHeight: 1.4,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '1px 7px',
+                                  borderRadius: 999,
+                                  background: `color-mix(in srgb, ${dot} 16%, transparent)`,
+                                  color: dot,
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  letterSpacing: '0.02em',
+                                  flexShrink: 0,
+                                  textTransform: 'uppercase',
                                 }}
                               >
-                                {session.lastMessage ?? session.subtitle}
+                                {statusLabel(session.status)}
+                              </span>
+                              {session.subtitle ? (
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    fontSize: 10,
+                                    color: 'var(--text-3)',
+                                  }}
+                                >
+                                  {session.subtitle}
+                                </span>
+                              ) : null}
+                            </span>
+
+                            {/* 第三行：最近一条消息 */}
+                            {session.lastMessage ? (
+                              <span
+                                style={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  fontSize: 11,
+                                  color: 'var(--text-3)',
+                                  lineHeight: 1.5,
+                                  paddingLeft: 8,
+                                  borderLeft:
+                                    '2px solid color-mix(in srgb, var(--border) 60%, transparent)',
+                                }}
+                              >
+                                {session.lastMessage}
                               </span>
                             ) : null}
                           </span>
