@@ -62,6 +62,7 @@ import { TeamRuntimeSettingsPanel } from './team/runtime/team-runtime-settings-p
 import { TeamTabContent } from './team/runtime/TeamTabContent.js';
 import { TeamSessionListSidebar } from './team/runtime/TeamSessionListSidebar.js';
 import { WorkspaceSwitcher } from './team/runtime/WorkspaceSwitcher.js';
+import { TeamHeaderMetrics } from './team/runtime/TeamHeaderMetrics.js';
 import {
   useBreakpoint,
   useTeamPageMode,
@@ -135,18 +136,18 @@ const HEADER_STYLE: CSSProperties = {
 
 const TITLE_GROUP_STYLE: CSSProperties = {
   display: 'flex',
-  alignItems: 'baseline',
+  alignItems: 'center',
   gap: 6,
   minWidth: 0,
-  flexShrink: 0,
-  maxWidth: '50%',
+  flexShrink: 1,
+  maxWidth: '40%',
 };
 
 const STATUS_SLOT_STYLE: CSSProperties = {
   flex: 1,
   minWidth: 0,
   display: 'flex',
-  justifyContent: 'flex-start',
+  justifyContent: 'flex-end',
   overflow: 'hidden',
 };
 
@@ -392,13 +393,30 @@ export default function TeamPageV2() {
     gridTemplateColumns,
   };
 
-  const selectedTeamLabel = useMemo(() => {
+  const selectedTeamMeta = useMemo(() => {
     for (const group of data.workspaceGroups) {
       const session = group.sessions.find((s) => s.id === selectedTeamId);
-      if (session) return session.title;
+      if (session) {
+        return {
+          title: session.title,
+          status: session.status,
+          updatedAt: session.updatedAt,
+        };
+      }
     }
     return null;
   }, [data.workspaceGroups, selectedTeamId]);
+  const selectedTeamLabel = selectedTeamMeta?.title ?? null;
+
+  // ─── header 指标统计 ────────────────────────────────────────────
+  const headerMetrics = useMemo(() => {
+    const allSessions = data.workspaceGroups.flatMap((group) => group.sessions);
+    const runningSessions = allSessions.filter((s) => s.status === 'running').length;
+    const activeHandoffs = Array.from(handoffs.values()).filter(
+      (h) => h.state === 'pending' || h.state === 'claimed' || h.state === 'running',
+    ).length;
+    return { runningSessions, activeHandoffs };
+  }, [data.workspaceGroups, handoffs]);
 
   return (
     <TeamRuntimeReferenceDataProvider value={data}>
@@ -419,9 +437,12 @@ export default function TeamPageV2() {
               loading={workspaceState.loading}
               onSelect={(id) => navigate(`/team/${id}`)}
             />
-            {selectedTeamLabel ? (
+            {selectedTeamMeta ? (
               <span
                 style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
                   fontSize: 12,
                   color: 'var(--text-2)',
                   whiteSpace: 'nowrap',
@@ -429,12 +450,50 @@ export default function TeamPageV2() {
                   textOverflow: 'ellipsis',
                   maxWidth: 280,
                 }}
-                title={selectedTeamLabel}
+                title={selectedTeamMeta.title}
               >
-                / {selectedTeamLabel}
+                <span style={{ color: 'var(--text-3)' }}>/</span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background:
+                      selectedTeamMeta.status === 'running'
+                        ? 'var(--success, #22c55e)'
+                        : selectedTeamMeta.status === 'paused'
+                          ? 'var(--warning, #f59e0b)'
+                          : selectedTeamMeta.status === 'failed'
+                            ? 'var(--error, #ef4444)'
+                            : 'var(--text-3)',
+                    boxShadow:
+                      selectedTeamMeta.status === 'running'
+                        ? '0 0 0 3px color-mix(in srgb, var(--success, #22c55e) 25%, transparent)'
+                        : 'none',
+                  }}
+                />
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {selectedTeamMeta.title}
+                </span>
               </span>
             ) : null}
           </div>
+
+          {/* 中部：工作区指标卡片 */}
+          {!isMobile ? (
+            <TeamHeaderMetrics
+              metrics={data.metricCards}
+              activeHandoffCount={headerMetrics.activeHandoffs}
+              runningSessionCount={headerMetrics.runningSessions}
+            />
+          ) : null}
 
           <div style={STATUS_SLOT_STYLE}>
             <div
