@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createArtifactsClient, createSettingsClient } from '@openAwork/web-client';
 import { DEFAULT_IMAGE_GENERATION_SIZE, validateImageGenerationSize } from '@openAwork/shared';
 import type {
   ChatSettingsProvider,
@@ -51,11 +52,10 @@ export function useChatImageGeneration(input: {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`${gatewayUrl}/settings/plugins`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok && !cancelled) {
-          const data = (await res.json()) as { imageGeneration?: { enabled?: boolean } };
+        const data = (await createSettingsClient(gatewayUrl).getPlugins(token)) as {
+          imageGeneration?: { enabled?: boolean };
+        };
+        if (!cancelled) {
           setImagePluginEnabled(data.imageGeneration?.enabled === true);
         }
       } catch {
@@ -124,33 +124,19 @@ export function useChatImageGeneration(input: {
 
       setImageGenerationBusy(true);
       try {
-        const response = await fetch(
-          `${gatewayUrl}/sessions/${params.sessionId}/images/generations`,
+        const payload = (await createArtifactsClient(gatewayUrl).generateImage(
+          token,
+          params.sessionId,
           {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              ...(params.inputArtifacts ? { inputArtifacts: params.inputArtifacts } : {}),
-              prompt: params.prompt,
-              size: imageGenerationDefaults.size,
-              quality: imageGenerationDefaults.quality,
-              outputFormat: imageGenerationDefaults.outputFormat,
-              background: imageGenerationDefaults.background,
-            }),
+            ...(params.inputArtifacts ? { inputArtifacts: params.inputArtifacts } : {}),
+            prompt: params.prompt,
+            size: imageGenerationDefaults.size,
+            quality: imageGenerationDefaults.quality,
+            outputFormat: imageGenerationDefaults.outputFormat,
+            background: imageGenerationDefaults.background,
           },
-        );
-
-        const payload = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        } & Partial<SessionImageGenerationResponse>;
-        if (!response.ok) {
-          throw new Error(payload.error?.message ?? '图片生成失败，请稍后重试。');
-        }
-
-        return payload as SessionImageGenerationResponse;
+        )) as SessionImageGenerationResponse;
+        return payload;
       } finally {
         setImageGenerationBusy(false);
       }

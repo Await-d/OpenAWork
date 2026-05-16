@@ -21,6 +21,17 @@ interface ChatTopBarProps {
    * without forcing a layout shift when undefined.
    */
   terminalsChip?: ReactNode;
+  /** Callback to open the command palette (Cmd+K). */
+  onOpenCommandPalette?: () => void;
+  /** Number of bookmarked messages in the current session. */
+  bookmarkCount?: number;
+  /** Whether multi-select mode is active. */
+  multiSelectActive?: boolean;
+  onToggleMultiSelect?: () => void;
+  /** Callback to open browser preview in editor pane. */
+  onOpenBrowser?: () => void;
+  /** Whether browser preview is currently active. */
+  browserActive?: boolean;
 }
 
 export function ChatTopBar({
@@ -36,6 +47,12 @@ export function ChatTopBar({
   contextMaxTokens,
   contextIsEstimated,
   terminalsChip,
+  onOpenCommandPalette,
+  bookmarkCount = 0,
+  multiSelectActive = false,
+  onToggleMultiSelect,
+  onOpenBrowser,
+  browserActive = false,
 }: ChatTopBarProps) {
   const showContextMeter =
     contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0;
@@ -70,6 +87,95 @@ export function ChatTopBar({
           onChange={onChangeDialogueMode}
           style={{ flexShrink: 0 }}
         />
+
+        {/* Command palette trigger */}
+        {onOpenCommandPalette && (
+          <button
+            type="button"
+            onClick={onOpenCommandPalette}
+            title="命令面板 (⌘K)"
+            style={{
+              height: 24,
+              padding: '0 8px',
+              borderRadius: 5,
+              border: '1px solid var(--border-subtle)',
+              background: 'transparent',
+              color: 'var(--text-3)',
+              fontSize: 10,
+              fontWeight: 500,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.35-4.35" />
+            </svg>
+            ⌘K
+          </button>
+        )}
+
+        {/* Bookmark count indicator */}
+        {bookmarkCount > 0 && (
+          <span
+            title={`当前会话有 ${bookmarkCount} 条收藏消息`}
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: 'var(--text-3)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              flexShrink: 0,
+            }}
+          >
+            ⭐ {bookmarkCount}
+          </span>
+        )}
+
+        {/* Multi-select toggle */}
+        {onToggleMultiSelect && (
+          <button
+            type="button"
+            onClick={onToggleMultiSelect}
+            aria-pressed={multiSelectActive}
+            title={multiSelectActive ? '退出多选模式 (⌘⇧M)' : '多选消息 (⌘⇧M)'}
+            style={{
+              height: 24,
+              padding: '0 7px',
+              borderRadius: 5,
+              border: multiSelectActive
+                ? '1px solid var(--accent)'
+                : '1px solid var(--border-subtle)',
+              background: multiSelectActive
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+              color: multiSelectActive ? 'var(--accent)' : 'var(--text-3)',
+              fontSize: 10,
+              fontWeight: 500,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              flexShrink: 0,
+            }}
+          >
+            ☑ 多选
+          </button>
+        )}
       </div>
 
       {/* Right group: YOLO + editor + panel — unified pill container */}
@@ -174,6 +280,39 @@ export function ChatTopBar({
             <polyline points="8 6 2 12 8 18" />
           </svg>
         </button>
+        {onOpenBrowser && (
+          <button
+            type="button"
+            onClick={onOpenBrowser}
+            title="打开浏览器预览"
+            className={`icon-btn${browserActive ? ' active' : ''}`}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={onToggleRightOpen}

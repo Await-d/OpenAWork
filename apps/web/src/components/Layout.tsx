@@ -1149,490 +1149,138 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                 />
               </div>
             </div>
+          </div>
 
-            {shouldOverlaySessionSidebar && leftSidebarOpen && (
-              <button
-                type="button"
-                aria-label="关闭侧栏遮罩"
-                onClick={() => setLeftSidebarOpen(false)}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  zIndex: 30,
-                  background: 'oklch(0 0 0 / 0.42)',
-                  backdropFilter: 'blur(1px)',
-                }}
-              />
-            )}
+          {shouldOverlaySessionSidebar && leftSidebarOpen && (
+            <button
+              type="button"
+              aria-label="关闭侧栏遮罩"
+              onClick={() => setLeftSidebarOpen(false)}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 30,
+                background: 'oklch(0 0 0 / 0.42)',
+                backdropFilter: 'blur(1px)',
+              }}
+            />
+          )}
 
+          <div
+            style={{
+              display: 'flex',
+              flex: 1,
+              minWidth: 0,
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
             <div
+              data-testid="layout-topbar"
               style={{
                 display: 'flex',
-                flex: 1,
-                minWidth: 0,
-                flexDirection: 'column',
-                overflow: 'hidden',
+                height: 44,
+                flexShrink: 0,
+                alignItems: 'center',
+                gap: 6,
+                padding: '0 12px',
+                borderBottom: '1px solid var(--border-subtle)',
+                background: 'var(--header-bg)',
               }}
             >
-              <div
-                data-testid="layout-topbar"
-                style={{
-                  display: 'flex',
-                  height: 44,
-                  flexShrink: 0,
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '0 12px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  background: 'var(--header-bg)',
-                }}
-              >
-                {isChatRoute && !leftSidebarOpen && (
-                  <button
-                    type="button"
-                    title="展开面板"
-                    onClick={() => setLeftSidebarOpen(true)}
-                    className="icon-btn"
-                    style={{
-                      display: 'flex',
-                      width: 28,
-                      height: 28,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: 7,
-                      color: 'var(--text-3)',
-                    }}
-                  >
-                    <svg
-                      aria-hidden="true"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                  </button>
-                )}
-                <span
+              {isChatRoute && !leftSidebarOpen && (
+                <button
+                  type="button"
+                  title="展开面板"
+                  onClick={() => setLeftSidebarOpen(true)}
+                  className="icon-btn"
                   style={{
-                    flex: 1,
-                    userSelect: 'none',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    letterSpacing: '-0.02em',
-                    color: 'var(--text)',
                     display: 'flex',
+                    width: 28,
+                    height: 28,
                     alignItems: 'center',
-                    gap: 6,
+                    justifyContent: 'center',
+                    borderRadius: 7,
+                    color: 'var(--text-3)',
                   }}
                 >
                   <svg
                     aria-hidden="true"
-                    width={18}
-                    height={18}
-                    viewBox="0 0 32 32"
-                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   >
-                    <rect width="32" height="32" rx="7" fill="var(--accent)" />
-                    <path
-                      d="M 16,3 C 26,3 29,12 16,16"
-                      stroke="var(--accent-text)"
-                      strokeWidth="2.8"
-                      strokeLinecap="round"
-                      fill="none"
-                      opacity="0.92"
-                      transform="rotate(0, 16, 16)"
-                    />
-                    <path
-                      d="M 16,3 C 26,3 29,12 16,16"
-                      stroke="var(--accent-text)"
-                      strokeWidth="2.8"
-                      strokeLinecap="round"
-                      fill="none"
-                      opacity="0.92"
-                      transform="rotate(120, 16, 16)"
-                    />
-                    <path
-                      d="M 16,3 C 26,3 29,12 16,16"
-                      stroke="var(--accent-text)"
-                      strokeWidth="2.8"
-                      strokeLinecap="round"
-                      fill="none"
-                      opacity="0.92"
-                      transform="rotate(240, 16, 16)"
-                    />
-                    <circle cx="16" cy="16" r="2.5" fill="var(--accent-text)" />
+                    <polyline points="9 18 15 12 9 6" />
                   </svg>
-                  OpenAWork
-                </span>
+                </button>
+              )}
+              <span
+                style={{
+                  flex: 1,
+                  userSelect: 'none',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: '-0.02em',
+                  color: 'var(--text)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  width={18}
+                  height={18}
+                  viewBox="0 0 32 32"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <rect width="32" height="32" rx="7" fill="var(--accent)" />
+                  <path
+                    d="M 16,3 C 26,3 29,12 16,16"
+                    stroke="var(--accent-text)"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    fill="none"
+                    opacity="0.92"
+                    transform="rotate(0, 16, 16)"
+                  />
+                  <path
+                    d="M 16,3 C 26,3 29,12 16,16"
+                    stroke="var(--accent-text)"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    fill="none"
+                    opacity="0.92"
+                    transform="rotate(120, 16, 16)"
+                  />
+                  <path
+                    d="M 16,3 C 26,3 29,12 16,16"
+                    stroke="var(--accent-text)"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    fill="none"
+                    opacity="0.92"
+                    transform="rotate(240, 16, 16)"
+                  />
+                  <circle cx="16" cy="16" r="2.5" fill="var(--accent-text)" />
+                </svg>
+                OpenAWork
+              </span>
 
-                {accessToken && (
-                  <div style={{ position: 'relative' }} ref={notificationsContainerRef}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotificationsOpen((previous) => !previous);
-                        void loadNotifications().catch(() => undefined);
-                      }}
-                      title="通知中心"
-                      className="toolbar-btn"
-                      style={{
-                        display: 'flex',
-                        width: 30,
-                        height: 30,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 7,
-                        color: 'var(--text-3)',
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--surface)',
-                        transition: 'color 150ms ease, background 150ms ease',
-                        cursor: 'pointer',
-                        position: 'relative',
-                      }}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.4V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
-                        <path d="M9 17a3 3 0 0 0 6 0" />
-                      </svg>
-                      {notifications.length > 0 ? (
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: -4,
-                            right: -4,
-                            minWidth: 16,
-                            height: 16,
-                            padding: '0 4px',
-                            borderRadius: 999,
-                            background: 'var(--danger)',
-                            color: 'white',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            display: 'grid',
-                            placeItems: 'center',
-                          }}
-                        >
-                          {notifications.length > 9 ? '9+' : notifications.length}
-                        </span>
-                      ) : null}
-                      {pendingPermission && notifications.length === 0 && (
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: -2,
-                            right: -2,
-                            width: 10,
-                            height: 10,
-                            borderRadius: 999,
-                            background: '#f59e0b',
-                            boxShadow: '0 0 0 2px var(--surface)',
-                            animation: 'permissionPulse 1.5s ease-in-out infinite',
-                          }}
-                        />
-                      )}
-                    </button>
-                    {notificationsOpen ? (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: 36,
-                          right: 0,
-                          width: 360,
-                          maxHeight: 480,
-                          borderRadius: 14,
-                          border: '1px solid var(--border)',
-                          background: 'var(--surface)',
-                          boxShadow: 'var(--shadow-lg)',
-                          zIndex: 40,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '10px 12px',
-                            borderBottom: '1px solid var(--border-subtle)',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                              通知中心
-                            </span>
-                            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                              {notifications.length === 0
-                                ? '已全部清空'
-                                : `${notifications.length} 条未读`}
-                            </span>
-                          </div>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button
-                              type="button"
-                              title="刷新"
-                              onClick={() => void loadNotifications().catch(() => undefined)}
-                              style={{
-                                width: 26,
-                                height: 26,
-                                borderRadius: 6,
-                                border: '1px solid var(--border-subtle)',
-                                background: 'var(--surface)',
-                                color: 'var(--text-3)',
-                                cursor: 'pointer',
-                                display: 'grid',
-                                placeItems: 'center',
-                              }}
-                            >
-                              <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polyline points="23 4 23 10 17 10" />
-                                <polyline points="1 20 1 14 7 14" />
-                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={notifications.length === 0}
-                              onClick={() => void handleMarkAllNotificationsRead()}
-                              style={{
-                                fontSize: 11,
-                                padding: '4px 8px',
-                                borderRadius: 6,
-                                border: '1px solid var(--border-subtle)',
-                                background:
-                                  notifications.length === 0 ? 'var(--surface)' : 'var(--bg-2)',
-                                color:
-                                  notifications.length === 0 ? 'var(--text-3)' : 'var(--text-2)',
-                                cursor: notifications.length === 0 ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              全部已读
-                            </button>
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            overflowY: 'auto',
-                            padding: 8,
-                            display: 'grid',
-                            gap: 6,
-                          }}
-                        >
-                          {notifications.length === 0 ? (
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: 'var(--text-3)',
-                                padding: '24px 8px',
-                                textAlign: 'center',
-                              }}
-                            >
-                              暂无未读通知
-                            </div>
-                          ) : (
-                            notifications.map((notification) => {
-                              const typeMeta = getNotificationTypeMeta(notification.eventType);
-                              return (
-                                <div
-                                  key={notification.id}
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={() => void handleOpenNotification(notification)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
-                                      event.preventDefault();
-                                      void handleOpenNotification(notification);
-                                    }
-                                  }}
-                                  style={{
-                                    position: 'relative',
-                                    display: 'grid',
-                                    gridTemplateColumns: '4px 1fr',
-                                    gap: 10,
-                                    padding: '10px 32px 10px 10px',
-                                    borderRadius: 10,
-                                    border: '1px solid var(--border-subtle)',
-                                    background: 'var(--bg-2)',
-                                    cursor: 'pointer',
-                                    transition: 'background 150ms ease, border-color 150ms ease',
-                                  }}
-                                  onMouseEnter={(event) => {
-                                    event.currentTarget.style.background = 'var(--bg-1)';
-                                    event.currentTarget.style.borderColor = 'var(--border)';
-                                  }}
-                                  onMouseLeave={(event) => {
-                                    event.currentTarget.style.background = 'var(--bg-2)';
-                                    event.currentTarget.style.borderColor = 'var(--border-subtle)';
-                                  }}
-                                >
-                                  <span
-                                    aria-hidden="true"
-                                    style={{
-                                      width: 4,
-                                      borderRadius: 2,
-                                      background: typeMeta.color,
-                                    }}
-                                  />
-                                  <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-                                    <div
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 6,
-                                        flexWrap: 'wrap',
-                                      }}
-                                    >
-                                      <span
-                                        style={{
-                                          fontSize: 10,
-                                          fontWeight: 600,
-                                          padding: '1px 6px',
-                                          borderRadius: 999,
-                                          background: typeMeta.bg,
-                                          color: typeMeta.color,
-                                        }}
-                                      >
-                                        {typeMeta.label}
-                                      </span>
-                                      <span
-                                        style={{
-                                          fontSize: 12,
-                                          fontWeight: 700,
-                                          color: 'var(--text)',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          whiteSpace: 'nowrap',
-                                          minWidth: 0,
-                                          flex: 1,
-                                        }}
-                                        title={notification.title}
-                                      >
-                                        {notification.title}
-                                      </span>
-                                    </div>
-                                    <span
-                                      style={{
-                                        fontSize: 12,
-                                        color: 'var(--text-2)',
-                                        lineHeight: 1.5,
-                                        display: '-webkit-box',
-                                        WebkitLineClamp: 2,
-                                        WebkitBoxOrient: 'vertical',
-                                        overflow: 'hidden',
-                                      }}
-                                    >
-                                      {notification.body}
-                                    </span>
-                                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                                      {new Date(notification.createdAt).toLocaleString('zh-CN', {
-                                        month: 'short',
-                                        day: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                      })}
-                                    </span>
-                                    {notification.eventType === 'permission_asked' &&
-                                      notification.sessionId && (
-                                        <button
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            void handleOpenNotification(notification);
-                                          }}
-                                          style={{
-                                            fontSize: 10,
-                                            fontWeight: 600,
-                                            padding: '3px 8px',
-                                            borderRadius: 5,
-                                            border: '1px solid rgba(245,158,11,0.35)',
-                                            background: 'rgba(245,158,11,0.1)',
-                                            color: '#d97706',
-                                            cursor: 'pointer',
-                                            justifySelf: 'start',
-                                          }}
-                                        >
-                                          去审批
-                                        </button>
-                                      )}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    title="标记已读"
-                                    aria-label="标记已读"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void handleDismissNotification(notification);
-                                    }}
-                                    style={{
-                                      position: 'absolute',
-                                      top: 6,
-                                      right: 6,
-                                      width: 20,
-                                      height: 20,
-                                      borderRadius: 6,
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: 'var(--text-3)',
-                                      cursor: 'pointer',
-                                      display: 'grid',
-                                      placeItems: 'center',
-                                    }}
-                                  >
-                                    <svg
-                                      width="12"
-                                      height="12"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    >
-                                      <line x1="18" y1="6" x2="6" y2="18" />
-                                      <line x1="6" y1="6" x2="18" y2="18" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-
-                {onToggleTheme && (
+              {accessToken && (
+                <div style={{ position: 'relative' }} ref={notificationsContainerRef}>
                   <button
                     type="button"
-                    onClick={onToggleTheme}
-                    title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
+                    onClick={() => {
+                      setNotificationsOpen((previous) => !previous);
+                      void loadNotifications().catch(() => undefined);
+                    }}
+                    title="通知中心"
                     className="toolbar-btn"
                     style={{
                       display: 'flex',
@@ -1646,56 +1294,407 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
                       background: 'var(--surface)',
                       transition: 'color 150ms ease, background 150ms ease',
                       cursor: 'pointer',
+                      position: 'relative',
                     }}
                   >
-                    {theme === 'dark' ? (
-                      <svg
-                        aria-hidden="true"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 15 15"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
+                    <svg
+                      aria-hidden="true"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.4V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
+                      <path d="M9 17a3 3 0 0 0 6 0" />
+                    </svg>
+                    {notifications.length > 0 ? (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -4,
+                          right: -4,
+                          minWidth: 16,
+                          height: 16,
+                          padding: '0 4px',
+                          borderRadius: 999,
+                          background: 'var(--danger)',
+                          color: 'white',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          display: 'grid',
+                          placeItems: 'center',
+                        }}
                       >
-                        <circle cx="7.5" cy="7.5" r="2.5" />
-                        <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14M2.9 2.9l1.1 1.1M11 11l1.1 1.1M2.9 12.1l1.1-1.1M11 4l1.1-1.1" />
-                      </svg>
-                    ) : (
-                      <svg
-                        aria-hidden="true"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 15 15"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M12.5 9A5.5 5.5 0 0 1 6 2.5a5.5 5.5 0 1 0 6.5 6.5z" />
-                      </svg>
+                        {notifications.length > 9 ? '9+' : notifications.length}
+                      </span>
+                    ) : null}
+                    {pendingPermission && notifications.length === 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -2,
+                          right: -2,
+                          width: 10,
+                          height: 10,
+                          borderRadius: 999,
+                          background: '#f59e0b',
+                          boxShadow: '0 0 0 2px var(--surface)',
+                          animation: 'permissionPulse 1.5s ease-in-out infinite',
+                        }}
+                      />
                     )}
                   </button>
-                )}
-              </div>
+                  {notificationsOpen ? (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 36,
+                        right: 0,
+                        width: 360,
+                        maxHeight: 480,
+                        borderRadius: 14,
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        boxShadow: 'var(--shadow-lg)',
+                        zIndex: 40,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '10px 12px',
+                          borderBottom: '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                            通知中心
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                            {notifications.length === 0
+                              ? '已全部清空'
+                              : `${notifications.length} 条未读`}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            title="刷新"
+                            onClick={() => void loadNotifications().catch(() => undefined)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid var(--border-subtle)',
+                              background: 'var(--surface)',
+                              color: 'var(--text-3)',
+                              cursor: 'pointer',
+                              display: 'grid',
+                              placeItems: 'center',
+                            }}
+                          >
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="23 4 23 10 17 10" />
+                              <polyline points="1 20 1 14 7 14" />
+                              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={notifications.length === 0}
+                            onClick={() => void handleMarkAllNotificationsRead()}
+                            style={{
+                              fontSize: 11,
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              border: '1px solid var(--border-subtle)',
+                              background:
+                                notifications.length === 0 ? 'var(--surface)' : 'var(--bg-2)',
+                              color: notifications.length === 0 ? 'var(--text-3)' : 'var(--text-2)',
+                              cursor: notifications.length === 0 ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            全部已读
+                          </button>
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          overflowY: 'auto',
+                          padding: 8,
+                          display: 'grid',
+                          gap: 6,
+                        }}
+                      >
+                        {notifications.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--text-3)',
+                              padding: '24px 8px',
+                              textAlign: 'center',
+                            }}
+                          >
+                            暂无未读通知
+                          </div>
+                        ) : (
+                          notifications.map((notification) => {
+                            const typeMeta = getNotificationTypeMeta(notification.eventType);
+                            return (
+                              <div
+                                key={notification.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => void handleOpenNotification(notification)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    void handleOpenNotification(notification);
+                                  }
+                                }}
+                                style={{
+                                  position: 'relative',
+                                  display: 'grid',
+                                  gridTemplateColumns: '4px 1fr',
+                                  gap: 10,
+                                  padding: '10px 32px 10px 10px',
+                                  borderRadius: 10,
+                                  border: '1px solid var(--border-subtle)',
+                                  background: 'var(--bg-2)',
+                                  cursor: 'pointer',
+                                  transition: 'background 150ms ease, border-color 150ms ease',
+                                }}
+                                onMouseEnter={(event) => {
+                                  event.currentTarget.style.background = 'var(--bg-1)';
+                                  event.currentTarget.style.borderColor = 'var(--border)';
+                                }}
+                                onMouseLeave={(event) => {
+                                  event.currentTarget.style.background = 'var(--bg-2)';
+                                  event.currentTarget.style.borderColor = 'var(--border-subtle)';
+                                }}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: 4,
+                                    borderRadius: 2,
+                                    background: typeMeta.color,
+                                  }}
+                                />
+                                <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      flexWrap: 'wrap',
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        fontWeight: 600,
+                                        padding: '1px 6px',
+                                        borderRadius: 999,
+                                        background: typeMeta.bg,
+                                        color: typeMeta.color,
+                                      }}
+                                    >
+                                      {typeMeta.label}
+                                    </span>
+                                    <span
+                                      style={{
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        color: 'var(--text)',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        minWidth: 0,
+                                        flex: 1,
+                                      }}
+                                      title={notification.title}
+                                    >
+                                      {notification.title}
+                                    </span>
+                                  </div>
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      color: 'var(--text-2)',
+                                      lineHeight: 1.5,
+                                      display: '-webkit-box',
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: 'vertical',
+                                      overflow: 'hidden',
+                                    }}
+                                  >
+                                    {notification.body}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                                    {new Date(notification.createdAt).toLocaleString('zh-CN', {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </span>
+                                  {notification.eventType === 'permission_asked' &&
+                                    notification.sessionId && (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void handleOpenNotification(notification);
+                                        }}
+                                        style={{
+                                          fontSize: 10,
+                                          fontWeight: 600,
+                                          padding: '3px 8px',
+                                          borderRadius: 5,
+                                          border: '1px solid rgba(245,158,11,0.35)',
+                                          background: 'rgba(245,158,11,0.1)',
+                                          color: '#d97706',
+                                          cursor: 'pointer',
+                                          justifySelf: 'start',
+                                        }}
+                                      >
+                                        去审批
+                                      </button>
+                                    )}
+                                </div>
+                                <button
+                                  type="button"
+                                  title="标记已读"
+                                  aria-label="标记已读"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleDismissNotification(notification);
+                                  }}
+                                  style={{
+                                    position: 'absolute',
+                                    top: 6,
+                                    right: 6,
+                                    width: 20,
+                                    height: 20,
+                                    borderRadius: 6,
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: 'var(--text-3)',
+                                    cursor: 'pointer',
+                                    display: 'grid',
+                                    placeItems: 'center',
+                                  }}
+                                >
+                                  <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                  </svg>
+                                </button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
-              <div
-                style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', minWidth: 0 }}
-              >
-                <div
-                  className="outlet-content-wrap"
+              {onToggleTheme && (
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
+                  className="toolbar-btn"
                   style={{
-                    flex: 1,
-                    overflow: 'hidden',
                     display: 'flex',
-                    minWidth: 0,
-                    position: 'relative',
+                    width: 30,
+                    height: 30,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 7,
+                    color: 'var(--text-3)',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--surface)',
+                    transition: 'color 150ms ease, background 150ms ease',
+                    cursor: 'pointer',
                   }}
                 >
-                  <CachedRouteOutlet />
-                </div>
+                  {theme === 'dark' ? (
+                    <svg
+                      aria-hidden="true"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 15 15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    >
+                      <circle cx="7.5" cy="7.5" r="2.5" />
+                      <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14M2.9 2.9l1.1 1.1M11 11l1.1 1.1M2.9 12.1l1.1-1.1M11 4l1.1-1.1" />
+                    </svg>
+                  ) : (
+                    <svg
+                      aria-hidden="true"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 15 15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12.5 9A5.5 5.5 0 0 1 6 2.5a5.5 5.5 0 1 0 6.5 6.5z" />
+                    </svg>
+                  )}
+                </button>
+              )}
+            </div>
+
+            <div
+              style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', minWidth: 0 }}
+            >
+              <div
+                className="outlet-content-wrap"
+                style={{
+                  flex: 1,
+                  overflow: 'hidden',
+                  display: 'flex',
+                  minWidth: 0,
+                  position: 'relative',
+                }}
+              >
+                <CachedRouteOutlet />
               </div>
             </div>
           </div>

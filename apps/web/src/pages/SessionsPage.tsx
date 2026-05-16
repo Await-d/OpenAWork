@@ -1,6 +1,10 @@
 import { useDeferredValue, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { createSessionsClient, withTokenRefresh } from '@openAwork/web-client';
+import {
+  createSessionsClient,
+  createWorkspaceClient,
+  withTokenRefresh,
+} from '@openAwork/web-client';
 import type { TokenStore } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
@@ -266,21 +270,10 @@ export default function SessionsPage() {
   }
 
   const fetchWorkspaceRoots = useCallback(async (): Promise<string[]> => {
-    const res = await fetch(`${gatewayUrl}/workspace/root`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error('fetchRootPath failed');
-    const data = (await res.json()) as { root?: string; roots?: string[] };
-    const roots = Array.isArray(data.roots)
-      ? data.roots.filter((root) => typeof root === 'string' && root.length > 0)
-      : typeof data.root === 'string' && data.root.length > 0
-        ? [data.root]
-        : [];
-
+    const roots = await createWorkspaceClient(gatewayUrl).listRoots(token ?? '');
     if (roots.length === 0) {
       throw new Error('fetchRootPath failed');
     }
-
     return roots;
   }, [token, gatewayUrl]);
 
@@ -295,30 +288,16 @@ export default function SessionsPage() {
   }, [fetchWorkspaceRoots]);
 
   const fetchTree = useCallback(
-    async (path: string, depth = 1) => {
-      const res = await fetch(
-        `${gatewayUrl}/workspace/tree?path=${encodeURIComponent(path)}&depth=${depth}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!res.ok) throw new Error('fetchTree failed');
-      const data = await res.json();
-      return (data?.nodes ??
-        data) as import('../components/WorkspacePickerModal.js').FileTreeNode[];
-    },
+    async (path: string, depth = 1) =>
+      createWorkspaceClient(gatewayUrl).fetchTree(token ?? '', path, { depth }) as Promise<
+        import('../components/WorkspacePickerModal.js').FileTreeNode[]
+      >,
     [token, gatewayUrl],
   );
 
   const validatePath = useCallback(
-    async (path: string): Promise<{ valid: boolean; error?: string; path?: string }> => {
-      const res = await fetch(`${gatewayUrl}/workspace/validate?path=${encodeURIComponent(path)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        return { valid: false, error: `Validation request failed: ${res.status}` };
-      }
-
-      return res.json();
-    },
+    async (path: string): Promise<{ valid: boolean; error?: string; path?: string }> =>
+      createWorkspaceClient(gatewayUrl).validatePath(token ?? '', path),
     [gatewayUrl, token],
   );
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { login } from '@openAwork/web-client';
+import { createSettingsClient, login } from '@openAwork/web-client';
 import { logger } from '../../utils/logger.js';
 import {
   authenticateDesktopGateway,
@@ -39,7 +39,6 @@ function hostForExposeLan(exposeLan: boolean): '127.0.0.1' | '0.0.0.0' {
 }
 
 interface UseSettingsEnvironmentResult {
-  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
   checkVersionUpdate: () => Promise<void>;
   copied: boolean;
   copyAddress: () => void;
@@ -89,19 +88,6 @@ export function useSettingsEnvironment(
     return 'remote';
   }, [input.gatewayUrl, input.webAccessEnabled]);
 
-  const apiFetch = React.useCallback(
-    (path: string, init?: RequestInit) =>
-      fetch(`${input.gatewayUrl}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${input.token}`,
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {}),
-        },
-      }),
-    [input.gatewayUrl, input.token],
-  );
-
   const checkVersionUpdate = React.useCallback(async () => {
     if (!input.token) {
       return;
@@ -114,8 +100,9 @@ export function useSettingsEnvironment(
     }));
 
     try {
-      const response = await apiFetch('/settings/version');
-      const data = (await response.json()) as SettingsVersionInfo;
+      const data = (await createSettingsClient(input.gatewayUrl).getVersion(
+        input.token,
+      )) as SettingsVersionInfo;
       setVersionInfo({
         currentVersion: data.currentVersion,
         latestVersion: data.latestVersion,
@@ -131,7 +118,7 @@ export function useSettingsEnvironment(
         checkError: '检查失败，请稍后重试',
       }));
     }
-  }, [apiFetch, input.token]);
+  }, [input.gatewayUrl, input.token]);
 
   const refreshLocalDesktopAuth = React.useCallback(
     async (gatewayUrl: string) => {
@@ -313,7 +300,6 @@ export function useSettingsEnvironment(
   }, [input.webPort]);
 
   return {
-    apiFetch,
     checkVersionUpdate,
     copied,
     copyAddress,

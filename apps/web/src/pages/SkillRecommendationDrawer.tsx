@@ -6,6 +6,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createSkillsClient, HttpError } from '@openAwork/web-client';
 import {
   buildSkillRecommendationDecisions,
   summarizeDecisions,
@@ -40,7 +41,12 @@ export interface SkillRecommendationDrawerProps {
   open: boolean;
   onClose: () => void;
   gatewayUrl: string;
-  headers: HeadersInit;
+  /**
+   * Bearer token used for the recommendation endpoints. The drawer used to
+   * accept a `headers` HeadersInit for legacy reasons; we now pass a raw token
+   * and let `createSkillsClient` build the auth header.
+   */
+  token: string;
   workspacePath: string;
   currentSelection: CurrentSelection[];
   /** Called after a successful apply so the parent can refresh selections. */
@@ -162,12 +168,14 @@ function deltaSectionLabel(origin: RowDecision['origin']): string {
 export default function SkillRecommendationDrawer(
   props: SkillRecommendationDrawerProps,
 ): React.ReactElement | null {
-  const { open, onClose, gatewayUrl, headers, workspacePath, currentSelection, onApplied } = props;
+  const { open, onClose, gatewayUrl, token, workspacePath, currentSelection, onApplied } = props;
   const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
   const [decisions, setDecisions] = useState<Map<string, RowDecision>>(() => new Map());
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const skillsClient = useMemo(() => createSkillsClient(gatewayUrl), [gatewayUrl]);
 
   const resetState = useCallback(() => {
     setRecommendation(null);
@@ -176,46 +184,36 @@ export default function SkillRecommendationDrawer(
   }, []);
 
   const loadLatest = useCallback(async (): Promise<RecommendationResponse | null> => {
-    const params = new URLSearchParams();
-    if (workspacePath.trim()) params.set('workspacePath', workspacePath.trim());
-    const res = await fetch(`${gatewayUrl}/skills/recommend/latest?${params.toString()}`, {
-      headers,
-    });
-    if (!res.ok) {
-      throw new Error(`latest ${res.status}`);
-    }
-    const body = (await res.json()) as LatestResponse;
-    // Prefer pending (unreviewed) recommendation; fall back to applied if none.
+    const body = (await skillsClient.getLatestRecommendation(token, {
+      ...(workspacePath.trim() ? { workspacePath: workspacePath.trim() } : {}),
+    })) as LatestResponse;
     return body.pending ?? body.applied ?? null;
-  }, [gatewayUrl, headers, workspacePath]);
+  }, [skillsClient, token, workspacePath]);
 
   const generate = useCallback(
     async (force: boolean): Promise<void> => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${gatewayUrl}/skills/recommend`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            workspacePath: workspacePath.trim() || null,
-            force,
-          }),
-        });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? `recommend failed: ${res.status}`);
-        }
-        const next = (await res.json()) as RecommendationResponse;
+        const next = (await skillsClient.recommend(token, {
+          workspacePath: workspacePath.trim() || null,
+          force,
+        })) as RecommendationResponse;
         setRecommendation(next);
         setDecisions(buildSkillRecommendationDecisions(currentSelection, next.recommendations));
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        const message =
+          err instanceof HttpError
+            ? `${err.message}`
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        setError(message);
       } finally {
         setLoading(false);
       }
     },
-    [currentSelection, gatewayUrl, headers, workspacePath],
+    [currentSelection, skillsClient, token, workspacePath],
   );
 
   useEffect(() => {
@@ -271,18 +269,7 @@ export default function SkillRecommendationDrawer(
       for (const [skillId, row] of decisions.entries()) {
         overrides[skillId] = { enabled: row.enabled, pinned: row.pinned };
       }
-      const res = await fetch(
-        `${gatewayUrl}/skills/recommend/${recommendation.recommendationId}/apply`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ overrides }),
-        },
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `apply failed: ${res.status}`);
-      }
+      await skillsClient.applyRecommendation(token, recommendation.recommendationId, { overrides });
       await onApplied();
       onClose();
     } catch (err) {
@@ -290,7 +277,7 @@ export default function SkillRecommendationDrawer(
     } finally {
       setApplying(false);
     }
-  }, [decisions, gatewayUrl, headers, onApplied, onClose, recommendation]);
+  }, [decisions, skillsClient, token, onApplied, onClose, recommendation]);
 
   if (!open) return null;
 

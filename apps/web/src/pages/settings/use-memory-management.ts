@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createMemoriesClient } from '@openAwork/web-client';
 import { logger } from '../../utils/logger.js';
-import { readErrorMessage } from './settings-page-helpers.js';
 import type {
   MemoryActionFeedback,
   MemoryCreateInput,
@@ -21,7 +21,11 @@ const DEFAULT_SETTINGS: MemorySettings = {
 const FEEDBACK_CLEAR_MS = 4000;
 
 interface UseMemoryManagementInput {
-  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * 网关 URL —— 用 `createMemoriesClient(gatewayUrl)` 在每个回调里构造客户端，
+   * 避免把整个 client 实例提升到 hook 顶层产生不必要的 re-render。
+   */
+  gatewayUrl: string;
   token: string | null;
   active: boolean;
 }
@@ -47,7 +51,7 @@ interface MemoryExtractResponse {
 }
 
 export function useMemoryManagement({
-  apiFetch,
+  gatewayUrl,
   token,
   active,
 }: UseMemoryManagementInput): UseMemoryManagementResult {
@@ -95,11 +99,7 @@ export function useMemoryManagement({
     setLoadStatus('loading');
     setLoadError(null);
     try {
-      const response = await apiFetch('/memories');
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载记忆列表失败'));
-      }
-      const payload = (await response.json()) as MemoriesResponse;
+      const payload = (await createMemoriesClient(gatewayUrl).list(token)) as MemoriesResponse;
       setMemories(payload.memories ?? []);
       setLoadStatus('loaded');
     } catch (error: unknown) {
@@ -108,7 +108,7 @@ export function useMemoryManagement({
       setLoadStatus('error');
       logger.error('failed to load memories', error);
     }
-  }, [apiFetch, token]);
+  }, [gatewayUrl, token]);
 
   const refreshStats = useCallback(async () => {
     if (!token) {
@@ -116,18 +116,16 @@ export function useMemoryManagement({
     }
     setStatsStatus('loading');
     try {
-      const response = await apiFetch('/memories/stats');
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载记忆统计失败'));
-      }
-      const payload = (await response.json()) as MemoryStatsResponse;
+      const payload = (await createMemoriesClient(gatewayUrl).getStats(
+        token,
+      )) as MemoryStatsResponse;
       setStats(payload.stats ?? null);
       setStatsStatus('loaded');
     } catch (error: unknown) {
       setStatsStatus('error');
       logger.error('failed to load memory stats', error);
     }
-  }, [apiFetch, token]);
+  }, [gatewayUrl, token]);
 
   const loadSettings = useCallback(async () => {
     if (!token) {
@@ -135,18 +133,16 @@ export function useMemoryManagement({
     }
     setSettingsStatus('loading');
     try {
-      const response = await apiFetch('/memories/settings');
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载记忆设置失败'));
-      }
-      const payload = (await response.json()) as MemorySettingsResponse;
+      const payload = (await createMemoriesClient(gatewayUrl).getSettings(
+        token,
+      )) as MemorySettingsResponse;
       setSettings(payload.settings ?? DEFAULT_SETTINGS);
       setSettingsStatus('loaded');
     } catch (error: unknown) {
       setSettingsStatus('error');
       logger.error('failed to load memory settings', error);
     }
-  }, [apiFetch, token]);
+  }, [gatewayUrl, token]);
 
   useEffect(() => {
     if (!active || !token || hasLoadedRef.current) {
@@ -163,21 +159,13 @@ export function useMemoryManagement({
       }
       showFeedback('pending', '正在创建记忆…');
       try {
-        const response = await apiFetch('/memories', {
-          method: 'POST',
-          body: JSON.stringify({
-            type: input.type,
-            key: input.key,
-            value: input.value,
-            workspaceRoot:
-              input.workspaceRoot.trim().length > 0 ? input.workspaceRoot.trim() : null,
-            source: 'manual',
-          }),
-        });
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '创建记忆失败'));
-        }
-        const payload = (await response.json()) as MemoryMutationResponse;
+        const payload = (await createMemoriesClient(gatewayUrl).create(token, {
+          type: input.type,
+          key: input.key,
+          value: input.value,
+          workspaceRoot: input.workspaceRoot.trim().length > 0 ? input.workspaceRoot.trim() : null,
+          source: 'manual',
+        })) as MemoryMutationResponse;
         if (payload.memory) {
           setMemories((previous) => [payload.memory!, ...previous]);
         }
@@ -189,7 +177,7 @@ export function useMemoryManagement({
         logger.error('failed to create memory', error);
       }
     },
-    [apiFetch, refreshStats, showFeedback, token],
+    [gatewayUrl, refreshStats, showFeedback, token],
   );
 
   const deleteMemory = useCallback(
@@ -199,10 +187,7 @@ export function useMemoryManagement({
       }
       showFeedback('pending', '正在删除…');
       try {
-        const response = await apiFetch(`/memories/${id}`, { method: 'DELETE' });
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '删除记忆失败'));
-        }
+        await createMemoriesClient(gatewayUrl).remove(token, id);
         setMemories((previous) => previous.filter((memory) => memory.id !== id));
         showFeedback('success', '已删除');
         void refreshStats();
@@ -212,7 +197,7 @@ export function useMemoryManagement({
         logger.error('failed to delete memory', error);
       }
     },
-    [apiFetch, refreshStats, showFeedback, token],
+    [gatewayUrl, refreshStats, showFeedback, token],
   );
 
   const updateMemory = useCallback(
@@ -222,14 +207,9 @@ export function useMemoryManagement({
       }
       showFeedback('pending', '正在保存…');
       try {
-        const response = await apiFetch(`/memories/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ value }),
-        });
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '更新记忆失败'));
-        }
-        const payload = (await response.json()) as MemoryMutationResponse;
+        const payload = (await createMemoriesClient(gatewayUrl).update(token, id, {
+          value,
+        })) as MemoryMutationResponse;
         if (payload.memory) {
           setMemories((previous) =>
             previous.map((memory) => (memory.id === id ? payload.memory! : memory)),
@@ -242,7 +222,7 @@ export function useMemoryManagement({
         logger.error('failed to update memory', error);
       }
     },
-    [apiFetch, showFeedback, token],
+    [gatewayUrl, showFeedback, token],
   );
 
   const extractMemories = useCallback(async () => {
@@ -251,14 +231,10 @@ export function useMemoryManagement({
     }
     showFeedback('pending', '正在提取记忆…');
     try {
-      const response = await apiFetch('/memories/extract', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '提取记忆失败'));
-      }
-      const payload = (await response.json()) as MemoryExtractResponse;
+      const payload = (await createMemoriesClient(gatewayUrl).extract(
+        token,
+        {},
+      )) as MemoryExtractResponse;
       showFeedback('success', `已提取 ${String(payload.extracted ?? 0)} 条记忆`);
       await Promise.all([refreshMemories(), refreshStats()]);
     } catch (error: unknown) {
@@ -266,7 +242,7 @@ export function useMemoryManagement({
       showFeedback('error', message);
       logger.error('failed to extract memories', error);
     }
-  }, [apiFetch, refreshMemories, refreshStats, showFeedback, token]);
+  }, [gatewayUrl, refreshMemories, refreshStats, showFeedback, token]);
 
   const updateSettings = useCallback(
     async (patch: Partial<MemorySettings>) => {
@@ -277,14 +253,10 @@ export function useMemoryManagement({
       const nextSettings = { ...settings, ...patch };
       setSettings(nextSettings);
       try {
-        const response = await apiFetch('/memories/settings', {
-          method: 'PUT',
-          body: JSON.stringify(nextSettings),
-        });
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '保存记忆设置失败'));
-        }
-        const payload = (await response.json()) as MemorySettingsResponse;
+        const payload = (await createMemoriesClient(gatewayUrl).putSettings(
+          token,
+          nextSettings,
+        )) as MemorySettingsResponse;
         setSettings(payload.settings ?? nextSettings);
         showFeedback('success', '设置已保存');
       } catch (error: unknown) {
@@ -294,7 +266,7 @@ export function useMemoryManagement({
         logger.error('failed to save memory settings', error);
       }
     },
-    [apiFetch, settings, showFeedback, token],
+    [gatewayUrl, settings, showFeedback, token],
   );
 
   const filteredMemories = useMemo(() => {

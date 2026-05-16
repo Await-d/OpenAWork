@@ -1,4 +1,4 @@
-import type { TokenPair } from '@openAwork/web-client';
+import { isGatewayHealthy as gatewayHealthCheck, type TokenPair } from '@openAwork/web-client';
 
 export type DesktopGatewayMode = 'local' | 'remote';
 
@@ -81,8 +81,7 @@ export async function isGatewayHealthy(gatewayUrl: string): Promise<boolean> {
       });
     }
 
-    const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2500) });
-    return response.ok;
+    return await gatewayHealthCheck(url, { timeoutMs: 2500 });
   } catch (_error) {
     return false;
   }

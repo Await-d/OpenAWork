@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth.js';
 import { extractSnippet, type FileSnippet } from './extract-snippet.js';
 
@@ -32,13 +33,7 @@ async function fetchFileContent(gatewayUrl: string, token: string, path: string)
 
   const promise = (async () => {
     try {
-      const res = await fetch(`${gatewayUrl}/workspace/file?path=${encodeURIComponent(path)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = (await res.json()) as { content: string };
+      const data = await createWorkspaceClient(gatewayUrl).readFile(token, path);
       cache.set(path, { content: data.content, ts: Date.now() });
       return data.content;
     } finally {

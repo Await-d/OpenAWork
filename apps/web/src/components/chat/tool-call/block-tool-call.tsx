@@ -64,13 +64,18 @@ export function BlockToolCall({
   // `<toolName> <generic>` title + JSON output dump.
   const isBashLike = normalized === 'bash' || normalized === 'interactive_bash';
 
-  // Default-expand every block tool. Previously only bash / webfetch /
-  // websearch / google_search auto-expanded on completion (and bash on
-  // running, anything on failure); the user asked for parity across all
-  // tools so they can see diffs / output / params without a click. Pending
-  // tools (no input or output yet) still start collapsed to keep the
-  // pre-call card compact.
-  const shouldAutoExpand = visualState !== 'pending';
+  // Auto-expand block tools when they have meaningful content to show.
+  // However, for completed tools with very large output, default to collapsed
+  // to prevent long outputs from dominating the viewport. The user can always
+  // click to expand.
+  const hasLargeOutput = (() => {
+    if (output === undefined) return false;
+    const outStr = typeof output === 'string' ? output : JSON.stringify(output);
+    return outStr.length > 2000;
+  })();
+
+  const shouldAutoExpand =
+    visualState !== 'pending' && !(visualState === 'completed' && hasLargeOutput);
 
   const [open, setOpen] = useState(shouldAutoExpand);
 

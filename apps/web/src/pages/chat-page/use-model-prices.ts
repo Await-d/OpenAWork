@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import type { ModelPriceEntry } from './chat-page-utils.js';
 
 export function useModelPrices(gatewayUrl: string, token: string | null): ModelPriceEntry[] {
@@ -11,11 +12,10 @@ export function useModelPrices(gatewayUrl: string, token: string | null): ModelP
     }
 
     let cancelled = false;
-    void fetch(`${gatewayUrl}/settings/model-prices`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('fail'))))
-      .then((data: { models?: ModelPriceEntry[] }) => {
+    void createSettingsClient(gatewayUrl)
+      .getModelPrices(token)
+      .then((rawData) => {
+        const data = rawData as { models?: ModelPriceEntry[] };
         if (!cancelled) {
           setModelPrices(data.models ?? []);
         }

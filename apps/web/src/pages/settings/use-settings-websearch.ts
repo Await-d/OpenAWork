@@ -11,8 +11,8 @@
  */
 
 import React from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import { logger } from '../../utils/logger.js';
-import { readErrorMessage } from './settings-page-helpers.js';
 
 export type WebsearchProvider =
   | 'duckduckgo'
@@ -46,7 +46,7 @@ const DEFAULT_POLICY: WebsearchPolicy = {
 };
 
 interface UseSettingsWebsearchInput {
-  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  gatewayUrl: string;
   token: string | null;
 }
 
@@ -75,11 +75,9 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
   const loadWebsearchPolicy = React.useCallback(async () => {
     if (!input.token) return;
     try {
-      const response = await input.apiFetch('/settings/websearch', { method: 'GET' });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载 web 搜索策略失败'));
-      }
-      const payload = (await response.json()) as WebsearchPolicy;
+      const payload = (await createSettingsClient(input.gatewayUrl).getWebsearch(
+        input.token,
+      )) as WebsearchPolicy;
       // Trust the gateway-side schema; if it is shaped wrong we fall
       // back to the documented defaults rather than throwing in the UI.
       const next: WebsearchPolicy = {
@@ -94,7 +92,7 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
       setPolicy(DEFAULT_POLICY);
       setSavedPolicy(DEFAULT_POLICY);
     }
-  }, [input.apiFetch, input.token]);
+  }, [input.gatewayUrl, input.token]);
 
   const saveWebsearchPolicy = React.useCallback(async () => {
     if (!input.token || saving) return;
@@ -113,14 +111,10 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
         rolloutMode: policy.rolloutMode,
         ...(typeof policy.timeoutMs === 'number' ? { timeoutMs: policy.timeoutMs } : {}),
       };
-      const response = await input.apiFetch('/settings/websearch', {
-        method: 'PUT',
-        body: JSON.stringify(sanitized),
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '保存 web 搜索策略失败'));
-      }
-      const payload = (await response.json()) as WebsearchPolicy;
+      const payload = (await createSettingsClient(input.gatewayUrl).putWebsearch(
+        input.token,
+        sanitized,
+      )) as WebsearchPolicy;
       const next: WebsearchPolicy = {
         providers: Array.isArray(payload.providers) ? payload.providers : [],
         rolloutMode: payload.rolloutMode ?? 'sequential',
@@ -133,7 +127,7 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
     } finally {
       setSaving(false);
     }
-  }, [input.apiFetch, input.token, policy, saving]);
+  }, [input.gatewayUrl, input.token, policy, saving]);
 
   return {
     loadWebsearchPolicy,

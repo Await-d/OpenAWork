@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createSettingsClient, createUsageClient } from '@openAwork/web-client';
 import { UsageDashboard, CostOverview, ModelCostDisplay } from '@openAwork/shared-ui';
 import type { MonthlyRecord, CostBreakdownItem } from '@openAwork/shared-ui';
 import { useAuthStore } from '../stores/auth.js';
@@ -39,23 +40,15 @@ export default function UsagePage() {
       setLoading(false);
       return;
     }
-    const headers = { Authorization: `Bearer ${token}` };
+    const usageClient = createUsageClient(gatewayUrl);
+    const settingsClient = createSettingsClient(gatewayUrl);
     Promise.all([
-      fetch(`${gatewayUrl}/usage/records`, { headers }).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<{ records: MonthlyRecord[]; budgetUsd: number }>;
-      }),
-      fetch(`${gatewayUrl}/usage/breakdown`, { headers }).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<{ monthlyCostUsd: number; breakdown: CostBreakdownItem[] }>;
-      }),
-      fetch(`${gatewayUrl}/settings/model-prices`, { headers }).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<{ models: ModelPriceEntry[] }>;
-      }),
+      usageClient.getRecords(token),
+      usageClient.getBreakdown(token),
+      settingsClient.getModelPrices(token) as Promise<{ models: ModelPriceEntry[] }>,
     ])
       .then(([usageData, breakdownData, pricesData]) => {
-        setRecords(usageData.records ?? []);
+        setRecords((usageData.records ?? []) as MonthlyRecord[]);
         setBudgetUsd(usageData.budgetUsd ?? 20);
         setMonthlyCostUsd(breakdownData.monthlyCostUsd ?? 0);
         setBreakdown(breakdownData.breakdown ?? []);

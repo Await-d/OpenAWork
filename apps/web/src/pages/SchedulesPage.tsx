@@ -1,6 +1,7 @@
 import { CronManager, ScheduleManagerUI } from '@openAwork/shared-ui';
 import type { CronJob, ScheduleTaskItem } from '@openAwork/shared-ui';
 import React, { useEffect, useState } from 'react';
+import { createCronClient } from '@openAwork/web-client';
 import { logger } from '../utils/logger.js';
 import { useAuthStore } from '../stores/auth.js';
 
@@ -25,25 +26,15 @@ export default function SchedulesPage() {
 
   useEffect(() => {
     if (!token) return;
-    const headers = { Authorization: `Bearer ${token}` };
-    Promise.all([
-      fetch(`${gatewayUrl}/cron/jobs`, { headers }).then(
-        (r) => r.json() as Promise<{ jobs: CronJob[] }>,
-      ),
-    ]).then(([data]) => {
-      setJobs(data.jobs);
-    });
+    void createCronClient(gatewayUrl)
+      .list(token)
+      .then((items) => {
+        setJobs(items as unknown as CronJob[]);
+      })
+      .catch(() => undefined);
   }, [token, gatewayUrl]);
 
-  const apiFetch = (path: string, init?: RequestInit) =>
-    fetch(`${gatewayUrl}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
-      },
-    });
+  const cronClient = createCronClient(gatewayUrl);
 
   return (
     <div className="page-root">
@@ -75,29 +66,30 @@ export default function SchedulesPage() {
               <CronManager
                 jobs={jobs}
                 onEnable={(id) => {
-                  void apiFetch(`/cron/jobs/${id}`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ enabled: true }),
-                  }).then(() =>
-                    setJobs((prev) =>
-                      prev.map((j) => (j.id === id ? { ...j, status: 'enabled' } : j)),
-                    ),
-                  );
+                  if (!token) return;
+                  void cronClient
+                    .setEnabled(token, id, true)
+                    .then(() =>
+                      setJobs((prev) =>
+                        prev.map((j) => (j.id === id ? { ...j, status: 'enabled' } : j)),
+                      ),
+                    );
                 }}
                 onDisable={(id) => {
-                  void apiFetch(`/cron/jobs/${id}`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ enabled: false }),
-                  }).then(() =>
-                    setJobs((prev) =>
-                      prev.map((j) => (j.id === id ? { ...j, status: 'disabled' } : j)),
-                    ),
-                  );
+                  if (!token) return;
+                  void cronClient
+                    .setEnabled(token, id, false)
+                    .then(() =>
+                      setJobs((prev) =>
+                        prev.map((j) => (j.id === id ? { ...j, status: 'disabled' } : j)),
+                      ),
+                    );
                 }}
                 onDelete={(id) => {
-                  void apiFetch(`/cron/jobs/${id}`, { method: 'DELETE' }).then(() =>
-                    setJobs((prev) => prev.filter((j) => j.id !== id)),
-                  );
+                  if (!token) return;
+                  void cronClient
+                    .remove(token, id)
+                    .then(() => setJobs((prev) => prev.filter((j) => j.id !== id)));
                 }}
                 onRunNow={(id) => logger.info('Run job now', id)}
                 onAdd={() => logger.info('Add job triggered')}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createArtifactsClient } from '@openAwork/web-client';
 import type { SessionArtifactsResponse } from '../artifacts/artifact-workspace-types.js';
 
 interface UseSessionContentArtifactCountOptions {
@@ -9,14 +10,6 @@ interface UseSessionContentArtifactCountOptions {
 }
 
 type SessionContentArtifactCountStatus = 'idle' | 'loading' | 'ready' | 'error';
-
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
 
 export function useSessionContentArtifactCount({
   currentSessionId,
@@ -44,19 +37,14 @@ export function useSessionContentArtifactCount({
 
     setStatus('loading');
 
-    void fetch(`${gatewayUrl}/sessions/${currentSessionId}/artifacts`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      signal: controller.signal,
-    })
-      .then((response) => parseJsonResponse<SessionArtifactsResponse>(response))
+    void createArtifactsClient(gatewayUrl)
+      .listForSession(token, currentSessionId, { signal: controller.signal })
       .then((payload) => {
         if (cancelled) {
           return;
         }
-
-        setContentArtifactCount((payload.contentArtifacts ?? []).length);
+        const typed = payload as unknown as SessionArtifactsResponse;
+        setContentArtifactCount((typed.contentArtifacts ?? []).length);
         setStatus('ready');
       })
       .catch((error: unknown) => {

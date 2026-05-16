@@ -1,9 +1,13 @@
 import { useCallback } from 'react';
 import type React from 'react';
+import {
+  createDesktopAutomationClient,
+  createGitHubClient,
+  createSettingsClient,
+} from '@openAwork/web-client';
 import type { SettingsDiagnosticRecord } from '../settings-types.js';
 
 interface SettingsTabActionsParams {
-  apiFetch: (input: string, init?: RequestInit) => Promise<Response>;
   gatewayUrl: string;
   token: string | null;
   setDiagnostics: React.Dispatch<React.SetStateAction<SettingsDiagnosticRecord[]>>;
@@ -14,7 +18,6 @@ interface SettingsTabActionsParams {
 }
 
 export function useSettingsTabActions({
-  apiFetch,
   gatewayUrl,
   token,
   setDiagnostics,
@@ -23,84 +26,69 @@ export function useSettingsTabActions({
 }: SettingsTabActionsParams) {
   const handleSaveGitHubTrigger = useCallback(
     async (config: { events: string[]; repoFullNameOwnerSlashRepo: string }) => {
-      const response = await apiFetch('/github/triggers', {
-        method: 'POST',
-        body: JSON.stringify(config),
-      });
-      if (!response.ok) {
-        const err = (await response.json()) as { message?: string };
-        throw new Error(err.message ?? '注册失败');
+      if (!token) {
+        throw new Error('未登录');
       }
+      await createGitHubClient(gatewayUrl).createTrigger(token, config);
       setGithubTriggers((prev) => [
         ...prev,
         { repo: config.repoFullNameOwnerSlashRepo, events: config.events },
       ]);
     },
-    [apiFetch, setGithubTriggers],
+    [gatewayUrl, setGithubTriggers, token],
   );
 
   const handleDesktopAutomationStart = useCallback(
     async (url?: string) => {
-      await apiFetch('/desktop-automation/start', {
-        method: 'POST',
-        body: JSON.stringify({ url }),
-      });
+      if (!token) return;
+      await createDesktopAutomationClient(gatewayUrl).start(token, url);
     },
-    [apiFetch],
+    [gatewayUrl, token],
   );
 
   const handleDesktopAutomationGoto = useCallback(
     async (url: string) => {
-      await apiFetch('/desktop-automation/goto', {
-        method: 'POST',
-        body: JSON.stringify({ url }),
-      });
+      if (!token) return;
+      await createDesktopAutomationClient(gatewayUrl).goto(token, url);
     },
-    [apiFetch],
+    [gatewayUrl, token],
   );
 
   const handleDesktopAutomationClick = useCallback(
     async (selector: string) => {
-      await apiFetch('/desktop-automation/click', {
-        method: 'POST',
-        body: JSON.stringify({ selector }),
-      });
+      if (!token) return;
+      await createDesktopAutomationClient(gatewayUrl).click(token, selector);
     },
-    [apiFetch],
+    [gatewayUrl, token],
   );
 
   const handleDesktopAutomationType = useCallback(
     async (selector: string, text: string) => {
-      await apiFetch('/desktop-automation/type', {
-        method: 'POST',
-        body: JSON.stringify({ selector, text }),
-      });
+      if (!token) return;
+      await createDesktopAutomationClient(gatewayUrl).type(token, selector, text);
     },
-    [apiFetch],
+    [gatewayUrl, token],
   );
 
   const handleDesktopAutomationScreenshot = useCallback(async () => {
-    const response = await apiFetch('/desktop-automation/screenshot', {
-      method: 'POST',
-    });
-    const payload = (await response.json()) as { screenshotBase64: string };
+    if (!token) return '';
+    const payload = await createDesktopAutomationClient(gatewayUrl).screenshot(token);
     return payload.screenshotBase64;
-  }, [apiFetch]);
+  }, [gatewayUrl, token]);
 
   const handleClearDiagnostics = useCallback(async () => {
+    if (!token) return;
     try {
-      const resp = await fetch(`${gatewayUrl}/settings/diagnostics`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token ?? ''}` },
-      });
-      if (resp.ok) {
-        setDiagnostics([]);
-        setDiagnosticsAvailableDates([]);
-      }
+      await createSettingsClient(gatewayUrl).clearDiagnostics(token);
+      setDiagnostics([]);
+      setDiagnosticsAvailableDates([]);
     } catch (_err) {
       return;
     }
   }, [gatewayUrl, setDiagnostics, setDiagnosticsAvailableDates, token]);
+
+  // (Settings hook intentionally exposes only the action callbacks; the
+  // earlier `apiFetch` shim has been replaced with web-client method calls.)
 
   return {
     handleClearDiagnostics,

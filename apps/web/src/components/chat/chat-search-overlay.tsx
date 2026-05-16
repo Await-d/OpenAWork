@@ -30,9 +30,11 @@ interface UseChatSearchReturn {
   query: string;
   matches: ChatSearchMatch[];
   currentIndex: number;
+  roleFilter: 'user' | 'assistant' | null;
   open: (initialQuery?: string) => void;
   close: () => void;
   setQuery: (next: string) => void;
+  setRoleFilter: (filter: 'user' | 'assistant' | null) => void;
   gotoNext: () => void;
   gotoPrev: () => void;
   gotoMatch: (matchIndex: number) => void;
@@ -58,14 +60,15 @@ export function useChatSearch({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQueryState] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [roleFilter, setRoleFilter] = useState<'user' | 'assistant' | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const lastFlashedRef = useRef<HTMLElement | null>(null);
 
   const matches = useMemo<ChatSearchMatch[]>(() => {
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY_LENGTH) return [];
-    return findChatMessageMatches(messages, trimmed);
-  }, [messages, query]);
+    return findChatMessageMatches(messages, trimmed, roleFilter);
+  }, [messages, query, roleFilter]);
 
   // Whenever the matches list changes (new query, new messages), keep the
   // cursor inside the valid range. We derive a primitive signature so the
@@ -163,9 +166,11 @@ export function useChatSearch({
     query,
     matches,
     currentIndex,
+    roleFilter,
     open,
     close,
     setQuery,
+    setRoleFilter,
     gotoNext,
     gotoPrev,
     gotoMatch,
@@ -177,7 +182,18 @@ interface ChatSearchOverlayProps {
 }
 
 export function ChatSearchOverlay({ controller }: ChatSearchOverlayProps) {
-  const { isOpen, query, matches, currentIndex, close, setQuery, gotoNext, gotoPrev } = controller;
+  const {
+    isOpen,
+    query,
+    matches,
+    currentIndex,
+    roleFilter,
+    close,
+    setQuery,
+    setRoleFilter,
+    gotoNext,
+    gotoPrev,
+  } = controller;
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -248,6 +264,85 @@ export function ChatSearchOverlay({ controller }: ChatSearchOverlayProps) {
           }
         }}
       />
+
+      {/* Role filter pills */}
+      <div className="chat-search-overlay-filters" style={{ display: 'flex', gap: 2 }}>
+        <button
+          type="button"
+          className="chat-search-overlay-filter-btn"
+          data-active={roleFilter === null ? 'true' : undefined}
+          onClick={() => setRoleFilter(null)}
+          title="搜索全部消息"
+          style={{
+            height: 18,
+            padding: '0 5px',
+            borderRadius: 9,
+            border:
+              roleFilter === null ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+            background:
+              roleFilter === null
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+            color: roleFilter === null ? 'var(--accent)' : 'var(--text-3)',
+            fontSize: 9,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          全部
+        </button>
+        <button
+          type="button"
+          className="chat-search-overlay-filter-btn"
+          data-active={roleFilter === 'user' ? 'true' : undefined}
+          onClick={() => setRoleFilter(roleFilter === 'user' ? null : 'user')}
+          title="仅搜索用户消息"
+          style={{
+            height: 18,
+            padding: '0 5px',
+            borderRadius: 9,
+            border:
+              roleFilter === 'user' ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+            background:
+              roleFilter === 'user'
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+            color: roleFilter === 'user' ? 'var(--accent)' : 'var(--text-3)',
+            fontSize: 9,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          👤
+        </button>
+        <button
+          type="button"
+          className="chat-search-overlay-filter-btn"
+          data-active={roleFilter === 'assistant' ? 'true' : undefined}
+          onClick={() => setRoleFilter(roleFilter === 'assistant' ? null : 'assistant')}
+          title="仅搜索助手消息"
+          style={{
+            height: 18,
+            padding: '0 5px',
+            borderRadius: 9,
+            border:
+              roleFilter === 'assistant'
+                ? '1px solid var(--accent)'
+                : '1px solid var(--border-subtle)',
+            background:
+              roleFilter === 'assistant'
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+            color: roleFilter === 'assistant' ? 'var(--accent)' : 'var(--text-3)',
+            fontSize: 9,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          🤖
+        </button>
+      </div>
+
       <span
         className="chat-search-overlay-counter"
         data-testid="chat-search-overlay-counter"

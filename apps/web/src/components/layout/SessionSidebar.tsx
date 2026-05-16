@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { createWorkspaceClient } from '@openAwork/web-client';
 import { useUIStateStore } from '../../stores/uiState.js';
 import { useAuthStore } from '../../stores/auth.js';
 import { useSessions } from '../../hooks/useSessions.js';
@@ -8,7 +9,6 @@ import FileTreeContextMenu from './FileTreeContextMenu.js';
 import {
   copyTextToClipboard,
   getFileTreeRelativePath,
-  getResponseErrorMessage,
   isValidFileTreeEntryName,
   joinFileTreePath,
 } from './file-tree-actions.js';
@@ -21,6 +21,13 @@ import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules
 import { toast } from '../ToastNotification.js';
 import { dispatchComposerReference } from '../../utils/composer-reference-events.js';
 import { UNBOUND_WORKSPACE_GROUP_KEY, getWorkspaceGroupKey } from '../../utils/session-grouping.js';
+
+function getParentDir(path: string): string {
+  if (path === '/') return '/';
+  const lastSlash = path.lastIndexOf('/');
+  if (lastSlash <= 0) return '/';
+  return path.slice(0, lastSlash);
+}
 
 const sessionIconBtnStyle: React.CSSProperties = {
   display: 'flex',
@@ -67,6 +74,7 @@ export function SessionSidebar({
   void fetchRootPath;
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const accessToken = useAuthStore((s) => s.accessToken);
+  const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
   const {
     sidebarTab,
     setSidebarTab,
@@ -76,6 +84,7 @@ export function SessionSidebar({
     expandedDirs: expandedDirsArr,
     setExpandedDirs: setExpandedDirsArr,
     fileTreeRootPath,
+    activeFilePath: uiActiveFilePath,
     bumpWorkspaceTreeVersion,
     removeSavedWorkspacePath,
   } = useUIStateStore();
@@ -140,6 +149,7 @@ export function SessionSidebar({
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
   const [fileTreeLoading, setFileTreeLoading] = useState(false);
   const [fileTreeError, setFileTreeError] = useState<string | null>(null);
+  const [fileTreeFilter, setFileTreeFilter] = useState('');
   const [fileTreeContextMenu, setFileTreeContextMenu] = useState<FileTreeContextMenuState | null>(
     null,
   );
@@ -528,38 +538,26 @@ export function SessionSidebar({
 
   const createWorkspaceFile = useCallback(
     async (path: string): Promise<void> => {
-      const response = await fetch(`${gatewayUrl}/workspace/file`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ path, content: '' }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await getResponseErrorMessage(response, '新建文件失败'));
+      try {
+        await workspaceClient.createFile(accessToken ?? '', path);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '新建文件失败';
+        throw new Error(message);
       }
     },
-    [accessToken, gatewayUrl],
+    [accessToken, workspaceClient],
   );
 
   const createWorkspaceDirectory = useCallback(
     async (path: string): Promise<void> => {
-      const response = await fetch(`${gatewayUrl}/workspace/directory`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ path }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await getResponseErrorMessage(response, '新建文件夹失败'));
+      try {
+        await workspaceClient.createDirectory(accessToken ?? '', path);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '新建文件夹失败';
+        throw new Error(message);
       }
     },
-    [accessToken, gatewayUrl],
+    [accessToken, workspaceClient],
   );
 
   const handleCreateEntry = useCallback(
@@ -1155,13 +1153,84 @@ export function SessionSidebar({
                 当前目录为空，可使用上方按钮或右键新建文件 / 文件夹
               </p>
             ) : (
-              <FileTreeView
-                nodes={fileTree}
-                expandedDirs={expandedDirs}
-                onOpenFile={onOpenFile}
-                onToggleDir={(path) => void handleToggleDirWithLoad(path)}
-                onNodeContextMenu={handleNodeContextMenu}
-              />
+              <>
+                {/* File tree search/filter */}
+                <div style={{ padding: '0 0 6px', flexShrink: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--surface)',
+                    }}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--text-3)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      style={{ flexShrink: 0 }}
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="m21 21-4.35-4.35" />
+                    </svg>
+                    <input
+                      type="text"
+                      placeholder="过滤文件…"
+                      value={fileTreeFilter}
+                      onChange={(e) => setFileTreeFilter(e.target.value)}
+                      style={{
+                        flex: 1,
+                        border: 'none',
+                        outline: 'none',
+                        background: 'transparent',
+                        color: 'var(--text-1)',
+                        fontSize: 11,
+                        padding: 0,
+                      }}
+                    />
+                    {fileTreeFilter && (
+                      <button
+                        type="button"
+                        onClick={() => setFileTreeFilter('')}
+                        style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: 7,
+                          border: 'none',
+                          background: 'var(--text-4)',
+                          color: 'var(--surface)',
+                          fontSize: 9,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <FileTreeView
+                  nodes={fileTree}
+                  expandedDirs={expandedDirs}
+                  onOpenFile={onOpenFile}
+                  onToggleDir={(path) => void handleToggleDirWithLoad(path)}
+                  onNodeContextMenu={handleNodeContextMenu}
+                  filter={fileTreeFilter}
+                  activeFilePath={uiActiveFilePath}
+                />
+              </>
             )}
           </div>
         )}
@@ -1443,6 +1512,64 @@ export function SessionSidebar({
           onRefresh={() => {
             void refreshDirectory(fileTreeContextMenu.directoryPath);
           }}
+          onDelete={
+            fileTreeContextMenu.targetType !== 'root'
+              ? () => {
+                  const targetPath = fileTreeContextMenu.path;
+                  const targetName = fileTreeContextMenu.name;
+                  const targetType = fileTreeContextMenu.targetType;
+                  const confirmMsg =
+                    targetType === 'directory'
+                      ? `确定要删除文件夹「${targetName}」及其所有内容吗？此操作不可撤销。`
+                      : `确定要删除文件「${targetName}」吗？此操作不可撤销。`;
+                  if (!window.confirm(confirmMsg)) return;
+                  void (async () => {
+                    try {
+                      if (!accessToken) return;
+                      await workspaceClient.deleteEntry(accessToken, targetPath);
+                      toast(`已删除: ${targetName}`, 'success');
+                      // Refresh the parent directory
+                      void refreshDirectory(fileTreeContextMenu.directoryPath);
+                      bumpWorkspaceTreeVersion();
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : '删除失败';
+                      toast(msg, 'error');
+                    }
+                  })();
+                }
+              : undefined
+          }
+          onRename={
+            fileTreeContextMenu.targetType !== 'root'
+              ? () => {
+                  const targetPath = fileTreeContextMenu.path;
+                  const targetName = fileTreeContextMenu.name;
+                  const newName = window.prompt(`重命名「${targetName}」为：`, targetName);
+                  if (!newName || newName === targetName || !newName.trim()) return;
+                  if (!isValidFileTreeEntryName(newName.trim())) {
+                    toast('名称无效，请检查是否包含特殊字符', 'warning');
+                    return;
+                  }
+                  void (async () => {
+                    try {
+                      if (!accessToken) return;
+                      const parentDir = fileTreeContextMenu.directoryPath;
+                      const newPath = joinFileTreePath(
+                        parentDir === targetPath ? getParentDir(targetPath) : parentDir,
+                        newName.trim(),
+                      );
+                      await workspaceClient.renameEntry(accessToken, targetPath, newPath);
+                      toast(`已重命名为: ${newName.trim()}`, 'success');
+                      void refreshDirectory(fileTreeContextMenu.directoryPath);
+                      bumpWorkspaceTreeVersion();
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : '重命名失败';
+                      toast(msg, 'error');
+                    }
+                  })();
+                }
+              : undefined
+          }
         />
       )}
       {workspaceContextMenu && (

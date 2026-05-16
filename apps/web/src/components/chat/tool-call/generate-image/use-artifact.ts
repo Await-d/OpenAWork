@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createArtifactsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth.js';
 
 /**
@@ -38,31 +39,12 @@ export function useGenerateImageArtifact(artifactId: string | undefined): {
     setImageLoading(true);
     setFetchError(null);
     setImageSrc(null);
-    const url = `${gatewayUrl}/artifacts/${artifactId}`;
     void (async () => {
       try {
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (cancelled) return;
-        if (!res.ok) {
-          const bodyText = await res.text().catch(() => '');
-          const message = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}${
-            bodyText ? ` — ${bodyText.slice(0, 200)}` : ''
-          }`;
-          console.error('[generate_image] artifact fetch failed', {
-            artifactId,
-            url,
-            status: res.status,
-            statusText: res.statusText,
-            body: bodyText.slice(0, 500),
-          });
-          setFetchError(message);
-          return;
-        }
-        const data = (await res.json()) as {
+        const data = (await createArtifactsClient(gatewayUrl).get(token, artifactId)) as {
           artifact?: { content?: string; metadata?: Record<string, unknown> };
         };
+        if (cancelled) return;
         const content = data.artifact?.content;
         const meta = data.artifact?.metadata;
         if (meta?.fileName && typeof meta.fileName === 'string') {

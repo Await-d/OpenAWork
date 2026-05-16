@@ -8,6 +8,14 @@ import type {
 } from '../components/ChannelSubscriptionSettings.js';
 import { validateImageGenerationSize } from '@openAwork/shared';
 import {
+  createChannelsClient,
+  createDesktopAutomationClient,
+  createGitHubClient,
+  createSettingsClient,
+  createSshClient,
+  createUsageClient,
+} from '@openAwork/web-client';
+import {
   buildDevEventsFromLogs,
   createInitialDevtoolsSourceStates,
   extractPrimaryMessage,
@@ -167,7 +175,6 @@ export default function SettingsPage() {
   const { tab } = useParams<{ tab: string }>();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
   const {
-    apiFetch,
     checkVersionUpdate,
     desktopGatewayBusy,
     desktopGatewayError,
@@ -198,7 +205,7 @@ export default function SettingsPage() {
     savingUpstreamRetrySettings,
     setUpstreamRetryMaxRetries,
     upstreamRetryMaxRetries,
-  } = useSettingsUpstreamRetry({ apiFetch, token });
+  } = useSettingsUpstreamRetry({ gatewayUrl, token });
   const {
     loadWebsearchPolicy,
     saveWebsearchPolicy,
@@ -206,9 +213,9 @@ export default function SettingsPage() {
     saving: websearchSaving,
     setPolicy: setWebsearchPolicy,
     policy: websearchPolicy,
-  } = useSettingsWebsearch({ apiFetch, token });
+  } = useSettingsWebsearch({ gatewayUrl, token });
   const memoryManagement = useMemoryManagement({
-    apiFetch,
+    gatewayUrl,
     token,
     active: activeTab === 'memory',
   });
@@ -284,7 +291,6 @@ export default function SettingsPage() {
     handleDesktopAutomationType,
     handleSaveGitHubTrigger,
   } = useSettingsTabActions({
-    apiFetch,
     gatewayUrl,
     token,
     setDiagnostics,
@@ -337,11 +343,9 @@ export default function SettingsPage() {
     if (!hasLoadedFilePatterns.current) return;
     if (!token) return;
     const timer = setTimeout(() => {
-      void fetch(`${gatewayUrl}/settings/file-patterns`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patterns: filePatterns }),
-      }).catch(() => undefined);
+      void createSettingsClient(gatewayUrl)
+        .putFilePatterns(token, filePatterns)
+        .catch(() => undefined);
     }, 600);
     return () => clearTimeout(timer);
   }, [filePatterns, gatewayUrl, token]);
@@ -369,14 +373,7 @@ export default function SettingsPage() {
     });
 
     try {
-      const response = await fetch(`${gatewayUrl}/settings/dev-logs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载开发日志失败'));
-      }
-
-      const payload = (await response.json()) as {
+      const payload = (await createSettingsClient(gatewayUrl).getDevLogs(token)) as {
         logs: Array<{
           id?: string;
           sessionId?: string | null;
@@ -446,14 +443,9 @@ export default function SettingsPage() {
     });
 
     try {
-      const response = await fetch(`${gatewayUrl}/settings/workers`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载 Worker 状态失败'));
-      }
-
-      const payload = (await response.json()) as { workers: WorkerEntry[] };
+      const payload = (await createSettingsClient(gatewayUrl).getWorkers(token)) as {
+        workers: WorkerEntry[];
+      };
       const nextWorkers = payload.workers ?? [];
       const errorCount = nextWorkers.filter((worker) => worker.status === 'error').length;
       setWorkers(nextWorkers);
@@ -491,14 +483,7 @@ export default function SettingsPage() {
     });
 
     try {
-      const response = await fetch(`${gatewayUrl}/settings/diagnostics`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载诊断信息失败'));
-      }
-
-      const payload = (await response.json()) as {
+      const payload = (await createSettingsClient(gatewayUrl).getDiagnostics(token)) as {
         diagnostics: Array<SettingsDiagnosticRecord>;
         availableDates?: string[];
         appVersion?: string;
@@ -543,14 +528,7 @@ export default function SettingsPage() {
     });
 
     try {
-      const response = await fetch(`${gatewayUrl}/desktop-automation/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载桌面自动化状态失败'));
-      }
-
-      const payload = (await response.json()) as { enabled: boolean };
+      const payload = await createDesktopAutomationClient(gatewayUrl).getStatus(token);
       const enabled = payload.enabled === true;
       setDesktopAutomationEnabled(enabled);
       updateDevtoolsSourceState('desktopAutomation', {
@@ -582,15 +560,9 @@ export default function SettingsPage() {
     });
 
     try {
-      const response = await fetch(`${gatewayUrl}/ssh/connections`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载 SSH 连接失败'));
-      }
-
-      const payload = (await response.json()) as { connections: SSHConnectionEntry[] };
-      const nextConnections = payload.connections ?? [];
+      const nextConnections = (await createSshClient(gatewayUrl).list(
+        token,
+      )) as unknown as SSHConnectionEntry[];
       setSshConnections(nextConnections);
       updateDevtoolsSourceState('sshConnections', {
         status: nextConnections.length > 0 ? 'healthy' : 'empty',
@@ -649,45 +621,45 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!token) return;
-    const h = { Authorization: `Bearer ${token}` };
     setDevtoolsSourceStates(createInitialDevtoolsSourceStates());
-    void fetch(`${gatewayUrl}/settings/providers`, { headers: h })
-      .then(
-        (r) =>
-          r.json() as Promise<{
-            providers: AIProviderRef[] | null;
-            activeSelection?: ActiveSelectionRef | null;
-            defaultThinking?: ThinkingDefaultsRef | null;
-            imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
-          }>,
-      )
-      .then((d) => {
-        if (d.providers) {
-          providersRef.current = d.providers;
-          setProviders(d.providers);
+    const settingsClient = createSettingsClient(gatewayUrl);
+    const usageClient = createUsageClient(gatewayUrl);
+    const channelsClient = createChannelsClient<ChannelSettingsEntry, ChannelTypeDescriptor>(
+      gatewayUrl,
+    );
+    const githubClient = createGitHubClient(gatewayUrl);
+
+    void settingsClient
+      .getProviders(token)
+      .then((data) => {
+        const typed = data as {
+          providers: AIProviderRef[] | null;
+          activeSelection?: ActiveSelectionRef | null;
+          defaultThinking?: ThinkingDefaultsRef | null;
+          imageGenerationDefaults?: ImageGenerationDefaultsRef | null;
+        };
+        if (typed.providers) {
+          providersRef.current = typed.providers;
+          setProviders(typed.providers);
         }
         applyServerDefaults(
           {
-            activeSelection: d.activeSelection,
-            defaultThinking: d.defaultThinking,
-            imageGenerationDefaults: d.imageGenerationDefaults,
+            activeSelection: typed.activeSelection,
+            defaultThinking: typed.defaultThinking,
+            imageGenerationDefaults: typed.imageGenerationDefaults,
           },
           { syncDraft: true, syncSaved: true },
         );
-      });
-    void fetch(`${gatewayUrl}/settings/mcp-servers`, { headers: h })
-      .then((r) => r.json() as Promise<{ servers: MCPServerEntry[] }>)
-      .then((d) => setMcpServersState(d.servers ?? []));
-    void fetch(`${gatewayUrl}/usage/records`, { headers: h })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '加载用量记录失败'));
-        }
-
-        return response.json() as Promise<{ records: MonthlyRecord[]; budgetUsd: number }>;
       })
+      .catch(() => undefined);
+    void settingsClient
+      .listMcpServers(token)
+      .then((data) => setMcpServersState((data as { servers?: MCPServerEntry[] }).servers ?? []))
+      .catch(() => undefined);
+    void usageClient
+      .getRecords(token)
       .then((d) => {
-        setUsageRecords(d.records ?? []);
+        setUsageRecords((d.records as MonthlyRecord[]) ?? []);
         setUsageBudget(d.budgetUsd ?? 0);
         setUsageRecordsError(null);
       })
@@ -697,17 +669,8 @@ export default function SettingsPage() {
         setUsageRecordsError(error instanceof Error ? error.message : '加载用量记录失败');
         logger.error('failed to load usage records', error);
       });
-    void fetch(`${gatewayUrl}/usage/breakdown`, { headers: h })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '加载费用明细失败'));
-        }
-
-        return response.json() as Promise<{
-          monthlyCostUsd: number;
-          breakdown: CostBreakdownItem[];
-        }>;
-      })
+    void usageClient
+      .getBreakdown(token)
       .then((d) => {
         setMonthlyCostUsd(d.monthlyCostUsd ?? 0);
         setCostBreakdown(d.breakdown ?? []);
@@ -719,29 +682,23 @@ export default function SettingsPage() {
         setCostBreakdownError(error instanceof Error ? error.message : '加载费用明细失败');
         logger.error('failed to load usage breakdown', error);
       });
-    void fetch(`${gatewayUrl}/settings/permission-rules`, { headers: h })
-      .then((response) =>
-        response.ok
-          ? (response.json() as Promise<{
-              rules: PermissionRuleEntry[];
-              categories: PermissionCategoryMeta[];
-            }>)
-          : Promise.resolve({ rules: [], categories: [] }),
-      )
+    void settingsClient
+      .getPermissionRules(token)
       .then((d) => {
-        setPermissionRules(d.rules ?? []);
-        if (d.categories?.length) setPermissionCategories(d.categories);
+        const typed = d as {
+          rules: PermissionRuleEntry[];
+          categories: PermissionCategoryMeta[];
+        };
+        setPermissionRules(typed.rules ?? []);
+        if (typed.categories?.length) setPermissionCategories(typed.categories);
       })
       .catch(() => setPermissionRules([]));
-    void fetch(`${gatewayUrl}/settings/permissions`, { headers: h })
-      .then((response) =>
-        response.ok
-          ? (response.json() as Promise<{ decisions: PermissionDecisionRecord[] }>)
-          : Promise.resolve({ decisions: [] }),
-      )
-      .then((d) =>
+    void settingsClient
+      .getPermissionDecisions(token)
+      .then((d) => {
+        const typed = d as { decisions: PermissionDecisionRecord[] };
         setPermissions(
-          (d.decisions ?? []).map((decision) => ({
+          (typed.decisions ?? []).map((decision) => ({
             ...decision,
             scope:
               (decision as PermissionDecisionRecord & { sessionId?: string; requestId?: string })
@@ -751,26 +708,24 @@ export default function SettingsPage() {
             timestamp: Date.now(),
             riskLevel: 'low',
           })),
-        ),
-      );
+        );
+      })
+      .catch(() => undefined);
     void loadDevLogs();
-    void fetch(`${gatewayUrl}/settings/mcp-status`, { headers: h })
-      .then((response) =>
-        response.ok
-          ? (response.json() as Promise<{
-              servers: Array<{
-                id: string;
-                name: string;
-                type?: string;
-                status?: string;
-                builtin?: boolean;
-              }>;
-            }>)
-          : Promise.resolve({ servers: [] }),
-      )
-      .then((d) =>
+    void settingsClient
+      .getMcpStatus(token)
+      .then((d) => {
+        const typed = d as {
+          servers: Array<{
+            id: string;
+            name: string;
+            type?: string;
+            status?: string;
+            builtin?: boolean;
+          }>;
+        };
         setMcpStatuses(
-          (d.servers ?? []).map((server) => ({
+          (typed.servers ?? []).map((server) => ({
             id: server.id,
             name: server.name,
             // 后端可能返回 'disabled'（来自 PR-D-Plugin retry 路由的
@@ -788,20 +743,16 @@ export default function SettingsPage() {
             authType: server.type,
             builtin: server.builtin === true,
           })),
-        ),
-      );
+        );
+      })
+      .catch(() => undefined);
     void loadWorkers();
     void loadDiagnostics();
-    void fetch(`${gatewayUrl}/settings/model-prices`, { headers: h })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response, '加载模型费用配置失败'));
-        }
-
-        return response.json() as Promise<{ models?: unknown }>;
-      })
+    void settingsClient
+      .getModelPrices(token)
       .then((d) => {
-        setPriceModels(normalizeSettingsModelPrices(d.models));
+        const typed = d as { models?: unknown };
+        setPriceModels(normalizeSettingsModelPrices(typed.models));
         setPriceModelsError(null);
       })
       .catch((error: unknown) => {
@@ -811,58 +762,39 @@ export default function SettingsPage() {
       });
     void loadDesktopAutomationStatus();
     void loadSshConnections();
-    void fetch(`${gatewayUrl}/settings/file-patterns`, { headers: h })
-      .then((r) => r.json() as Promise<{ patterns: string[] }>)
+    void settingsClient
+      .getFilePatterns(token)
       .then((d) => {
-        setFilePatterns(d.patterns ?? []);
+        const typed = d as { patterns: string[] };
+        setFilePatterns(typed.patterns ?? []);
         hasLoadedFilePatterns.current = true;
       })
       .catch(() => {
         hasLoadedFilePatterns.current = true;
       });
-    void fetch(`${gatewayUrl}/github/triggers`, { headers: h })
-      .then((r) => r.json() as Promise<{ triggers: Array<{ repo: string; events: string[] }> }>)
-      .then((d) => setGithubTriggers(d.triggers ?? []))
+    void githubClient
+      .listTriggers(token)
+      .then((triggers) => setGithubTriggers(triggers))
       .catch(() => undefined);
     void loadUpstreamRetrySettings().catch(() => undefined);
     void loadWebsearchPolicy().catch(() => undefined);
     void checkVersionUpdate();
-    void fetch(`${gatewayUrl}/channels`, { headers: h })
-      .then(async (response) => {
-        const payload = (await response.json()) as {
-          channels?: ChannelSettingsEntry[];
-          error?: string;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error ?? '加载通道失败');
-        }
-
-        return payload;
-      })
+    void channelsClient
+      .list(token)
       .then((data) => {
         setChannelsLoadError(null);
-        setChannels(data.channels ?? []);
+        setChannels(data ?? []);
       })
       .catch((error: unknown) => {
         setChannels([]);
         setChannelsLoadError(error instanceof Error ? error.message : '加载通道失败');
         logger.error('failed to load channels', error);
       });
-    void fetch(`${gatewayUrl}/channels/descriptors`, { headers: h })
-      .then(async (response) => {
-        const payload = (await response.json()) as {
-          descriptors?: ChannelTypeDescriptor[];
-          error?: string;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error ?? '加载通道模板失败');
-        }
-
-        return payload;
-      })
+    void channelsClient
+      .listDescriptors(token)
       .then((data) => {
         setChannelDescriptorsLoadError(null);
-        setChannelDescriptors(data.descriptors ?? []);
+        setChannelDescriptors(data ?? []);
       })
       .catch((error: unknown) => {
         setChannelDescriptors([]);
@@ -904,28 +836,18 @@ export default function SettingsPage() {
       providerSaveSeqRef.current = requestSeq;
 
       const runSave = async () => {
-        const response = await fetch(`${gatewayUrl}/settings/providers`, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            providers: next,
-            activeSelection: nextSel,
-            defaultThinking: nextThinking,
-            imageGenerationDefaults: nextImageGenerationDefaults,
-          }),
-        });
-
-        const data = (await response.json()) as {
+        const data = (await createSettingsClient(gatewayUrl).putProviders(token, {
+          providers: next,
+          activeSelection: nextSel,
+          defaultThinking: nextThinking,
+          imageGenerationDefaults: nextImageGenerationDefaults,
+        })) as {
           providers?: AIProviderRef[];
           activeSelection?: ActiveSelectionRef;
           defaultThinking?: ThinkingDefaultsRef;
           imageGenerationDefaults?: ImageGenerationDefaultsRef;
           error?: string;
         };
-
-        if (!response.ok) {
-          throw new Error(data.error ?? '保存提供商配置失败');
-        }
 
         if (requestSeq !== providerSaveSeqRef.current) {
           return;
@@ -960,11 +882,7 @@ export default function SettingsPage() {
       setMcpServersState((prev) => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
         if (token) {
-          void fetch(`${gatewayUrl}/settings/mcp-servers`, {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ servers: next }),
-          });
+          void createSettingsClient(gatewayUrl).putMcpServers(token, { servers: next });
         }
         return next;
       });
@@ -999,18 +917,7 @@ export default function SettingsPage() {
 
       void (async () => {
         try {
-          const response = await fetch(
-            `${gatewayUrl}/settings/mcp-servers/${encodeURIComponent(serverId)}/retry`,
-            {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}` },
-            },
-          );
-          if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || `HTTP ${response.status}`);
-          }
-          const data = (await response.json()) as {
+          const data = (await createSettingsClient(gatewayUrl).retryMcpServer(token, serverId)) as {
             status: 'connected' | 'error' | 'disabled';
             toolCount: number;
             durationMs: number;
@@ -1120,15 +1027,12 @@ export default function SettingsPage() {
   function handlePermissionRulesChange(rules: PermissionRuleEntry[]) {
     setPermissionRules(rules);
     setPermissionRulesSaving(true);
-    void apiFetch('/settings/permission-rules', {
-      method: 'PUT',
-      body: JSON.stringify({ rules }),
-    })
-      .then((response) => {
-        if (!response.ok) {
-          logger.error('failed to save permission rules');
-        }
-      })
+    if (!token) {
+      setPermissionRulesSaving(false);
+      return;
+    }
+    void createSettingsClient(gatewayUrl)
+      .putPermissionRules(token, { rules })
       .catch((error: unknown) => {
         logger.error('failed to save permission rules', error);
       })
@@ -1305,14 +1209,10 @@ export default function SettingsPage() {
 
   const loadSshFiles = React.useCallback(
     async (connectionId: string, path: string) => {
-      const response = await apiFetch(
-        `/ssh/files?connectionId=${encodeURIComponent(connectionId)}&path=${encodeURIComponent(path)}`,
-        { method: 'GET' },
-      );
-      const payload = (await response.json()) as {
-        entries: Array<{ name: string; path: string; kind: 'file' | 'directory' }>;
-      };
-      const nodes: FileTreeNode[] = (payload.entries ?? []).map((entry) => ({
+      if (!token) return;
+      const sshClient = createSshClient(gatewayUrl);
+      const entries = await sshClient.listFiles(token, connectionId, path);
+      const nodes: FileTreeNode[] = entries.map((entry) => ({
         path: entry.path,
         name: entry.name,
         type: entry.kind,
@@ -1321,26 +1221,20 @@ export default function SettingsPage() {
       setSshCurrentPath(path);
       const firstFile = nodes.find((node) => node.type === 'file');
       if (firstFile) {
-        const previewResponse = await apiFetch(
-          `/ssh/file?connectionId=${encodeURIComponent(connectionId)}&path=${encodeURIComponent(firstFile.path)}`,
-          { method: 'GET' },
-        );
-        const previewPayload = (await previewResponse.json()) as {
-          preview: { path: string; content: string };
-        };
+        const previewPayload = await sshClient.readFile(token, connectionId, firstFile.path);
         setSshPreview({
-          id: previewPayload.preview.path,
-          name: previewPayload.preview.path.split('/').pop() ?? previewPayload.preview.path,
+          id: previewPayload.path,
+          name: previewPayload.path.split('/').pop() ?? previewPayload.path,
           type: 'text',
           createdAt: Date.now(),
           sessionId: connectionId,
-          content: previewPayload.preview.content,
+          content: previewPayload.content,
         });
       } else {
         setSshPreview(null);
       }
     },
-    [apiFetch],
+    [gatewayUrl, token],
   );
 
   useEffect(() => {
@@ -1353,22 +1247,23 @@ export default function SettingsPage() {
 
   const addSshConnection = React.useCallback(
     (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => {
-      void apiFetch('/ssh/connections', {
-        method: 'POST',
-        body: JSON.stringify(entry),
-      })
-        .then((response) => response.json() as Promise<{ connection: SSHConnectionEntry }>)
-        .then((payload) => {
-          setSshConnections((prev) => [...prev, payload.connection]);
-          setActiveSSHConnectionId(payload.connection.id);
+      if (!token) return;
+      void createSshClient(gatewayUrl)
+        .create(token, entry as never)
+        .then((connection) => {
+          const next = connection as unknown as SSHConnectionEntry;
+          setSshConnections((prev) => [...prev, next]);
+          setActiveSSHConnectionId(next.id);
         });
     },
-    [apiFetch],
+    [gatewayUrl, token],
   );
 
   const connectSsh = React.useCallback(
     (id: string) => {
-      void apiFetch(`/ssh/connections/${id}/connect`, { method: 'POST' })
+      if (!token) return;
+      void createSshClient(gatewayUrl)
+        .connect(token, id)
         .then(() => {
           setSshConnections((prev) =>
             prev.map((connection) =>
@@ -1380,60 +1275,58 @@ export default function SettingsPage() {
         })
         .catch((error: unknown) => logger.error('failed to connect ssh', error));
     },
-    [apiFetch, loadSshFiles],
+    [gatewayUrl, loadSshFiles, token],
   );
 
   const disconnectSsh = React.useCallback(
     (id: string) => {
-      void apiFetch(`/ssh/connections/${id}/disconnect`, { method: 'POST' }).then(() => {
-        setSshConnections((prev) =>
-          prev.map((connection) =>
-            connection.id === id ? { ...connection, status: 'disconnected' } : connection,
-          ),
-        );
-        if (activeSSHConnectionId === id) {
-          setActiveSSHConnectionId(null);
-          setSshNodes([]);
-          setSshPreview(null);
-          setSshCurrentPath('/');
-        }
-      });
+      if (!token) return;
+      void createSshClient(gatewayUrl)
+        .disconnect(token, id)
+        .then(() => {
+          setSshConnections((prev) =>
+            prev.map((connection) =>
+              connection.id === id ? { ...connection, status: 'disconnected' } : connection,
+            ),
+          );
+          if (activeSSHConnectionId === id) {
+            setActiveSSHConnectionId(null);
+            setSshNodes([]);
+            setSshPreview(null);
+            setSshCurrentPath('/');
+          }
+        });
     },
-    [activeSSHConnectionId, apiFetch],
+    [activeSSHConnectionId, gatewayUrl, token],
   );
 
   const browseSshPath = React.useCallback(
     (path: string) => {
-      if (!activeSSHConnectionId) return;
+      if (!activeSSHConnectionId || !token) return;
       const node = sshNodes.find((item) => item.path === path);
       if (node?.type === 'directory') {
         void loadSshFiles(activeSSHConnectionId, path);
         return;
       }
-      void apiFetch(
-        `/ssh/file?connectionId=${encodeURIComponent(activeSSHConnectionId)}&path=${encodeURIComponent(path)}`,
-        { method: 'GET' },
-      )
-        .then(
-          (response) => response.json() as Promise<{ preview: { path: string; content: string } }>,
-        )
-        .then((payload) =>
+      void createSshClient(gatewayUrl)
+        .readFile(token, activeSSHConnectionId, path)
+        .then((preview) =>
           setSshPreview({
-            id: payload.preview.path,
-            name: payload.preview.path.split('/').pop() ?? payload.preview.path,
+            id: preview.path,
+            name: preview.path.split('/').pop() ?? preview.path,
             type: 'text',
             createdAt: Date.now(),
             sessionId: activeSSHConnectionId,
-            content: payload.preview.content,
+            content: preview.content,
           }),
         );
     },
-    [activeSSHConnectionId, apiFetch, loadSshFiles, sshNodes],
+    [activeSSHConnectionId, gatewayUrl, loadSshFiles, sshNodes, token],
   );
 
   const uploadSshFile = React.useCallback(
     (file: File) => {
-      if (!activeSSHConnectionId) return;
+      if (!activeSSHConnectionId || !token) return;
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result;
@@ -1441,20 +1334,19 @@ export default function SettingsPage() {
         const bytes = new Uint8Array(result);
         const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
         const contentBase64 = btoa(binary);
-        void apiFetch('/ssh/upload', {
-          method: 'POST',
-          body: JSON.stringify({
+        void createSshClient(gatewayUrl)
+          .upload(token, {
             connectionId: activeSSHConnectionId,
             path: `${sshCurrentPath.replace(/\/$/, '')}/${file.name}`,
             contentBase64,
-          }),
-        }).then(() => {
-          void loadSshFiles(activeSSHConnectionId, sshCurrentPath);
-        });
+          })
+          .then(() => {
+            void loadSshFiles(activeSSHConnectionId, sshCurrentPath);
+          });
       };
       reader.readAsArrayBuffer(file);
     },
-    [activeSSHConnectionId, apiFetch, loadSshFiles, sshCurrentPath],
+    [activeSSHConnectionId, gatewayUrl, loadSshFiles, sshCurrentPath, token],
   );
 
   const connectedCount = channels.filter((c) => c.status === 'connected').length;
@@ -1677,7 +1569,8 @@ export default function SettingsPage() {
                       defaultModels: provider.defaultModels,
                     }))}
                     loadError={channelsPanelLoadError}
-                    apiFetch={apiFetch}
+                    gatewayUrl={gatewayUrl}
+                    token={token}
                     connectedCount={connectedCount}
                     disconnectedCount={disconnectedCount}
                   />

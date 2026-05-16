@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import { useUIStateStore } from '../stores/uiState.js';
 
@@ -45,6 +46,7 @@ function getLanguage(path: string): string {
 export function useFileEditor() {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
   const openFilePaths = useUIStateStore((s) => s.openFilePaths);
   const activeFilePath = useUIStateStore((s) => s.activeFilePath);
   const setOpenFilePaths = useUIStateStore((s) => s.setOpenFilePaths);
@@ -73,11 +75,7 @@ export function useFileEditor() {
       setLoading(true);
       setSaveError(null);
       try {
-        const res = await fetch(`${gatewayUrl}/workspace/file?path=${encodeURIComponent(path)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error(`Failed to open file: ${res.status}`);
-        const data = (await res.json()) as { content: string };
+        const data = await workspaceClient.readFile(token ?? '', path);
         const name = path.split('/').pop() ?? path;
         const file: OpenFile = {
           path,
@@ -94,7 +92,7 @@ export function useFileEditor() {
         setLoading(false);
       }
     },
-    [openFiles, token, gatewayUrl, setActiveFilePath],
+    [openFiles, token, workspaceClient, setActiveFilePath],
   );
 
   useEffect(() => {
@@ -105,11 +103,7 @@ export function useFileEditor() {
       const loaded: OpenFile[] = [];
       for (const path of persistedPaths) {
         try {
-          const res = await fetch(`${gatewayUrl}/workspace/file?path=${encodeURIComponent(path)}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!res.ok) continue;
-          const data = (await res.json()) as { content: string };
+          const data = await workspaceClient.readFile(token ?? '', path);
           loaded.push({
             path,
             name: path.split('/').pop() ?? path,
@@ -129,7 +123,7 @@ export function useFileEditor() {
     return () => {
       cancelled = true;
     };
-  }, [persistedPaths, persistedPaths.length, openFiles.length, token, gatewayUrl]);
+  }, [persistedPaths, persistedPaths.length, openFiles.length, token, workspaceClient]);
 
   const closeFile = useCallback(
     (path: string) => {
@@ -156,15 +150,7 @@ export function useFileEditor() {
       if (!file) return;
       setSaveError(null);
       try {
-        const res = await fetch(`${gatewayUrl}/workspace/file`, {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ path, content: file.content }),
-        });
-        if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+        await workspaceClient.writeFile(token ?? '', path, file.content);
         setOpenFiles((prev) =>
           prev.map((f) => (f.path === path ? { ...f, originalContent: f.content } : f)),
         );
@@ -172,7 +158,7 @@ export function useFileEditor() {
         setSaveError(err instanceof Error ? err.message : '保存失败');
       }
     },
-    [openFiles, token, gatewayUrl],
+    [openFiles, token, workspaceClient],
   );
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath) ?? null;

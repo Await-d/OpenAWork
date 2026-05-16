@@ -24,7 +24,7 @@ import type { SessionTerminalView } from './terminals-api.js';
 import { deleteSessionTerminal } from './terminals-api.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
-import { BuiltInBrowser } from '../../components/chat/BuiltInBrowser.js';
+import { BookmarksPanel } from '../../components/chat/bookmarks-panel.js';
 import {
   RIGHT_PANEL_TABS,
   RIGHT_PANEL_TAB_META,
@@ -163,7 +163,6 @@ export interface ChatRightPanelProps {
   sessionTerminalsPendingKillIds?: Set<string>;
   onKillTerminal?: (terminalId: string) => Promise<void>;
   onReloadTerminals?: () => void;
-  browserPreviewUrl?: string | null;
 }
 
 export function ChatRightPanel(props: ChatRightPanelProps) {
@@ -213,18 +212,10 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
     yoloMode,
   } = props;
 
-  // Once the browser tab has been activated (user clicked or auto-preview
-  // triggered), keep BuiltInBrowser mounted so the Tauri webview / iframe
-  // preserves page state across tab switches.
-  const [browserMounted, setBrowserMounted] = useState(false);
-  useEffect(() => {
-    if (rightTab === 'browser' || props.browserPreviewUrl) setBrowserMounted(true);
-  }, [rightTab, props.browserPreviewUrl]);
-
   const rightPanelWidth = rightOpen
-    ? rightTab === 'agent' || rightTab === 'browser'
+    ? rightTab === 'agent'
       ? 'clamp(360px, 40vw, 520px)'
-      : 'clamp(320px, 32vw, 400px)'
+      : 'clamp(300px, 30vw, 380px)'
     : 0;
   const rightPanelMaxWidth = rightOpen ? 'calc(100vw - 88px)' : 0;
   const activeRightTabMeta = RIGHT_PANEL_TAB_META[rightTab ?? 'overview'];
@@ -254,30 +245,32 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
             height: '100%',
             minWidth: 0,
             minHeight: 0,
-            background: 'color-mix(in oklch, var(--surface) 96%, var(--bg) 4%)',
+            background: 'var(--surface)',
           }}
         >
+          {/* ─── Compact nav rail ─── */}
           <div
             data-testid="chat-right-nav-rail"
             style={{
               display: 'flex',
               flexDirection: 'column',
-              alignItems: 'stretch',
-              gap: 4,
-              width: 52,
-              minWidth: 52,
-              padding: '8px 4px',
-              borderRight: '1px solid var(--border)',
+              alignItems: 'center',
+              gap: 2,
+              width: 40,
+              minWidth: 40,
+              padding: '6px 2px',
+              borderRight: '1px solid var(--border-subtle)',
               flexShrink: 0,
-              background:
-                'linear-gradient(180deg, color-mix(in oklch, var(--surface) 92%, var(--bg) 8%), color-mix(in oklch, var(--surface) 88%, var(--bg) 12%))',
+              background: 'color-mix(in oklch, var(--bg) 30%, var(--surface) 70%)',
+              overflowY: 'auto',
+              overflowX: 'hidden',
             }}
           >
             <div
               role="tablist"
               aria-label="右侧面板切换"
               aria-orientation="vertical"
-              style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%' }}
             >
               {RIGHT_PANEL_TABS.map((tab) => {
                 const isActive = rightTab === tab.id;
@@ -293,25 +286,22 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                     tabIndex={isActive ? 0 : -1}
                     title={tab.label}
                     onClick={() => setRightTab(tab.id)}
-                    className={`toolbar-btn${isActive ? ' active' : ''}`}
                     style={{
-                      width: '100%',
+                      width: 34,
+                      height: 30,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      minHeight: 34,
-                      padding: '6px 0',
-                      borderRadius: 8,
-                      border: isActive
-                        ? '1px solid color-mix(in oklch, var(--accent) 24%, var(--border))'
-                        : '1px solid transparent',
-                      background: isActive
-                        ? 'color-mix(in oklch, var(--accent) 16%, var(--surface))'
-                        : 'transparent',
-                      color: isActive ? 'var(--accent)' : 'var(--text-2)',
-                      boxShadow: isActive
-                        ? 'inset 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent)'
-                        : 'none',
+                      borderRadius: 7,
+                      border: 'none',
+                      background: isActive ? 'var(--accent)' : 'transparent',
+                      color: isActive ? 'white' : 'var(--text-3)',
+                      cursor: 'pointer',
+                      transition: 'background 100ms ease, color 100ms ease, transform 80ms ease',
+                      transform: isActive ? 'scale(1)' : 'scale(0.92)',
+                      opacity: isActive ? 1 : 0.75,
+                      margin: '0 auto',
+                      padding: 0,
                       fontSize: 0,
                     }}
                   >
@@ -321,6 +311,8 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
               })}
             </div>
           </div>
+
+          {/* ─── Panel content ─── */}
           <div
             role="tabpanel"
             id={`chat-right-panel-${rightTab}`}
@@ -333,20 +325,9 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
               padding: 0,
               display: 'flex',
               flexDirection: 'column',
-              background: 'color-mix(in oklch, var(--surface) 98%, var(--bg) 2%)',
+              background: 'var(--surface)',
             }}
           >
-            {browserMounted && (
-              <BuiltInBrowser
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  ...(rightTab !== 'browser' && { display: 'none' as const }),
-                }}
-                previewUrl={props.browserPreviewUrl}
-                hidden={rightTab !== 'browser'}
-              />
-            )}
             {rightTab === 'agent' && (
               <div
                 style={{
@@ -373,27 +354,44 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                 />
               </div>
             )}
-            {rightTab !== 'agent' && rightTab !== 'browser' && (
+            {rightTab !== 'agent' && (
               <>
                 <div
                   data-testid={`chat-right-panel-header-${rightTab}`}
                   style={{
-                    padding: '10px 12px 8px',
-                    borderBottom: '1px solid color-mix(in oklch, var(--border) 86%, transparent)',
-                    background:
-                      'linear-gradient(180deg, color-mix(in oklch, var(--surface) 96%, var(--bg) 4%), color-mix(in oklch, var(--surface) 98%, var(--bg) 2%))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    flexShrink: 0,
                   }}
                 >
-                  <div
-                    style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}
-                  >
-                    {activeRightTabMeta.title}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: 'var(--text)',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {activeRightTabMeta.title}
+                    </span>
                   </div>
-                  <div
-                    style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.45, marginTop: 2 }}
+                  <span
+                    style={{
+                      fontSize: 9,
+                      color: 'var(--text-4)',
+                      maxWidth: 140,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={activeRightTabMeta.description}
                   >
                     {activeRightTabMeta.description}
-                  </div>
+                  </span>
                 </div>
                 <div
                   data-testid={`chat-right-panel-body-${rightTab}`}
@@ -402,11 +400,11 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                     minHeight: 0,
                     overflowY: 'auto',
                     overflowX: 'hidden',
-                    padding: '8px 10px 10px',
+                    padding: '6px 8px 10px',
                     scrollbarGutter: 'stable',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 8,
+                    gap: 6,
                   }}
                 >
                   {rightTab === 'plan' && <PlanPanel tasks={planTasks} />}
@@ -420,6 +418,28 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                       resolveTaskToolRuntimeSnapshot,
                       selectedChildSessionId,
                     )}
+                  {rightTab === 'bookmarks' && (
+                    <BookmarksPanel
+                      sessionId={currentSessionId ?? ''}
+                      onNavigateToMessage={(messageId) => {
+                        // Scroll to the message in the chat
+                        const scrollRegion = document.querySelector(
+                          '[data-testid="chat-scroll-region"]',
+                        );
+                        if (!scrollRegion) return;
+                        const target = scrollRegion.querySelector(
+                          `[data-message-id="${messageId}"]`,
+                        );
+                        if (target) {
+                          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          (target as HTMLElement).setAttribute('data-search-flash', 'true');
+                          setTimeout(() => {
+                            (target as HTMLElement).removeAttribute('data-search-flash');
+                          }, 1500);
+                        }
+                      }}
+                    />
+                  )}
                   {rightTab === 'viz' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       <div style={sharedUiThemeVars}>

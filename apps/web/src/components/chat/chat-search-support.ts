@@ -9,6 +9,8 @@ export interface ChatSearchMatch {
   snippet: string;
   /** Number of times the query appeared in this message's searchable text. */
   occurrences: number;
+  /** Role of the matching message for filter display. */
+  role: 'user' | 'assistant';
 }
 
 const SNIPPET_RADIUS = 32;
@@ -82,8 +84,14 @@ export function extractSearchableText(message: ChatMessage): string {
  * substring match). Empty / whitespace queries return an empty list. Results
  * preserve the input message order so "previous" / "next" navigation maps
  * cleanly to scroll-up / scroll-down.
+ *
+ * Optional `roleFilter` restricts results to messages of a specific role.
  */
-export function findChatMessageMatches(messages: ChatMessage[], query: string): ChatSearchMatch[] {
+export function findChatMessageMatches(
+  messages: ChatMessage[],
+  query: string,
+  roleFilter?: 'user' | 'assistant' | null,
+): ChatSearchMatch[] {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length === 0) return [];
 
@@ -93,6 +101,7 @@ export function findChatMessageMatches(messages: ChatMessage[], query: string): 
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
     if (!message) continue;
+    if (roleFilter && message.role !== roleFilter) continue;
     const haystack = extractSearchableText(message);
     if (haystack.length === 0) continue;
     const lowerHaystack = haystack.toLowerCase();
@@ -114,6 +123,7 @@ export function findChatMessageMatches(messages: ChatMessage[], query: string): 
       messageIndex: index,
       snippet: buildSnippet(haystack, firstHit, normalizedQuery.length),
       occurrences,
+      role: message.role,
     });
   }
 

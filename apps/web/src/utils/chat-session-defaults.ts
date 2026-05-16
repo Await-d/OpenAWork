@@ -1,3 +1,4 @@
+import { createSettingsClient } from '@openAwork/web-client';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type { ReasoningEffort } from '../pages/chat-page/support.js';
 
@@ -69,15 +70,9 @@ export async function loadSavedChatSessionDefaults(
   imageDefaults: SavedChatImageDefaults;
   providers: ChatSettingsProvider[];
 }> {
-  const response = await fetch(`${gatewayUrl}/settings/providers?enabledOnly=true`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
-    throw new Error('failed to load saved chat defaults');
-  }
-
-  const data = (await response.json()) as SettingsProvidersResponse;
+  const data = (await createSettingsClient(gatewayUrl).getProviders(token, {
+    enabledOnly: true,
+  })) as SettingsProvidersResponse;
   const providers = (data.providers ?? [])
     .filter((provider) => provider.enabled)
     .map((provider) => ({

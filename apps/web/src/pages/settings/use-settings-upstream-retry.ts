@@ -1,10 +1,10 @@
 import React from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import { logger } from '../../utils/logger.js';
 import type { UpstreamRetrySettingsRef } from '../settings-types.js';
-import { readErrorMessage } from './settings-page-helpers.js';
 
 interface UseSettingsUpstreamRetryInput {
-  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  gatewayUrl: string;
   token: string | null;
 }
 
@@ -30,12 +30,9 @@ export function useSettingsUpstreamRetry(
     }
 
     try {
-      const response = await input.apiFetch('/settings/upstream-retry', { method: 'GET' });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '加载上游重试策略失败'));
-      }
-
-      const payload = (await response.json()) as UpstreamRetrySettingsRef;
+      const payload = (await createSettingsClient(input.gatewayUrl).getUpstreamRetry(
+        input.token,
+      )) as UpstreamRetrySettingsRef;
       setUpstreamRetryMaxRetries(payload.maxRetries);
       setSavedUpstreamRetryMaxRetries(payload.maxRetries);
     } catch (error: unknown) {
@@ -43,7 +40,7 @@ export function useSettingsUpstreamRetry(
       setUpstreamRetryMaxRetries(3);
       setSavedUpstreamRetryMaxRetries(3);
     }
-  }, [input.apiFetch, input.token]);
+  }, [input.gatewayUrl, input.token]);
 
   const saveUpstreamRetrySettings = React.useCallback(async () => {
     if (!input.token || savingUpstreamRetrySettings) {
@@ -52,16 +49,9 @@ export function useSettingsUpstreamRetry(
 
     setSavingUpstreamRetrySettings(true);
     try {
-      const response = await input.apiFetch('/settings/upstream-retry', {
-        method: 'PUT',
-        body: JSON.stringify({ maxRetries: upstreamRetryMaxRetries }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, '保存上游重试设置失败'));
-      }
-
-      const payload = (await response.json()) as UpstreamRetrySettingsRef;
+      const payload = (await createSettingsClient(input.gatewayUrl).putUpstreamRetry(input.token, {
+        maxRetries: upstreamRetryMaxRetries,
+      })) as UpstreamRetrySettingsRef;
       setUpstreamRetryMaxRetries(payload.maxRetries);
       setSavedUpstreamRetryMaxRetries(payload.maxRetries);
     } catch (error: unknown) {
@@ -69,7 +59,7 @@ export function useSettingsUpstreamRetry(
     } finally {
       setSavingUpstreamRetrySettings(false);
     }
-  }, [input.apiFetch, input.token, savingUpstreamRetrySettings, upstreamRetryMaxRetries]);
+  }, [input.gatewayUrl, input.token, savingUpstreamRetrySettings, upstreamRetryMaxRetries]);
 
   return {
     loadUpstreamRetrySettings,

@@ -55,6 +55,14 @@ export function FileEditorPanel({
     if (!activePreviewKind && panelMode === 'preview') {
       setPanelMode('code');
     }
+    // Auto-switch to preview for markdown files
+    if (
+      activePreviewKind === 'markdown' ||
+      activePreviewKind === 'svg' ||
+      activePreviewKind === 'image'
+    ) {
+      setPanelMode('preview');
+    }
   }, [activePreviewKind, panelMode]);
 
   const handlePreview = useCallback(

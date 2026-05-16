@@ -1,4 +1,5 @@
 import React from 'react';
+import { createChannelsClient } from '@openAwork/web-client';
 import { StatusPill } from '@openAwork/shared-ui';
 import type {
   ChannelDraft,
@@ -17,7 +18,9 @@ interface ChannelsTabContentProps {
   descriptors: ChannelTypeDescriptor[];
   providers: ChannelProviderOption[];
   loadError: string | null;
-  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  /** 网关地址 + 用户 token，用于通过 web-client 调用 channels 路由。 */
+  gatewayUrl: string;
+  token: string | null;
   connectedCount: number;
   disconnectedCount: number;
 }
@@ -28,10 +31,20 @@ export function ChannelsTabContent({
   descriptors,
   providers,
   loadError,
-  apiFetch,
+  gatewayUrl,
+  token,
   connectedCount,
   disconnectedCount,
 }: ChannelsTabContentProps) {
+  const channelsClient = createChannelsClient<
+    ChannelSettingsEntry,
+    ChannelTypeDescriptor,
+    ChannelTargetEntry
+  >(gatewayUrl);
+  const ensureToken = (): string => {
+    if (!token) throw new Error('未登录');
+    return token;
+  };
   const applyChannelError = (channelId: string, errorMessage?: string) => {
     setChannels((prev) =>
       prev.map((channel) =>
@@ -49,27 +62,10 @@ export function ChannelsTabContent({
     channelId: string | null,
     draft: ChannelDraft,
   ): Promise<ChannelSettingsEntry> => {
-    const request = channelId
-      ? apiFetch(`/channels/${channelId}`, {
-          method: 'PUT',
-          body: JSON.stringify(draft),
-        })
-      : apiFetch('/channels', {
-          method: 'POST',
-          body: JSON.stringify(draft),
-        });
-
     try {
-      const response = await request;
-      const payload = (await response.json()) as {
-        channel?: ChannelSettingsEntry;
-        error?: string;
-      };
-      if (!response.ok || !payload.channel) {
-        throw new Error(payload.error ?? '保存通道配置失败');
-      }
-
-      const savedChannel = payload.channel;
+      const savedChannel = channelId
+        ? await channelsClient.update(ensureToken(), channelId, draft)
+        : await channelsClient.create(ensureToken(), draft);
       setChannels((prev) => {
         const exists = prev.some((channel) => channel.id === savedChannel.id);
         if (exists) {
@@ -107,19 +103,13 @@ export function ChannelsTabContent({
     );
 
     try {
-      const response = await apiFetch(`/channels/${channelId}/groups`);
-      if (!response.ok) {
-        const payload = (await response.json()) as { error?: string };
-        throw new Error(payload.error ?? '无法拉取订阅目标');
-      }
-
-      const payload = (await response.json()) as { groups: ChannelTargetEntry[] };
+      const groups = await channelsClient.listTargets(ensureToken(), channelId);
       setChannels((prev) =>
         prev.map((channel) =>
           channel.id === channelId
             ? {
                 ...channel,
-                availableTargets: payload.groups,
+                availableTargets: groups,
                 loadingTargets: false,
                 errorMessage: undefined,
               }
@@ -144,21 +134,13 @@ export function ChannelsTabContent({
 
   const connectChannel = async (id: string): Promise<void> => {
     try {
-      const response = await apiFetch(`/channels/${id}/start`, { method: 'POST' });
-      const payload = (await response.json()) as {
-        status?: ChannelSettingsEntry['status'];
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(payload.error ?? '连接通道失败');
-      }
-
+      const result = await channelsClient.start(ensureToken(), id);
       setChannels((prev) =>
         prev.map((channel) =>
           channel.id === id
             ? {
                 ...channel,
-                status: payload.status ?? 'connected',
+                status: (result.status as ChannelSettingsEntry['status']) ?? 'connected',
                 errorMessage: undefined,
               }
             : channel,
@@ -173,21 +155,13 @@ export function ChannelsTabContent({
 
   const disconnectChannel = async (id: string): Promise<void> => {
     try {
-      const response = await apiFetch(`/channels/${id}/stop`, { method: 'POST' });
-      const payload = (await response.json()) as {
-        status?: ChannelSettingsEntry['status'];
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(payload.error ?? '断开通道失败');
-      }
-
+      const result = await channelsClient.stop(ensureToken(), id);
       setChannels((prev) =>
         prev.map((channel) =>
           channel.id === id
             ? {
                 ...channel,
-                status: payload.status ?? 'disconnected',
+                status: (result.status as ChannelSettingsEntry['status']) ?? 'disconnected',
                 errorMessage: undefined,
               }
             : channel,
@@ -202,18 +176,7 @@ export function ChannelsTabContent({
 
   const deleteChannel = async (id: string): Promise<void> => {
     try {
-      const response = await apiFetch(`/channels/${id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        let errorMessage = '删除通道失败';
-        try {
-          const payload = (await response.json()) as { error?: string };
-          errorMessage = payload.error ?? errorMessage;
-        } catch (_error) {
-          errorMessage = '删除通道失败';
-        }
-        throw new Error(errorMessage);
-      }
-
+      await channelsClient.remove(ensureToken(), id);
       setChannels((prev) => prev.filter((channel) => channel.id !== id));
     } catch (error) {
       logger.error('failed to delete channel', error);

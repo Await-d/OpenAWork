@@ -13,6 +13,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createSkillsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import SkillRecommendationDrawer from './SkillRecommendationDrawer.js';
 import {
@@ -186,39 +187,25 @@ export default function SkillSelectionPage(): React.ReactElement {
   const [recommendOpen, setRecommendOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const headers = useMemo<HeadersInit>(
-    () => ({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken ?? ''}`,
-    }),
-    [accessToken],
-  );
-
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (workspacePath.trim().length > 0) {
-        params.set('workspacePath', workspacePath.trim());
-      }
-      const [selectionRes, installedRes] = await Promise.all([
-        fetch(`${gatewayUrl}/skills/selection${params.size ? `?${params.toString()}` : ''}`, {
-          headers,
-        }),
-        fetch(`${gatewayUrl}/skills/installed`, { headers }),
+      const client = createSkillsClient(gatewayUrl);
+      const tokenStr = accessToken ?? '';
+      const [selection, installed] = await Promise.all([
+        client.getSelection(tokenStr, {
+          ...(workspacePath.trim().length > 0 ? { workspacePath: workspacePath.trim() } : {}),
+        }) as Promise<SelectionGetResponse>,
+        client.listInstalled(tokenStr) as Promise<{ skills: InstalledSkillDto[] }>,
       ]);
-      if (!selectionRes.ok) throw new Error(`selection ${selectionRes.status}`);
-      if (!installedRes.ok) throw new Error(`installed ${installedRes.status}`);
-      const selection = (await selectionRes.json()) as SelectionGetResponse;
-      const installed = (await installedRes.json()) as { skills: InstalledSkillDto[] };
       setRows(buildRows(installed.skills, selection.effective));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [gatewayUrl, headers, workspacePath]);
+  }, [gatewayUrl, accessToken, workspacePath]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -242,18 +229,10 @@ export default function SkillSelectionPage(): React.ReactElement {
           pinned: row.pinned,
           reason: row.reason,
         }));
-      const res = await fetch(`${gatewayUrl}/skills/selection`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({
-          workspacePath: workspacePath.trim() || null,
-          items,
-        }),
+      await createSkillsClient(gatewayUrl).putSelection(accessToken ?? '', {
+        workspacePath: workspacePath.trim() || null,
+        items,
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `save failed: ${res.status}`);
-      }
       setHint('已保存。下次新建会话生效。');
       await refresh();
     } catch (err) {
@@ -261,7 +240,7 @@ export default function SkillSelectionPage(): React.ReactElement {
     } finally {
       setSaving(false);
     }
-  }, [gatewayUrl, headers, refresh, rows, workspacePath]);
+  }, [gatewayUrl, accessToken, refresh, rows, workspacePath]);
 
   const tokenEstimate = useMemo<PinnedTokenEstimate>(
     () =>
@@ -521,7 +500,7 @@ export default function SkillSelectionPage(): React.ReactElement {
         open={recommendOpen}
         onClose={() => setRecommendOpen(false)}
         gatewayUrl={gatewayUrl}
-        headers={headers}
+        token={accessToken ?? ''}
         workspacePath={workspacePath}
         currentSelection={rows
           .filter((row) => !row.isBuiltin && row.isInstalled && row.enabled)

@@ -4,13 +4,13 @@ export const RIGHT_PANEL_TABS = [
   { id: 'overview', label: '概览' },
   { id: 'plan', label: '计划' },
   { id: 'tools', label: '工具' },
+  { id: 'bookmarks', label: '收藏' },
   { id: 'terminals', label: '终端' },
   { id: 'skills', label: 'Skills' },
   { id: 'history', label: '历史' },
   { id: 'viz', label: '可视化' },
   { id: 'mcp', label: 'MCP' },
   { id: 'agent', label: '代理' },
-  { id: 'browser', label: '浏览器' },
 ] as const;
 
 export type RightPanelTabId = (typeof RIGHT_PANEL_TABS)[number]['id'];
@@ -20,6 +20,7 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     overview: { title: '会话概览', description: '查看当前会话、上下文注入与运行摘要。' },
     plan: { title: '计划面板', description: '聚焦当前任务拆解、优先级与执行进度。' },
     tools: { title: '工具记录', description: '浏览工具调用、筛选分类，并快速定位输出。' },
+    bookmarks: { title: '消息收藏', description: '查看收藏的重要消息，支持备注和跳转。' },
     terminals: {
       title: '终端管理',
       description: '查看当前会话的运行/已完成终端，查看输出或快速终止。',
@@ -32,7 +33,6 @@ export const RIGHT_PANEL_TAB_META: Record<RightPanelTabId, { description: string
     viz: { title: '执行可视化', description: '从图谱与事件时间线理解当前执行路径。' },
     mcp: { title: 'MCP 状态', description: '检查 MCP 服务连接状态与可用能力。' },
     agent: { title: '代理详情', description: '查看子代理会话、日志与运行细节。' },
-    browser: { title: '内置浏览器', description: '在面板中直接浏览网页，桌面端使用原生 Webview。' },
   };
 
 export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
@@ -76,6 +76,13 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
       </svg>
     );
   }
+  if (tabId === 'bookmarks') {
+    return (
+      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+      </svg>
+    );
+  }
   if (tabId === 'terminals') {
     return (
       <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
@@ -112,16 +119,6 @@ export function renderRightPanelTabIcon(tabId: RightPanelTabId): ReactNode {
         <circle cx="18" cy="14" r="2.5" />
         <path d="M8 16.7l2.5-7" />
         <path d="M13.8 7.5l2.4 4.8" />
-      </svg>
-    );
-  }
-  if (tabId === 'browser') {
-    return (
-      <svg aria-hidden="true" focusable="false" role="presentation" {...iconProps}>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M3.6 9h16.8" />
-        <path d="M3.6 15h16.8" />
-        <path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9z" />
       </svg>
     );
   }

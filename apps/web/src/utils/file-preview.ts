@@ -1,7 +1,7 @@
 export const DEFAULT_FILE_PREVIEW_HEIGHT = 280;
 export const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 
-export type FilePreviewKind = 'html' | 'css' | 'javascript';
+export type FilePreviewKind = 'html' | 'css' | 'javascript' | 'markdown' | 'svg' | 'image' | 'json';
 
 export function getCodeBlockPreviewKind(language: string | undefined): FilePreviewKind | null {
   if (language === 'html') {
@@ -32,6 +32,30 @@ export function getFilePreviewKind(path: string): FilePreviewKind | null {
 
   if (ext === 'js' || ext === 'mjs' || ext === 'cjs') {
     return 'javascript';
+  }
+
+  if (ext === 'md' || ext === 'mdx' || ext === 'markdown') {
+    return 'markdown';
+  }
+
+  if (ext === 'svg') {
+    return 'svg';
+  }
+
+  if (
+    ext === 'png' ||
+    ext === 'jpg' ||
+    ext === 'jpeg' ||
+    ext === 'gif' ||
+    ext === 'webp' ||
+    ext === 'bmp' ||
+    ext === 'ico'
+  ) {
+    return 'image';
+  }
+
+  if (ext === 'json' || ext === 'jsonc') {
+    return 'json';
   }
 
   return null;
@@ -180,6 +204,22 @@ export function getPreviewBadgeLabel(previewKind: FilePreviewKind): string {
     return '脚本预览';
   }
 
+  if (previewKind === 'markdown') {
+    return 'Markdown 预览';
+  }
+
+  if (previewKind === 'svg') {
+    return 'SVG 预览';
+  }
+
+  if (previewKind === 'image') {
+    return '图片预览';
+  }
+
+  if (previewKind === 'json') {
+    return 'JSON 预览';
+  }
+
   return '静态预览';
 }
 
@@ -192,6 +232,22 @@ export function getPreviewTitle(previewKind: FilePreviewKind): string {
     return 'JavaScript 预览';
   }
 
+  if (previewKind === 'markdown') {
+    return 'Markdown 预览';
+  }
+
+  if (previewKind === 'svg') {
+    return 'SVG 预览';
+  }
+
+  if (previewKind === 'image') {
+    return '图片预览';
+  }
+
+  if (previewKind === 'json') {
+    return 'JSON 格式化预览';
+  }
+
   return 'HTML 预览';
 }
 
@@ -202,6 +258,22 @@ export function getPreviewNote(previewKind: FilePreviewKind): string {
 
   if (previewKind === 'javascript') {
     return '当前脚本仅在隔离 iframe 中运行：允许脚本执行，但不会获得宿主页同源权限。';
+  }
+
+  if (previewKind === 'markdown') {
+    return '渲染 Markdown 内容为富文本格式，支持 GFM 表格、代码高亮、任务列表等。';
+  }
+
+  if (previewKind === 'svg') {
+    return '直接渲染 SVG 矢量图形，支持缩放查看。';
+  }
+
+  if (previewKind === 'image') {
+    return '图片预览，支持缩放和适应窗口。';
+  }
+
+  if (previewKind === 'json') {
+    return 'JSON 数据格式化展示，支持折叠和语法高亮。';
   }
 
   return '安全沙箱预览：用户脚本已移除，外链将在新窗口打开。';

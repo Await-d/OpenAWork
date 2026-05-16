@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
 import type {
   ArtifactContentType,
   ArtifactRecord,
@@ -9,7 +10,6 @@ import type {
   ArtifactSessionSummary,
   ArtifactVersionsResponse,
   SessionArtifactsResponse,
-  SessionsListResponse,
 } from './artifact-workspace-types.js';
 
 interface UseArtifactsWorkspaceOptions {
@@ -22,20 +22,6 @@ interface CreateArtifactDraft {
   content: string;
   title: string;
   type: ArtifactContentType;
-}
-
-function buildHeaders(token: string): HeadersInit {
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return (await response.json()) as T;
 }
 
 export function useArtifactsWorkspace({
@@ -55,23 +41,11 @@ export function useArtifactsWorkspace({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [versions, setVersions] = useState<ArtifactVersionRecord[]>([]);
 
-  const fetchJson = useCallback(
-    async <T>(path: string, init?: RequestInit): Promise<T> => {
-      if (!token) {
-        throw new Error('未登录');
-      }
-      const response = await fetch(`${gatewayUrl}${path}`, {
-        ...init,
-        headers: {
-          ...(init?.headers ?? {}),
-          ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      return parseJsonResponse<T>(response);
-    },
-    [gatewayUrl, token],
+  const artifactsClient = useMemo(
+    () => createArtifactsClient<ArtifactRecord, ArtifactVersionRecord>(gatewayUrl),
+    [gatewayUrl],
   );
+  const sessionsClient = useMemo(() => createSessionsClient(gatewayUrl), [gatewayUrl]);
 
   const loadSessions = useCallback(async () => {
     if (!token) {
@@ -83,11 +57,12 @@ export function useArtifactsWorkspace({
     setLoadingSessions(true);
     setError(null);
     try {
-      const payload = await fetchJson<SessionsListResponse>('/sessions');
-      const nextSessions = (payload.sessions ?? []).map((session) => ({
+      const list = await sessionsClient.list(token);
+      const nextSessions = (list ?? []).map((session) => ({
         id: session.id,
-        title: session.title,
-        updatedAt: session.updated_at,
+        title: session.title ?? null,
+        updatedAt:
+          (session as unknown as { updated_at?: string; updatedAt?: number }).updated_at ?? '',
       }));
       setSessions(nextSessions);
 
@@ -106,16 +81,18 @@ export function useArtifactsWorkspace({
     } finally {
       setLoadingSessions(false);
     }
-  }, [fetchJson, preferredSessionId, token]);
+  }, [preferredSessionId, sessionsClient, token]);
 
   const loadSessionArtifacts = useCallback(
     async (sessionId: string) => {
+      if (!token) return;
       setLoadingArtifacts(true);
       setError(null);
       try {
-        const payload = await fetchJson<SessionArtifactsResponse>(
-          `/sessions/${sessionId}/artifacts`,
-        );
+        const payload = (await artifactsClient.listForSession(
+          token,
+          sessionId,
+        )) as unknown as SessionArtifactsResponse;
         const nextArtifacts = payload.contentArtifacts ?? [];
         setSessionArtifacts(nextArtifacts);
         setSelectedArtifactId((current) =>
@@ -133,15 +110,17 @@ export function useArtifactsWorkspace({
         setLoadingArtifacts(false);
       }
     },
-    [fetchJson],
+    [artifactsClient, token],
   );
 
   const loadArtifactVersions = useCallback(
     async (artifactId: string) => {
+      if (!token) return;
       try {
-        const payload = await fetchJson<ArtifactVersionsResponse>(
-          `/artifacts/${artifactId}/versions`,
-        );
+        const payload = (await artifactsClient.listVersions(
+          token,
+          artifactId,
+        )) as unknown as ArtifactVersionsResponse;
         setSelectedArtifact(payload.artifact);
         setVersions(payload.versions);
       } catch (loadError) {
@@ -150,7 +129,7 @@ export function useArtifactsWorkspace({
         setError(loadError instanceof Error ? loadError.message : '加载版本失败');
       }
     },
-    [fetchJson],
+    [artifactsClient, token],
   );
 
   useEffect(() => {
@@ -201,15 +180,12 @@ export function useArtifactsWorkspace({
       setSaving(true);
       setError(null);
       try {
-        const payload = await fetchJson<{ artifact: ArtifactRecord }>('/artifacts', {
-          method: 'POST',
-          body: JSON.stringify({
-            sessionId: selectedSessionId,
-            title: draft.title,
-            content: draft.content,
-            type: draft.type,
-            createdBy: 'user',
-          }),
+        const payload = await artifactsClient.create(token, {
+          sessionId: selectedSessionId,
+          title: draft.title,
+          content: draft.content,
+          type: draft.type,
+          createdBy: 'user',
         });
         await loadSessionArtifacts(selectedSessionId);
         setSelectedArtifactId(payload.artifact.id);
@@ -222,7 +198,7 @@ export function useArtifactsWorkspace({
         setSaving(false);
       }
     },
-    [fetchJson, loadSessionArtifacts, selectedSessionId, token],
+    [artifactsClient, loadSessionArtifacts, selectedSessionId, token],
   );
 
   const saveArtifact = useCallback(
@@ -234,13 +210,10 @@ export function useArtifactsWorkspace({
       setSaving(true);
       setError(null);
       try {
-        await fetchJson<{ artifact: ArtifactRecord }>(`/artifacts/${selectedArtifactId}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            title: draft.title,
-            content: draft.content,
-            createdBy: 'user',
-          }),
+        await artifactsClient.update(token, selectedArtifactId, {
+          title: draft.title,
+          content: draft.content,
+          createdBy: 'user',
         });
         await loadSessionArtifacts(selectedSessionId);
         await loadArtifactVersions(selectedArtifactId);
@@ -254,7 +227,7 @@ export function useArtifactsWorkspace({
       }
     },
     [
-      fetchJson,
+      artifactsClient,
       loadArtifactVersions,
       loadSessionArtifacts,
       selectedArtifactId,
@@ -272,9 +245,9 @@ export function useArtifactsWorkspace({
       setRevertingVersionId(versionId);
       setError(null);
       try {
-        await fetchJson<{ artifact: ArtifactRecord }>(`/artifacts/${selectedArtifactId}/revert`, {
-          method: 'POST',
-          body: JSON.stringify({ versionId, createdBy: 'user' }),
+        await artifactsClient.revert(token, selectedArtifactId, {
+          versionId,
+          createdBy: 'user',
         });
         await loadSessionArtifacts(selectedSessionId);
         await loadArtifactVersions(selectedArtifactId);
@@ -288,7 +261,7 @@ export function useArtifactsWorkspace({
       }
     },
     [
-      fetchJson,
+      artifactsClient,
       loadArtifactVersions,
       loadSessionArtifacts,
       selectedArtifactId,

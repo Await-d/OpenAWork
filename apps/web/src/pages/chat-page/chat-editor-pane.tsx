@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { FileEditorPanel } from '../../components/FileEditorPanel.js';
+import { BuiltInBrowser } from '../../components/chat/BuiltInBrowser.js';
 import type { OpenFile } from '../../hooks/useFileEditor.js';
+
+export type EditorPaneTab = 'code' | 'browser';
 
 export interface ChatEditorPaneProps {
   editorMode: boolean;
@@ -20,6 +23,12 @@ export interface ChatEditorPaneProps {
   };
   saving: boolean;
   handleSaveFile: (path: string) => Promise<void>;
+  /** Browser preview URL — when set, shows a browser tab in the editor pane. */
+  browserPreviewUrl?: string | null;
+  /** Active tab in the editor pane. */
+  activeTab?: EditorPaneTab;
+  /** Callback when the active tab changes. */
+  onTabChange?: (tab: EditorPaneTab) => void;
 }
 
 export function ChatEditorPane({
@@ -31,7 +40,26 @@ export function ChatEditorPane({
   fileEditor,
   saving,
   handleSaveFile,
+  browserPreviewUrl,
+  activeTab = 'code',
+  onTabChange,
 }: ChatEditorPaneProps) {
+  const [localTab, setLocalTab] = useState<EditorPaneTab>('code');
+  const currentTab = onTabChange ? activeTab : localTab;
+  const setCurrentTab = onTabChange ?? setLocalTab;
+
+  // Keep browser mounted once activated (preserves page state across tab switches)
+  const [browserMounted, setBrowserMounted] = useState(false);
+  const showBrowserTab = !!browserPreviewUrl || browserMounted;
+
+  // Auto-switch to browser tab when a preview URL is first detected
+  useEffect(() => {
+    if (browserPreviewUrl) {
+      setBrowserMounted(true);
+      setCurrentTab('browser');
+    }
+  }, [browserPreviewUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <>
       <button
@@ -73,19 +101,155 @@ export function ChatEditorPane({
             : 'width 240ms ease, opacity 180ms ease, transform 240ms ease, border-color 180ms ease',
         }}
       >
-        <FileEditorPanel
-          files={fileEditor.openFiles}
-          activeFile={fileEditor.activeFile}
-          activeFilePath={fileEditor.activeFilePath}
-          isDirty={fileEditor.isDirty}
-          saving={saving}
-          saveError={fileEditor.saveError}
-          onActivate={fileEditor.setActiveFilePath}
-          onClose={fileEditor.closeFile}
-          onChange={fileEditor.updateContent}
-          onSave={handleSaveFile}
-        />
+        {/* Tab bar when browser preview is available */}
+        {showBrowserTab && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0,
+              borderBottom: '1px solid var(--border-subtle)',
+              background: 'var(--header-bg)',
+              flexShrink: 0,
+              padding: '0 4px',
+              minHeight: 32,
+            }}
+          >
+            <EditorPaneTabButton
+              label="代码"
+              icon={
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="16 18 22 12 16 6" />
+                  <polyline points="8 6 2 12 8 18" />
+                </svg>
+              }
+              active={currentTab === 'code'}
+              onClick={() => setCurrentTab('code')}
+            />
+            <EditorPaneTabButton
+              label="预览"
+              icon={
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              }
+              active={currentTab === 'browser'}
+              onClick={() => setCurrentTab('browser')}
+              badge
+            />
+          </div>
+        )}
+
+        {/* Code editor */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: currentTab === 'code' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}
+        >
+          <FileEditorPanel
+            files={fileEditor.openFiles}
+            activeFile={fileEditor.activeFile}
+            activeFilePath={fileEditor.activeFilePath}
+            isDirty={fileEditor.isDirty}
+            saving={saving}
+            saveError={fileEditor.saveError}
+            onActivate={fileEditor.setActiveFilePath}
+            onClose={fileEditor.closeFile}
+            onChange={fileEditor.updateContent}
+            onSave={handleSaveFile}
+          />
+        </div>
+
+        {/* Browser preview — stays mounted once activated */}
+        {browserMounted && (
+          <BuiltInBrowser
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: currentTab === 'browser' ? 'flex' : 'none',
+            }}
+            previewUrl={browserPreviewUrl}
+            hidden={currentTab !== 'browser'}
+          />
+        )}
       </div>
     </>
+  );
+}
+
+function EditorPaneTabButton({
+  label,
+  icon,
+  active,
+  onClick,
+  badge = false,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+  badge?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        height: 28,
+        padding: '0 10px',
+        borderRadius: '6px 6px 0 0',
+        border: 'none',
+        borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+        background: active ? 'color-mix(in oklch, var(--accent) 6%, transparent)' : 'transparent',
+        color: active ? 'var(--accent)' : 'var(--text-3)',
+        fontSize: 11,
+        fontWeight: active ? 600 : 500,
+        cursor: 'pointer',
+        transition: 'color 100ms ease, border-color 100ms ease, background 100ms ease',
+        position: 'relative',
+      }}
+    >
+      {icon}
+      {label}
+      {badge && (
+        <span
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: '50%',
+            background: 'var(--accent)',
+            position: 'absolute',
+            top: 5,
+            right: 5,
+          }}
+        />
+      )}
+    </button>
   );
 }

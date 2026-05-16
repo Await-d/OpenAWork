@@ -18,6 +18,7 @@ import type {
   SessionTask,
 } from '@openAwork/web-client';
 import {
+  createArtifactsClient,
   createPendingPermissionRequestSnapshot,
   createQuestionsClient,
   createSessionsClient,
@@ -28,7 +29,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useFileEditorContext } from '../App.js';
 import { usePageActivation } from '../components/CachedRouteOutlet.js';
-import { ChatComposer } from '../components/chat/ChatComposer.js';
+
 import { ChatImageGenerationResultStrip } from '../components/chat/ChatImageGenerationResultStrip.js';
 import {
   ModelPicker,
@@ -38,6 +39,7 @@ import {
   sharedUiThemeVars,
   WelcomeScreen,
 } from '../components/chat/ChatPageSections.js';
+import { UnifiedComposer } from '../components/chat/UnifiedComposer.js';
 import { ChatTopBar } from '../components/chat/ChatTopBar.js';
 import { SessionTerminalsChip } from '../components/chat/SessionTerminalsChip.js';
 import {
@@ -59,7 +61,6 @@ import { useGatewayClient } from '../hooks/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion.js';
 import { useWorkspace } from '../hooks/useWorkspace.js';
 import { useAuthStore } from '../stores/auth.js';
-import { useChatQueueStore } from '../stores/chat-queue.js';
 import { useUIStateStore } from '../stores/uiState.js';
 import {
   type ChatSettingsProvider,
@@ -123,16 +124,7 @@ import {
 } from './chat-page/image-edit-reference-artifacts.js';
 import { makeOrderedMessageId } from './chat-page/ordered-id.js';
 import { isAutoAcceptEnabled } from './chat-page/permission-auto-respond.js';
-import {
-  deleteQueuedComposerFiles,
-  restoreQueuedComposerFiles,
-} from './chat-page/queued-composer-file-store.js';
-import {
-  createQueuedComposerPreview,
-  hydrateQueuedComposerMessage,
-  type QueuedComposerMessage,
-  toPersistedQueuedComposerMessage,
-} from './chat-page/queued-composer-state.js';
+import { deleteQueuedComposerFiles } from './chat-page/queued-composer-file-store.js';
 import RetryModeDialog from './chat-page/retry-mode-dialog.js';
 import { startSequentialPolling } from './chat-page/sequential-polling.js';
 import { executeServerCommand } from './chat-page/server-command-item.js';
@@ -221,9 +213,6 @@ import {
 } from './chat-page/use-chat-message-actions.js';
 import { useChatRenderData } from './chat-page/use-chat-render-data.js';
 import { useChatUiActions } from './chat-page/use-chat-ui-actions.js';
-import { useComposerCallbacks } from './chat-page/use-composer-callbacks.js';
-import { useComposerMenuItems } from './chat-page/use-composer-menu-items.js';
-import { useComposerQueue } from './chat-page/use-composer-queue.js';
 import { useModelPrices } from './chat-page/use-model-prices.js';
 import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
 import { useScrollManager } from './chat-page/use-scroll-manager.js';
@@ -252,6 +241,23 @@ import {
   startChatRightPanelRun,
 } from './chat-stream-state.js';
 import { type DialogueMode, getDefaultAgentForDialogueMode } from './dialogue-mode.js';
+import {
+  CommandPalette,
+  useCommandPalette,
+  type CommandPaletteItem,
+} from '../components/chat/command-palette.js';
+import { PromptTemplatePanel } from '../components/chat/prompt-template-panel.js';
+import {
+  useMessageMultiSelect,
+  MultiSelectToolbar,
+} from '../components/chat/message-multi-select.js';
+import {
+  exportMessages,
+  downloadExport,
+  copyExportToClipboard,
+} from '../components/chat/message-export.js';
+import { useBookmarkStore } from '../stores/bookmarks.js';
+import { useChatKeyboardShortcuts } from '../hooks/useChatKeyboardShortcuts.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
 const LOAD_MORE_MESSAGE_INCREMENT = 20;
@@ -276,8 +282,6 @@ export default function ChatPage() {
   const [activeModelId, setActiveModelId] = useState<string>('');
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
   const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
-  const [showModelPicker, setShowModelPicker] = useState(false);
-  const [showModelSettings, setShowModelSettings] = useState(false);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [stoppingStream, setStoppingStream] = useState(false);
@@ -302,12 +306,10 @@ export default function ChatPage() {
   const [activeStreamFirstTokenLatencyMs, setActiveStreamFirstTokenLatencyMs] = useState<
     number | null
   >(null);
-  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const contentColumnRef = useRef<HTMLDivElement>(null);
   const scrollRegionRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
@@ -344,10 +346,7 @@ export default function ChatPage() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
-  const [attachmentItems, setAttachmentItems] = useState<AttachmentItem[]>([]);
-  const [showVoice, setShowVoice] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [queuedComposerMessages, setQueuedComposerMessages] = useState<QueuedComposerMessage[]>([]);
   const [sessionReloadNonce, setSessionReloadNonce] = useState(0);
   const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(false);
@@ -410,9 +409,12 @@ export default function ChatPage() {
   const [sessionModesHydrated, setSessionModesHydrated] = useState(false);
   const [sessionMetadataDirty, setSessionMetadataDirty] = useState(false);
   const [workspaceFileItems, setWorkspaceFileItems] = useState<WorkspaceFileMentionItem[]>([]);
-  const [composerMenu, setComposerMenu] = useState<ComposerMenuState>(null);
-  const modelPickerBtnRef = useRef<HTMLButtonElement>(null);
-  const modelSettingsBtnRef = useRef<HTMLButtonElement>(null);
+
+  // ─── Enhanced chat operations state ───────────────────────────────────────
+  const [showTemplatePanel, setShowTemplatePanel] = useState(false);
+  const bookmarkStore = useBookmarkStore();
+  const multiSelect = useMessageMultiSelect();
+
   const lastPersistedSessionMetadataSnapshotRef = useRef<string | null>(null);
   const composerCommandDescriptors = useCommandRegistry('composer');
   const prefersReducedMotion = usePrefersReducedMotion();
@@ -429,10 +431,9 @@ export default function ChatPage() {
   const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
+  const toggleLeftSidebar = useUIStateStore((s) => s.toggleLeftSidebar);
   const splitDragging = useRef(false);
   const rightOpenRef = useRef(rightOpen);
-  const queueFlushInFlightRef = useRef(false);
-  const queueHydratingRef = useRef(false);
   const {
     streamRevealTargetRef,
     streamRevealVisibleRef,
@@ -469,23 +470,11 @@ export default function ChatPage() {
       sessionViewEpochRef,
       currentSessionViewRef,
     });
-  const sendMessageRef = useRef<
-    (
-      overrideText?: string,
-      options?: {
-        forcedSessionId?: string;
-        queuedAttachmentItems?: AttachmentItem[];
-        queuedFiles?: File[];
-        queuedMessageId?: string;
-      },
-    ) => Promise<boolean>
-  >(async () => false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const fileEditor = useFileEditor();
   const [saving, setSaving] = useState(false);
   const openFileRef = useFileEditorContext();
-  const replacePersistedQueue = useChatQueueStore((state) => state.replaceQueue);
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
@@ -651,92 +640,6 @@ export default function ChatPage() {
   }, [currentSessionId, sessionId]);
 
   useEffect(() => {
-    let cancelled = false;
-    queueHydratingRef.current = true;
-    queueFlushInFlightRef.current = false;
-
-    const persistedQueue = queuedComposerScope
-      ? (useChatQueueStore.getState().queuesByScope[queuedComposerScope] ?? [])
-      : [];
-
-    const finishHydration = (items: QueuedComposerMessage[]) => {
-      if (cancelled) {
-        return;
-      }
-      setQueuedComposerMessages(items);
-      queueHydratingRef.current = false;
-    };
-
-    if (!queuedComposerScope || persistedQueue.length === 0) {
-      finishHydration([]);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void Promise.all(
-      persistedQueue.map(async (item) => {
-        const hydratedItem = hydrateQueuedComposerMessage(item);
-        if (item.attachmentItems.length === 0) {
-          return hydratedItem;
-        }
-
-        const restoredFiles = await restoreQueuedComposerFiles({
-          attachmentItems: item.attachmentItems,
-          queueId: item.id,
-          scope: queuedComposerScope,
-        });
-
-        if (restoredFiles.restored) {
-          return {
-            ...hydratedItem,
-            files: restoredFiles.files,
-            requiresAttachmentRebind: false,
-          } satisfies QueuedComposerMessage;
-        }
-
-        return {
-          ...hydratedItem,
-          requiresAttachmentRebind:
-            hydratedItem.requiresAttachmentRebind || item.attachmentItems.length > 0,
-        } satisfies QueuedComposerMessage;
-      }),
-    )
-      .then((items) => {
-        finishHydration(items);
-      })
-      .catch(() => {
-        finishHydration(
-          persistedQueue.map((item) => ({
-            ...hydrateQueuedComposerMessage(item),
-            requiresAttachmentRebind:
-              item.requiresAttachmentRebind || item.attachmentItems.length > 0,
-          })),
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [queuedComposerScope]);
-
-  useEffect(() => {
-    if (!queuedComposerScope) {
-      return;
-    }
-
-    if (queueHydratingRef.current) {
-      queueHydratingRef.current = false;
-      return;
-    }
-
-    replacePersistedQueue(
-      queuedComposerScope,
-      queuedComposerMessages.map((item) => toPersistedQueuedComposerMessage(item)),
-    );
-  }, [queuedComposerMessages, queuedComposerScope, replacePersistedQueue]);
-
-  useEffect(() => {
     return subscribeCurrentSessionRefresh((targetSessionId) => {
       if (targetSessionId === activeSessionRef.current) {
         setSessionReloadNonce((value) => value + 1);
@@ -772,24 +675,13 @@ export default function ChatPage() {
     const controller = new AbortController();
     let cancelled = false;
 
-    void fetch(`${gatewayUrl}/sessions/${currentSessionId}/artifacts`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        return (await response.json()) as SessionArtifactsResponse;
-      })
-      .then((payload) => {
+    void createArtifactsClient(gatewayUrl)
+      .listForSession(token, currentSessionId, { signal: controller.signal })
+      .then((rawPayload) => {
         if (cancelled) {
           return;
         }
-
+        const payload = rawPayload as unknown as SessionArtifactsResponse;
         setSessionImageEditReferenceArtifacts(
           toImageEditReferenceArtifacts(payload.contentArtifacts ?? []),
         );
@@ -1070,10 +962,6 @@ export default function ChatPage() {
       : [];
   const activeStreamMessageId =
     currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
-  const queuedComposerPreviews = useMemo(
-    () => queuedComposerMessages.map((item) => createQueuedComposerPreview(item)),
-    [queuedComposerMessages],
-  );
 
   const shouldPollSessionSubresources = useMemo(
     () =>
@@ -1886,7 +1774,6 @@ export default function ChatPage() {
 
   const focusComposerWithText = useCallback((text: string) => {
     setInput(text);
-    setComposerMenu(null);
     requestAnimationFrame(() => {
       if (!textareaRef.current) return;
       textareaRef.current.focus();
@@ -1900,7 +1787,6 @@ export default function ChatPage() {
       const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
       return `${previous}${separator}${text}`;
     });
-    setComposerMenu(null);
     requestAnimationFrame(() => {
       if (!textareaRef.current) return;
       textareaRef.current.focus();
@@ -2054,19 +1940,10 @@ export default function ChatPage() {
   const truncateSessionMessagesInPlace = useCallback(
     async (sessionId: string, messageId: string, messageText?: string): Promise<Message[]> => {
       if (!token) return [];
-      const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ messageId, inclusive: true, messageText }),
+      return createSessionsClient(gatewayUrl).truncateMessages(token, sessionId, messageId, {
+        inclusive: true,
+        ...(messageText !== undefined ? { messageText } : {}),
       });
-      if (!res.ok) {
-        throw new Error(`Failed to truncate session messages: ${res.status}`);
-      }
-      const data = (await res.json()) as { messages?: Message[] };
-      return data.messages ?? [];
     },
     [gatewayUrl, token],
   );
@@ -2163,31 +2040,6 @@ export default function ChatPage() {
     return session.id;
   }
 
-  const {
-    appendFiles,
-    handleFileChange,
-    removeFile,
-    removeAttachment,
-    clearComposerDraft,
-    enqueueComposerMessage,
-    removeQueuedComposerMessage,
-    restoreQueuedComposerMessage,
-  } = useComposerQueue({
-    input,
-    setInput,
-    attachedFiles,
-    setAttachedFiles,
-    attachmentItems,
-    setAttachmentItems,
-    queuedComposerMessages,
-    setQueuedComposerMessages,
-    queuedComposerScope,
-    setComposerMenu,
-    setStreamError,
-    textareaRef,
-    fileInputRef,
-  });
-
   const appendImageGenerationSummaryMessage = useCallback(
     (input: {
       artifactTitle: string;
@@ -2231,8 +2083,8 @@ export default function ChatPage() {
       queuedMessageId?: string;
     },
   ): Promise<boolean> {
-    const sourceInput = sanitizeComposerPlainText(overrideText ?? input);
-    const effectiveFiles = options?.queuedFiles ?? attachedFiles;
+    const sourceInput = sanitizeComposerPlainText(overrideText ?? '');
+    const effectiveFiles = options?.queuedFiles ?? [];
     if (
       (!sourceInput.trim() && (imageGenerationMode || effectiveFiles.length === 0)) ||
       streaming ||
@@ -2251,10 +2103,6 @@ export default function ChatPage() {
         setStreamError(message);
         toast(message, 'warning');
         return false;
-      }
-
-      if (overrideText === undefined && options?.queuedFiles === undefined) {
-        clearComposerDraft();
       }
 
       let sid: string;
@@ -2343,10 +2191,6 @@ export default function ChatPage() {
             ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
             ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
           }));
-        if (options?.queuedFiles === undefined) {
-          setAttachedFiles([]);
-          setAttachmentItems([]);
-        }
       }
 
       const requestStartedAt = Date.now();
@@ -2422,17 +2266,11 @@ export default function ChatPage() {
         : null;
 
     if (matchedClientCommand?.action.kind === 'open_companion_panel') {
-      if (overrideText === undefined && options?.queuedFiles === undefined) {
-        clearComposerDraft();
-      }
       setCompanionPanelSignal((value) => value + 1);
       return true;
     }
 
     if (matchedServerCommand) {
-      if (overrideText === undefined && options?.queuedFiles === undefined) {
-        clearComposerDraft();
-      }
       await executeServerCommand({
         command: matchedServerCommand,
         currentSessionId,
@@ -2457,10 +2295,6 @@ export default function ChatPage() {
       });
       requestSessionListRefresh();
       return true;
-    }
-
-    if (overrideText === undefined && options?.queuedFiles === undefined) {
-      clearComposerDraft();
     }
 
     let sid: string;
@@ -2510,10 +2344,6 @@ export default function ChatPage() {
         .filter((attachment) => attachment.type !== 'image')
         .map((attachment) => buildUploadedAttachmentSummaryLine(attachment));
       text = appendAttachmentSummary(text, uploadedAttachmentLines);
-      if (options?.queuedFiles === undefined) {
-        setAttachedFiles([]);
-        setAttachmentItems([]);
-      }
 
       if (imageInputParts.length > 0) {
         requestInputParts = imageInputParts;
@@ -2915,8 +2745,8 @@ export default function ChatPage() {
               if (detected) {
                 devServerDetectedTerminalIdsRef.current.add(terminalId);
                 setBrowserPreviewUrl(detected.url);
-                setRightOpen(true);
-                setRightTab('browser');
+                // Open the editor pane with browser preview instead of right panel
+                setEditorMode(true);
               }
             }
           }
@@ -3491,8 +3321,6 @@ export default function ChatPage() {
     });
     return true;
   }
-
-  sendMessageRef.current = sendMessage;
 
   const {
     resolveAssistantCapabilityKind,
@@ -4357,8 +4185,8 @@ export default function ChatPage() {
                 if (detected) {
                   devServerDetectedTerminalIdsRef.current.add(terminalId);
                   setBrowserPreviewUrl(detected.url);
-                  setRightOpen(true);
-                  setRightTab('browser');
+                  // Open the editor pane with browser preview
+                  setEditorMode(true);
                 }
               }
             }
@@ -4987,95 +4815,6 @@ export default function ChatPage() {
     token,
   ]);
 
-  useEffect(() => {
-    if (
-      queuedComposerMessages.length === 0 ||
-      isSessionLoading ||
-      (currentSessionId !== null && !isSessionSnapshotReady) ||
-      streaming ||
-      stoppingStream ||
-      canStopCurrentSessionStream ||
-      remoteSessionBusyState !== null ||
-      queueFlushInFlightRef.current
-    ) {
-      return;
-    }
-
-    const [nextQueuedMessage] = queuedComposerMessages;
-    if (!nextQueuedMessage) {
-      return;
-    }
-
-    if (nextQueuedMessage.requiresAttachmentRebind) {
-      return;
-    }
-
-    queueFlushInFlightRef.current = true;
-    setQueuedComposerMessages((previous) => previous.slice(1));
-
-    void sendMessageRef
-      .current(nextQueuedMessage.text, {
-        queuedAttachmentItems: nextQueuedMessage.attachmentItems,
-        queuedFiles: nextQueuedMessage.files,
-        queuedMessageId: nextQueuedMessage.id,
-      })
-      .then((sent) => {
-        if (sent) {
-          return;
-        }
-
-        setQueuedComposerMessages((previous) => [nextQueuedMessage, ...previous]);
-      })
-      .catch(() => {
-        setQueuedComposerMessages((previous) => [nextQueuedMessage, ...previous]);
-      })
-      .finally(() => {
-        queueFlushInFlightRef.current = false;
-      });
-  }, [
-    canStopCurrentSessionStream,
-    currentSessionId,
-    isSessionLoading,
-    isSessionSnapshotReady,
-    queuedComposerMessages,
-    remoteSessionBusyState,
-    stoppingStream,
-    streaming,
-  ]);
-
-  const { slashCommandItems, mentionItems } = useComposerMenuItems({
-    composerMenu,
-    composerCommandDescriptors,
-    composerWorkspaceCatalog,
-    workspaceFileItems,
-  });
-
-  const {
-    handleKeyDown,
-    handleInputChange,
-    handleInputSelect,
-    handlePaste,
-    replaceComposerToken,
-    applyComposerSelection,
-    updateComposerMenu,
-  } = useComposerCallbacks({
-    composerMenu,
-    setComposerMenu,
-    input,
-    setInput,
-    textareaRef,
-    slashCommandItems,
-    mentionItems,
-    stopCapability,
-    streaming,
-    canStopCurrentSessionStream,
-    remoteSessionBusyState,
-    stopActiveMessage,
-    enqueueComposerMessage,
-    sendMessage,
-    appendFiles,
-  });
-
   const composerVariant =
     messages.length === 0 &&
     !visibleStreaming &&
@@ -5129,7 +4868,38 @@ export default function ChatPage() {
     streamingOrderedParts: visibleStreamingSegments,
     resolveAssistantCapabilityKind,
     resolveInlinePermissionActions,
-    buildMessageActions,
+    buildMessageActions: (message) => {
+      const baseActions = buildMessageActions(message);
+      const isBookmarked = bookmarkStore.isBookmarked(message.id);
+      return [
+        ...baseActions,
+        {
+          id: 'bookmark',
+          label: isBookmarked ? '⭐ 已收藏' : '☆ 收藏',
+          onClick: () => {
+            if (isBookmarked) {
+              bookmarkStore.removeBookmark(message.id);
+            } else {
+              bookmarkStore.addBookmark({
+                messageId: message.id,
+                sessionId: currentSessionId ?? '',
+                content: message.content.slice(0, 200),
+                role: message.role,
+              });
+            }
+          },
+        },
+        ...(multiSelect.multiSelect.enabled
+          ? [
+              {
+                id: 'select',
+                label: multiSelect.isSelected(message.id) ? '☑ 已选' : '☐ 选择',
+                onClick: () => multiSelect.toggleMessage(message.id),
+              },
+            ]
+          : []),
+      ];
+    },
     handleCopyMessageGroup,
     openChildSessionInspector,
     selectedChildSessionId,
@@ -5143,24 +4913,281 @@ export default function ChatPage() {
 
   const chatSearch = useChatSearch({ messages, scrollRegionRef });
 
-  useEffect(() => {
-    if (!isPageActive) return undefined;
-    const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
-        if (event.key === 'f' || event.key === 'F') {
-          event.preventDefault();
-          chatSearch.open();
+  // ─── Command Palette items ──────────────────────────────────────────────
+  const commandPaletteItems = useMemo<CommandPaletteItem[]>(
+    () => [
+      {
+        id: 'search',
+        label: '在对话中查找',
+        description: '搜索当前会话的消息内容',
+        category: '导航',
+        shortcut: '⌘F',
+        icon: '🔍',
+        onExecute: () => chatSearch.open(),
+      },
+      {
+        id: 'templates',
+        label: '提示词模板',
+        description: '打开模板库，快速插入常用提示词',
+        category: '输入',
+        shortcut: '⌘⇧T',
+        icon: '📋',
+        onExecute: () => setShowTemplatePanel(true),
+      },
+      {
+        id: 'multi-select',
+        label: multiSelect.multiSelect.enabled ? '退出多选模式' : '多选消息',
+        description: '批量选择消息进行复制、导出或收藏',
+        category: '操作',
+        shortcut: '⌘⇧M',
+        icon: '☑',
+        onExecute: () => {
+          if (multiSelect.multiSelect.enabled) {
+            multiSelect.disableMultiSelect();
+          } else {
+            multiSelect.enableMultiSelect();
+          }
+        },
+      },
+      {
+        id: 'export-markdown',
+        label: '导出对话为 Markdown',
+        description: '将当前会话导出为 Markdown 文件',
+        category: '导出',
+        icon: '📤',
+        onExecute: () => {
+          const content = exportMessages(messages, 'markdown');
+          downloadExport(content, `chat-export-${Date.now()}.md`, 'text/markdown');
+        },
+      },
+      {
+        id: 'export-json',
+        label: '导出对话为 JSON',
+        description: '将当前会话导出为 JSON 文件',
+        category: '导出',
+        icon: '📦',
+        onExecute: () => {
+          const content = exportMessages(messages, 'json');
+          downloadExport(content, `chat-export-${Date.now()}.json`, 'application/json');
+        },
+      },
+      {
+        id: 'copy-last-assistant',
+        label: '复制最后一条助手消息',
+        description: '将最近的助手回复复制到剪贴板',
+        category: '操作',
+        shortcut: '⌘⇧C',
+        icon: '📋',
+        onExecute: () => {
+          const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+          if (lastAssistant) {
+            handleCopyMessage(lastAssistant);
+            toast('已复制最后一条助手消息', 'success');
+          }
+        },
+      },
+      {
+        id: 'toggle-editor',
+        label: editorMode ? '关闭编辑器' : '打开编辑器',
+        description: '切换分屏代码编辑器',
+        category: '视图',
+        icon: '💻',
+        onExecute: () => setEditorMode(!editorMode),
+      },
+      {
+        id: 'open-browser-preview',
+        label: '打开浏览器预览',
+        description: '在编辑器面板中打开内置浏览器（输入 URL 或自动检测 dev server）',
+        category: '视图',
+        icon: '🌐',
+        onExecute: () => {
+          // Set a default URL if none detected yet
+          if (!browserPreviewUrl) {
+            setBrowserPreviewUrl('http://localhost:3000');
+          }
+          setEditorMode(true);
+        },
+      },
+      {
+        id: 'toggle-right-panel',
+        label: rightOpen ? '收起右侧面板' : '展开右侧面板',
+        description: '切换计划/工具/概览面板',
+        category: '视图',
+        shortcut: '⌘\\',
+        icon: '📊',
+        onExecute: () => setRightOpen((v) => !v),
+      },
+      {
+        id: 'compact-session',
+        label: '压缩当前会话',
+        description: '压缩对话历史以释放上下文空间',
+        category: '会话',
+        icon: '🗜',
+        onExecute: () => void handleCompactCurrentSession(),
+      },
+      {
+        id: 'new-session',
+        label: '新建会话',
+        description: '创建一个新的对话会话',
+        category: '会话',
+        shortcut: '⌘N',
+        icon: '✨',
+        onExecute: () => {
+          navigate('/chat');
+          navigateToHome();
+        },
+      },
+      {
+        id: 'toggle-yolo',
+        label: yoloMode ? '关闭 YOLO 模式' : '开启 YOLO 模式',
+        description: '切换自动审批模式',
+        category: '设置',
+        icon: '⚡',
+        onExecute: () => handleToggleYolo(),
+      },
+      {
+        id: 'view-bookmarks',
+        label: '查看收藏消息',
+        description: `当前会话有 ${bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length} 条收藏`,
+        category: '操作',
+        icon: '⭐',
+        onExecute: () => {
+          setRightOpen(true);
+          setRightTab('overview');
+        },
+      },
+    ],
+    [
+      chatSearch,
+      messages,
+      multiSelect,
+      editorMode,
+      rightOpen,
+      yoloMode,
+      currentSessionId,
+      bookmarkStore,
+      handleCopyMessage,
+      handleCompactCurrentSession,
+      navigate,
+      navigateToHome,
+      setEditorMode,
+      setRightOpen,
+      setRightTab,
+      handleToggleYolo,
+    ],
+  );
+
+  const commandPalette = useCommandPalette({
+    items: commandPaletteItems,
+    enabled: isPageActive,
+  });
+
+  // ─── Keyboard shortcuts ─────────────────────────────────────────────────
+  useChatKeyboardShortcuts(
+    {
+      onCommandPalette: commandPalette.toggle,
+      onSearch: () => chatSearch.open(),
+      onToggleDialogueMode: () => {
+        const nextMode: DialogueMode = dialogueMode === 'coding' ? 'clarify' : 'coding';
+        handleDialogueModeChange(nextMode);
+      },
+      onCopyLastAssistant: () => {
+        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+        if (lastAssistant) {
+          handleCopyMessage(lastAssistant);
+          toast('已复制', 'success');
         }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [chatSearch.open, isPageActive]);
+      },
+      onToggleMultiSelect: () => {
+        if (multiSelect.multiSelect.enabled) {
+          multiSelect.disableMultiSelect();
+        } else {
+          multiSelect.enableMultiSelect();
+        }
+      },
+      onOpenTemplates: () => setShowTemplatePanel(true),
+      onScrollToNextUser: () => {
+        const region = scrollRegionRef.current;
+        if (!region) return;
+        const userMessages = region.querySelectorAll<HTMLElement>('[data-role="user"]');
+        const regionRect = region.getBoundingClientRect();
+        for (const el of Array.from(userMessages)) {
+          const rect = el.getBoundingClientRect();
+          if (rect.top > regionRect.top + 60) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            break;
+          }
+        }
+      },
+      onScrollToPrevUser: () => {
+        const region = scrollRegionRef.current;
+        if (!region) return;
+        const userMessages = region.querySelectorAll<HTMLElement>('[data-role="user"]');
+        const regionRect = region.getBoundingClientRect();
+        const arr = Array.from(userMessages).reverse();
+        for (const el of arr) {
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom < regionRect.top + 60) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            break;
+          }
+        }
+      },
+      onToggleSidebar: () => toggleLeftSidebar(),
+      onToggleRightPanel: () => setRightOpen((v) => !v),
+      onNewSession: () => {
+        navigate('/chat');
+        navigateToHome();
+      },
+    },
+    isPageActive,
+  );
 
   const showSessionSwitchSkeleton = currentSessionId !== null && isSessionLoading && !streaming;
 
+  // Listen for custom events from slash commands
+  useEffect(() => {
+    const handleOpenTemplates = () => setShowTemplatePanel(true);
+    const handleExportChat = () => {
+      const content = exportMessages(messages, 'markdown');
+      downloadExport(content, `chat-export-${Date.now()}.md`, 'text/markdown');
+      toast('对话已导出为 Markdown', 'success');
+    };
+    const handleOpenBrowser = () => {
+      if (!browserPreviewUrl) {
+        setBrowserPreviewUrl('http://localhost:3000');
+      }
+      setEditorMode(true);
+    };
+    window.addEventListener('openAwork:open-templates', handleOpenTemplates);
+    window.addEventListener('openAwork:export-chat', handleExportChat);
+    window.addEventListener('openAwork:open-browser', handleOpenBrowser);
+    return () => {
+      window.removeEventListener('openAwork:open-templates', handleOpenTemplates);
+      window.removeEventListener('openAwork:export-chat', handleExportChat);
+      window.removeEventListener('openAwork:open-browser', handleOpenBrowser);
+    };
+  }, [messages]);
+
   return (
     <div className="page-root page-root-row">
+      {/* ─── Command Palette ─── */}
+      <CommandPalette
+        items={commandPaletteItems}
+        isOpen={commandPalette.isOpen}
+        onClose={commandPalette.close}
+      />
+
+      {/* ─── Prompt Template Panel ─── */}
+      <PromptTemplatePanel
+        isOpen={showTemplatePanel}
+        onClose={() => setShowTemplatePanel(false)}
+        onInsert={(content) => {
+          setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
+          requestAnimationFrame(() => textareaRef.current?.focus());
+        }}
+      />
+
       <div
         ref={splitContainerRef}
         style={{
@@ -5211,59 +5238,23 @@ export default function ChatPage() {
                 />
               ) : null
             }
-          />
-          {showModelPicker && (
-            <ModelPicker
-              providers={providers}
-              activeProviderId={activeProviderId}
-              activeModelId={activeModelId}
-              anchorRef={modelPickerBtnRef}
-              onSelect={async (pid: string, mid: string) => {
-                setActiveProviderId(pid);
-                setActiveModelId(mid);
-                if (!currentSessionId) {
-                  markSessionMetadataDirty();
-                }
-                if (!token) return;
-                if (currentSessionId) {
-                  const targetSessionId = currentSessionId;
-                  const selectedMetadata = buildSessionMetadata({
-                    providerId: pid,
-                    modelId: mid,
-                  });
-                  await createSessionsClient(gatewayUrl).updateMetadata(
-                    token,
-                    targetSessionId,
-                    selectedMetadata,
-                  );
-                  if (activeSessionRef.current !== targetSessionId) {
-                    return;
-                  }
-                  lastPersistedSessionMetadataSnapshotRef.current =
-                    createSessionMetadataSnapshot(selectedMetadata);
-                  clearSessionMetadataDirty();
-                  requestSessionListRefresh();
-                }
-              }}
-              onClose={() => setShowModelPicker(false)}
-            />
-          )}
-          <ModelSettingsPopover
-            anchorRef={modelSettingsBtnRef}
-            open={showModelSettings}
-            onClose={() => setShowModelSettings(false)}
-            modelLabel={(activeModelOption?.label ?? activeModelId) || '当前模型'}
-            providerType={activeProvider?.type}
-            modelId={activeModelOption?.id ?? activeModelId}
-            supportsThinking={activeModelOption?.supportsThinking === true}
-            canConfigureThinking={activeModelCanConfigureThinking}
-            contextWindow={activeModelOption?.contextWindow}
-            supportsTools={activeModelOption?.supportsTools}
-            supportsVision={activeModelOption?.supportsVision}
-            thinkingEnabled={thinkingEnabled}
-            reasoningEffort={reasoningEffort}
-            onChangeThinkingEnabled={handleThinkingEnabledChange}
-            onChangeReasoningEffort={handleReasoningEffortChange}
+            onOpenCommandPalette={commandPalette.open}
+            bookmarkCount={bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length}
+            multiSelectActive={multiSelect.multiSelect.enabled}
+            onToggleMultiSelect={() => {
+              if (multiSelect.multiSelect.enabled) {
+                multiSelect.disableMultiSelect();
+              } else {
+                multiSelect.enableMultiSelect();
+              }
+            }}
+            onOpenBrowser={() => {
+              if (!browserPreviewUrl) {
+                setBrowserPreviewUrl('http://localhost:3000');
+              }
+              setEditorMode(true);
+            }}
+            browserActive={!!browserPreviewUrl}
           />
           <WorkspacePickerModal
             isOpen={showWorkspaceSelector}
@@ -5517,18 +5508,18 @@ export default function ChatPage() {
 
           <CompanionStage
             agentId={effectiveAgentId}
-            attachedCount={attachmentItems.length}
+            attachedCount={0}
             currentUserEmail={currentUserEmail}
             editorMode={editorMode}
             input={input}
             panelOpenSignal={companionPanelSignal}
             pendingPermissionCount={pendingPermissions.length}
             prefersReducedMotion={prefersReducedMotion}
-            queuedCount={queuedComposerPreviews.length}
+            queuedCount={0}
             rightOpen={rightOpen}
             sessionBusyState={remoteSessionBusyState}
             sessionId={currentSessionId}
-            showVoice={showVoice}
+            showVoice={false}
             streaming={streaming}
             todoCount={sessionTodos.length}
           />
@@ -5557,90 +5548,121 @@ export default function ChatPage() {
             />
           )}
 
-          <ChatComposer
+          {/* ─── Multi-select toolbar ─── */}
+          {multiSelect.multiSelect.enabled && (
+            <MultiSelectToolbar
+              selectedCount={multiSelect.selectedCount}
+              onCopy={() => {
+                const selected = multiSelect.getSelectedMessages(messages);
+                if (selected.length > 0) {
+                  void copyExportToClipboard(selected, 'text').then((ok) => {
+                    if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
+                  });
+                }
+              }}
+              onExport={() => {
+                const selected = multiSelect.getSelectedMessages(messages);
+                if (selected.length > 0) {
+                  const content = exportMessages(selected, 'markdown');
+                  downloadExport(content, `chat-selected-${Date.now()}.md`, 'text/markdown');
+                  toast(`已导出 ${selected.length} 条消息`, 'success');
+                }
+              }}
+              onBookmark={() => {
+                const selected = multiSelect.getSelectedMessages(messages);
+                for (const msg of selected) {
+                  if (!bookmarkStore.isBookmarked(msg.id)) {
+                    bookmarkStore.addBookmark({
+                      messageId: msg.id,
+                      sessionId: currentSessionId ?? '',
+                      content: msg.content.slice(0, 200),
+                      role: msg.role,
+                    });
+                  }
+                }
+                toast(`已收藏 ${selected.length} 条消息`, 'success');
+                multiSelect.disableMultiSelect();
+              }}
+              onSelectAll={() => multiSelect.selectAll(messages)}
+              onCancel={() => multiSelect.disableMultiSelect()}
+            />
+          )}
+
+          <UnifiedComposer
             variant={composerVariant}
-            editorMode={editorMode}
-            activeProviderId={activeProviderId}
-            activeProviderName={activeProvider?.name}
-            activeProviderType={activeProvider?.type}
-            activeModelTooltip={activeModelTooltip}
-            modelPickerRef={modelPickerBtnRef}
-            modelSettingsRef={modelSettingsBtnRef}
-            showModelPicker={showModelPicker}
-            showModelSettings={showModelSettings}
-            activeModelSupportsThinking={activeModelOption?.supportsThinking === true}
-            hasConfiguredImageModel={hasConfiguredImageModel}
-            imageGenerationBusy={imageGenerationBusy}
-            imageGenerationDefaults={imageGenerationDefaults}
-            imageGenerationMode={imageGenerationMode}
-            imageModelLabel={imageModelLabel}
-            imagePluginEnabled={imagePluginEnabled}
-            imageReferenceArtifacts={availableImageEditReferenceArtifacts}
-            webSearchEnabled={webSearchEnabled}
-            thinkingEnabled={thinkingEnabled}
-            input={input}
+            sessionId={currentSessionId}
+            currentUserEmail={currentUserEmail}
+            gatewayUrl={gatewayUrl}
+            token={token}
+            streaming={streaming}
+            stoppingStream={stoppingStream}
             canStopSession={canStopCurrentSessionStream}
             stopCapability={stopCapability}
             sessionBusyState={remoteSessionBusyState}
-            streaming={streaming}
-            stoppingStream={stoppingStream}
-            attachedFiles={attachedFiles}
-            attachmentItems={attachmentItems}
-            queuedMessages={queuedComposerPreviews}
-            showVoice={showVoice}
-            composerMenu={composerMenu}
-            slashCommandItems={slashCommandItems}
-            mentionItems={mentionItems}
-            textareaRef={textareaRef}
-            fileInputRef={fileInputRef}
-            onFileChange={handleFileChange}
-            onInputChange={handleInputChange}
-            onInputSelect={handleInputSelect}
-            onInputPaste={handlePaste}
-            onKeyDown={handleKeyDown}
-            onRemoveAttachment={removeAttachment}
-            onApplyComposerSelection={applyComposerSelection}
-            onComposerHover={(index) =>
-              setComposerMenu((prev) => (prev ? { ...prev, selectedIndex: index } : prev))
-            }
-            onToggleVoice={() => setShowVoice((v) => !v)}
-            onVoiceTranscript={(text) => {
-              setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
-              setShowVoice(false);
-            }}
-            onQueueMessage={() => void enqueueComposerMessage()}
-            onRemoveQueuedMessage={removeQueuedComposerMessage}
-            onRestoreQueuedMessage={restoreQueuedComposerMessage}
-            onSend={() => void sendMessage()}
-            onStop={() => void stopActiveMessage()}
-            onRequestFiles={() => fileInputRef.current?.click()}
-            onToggleModelPicker={() => setShowModelPicker((v) => !v)}
-            onToggleModelSettings={() => setShowModelSettings((v) => !v)}
-            onToggleImageGenerationMode={toggleImageGenerationMode}
-            onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
-            onToggleWebSearch={handleToggleWebSearch}
-            onUpdateImageGenerationDefaults={updateImageGenerationDefaults}
-            selectedImageReferenceArtifactId={selectedImageEditReferenceArtifactId}
-            agentOptions={agentOptions}
+            editorMode={editorMode}
+            providers={providers}
+            activeProviderId={activeProviderId}
+            activeModelId={activeModelId}
+            activeProvider={activeProvider}
+            activeModelOption={activeModelOption}
+            activeModelCanConfigureThinking={activeModelCanConfigureThinking}
+            activeModelTooltip={activeModelTooltip}
+            dialogueMode={dialogueMode}
             manualAgentId={manualAgentId}
+            yoloMode={yoloMode}
+            webSearchEnabled={webSearchEnabled}
+            thinkingEnabled={thinkingEnabled}
+            reasoningEffort={reasoningEffort}
+            imageReferenceArtifacts={availableImageEditReferenceArtifacts}
+            selectedImageReferenceArtifactId={selectedImageEditReferenceArtifactId}
+            latestGeneratedImageResult={latestGeneratedImageResult}
+            artifactsWorkspaceHref={artifactsWorkspaceHref}
+            imageGenerationMode={imageGenerationMode}
+            hasConfiguredImageModel={hasConfiguredImageModel}
+            imageGenerationBusy={imageGenerationBusy}
+            imageGenerationDefaults={imageGenerationDefaults}
+            imageModelLabel={imageModelLabel}
+            imagePluginEnabled={imagePluginEnabled}
+            toggleImageGenerationMode={toggleImageGenerationMode}
+            updateImageGenerationDefaults={updateImageGenerationDefaults}
+            composerWorkspaceCatalog={composerWorkspaceCatalog}
+            composerCommandDescriptors={composerCommandDescriptors}
+            agentOptions={agentOptions}
+            effectiveAgentId={effectiveAgentId}
             defaultAgentLabel={defaultAgentLabel}
-            onChangeManualAgentId={handleManualAgentChange}
+            input={input}
+            setInput={setInput}
+            textareaRef={textareaRef}
+            onSubmit={async (payload) => {
+              await sendMessage(payload.text, {
+                queuedFiles: payload.files,
+                queuedAttachmentItems: payload.attachmentItems,
+                queuedMessageId: payload.queuedMessageId,
+              });
+            }}
+            onStop={() => void stopActiveMessage()}
+            onModelSelect={async (pid: string, mid: string) => {
+              setActiveProviderId(pid);
+              setActiveModelId(mid);
+              markSessionMetadataDirty();
+            }}
+            onToggleWebSearch={handleToggleWebSearch}
+            onThinkingEnabledChange={(enabled) => {
+              setThinkingEnabled(enabled);
+              markSessionMetadataDirty();
+            }}
+            onReasoningEffortChange={(effort) => {
+              setReasoningEffort(effort);
+              markSessionMetadataDirty();
+            }}
+            onManualAgentChange={handleManualAgentChange}
             onClearManualAgentId={handleClearManualAgentId}
-            onOptimizePrompt={
-              token
-                ? async (text: string) => {
-                    const client = createWorkflowsClient(gatewayUrl);
-                    return client.optimizePrompt(token, {
-                      originalPrompt: text,
-                      context: 'AI对话提示词优化：提取关键内容、转换为专业术语、增强指令明确性',
-                      targetAudience: 'AI助手',
-                      candidateCount: 3,
-                    });
-                  }
-                : undefined
+            onContinueEditingImage={continueEditingLatestGeneratedImage}
+            onNavigateToArtifacts={
+              artifactsWorkspaceHref ? () => navigate(artifactsWorkspaceHref) : undefined
             }
-            onDropFiles={appendFiles}
-            onReplaceInput={(nextValue: string) => setInput(nextValue)}
+            onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
+            markSessionMetadataDirty={markSessionMetadataDirty}
           />
         </div>
         <ChatEditorPane
@@ -5652,6 +5674,7 @@ export default function ChatPage() {
           fileEditor={fileEditor}
           saving={saving}
           handleSaveFile={handleSaveFile}
+          browserPreviewUrl={browserPreviewUrl}
         />
       </div>
 
@@ -5690,7 +5713,7 @@ export default function ChatPage() {
           setRightTab('history');
         }}
         providerCatalog={providerCatalog}
-        attachmentItems={attachmentItems}
+        attachmentItems={[]}
         artifactsWorkspaceHref={artifactsWorkspaceHref}
         contextUsageSnapshot={contextUsageSnapshot}
         contentArtifactCount={contentArtifactCount}
@@ -5709,7 +5732,6 @@ export default function ChatPage() {
         sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
         onKillTerminal={sessionTerminals.killTerminal}
         onReloadTerminals={sessionTerminals.reload}
-        browserPreviewUrl={browserPreviewUrl}
       />
     </div>
   );

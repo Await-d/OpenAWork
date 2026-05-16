@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import type { AIProviderRef } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth.js';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
@@ -155,13 +156,8 @@ export function PluginsTabContent({
     if (!token) return;
     void (async () => {
       try {
-        const res = await fetch(`${gatewayUrl}/settings/plugins`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = (await res.json()) as PluginSettings;
-          setPluginSettings(data);
-        }
+        const data = (await createSettingsClient(gatewayUrl).getPlugins(token)) as PluginSettings;
+        setPluginSettings(data);
       } catch {
         /* ignore */
       } finally {
@@ -176,14 +172,7 @@ export function PluginsTabContent({
       if (!token) return;
       setSaving(true);
       try {
-        await fetch(`${gatewayUrl}/settings/plugins`, {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(next),
-        });
+        await createSettingsClient(gatewayUrl).putPlugins(token, next);
       } catch {
         /* ignore */
       } finally {

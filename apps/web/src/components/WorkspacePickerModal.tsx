@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { FolderIcon } from './FileIcon.js';
 
 export interface FileTreeNode {
   path: string;
@@ -451,40 +452,68 @@ export default function WorkspacePickerModal({
               当前目录下没有可进入的子文件夹
             </div>
           ) : (
-            directories.map((directory) => (
-              <button
-                key={directory.path}
-                type="button"
-                onClick={() => void openDirectory(directory.path)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  minHeight: 38,
-                  padding: '0 10px',
-                  borderRadius: 8,
-                  border: '1px solid var(--border-subtle)',
-                  background: 'var(--surface)',
-                  color: 'var(--text)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-              >
-                <span style={{ fontSize: 12, flexShrink: 0 }}>📁</span>
-                <span
+            directories
+              .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }))
+              .map((directory) => (
+                <button
+                  key={directory.path}
+                  type="button"
+                  onClick={() => void openDirectory(directory.path)}
+                  className="workspace-picker-dir-btn"
                   style={{
-                    flex: 1,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    minHeight: 34,
+                    padding: '4px 10px',
+                    borderRadius: 7,
+                    border: '1px solid transparent',
+                    background: 'transparent',
+                    color: 'var(--text)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 80ms ease, border-color 80ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.background =
+                      'color-mix(in oklch, var(--accent) 8%, transparent)';
+                    (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLElement).style.borderColor = 'transparent';
                   }}
                 >
-                  {directory.name}
-                </span>
-                <span style={{ color: 'var(--text-3)', fontSize: 12, flexShrink: 0 }}>进入</span>
-              </button>
-            ))
+                  <FolderIcon size={14} name={directory.name} />
+                  <span
+                    style={{
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 12,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {directory.name}
+                  </span>
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--text-3)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    style={{ flexShrink: 0, opacity: 0.5 }}
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              ))
           )}
         </div>
 

@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import type {
   CompanionAgentBinding,
   CompanionVoiceOutputMode,
@@ -299,17 +300,13 @@ export function useBuddyVoicePreferences(
 
     setSyncStatus('loading');
     const abortController = new AbortController();
-    const queryString = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
-    void fetch(`${gatewayUrl}/settings/companion${queryString}`, {
-      signal: abortController.signal,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    })
-      .then((response) =>
-        response.ok ? response.json() : Promise.reject(new Error('load failed')),
-      )
-      .then((data: CompanionSettingsResponse) => {
+    void createSettingsClient(gatewayUrl)
+      .getCompanion(accessToken, {
+        signal: abortController.signal,
+        ...(agentId ? { agentId } : {}),
+      })
+      .then((rawData) => {
+        const data = rawData as CompanionSettingsResponse;
         const remotePreferences: BuddyVoicePreferencesState = {
           enabled: data.preferences?.enabled !== false,
           injectionMode: normalizeInjectionMode(data.preferences?.injectionMode),
@@ -386,14 +383,9 @@ export function useBuddyVoicePreferences(
       const queuedSave = saveQueueRef.current
         .catch(() => undefined)
         .then(async () => {
-          const queryString = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
-          const response = await fetch(`${gatewayUrl}/settings/companion${queryString}`, {
-            method: 'PUT',
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
+          const data = (await createSettingsClient(gatewayUrl).putCompanion(
+            accessToken,
+            {
               preferences: {
                 enabled: preferences.enabled,
                 injectionMode: preferences.injectionMode,
@@ -405,14 +397,9 @@ export function useBuddyVoicePreferences(
                 voiceRate: preferences.voiceRate,
                 voiceVariant: preferences.voiceVariant,
               },
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error('save failed');
-          }
-
-          const data = (await response.json()) as CompanionSettingsResponse;
+            },
+            agentId ? { agentId } : undefined,
+          )) as CompanionSettingsResponse;
           setActiveBinding(data.activeBinding);
           setBindings(normalizeBuddyBindings(data.bindings));
 
@@ -464,24 +451,12 @@ export function useBuddyVoicePreferences(
         return;
       }
 
-      const queryString = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
       setSyncStatus('saving');
-      const response = await fetch(`${gatewayUrl}/settings/companion${queryString}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          bindings: nextBindings,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('save failed');
-      }
-
-      const data = (await response.json()) as CompanionSettingsResponse;
+      const data = (await createSettingsClient(gatewayUrl).putCompanion(
+        accessToken,
+        { bindings: nextBindings },
+        agentId ? { agentId } : undefined,
+      )) as CompanionSettingsResponse;
       setActiveBinding(data.activeBinding);
       setBindings(normalizeBuddyBindings(data.bindings));
       setProfile(data.profile ?? null);

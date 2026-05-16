@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import {
   buildCompanionIntroText,
   createCompanionProfile,
@@ -604,30 +605,17 @@ export function CompanionStage({
 
       setBuddyChatBusy(true);
       try {
-        const response = await fetch(`${gatewayUrl}/settings/companion/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+        const data = (await createSettingsClient(gatewayUrl).putCompanionChat(accessToken, {
+          message: userMessage,
+          context: {
+            sessionBusy: sessionBusyState === 'running',
+            pendingApprovals: pendingPermissionCount,
+            pendingQuestions: pendingPermissionCount,
+            runningTasks: attachedCount,
+            todoCount,
           },
-          body: JSON.stringify({
-            message: userMessage,
-            context: {
-              sessionBusy: sessionBusyState === 'running',
-              pendingApprovals: pendingPermissionCount,
-              pendingQuestions: pendingPermissionCount,
-              runningTasks: attachedCount,
-              todoCount,
-            },
-            agentId,
-          }),
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const data = (await response.json()) as {
+          agentId,
+        })) as {
           text: string;
           profileName: string;
           profileSpecies: string;

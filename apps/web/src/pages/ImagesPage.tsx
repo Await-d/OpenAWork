@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { createSessionsClient, createWorkflowsClient } from '@openAwork/web-client';
+import {
+  createArtifactsClient,
+  createSessionsClient,
+  createWorkflowsClient,
+} from '@openAwork/web-client';
 import type { ArtifactRecord } from '@openAwork/artifacts';
 import { useAuthStore } from '../stores/auth.js';
 import { ChatImageGenerationControls } from '../components/chat/ChatImageGenerationControls.js';
@@ -256,18 +260,15 @@ export default function ImagesPage() {
     }
     const controller = new AbortController();
     let cancelled = false;
-    void fetch(`${gatewayUrl}/image-workbench/artifacts?type=image&limit=200`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return (await response.json()) as SessionArtifactsResponse;
+    void createArtifactsClient(gatewayUrl)
+      .listImageWorkbench(accessToken, {
+        type: 'image',
+        limit: 200,
+        signal: controller.signal,
       })
-      .then((payload) => {
+      .then((rawPayload) => {
         if (cancelled) return;
+        const payload = rawPayload as SessionArtifactsResponse;
         setSessionArtifacts(toImageEditReferenceArtifacts(payload.contentArtifacts ?? []));
       })
       .catch((err: unknown) => {

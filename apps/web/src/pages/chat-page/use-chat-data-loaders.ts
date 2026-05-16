@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createSettingsClient } from '@openAwork/web-client';
 import type { MCPServerStatus } from '@openAwork/shared-ui';
 import type { WorkspaceFileMentionItem, WorkspaceTreeNode } from './support.js';
 import { flattenWorkspaceFiles } from './support.js';
@@ -67,12 +68,10 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
   useEffect(() => {
     if (!token || !rightOpen || rightTab !== 'mcp') return;
     let cancelled = false;
-    void fetch(`${gatewayUrl}/settings/mcp-status`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fail'))))
-      .then(
-        (data: {
+    void createSettingsClient(gatewayUrl)
+      .getMcpStatus(token)
+      .then((rawData) => {
+        const data = rawData as {
           servers?: Array<{
             id: string;
             name: string;
@@ -81,28 +80,27 @@ export function useChatDataLoaders(deps: ChatDataLoadersDeps): void {
             enabled?: boolean;
             builtin?: boolean;
           }>;
-        }) => {
-          if (!cancelled) {
-            setMcpServers(
-              (data.servers ?? []).map((server) => ({
-                id: server.id,
-                name: server.name,
-                status:
-                  server.status === 'connected' ||
-                  server.status === 'connecting' ||
-                  server.status === 'error'
-                    ? server.status
-                    : server.enabled === false
-                      ? 'disconnected'
-                      : 'connecting',
-                toolCount: 0,
-                authType: server.type,
-                builtin: server.builtin === true,
-              })),
-            );
-          }
-        },
-      )
+        };
+        if (!cancelled) {
+          setMcpServers(
+            (data.servers ?? []).map((server) => ({
+              id: server.id,
+              name: server.name,
+              status:
+                server.status === 'connected' ||
+                server.status === 'connecting' ||
+                server.status === 'error'
+                  ? server.status
+                  : server.enabled === false
+                    ? 'disconnected'
+                    : 'connecting',
+              toolCount: 0,
+              authType: server.type,
+              builtin: server.builtin === true,
+            })),
+          );
+        }
+      })
       .catch(() => {
         if (!cancelled) setMcpServers([]);
       });

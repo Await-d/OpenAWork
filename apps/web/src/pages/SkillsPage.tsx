@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createSkillsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth.js';
 import { SkillDetailPage, InstallProgressUI } from '@openAwork/shared-ui';
 import type {
@@ -117,14 +118,8 @@ function matchesLocalSkill(skill: LocalWorkspaceSkill, query?: string, category?
 
 function useSkillsApi() {
   const { gatewayUrl, accessToken } = useAuthStore();
-
-  const getHeaders = useCallback(
-    (): HeadersInit => ({
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    }),
-    [accessToken],
-  );
+  const client = useMemo(() => createSkillsClient(gatewayUrl), [gatewayUrl]);
+  const token = accessToken ?? '';
 
   const searchSkills = useCallback(
     async (
@@ -133,14 +128,12 @@ function useSkillsApi() {
       page = 1,
       pageSize = MARKET_PAGE_SIZE,
     ): Promise<MarketSearchResult> => {
-      const url = new URL(`${gatewayUrl}/skills/search`);
-      if (q) url.searchParams.set('q', q);
-      if (category) url.searchParams.set('category', category);
-      url.searchParams.set('limit', String(pageSize));
-      url.searchParams.set('offset', String((page - 1) * pageSize));
-      const res = await fetch(url.toString(), { headers: getHeaders() });
-      if (!res.ok) throw new Error(`Search failed: ${res.status}`);
-      const data = (await res.json()) as { skills: SkillEntryDto[]; total?: number };
+      const data = (await client.search(token, {
+        ...(q ? { q } : {}),
+        ...(category ? { category } : {}),
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      })) as { skills: SkillEntryDto[]; total?: number };
       const sourceMap = new Map<string, string>();
       for (const entry of data.skills) {
         if (entry.sourceId) sourceMap.set(entry.id, entry.sourceId);
@@ -151,13 +144,11 @@ function useSkillsApi() {
         total: data.total ?? data.skills.length,
       };
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const fetchInstalled = useCallback(async (): Promise<MarketInstalledSkill[]> => {
-    const res = await fetch(`${gatewayUrl}/skills/installed`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(`Failed to load installed: ${res.status}`);
-    const data = (await res.json()) as {
+    const data = (await client.listInstalled(token)) as {
       skills: Array<{
         skillId: string;
         manifest: { name: string; version: string };
@@ -179,78 +170,39 @@ function useSkillsApi() {
       enabled: s.enabled,
       preinstalled: DEFAULT_PREINSTALLED_SKILL_IDS.has(s.skillId),
     }));
-  }, [gatewayUrl, getHeaders]);
+  }, [client, token]);
 
   const installSkill = useCallback(
     async (skillId: string, sourceId?: string): Promise<void> => {
-      const res = await fetch(`${gatewayUrl}/skills/install`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ skillId, sourceId }),
-      });
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        throw new Error(err.error ?? `Install failed: ${res.status}`);
-      }
+      await client.install(token, { skillId, ...(sourceId ? { sourceId } : {}) });
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const uninstallSkill = useCallback(
     async (skillId: string): Promise<void> => {
-      const res = await fetch(`${gatewayUrl}/skills/installed/${encodeURIComponent(skillId)}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
-      if (!res.ok) throw new Error(`Uninstall failed: ${res.status}`);
+      await client.uninstall(token, skillId);
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const toggleInstalledSkill = useCallback(
     async (skillId: string, enabled: boolean): Promise<void> => {
-      const res = await fetch(
-        `${gatewayUrl}/skills/installed/${encodeURIComponent(skillId)}/enable`,
-        {
-          method: 'PATCH',
-          headers: getHeaders(),
-          body: JSON.stringify({ enabled }),
-        },
-      );
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({ error: `Toggle failed: ${res.status}` }))) as {
-          error?: string;
-        };
-        throw new Error(err.error ?? `Toggle failed: ${res.status}`);
-      }
+      await client.setEnabled(token, skillId, enabled);
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const discoverLocalSkills = useCallback(async (): Promise<LocalSkillEntryDto[]> => {
-    const res = await fetch(`${gatewayUrl}/skills/local/discover`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(`Failed to discover local skills: ${res.status}`);
-    const data = (await res.json()) as { skills: LocalSkillEntryDto[] };
+    const data = (await client.discoverLocal(token)) as { skills: LocalSkillEntryDto[] };
     return data.skills;
-  }, [gatewayUrl, getHeaders]);
+  }, [client, token]);
 
   const installLocalSkill = useCallback(
     async (dirPath: string): Promise<void> => {
-      const res = await fetch(`${gatewayUrl}/skills/local/install`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ dirPath }),
-      });
-      if (!res.ok) {
-        const err = (await res
-          .json()
-          .catch(() => ({ error: `Install failed: ${res.status}` }))) as {
-          error?: string;
-        };
-        throw new Error(err.error ?? `Install failed: ${res.status}`);
-      }
+      await client.installLocal(token, dirPath);
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const resyncSystemSkills = useCallback(async (): Promise<{
@@ -259,93 +211,50 @@ function useSkillsApi() {
     removed: number;
     total: number;
   }> => {
-    const res = await fetch(`${gatewayUrl}/skills/system/resync`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({ error: `Resync failed: ${res.status}` }))) as {
-        error?: string;
-      };
-      throw new Error(err.error ?? `Resync failed: ${res.status}`);
-    }
-    return (await res.json()) as {
+    return (await client.resyncSystem(token)) as {
       added: number;
       updated: number;
       removed: number;
       total: number;
     };
-  }, [gatewayUrl, getHeaders]);
+  }, [client, token]);
 
   const fetchSources = useCallback(async (): Promise<RegistrySource[]> => {
-    const res = await fetch(`${gatewayUrl}/skills/registry-sources`, { headers: getHeaders() });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { sources: RegistrySource[] };
+    const data = (await client.listRegistrySources(token)) as { sources: RegistrySource[] };
     return data.sources;
-  }, [gatewayUrl, getHeaders]);
+  }, [client, token]);
 
   const syncSources = useCallback(
     async (sourceIds?: string[]): Promise<void> => {
-      const res = await fetch(`${gatewayUrl}/skills/registry-sources/sync`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(sourceIds && sourceIds.length > 0 ? { sourceIds } : {}),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({ error: `Sync failed: ${res.status}` }))) as {
-          error?: string;
-        };
-        throw new Error(err.error ?? `Sync failed: ${res.status}`);
-      }
+      await client.syncRegistrySources(token, sourceIds);
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const addSource = useCallback(
     async (url: string): Promise<void> => {
-      await fetch(`${gatewayUrl}/skills/registry-sources`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ name: url, url }),
-      });
+      await client.addRegistrySource(token, { name: url, url });
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const removeSource = useCallback(
     async (id: string): Promise<void> => {
-      await fetch(`${gatewayUrl}/skills/registry-sources/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
+      await client.removeRegistrySource(token, id);
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const toggleSource = useCallback(
     async (id: string, enabled: boolean): Promise<void> => {
-      const res = await fetch(`${gatewayUrl}/skills/registry-sources/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: getHeaders(),
-        body: JSON.stringify({ enabled }),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({ error: `Toggle failed: ${res.status}` }))) as {
-          error?: string;
-        };
-        throw new Error(err.error ?? `Toggle failed: ${res.status}`);
-      }
+      await client.setRegistrySourceEnabled(token, id, enabled);
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   const fetchSkillDetail = useCallback(
     async (skillId: string): Promise<MarketSkillDetail> => {
-      const res = await fetch(`${gatewayUrl}/skills/${encodeURIComponent(skillId)}`, {
-        headers: getHeaders(),
-      });
-      if (!res.ok) throw new Error(`Skill detail failed: ${res.status}`);
-      const data = (await res.json()) as SkillEntryDto & {
+      const data = (await client.getDetail(token, skillId)) as SkillEntryDto & {
         readme?: string;
         license?: string;
         permissions?: string[];
@@ -368,7 +277,7 @@ function useSkillsApi() {
         changelog: data.changelog,
       };
     },
-    [gatewayUrl, getHeaders],
+    [client, token],
   );
 
   return {

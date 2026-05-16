@@ -147,6 +147,42 @@ const SparkSessionIcon = () => (
   </svg>
 );
 
+const DeleteIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
+  </svg>
+);
+
+const RenameIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+);
+
 export interface FileTreeContextMenuProps {
   x: number;
   y: number;
@@ -164,6 +200,8 @@ export interface FileTreeContextMenuProps {
   onCreateFile: () => void;
   onCreateFolder: () => void;
   onRefresh: () => void;
+  onDelete?: () => void;
+  onRename?: () => void;
 }
 
 const menuStyle: React.CSSProperties = {
@@ -188,11 +226,13 @@ function MenuItem({
   icon,
   onClick,
   disabled = false,
+  danger = false,
 }: {
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  danger?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -211,8 +251,13 @@ function MenuItem({
         width: '100%',
         padding: '7px 12px',
         border: 'none',
-        background: hovered && !disabled ? 'var(--bg-2)' : 'transparent',
-        color: disabled ? 'var(--text-3)' : 'var(--text)',
+        background:
+          hovered && !disabled
+            ? danger
+              ? 'color-mix(in oklch, var(--danger) 10%, transparent)'
+              : 'var(--bg-2)'
+            : 'transparent',
+        color: disabled ? 'var(--text-3)' : danger ? 'var(--danger)' : 'var(--text)',
         fontSize: 12,
         textAlign: 'left',
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -254,6 +299,8 @@ export default function FileTreeContextMenu({
   onCreateFile,
   onCreateFolder,
   onRefresh,
+  onDelete,
+  onRename,
 }: FileTreeContextMenuProps) {
   const baseLabel =
     targetType === 'root'
@@ -381,6 +428,28 @@ export default function FileTreeContextMenu({
             onClose();
           }}
         />
+        {targetType !== 'root' && (onRename || onDelete) && <div style={dividerStyle} />}
+        {targetType !== 'root' && onRename && (
+          <MenuItem
+            label={`重命名${targetType === 'directory' ? '文件夹' : '文件'}`}
+            icon={<RenameIcon />}
+            onClick={() => {
+              onRename();
+              onClose();
+            }}
+          />
+        )}
+        {targetType !== 'root' && onDelete && (
+          <MenuItem
+            label={`删除${targetType === 'directory' ? '文件夹' : '文件'}`}
+            icon={<DeleteIcon />}
+            onClick={() => {
+              onDelete();
+              onClose();
+            }}
+            danger
+          />
+        )}
       </div>
     </>
   );

@@ -26,6 +26,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
+import { createSkillsClient } from '@openAwork/web-client';
 import {
   InstalledSkillsManager,
   type MarketInstalledSkill as InstalledSkill,
@@ -82,18 +83,14 @@ export function SkillsPluginPanel(): React.ReactElement {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const headers = useMemo(() => {
-    const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (accessToken) h['Authorization'] = `Bearer ${accessToken}`;
-    return h;
-  }, [accessToken]);
+  const skillsClient = useMemo(() => createSkillsClient(gatewayUrl), [gatewayUrl]);
 
   const loadInstalled = useCallback(async () => {
     if (!accessToken) return;
     try {
-      const res = await fetch(`${gatewayUrl}/skills/installed`, { headers });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { skills: InstalledSkillDto[] };
+      const data = (await skillsClient.listInstalled(accessToken)) as {
+        skills: InstalledSkillDto[];
+      };
       const mapped = data.skills.map<InstalledSkill>((s) => ({
         id: s.skillId,
         name: s.manifest.name,
@@ -112,7 +109,7 @@ export function SkillsPluginPanel(): React.ReactElement {
     } finally {
       setLoaded(true);
     }
-  }, [accessToken, gatewayUrl, headers]);
+  }, [accessToken, skillsClient]);
 
   useEffect(() => {
     void loadInstalled();
@@ -126,20 +123,7 @@ export function SkillsPluginPanel(): React.ReactElement {
       setSkills((prev) => prev.map((s) => (s.id === skillId ? { ...s, enabled: nextEnabled } : s)));
       setBusy(true);
       try {
-        const res = await fetch(
-          `${gatewayUrl}/skills/installed/${encodeURIComponent(skillId)}/enable`,
-          {
-            method: 'PATCH',
-            headers,
-            body: JSON.stringify({ enabled: nextEnabled }),
-          },
-        );
-        if (!res.ok) {
-          const errPayload = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {
-            error?: string;
-          };
-          throw new Error(errPayload.error ?? `HTTP ${res.status}`);
-        }
+        await skillsClient.setEnabled(accessToken ?? '', skillId, nextEnabled);
         setStatusMessage(`已${nextEnabled ? '启用' : '禁用'}：${skillId}`);
         // Eventually-consistent refetch in case the row mutated for
         // any other reason (e.g. concurrent system rescan).
@@ -156,18 +140,14 @@ export function SkillsPluginPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [gatewayUrl, headers, loadInstalled],
+    [skillsClient, accessToken, loadInstalled],
   );
 
   const handleUninstall = useCallback(
     async (skillId: string) => {
       setBusy(true);
       try {
-        const res = await fetch(`${gatewayUrl}/skills/installed/${encodeURIComponent(skillId)}`, {
-          method: 'DELETE',
-          headers,
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await skillsClient.uninstall(accessToken ?? '', skillId);
         setStatusMessage(`已移除：${skillId}`);
         await loadInstalled();
       } catch (err) {
@@ -178,7 +158,7 @@ export function SkillsPluginPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [gatewayUrl, headers, loadInstalled],
+    [skillsClient, accessToken, loadInstalled],
   );
 
   const handleCheckUpdates = useCallback(async () => {
@@ -189,15 +169,13 @@ export function SkillsPluginPanel(): React.ReactElement {
       // Trigger a system-skills rescan so any newly added system-level
       // skills (e.g. user just dropped a folder under ~/.claude/skills)
       // surface here without waiting for the periodic 10min tick.
-      const res = await fetch(`${gatewayUrl}/skills/system/resync`, {
-        method: 'POST',
-        headers,
-      });
-      if (res.ok) {
-        const data = (await res.json()) as ResyncResponse;
+      try {
+        const data = (await skillsClient.resyncSystem(accessToken ?? '')) as ResyncResponse;
         setStatusMessage(
           `系统目录扫描完成：新增 ${data.added}，更新 ${data.updated}，移除 ${data.removed}（共 ${data.total}）`,
         );
+      } catch {
+        // Skip status update if resync failed — loadInstalled below still runs.
       }
       await loadInstalled();
     } catch (err) {
@@ -207,7 +185,7 @@ export function SkillsPluginPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [gatewayUrl, headers, loadInstalled]);
+  }, [skillsClient, accessToken, loadInstalled]);
 
   const toggleDisabledReason = useCallback((skill: InstalledSkill): string | null => {
     if (skill.preinstalled) return '系统预装技能，不允许禁用';

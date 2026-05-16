@@ -24,6 +24,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { createSkillsClient } from '@openAwork/web-client';
 import SkillRecommendationDrawer from '../../pages/SkillRecommendationDrawer.js';
 import {
   buildSelectionExport,
@@ -289,36 +290,22 @@ export default function SkillSettingsPanel(
     setTab(sessionId ? 'session' : 'workspace');
   }, [sessionId]);
 
-  const headers = useMemo<HeadersInit>(
-    () => ({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken ?? ''}`,
-    }),
-    [accessToken],
-  );
+  const skillsClient = useMemo(() => createSkillsClient(gatewayUrl), [gatewayUrl]);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!accessToken) return;
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (workspacePath && workspacePath.trim().length > 0) {
-        params.set('workspacePath', workspacePath.trim());
-      }
-      if (sessionId) {
-        params.set('sessionId', sessionId);
-      }
-      const [selectionRes, installedRes] = await Promise.all([
-        fetch(`${gatewayUrl}/skills/selection${params.size ? `?${params.toString()}` : ''}`, {
-          headers,
-        }),
-        fetch(`${gatewayUrl}/skills/installed`, { headers }),
+      const [selection, installed] = await Promise.all([
+        skillsClient.getSelection(accessToken, {
+          ...(workspacePath && workspacePath.trim().length > 0
+            ? { workspacePath: workspacePath.trim() }
+            : {}),
+          ...(sessionId ? { sessionId } : {}),
+        }) as Promise<SelectionGetResponse>,
+        skillsClient.listInstalled(accessToken) as Promise<{ skills: InstalledSkillDto[] }>,
       ]);
-      if (!selectionRes.ok) throw new Error(`selection ${selectionRes.status}`);
-      if (!installedRes.ok) throw new Error(`installed ${installedRes.status}`);
-      const selection = (await selectionRes.json()) as SelectionGetResponse;
-      const installed = (await installedRes.json()) as { skills: InstalledSkillDto[] };
       setServerData(selection);
       setRows(buildRows(installed.skills, selection.effective));
     } catch (err) {
@@ -326,7 +313,7 @@ export default function SkillSettingsPanel(
     } finally {
       setLoading(false);
     }
-  }, [accessToken, gatewayUrl, headers, sessionId, workspacePath]);
+  }, [accessToken, skillsClient, sessionId, workspacePath]);
 
   // Refresh on initial mount and whenever the workspace / session changes.
   useEffect(() => {
@@ -360,18 +347,10 @@ export default function SkillSettingsPanel(
           pinned: row.pinned,
           reason: row.reason,
         }));
-      const res = await fetch(`${gatewayUrl}/skills/selection`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({
-          workspacePath: workspacePath?.trim() || null,
-          items,
-        }),
+      await skillsClient.putSelection(accessToken ?? '', {
+        workspacePath: workspacePath?.trim() || null,
+        items,
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `save failed: ${res.status}`);
-      }
       setHint('已保存。下次新建会话生效。');
       await refresh();
     } catch (err) {
@@ -379,7 +358,7 @@ export default function SkillSettingsPanel(
     } finally {
       setSaving(false);
     }
-  }, [gatewayUrl, headers, refresh, rows, workspacePath]);
+  }, [skillsClient, accessToken, refresh, rows, workspacePath]);
 
   const tokenEstimate = useMemo<PinnedTokenEstimate>(
     () =>
@@ -492,17 +471,9 @@ export default function SkillSettingsPanel(
           ...(value.pinned !== null ? { pinned: value.pinned } : {}),
         })),
       };
-      const res = await fetch(`${gatewayUrl}/skills/selection/session/${sessionId}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(errBody.error ?? `patch failed: ${res.status}`);
-      }
+      await skillsClient.patchSessionSelection(accessToken ?? '', sessionId, body);
     },
-    [gatewayUrl, headers, serverData, sessionId],
+    [skillsClient, accessToken, serverData, sessionId],
   );
 
   const handleSessionToggleEnabled = useCallback(
@@ -533,20 +504,13 @@ export default function SkillSettingsPanel(
   const handleResetSessionOverride = useCallback(async (): Promise<void> => {
     if (!sessionId) return;
     try {
-      const res = await fetch(`${gatewayUrl}/skills/selection/session/${sessionId}`, {
-        method: 'DELETE',
-        headers,
-      });
-      if (!res.ok && res.status !== 404) {
-        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(errBody.error ?? `delete failed: ${res.status}`);
-      }
+      await skillsClient.removeSessionSelection(accessToken ?? '', sessionId);
       setHint('已恢复 workspace 默认。');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [gatewayUrl, headers, refresh, sessionId]);
+  }, [skillsClient, accessToken, refresh, sessionId]);
 
   const grouped = useMemo(() => {
     const pinned: RowState[] = [];
@@ -734,7 +698,7 @@ export default function SkillSettingsPanel(
         open={recommendOpen}
         onClose={() => setRecommendOpen(false)}
         gatewayUrl={gatewayUrl}
-        headers={headers}
+        token={accessToken ?? ''}
         workspacePath={workspacePath?.trim() || ''}
         currentSelection={rows
           .filter((row) => !row.isBuiltin && row.isInstalled && row.enabled)

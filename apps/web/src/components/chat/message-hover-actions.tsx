@@ -21,7 +21,15 @@ const COPY_FEEDBACK_MS = 1500;
  * (assistant action header, regenerate banner) so this overlay
  * stays a single-purpose primitive.
  */
-export function MessageHoverActions({ getCopyText }: { getCopyText: () => string }) {
+export function MessageHoverActions({
+  getCopyText,
+  isBookmarked = false,
+  onToggleBookmark,
+}: {
+  getCopyText: () => string;
+  isBookmarked?: boolean;
+  onToggleBookmark?: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | null>(null);
 
@@ -65,6 +73,24 @@ export function MessageHoverActions({ getCopyText }: { getCopyText: () => string
       >
         {copied ? '✓ 已复制' : '复制'}
       </button>
+      {onToggleBookmark && (
+        <button
+          type="button"
+          className="chat-message-hover-action"
+          data-bookmarked={isBookmarked ? 'true' : undefined}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleBookmark();
+          }}
+          title={isBookmarked ? '取消收藏' : '收藏此消息'}
+          aria-label={isBookmarked ? '取消收藏' : '收藏'}
+          style={{
+            color: isBookmarked ? '#f59e0b' : undefined,
+          }}
+        >
+          {isBookmarked ? '⭐' : '☆'}
+        </button>
+      )}
     </div>
   );
 }

@@ -114,14 +114,31 @@ export function FileIcon({ path, size = 14 }: { path: string; size?: number }) {
   );
 }
 
-export function FolderIcon({ open = false, size = 14 }: { open?: boolean; size?: number }) {
+export function FolderIcon({
+  open = false,
+  size = 14,
+  name,
+}: {
+  open?: boolean;
+  size?: number;
+  name?: string;
+}) {
+  // Special folder colors for well-known directories
+  const specialColor = name ? SPECIAL_FOLDER_COLORS[name.toLowerCase()] : undefined;
+  const strokeColor = specialColor ?? 'var(--accent)';
+  const fillColor = open
+    ? specialColor
+      ? `color-mix(in oklch, ${specialColor} 20%, transparent)`
+      : 'var(--accent-muted)'
+    : 'transparent';
+
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={open ? 'var(--accent-muted)' : 'transparent'}
-      stroke="var(--accent)"
+      fill={fillColor}
+      stroke={strokeColor}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -132,3 +149,42 @@ export function FolderIcon({ open = false, size = 14 }: { open?: boolean; size?:
     </svg>
   );
 }
+
+const SPECIAL_FOLDER_COLORS: Record<string, string> = {
+  src: '#3178c6',
+  lib: '#3178c6',
+  app: '#3178c6',
+  apps: '#3178c6',
+  components: '#61dafb',
+  hooks: '#61dafb',
+  pages: '#61dafb',
+  utils: '#89e051',
+  helpers: '#89e051',
+  config: '#cbcb41',
+  configs: '#cbcb41',
+  public: '#42a5f5',
+  static: '#42a5f5',
+  assets: '#a074c4',
+  images: '#a074c4',
+  styles: '#42a5f5',
+  css: '#42a5f5',
+  test: '#f7df1e',
+  tests: '#f7df1e',
+  __tests__: '#f7df1e',
+  spec: '#f7df1e',
+  docs: '#519aba',
+  doc: '#519aba',
+  scripts: '#89e051',
+  build: '#f59e0b',
+  dist: '#f59e0b',
+  packages: '#cc3534',
+  services: '#cc3534',
+  types: '#3178c6',
+  interfaces: '#3178c6',
+  models: '#dea584',
+  store: '#178600',
+  stores: '#178600',
+  api: '#00add8',
+  routes: '#00add8',
+  middleware: '#b07219',
+};

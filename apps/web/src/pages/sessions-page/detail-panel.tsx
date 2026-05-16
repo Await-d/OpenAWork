@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   createSessionsClient,
+  createWorkspaceClient,
   HttpError,
   type SessionRestorePreviewResult,
   type SessionSnapshotComparisonResult,
@@ -457,18 +458,12 @@ export function DetailPanel({
       setReviewLoading(true);
       setReviewError(null);
       try {
-        const response = await fetch(
-          `${gatewayUrl}/workspace/review/status?path=${encodeURIComponent(selectedWorkingDirectory)}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            signal,
-          },
-        );
-        if (!response.ok) {
-          throw new Error(`status:${response.status}`);
-        }
-        const data = (await response.json()) as { changes: FileChange[] };
-        setReviewChanges(data.changes ?? []);
+        const changes = (await createWorkspaceClient(gatewayUrl).reviewStatus(
+          token,
+          selectedWorkingDirectory,
+          { signal },
+        )) as unknown as FileChange[];
+        setReviewChanges(changes ?? []);
         setReviewDiff({});
       } catch (error) {
         if (!isAbortError(error)) {
@@ -1028,33 +1023,27 @@ export function DetailPanel({
                   loadDiff={async (filePath: string) => {
                     const cached = reviewDiff[filePath];
                     if (cached !== undefined) return cached;
-                    const response = await fetch(
-                      `${gatewayUrl}/workspace/review/diff?path=${encodeURIComponent(selectedWorkingDirectory)}&filePath=${encodeURIComponent(filePath)}`,
-                      { headers: { Authorization: `Bearer ${token}` } },
-                    );
-                    if (!response.ok) return '';
-                    const data = (await response.json()) as { diff: string };
-                    setReviewDiff((prev) => ({ ...prev, [filePath]: data.diff ?? '' }));
-                    return data.diff ?? '';
+                    try {
+                      const diff = await createWorkspaceClient(gatewayUrl).reviewDiff(
+                        token,
+                        selectedWorkingDirectory,
+                        filePath,
+                      );
+                      setReviewDiff((prev) => ({ ...prev, [filePath]: diff }));
+                      return diff;
+                    } catch {
+                      return '';
+                    }
                   }}
                   onAccept={(filePath: string) => {
                     setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
                   }}
                   onRevert={async (filePath: string) => {
-                    const response = await fetch(`${gatewayUrl}/workspace/review/revert`, {
-                      method: 'POST',
-                      headers: {
-                        Authorization: `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        path: selectedWorkingDirectory,
-                        filePath,
-                      }),
-                    });
-                    if (!response.ok) {
-                      throw new Error('revert failed');
-                    }
+                    await createWorkspaceClient(gatewayUrl).reviewRevert(
+                      token,
+                      selectedWorkingDirectory,
+                      filePath,
+                    );
                     setReviewChanges((prev) => prev.filter((change) => change.path !== filePath));
                     setReviewDiff((prev) => {
                       const next = { ...prev };
