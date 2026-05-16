@@ -1,6 +1,7 @@
 # .agentdocs 索引
 
 ## Active Workflows
+- [260516-team-page-重构调整方案](workflow/260516-team-page-重构调整方案.md) — TeamPage 重构：从"左侧 Sidebar + Tab 工作台"改为"对话中心 + 右侧可收起面板 + 顶部固定状态栏"；15 项任务 / 5 Wave / feature flag 保护
 - [260509-skill-workspace-selection-spec](workflow/260509-skill-workspace-selection-spec.md) — 让用户在 chat 工作区维度可控地选择启用哪些 skill（workspace 默认 + session 覆盖），支持 AI 一键根据项目特征推荐勾选集；BUILTIN 始终可用、不参与过滤；pinned 仅首轮注入 system prompt
 - [260507-web-图片生成工作台实施](workflow/260507-web-图片生成工作台实施.md) — 为 Web 左侧新增专用图片工作台入口，收口独立页面下的文生图、图片编辑、结果历史与产物联动能力
 - [260507-image-workspace-新建图片工作区流程](workflow/260507-image-workspace-新建图片工作区流程.md) — 支持用户新建图片工作区，包含图片生成、编辑、历史记录等功能
@@ -19,6 +20,11 @@
 - [260416-team-创建实施方案](workflow/260416-team-创建实施方案.md) — Team 会话创建向导、DTO/API、template metadata 与测试落地计划
 
 ## Done Workflows
+- [260516-team-phase-e-实施方案](workflow/done/260516-team-phase-e-实施方案.md) — ✅ 已完成 2026-05-16：Workflow 模板栈 + Role Adapter 矩阵 + 5 个内置 workflow 包 + 模板编辑器 + 模板驱动 handoff；12 项任务全部完成
+- [260516-team-phase-d-实施方案](workflow/done/260516-team-phase-d-实施方案.md) — ✅ 已完成 2026-05-16：d 层结构化派发 + dispatch_package + 双重 review + D29 B3 失败分流 + toolset 门控 + 动态编制 + pm2-runner 生产接入；11 项任务全部完成
+- [260515-team-phase-c-实施方案](workflow/done/260515-team-phase-c-实施方案.md) — ✅ 已完成 2026-05-16：c 层产物链（spec/plan/tasks）+ Constitution Check + [NEEDS CLARIFICATION] 推送 + 产物查看器 + 标记高亮 + 三步向导 UI + pm1-runner 运行时接入；10 项任务全部完成 + 3 项补完全部完成
+- [260515-team-phase-b-实施方案](workflow/done/260515-team-phase-b-实施方案.md) — ✅ 已完成 2026-05-15：Session 状态机 + Handoff 协议 + Watcher + BackgroundTaskScheduler + 五层骨架 + 前端 TeamStatusBar/Session树/暂停取消/层级对话查看器；15 项任务全部完成 + 7 项补完任务全部完成
+- [260515-team-phase-a-实施方案](workflow/done/260515-team-phase-a-实施方案.md) — ✅ 已完成 2026-05-15：团队宪法 + 角色 SOUL + 7 层指令分层栈 + memory 安全扫描 + ForceApply；12 项任务全部完成；3 项偏差记录
 - [260509-opencode借鉴升级总览](workflow/done/260509-opencode借鉴升级总览.md) — ✅ 已归档 2026-05-09：8 份子工作流（P0×1 + P1×3 + P2×2 + P3×2）整批落地或显式推迟决议；agent-gateway 测试 335 → 472（+137），agent-core 新增 14 项；新增 6 个源码模块；修复 mutex 泄漏 / sandbox 未注册 / dev-browser 误导 prompt / GPT-5 400 / overloaded 重试 共 4 个真实 bug；推迟项跟踪表见文末
 - [260509-p0-provider兼容性修复批](workflow/done/260509-p0-provider兼容性修复批.md) — ✅ P0 五项已完成 2026-05-09：GPT-5 reasoning clamp + Gemini-3/2.5 thinking 子集对齐 + `server_is_overloaded` 显式分支 + 工具确定性排序 + Anthropic adaptive thinking 空 text 保留（已存在），typecheck + 335/335 vitest 通过
 - [260509-p1-compaction锚点摘要升级](workflow/done/260509-p1-compaction锚点摘要升级.md) — ✅ P1 已完成 2026-05-09：新建 `compaction-prompt.ts` 引入锚点风格 system prompt 与 `<previous-summary>` 更新指令；S3/S4/S5（工具截断、PRUNE_PROTECTED_TOOLS、summary/tail 顺序）已存在；8 项 prompt 单元 + 353/353 全量通过
