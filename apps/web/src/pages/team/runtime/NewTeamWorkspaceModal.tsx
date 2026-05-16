@@ -15,7 +15,10 @@
  * 成功后调 onCreated(newId)，由父级决定是否 navigate。
  */
 
-import { useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { createWorkspaceClient } from '@openAwork/web-client';
+import WorkspacePickerModal from '../../../components/WorkspacePickerModal.js';
+import { useAuthStore } from '../../../stores/auth.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { XIcon } from './TeamIcons.js';
 
@@ -167,12 +170,46 @@ const ERROR_STYLE: CSSProperties = {
 
 export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceModalProps) {
   const data = useTeamRuntimeReferenceViewData();
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
+
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [defaultWorkingRoot, setDefaultWorkingRoot] = useState('');
   const [visibility, setVisibility] = useState<'private' | 'closed' | 'open'>('private');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+
+  // ─── workspace picker fetch 适配（与 chat 页面 useWorkspace 暴露的相同函数 ──
+  const fetchWorkspaceRoots = useCallback(async (): Promise<string[]> => {
+    const roots = await workspaceClient.listRoots(accessToken ?? '');
+    if (roots.length === 0) {
+      throw new Error('fetchWorkspaceRoots failed: no workspace roots');
+    }
+    return roots;
+  }, [accessToken, workspaceClient]);
+
+  const fetchRootPath = useCallback(async (): Promise<string> => {
+    const roots = await fetchWorkspaceRoots();
+    const root = roots[0];
+    if (!root) {
+      throw new Error('fetchRootPath failed: no workspace roots');
+    }
+    return root;
+  }, [fetchWorkspaceRoots]);
+
+  const fetchTree = useCallback(
+    async (path: string, depth = 2) =>
+      workspaceClient.fetchTree(accessToken ?? '', path, { depth }),
+    [accessToken, workspaceClient],
+  );
+
+  const validatePath = useCallback(
+    async (path: string) => workspaceClient.validatePath(accessToken ?? '', path),
+    [accessToken, workspaceClient],
+  );
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -191,8 +228,6 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
         setError('创建失败，请重试或检查权限');
         return;
       }
-      // reference-data 的 createWorkspace 当前不返回新 id；
-      // 父级可以通过 onCreated() 回调触发 workspaces 列表刷新 + 选中最新一个
       onCreated?.();
       onClose();
     } catch (e) {
@@ -203,145 +238,203 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
   };
 
   return (
-    <div style={OVERLAY_STYLE}>
-      <button
-        type="button"
-        aria-label="关闭新建工作区弹窗"
-        onClick={onClose}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          border: 'none',
-          background: 'transparent',
-          cursor: 'pointer',
-        }}
-      />
-      <div style={MODAL_STYLE} role="dialog" aria-modal="true" aria-labelledby="new-ws-title">
-        <div style={HEADER_ROW_STYLE}>
-          <div style={{ display: 'grid', gap: 5 }}>
-            <span id="new-ws-title" style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
-              新建工作区
-            </span>
-            <span style={HINT_STYLE}>
-              工作区是团队会话与产物的隔离单元，每个工作区有独立的 constitution / 角色绑定 /
-              任务清单。
-            </span>
+    <>
+      <div style={OVERLAY_STYLE}>
+        <button
+          type="button"
+          aria-label="关闭新建工作区弹窗"
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+          }}
+        />
+        <div style={MODAL_STYLE} role="dialog" aria-modal="true" aria-labelledby="new-ws-title">
+          <div style={HEADER_ROW_STYLE}>
+            <div style={{ display: 'grid', gap: 5 }}>
+              <span
+                id="new-ws-title"
+                style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}
+              >
+                新建工作区
+              </span>
+              <span style={HINT_STYLE}>
+                工作区是团队会话与产物的隔离单元，每个工作区有独立的 constitution / 角色绑定 /
+                任务清单。
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="关闭"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-3)',
+                padding: 4,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                borderRadius: 4,
+              }}
+            >
+              <XIcon size={14} color="var(--text-3)" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭"
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-3)',
-              padding: 4,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              borderRadius: 4,
-            }}
-          >
-            <XIcon size={14} color="var(--text-3)" />
-          </button>
-        </div>
 
-        <div style={FIELD_STYLE}>
-          <label htmlFor="new-ws-name" style={LABEL_STYLE}>
-            名称 <span style={{ color: 'var(--error, #ef4444)' }}>*</span>
-          </label>
-          <input
-            id="new-ws-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="例如：AILinkMarket"
-            style={INPUT_STYLE}
-            autoFocus
-            maxLength={80}
-          />
-        </div>
+          <div style={FIELD_STYLE}>
+            <label htmlFor="new-ws-name" style={LABEL_STYLE}>
+              名称 <span style={{ color: 'var(--error, #ef4444)' }}>*</span>
+            </label>
+            <input
+              id="new-ws-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="例如：AILinkMarket"
+              style={INPUT_STYLE}
+              autoFocus
+              maxLength={80}
+            />
+          </div>
 
-        <div style={FIELD_STYLE}>
-          <label htmlFor="new-ws-desc" style={LABEL_STYLE}>
-            描述
-          </label>
-          <textarea
-            id="new-ws-desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="一句话说明这个工作区做什么（可选）"
-            style={TEXTAREA_STYLE}
-            maxLength={300}
-          />
-        </div>
+          <div style={FIELD_STYLE}>
+            <label htmlFor="new-ws-desc" style={LABEL_STYLE}>
+              描述
+            </label>
+            <textarea
+              id="new-ws-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="一句话说明这个工作区做什么（可选）"
+              style={TEXTAREA_STYLE}
+              maxLength={300}
+            />
+          </div>
 
-        <div style={FIELD_STYLE}>
-          <label htmlFor="new-ws-root" style={LABEL_STYLE}>
-            默认工作目录
-          </label>
-          <input
-            id="new-ws-root"
-            type="text"
-            value={defaultWorkingRoot}
-            onChange={(e) => setDefaultWorkingRoot(e.target.value)}
-            placeholder="例如：/home/user/projects/ailinkmarket（可选）"
-            style={INPUT_STYLE}
-          />
-          <span style={HINT_STYLE}>c/d/e 派生的会话将默认绑定此目录；可在创建会话时单独覆盖。</span>
-        </div>
-
-        <div style={FIELD_STYLE}>
-          <span style={LABEL_STYLE}>可见性</span>
-          <div style={VISIBILITY_GROUP_STYLE}>
-            {VISIBILITY_OPTIONS.map((opt) => {
-              const active = visibility === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setVisibility(opt.value)}
-                  style={active ? VISIBILITY_OPTION_ACTIVE_STYLE : VISIBILITY_OPTION_BASE_STYLE}
-                  aria-pressed={active}
+          <div style={FIELD_STYLE}>
+            <label htmlFor="new-ws-root" style={LABEL_STYLE}>
+              默认工作目录
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                id="new-ws-root"
+                type="text"
+                value={defaultWorkingRoot}
+                onChange={(e) => setDefaultWorkingRoot(e.target.value)}
+                placeholder="例如：/home/user/projects/ailinkmarket（可选）"
+                style={{ ...INPUT_STYLE, flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPicker(true)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
+                  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                  color: 'var(--accent)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  flexShrink: 0,
+                }}
+                title="从工作区列表选择"
+                aria-label="从工作区列表选择目录"
+              >
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 >
-                  <span style={{ fontWeight: 700 }}>{opt.label}</span>
-                  <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
-                    {opt.description}
-                  </span>
-                </button>
-              );
-            })}
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                <span>浏览</span>
+              </button>
+            </div>
+            <span style={HINT_STYLE}>
+              c/d/e 派生的会话将默认绑定此目录；可在创建会话时单独覆盖。
+            </span>
           </div>
-        </div>
 
-        {error ? (
-          <div role="alert" style={ERROR_STYLE}>
-            {error}
+          <div style={FIELD_STYLE}>
+            <span style={LABEL_STYLE}>可见性</span>
+            <div style={VISIBILITY_GROUP_STYLE}>
+              {VISIBILITY_OPTIONS.map((opt) => {
+                const active = visibility === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setVisibility(opt.value)}
+                    style={active ? VISIBILITY_OPTION_ACTIVE_STYLE : VISIBILITY_OPTION_BASE_STYLE}
+                    aria-pressed={active}
+                  >
+                    <span style={{ fontWeight: 700 }}>{opt.label}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                      {opt.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        ) : null}
 
-        <div style={ACTIONS_ROW_STYLE}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={SECONDARY_BUTTON_STYLE}
-            disabled={submitting}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSubmit()}
-            style={{
-              ...PRIMARY_BUTTON_STYLE,
-              opacity: submitting || !name.trim() ? 0.6 : 1,
-              cursor: submitting || !name.trim() ? 'not-allowed' : 'pointer',
-            }}
-            disabled={submitting || !name.trim()}
-          >
-            {submitting ? '创建中…' : '创建工作区'}
-          </button>
+          {error ? (
+            <div role="alert" style={ERROR_STYLE}>
+              {error}
+            </div>
+          ) : null}
+
+          <div style={ACTIONS_ROW_STYLE}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={SECONDARY_BUTTON_STYLE}
+              disabled={submitting}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSubmit()}
+              style={{
+                ...PRIMARY_BUTTON_STYLE,
+                opacity: submitting || !name.trim() ? 0.6 : 1,
+                cursor: submitting || !name.trim() ? 'not-allowed' : 'pointer',
+              }}
+              disabled={submitting || !name.trim()}
+            >
+              {submitting ? '创建中…' : '创建工作区'}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      <WorkspacePickerModal
+        isOpen={showPicker}
+        onClose={() => setShowPicker(false)}
+        onSelect={async (path) => {
+          setDefaultWorkingRoot(path);
+          setShowPicker(false);
+        }}
+        fetchRootPath={fetchRootPath}
+        fetchWorkspaceRoots={fetchWorkspaceRoots}
+        fetchTree={fetchTree}
+        validatePath={validatePath}
+        initialPath={defaultWorkingRoot || undefined}
+      />
+    </>
   );
 }
