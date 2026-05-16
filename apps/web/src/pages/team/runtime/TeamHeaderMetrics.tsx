@@ -1,12 +1,14 @@
 /**
  * TeamHeaderMetrics · page-header 中部指标卡片
  *
- * 在 page-header 中显示当前工作区的关键指标：成员数 / 任务进度 /
- * 消息数 / handoff 数 / 运行中会话等。每个指标用紧凑徽章呈现，
- * 整行高度 ≤ 28px，hover 显示完整 tooltip。
+ * 紧凑展示当前工作区的关键指标。设计原则：
+ * - 把「成员 / 任务 / 汇报」3 个低优先级数字合并到一个 split-pill 里，
+ *   减少视觉碎片
+ * - 把「运行中会话 / 活跃 Handoff」做成显眼的 accent 状态徽章
+ *   （仅在 > 0 时出现），它们才是用户最关心的实时数据
+ * - 整行高度 ≤ 28px，hover 显示完整说明
  *
- * 数据源：来自 useTeamRuntimeReferenceViewData() 的 metricCards 字段
- * + handoffs store。
+ * 数据源：useTeamRuntimeReferenceViewData().metricCards + handoff store
  */
 
 import type { CSSProperties } from 'react';
@@ -24,27 +26,38 @@ export interface TeamHeaderMetricsProps {
 const ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
+  gap: 8,
   padding: 0,
   margin: 0,
   flexShrink: 0,
 };
 
-const CHIP_STYLE: CSSProperties = {
+// ─── 合并 pill：成员 / 任务 / 汇报 ─────────────
+const SPLIT_PILL_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 5,
-  padding: '3px 9px',
-  borderRadius: 6,
+  padding: '3px 4px',
+  borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--border) 45%, transparent)',
   background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
-  color: 'var(--text-2)',
   fontSize: 11,
-  fontWeight: 600,
-  whiteSpace: 'nowrap',
   lineHeight: 1.2,
   cursor: 'default',
-  transition: 'background 150ms ease, border-color 150ms ease',
+};
+
+const SPLIT_CELL_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '0 8px',
+  color: 'var(--text-2)',
+};
+
+const SPLIT_DIVIDER_STYLE: CSSProperties = {
+  width: 1,
+  height: 12,
+  background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+  flexShrink: 0,
 };
 
 const VALUE_STYLE: CSSProperties = {
@@ -58,16 +71,37 @@ const LABEL_STYLE: CSSProperties = {
   fontSize: 10,
 };
 
+// ─── accent 高亮徽章：运行 / 派发 ─────────────
+const ACTIVITY_BADGE_BASE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
+  padding: '3px 9px',
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+  lineHeight: 1.2,
+  cursor: 'default',
+};
+
+const RUNNING_BADGE_STYLE: CSSProperties = {
+  ...ACTIVITY_BADGE_BASE,
+  background: 'color-mix(in srgb, var(--success, #22c55e) 14%, transparent)',
+  color: 'var(--success, #22c55e)',
+  border: '1px solid color-mix(in srgb, var(--success, #22c55e) 35%, transparent)',
+};
+
+const HANDOFF_BADGE_STYLE: CSSProperties = {
+  ...ACTIVITY_BADGE_BASE,
+  background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+  color: 'var(--accent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+};
+
 const ICON_STYLE: CSSProperties = {
   flexShrink: 0,
   opacity: 0.85,
-};
-
-const HIGHLIGHT_STYLE: CSSProperties = {
-  ...CHIP_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-  borderColor: 'color-mix(in srgb, var(--accent) 35%, transparent)',
-  color: 'var(--accent)',
 };
 
 function MetricIcon({ kind }: { kind: string }) {
@@ -150,21 +184,18 @@ function MetricIcon({ kind }: { kind: string }) {
       );
     case 'running':
       return (
-        <svg
+        <span
           aria-hidden="true"
-          width="11"
-          height="11"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={ICON_STYLE}
-        >
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
+          style={{
+            ...ICON_STYLE,
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: 'currentColor',
+            boxShadow: '0 0 0 3px color-mix(in srgb, currentColor 22%, transparent)',
+            display: 'inline-block',
+          }}
+        />
       );
     default:
       return null;
@@ -178,25 +209,35 @@ export function TeamHeaderMetrics({
 }: TeamHeaderMetricsProps) {
   return (
     <div style={ROW_STYLE} aria-label="工作区指标">
-      {metrics.map((metric) => (
-        <span key={metric.icon} style={CHIP_STYLE} title={`${metric.label}: ${metric.value}`}>
-          <MetricIcon kind={metric.icon} />
-          <span style={VALUE_STYLE}>{metric.value}</span>
-          <span style={LABEL_STYLE}>{metric.label}</span>
-        </span>
-      ))}
+      {/* 显眼实时状态：仅在有数据时出现 */}
       {typeof runningSessionCount === 'number' && runningSessionCount > 0 ? (
-        <span style={HIGHLIGHT_STYLE} title={`运行中会话：${runningSessionCount}`}>
+        <span style={RUNNING_BADGE_STYLE} title={`${runningSessionCount} 个会话正在运行`}>
           <MetricIcon kind="running" />
-          <span style={VALUE_STYLE}>{runningSessionCount}</span>
-          <span style={LABEL_STYLE}>运行</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{runningSessionCount}</span>
+          <span style={{ fontWeight: 500, opacity: 0.85 }}>运行</span>
         </span>
       ) : null}
       {typeof activeHandoffCount === 'number' && activeHandoffCount > 0 ? (
-        <span style={HIGHLIGHT_STYLE} title={`活跃 Handoff：${activeHandoffCount}`}>
+        <span style={HANDOFF_BADGE_STYLE} title={`${activeHandoffCount} 个 Handoff 正在派发`}>
           <MetricIcon kind="handoff" />
-          <span style={VALUE_STYLE}>{activeHandoffCount}</span>
-          <span style={LABEL_STYLE}>派发</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{activeHandoffCount}</span>
+          <span style={{ fontWeight: 500, opacity: 0.85 }}>派发</span>
+        </span>
+      ) : null}
+
+      {/* 静态指标合并 split-pill */}
+      {metrics.length > 0 ? (
+        <span style={SPLIT_PILL_STYLE}>
+          {metrics.map((metric, i) => (
+            <span key={metric.icon} style={{ display: 'inline-flex' }}>
+              {i > 0 ? <span style={SPLIT_DIVIDER_STYLE} /> : null}
+              <span style={SPLIT_CELL_STYLE} title={`${metric.label}: ${metric.value}`}>
+                <MetricIcon kind={metric.icon} />
+                <span style={VALUE_STYLE}>{metric.value}</span>
+                <span style={LABEL_STYLE}>{metric.label}</span>
+              </span>
+            </span>
+          ))}
         </span>
       ) : null}
     </div>

@@ -412,21 +412,6 @@ export default function TeamPageV2() {
     gridTemplateColumns,
   };
 
-  const selectedTeamMeta = useMemo(() => {
-    for (const group of data.workspaceGroups) {
-      const session = group.sessions.find((s) => s.id === selectedTeamId);
-      if (session) {
-        return {
-          title: session.title,
-          status: session.status,
-          updatedAt: session.updatedAt,
-        };
-      }
-    }
-    return null;
-  }, [data.workspaceGroups, selectedTeamId]);
-  const selectedTeamLabel = selectedTeamMeta?.title ?? null;
-
   // ─── header 指标统计 ────────────────────────────────────────────
   const headerMetrics = useMemo(() => {
     const allSessions = data.workspaceGroups.flatMap((group) => group.sessions);
@@ -450,6 +435,7 @@ export default function TeamPageV2() {
         <header className="page-header" style={HEADER_STYLE}>
           <div style={TITLE_GROUP_STYLE}>
             <strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>团队</strong>
+            <span style={{ color: 'var(--text-3)', fontSize: 12 }}>·</span>
             <WorkspaceSwitcher
               workspaces={workspaceState.workspaces}
               activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
@@ -459,53 +445,6 @@ export default function TeamPageV2() {
               onRename={data.renameWorkspace}
               onRequestDelete={(ws) => setDeleteWorkspaceTarget(ws)}
             />
-            {selectedTeamMeta ? (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  color: 'var(--text-2)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: 280,
-                }}
-                title={selectedTeamMeta.title}
-              >
-                <span style={{ color: 'var(--text-3)' }}>/</span>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    flexShrink: 0,
-                    background:
-                      selectedTeamMeta.status === 'running'
-                        ? 'var(--success, #22c55e)'
-                        : selectedTeamMeta.status === 'paused'
-                          ? 'var(--warning, #f59e0b)'
-                          : selectedTeamMeta.status === 'failed'
-                            ? 'var(--error, #ef4444)'
-                            : 'var(--text-3)',
-                    boxShadow:
-                      selectedTeamMeta.status === 'running'
-                        ? '0 0 0 3px color-mix(in srgb, var(--success, #22c55e) 25%, transparent)'
-                        : 'none',
-                  }}
-                />
-                <span
-                  style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {selectedTeamMeta.title}
-                </span>
-              </span>
-            ) : null}
           </div>
 
           {/* 中部：工作区指标卡片 */}

@@ -705,6 +705,8 @@ export function TeamSessionListSidebar({
         </div>
       </header>
 
+      {/* 多 workspace 切换器（仅在 workspaceGroups > 1 时出现）；
+          单 workspace 时不再显示 workspaceLabel 静态框，避免与顶部 page-header 重复 */}
       {workspaceGroups.length > 1 && onWorkspaceChange ? (
         <div style={{ padding: '8px 10px 0' }}>
           <select
@@ -726,21 +728,6 @@ export function TeamSessionListSidebar({
               </option>
             ))}
           </select>
-        </div>
-      ) : workspaceLabel ? (
-        <div style={{ padding: '8px 10px 0' }}>
-          <div
-            style={{
-              padding: '7px 10px',
-              borderRadius: 8,
-              border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--bg) 60%, var(--surface))',
-              fontSize: 12,
-              color: 'var(--text-2)',
-            }}
-          >
-            {workspaceLabel}
-          </div>
         </div>
       ) : null}
 
@@ -889,6 +876,11 @@ export function TeamSessionListSidebar({
         ) : null}
         {filteredGroups.map((group) => {
           const showWorkspaceLabel = filteredGroups.length > 1;
+          // 仅当存在多个时间桶有内容时才显示「今天 / 昨天 / 更早」分隔标签
+          const nonEmptyBuckets = TIME_BUCKET_ORDER.filter(
+            (b) => (group.buckets.get(b) ?? []).length > 0,
+          );
+          const showBucketLabels = nonEmptyBuckets.length > 1;
           return (
             <div key={group.workspacePath ?? group.workspaceLabel} style={{ marginBottom: 6 }}>
               {showWorkspaceLabel ? (
@@ -899,7 +891,9 @@ export function TeamSessionListSidebar({
                 if (sessions.length === 0) return null;
                 return (
                   <Fragment key={`${group.workspacePath ?? group.workspaceLabel}-${bucket}`}>
-                    <span style={TIME_BUCKET_LABEL_STYLE}>{bucket}</span>
+                    {showBucketLabels ? (
+                      <span style={TIME_BUCKET_LABEL_STYLE}>{bucket}</span>
+                    ) : null}
                     {sessions.map((session) => {
                       const active = session.id === selectedTeamId;
                       const dot = dotColor(session.status);
