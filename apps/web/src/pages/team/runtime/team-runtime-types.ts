@@ -160,12 +160,22 @@ export interface AgentTeamsSidebarTeam {
   taskRunning?: number;
   /** 失败任务数（用于异常徽章）。 */
   taskFailed?: number;
+  /** 待处理任务数。 */
+  taskPending?: number;
   /** 子会话数（基于 parentSessionId 反向汇总）。 */
   childSessionCount?: number;
   /** 工作目录（从 metadataJson.workingDirectory 解析）。 */
   workingDirectory?: string;
   /** 是否为派生会话（有 parentSessionId）。 */
   isDerived?: boolean;
+  /** 当前正在运行的任务标题（最早开始的一个）。 */
+  currentTaskTitle?: string;
+  /** 参与该会话的 agent 集合（来自 task.assignedAgent 去重）。 */
+  agents?: string[];
+  /** 该会话已运行的总耗时（毫秒，基于最早 startedAt 到现在；终态用 completedAt）。 */
+  durationMs?: number;
+  /** 创建时间（ISO 字符串），用于显示「创建于 …」。 */
+  createdAt?: string;
 }
 
 export interface AgentTeamsWorkspaceGroup {

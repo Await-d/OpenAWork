@@ -48,6 +48,21 @@ function formatRelativeTime(timestamp: string | undefined): string {
   return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 }
 
+/**
+ * 短时长格式：5s / 12m / 3h / 2d，用于会话/任务总耗时展示。
+ */
+function formatDurationShort(ms?: number): string | undefined {
+  if (ms == null || ms <= 0) return undefined;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  return `${day}d`;
+}
+
 type TimeBucket = '今天' | '昨天' | '更早';
 
 function getTimeGroup(timestamp: string | undefined): TimeBucket {
@@ -587,7 +602,7 @@ export function TeamSessionListSidebar({
       }}
     >
       {/* 局部 keyframe：仅本组件使用的旋转动画（避免污染全局 CSS） */}
-      <style>{`@keyframes team-v2-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes team-v2-pulse{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}`}</style>
+      <style>{`@keyframes team-v2-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes team-v2-pulse{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}@keyframes team-v2-pulse-fade{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
       <header style={HEADER_STYLE}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
           <strong
@@ -901,8 +916,12 @@ export function TeamSessionListSidebar({
                       const taskCompleted = session.taskCompleted ?? 0;
                       const taskRunning = session.taskRunning ?? 0;
                       const taskFailed = session.taskFailed ?? 0;
+                      const taskPending = session.taskPending ?? 0;
                       const taskProgress = taskTotal > 0 ? taskCompleted / taskTotal : 0;
                       const childCount = session.childSessionCount ?? 0;
+                      const currentTaskTitle = session.currentTaskTitle;
+                      const agents = session.agents ?? [];
+                      const durationLabel = formatDurationShort(session.durationMs);
                       // 不再单独展示工作目录：与顶部工作区名重复，且会话已经按工作区分组
 
                       return (
@@ -1260,7 +1279,173 @@ export function TeamSessionListSidebar({
                                     {taskFailed}
                                   </span>
                                 ) : null}
+                                {durationLabel ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 2,
+                                      color: 'var(--text-3)',
+                                      fontVariantNumeric: 'tabular-nums',
+                                      fontWeight: 600,
+                                      flexShrink: 0,
+                                    }}
+                                    title={`运行总耗时：${durationLabel}`}
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      width="9"
+                                      height="9"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <circle cx="12" cy="12" r="10" />
+                                      <polyline points="12 6 12 12 16 14" />
+                                    </svg>
+                                    {durationLabel}
+                                  </span>
+                                ) : null}
                               </div>
+                            ) : null}
+
+                            {/* 待办任务计数（仅当有 pending 但还未开始时） */}
+                            {taskPending > 0 && taskRunning === 0 ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: 10,
+                                  color: 'var(--text-3)',
+                                }}
+                                title={`${taskPending} 个待办任务`}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  style={{ opacity: 0.7 }}
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <line x1="12" y1="8" x2="12" y2="12" />
+                                </svg>
+                                <span>
+                                  待执行{' '}
+                                  <strong style={{ color: 'var(--text-2)' }}>{taskPending}</strong>{' '}
+                                  项
+                                </span>
+                              </span>
+                            ) : null}
+
+                            {/* 正在运行的任务标题（动态强调） */}
+                            {currentTaskTitle && session.status === 'running' ? (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  fontSize: 11,
+                                  color: 'var(--success, #22c55e)',
+                                  fontWeight: 500,
+                                  lineHeight: 1.4,
+                                }}
+                                title={`正在运行：${currentTaskTitle}`}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 24 24"
+                                  fill="currentColor"
+                                  style={{
+                                    flexShrink: 0,
+                                    animation: 'team-v2-pulse-fade 1.6s ease-in-out infinite',
+                                  }}
+                                >
+                                  <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {currentTaskTitle}
+                                </span>
+                              </span>
+                            ) : null}
+
+                            {/* 参与的 agent 列表（最多展示 3 个，多余收为 +N） */}
+                            {agents.length > 0 ? (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: 10,
+                                  color: 'var(--text-3)',
+                                  flexWrap: 'wrap',
+                                }}
+                                title={`参与 agent：${agents.join('、')}`}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  style={{ flexShrink: 0, opacity: 0.6 }}
+                                >
+                                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                  <circle cx="9" cy="7" r="4" />
+                                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                                </svg>
+                                {agents.slice(0, 3).map((a, i) => (
+                                  <span key={a} style={{ display: 'inline-flex', gap: 4 }}>
+                                    {i > 0 ? (
+                                      <span style={{ color: 'var(--text-3)', opacity: 0.5 }}>
+                                        ·
+                                      </span>
+                                    ) : null}
+                                    <span
+                                      style={{
+                                        color: 'var(--text-2)',
+                                        fontWeight: 500,
+                                      }}
+                                    >
+                                      {a}
+                                    </span>
+                                  </span>
+                                ))}
+                                {agents.length > 3 ? (
+                                  <span
+                                    style={{
+                                      color: 'var(--text-3)',
+                                      fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                  >
+                                    +{agents.length - 3}
+                                  </span>
+                                ) : null}
+                              </span>
                             ) : null}
 
                             {/* 第 4 行：最新消息预览（带气泡图标） */}

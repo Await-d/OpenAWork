@@ -814,20 +814,90 @@ export function useResolvedTeamRuntimeReferenceData(
     }
 
     // 预聚合：以 sessionId 为 key 的任务统计（runtimeTasks 含 SessionTask.sessionId 字段）
-    const taskStats = new Map<
-      string,
-      { total: number; running: number; completed: number; failed: number }
-    >();
+    interface TaskAgg {
+      total: number;
+      running: number;
+      completed: number;
+      failed: number;
+      pending: number;
+      // 当前最早开始的 running 任务（用于显示「正在做：X」）
+      currentTaskTitle?: string;
+      currentTaskStartedAt?: number;
+      // 参与的 agent 集合
+      agents: Set<string>;
+      // 全部任务的最早 startedAt 和最晚 completedAt（用于耗时）
+      earliestStartedAt?: number;
+      latestCompletedAt?: number;
+    }
+    const taskStats = new Map<string, TaskAgg>();
     for (const task of collaboration.runtimeTasks) {
       const sid = task.sessionId;
       if (!sid) continue;
-      const cur = taskStats.get(sid) ?? { total: 0, running: 0, completed: 0, failed: 0 };
+      const cur =
+        taskStats.get(sid) ??
+        ({
+          total: 0,
+          running: 0,
+          completed: 0,
+          failed: 0,
+          pending: 0,
+          agents: new Set<string>(),
+        } satisfies TaskAgg);
       cur.total += 1;
-      if (task.status === 'running') cur.running += 1;
-      else if (task.status === 'completed') cur.completed += 1;
+      if (task.status === 'running') {
+        cur.running += 1;
+        // 记录最早开始的 running 任务作为「正在做」展示
+        if (
+          task.startedAt != null &&
+          (cur.currentTaskStartedAt == null || task.startedAt < cur.currentTaskStartedAt)
+        ) {
+          cur.currentTaskStartedAt = task.startedAt;
+          cur.currentTaskTitle = task.title;
+        } else if (cur.currentTaskTitle == null) {
+          cur.currentTaskTitle = task.title;
+        }
+      } else if (task.status === 'completed') cur.completed += 1;
       else if (task.status === 'failed') cur.failed += 1;
+      else if (task.status === 'pending') cur.pending += 1;
+
+      if (task.assignedAgent && task.assignedAgent.length > 0) {
+        cur.agents.add(task.assignedAgent);
+      }
+      if (task.startedAt != null) {
+        if (cur.earliestStartedAt == null || task.startedAt < cur.earliestStartedAt) {
+          cur.earliestStartedAt = task.startedAt;
+        }
+      }
+      if (task.completedAt != null) {
+        if (cur.latestCompletedAt == null || task.completedAt > cur.latestCompletedAt) {
+          cur.latestCompletedAt = task.completedAt;
+        }
+      }
       taskStats.set(sid, cur);
     }
+
+    const buildExtraFields = (sid: string) => {
+      const stats = taskStats.get(sid);
+      if (!stats) return {};
+      const out: Partial<AgentTeamsSidebarTeam> = {
+        taskTotal: stats.total,
+        taskRunning: stats.running,
+        taskCompleted: stats.completed,
+        taskFailed: stats.failed,
+        taskPending: stats.pending,
+      };
+      if (stats.currentTaskTitle) out.currentTaskTitle = stats.currentTaskTitle;
+      if (stats.agents.size > 0) {
+        out.agents = Array.from(stats.agents).sort();
+      }
+      // 计算耗时：仍在运行 → 从 earliestStartedAt 到现在；已结束 → 从 earliestStartedAt 到 latestCompletedAt
+      if (stats.earliestStartedAt != null) {
+        const endTs = stats.running > 0 ? Date.now() : (stats.latestCompletedAt ?? Date.now());
+        const ms = Math.max(0, endTs - stats.earliestStartedAt);
+        if (ms > 0) out.durationMs = ms;
+      }
+      return out;
+    };
 
     // 反向汇总：parent → 子会话数
     const childCount = new Map<string, number>();
@@ -861,7 +931,6 @@ export function useResolvedTeamRuntimeReferenceData(
         workspacePath: session.workspacePath,
         sessions: [],
       };
-      const stats = taskStats.get(session.id);
       const wd = parseWorkingDirectory(session.metadataJson ?? '');
       current.sessions.push({
         id: session.id,
@@ -869,14 +938,7 @@ export function useResolvedTeamRuntimeReferenceData(
         subtitle: getSharedSessionStateLabel(session.stateStatus),
         title: session.title ?? session.id,
         updatedAt: session.updatedAt,
-        ...(stats
-          ? {
-              taskTotal: stats.total,
-              taskRunning: stats.running,
-              taskCompleted: stats.completed,
-              taskFailed: stats.failed,
-            }
-          : {}),
+        ...buildExtraFields(session.id),
         ...(childCount.has(session.id) ? { childSessionCount: childCount.get(session.id) } : {}),
         ...(wd ? { workingDirectory: wd } : {}),
         ...(session.parentSessionId ? { isDerived: true } : {}),
@@ -893,21 +955,13 @@ export function useResolvedTeamRuntimeReferenceData(
         workspacePath: sharedSession.workspacePath,
         sessions: [],
       };
-      const stats = taskStats.get(sharedSession.sessionId);
       current.sessions.push({
         id: sharedSession.sessionId,
         status: mapSidebarStatus(sharedSession.stateStatus),
         subtitle: getSharedSessionStateLabel(sharedSession.stateStatus),
         title: sharedSession.title ?? sharedSession.sessionId,
         updatedAt: sharedSession.shareUpdatedAt,
-        ...(stats
-          ? {
-              taskTotal: stats.total,
-              taskRunning: stats.running,
-              taskCompleted: stats.completed,
-              taskFailed: stats.failed,
-            }
-          : {}),
+        ...buildExtraFields(sharedSession.sessionId),
         ...(childCount.has(sharedSession.sessionId)
           ? { childSessionCount: childCount.get(sharedSession.sessionId) }
           : {}),
