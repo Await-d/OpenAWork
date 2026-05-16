@@ -131,6 +131,7 @@ const ITEM_STYLE: CSSProperties = {
   borderRadius: '0 10px 10px 0',
   transition: 'all 120ms ease',
   position: 'relative',
+  outline: 'none',
 };
 
 const ITEM_ACTIVE_STYLE: CSSProperties = {
@@ -162,6 +163,21 @@ const COLLAPSE_BTN_STYLE: CSSProperties = {
   color: 'var(--text-2)',
   fontSize: 12,
   cursor: 'pointer',
+};
+
+const QUICK_BTN_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 22,
+  height: 22,
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--text-3)',
+  cursor: 'pointer',
+  flexShrink: 0,
+  transition: 'background 120ms ease, color 120ms ease',
 };
 
 function dotColor(status: AgentTeamsSidebarTeam['status']): string {
@@ -347,6 +363,7 @@ export function TeamSessionListSidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string } | null>(null);
+  const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const handleContextMenu = useCallback(
@@ -857,27 +874,38 @@ export function TeamSessionListSidebar({
                     {sessions.map((session) => {
                       const active = session.id === selectedTeamId;
                       const dot = dotColor(session.status);
+                      const hovered = hoveredSessionId === session.id;
+                      const showActions = hovered || active;
+
+                      const handleCardClick = () => onSelectTeam(session.id);
+                      const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          onSelectTeam(session.id);
+                        }
+                      };
+
                       return (
-                        <button
+                        <div
                           key={session.id}
-                          type="button"
-                          onClick={() => onSelectTeam(session.id)}
+                          role="button"
+                          tabIndex={0}
+                          onClick={handleCardClick}
+                          onKeyDown={handleCardKeyDown}
                           onContextMenu={(event) => handleContextMenu(event, session)}
-                          style={active ? ITEM_ACTIVE_STYLE : ITEM_STYLE}
+                          onMouseEnter={() => setHoveredSessionId(session.id)}
+                          onMouseLeave={() => {
+                            setHoveredSessionId((cur) => (cur === session.id ? null : cur));
+                          }}
+                          style={{
+                            ...(active ? ITEM_ACTIVE_STYLE : ITEM_STYLE),
+                            ...(hovered && !active
+                              ? { background: 'color-mix(in srgb, var(--accent) 6%, transparent)' }
+                              : {}),
+                          }}
                           title={session.title}
                           aria-current={active ? 'true' : undefined}
                           aria-label={`会话：${session.title}，${statusLabel(session.status)}${session.lastMessage ? `，最新：${session.lastMessage}` : ''}`}
-                          onMouseEnter={(e) => {
-                            if (!active) {
-                              e.currentTarget.style.background =
-                                'color-mix(in srgb, var(--accent) 6%, transparent)';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!active) {
-                              e.currentTarget.style.background = 'transparent';
-                            }
-                          }}
                         >
                           {/* 状态点（running 带脉冲） */}
                           <span
@@ -930,6 +958,8 @@ export function TeamSessionListSidebar({
                                     color: 'var(--text-3)',
                                     fontWeight: 400,
                                     fontVariantNumeric: 'tabular-nums',
+                                    opacity: showActions ? 0 : 1,
+                                    transition: 'opacity 120ms ease',
                                   }}
                                 >
                                   {formatRelativeTime(session.updatedAt)}
@@ -1001,7 +1031,108 @@ export function TeamSessionListSidebar({
                               </span>
                             ) : null}
                           </span>
-                        </button>
+
+                          {/* 快捷操作（hover 时浮现） */}
+                          {showActions ? (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: 8,
+                                right: 8,
+                                display: 'inline-flex',
+                                gap: 2,
+                                background: active
+                                  ? 'transparent'
+                                  : 'color-mix(in srgb, var(--surface) 90%, transparent)',
+                                borderRadius: 6,
+                                padding: 2,
+                                opacity: hovered ? 1 : 0.7,
+                                transition: 'opacity 120ms ease',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                                    navigator.clipboard.writeText(session.id).catch((err) => {
+                                      console.warn(
+                                        '[TeamSessionListSidebar] clipboard failed:',
+                                        err,
+                                      );
+                                    });
+                                  }
+                                }}
+                                style={QUICK_BTN_STYLE}
+                                aria-label="复制会话 ID"
+                                title="复制会话 ID"
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background =
+                                    'color-mix(in srgb, var(--text-3) 16%, transparent)';
+                                  e.currentTarget.style.color = 'var(--text)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'transparent';
+                                  e.currentTarget.style.color = 'var(--text-3)';
+                                }}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="11"
+                                  height="11"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setDeleteConfirm({
+                                    id: session.id,
+                                    title: session.title,
+                                  });
+                                }}
+                                style={QUICK_BTN_STYLE}
+                                aria-label="删除会话"
+                                title="删除会话"
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background =
+                                    'color-mix(in srgb, var(--danger, #d4574e) 16%, transparent)';
+                                  e.currentTarget.style.color = 'var(--danger, #d4574e)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'transparent';
+                                  e.currentTarget.style.color = 'var(--text-3)';
+                                }}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="11"
+                                  height="11"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-2 14H7L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                                </svg>
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       );
                     })}
                   </Fragment>

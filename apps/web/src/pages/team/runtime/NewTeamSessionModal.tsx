@@ -21,14 +21,16 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { useTeamRuntimeRoleBindings } from './use-team-runtime-role-bindings.js';
-import { useTeamSessionCreation } from './use-team-session-creation.js';
+import {
+  generateDefaultSessionTitle,
+  useTeamSessionCreation,
+} from './use-team-session-creation.js';
 import {
   REQUIRED_CORE_ROLES,
   type TeamSessionCreationDraft,
   type TeamSessionCreationStep,
 } from './team-session-creation.types.js';
 import { CheckIcon, ChevronRightIcon, XIcon } from './TeamIcons.js';
-import { WorkflowSelector } from './WorkflowEditor.js';
 
 interface NewTeamSessionModalProps {
   onClose: () => void;
@@ -45,7 +47,7 @@ interface StepDescriptor {
   icon: ReactNode;
 }
 
-type SourceTab = 'blank' | 'workflow' | 'template';
+type SourceTab = 'blank' | 'template';
 
 // ─── 图标 ─────────────────────────────────────────────
 
@@ -138,26 +140,6 @@ const ICON_BLANK = (
     <polyline points="14 2 14 8 20 8" />
     <line x1="12" y1="18" x2="12" y2="12" />
     <line x1="9" y1="15" x2="15" y2="15" />
-  </svg>
-);
-
-const ICON_WORKFLOW = (
-  <svg
-    aria-hidden="true"
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="3" width="6" height="6" rx="1" />
-    <rect x="15" y="3" width="6" height="6" rx="1" />
-    <rect x="3" y="15" width="6" height="6" rx="1" />
-    <rect x="15" y="15" width="6" height="6" rx="1" />
-    <path d="M9 6h6M6 9v6M18 9v6M9 18h6" />
   </svg>
 );
 
@@ -402,7 +384,7 @@ const INPUT_ERROR_STYLE: CSSProperties = {
 
 const SOURCE_TAB_BAR_STYLE: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1fr 1fr 1fr',
+  gridTemplateColumns: '1fr 1fr',
   gap: 8,
   padding: 4,
   borderRadius: 10,
@@ -633,6 +615,76 @@ function describeRole(role: string): string {
   }
 }
 
+/**
+ * 把 agent 的 canonicalRole.coreRole 映射到团队层级 + 可读说明。
+ * 在「额外成员」步骤里向用户解释加入此 agent 后，它会以哪种层级出现在团队中。
+ */
+interface OptionalAgentGroup {
+  key: string;
+  label: string;
+  description: string;
+  color: string;
+  hint: string;
+}
+
+const OPTIONAL_GROUP_META: Record<string, Omit<OptionalAgentGroup, 'key'>> = {
+  leader: {
+    label: '领导层',
+    description: '统筹全局，可作为团队代理人下发任务',
+    color: '#a855f7',
+    hint: '会出现在「领导」层级，介入跨子流程的协调与拍板。',
+  },
+  general: {
+    label: '通用助手',
+    description: '通用型 agent，灵活补位',
+    color: '#0ea5e9',
+    hint: '会出现在主对话流，按需被引用作为辅助回答与协作。',
+  },
+  planner: {
+    label: '规划补位',
+    description: '在 planner 层提供额外协作思路',
+    color: '#6366f1',
+    hint: '与核心 planner 并行，作为额外的拆解视角参与「规划」层。',
+  },
+  researcher: {
+    label: '研究补位',
+    description: '在 researcher 层补充信息源',
+    color: '#0ea5e9',
+    hint: '与核心 researcher 并行，作为额外检索通道参与「研究」层。',
+  },
+  executor: {
+    label: '执行补位',
+    description: '在 executor 层提供额外执行能力',
+    color: '#22c55e',
+    hint: '与核心 executor 并行，作为额外执行节点参与「执行」层。',
+  },
+  reviewer: {
+    label: '评审补位',
+    description: '在 reviewer 层加强审查',
+    color: '#f59e0b',
+    hint: '与核心 reviewer 并行，作为额外评审视角参与「评审」层。',
+  },
+  unknown: {
+    label: '未分层',
+    description: '未声明 canonical role 的 agent',
+    color: '#71717a',
+    hint: '未声明 canonical role，默认作为通用辅助 agent 加入。',
+  },
+};
+
+function getAgentGroupKey(agent: { canonicalRole?: { coreRole?: string } }): string {
+  const role = agent.canonicalRole?.coreRole;
+  if (typeof role === 'string' && role in OPTIONAL_GROUP_META) {
+    return role;
+  }
+  return 'unknown';
+}
+
+function getAgentGroupMeta(key: string): OptionalAgentGroup {
+  const meta = OPTIONAL_GROUP_META[key] ?? OPTIONAL_GROUP_META['unknown']!;
+  return { key, ...meta };
+}
+
 function badgeToneStyle(tone?: string): CSSProperties {
   switch (tone) {
     case 'accent':
@@ -670,9 +722,8 @@ export function NewTeamSessionModal({
   const roleBindings = useTeamRuntimeRoleBindings();
   const creation = useTeamSessionCreation({ teamWorkspaceId });
   const [submitting, setSubmitting] = useState(false);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
 
-  // 来源 tab：根据当前 source 推断
+  // 来源 tab：根据当前 source 推断（workflow 已移除，仅保留 blank / template）
   const [sourceTab, setSourceTab] = useState<SourceTab>(
     creation.draft.source.kind === 'saved-template' ? 'template' : 'blank',
   );
@@ -712,7 +763,15 @@ export function NewTeamSessionModal({
     if (!creation.canSubmit || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmitDraft(creation.draft);
+      // 提交前若标题为空，自动填入默认标题（不阻塞用户）
+      if (!creation.draft.title.trim()) {
+        creation.fillDefaultTitle();
+      }
+      const finalDraft = {
+        ...creation.draft,
+        title: creation.draft.title.trim() || generateDefaultSessionTitle(),
+      };
+      await onSubmitDraft(finalDraft);
       onClose();
     } finally {
       setSubmitting(false);
@@ -841,9 +900,9 @@ export function NewTeamSessionModal({
                 {creation.step === 'source' &&
                   '选择新会话从何处启动：从空白开始、套用工作流，或复用已保存的模板配置。'}
                 {creation.step === 'required-roles' &&
-                  '4 个核心角色由系统固定 agent 预绑定。可在此填写会话标题以便后续识别。'}
+                  '4 个核心角色由系统固定 agent 预绑定。可在此填写会话标题（留空则自动生成）。'}
                 {creation.step === 'optional-members' &&
-                  '在核心角色之外可加入更多 agent（如 leader / 通用助手）协助完成任务。'}
+                  '在核心角色之外可加入更多 agent，按其声明的层级（leader / general / planner …）参与对应阶段。'}
                 {creation.step === 'review' && '请确认会话配置，提交后即立即创建并进入。'}
               </div>
             </div>
@@ -889,22 +948,6 @@ export function NewTeamSessionModal({
                       {ICON_BLANK}
                     </span>
                     空白会话
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={sourceTab === 'workflow'}
-                    onClick={() => setSourceTab('workflow')}
-                    style={
-                      sourceTab === 'workflow'
-                        ? SOURCE_TAB_BTN_ACTIVE_STYLE
-                        : SOURCE_TAB_BTN_BASE_STYLE
-                    }
-                  >
-                    <span style={{ color: sourceTab === 'workflow' ? 'var(--accent)' : undefined }}>
-                      {ICON_WORKFLOW}
-                    </span>
-                    工作流模板
                   </button>
                   <button
                     type="button"
@@ -955,7 +998,9 @@ export function NewTeamSessionModal({
                     </div>
                     <div style={CARD_DESC_STYLE}>
                       使用系统预置的 4 个核心角色（planner / researcher / executor /
-                      reviewer），随后可按需追加额外 agent 成员。
+                      reviewer），随后可按需追加额外 agent 成员。会话标题可留空，提交时会自动以
+                      <strong style={{ color: 'var(--text-2)' }}>「团队会话 + 时间戳」</strong>
+                      命名。
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {REQUIRED_CORE_ROLES.map((role) => (
@@ -974,20 +1019,47 @@ export function NewTeamSessionModal({
                   </button>
                 ) : null}
 
-                {sourceTab === 'workflow' ? (
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    <span style={HINT_STYLE}>
-                      工作流模板内置了一组步骤序列，新会话将按此模板派生。
-                    </span>
-                    <WorkflowSelector
-                      selectedId={selectedWorkflowId}
-                      onSelect={(id) => setSelectedWorkflowId(id)}
-                    />
-                  </div>
-                ) : null}
-
                 {sourceTab === 'template' ? (
                   <div style={{ display: 'grid', gap: 12 }}>
+                    {/* 旧版兼容警告 */}
+                    <div
+                      role="note"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 8,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        background: 'color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent)',
+                        border:
+                          '1px solid color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent)',
+                        fontSize: 11,
+                        color: 'var(--text-2)',
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="var(--warning, #f59e0b)"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ flexShrink: 0, marginTop: 1 }}
+                      >
+                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span>
+                        <strong style={{ color: 'var(--warning, #b45309)' }}>实验性功能：</strong>
+                        已保存模板沿用旧版数据结构，与新版会话契约可能不完全兼容；新版的模板体系仍在设计中。建议优先选择「空白会话」开始。
+                      </span>
+                    </div>
+
                     {templateLoading ? (
                       <div
                         style={{
@@ -1097,24 +1169,64 @@ export function NewTeamSessionModal({
             {creation.step === 'required-roles' ? (
               <>
                 <div style={FIELD_STYLE}>
-                  <label htmlFor="new-team-session-title" style={LABEL_STYLE}>
-                    会话标题 <span style={{ color: 'var(--error, #ef4444)' }}>*</span>
-                  </label>
-                  <input
-                    id="new-team-session-title"
-                    value={creation.draft.title}
-                    onChange={(e) => creation.setTitle(e.target.value)}
-                    placeholder={`例如：研究团队 ${new Date().toISOString().slice(0, 10)}`}
-                    style={creation.fieldErrors.title ? INPUT_ERROR_STYLE : INPUT_STYLE}
-                    autoFocus
-                  />
-                  {creation.fieldErrors.title ? (
-                    <span style={{ fontSize: 11, color: 'var(--warning, #f59e0b)' }}>
-                      {creation.fieldErrors.title}
+                  <label
+                    htmlFor="new-team-session-title"
+                    style={{
+                      ...LABEL_STYLE,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>会话标题</span>
+                    <span
+                      style={{
+                        ...BADGE_BASE_STYLE,
+                        ...badgeToneStyle(),
+                        fontSize: 9,
+                        padding: '0 6px',
+                        minHeight: 16,
+                      }}
+                    >
+                      可选
                     </span>
-                  ) : (
-                    <span style={HINT_STYLE}>会话列表与对话头部都会显示此标题。</span>
-                  )}
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      id="new-team-session-title"
+                      value={creation.draft.title}
+                      onChange={(e) => creation.setTitle(e.target.value)}
+                      placeholder={generateDefaultSessionTitle()}
+                      style={{ ...INPUT_STYLE, flex: 1 }}
+                      autoFocus
+                    />
+                    {!creation.draft.title.trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => creation.setTitle(generateDefaultSessionTitle())}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
+                          background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+                          color: 'var(--accent)',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                        title="使用默认标题"
+                      >
+                        使用默认
+                      </button>
+                    ) : null}
+                  </div>
+                  <span style={HINT_STYLE}>
+                    留空将自动以
+                    <strong style={{ color: 'var(--text-2)' }}>「团队会话 + 当前时间戳」</strong>
+                    作为标题，可随时在会话列表里重命名。
+                  </span>
                 </div>
 
                 <div style={SECTION_HEADER_STYLE}>
@@ -1227,38 +1339,169 @@ export function NewTeamSessionModal({
                   </div>
                 ) : (
                   <>
-                    <span style={HINT_STYLE}>
-                      可为空。已选 {creation.draft.optionalAgentIds.length} 个，剩余{' '}
-                      {availableOptionalAgents.length} 个可选。
-                    </span>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {availableOptionalAgents.map((agent) => {
-                        const selected = creation.draft.optionalAgentIds.includes(agent.id);
-                        const color = agent.color ?? '#71717a';
-                        return (
-                          <button
-                            key={agent.id}
-                            type="button"
-                            onClick={() => creation.toggleOptionalAgent(agent.id)}
-                            style={selected ? AGENT_CHIP_SELECTED_STYLE : AGENT_CHIP_BASE_STYLE}
-                            title={agent.description || agent.label}
-                          >
-                            <span
-                              aria-hidden="true"
-                              style={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: '50%',
-                                background: color,
-                                flexShrink: 0,
-                              }}
-                            />
-                            {selected ? <CheckIcon size={11} color="var(--accent)" /> : null}
-                            <span>{agent.label}</span>
-                          </button>
-                        );
-                      })}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span style={HINT_STYLE}>
+                        额外成员按 <strong style={{ color: 'var(--text-2)' }}>层级</strong>
+                        分组展示。每个 agent 加入后，会以其声明的层级参与协作，与核心角色
+                        <strong style={{ color: 'var(--text-2)' }}>并行</strong>而非替代。
+                      </span>
+                      <span
+                        style={{
+                          ...BADGE_BASE_STYLE,
+                          ...badgeToneStyle('accent'),
+                          gap: 4,
+                        }}
+                      >
+                        已选 {creation.draft.optionalAgentIds.length} /{' '}
+                        {availableOptionalAgents.length}
+                      </span>
                     </div>
+
+                    {(() => {
+                      // 按 canonicalRole.coreRole 分组
+                      const buckets = new Map<string, typeof availableOptionalAgents>();
+                      for (const agent of availableOptionalAgents) {
+                        const key = getAgentGroupKey(agent);
+                        const list = buckets.get(key) ?? [];
+                        list.push(agent);
+                        buckets.set(key, list);
+                      }
+
+                      // 层级显示顺序：leader → general → planner → researcher → executor → reviewer → unknown
+                      const ORDER = [
+                        'leader',
+                        'general',
+                        'planner',
+                        'researcher',
+                        'executor',
+                        'reviewer',
+                        'unknown',
+                      ];
+                      const groups = ORDER.map((key) => ({
+                        meta: getAgentGroupMeta(key),
+                        items: buckets.get(key) ?? [],
+                      })).filter((g) => g.items.length > 0);
+
+                      return (
+                        <div style={{ display: 'grid', gap: 14 }}>
+                          {groups.map(({ meta, items }) => (
+                            <div key={meta.key} style={{ display: 'grid', gap: 8 }}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 10,
+                                  padding: '8px 10px',
+                                  borderRadius: 10,
+                                  background: `color-mix(in srgb, ${meta.color} 10%, transparent)`,
+                                  border: `1px solid color-mix(in srgb, ${meta.color} 30%, transparent)`,
+                                }}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: '50%',
+                                    background: meta.color,
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0, display: 'grid', gap: 2 }}>
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      color: 'var(--text)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                    }}
+                                  >
+                                    {meta.label}
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        fontFamily: 'ui-monospace, monospace',
+                                        color: 'var(--text-3)',
+                                        fontWeight: 400,
+                                      }}
+                                    >
+                                      {meta.key}
+                                    </span>
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      color: 'var(--text-3)',
+                                      lineHeight: 1.4,
+                                    }}
+                                  >
+                                    {meta.hint}
+                                  </span>
+                                </div>
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    color: 'var(--text-3)',
+                                    fontVariantNumeric: 'tabular-nums',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {items.length} 个候选
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                {items.map((agent) => {
+                                  const selected = creation.draft.optionalAgentIds.includes(
+                                    agent.id,
+                                  );
+                                  const color = agent.color ?? meta.color;
+                                  return (
+                                    <button
+                                      key={agent.id}
+                                      type="button"
+                                      onClick={() => creation.toggleOptionalAgent(agent.id)}
+                                      style={
+                                        selected ? AGENT_CHIP_SELECTED_STYLE : AGENT_CHIP_BASE_STYLE
+                                      }
+                                      title={
+                                        agent.description ||
+                                        `${agent.label}（加入后会出现在「${meta.label}」层级）`
+                                      }
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        style={{
+                                          width: 8,
+                                          height: 8,
+                                          borderRadius: '50%',
+                                          background: color,
+                                          flexShrink: 0,
+                                        }}
+                                      />
+                                      {selected ? (
+                                        <CheckIcon size={11} color="var(--accent)" />
+                                      ) : null}
+                                      <span>{agent.label}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </>
                 )}
               </>
@@ -1301,8 +1544,17 @@ export function NewTeamSessionModal({
                 <div style={REVIEW_ROW_STYLE}>
                   <span style={REVIEW_LABEL_STYLE}>会话标题</span>
                   <span style={{ ...REVIEW_VALUE_STYLE, fontWeight: 600 }}>
-                    {creation.draft.title || (
-                      <span style={{ color: 'var(--warning, #f59e0b)' }}>未填写</span>
+                    {creation.draft.title.trim() || (
+                      <span
+                        style={{
+                          color: 'var(--text-3)',
+                          fontStyle: 'italic',
+                          fontWeight: 400,
+                        }}
+                        title="提交后将以此默认值创建"
+                      >
+                        {generateDefaultSessionTitle()}（自动）
+                      </span>
                     )}
                   </span>
                 </div>
@@ -1350,7 +1602,9 @@ export function NewTeamSessionModal({
                     ) : (
                       creation.draft.optionalAgentIds.map((id) => {
                         const agent = agentById.get(id);
-                        const color = agent?.color ?? '#71717a';
+                        const groupKey = agent ? getAgentGroupKey(agent) : 'unknown';
+                        const groupMeta = getAgentGroupMeta(groupKey);
+                        const color = agent?.color ?? groupMeta.color;
                         return (
                           <span
                             key={id}
@@ -1362,6 +1616,7 @@ export function NewTeamSessionModal({
                                 '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
                               gap: 5,
                             }}
+                            title={`${agent?.label ?? id} · ${groupMeta.label} (${groupMeta.key})`}
                           >
                             <span
                               aria-hidden="true"
@@ -1373,6 +1628,16 @@ export function NewTeamSessionModal({
                               }}
                             />
                             {agent?.label ?? id}
+                            <span
+                              style={{
+                                fontSize: 9,
+                                color: groupMeta.color,
+                                fontFamily: 'ui-monospace, monospace',
+                                opacity: 0.85,
+                              }}
+                            >
+                              · {groupMeta.key}
+                            </span>
                           </span>
                         );
                       })
