@@ -157,6 +157,13 @@ export interface ConversationAreaProps {
   onSubmitMessage?: (text: string) => void | Promise<void>;
   topBar?: ReactNode;
   messagesOverride?: ReactNode;
+  /**
+   * 隐藏 ConversationArea 自带的 textarea + 发送按钮。
+   * Phase 2a：team 端通过 messagesOverride 注入 SessionConversationView 时
+   * （自带 UnifiedComposer），需要隐藏 ConversationArea 的简易 textarea
+   * 避免双输入框冲突。
+   */
+  hideInput?: boolean;
 }
 
 export function ConversationArea({
@@ -166,6 +173,7 @@ export function ConversationArea({
   onSubmitMessage,
   topBar,
   messagesOverride,
+  hideInput,
 }: ConversationAreaProps) {
   const { conversationCards, error, loading } = useTeamRuntimeReferenceViewData();
   const events = useTeamNotificationStore((s) => s.events);
@@ -227,44 +235,46 @@ export function ConversationArea({
         </div>
       )}
 
-      <div style={INPUT_AREA_STYLE}>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={inputDisabled}
-          placeholder={error ? '离线中，无法发送' : '向团队提交意图，回车发送…'}
-          style={TEXTAREA_STYLE}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void handleSubmit();
-            }
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => void handleSubmit()}
-          disabled={!draft.trim() || inputDisabled}
-          style={{
-            padding: '0 var(--team-space-5)',
-            borderRadius: 'var(--team-radius-md)',
-            border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-            background:
-              draft.trim() && !inputDisabled
-                ? 'color-mix(in srgb, var(--accent) 18%, var(--surface))'
-                : 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
-            color: 'var(--text)',
-            cursor: draft.trim() && !inputDisabled ? 'pointer' : 'not-allowed',
-            fontWeight: 700,
-            fontSize: 'var(--team-font-sm)',
-            opacity: draft.trim() && !inputDisabled ? 1 : 0.6,
-            transition: 'all 150ms ease',
-            flexShrink: 0,
-          }}
-        >
-          发送
-        </button>
-      </div>
+      {hideInput ? null : (
+        <div style={INPUT_AREA_STYLE}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={inputDisabled}
+            placeholder={error ? '离线中，无法发送' : '向团队提交意图，回车发送…'}
+            style={TEXTAREA_STYLE}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void handleSubmit();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={!draft.trim() || inputDisabled}
+            style={{
+              padding: '0 var(--team-space-5)',
+              borderRadius: 'var(--team-radius-md)',
+              border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+              background:
+                draft.trim() && !inputDisabled
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--surface))'
+                  : 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
+              color: 'var(--text)',
+              cursor: draft.trim() && !inputDisabled ? 'pointer' : 'not-allowed',
+              fontWeight: 700,
+              fontSize: 'var(--team-font-sm)',
+              opacity: draft.trim() && !inputDisabled ? 1 : 0.6,
+              transition: 'all 150ms ease',
+              flexShrink: 0,
+            }}
+          >
+            发送
+          </button>
+        </div>
+      )}
     </section>
   );
 }

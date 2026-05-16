@@ -247,6 +247,21 @@ export type {
   TeamRuntimeClient,
 } from './team-runtime.js';
 
+export { createTeamInboundClient } from './team-inbound.js';
+export type {
+  CancelSignalPayload,
+  ClarificationAnswerPayload,
+  EscalationRequestPayload,
+  InboundMessageType,
+  InboundPayloadByType,
+  InboundSubmitRequest,
+  InboundSubmitResponse,
+  PauseSignalPayload,
+  ProgressReportPayload,
+  TeamInboundClient,
+  UserInputPayload,
+} from './team-inbound.js';
+
 export { createSettingsClient } from './settings.js';
 export type { SettingsClient } from './settings.js';
 

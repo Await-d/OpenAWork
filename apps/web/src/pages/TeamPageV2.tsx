@@ -50,6 +50,7 @@ import {
 import { useTeamWorkspaceState } from './team/use-team-workspace-state.js';
 import { useTeamWorkspaceSnapshotState } from './team/use-team-workspace-snapshot-state.js';
 import { ConversationArea } from './team/runtime/ConversationArea.js';
+import { TeamSessionView } from './team/runtime/TeamSessionView.js';
 import { OfficeCompactBar } from './team/runtime/OfficeCompactBar.js';
 import { RightPanel, useRightPanelState } from './team/runtime/RightPanel.js';
 import { TeamStatusBar } from './team/runtime/TeamStatusBar.js';
@@ -538,6 +539,7 @@ export default function TeamPageV2() {
               onSubmitMessage={handleSubmitMessage}
               onSelectSuggestion={handleSubmitMessage}
               onRetryConnection={handleRetryConnection}
+              hideInput={middleTab === 'conversation' && Boolean(selectedTeamId)}
               topBar={
                 <div style={MIDDLE_TAB_BAR_STYLE} role="tablist" aria-label="中间区视图切换">
                   {MIDDLE_TABS.map((tab) => {
@@ -570,7 +572,11 @@ export default function TeamPageV2() {
                 </div>
               }
               messagesOverride={
-                middleTab === 'conversation' ? undefined : (
+                middleTab === 'conversation' ? (
+                  selectedTeamId ? (
+                    <TeamSessionView sessionId={selectedTeamId} />
+                  ) : undefined
+                ) : (
                   <div
                     id={`middle-panel-${middleTab}`}
                     role="tabpanel"
