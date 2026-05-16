@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '../../../stores/auth.js';
+import { connectTeamEvents, disconnectTeamEvents } from '../../../stores/team-events.js';
 import type {
   SharedSessionDetailRecord,
   SharedSessionSummaryRecord,
@@ -42,6 +43,9 @@ import {
 } from './team-runtime-model.js';
 import { buildTeamRuntimeShellViewModel } from './build-team-runtime-shell-view-model.js';
 import { TeamRuntimeShellFrame } from './team-runtime-shell-frame.js';
+import { TeamStatusBar } from './TeamStatusBar.js';
+import { LayerConversationDrawer } from './LayerConversationDrawer.js';
+import { TeamArtifactSection } from './TeamArtifactSection.js';
 import { useTeamRuntimeProjection } from './use-team-runtime-projection.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session-grouping.js';
 
@@ -405,6 +409,15 @@ export function TeamRuntimeShell({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // 260515-team-phase-c：连接 /team-events WS（Phase B T-11 store 消费）
+  useEffect(() => {
+    if (!accessToken || !gatewayUrl) return undefined;
+    connectTeamEvents(gatewayUrl, accessToken);
+    return () => {
+      disconnectTeamEvents();
+    };
+  }, [accessToken, gatewayUrl]);
+
   const isSingleColumn = viewportWidth < 1120;
   const isTwoColumn = viewportWidth >= 1120 && viewportWidth < 1500;
   const activeTabMeta = tabs.find((tab) => tab.key === activeTab) ?? tabs[0]!;
@@ -674,6 +687,7 @@ export function TeamRuntimeShell({
       case 'tasks':
         return (
           <div style={{ display: 'grid', gap: 16 }}>
+            <TeamArtifactSection />
             <section className="content-card" style={{ display: 'grid', gap: 12, padding: 18 }}>
               <TeamSectionHeader
                 eyebrow="Runtime tasks"
@@ -1247,6 +1261,12 @@ export function TeamRuntimeShell({
     workflowLaunch,
     workspaceOverviewLines,
     workspaceSummaries,
+    settingsGatewayUrl: gatewayUrl,
+    settingsAccessToken: accessToken,
+    // 当前 selectedWorkspace.key 是 workspace 路径而不是 team_workspaces.id；
+    // Phase A 暂不在此自动联动 teamWorkspaceId（待 Phase B 引入 team workspace
+    // 切换器）。设置面板会展示提示要求用户选择具体的 team workspace。
+    settingsTeamWorkspaceId: null,
   });
 
   return loading ? (
@@ -1263,6 +1283,10 @@ export function TeamRuntimeShell({
       </div>
     </div>
   ) : (
-    <TeamRuntimeShellFrame {...shellFrameViewModel} />
+    <>
+      <TeamStatusBar />
+      <TeamRuntimeShellFrame {...shellFrameViewModel} />
+      <LayerConversationDrawer />
+    </>
   );
 }

@@ -7,6 +7,7 @@ import {
   type TeamSessionCreationDraft,
 } from './team-session-creation.types.js';
 import { CheckIcon, ChevronRightIcon, XIcon } from './TeamIcons.js';
+import { WorkflowSelector } from './WorkflowEditor.js';
 
 interface NewTeamSessionModalProps {
   onClose: () => void;
@@ -32,6 +33,7 @@ export function NewTeamSessionModal({
   const roleBindings = useTeamRuntimeRoleBindings();
   const creation = useTeamSessionCreation({ teamWorkspaceId });
   const [submitting, setSubmitting] = useState(false);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
 
   const groupedTemplates = useMemo(() => {
     const groups = new Map<string, { items: typeof templates; title: string; priority: number }>();
@@ -189,6 +191,15 @@ export function NewTeamSessionModal({
                 使用系统预置的 4 个核心角色，再按需加入额外 agent 成员。
               </span>
             </button>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 700 }}>
+                工作流模板
+              </span>
+              <WorkflowSelector
+                selectedId={selectedWorkflowId}
+                onSelect={(id) => setSelectedWorkflowId(id)}
+              />
+            </div>
             <div style={{ display: 'grid', gap: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 700 }}>
                 已保存模板

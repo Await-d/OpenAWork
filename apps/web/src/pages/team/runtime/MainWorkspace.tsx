@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { agentTeamsTabs } from './team-runtime-ui-config.js';
 import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
@@ -14,6 +14,34 @@ import { ChromeBadge, CompactMetricPill } from './team-runtime-shell-primitives.
 import { Icon } from './TeamIcons.js';
 import type { IconKey } from './TeamIcons.js';
 import { ViewGridIcon, ViewListIcon, ViewKanbanIcon, ViewSingleIcon } from './TeamIcons.js';
+
+const FULLSCREEN_OVERLAY_STYLE: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 100,
+  background: 'var(--bg)',
+  display: 'flex',
+  flexDirection: 'column',
+};
+
+const FULLSCREEN_CLOSE_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 16,
+  right: 16,
+  zIndex: 101,
+  width: 40,
+  height: 40,
+  borderRadius: 10,
+  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
+  color: 'var(--text)',
+  fontSize: 18,
+  fontWeight: 700,
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+  backdropFilter: 'blur(8px)',
+};
 
 function MetricCard({
   item,
@@ -44,6 +72,16 @@ export function MainWorkspace({
 }) {
   const { metricCards } = useTeamRuntimeReferenceViewData();
   const officeState = useOfficeSceneState();
+  const [showOfficeFullscreen, setShowOfficeFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!showOfficeFullscreen) return undefined;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowOfficeFullscreen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showOfficeFullscreen]);
 
   return (
     <section
@@ -56,6 +94,26 @@ export function MainWorkspace({
         boxSizing: 'border-box',
       }}
     >
+      {showOfficeFullscreen ? (
+        <div style={FULLSCREEN_OVERLAY_STYLE}>
+          <button
+            type="button"
+            onClick={() => setShowOfficeFullscreen(false)}
+            style={FULLSCREEN_CLOSE_STYLE}
+            aria-label="关闭全屏 3D 场景"
+            title="关闭全屏（ESC）"
+          >
+            ✕
+          </button>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <OfficeThreeCanvas
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={onSelectAgent}
+              state={officeState}
+            />
+          </div>
+        </div>
+      ) : null}
       {selectedTeam ? (
         <div
           style={{

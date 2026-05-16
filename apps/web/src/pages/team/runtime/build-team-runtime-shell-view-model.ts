@@ -43,6 +43,10 @@ interface BuildTeamRuntimeShellViewModelArgs {
   workspaceOverviewLines: string[];
   workspaceSummaries: TeamWorkspaceCardSummary[];
   metrics: TeamRuntimeMetric[];
+  /** 260515-team-phase-a · 设置面板用 */
+  settingsGatewayUrl?: string;
+  settingsAccessToken?: string | null;
+  settingsTeamWorkspaceId?: string | null;
 }
 
 export function buildTeamRuntimeShellViewModel({
@@ -80,6 +84,9 @@ export function buildTeamRuntimeShellViewModel({
   workflowLaunch,
   workspaceOverviewLines,
   workspaceSummaries,
+  settingsGatewayUrl,
+  settingsAccessToken,
+  settingsTeamWorkspaceId,
 }: BuildTeamRuntimeShellViewModelArgs): TeamRuntimeShellFrameProps {
   return {
     activeTabKey: activeTabMeta.key,
@@ -120,5 +127,8 @@ export function buildTeamRuntimeShellViewModel({
     workspaceOverviewLines,
     workspaceSummaries,
     workflowLaunch,
+    settingsGatewayUrl,
+    settingsAccessToken,
+    settingsTeamWorkspaceId,
   };
 }

@@ -75,7 +75,11 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/SettingsPage.js'),
     '设置中心',
   ),
-  team: createPreloadableRouteModule('team', () => import('../pages/TeamPage.js'), '团队协作'),
+  team: createPreloadableRouteModule(
+    'team',
+    () => import('../pages/TeamPageDispatcher.js'),
+    '团队协作',
+  ),
   templates: createPreloadableRouteModule(
     'templates',
     () => import('../pages/TeamTemplatesPage.js'),

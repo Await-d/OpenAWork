@@ -1,3 +1,4 @@
+import { createTeamRuntimeClient } from '@openAwork/web-client';
 import type { CreateTeamMessageInput } from '@openAwork/web-client';
 
 type InteractionAgentPhase = 'completed' | 'processing' | 'started';
@@ -77,24 +78,10 @@ async function requestInteractionAgentRewrite(
   gatewayUrl: string,
   token: string,
 ): Promise<InteractionAgentRewriteResponse | null> {
-  try {
-    const response = await fetch(`${gatewayUrl}/team/interaction-agent/rewrite`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(input),
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json()) as InteractionAgentRewriteResponse;
-  } catch {
-    return null;
-  }
+  return createTeamRuntimeClient(gatewayUrl).rewriteIntent(
+    token,
+    input,
+  ) as Promise<InteractionAgentRewriteResponse | null>;
 }
 
 export async function submitInteractionAgentFlow(input: {

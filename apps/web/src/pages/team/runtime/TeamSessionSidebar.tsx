@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
+import { createWorkspaceClient } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from './team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from './team-runtime-reference-data.js';
 import { useAuthStore } from '../../../stores/auth.js';
@@ -242,26 +243,17 @@ export function SessionSidebar({
   const fetchTree = useCallback(
     async (path: string, depth = 1) => {
       if (!accessToken || !gatewayUrl) return [];
-      const res = await fetch(
-        `${gatewayUrl}/workspace/tree?path=${encodeURIComponent(path)}&depth=${depth}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      if (!res.ok) throw new Error(`fetchTree failed: ${res.status}`);
-      const data = await res.json();
-      return (data?.nodes ??
-        data) as import('../../../components/WorkspacePickerModal.js').FileTreeNode[];
+      return createWorkspaceClient(gatewayUrl).fetchTree(accessToken, path, { depth }) as Promise<
+        import('../../../components/WorkspacePickerModal.js').FileTreeNode[]
+      >;
     },
     [accessToken, gatewayUrl],
   );
 
   const fetchRootPath = useCallback(async (): Promise<string> => {
     if (!accessToken || !gatewayUrl) return '/';
-    const res = await fetch(`${gatewayUrl}/workspace/root`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return '/';
-    const data = await res.json();
-    return data.root ?? '/';
+    const roots = await createWorkspaceClient(gatewayUrl).listRoots(accessToken);
+    return roots[0] ?? '/';
   }, [accessToken, gatewayUrl]);
 
   const handleCreateWorkspace = useCallback(

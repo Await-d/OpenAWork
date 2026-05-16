@@ -147,9 +147,11 @@ export interface AgentTeamsReviewCard {
 
 export interface AgentTeamsSidebarTeam {
   id: string;
+  lastMessage?: string;
   status: 'running' | 'paused' | 'completed' | 'failed';
   subtitle: string;
   title: string;
+  updatedAt?: string;
 }
 
 export interface AgentTeamsWorkspaceGroup {

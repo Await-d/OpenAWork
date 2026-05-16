@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createTeamClient } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './team/runtime/team-runtime-types.js';
 import {
@@ -13,10 +13,16 @@ import { TabRow } from './team/runtime/TabRow.js';
 import { FooterBar, MainWorkspace } from './team/runtime/MainWorkspace.js';
 import { NewTeamSessionModal } from './team/runtime/NewTeamSessionModal.js';
 import { NewTeamTemplateModal } from './team/runtime/NewTeamTemplateModal.js';
+import { LayerConversationDrawer } from './team/runtime/LayerConversationDrawer.js';
+import { PauseConfirmDialog, ResumeStaleDialog } from './team/runtime/PauseResumeControls.js';
+import { SessionTreeView } from './team/runtime/SessionTreeView.js';
+import { TeamArtifactSection } from './team/runtime/TeamArtifactSection.js';
 import { SessionSidebar } from './team/runtime/TeamSessionSidebar.js';
+import { TeamStatusBar } from './team/runtime/TeamStatusBar.js';
 import { useTeamWorkspaceSnapshotState } from './team/use-team-workspace-snapshot-state.js';
 import { useTeamWorkspaceState } from './team/use-team-workspace-state.js';
 import { useAuthStore } from '../stores/auth.js';
+import { connectTeamEvents, disconnectTeamEvents, useHandoffStore } from '../stores/team-events.js';
 import type { TeamSessionCreationDraft } from './team/runtime/team-session-creation.types.js';
 
 function TeamPageLayout({
@@ -24,7 +30,6 @@ function TeamPageLayout({
   activeWorkspaceName,
   onRefreshSnapshot,
   onRefreshWorkspaces,
-  pendingCreatedSessionId,
   selectedTeamId,
   setPendingCreatedSessionId,
   setSelectedTeamId,
@@ -33,7 +38,6 @@ function TeamPageLayout({
   activeWorkspaceName: string;
   onRefreshSnapshot: () => void;
   onRefreshWorkspaces: () => void;
-  pendingCreatedSessionId: string | null;
   selectedTeamId: string;
   setPendingCreatedSessionId: (teamId: string | null) => void;
   setSelectedTeamId: (teamId: string) => void;
@@ -44,8 +48,36 @@ function TeamPageLayout({
   const [selectedAgentId, setSelectedAgentId] = useState(data.defaultSelectedAgentId);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [showNewTemplateModal, setShowNewTemplateModal] = useState(false);
+  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
+  const [showResumeStale, setShowResumeStale] = useState(false);
+  const [showLayerDrawer, setShowLayerDrawer] = useState(false);
   const [viewMode, setViewMode] = useState(1);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const teamEventsConnectionGeneration = useRef(0);
+  const handoffs = useHandoffStore((state) => state.handoffs);
+
+  useEffect(() => {
+    if (!gatewayUrl || !accessToken) {
+      return undefined;
+    }
+
+    teamEventsConnectionGeneration.current += 1;
+    const generation = teamEventsConnectionGeneration.current;
+    connectTeamEvents(gatewayUrl, accessToken);
+    return () => {
+      disconnectTeamEvents();
+      window.setTimeout(() => {
+        if (teamEventsConnectionGeneration.current === generation) {
+          disconnectTeamEvents();
+        }
+      }, 0);
+      window.setTimeout(() => {
+        if (teamEventsConnectionGeneration.current === generation) {
+          disconnectTeamEvents();
+        }
+      }, 100);
+    };
+  }, [accessToken, gatewayUrl]);
 
   useEffect(() => {
     if (!data.roleChips.some((chip) => chip.id === selectedAgentId)) {
@@ -75,6 +107,44 @@ function TeamPageLayout({
     selectedTeam.status !== 'completed' &&
     selectedTeam.status !== 'failed';
 
+  const hasHandoffs = handoffs.size > 0;
+
+  const hasActivePm1Handoff = useMemo(() => {
+    for (const handoff of handoffs.values()) {
+      if (
+        handoff.toRoleLayer === 'pm1' &&
+        (handoff.state === 'pending' || handoff.state === 'claimed' || handoff.state === 'running')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [handoffs]);
+
+  const activeHandoffCount = useMemo(() => {
+    let count = 0;
+    for (const handoff of handoffs.values()) {
+      if (
+        handoff.state === 'pending' ||
+        handoff.state === 'claimed' ||
+        handoff.state === 'running'
+      ) {
+        count += 1;
+      }
+    }
+    return count;
+  }, [handoffs]);
+
+  const staleHandoffCount = useMemo(() => {
+    let count = 0;
+    for (const handoff of handoffs.values()) {
+      if (handoff.state === 'pending' || handoff.state === 'claimed') {
+        count += 1;
+      }
+    }
+    return count;
+  }, [handoffs]);
+
   const handleSelectAgent = useCallback((id: string) => {
     setSelectedAgentId((previous) => (previous === id ? '' : id));
   }, []);
@@ -85,6 +155,53 @@ function TeamPageLayout({
     }
     void data.toggleSessionState(selectedTeamId, selectedTeam.status);
   }, [canToggleSelectedTeam, data.toggleSessionState, selectedTeam, selectedTeamId]);
+
+  const handlePauseAll = useCallback(() => {
+    if (!canToggleSelectedTeam || isSelectedTeamPaused) {
+      return;
+    }
+    setShowPauseConfirm(true);
+  }, [canToggleSelectedTeam, isSelectedTeamPaused]);
+
+  const handleConfirmPauseAll = useCallback(() => {
+    setShowPauseConfirm(false);
+    if (!canToggleSelectedTeam || isSelectedTeamPaused || !selectedTeamId || !selectedTeam) {
+      return;
+    }
+    void data.toggleSessionState(selectedTeamId, selectedTeam.status);
+  }, [
+    canToggleSelectedTeam,
+    data.toggleSessionState,
+    isSelectedTeamPaused,
+    selectedTeam,
+    selectedTeamId,
+  ]);
+
+  const handleResumeAll = useCallback(() => {
+    setShowResumeStale(false);
+    if (!canToggleSelectedTeam || !isSelectedTeamPaused || !selectedTeamId || !selectedTeam) {
+      return;
+    }
+    void data.toggleSessionState(selectedTeamId, selectedTeam.status);
+  }, [
+    canToggleSelectedTeam,
+    data.toggleSessionState,
+    isSelectedTeamPaused,
+    selectedTeam,
+    selectedTeamId,
+  ]);
+
+  const handleRequestResumeAll = useCallback(() => {
+    if (staleHandoffCount > 0) {
+      setShowResumeStale(true);
+      return;
+    }
+    handleResumeAll();
+  }, [handleResumeAll, staleHandoffCount]);
+
+  const handleSelectLayerSession = useCallback(() => {
+    setShowLayerDrawer(true);
+  }, []);
 
   const handleOpenTemplate = useCallback(() => {
     if (!data.canCreateTemplate) {
@@ -135,15 +252,35 @@ function TeamPageLayout({
 
   const mainContent = useMemo(
     () => (
-      <MainWorkspace
-        activeTab={activeTab}
-        selectedTeam={selectedTeam}
-        selectedAgentId={selectedAgentId}
-        onSelectAgent={handleSelectAgent}
-        onNewTemplate={handleOpenTemplate}
-      />
+      <div style={{ display: 'grid', gap: 12 }}>
+        <MainWorkspace
+          activeTab={activeTab}
+          selectedTeam={selectedTeam}
+          selectedAgentId={selectedAgentId}
+          onSelectAgent={handleSelectAgent}
+          onNewTemplate={handleOpenTemplate}
+        />
+        {hasActivePm1Handoff ? (
+          <div style={{ padding: '0 20px 16px' }}>
+            <TeamArtifactSection />
+          </div>
+        ) : null}
+        {activeTab === 'tasks' && !hasActivePm1Handoff ? (
+          <div style={{ padding: '0 20px 16px' }}>
+            <SessionTreeView onSelectSession={handleSelectLayerSession} />
+          </div>
+        ) : null}
+      </div>
     ),
-    [activeTab, handleOpenTemplate, handleSelectAgent, selectedAgentId, selectedTeam],
+    [
+      activeTab,
+      handleOpenTemplate,
+      handleSelectAgent,
+      handleSelectLayerSession,
+      hasActivePm1Handoff,
+      selectedAgentId,
+      selectedTeam,
+    ],
   );
 
   return (
@@ -185,6 +322,38 @@ function TeamPageLayout({
             canManageRuntime={canToggleSelectedTeam}
             onExpandSidebar={sidebarCollapsed ? () => setSidebarCollapsed(false) : undefined}
           />
+          {hasHandoffs || showPauseConfirm || showResumeStale ? (
+            <div style={{ display: 'grid', gap: 8, padding: '8px 16px 0' }}>
+              {hasHandoffs ? (
+                <div
+                  onClick={(event) => {
+                    if (event.target instanceof HTMLElement && event.target.closest('button')) {
+                      return;
+                    }
+                    setShowLayerDrawer(true);
+                  }}
+                >
+                  <TeamStatusBar
+                    onPauseAll={canToggleSelectedTeam ? handlePauseAll : undefined}
+                    onResumeAll={canToggleSelectedTeam ? handleRequestResumeAll : undefined}
+                    paused={isSelectedTeamPaused}
+                  />
+                </div>
+              ) : null}
+              <PauseConfirmDialog
+                open={showPauseConfirm}
+                activeCount={activeHandoffCount}
+                onConfirm={handleConfirmPauseAll}
+                onCancel={() => setShowPauseConfirm(false)}
+              />
+              <ResumeStaleDialog
+                open={showResumeStale}
+                staleCount={staleHandoffCount}
+                onResumeAll={handleResumeAll}
+                onDismiss={() => setShowResumeStale(false)}
+              />
+            </div>
+          ) : null}
           <TabRow activeTab={activeTab} onSelect={setActiveTab} />
           <div
             style={{
@@ -210,6 +379,7 @@ function TeamPageLayout({
           workspaceLabel={activeWorkspaceName}
         />
       )}
+      <LayerConversationDrawer visible={showLayerDrawer} />
     </div>
   );
 }
@@ -273,7 +443,6 @@ export default function TeamPage() {
         activeWorkspaceName={workspaceState.activeWorkspace?.name ?? '当前工作区'}
         onRefreshSnapshot={workspaceSnapshotState.refresh}
         onRefreshWorkspaces={workspaceState.refresh}
-        pendingCreatedSessionId={pendingCreatedSessionId}
         selectedTeamId={selectedTeamId}
         setPendingCreatedSessionId={setPendingCreatedSessionId}
         setSelectedTeamId={setSelectedTeamId}

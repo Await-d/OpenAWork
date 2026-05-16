@@ -1,3 +1,4 @@
+import { createTeamRuntimeClient } from '@openAwork/web-client';
 import type { CreateTeamMessageInput } from '@openAwork/web-client';
 import type { InteractionAgentRewriteArtifact } from './interaction-agent-flow.js';
 
@@ -73,30 +74,15 @@ async function requestLeaderDispatch(
   context?: string,
   teamRoster?: TeamRosterMember[],
 ): Promise<LeaderDispatchResult | null> {
-  try {
-    const response = await fetch(`${gatewayUrl}/team/leader/dispatch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        context,
-        recommendedRole: artifact.recommendedRole,
-        rewrittenIntent: artifact.rewrittenIntent,
-        sourceIntent: artifact.sourceIntent,
-        teamRoster: teamRoster ?? [],
-      }),
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json()) as LeaderDispatchResult;
-  } catch {
-    return null;
-  }
+  return createTeamRuntimeClient(gatewayUrl).dispatch(token, {
+    ...(context !== undefined ? { context } : {}),
+    ...(artifact.recommendedRole !== undefined
+      ? { recommendedRole: artifact.recommendedRole }
+      : {}),
+    rewrittenIntent: artifact.rewrittenIntent,
+    sourceIntent: artifact.sourceIntent,
+    teamRoster: teamRoster ?? [],
+  }) as Promise<LeaderDispatchResult | null>;
 }
 
 // ─── Fallback (no LLM) ───

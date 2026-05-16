@@ -13,6 +13,7 @@ import {
 } from './team-runtime-shell-primitives.js';
 import { TeamRuntimeBuddy } from './team-runtime-buddy.js';
 import { TeamRuntimeRoleBindingPanel } from './team-runtime-role-binding-panel.js';
+import { TeamRuntimeSettingsPanel } from './team-runtime-settings-panel.js';
 import { useRuntimeWorkbenchPanes } from './use-runtime-workbench-panes.js';
 
 const APP_FRAME_STYLE: CSSProperties = {
@@ -79,7 +80,7 @@ const PANE_CONTROL_BUTTON_STYLE: CSSProperties = {
   cursor: 'pointer',
 };
 
-type DetailRailPanelKey = 'buddy' | 'interaction' | 'role-bindings' | 'selected-run';
+type DetailRailPanelKey = 'buddy' | 'interaction' | 'role-bindings' | 'selected-run' | 'settings';
 
 interface TeamRuntimeSelectedRunSummary {
   activeViewerCount: number;
@@ -159,6 +160,15 @@ export interface TeamRuntimeShellFrameProps {
     templateId: string;
     templateName: string;
   } | null;
+  /**
+   * 260515-team-phase-a · Detail Rail "设置" 面板需要的网关地址。
+   * 由上层（hosting page）从 useAuthStore 注入。
+   */
+  settingsGatewayUrl?: string;
+  /** 260515-team-phase-a · 当前用户访问 token；未登录时传 null */
+  settingsAccessToken?: string | null;
+  /** 260515-team-phase-a · 选中的 team workspace id；无选中时传 null */
+  settingsTeamWorkspaceId?: string | null;
 }
 
 function getRuntimeTabGlyph(tabKey: string): string {
@@ -196,6 +206,9 @@ function getDetailRailPanelLabel(panelKey: DetailRailPanelKey): string {
   }
   if (panelKey === 'buddy') {
     return 'Buddy';
+  }
+  if (panelKey === 'settings') {
+    return '设置';
   }
 
   return '角色绑定';
@@ -740,6 +753,9 @@ function RuntimeDetailRail({
   onBuddyApproveAll,
   onBuddyReviewBlocked,
   onBuddyAnswerQuestions,
+  settingsGatewayUrl,
+  settingsAccessToken,
+  settingsTeamWorkspaceId,
 }: {
   activeDetailPanel: DetailRailPanelKey;
   buddyProjection: TeamRuntimeShellFrameProps['buddyProjection'];
@@ -757,6 +773,12 @@ function RuntimeDetailRail({
   roleBindingLoading: boolean;
   selectedRunSummary: TeamRuntimeSelectedRunSummary | null;
   setActiveDetailPanel: (key: DetailRailPanelKey) => void;
+  /** 260515-team-phase-a · 设置面板需要的网关地址（由 store 注入） */
+  settingsGatewayUrl: string;
+  /** 260515-team-phase-a · 当前用户访问 token（未登录时为 null） */
+  settingsAccessToken: string | null;
+  /** 260515-team-phase-a · 当前选中的 team workspace id（无选中时为 null） */
+  settingsTeamWorkspaceId: string | null;
 }) {
   return (
     <aside
@@ -909,6 +931,14 @@ function RuntimeDetailRail({
             cards={roleBindingCards}
             error={roleBindingError}
             loading={roleBindingLoading}
+          />
+        ) : null}
+
+        {activeDetailPanel === 'settings' ? (
+          <TeamRuntimeSettingsPanel
+            gatewayUrl={settingsGatewayUrl}
+            accessToken={settingsAccessToken}
+            teamWorkspaceId={settingsTeamWorkspaceId}
           />
         ) : null}
       </div>
@@ -1094,6 +1124,9 @@ export function TeamRuntimeShellFrame({
   workspaceOverviewLines,
   workspaceSummaries,
   workflowLaunch,
+  settingsGatewayUrl = 'http://localhost:3000',
+  settingsAccessToken = null,
+  settingsTeamWorkspaceId = null,
 }: TeamRuntimeShellFrameProps) {
   const [activeDetailPanel, setActiveDetailPanel] = useState<DetailRailPanelKey>('selected-run');
   const detailPanels: DetailRailPanelKey[] = [
@@ -1101,6 +1134,7 @@ export function TeamRuntimeShellFrame({
     'interaction',
     'buddy',
     'role-bindings',
+    'settings',
   ];
   const countsLine = `${filteredSessionCount} 个会话 · ${filteredSharedSessions.length} 个共享运行 · ${filteredSessionShareCount} 条共享记录`;
   const {
@@ -1401,6 +1435,9 @@ export function TeamRuntimeShellFrame({
                     roleBindingLoading={roleBindingLoading}
                     selectedRunSummary={selectedRunSummary}
                     setActiveDetailPanel={setActiveDetailPanel}
+                    settingsGatewayUrl={settingsGatewayUrl}
+                    settingsAccessToken={settingsAccessToken}
+                    settingsTeamWorkspaceId={settingsTeamWorkspaceId}
                   />
                 </div>
               ) : null}
