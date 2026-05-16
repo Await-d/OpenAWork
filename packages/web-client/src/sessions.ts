@@ -557,7 +557,7 @@ export interface SessionsClient {
     token: string,
     sessionId: string,
     messageId: string,
-    options?: { inclusive?: boolean },
+    options?: { inclusive?: boolean; messageText?: string },
   ): Promise<Message[]>;
   cancelTask(
     token: string,
@@ -1147,7 +1147,11 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       const res = await fetch(`${gatewayUrl}/sessions/${sessionId}/messages/truncate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeader(token) },
-        body: JSON.stringify({ messageId, inclusive: options.inclusive ?? true }),
+        body: JSON.stringify({
+          messageId,
+          inclusive: options.inclusive ?? true,
+          ...(options.messageText !== undefined ? { messageText: options.messageText } : {}),
+        }),
       });
       if (!res.ok) {
         throw new HttpError(`Failed to truncate session messages: ${res.status}`, res.status);

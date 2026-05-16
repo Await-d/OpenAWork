@@ -51,6 +51,22 @@ export type {
   UpdateTeamWorkspaceInput,
   UpdateTeamTaskInput,
 } from './team.js';
+export { createTeamPhaseAClient } from './team-phase-a.js';
+export type {
+  AgentPersonaRecord,
+  ConstitutionRecord,
+  ConstitutionTemplate,
+  DefaultSoul,
+  ForceApplyState,
+  InstructionStackPreview,
+  MemoryWriteBlocked,
+  PersonaResponse,
+  RateLimited,
+  SoulRoleLayer,
+  TeamPhaseAClient,
+  UserMemoryRecord,
+  VersionConflict,
+} from './team-phase-a.js';
 export { createWorkflowsClient } from './workflows.js';
 export type {
   CreateWorkflowTemplateInput,
@@ -92,7 +108,7 @@ export type {
   PendingQuestionRequest,
   QuestionsClient,
 } from './questions.js';
-export { createSessionsClient, HttpError } from './sessions.js';
+export { createSessionsClient } from './sessions.js';
 export type {
   DeleteSessionBlockReason,
   DeleteSessionErrorData,
@@ -141,3 +157,101 @@ export type {
 } from './sessions.js';
 export { withTokenRefresh } from './token-refresh.js';
 export type { TokenStore } from './token-refresh.js';
+export { authHeader, jsonAuthHeaders, HttpError } from './http.js';
+
+// 新增的资源域客户端
+export { createWorkspaceClient } from './workspace.js';
+export type {
+  FileTreeNode,
+  WorkspaceClient,
+  WorkspaceFileContent,
+  WorkspaceReviewChange,
+  WorkspaceReviewDiffResponse,
+  WorkspaceReviewStatusResponse,
+  WorkspaceRootsResponse,
+  WorkspaceSearchHit,
+  WorkspaceValidateResult,
+  SessionWorkspaceUpdateResponse,
+} from './workspace.js';
+
+export { createUsageClient } from './usage.js';
+export type {
+  UsageBreakdownResponse,
+  UsageClient,
+  UsageCostBreakdownItem,
+  UsageMonthlyRecord,
+  UsageRecordsResponse,
+} from './usage.js';
+
+export { createCronClient } from './cron.js';
+export type { CronClient, CronJobRecord, CronJobsResponse } from './cron.js';
+
+export { createHealthClient, isGatewayHealthy } from './health.js';
+export type { HealthClient } from './health.js';
+
+export { createDesktopAutomationClient } from './desktop-automation.js';
+export type {
+  DesktopAutomationClient,
+  DesktopAutomationScreenshotResult,
+  DesktopAutomationStatus,
+} from './desktop-automation.js';
+
+export { createSshClient } from './ssh.js';
+export type {
+  CreateSSHConnectionInput,
+  SSHClient,
+  SSHConnectionEntry,
+  SSHFileEntry,
+  SSHFilePreview,
+} from './ssh.js';
+
+export { createGitHubClient } from './github.js';
+export type { CreateGitHubTriggerInput, GitHubClient, GitHubTrigger } from './github.js';
+
+export { createChannelsClient } from './channels.js';
+export type {
+  ChannelDescriptorListResponse,
+  ChannelListResponse,
+  ChannelMutationResponse,
+  ChannelTargetsResponse,
+  ChannelsClient,
+} from './channels.js';
+
+export { createArtifactsClient } from './artifacts.js';
+export type {
+  ArtifactSessionArtifactsResponse,
+  ArtifactVersionsResponse,
+  ArtifactsClient,
+  CreateArtifactInput,
+  ImageGenerationInput,
+  RevertArtifactInput,
+  UpdateArtifactInput,
+  UploadSessionArtifactInput,
+} from './artifacts.js';
+
+export { createSessionTerminalsClient } from './session-terminals.js';
+export type {
+  ListSessionTerminalsOptions,
+  SessionTerminalView,
+  SessionTerminalsClient,
+} from './session-terminals.js';
+
+export { createTeamRuntimeClient } from './team-runtime.js';
+export type {
+  InteractionAgentRewriteRequest,
+  InteractionAgentRewriteResponse,
+  TeamLeaderDispatchRequest,
+  TeamLeaderDispatchResponse,
+  TeamLeaderDispatchedTask,
+  TeamLeaderRosterMember,
+  TeamRuntimeClient,
+} from './team-runtime.js';
+
+export { createSettingsClient } from './settings.js';
+export type { SettingsClient } from './settings.js';
+
+export { createSkillsClient } from './skills.js';
+export type { SkillsClient } from './skills.js';
+
+export { createMemoriesClient } from './memories.js';
+export type { MemoriesClient } from './memories.js';
