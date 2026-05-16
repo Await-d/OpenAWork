@@ -42,7 +42,7 @@ import {
   type CSSProperties,
   type MouseEvent,
 } from 'react';
-import { useParams } from 'react-router';
+import { useParams, useNavigate } from 'react-router';
 import {
   TeamRuntimeReferenceDataProvider,
   useResolvedTeamRuntimeReferenceData,
@@ -61,6 +61,7 @@ import { ReviewReportView } from './team/runtime/ReviewReportView.js';
 import { TeamRuntimeSettingsPanel } from './team/runtime/team-runtime-settings-panel.js';
 import { TeamTabContent } from './team/runtime/TeamTabContent.js';
 import { TeamSessionListSidebar } from './team/runtime/TeamSessionListSidebar.js';
+import { WorkspaceSwitcher } from './team/runtime/WorkspaceSwitcher.js';
 import {
   useBreakpoint,
   useTeamPageMode,
@@ -202,6 +203,7 @@ const LEFT_AREA_STYLE: CSSProperties = {
 
 export default function TeamPageV2() {
   const { teamWorkspaceId } = useParams<{ teamWorkspaceId?: string }>();
+  const navigate = useNavigate();
   const workspaceState = useTeamWorkspaceState(teamWorkspaceId);
   const resolvedTeamWorkspaceId = teamWorkspaceId ?? workspaceState.workspaces[0]?.id ?? null;
   const workspaceSnapshotState = useTeamWorkspaceSnapshotState(
@@ -411,21 +413,12 @@ export default function TeamPageV2() {
         <header className="page-header" style={HEADER_STYLE}>
           <div style={TITLE_GROUP_STYLE}>
             <strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>团队</strong>
-            {workspaceState.activeWorkspace ? (
-              <span
-                style={{
-                  fontSize: 12,
-                  color: 'var(--text-3)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: 200,
-                }}
-                title={workspaceState.activeWorkspace.name}
-              >
-                · {workspaceState.activeWorkspace.name}
-              </span>
-            ) : null}
+            <WorkspaceSwitcher
+              workspaces={workspaceState.workspaces}
+              activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
+              loading={workspaceState.loading}
+              onSelect={(id) => navigate(`/team/${id}`)}
+            />
             {selectedTeamLabel ? (
               <span
                 style={{
