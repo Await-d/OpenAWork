@@ -117,18 +117,18 @@ const TIME_BUCKET_ORDER: TimeBucket[] = ['今天', '昨天', '更早'];
 
 const ITEM_STYLE: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
+  alignItems: 'flex-start',
   gap: 10,
-  padding: '8px 10px 8px 11px',
-  margin: '0 6px',
-  border: 'none',
+  padding: '10px 12px',
+  margin: '0 6px 4px',
+  border: '1px solid transparent',
   background: 'transparent',
   width: 'auto',
   textAlign: 'left' as const,
   fontSize: 12,
   color: 'var(--text)',
   cursor: 'pointer',
-  borderRadius: 8,
+  borderRadius: 10,
   transition: 'all 120ms ease',
   position: 'relative',
   outline: 'none',
@@ -136,8 +136,9 @@ const ITEM_STYLE: CSSProperties = {
 
 const ITEM_ACTIVE_STYLE: CSSProperties = {
   ...ITEM_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 14%, var(--surface))',
-  boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
+  borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
+  boxShadow: '0 1px 3px color-mix(in srgb, var(--accent) 20%, transparent)',
   color: 'var(--text)',
 };
 
@@ -147,20 +148,6 @@ const STATUS_DOT_BASE: CSSProperties = {
   height: 10,
   borderRadius: 999,
   marginTop: 4,
-  position: 'relative',
-};
-
-/**
- * 紧凑的状态指示器（替代之前的 32px 大头像）：
- * - 仅一个 8px 圆点 + 可选状态图标，整体 16x16
- * - running 时圆点带脉冲外圈
- */
-const STATUS_INDICATOR_STYLE: CSSProperties = {
-  flexShrink: 0,
-  width: 16,
-  height: 16,
-  display: 'grid',
-  placeItems: 'center',
   position: 'relative',
 };
 
@@ -940,42 +927,69 @@ export function TeamSessionListSidebar({
                           aria-current={active ? 'true' : undefined}
                           aria-label={`会话：${session.title}，${statusLabel(session.status)}${session.lastMessage ? `，最新：${session.lastMessage}` : ''}`}
                         >
-                          {/* 紧凑状态指示器：圆点 + running 脉冲 */}
-                          <span aria-hidden="true" style={STATUS_INDICATOR_STYLE}>
+                          {/* 左侧状态柱（顶部圆点 + 垂直时间柱，包含 running 脉冲） */}
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              flexShrink: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: 4,
+                              marginTop: 2,
+                            }}
+                          >
                             <span
                               style={{
-                                width: 8,
-                                height: 8,
+                                position: 'relative',
+                                width: 10,
+                                height: 10,
                                 borderRadius: '50%',
                                 background: dot,
                                 boxShadow:
                                   session.status === 'running'
                                     ? `0 0 0 3px color-mix(in srgb, ${dot} 28%, transparent)`
-                                    : 'none',
+                                    : `0 0 0 2px color-mix(in srgb, ${dot} 14%, transparent)`,
+                              }}
+                            >
+                              {session.status === 'running' ? (
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    inset: -1,
+                                    borderRadius: '50%',
+                                    border: `1px solid color-mix(in srgb, ${dot} 50%, transparent)`,
+                                    animation: 'team-v2-pulse 1.6s ease-out infinite',
+                                    pointerEvents: 'none',
+                                  }}
+                                />
+                              ) : null}
+                            </span>
+                            {/* 垂直延伸的细线（视觉分组提示） */}
+                            <span
+                              style={{
+                                width: 2,
+                                flex: 1,
+                                minHeight: 12,
+                                background:
+                                  active || hovered
+                                    ? `color-mix(in srgb, ${dot} 35%, transparent)`
+                                    : 'color-mix(in srgb, var(--border) 50%, transparent)',
+                                borderRadius: 999,
+                                transition: 'background 120ms ease',
                               }}
                             />
-                            {session.status === 'running' ? (
-                              <span
-                                style={{
-                                  position: 'absolute',
-                                  inset: 0,
-                                  borderRadius: '50%',
-                                  border: `1px solid color-mix(in srgb, ${dot} 50%, transparent)`,
-                                  animation: 'team-v2-pulse 1.6s ease-out infinite',
-                                  pointerEvents: 'none',
-                                }}
-                              />
-                            ) : null}
                           </span>
+
                           <span
                             style={{
                               flex: 1,
                               minWidth: 0,
                               display: 'grid',
-                              gap: 3,
+                              gap: 6,
                             }}
                           >
-                            {/* 第一行：标题 + 时间 */}
+                            {/* 第 1 行：标题 + 时间 */}
                             <span
                               style={{
                                 display: 'flex',
@@ -1005,7 +1019,7 @@ export function TeamSessionListSidebar({
                                     flexShrink: 0,
                                     fontSize: 10,
                                     color: 'var(--text-3)',
-                                    fontWeight: 400,
+                                    fontWeight: 500,
                                     fontVariantNumeric: 'tabular-nums',
                                     opacity: showActions ? 0 : 1,
                                     transition: 'opacity 120ms ease',
@@ -1016,195 +1030,278 @@ export function TeamSessionListSidebar({
                               ) : null}
                             </span>
 
-                            {/* 第二行：合并 meta（任务进度 / 派生 / 子会话 / 状态文字） */}
-                            {(() => {
-                              const hasTaskBar = taskTotal > 0;
-                              const showStatusText =
-                                !hasTaskBar &&
-                                session.status !== 'running' &&
-                                !session.isDerived &&
-                                childCount === 0;
-                              return (
-                                <span
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                    minWidth: 0,
-                                    fontSize: 10,
-                                    color: 'var(--text-3)',
-                                  }}
-                                >
-                                  {/* 任务进度（紧凑：1/4 + mini bar） */}
-                                  {hasTaskBar ? (
-                                    <span
-                                      style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 5,
-                                        flexShrink: 0,
-                                      }}
-                                      title={`${taskCompleted}/${taskTotal} 已完成${taskRunning > 0 ? `，${taskRunning} 运行中` : ''}${taskFailed > 0 ? `，${taskFailed} 异常` : ''}`}
-                                    >
-                                      <svg
-                                        aria-hidden="true"
-                                        width="10"
-                                        height="10"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      >
-                                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                                        <path d="m9 12 2 2 4-4" />
-                                      </svg>
-                                      <span
-                                        style={{
-                                          width: 28,
-                                          height: 3,
-                                          borderRadius: 999,
-                                          background:
-                                            'color-mix(in srgb, var(--text-3) 18%, transparent)',
-                                          overflow: 'hidden',
-                                        }}
-                                      >
-                                        <span
-                                          aria-hidden="true"
-                                          style={{
-                                            display: 'block',
-                                            height: '100%',
-                                            width: `${Math.round(taskProgress * 100)}%`,
-                                            background:
-                                              taskFailed > 0
-                                                ? 'var(--danger, #d4574e)'
-                                                : taskRunning > 0
-                                                  ? 'var(--success, #22c55e)'
-                                                  : 'var(--accent)',
-                                            transition: 'width 200ms ease',
-                                          }}
-                                        />
-                                      </span>
-                                      <span
-                                        style={{
-                                          fontVariantNumeric: 'tabular-nums',
-                                          fontWeight: 600,
-                                          color:
-                                            taskFailed > 0
-                                              ? 'var(--danger, #d4574e)'
-                                              : taskTotal === taskCompleted
-                                                ? 'var(--success, #22c55e)'
-                                                : 'var(--text-2)',
-                                        }}
-                                      >
-                                        {taskCompleted}/{taskTotal}
-                                      </span>
-                                      {taskRunning > 0 ? (
-                                        <span
-                                          style={{
-                                            color: 'var(--success, #22c55e)',
-                                            fontWeight: 600,
-                                          }}
-                                          title={`${taskRunning} 个任务运行中`}
-                                        >
-                                          ↻{taskRunning}
-                                        </span>
-                                      ) : null}
-                                      {taskFailed > 0 ? (
-                                        <span
-                                          style={{
-                                            color: 'var(--danger, #d4574e)',
-                                            fontWeight: 600,
-                                          }}
-                                          title={`${taskFailed} 个任务失败`}
-                                        >
-                                          !{taskFailed}
-                                        </span>
-                                      ) : null}
-                                    </span>
-                                  ) : null}
-
-                                  {session.isDerived ? (
-                                    <span
-                                      style={{
-                                        ...META_BADGE_STYLE,
-                                        background:
-                                          'color-mix(in srgb, var(--text-3) 14%, transparent)',
-                                        color: 'var(--text-2)',
-                                      }}
-                                      title="此会话由其他会话派生（来自 parent 会话）"
-                                    >
-                                      <svg
-                                        aria-hidden="true"
-                                        width="9"
-                                        height="9"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      >
-                                        <line x1="6" y1="3" x2="6" y2="15" />
-                                        <circle cx="18" cy="6" r="3" />
-                                        <circle cx="6" cy="18" r="3" />
-                                        <path d="M18 9a9 9 0 0 1-9 9" />
-                                      </svg>
-                                      派生
-                                    </span>
-                                  ) : null}
-
-                                  {childCount > 0 ? (
-                                    <span
-                                      style={{
-                                        ...META_BADGE_STYLE,
-                                        background:
-                                          'color-mix(in srgb, var(--accent) 14%, transparent)',
-                                        color: 'var(--accent)',
-                                      }}
-                                      title={`包含 ${childCount} 个子会话`}
-                                    >
-                                      ⋮ {childCount}
-                                    </span>
-                                  ) : null}
-
-                                  {/* 没有任务/派生信息时，才退化为状态文字（避免与状态点重复） */}
-                                  {showStatusText ? (
-                                    <span
-                                      style={{
-                                        flex: 1,
-                                        minWidth: 0,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                        color: dot,
-                                        fontWeight: 500,
-                                      }}
-                                    >
-                                      {statusLabel(session.status)}
-                                    </span>
-                                  ) : null}
-                                </span>
-                              );
-                            })()}
-
-                            {/* 最近一条消息（仅在选中或 hover 时展示，避免列表噪音） */}
-                            {session.lastMessage && (active || hovered) ? (
+                            {/* 第 2 行：状态文字 + 短 ID + 派生标记 */}
+                            <span
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                minWidth: 0,
+                                flexWrap: 'wrap',
+                                fontSize: 10,
+                              }}
+                            >
                               <span
                                 style={{
-                                  display: '-webkit-box',
-                                  WebkitLineClamp: 1,
-                                  WebkitBoxOrient: 'vertical',
-                                  overflow: 'hidden',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '1px 7px',
+                                  borderRadius: 999,
+                                  background: `color-mix(in srgb, ${dot} 14%, transparent)`,
+                                  color: dot,
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  letterSpacing: '0.04em',
+                                  flexShrink: 0,
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {statusLabel(session.status)}
+                              </span>
+                              <span
+                                style={{
+                                  fontFamily:
+                                    'ui-monospace, SFMono-Regular, Menlo, monospace, Consolas, "Liberation Mono"',
+                                  color: 'var(--text-3)',
+                                  fontSize: 9,
+                                  letterSpacing: '0.02em',
+                                  flexShrink: 0,
+                                }}
+                                title={`会话 ID：${session.id}`}
+                              >
+                                #{session.id.slice(0, 6)}
+                              </span>
+                              {session.isDerived ? (
+                                <span
+                                  style={{
+                                    ...META_BADGE_STYLE,
+                                    background:
+                                      'color-mix(in srgb, var(--text-3) 14%, transparent)',
+                                    color: 'var(--text-2)',
+                                  }}
+                                  title="此会话由其他会话派生（来自 parent 会话）"
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    width="9"
+                                    height="9"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <line x1="6" y1="3" x2="6" y2="15" />
+                                    <circle cx="18" cy="6" r="3" />
+                                    <circle cx="6" cy="18" r="3" />
+                                    <path d="M18 9a9 9 0 0 1-9 9" />
+                                  </svg>
+                                  派生
+                                </span>
+                              ) : null}
+                              {childCount > 0 ? (
+                                <span
+                                  style={{
+                                    ...META_BADGE_STYLE,
+                                    background:
+                                      'color-mix(in srgb, var(--accent) 14%, transparent)',
+                                    color: 'var(--accent)',
+                                    gap: 4,
+                                  }}
+                                  title={`包含 ${childCount} 个子会话`}
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    width="9"
+                                    height="9"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <path d="M3 6h6M3 12h6M3 18h6" />
+                                    <circle cx="14" cy="12" r="2" />
+                                    <path d="M14 6v4M14 14v4" />
+                                  </svg>
+                                  {childCount} 子会话
+                                </span>
+                              ) : null}
+                            </span>
+
+                            {/* 第 3 行：任务进度（带可视化条 + 数字 + 状态拆分） */}
+                            {taskTotal > 0 ? (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  fontSize: 10,
+                                  color: 'var(--text-3)',
+                                  padding: '5px 8px',
+                                  borderRadius: 6,
+                                  background: 'color-mix(in srgb, var(--bg-2) 50%, var(--surface))',
+                                  border:
+                                    '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
+                                }}
+                                title={`${taskCompleted}/${taskTotal} 已完成${taskRunning > 0 ? `，${taskRunning} 运行中` : ''}${taskFailed > 0 ? `，${taskFailed} 异常` : ''}`}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    color: 'var(--text-3)',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.05em',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  任务
+                                </span>
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    height: 4,
+                                    borderRadius: 999,
+                                    background:
+                                      'color-mix(in srgb, var(--text-3) 16%, transparent)',
+                                    overflow: 'hidden',
+                                    position: 'relative',
+                                    minWidth: 30,
+                                  }}
+                                >
+                                  <span
+                                    aria-hidden="true"
+                                    style={{
+                                      display: 'block',
+                                      height: '100%',
+                                      width: `${Math.round(taskProgress * 100)}%`,
+                                      background:
+                                        taskFailed > 0
+                                          ? 'var(--danger, #d4574e)'
+                                          : taskRunning > 0
+                                            ? 'var(--success, #22c55e)'
+                                            : 'var(--accent)',
+                                      transition: 'width 200ms ease',
+                                    }}
+                                  />
+                                </span>
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    fontVariantNumeric: 'tabular-nums',
+                                    fontWeight: 700,
+                                    fontSize: 11,
+                                    color:
+                                      taskFailed > 0
+                                        ? 'var(--danger, #d4574e)'
+                                        : taskTotal === taskCompleted
+                                          ? 'var(--success, #22c55e)'
+                                          : 'var(--text)',
+                                  }}
+                                >
+                                  {taskCompleted}
+                                  <span style={{ color: 'var(--text-3)', fontWeight: 500 }}>
+                                    /{taskTotal}
+                                  </span>
+                                </span>
+                                {taskRunning > 0 ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 2,
+                                      color: 'var(--success, #22c55e)',
+                                      fontWeight: 600,
+                                      flexShrink: 0,
+                                    }}
+                                    title={`${taskRunning} 个任务运行中`}
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      width="9"
+                                      height="9"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                    >
+                                      <circle cx="12" cy="12" r="6" />
+                                    </svg>
+                                    {taskRunning}
+                                  </span>
+                                ) : null}
+                                {taskFailed > 0 ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 2,
+                                      color: 'var(--danger, #d4574e)',
+                                      fontWeight: 600,
+                                      flexShrink: 0,
+                                    }}
+                                    title={`${taskFailed} 个任务异常`}
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      width="9"
+                                      height="9"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="3"
+                                      strokeLinecap="round"
+                                    >
+                                      <line x1="12" y1="6" x2="12" y2="13" />
+                                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                    {taskFailed}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+
+                            {/* 第 4 行：最新消息预览（带气泡图标） */}
+                            {session.lastMessage ? (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'flex-start',
+                                  gap: 6,
                                   fontSize: 11,
                                   color: 'var(--text-3)',
                                   lineHeight: 1.5,
-                                  fontStyle: 'italic',
-                                  opacity: 0.85,
+                                  fontStyle: 'normal',
                                 }}
                               >
-                                ⤷ {session.lastMessage}
+                                <svg
+                                  aria-hidden="true"
+                                  width="11"
+                                  height="11"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  style={{ flexShrink: 0, marginTop: 2, opacity: 0.7 }}
+                                >
+                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                </svg>
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: active || hovered ? 2 : 1,
+                                    WebkitBoxOrient: 'vertical',
+                                    overflow: 'hidden',
+                                  }}
+                                >
+                                  {session.lastMessage}
+                                </span>
                               </span>
                             ) : null}
                           </span>
