@@ -365,6 +365,16 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
         onClose={() => setShowPicker(false)}
         onSelect={async (path) => {
           setDefaultWorkingRoot(path);
+          // 自动用目录最后一段作为工作区名称（仅当用户尚未填写时不覆盖已有输入）
+          if (!name.trim()) {
+            const trimmed = path.replace(/\/+$/, '');
+            const folderName = trimmed.includes('/')
+              ? trimmed.slice(trimmed.lastIndexOf('/') + 1)
+              : trimmed;
+            if (folderName) {
+              setName(folderName);
+            }
+          }
           setShowPicker(false);
         }}
         fetchRootPath={fetchRootPath}
