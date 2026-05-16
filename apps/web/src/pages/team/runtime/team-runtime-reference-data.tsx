@@ -780,8 +780,9 @@ export function useResolvedTeamRuntimeReferenceData(
       current.sessions.push({
         id: session.id,
         status: mapSidebarStatus(session.stateStatus),
-        subtitle: `${getSharedSessionStateLabel(session.stateStatus)} · ${formatRelativeTime(session.updatedAt)}`,
+        subtitle: getSharedSessionStateLabel(session.stateStatus),
         title: session.title ?? session.id,
+        updatedAt: session.updatedAt,
       });
       groups.set(key, current);
     }
@@ -798,8 +799,9 @@ export function useResolvedTeamRuntimeReferenceData(
       current.sessions.push({
         id: sharedSession.sessionId,
         status: mapSidebarStatus(sharedSession.stateStatus),
-        subtitle: `${getSharedSessionStateLabel(sharedSession.stateStatus)} · ${formatRelativeTime(sharedSession.shareUpdatedAt)}`,
+        subtitle: getSharedSessionStateLabel(sharedSession.stateStatus),
         title: sharedSession.title ?? sharedSession.sessionId,
+        updatedAt: sharedSession.shareUpdatedAt,
       });
       groups.set(key, current);
     }

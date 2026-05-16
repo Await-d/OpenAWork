@@ -24,6 +24,8 @@ export interface WorkspaceSwitcherProps {
   onSelect: (workspaceId: string) => void;
   /** loading 时禁用切换。 */
   loading?: boolean;
+  /** 点击 "+ 新建工作区" 项的回调（不传则不渲染该项）。 */
+  onCreateNew?: () => void;
 }
 
 const TRIGGER_BUTTON_STYLE: CSSProperties = {
@@ -118,6 +120,7 @@ export function WorkspaceSwitcher({
   activeWorkspaceId,
   onSelect,
   loading,
+  onCreateNew,
 }: WorkspaceSwitcherProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,8 +150,8 @@ export function WorkspaceSwitcher({
     [activeWorkspaceId, onSelect],
   );
 
-  // 只有一个工作区或没有时不渲染 dropdown，仅显示文字
-  if (workspaces.length <= 1) {
+  // 只有一个工作区或没有时仍允许创建（如果传了 onCreateNew 才显示 dropdown）
+  if (workspaces.length <= 1 && !onCreateNew) {
     return (
       <span style={STATIC_LABEL_STYLE} title={displayName}>
         · {displayName}
@@ -198,7 +201,7 @@ export function WorkspaceSwitcher({
 
       {open ? (
         <div role="listbox" aria-label="切换工作区" style={POPOVER_STYLE}>
-          <div style={POPOVER_HEADER_STYLE}>切换到工作区</div>
+          {workspaces.length > 0 ? <div style={POPOVER_HEADER_STYLE}>切换到工作区</div> : null}
           {workspaces.map((ws) => {
             const active = ws.id === activeWorkspaceId;
             return (
@@ -266,6 +269,54 @@ export function WorkspaceSwitcher({
               </button>
             );
           })}
+          {onCreateNew ? (
+            <>
+              {workspaces.length > 0 ? (
+                <div
+                  role="separator"
+                  style={{
+                    height: 1,
+                    background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+                    margin: '4px 0',
+                  }}
+                />
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onCreateNew();
+                }}
+                style={{
+                  ...ITEM_BASE_STYLE,
+                  color: 'var(--accent)',
+                  fontWeight: 600,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background =
+                    'color-mix(in srgb, var(--accent) 10%, transparent)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={CHECK_STYLE}
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                <span style={{ flex: 1 }}>新建工作区</span>
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>

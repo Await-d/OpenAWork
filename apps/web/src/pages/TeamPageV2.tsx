@@ -63,6 +63,7 @@ import { TeamTabContent } from './team/runtime/TeamTabContent.js';
 import { TeamSessionListSidebar } from './team/runtime/TeamSessionListSidebar.js';
 import { WorkspaceSwitcher } from './team/runtime/WorkspaceSwitcher.js';
 import { TeamHeaderMetrics } from './team/runtime/TeamHeaderMetrics.js';
+import { NewTeamWorkspaceModal } from './team/runtime/NewTeamWorkspaceModal.js';
 import {
   useBreakpoint,
   useTeamPageMode,
@@ -213,6 +214,7 @@ export default function TeamPageV2() {
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [officeCollapsed, setOfficeCollapsed] = useState(true);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('teamV2.leftSidebar.collapsed') === '1';
@@ -436,6 +438,7 @@ export default function TeamPageV2() {
               activeWorkspaceId={workspaceState.activeWorkspace?.id ?? null}
               loading={workspaceState.loading}
               onSelect={(id) => navigate(`/team/${id}`)}
+              onCreateNew={() => setShowNewWorkspaceModal(true)}
             />
             {selectedTeamMeta ? (
               <span
@@ -773,6 +776,15 @@ export default function TeamPageV2() {
         ) : null}
 
         <LayerConversationDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+        {showNewWorkspaceModal ? (
+          <NewTeamWorkspaceModal
+            onClose={() => setShowNewWorkspaceModal(false)}
+            onCreated={() => {
+              // 刷新工作区列表，让新创建的工作区出现在 dropdown 中
+              workspaceState.refresh();
+            }}
+          />
+        ) : null}
 
         {showOfficeFullscreen ? (
           <div
