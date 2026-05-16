@@ -1030,7 +1030,7 @@ export function TeamSessionListSidebar({
                               ) : null}
                             </span>
 
-                            {/* 第 2 行：状态文字 + 短 ID + 派生标记 */}
+                            {/* 第 2 行：状态徽章 + 派生标记 + 子会话 */}
                             <span
                               style={{
                                 display: 'flex',
@@ -1046,31 +1046,17 @@ export function TeamSessionListSidebar({
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: 4,
-                                  padding: '1px 7px',
+                                  padding: '2px 8px',
                                   borderRadius: 999,
-                                  background: `color-mix(in srgb, ${dot} 14%, transparent)`,
+                                  background: `color-mix(in srgb, ${dot} 16%, transparent)`,
                                   color: dot,
-                                  fontSize: 9,
+                                  fontSize: 10,
                                   fontWeight: 700,
-                                  letterSpacing: '0.04em',
-                                  flexShrink: 0,
-                                  textTransform: 'uppercase',
-                                }}
-                              >
-                                {statusLabel(session.status)}
-                              </span>
-                              <span
-                                style={{
-                                  fontFamily:
-                                    'ui-monospace, SFMono-Regular, Menlo, monospace, Consolas, "Liberation Mono"',
-                                  color: 'var(--text-3)',
-                                  fontSize: 9,
                                   letterSpacing: '0.02em',
                                   flexShrink: 0,
                                 }}
-                                title={`会话 ID：${session.id}`}
                               >
-                                #{session.id.slice(0, 6)}
+                                {statusLabel(session.status)}
                               </span>
                               {session.isDerived ? (
                                 <span
@@ -1127,9 +1113,23 @@ export function TeamSessionListSidebar({
                                     <circle cx="14" cy="12" r="2" />
                                     <path d="M14 6v4M14 14v4" />
                                   </svg>
-                                  {childCount} 子会话
+                                  {childCount}
                                 </span>
                               ) : null}
+                              <span
+                                style={{
+                                  marginLeft: 'auto',
+                                  fontFamily:
+                                    'ui-monospace, SFMono-Regular, Menlo, monospace, Consolas, "Liberation Mono"',
+                                  color: 'var(--text-3)',
+                                  fontSize: 9,
+                                  opacity: 0.7,
+                                  flexShrink: 0,
+                                }}
+                                title={`会话 ID：${session.id}`}
+                              >
+                                #{session.id.slice(0, 6)}
+                              </span>
                             </span>
 
                             {/* 第 3 行：任务进度（带可视化条 + 数字 + 状态拆分） */}
