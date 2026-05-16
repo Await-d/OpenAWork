@@ -55,6 +55,8 @@ import {
 import { persistMonthlyUsageRecord } from '../usage-records-store.js';
 import { resolveSessionInteractionStateUpdate } from '../session-runtime-state.js';
 import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
+import { buildTeamInstructionStack } from '../team-instruction-stack.js';
+import { mapAgentToTeamRoleLayer } from '../team-role-layer-mapping.js';
 import {
   clearSessionRuntimeThread,
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,
@@ -147,6 +149,21 @@ async function continueFromApprovedToolResult(input: {
   const abortController = new AbortController();
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(sessionContext.metadataJson);
   const memoryBlock = buildMemoryBlockForSession(input.userId, sessionContext.metadataJson);
+
+  // 260515-team-phase-a · T-06：构建 7 层团队指令栈（resume 路径）
+  const teamWorkspaceIdForStack =
+    typeof sessionMeta['teamWorkspaceId'] === 'string' ? sessionMeta['teamWorkspaceId'] : null;
+  const workingDirectoryForStack =
+    typeof sessionMeta['workingDirectory'] === 'string' ? sessionMeta['workingDirectory'] : null;
+  const roleLayerForStack = mapAgentToTeamRoleLayer(route.effectiveAgentId ?? null);
+  const teamInstructionStackResult = await buildTeamInstructionStack({
+    userId: input.userId,
+    workspaceRoot: workingDirectoryForStack,
+    teamWorkspaceId: teamWorkspaceIdForStack,
+    roleLayer: roleLayerForStack,
+  });
+  const teamInstructionStack = teamInstructionStackResult.stableBlock;
+
   const wl = new WorkflowLogger();
   const ctx = createRequestContext(
     'INTERNAL',
@@ -309,6 +326,7 @@ async function continueFromApprovedToolResult(input: {
           yoloModePrompt,
           companionPrompt,
           memoryBlock,
+          teamInstructionStack,
           writeChunk,
         });
 

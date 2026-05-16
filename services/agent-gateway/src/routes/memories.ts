@@ -22,6 +22,7 @@ import {
 } from '../memory-store.js';
 import { sqliteGet } from '../db.js';
 import { buildMemoryExtractionTextForSession } from '../memory-runtime.js';
+import { scanMemoryWriteContent } from '../memory-security-scanner.js';
 import { z } from 'zod';
 
 interface SessionSelectionRow {
@@ -60,6 +61,24 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         step.fail('invalid body');
         return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
+      }
+
+      // 260515-team-phase-a · T-07：拒绝包含注入载荷 / Unicode 异常 / 超大记忆
+      for (const [field, content] of [
+        ['key', parsed.data.key],
+        ['value', parsed.data.value],
+      ] as const) {
+        const scan = scanMemoryWriteContent(content);
+        if (!scan.ok) {
+          step.fail('memory-write-blocked');
+          return reply.status(400).send({
+            error: 'memory-write-blocked',
+            field,
+            threat: scan.threat,
+            reason: scan.reason,
+            sample: scan.sample,
+          });
+        }
       }
 
       const memory = createMemory(user.sub, parsed.data);
@@ -112,6 +131,25 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         step.fail('invalid body');
         return reply.status(400).send({ error: 'Invalid body', issues: parsed.error.issues });
+      }
+
+      // 260515-team-phase-a · T-07：用户更新 memory 时同样跑一遍安全扫描
+      for (const [field, content] of [
+        ['key', parsed.data.key],
+        ['value', parsed.data.value],
+      ] as const) {
+        if (typeof content !== 'string') continue;
+        const scan = scanMemoryWriteContent(content);
+        if (!scan.ok) {
+          step.fail('memory-write-blocked');
+          return reply.status(400).send({
+            error: 'memory-write-blocked',
+            field,
+            threat: scan.threat,
+            reason: scan.reason,
+            sample: scan.sample,
+          });
+        }
       }
 
       const memory = updateMemory(user.sub, memoryId, parsed.data);

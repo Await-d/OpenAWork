@@ -18,6 +18,7 @@ import { persistSessionSnapshot, createRequestSnapshotRef } from '../session-sna
 import { appendSnapshotPart, appendPatchPart } from '../message-v2-adapter.js';
 import type { MessageID } from '../message-v2-schema.js';
 import { upsertArtifactsFromAssistantMessage } from '../assistant-content-artifacts.js';
+import { touchSessionHeartbeat } from '../handoff/heartbeat.js';
 import type { StreamUsageSummary } from './stream-usage.js';
 import {
   THINKING_LANGUAGE_HINT_MARKERS,
@@ -662,6 +663,10 @@ function isToolUseStopReason(reason: StreamStopReason): boolean {
   return reason === 'tool_use';
 }
 
+function isTeamSession(sessionContext: SessionStreamContext): boolean {
+  return sessionContext.roleLayer !== null;
+}
+
 import type { StreamRequest } from './stream.js';
 
 function createIntermediateAssistantRequestId(clientRequestId: string, round: number): string {
@@ -725,6 +730,11 @@ export async function runModelRound(input: {
    * `pinned-skills-prompt.ts`.
    */
   pinnedSkillsPrompt?: string | null;
+  /**
+   * 260515-team-phase-a · 7 层团队指令栈（含 cache breaker tag）。
+   * 由调用方在 round 起始前 await `buildTeamInstructionStack(...)` 取得。
+   */
+  teamInstructionStack?: string | null;
   syntheticContinuationPrompt?: string;
   memoryBlock?: string | null;
   /** Agent ID for the current stream round (for per-agent color rendering). */
@@ -826,6 +836,7 @@ export async function runModelRound(input: {
     startWorkContext: input.startWorkContext,
     commandContext: input.commandContext,
     pinnedSkillsPrompt: input.pinnedSkillsPrompt,
+    teamInstructionStack: input.teamInstructionStack,
   });
 
   const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';
@@ -1117,6 +1128,10 @@ export async function runModelRound(input: {
     let v2UsageOccurredAt: number | undefined;
 
     try {
+      if (isTeamSession(input.sessionContext)) {
+        touchSessionHeartbeat(input.sessionId);
+      }
+
       for await (const chunk of runUpstreamStream({
         model: modelHandle,
         modelId: input.route.model,

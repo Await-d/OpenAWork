@@ -25,6 +25,13 @@ import {
   validateParentSessionBinding,
 } from './sessions.js';
 import { validateImportedMessagesPayload } from './session-route-helpers.js';
+import { isHandoffModeEnabled } from '../handoff/feature-flags.js';
+import {
+  createHandoff as createHandoffRecord,
+  type HandoffRoleLayer,
+} from '../handoff/handoff-store.js';
+import { publishHandoffEvent as publishHandoffEventFromTeamRoute } from '../handoff/team-events-bus.js';
+import { createTeamSession } from '../handoff/team-session-create.js';
 
 const createMemberSchema = z.object({
   name: z.string().min(1),
@@ -224,6 +231,35 @@ const workflowTeamTemplateSchema = z.object({
     .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
     .optional(),
 });
+
+// ─── Phase B T-09/T-10 helpers ──────────────────────────────────────────────
+
+/**
+ * 找到或创建一个 reception 层 session 作为 handoff 的 from_session_id。
+ * Phase B MVP：每次都创建一个新的（简单但不浪费——每条 handoff 链有独立 root）。
+ * Phase C 可以改为复用同一 workspace 下的 reception session。
+ */
+function findOrCreateReceptionSession(userId: string, _teamWorkspaceId: string | null): string {
+  const { sessionId } = createTeamSession({
+    userId,
+    roleLayer: 'reception',
+  });
+  return sessionId;
+}
+
+/**
+ * 把 team-leader dispatch 的 assigneeRole 映射到 HandoffRoleLayer。
+ */
+function mapDispatchRoleToHandoffLayer(role: string): HandoffRoleLayer {
+  const map: Record<string, HandoffRoleLayer> = {
+    planner: 'pm1',
+    researcher: 'pm2',
+    executor: 'executor',
+    reviewer: 'reviewer',
+    leader: 'pm2',
+  };
+  return map[role] ?? 'executor';
+}
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
   const SESSION_TEAM_WORKSPACE_ID_SQL =
@@ -1860,6 +1896,42 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
 
         step.succeed();
 
+        // 260515-team-phase-b · T-09：feature flag 开启时记录 handoff(reception→pm1)
+        if (isHandoffModeEnabled()) {
+          try {
+            const teamWorkspaceId =
+              typeof (request.query as Record<string, string>)['teamWorkspaceId'] === 'string'
+                ? (request.query as Record<string, string>)['teamWorkspaceId']
+                : null;
+            // 找到或创建一个 reception session 作为 from_session_id
+            // Phase B MVP：用 user 最近的 team session 或创建一个临时的
+            const receptionSession = findOrCreateReceptionSession(
+              user.sub,
+              teamWorkspaceId ?? null,
+            );
+            const handoff = createHandoffRecord({
+              userId: user.sub,
+              fromSessionId: receptionSession,
+              fromRoleLayer: 'reception',
+              toRoleLayer: 'pm1',
+              payload: {
+                sourceIntent: body.data.intent,
+                rewrittenIntent,
+                recommendedRole,
+                recommendedNextStep,
+              },
+            });
+            publishHandoffEventFromTeamRoute({
+              type: 'handoff.created',
+              record: handoff,
+            });
+          } catch (err) {
+            console.warn(
+              `[team.interaction-agent.rewrite] handoff record creation failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
         return reply.send({
           createdAt: Date.now(),
           recommendedNextStep,
@@ -2221,6 +2293,41 @@ REVIEW GATE CHECKLIST:
         });
 
         step.succeed(undefined, { taskCount: dispatchedTasks.length });
+
+        // 260515-team-phase-b · T-10：feature flag 开启时记录 handoff(pm1→executor) × N
+        if (isHandoffModeEnabled()) {
+          try {
+            const teamWorkspaceId =
+              typeof (request.query as Record<string, string>)['teamWorkspaceId'] === 'string'
+                ? (request.query as Record<string, string>)['teamWorkspaceId']
+                : null;
+            const pm1Session = findOrCreateReceptionSession(user.sub, teamWorkspaceId ?? null);
+            for (const task of dispatchedTasks) {
+              const toLayer = mapDispatchRoleToHandoffLayer(task.assigneeRole);
+              const handoff = createHandoffRecord({
+                userId: user.sub,
+                fromSessionId: pm1Session,
+                fromRoleLayer: 'pm1',
+                toRoleLayer: toLayer,
+                payload: {
+                  taskId: task.taskId,
+                  title: task.title,
+                  assigneeRole: task.assigneeRole,
+                  assigneeAgentId: task.assigneeAgentId,
+                  priority: task.priority,
+                },
+              });
+              publishHandoffEventFromTeamRoute({
+                type: 'handoff.created',
+                record: handoff,
+              });
+            }
+          } catch (err) {
+            console.warn(
+              `[team.leader.dispatch] handoff record creation failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
 
         return reply.send({
           dispatchedTasks,

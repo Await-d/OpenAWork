@@ -404,6 +404,8 @@ export interface RoundSystemMessagesInput {
   startWorkContext?: string | null;
   /** Command template context injected when an active slash command is detected */
   commandContext?: string | null;
+  /** 260515-team-phase-a · 7 层团队指令栈（stable 段，per session 内稳定） */
+  teamInstructionStack?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +433,16 @@ export interface SystemPromptChainInput {
    * creation and does not change mid-session.
    */
   pinnedSkillsPrompt?: string | null;
+  /**
+   * 260515-team-phase-a · T-06：7 层指令栈注入。
+   * 包含 AGENTS / architecture / constitution / project-memory /
+   * lessons-learned / user_memory / SOUL 拼接结果，已带 ForceApply
+   * cache-breaker tag。属于 stable 段（per session 内稳定）。
+   *
+   * 由调用方通过 `buildTeamInstructionStack(...)` 在 session 创建
+   * / round 起始时计算。空字符串视为未启用团队上下文。
+   */
+  teamInstructionStack?: string | null;
 }
 
 /**
@@ -467,6 +479,8 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
     // Slot 11: Pinned skills section (PR3 of skill-workspace-selection spec)
     input.pinnedSkillsPrompt ?? '',
+    // Slot 12: 260515-team-phase-a · 7 层团队指令栈
+    input.teamInstructionStack ?? '',
   ];
 
   // Filter out empty strings (slots with no content and no placeholder)
@@ -506,6 +520,8 @@ export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
     // the snapshot is captured at session start. Empty string is filtered
     // below so absence does not affect cache shape.
     input.pinnedSkillsPrompt ?? '',
+    // 260515-team-phase-a · 7 层团队指令栈（含 cache-breaker tag）
+    input.teamInstructionStack ?? '',
   ];
 
   const dynamicSlots: string[] = [
@@ -542,6 +558,8 @@ export function buildRoundSystemMessages(input: RoundSystemMessagesInput) {
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
     WEB_SEARCH_ROUTING_SYSTEM_PROMPT,
     input.thinkingLanguagePrompt ?? THINKING_LANGUAGE_PLACEHOLDER,
+    // 260515-team-phase-a · 7 层团队指令栈（stable 段，含 ForceApply cache breaker）
+    input.teamInstructionStack ?? '',
     input.dynamicAgentPrompt,
     input.startWorkContext,
     input.commandContext,

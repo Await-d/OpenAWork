@@ -160,6 +160,8 @@ import {
 import { autoExtractMemoriesForRequest, buildMemoryBlockForSession } from '../memory-runtime.js';
 import { buildCompanionPrompt, loadCompanionSettingsForUser } from '../companion-settings.js';
 import { checkDoomLoop, resetDoomLoopHistory } from '../doom-loop-detector.js';
+import { buildTeamInstructionStack } from '../team-instruction-stack.js';
+import { mapAgentToTeamRoleLayer } from '../team-role-layer-mapping.js';
 
 type PersistedSessionStateStatus = 'idle' | 'running' | 'paused';
 
@@ -569,6 +571,7 @@ export function buildStreamToolObservability(input: {
 
 export interface SessionStreamContext {
   metadataJson: string;
+  roleLayer?: string | null;
 }
 
 interface SessionUserRow {
@@ -932,13 +935,14 @@ function buildErrorContent(code: string, message: string): MessageContent[] {
 }
 
 export function loadSessionContext(sessionId: string, userId: string): SessionStreamContext | null {
-  const session = sqliteGet<{ metadata_json: string }>(
-    'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+  const session = sqliteGet<{ metadata_json: string; role_layer: string | null }>(
+    'SELECT metadata_json, role_layer FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [sessionId, userId],
   );
   if (!session) return null;
   return {
     metadataJson: sanitizeSessionMetadataJson(session.metadata_json),
+    roleLayer: session.role_layer,
   };
 }
 
@@ -2112,6 +2116,27 @@ export async function handleStreamRequest(input: {
         input.user.sub,
         input.sessionContext.metadataJson,
       );
+
+      // 260515-team-phase-a · T-06：构建 7 层团队指令栈
+      // session metadata 中的 teamWorkspaceId 决定是否注入团队约束；
+      // route.effectiveAgentId 映射到 5 层 role_layer（reception/pm1/pm2/executor/reviewer）。
+      // 复用前面 line 1728 已经解析过的 sessionMeta（避免重复 JSON.parse）。
+      const teamWorkspaceIdForStack =
+        typeof sessionMeta['teamWorkspaceId'] === 'string' ? sessionMeta['teamWorkspaceId'] : null;
+      const workingDirectoryForStack =
+        typeof sessionMeta['workingDirectory'] === 'string'
+          ? sessionMeta['workingDirectory']
+          : null;
+      const roleLayerForStack = mapAgentToTeamRoleLayer(
+        route.effectiveAgentId ?? requestData.agentId ?? null,
+      );
+      const teamInstructionStackResult = await buildTeamInstructionStack({
+        userId: input.user.sub,
+        workspaceRoot: workingDirectoryForStack,
+        teamWorkspaceId: teamWorkspaceIdForStack,
+        roleLayer: roleLayerForStack,
+      });
+      const teamInstructionStack = teamInstructionStackResult.stableBlock;
       const compactionSettingsRow = sqliteGet<{ value: string }>(
         `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
         [input.user.sub, COMPACTION_SETTINGS_KEY],
@@ -2261,6 +2286,7 @@ export async function handleStreamRequest(input: {
           startWorkContext,
           commandContext: commandContext?.instruction ?? null,
           pinnedSkillsPrompt,
+          teamInstructionStack,
           syntheticContinuationPrompt,
           memoryBlock,
           agentId: route.effectiveAgentId ?? requestData.agentId,

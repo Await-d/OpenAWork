@@ -45,6 +45,10 @@ import { streamRoutes } from './routes/stream-routes-plugin.js';
 import { usageRoutes } from './routes/usage.js';
 import { agentsRoutes } from './routes/agents.js';
 import { teamRoutes } from './routes/team.js';
+import { teamPhaseARoutes } from './routes/team-phase-a.js';
+import { teamEventsRoutes } from './routes/team-events.js';
+import { teamHandoffsRoutes } from './routes/team-handoffs.js';
+import { teamWorkflowsCrudRoutes } from './routes/team-workflows-crud.js';
 import { settingsRoutes } from './routes/settings.js';
 import { workflowRoutes } from './routes/workflows.js';
 import webStaticPlugin from './web-static.js';
@@ -87,6 +91,10 @@ await app.register(streamRoutes);
 await app.register(usageRoutes);
 await app.register(agentsRoutes);
 await app.register(teamRoutes);
+await app.register(teamPhaseARoutes);
+await app.register(teamEventsRoutes);
+await app.register(teamHandoffsRoutes);
+await app.register(teamWorkflowsCrudRoutes);
 await app.register(settingsRoutes);
 await app.register(workflowRoutes);
 await app.register(webStaticPlugin);
@@ -327,6 +335,25 @@ try {
   step = bootLogger.start('gateway.models-dev-sync');
   startModelsDevRefresh();
   bootLogger.succeed(step);
+
+  // 260515-team-phase-b · T-04 启动 Handoff Watcher（默认开启，环境变量 OPENAWORK_DISABLE_HANDOFF_WATCHER=1 可关）
+  const handoffWatcherDisabled =
+    globalThis.process?.env['OPENAWORK_DISABLE_HANDOFF_WATCHER'] === '1';
+  if (!handoffWatcherDisabled) {
+    step = bootLogger.start('gateway.start-handoff-watcher');
+    try {
+      const { startHandoffWatcher } = await import('./handoff/watcher.js');
+      const { createPhaseCAwareRunner } = await import('./handoff/pm1-runner.js');
+      const watcher = startHandoffWatcher({
+        taskRunner: createPhaseCAwareRunner(),
+      });
+      void watcher; // silence unused
+      bootLogger.succeed(step);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      bootLogger.fail(step, message);
+    }
+  }
 
   step = bootLogger.start('gateway.listen', undefined, { host, port });
   await app.listen({ port, host });

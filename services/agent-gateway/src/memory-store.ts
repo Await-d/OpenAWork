@@ -15,6 +15,7 @@ import {
   deduplicateMemories,
 } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from './db.js';
+import { scanMemoryWriteContent } from './memory-security-scanner.js';
 
 interface MemoryRow {
   id: string;
@@ -259,9 +260,24 @@ export function upsertExtractedMemories(
   userId: string,
   candidates: ExtractedMemoryCandidate[],
   workspaceRoot: string | null = null,
-): { created: number; updated: number; duplicates: number } {
+): { created: number; updated: number; duplicates: number; blocked: number } {
+  // 260515-team-phase-a · T-07：自动抽取也要过安全扫描，避免对话历史里
+  // 出现的注入载荷 / 零宽字符通过自动抽取静默落库。命中威胁的候选项被
+  // 直接丢弃，由调用方通过返回值 blocked 计数感知。
+  const safeCandidates: ExtractedMemoryCandidate[] = [];
+  let blocked = 0;
+  for (const candidate of candidates) {
+    const scanKey = scanMemoryWriteContent(candidate.key);
+    const scanValue = scanMemoryWriteContent(candidate.value);
+    if (!scanKey.ok || !scanValue.ok) {
+      blocked += 1;
+      continue;
+    }
+    safeCandidates.push(candidate);
+  }
+
   const existing = listMemories(userId, { enabled: true, limit: 1000 });
-  const result = deduplicateMemories(candidates, existing);
+  const result = deduplicateMemories(safeCandidates, existing);
 
   for (const candidate of result.toCreate) {
     createMemory(userId, {
@@ -285,6 +301,7 @@ export function upsertExtractedMemories(
     created: result.toCreate.length,
     updated: result.toUpdate.length,
     duplicates: result.duplicates.length,
+    blocked,
   };
 }
 

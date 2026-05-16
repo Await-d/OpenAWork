@@ -986,6 +986,138 @@ export async function migrate(): Promise<void> {
   ensureColumn('sessions', 'revert', 'TEXT DEFAULT NULL');
   ensureColumn('sessions', 'permission', 'TEXT DEFAULT NULL');
 
+  // ─── Phase A: Team Constitution + 用户长期记忆 + 角色 SOUL（260515-team-phase-a） ───
+  // T-01: team_workspaces.constitution_md / constitution_version（乐观锁版本号）
+  ensureColumn('team_workspaces', 'constitution_md', 'TEXT');
+  ensureColumn('team_workspaces', 'constitution_version', 'INTEGER NOT NULL DEFAULT 0');
+
+  // T-02: users.user_memory_md（用户级长期记忆，对应 7 层注入栈第 6 层）
+  ensureColumn('users', 'user_memory_md', "TEXT NOT NULL DEFAULT ''");
+
+  // T-03: agent_personas（五层角色 SOUL：reception / pm1 / pm2 / executor / reviewer）
+  // 设计要点：
+  //   - role_layer 是 SOUL 的逻辑标识（reception | pm1 | pm2 | executor | reviewer）
+  //   - 同一 user 可以多份 persona（不同 key），但 (user_id, role_layer, key) 唯一
+  //   - soul_md 即 5 维度 frontmatter + Markdown 正文
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_personas (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      role_layer TEXT NOT NULL,
+      soul_md TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_personas_user_role_key ON agent_personas(user_id, role_layer, key)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_agent_personas_user_role ON agent_personas(user_id, role_layer)',
+  );
+
+  // T-09: ForceApply 事件表（24h ≤ 5 次限流 + cache-breaker tag）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS team_force_apply_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_force_apply_events_user ON team_force_apply_events(user_id, applied_at DESC)',
+  );
+
+  // ─── Phase B: Session 状态机 + Handoff 协议（260515-team-phase-b） ───
+  // T-01: sessions 表扩展五个字段。注意 `team_parent_session_id` 故意区别于
+  // 已有的 `parent_id`（后者是 V2 message-tree 父子，由 message-v2-projectors
+  // / tool-sandbox 维护，与团队 layering 无关）。
+  ensureColumn('sessions', 'team_parent_session_id', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'role_layer', 'TEXT DEFAULT NULL');
+  // handoff_state：null（非 handoff session）| 'pending' | 'claimed' | 'running' |
+  // 'completed' | 'failed' | 'cancelled' | 'paused'
+  ensureColumn('sessions', 'handoff_state', 'TEXT DEFAULT NULL');
+  // intent_state：JSON 文本，存当前层级对意图的理解（Phase C 真正用，B 阶段先占位）
+  ensureColumn('sessions', 'intent_state', 'TEXT DEFAULT NULL');
+  // last_heartbeat：T-04/T-06 崩溃恢复用；ISO 'YYYY-MM-DD HH:MM:SS' UTC
+  ensureColumn('sessions', 'last_heartbeat', 'TEXT DEFAULT NULL');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_sessions_team_parent ON sessions(team_parent_session_id) WHERE team_parent_session_id IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_sessions_handoff_state ON sessions(handoff_state) WHERE handoff_state IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_sessions_role_layer ON sessions(role_layer) WHERE role_layer IS NOT NULL',
+  );
+
+  // T-02: handoff_records —— b→c→d→e/f/g 派发协议的核心表
+  // 状态机：pending → claimed → running → (completed | failed | cancelled)
+  //         任何状态 → cancelled（用户主动 cancel）
+  //         claimed/running → pending（崩溃恢复重试）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS handoff_records (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      from_role_layer TEXT NOT NULL,
+      to_role_layer TEXT NOT NULL,
+      to_session_id TEXT,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      state TEXT NOT NULL DEFAULT 'pending',
+      claim_token TEXT,
+      claimed_at TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      failure_reason TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      escalation_round INTEGER NOT NULL DEFAULT 0,
+      cancel_requested INTEGER NOT NULL DEFAULT 0,
+      paused INTEGER NOT NULL DEFAULT 0,
+      crash_retry_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  ensureColumn('handoff_records', 'escalation_round', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('handoff_records', 'cancel_requested', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('handoff_records', 'paused', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('handoff_records', 'crash_retry_count', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_state ON handoff_records(state, created_at)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_from_session ON handoff_records(from_session_id, created_at DESC)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_to_session ON handoff_records(to_session_id) WHERE to_session_id IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_handoff_records_user ON handoff_records(user_id, updated_at DESC)',
+  );
+
+  // ─── Phase C: c 层产物链 spec / plan / tasks（260515-team-phase-c） ───
+  // T-01: artifacts 表扩展
+  // phase：产物所属阶段（spec / plan / tasks / research / data-model）
+  ensureColumn('artifacts', 'phase', 'TEXT DEFAULT NULL');
+  // team_workspace_id：关联到 team_workspaces.id（可选，非团队产物为 null）
+  ensureColumn('artifacts', 'team_workspace_id', 'TEXT DEFAULT NULL');
+  // parent_artifact_id：产物链父子关系（plan 的 parent 是 spec，tasks 的 parent 是 plan）
+  ensureColumn('artifacts', 'parent_artifact_id', 'TEXT DEFAULT NULL');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_artifacts_phase ON artifacts(phase) WHERE phase IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_artifacts_team_workspace ON artifacts(team_workspace_id) WHERE team_workspace_id IS NOT NULL',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_artifacts_parent ON artifacts(parent_artifact_id) WHERE parent_artifact_id IS NOT NULL',
+  );
+
+  // T-04: handoff_records 扩展 result_json（c 完成后写入 plan/tasks 产物引用）
+  ensureColumn('handoff_records', 'result_json', 'TEXT DEFAULT NULL');
+
   // ─── App meta：跨版本状态戳 ───
   // 卸载桌面端但「保留用户数据」时，旧的 sqlite 仍在新版本启动时被复用。
   // 这里建立一张轻量的 key/value meta 表，为后续「按版本号触发兼容修补」
