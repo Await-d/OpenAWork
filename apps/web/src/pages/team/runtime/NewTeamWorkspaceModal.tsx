@@ -31,7 +31,7 @@ export interface NewTeamWorkspaceModalProps {
 const OVERLAY_STYLE: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  zIndex: 9999,
+  zIndex: 800,
   display: 'grid',
   placeItems: 'center',
   background: 'oklch(0 0 0 / 0.6)',
