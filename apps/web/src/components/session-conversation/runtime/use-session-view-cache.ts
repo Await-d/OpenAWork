@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react';
 import type { ChatMessage } from './support.js';
-import type { ChatRightPanelState } from '../chat-stream-state.js';
+import type { ChatRightPanelState } from '../../../pages/chat-stream-state.js';
 import type { RecoveredActiveAssistantStream } from './stream-recovery.js';
 
 const MAX_CACHE_SIZE = 10;

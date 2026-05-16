@@ -1,5 +1,5 @@
-import type { ChatMessage } from '../../pages/chat-page/support.js';
-import { readAssistantTracePayload } from '../../pages/chat-page/support.js';
+import type { ChatMessage } from '../session-conversation/runtime/support.js';
+import { readAssistantTracePayload } from '../session-conversation/runtime/support.js';
 
 export type ExportFormat = 'markdown' | 'json' | 'text';
 

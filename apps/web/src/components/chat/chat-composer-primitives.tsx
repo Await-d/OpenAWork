@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SlashCommandItem } from '../../pages/chat-page/support.js';
+import type { SlashCommandItem } from '../session-conversation/runtime/support.js';
 
 export function getSlashBadgeStyle(source: SlashCommandItem['source']): React.CSSProperties {
   switch (source) {

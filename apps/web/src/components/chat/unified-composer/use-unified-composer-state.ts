@@ -1,31 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
-import { useComposerCallbacks } from '../../../pages/chat-page/use-composer-callbacks.js';
-import { useComposerMenuItems } from '../../../pages/chat-page/use-composer-menu-items.js';
-import { useComposerQueue } from '../../../pages/chat-page/use-composer-queue.js';
+import { useComposerCallbacks } from '../../session-conversation/runtime/use-composer-callbacks.js';
+import { useComposerMenuItems } from '../../session-conversation/runtime/use-composer-menu-items.js';
+import { useComposerQueue } from '../../session-conversation/runtime/use-composer-queue.js';
 
-import { buildQueuedComposerScopeKey } from '../../../pages/chat-page/chat-page-utils.js';
+import { buildQueuedComposerScopeKey } from '../../session-conversation/runtime/chat-page-utils.js';
 import {
   createQueuedComposerPreview,
   hydrateQueuedComposerMessage,
   type QueuedComposerMessage,
   toPersistedQueuedComposerMessage,
-} from '../../../pages/chat-page/queued-composer-state.js';
+} from '../../session-conversation/runtime/queued-composer-state.js';
 import {
   deleteQueuedComposerFiles,
   restoreQueuedComposerFiles,
-} from '../../../pages/chat-page/queued-composer-file-store.js';
+} from '../../session-conversation/runtime/queued-composer-file-store.js';
 import type {
   ComposerMenuState,
   WorkspaceFileMentionItem,
-} from '../../../pages/chat-page/support.js';
+} from '../../session-conversation/runtime/support.js';
 import { useChatQueueStore } from '../../../stores/chat-queue.js';
 import type { ChatSettingsProvider } from '../../../utils/chat-session-defaults.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat-session-defaults.js';
 import type { DialogueMode } from '../../../pages/dialogue-mode.js';
 import type { UnifiedComposerFeatures, UnifiedComposerSubmitPayload } from '../UnifiedComposer.js';
-import type { ImageEditReferenceArtifact } from '../../../pages/chat-page/image-edit-reference-artifacts.js';
+import type { ImageEditReferenceArtifact } from '../../session-conversation/runtime/image-edit-reference-artifacts.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/useComposerWorkspaceCatalog.js';
 
 export interface UseUnifiedComposerStateOptions {

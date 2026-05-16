@@ -25,7 +25,15 @@ import {
   createWorkflowsClient,
   dedupePendingPermissionRequests,
 } from '@openAwork/web-client';
-import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useFileEditorContext } from '../App.js';
 import { usePageActivation } from '../components/CachedRouteOutlet.js';
@@ -87,14 +95,14 @@ import { extractWorkingDirectory } from '../utils/session-metadata.js';
 import {
   shouldAttemptAttachToSession,
   shouldResetAttachAttempt,
-} from './chat-page/attach-stream-eligibility.js';
-import { handleInterruptedAttachStream } from './chat-page/attach-stream-reconnect.js';
-import { createAttachStreamReconnectWiring } from './chat-page/attach-stream-reconnect-wiring.js';
+} from '../components/session-conversation/runtime/attach-stream-eligibility.js';
+import { handleInterruptedAttachStream } from '../components/session-conversation/runtime/attach-stream-reconnect.js';
+import { createAttachStreamReconnectWiring } from '../components/session-conversation/runtime/attach-stream-reconnect-wiring.js';
 import {
   appendAttachmentSummary,
   buildUploadedAttachmentSummaryLine,
   uploadChatAttachments,
-} from './chat-page/attachment-upload.js';
+} from '../components/session-conversation/runtime/attachment-upload.js';
 import { ChatEditorPane } from './chat-page/chat-editor-pane.js';
 import {
   buildQueuedComposerScopeKey,
@@ -111,42 +119,41 @@ import {
   REMOTE_STREAM_RECOVERY_POLL_MS,
   SESSION_SWITCH_DEFER_THRESHOLD,
   type SessionsClientWithActiveStop,
-} from './chat-page/chat-page-utils.js';
+} from '../components/session-conversation/runtime/chat-page-utils.js';
 import { ChatRightPanel } from './chat-page/chat-right-panel.js';
 import type { RightPanelTabId } from './chat-page/right-panel-tabs.js';
-import { ChatScrollBottomButton } from './chat-page/chat-scroll-bottom-button.js';
-import { ChatStreamErrorBar } from './chat-page/chat-stream-error-bar.js';
-import { ChatTodoBar } from './chat-page/chat-todo-bar.js';
-import HistoryEditDialog from './chat-page/history-edit-dialog.js';
+import { ChatScrollBottomButton } from '../components/session-conversation/runtime/scroll-bottom-button.js';
+import { ChatStreamErrorBar } from '../components/session-conversation/runtime/stream-error-bar.js';
+import HistoryEditDialog from '../components/session-conversation/runtime/history-edit-dialog.js';
 import {
   type ImageEditReferenceArtifact,
   toImageEditReferenceArtifacts,
-} from './chat-page/image-edit-reference-artifacts.js';
-import { makeOrderedMessageId } from './chat-page/ordered-id.js';
-import { isAutoAcceptEnabled } from './chat-page/permission-auto-respond.js';
-import { deleteQueuedComposerFiles } from './chat-page/queued-composer-file-store.js';
-import RetryModeDialog from './chat-page/retry-mode-dialog.js';
-import { startSequentialPolling } from './chat-page/sequential-polling.js';
-import { executeServerCommand } from './chat-page/server-command-item.js';
+} from '../components/session-conversation/runtime/image-edit-reference-artifacts.js';
+import { makeOrderedMessageId } from '../components/session-conversation/runtime/ordered-id.js';
+import { isAutoAcceptEnabled } from '../components/session-conversation/runtime/permission-auto-respond.js';
+import { deleteQueuedComposerFiles } from '../components/session-conversation/runtime/queued-composer-file-store.js';
+import RetryModeDialog from '../components/session-conversation/runtime/retry-mode-dialog.js';
+import { startSequentialPolling } from '../components/session-conversation/runtime/sequential-polling.js';
+import { executeServerCommand } from '../components/session-conversation/runtime/server-command-item.js';
 import {
   SessionRunStateBar,
   SessionRunStatePlaceholder,
-} from './chat-page/session-run-state-bar.js';
+} from '../components/session-conversation/runtime/session-run-state-bar.js';
 import {
   flattenSessionTodoLanes,
   type SessionStateStatus,
   type SessionTodoItem,
   shouldPollSessionRuntime,
   toSessionPendingPermissionState,
-} from './chat-page/session-runtime.js';
+} from '../components/session-conversation/runtime/session-runtime.js';
 import {
   type RecoveredActiveAssistantStream,
   recoverActiveAssistantStream,
-} from './chat-page/stream-recovery.js';
+} from '../components/session-conversation/runtime/stream-recovery.js';
 import {
   type ChatBackendUsageSnapshot,
   mergeChatBackendUsageSnapshot,
-} from './chat-page/stream-usage.js';
+} from '../components/session-conversation/runtime/stream-usage.js';
 import {
   appendStreamingTextDelta,
   appendStreamingThinkingDelta,
@@ -154,7 +161,7 @@ import {
   markStreamingReasoningSegmentEnded,
   segmentsFromRecoverySnapshot,
   upsertStreamingToolSegment,
-} from './chat-page/streaming-segments.js';
+} from '../components/session-conversation/runtime/streaming-segments.js';
 import {
   appendStreamingThinkingChunk,
   extractStreamingThinkingDurations,
@@ -163,7 +170,7 @@ import {
   joinStreamingThinkingTexts,
   markStreamingThinkingChunkEnded,
   type StreamingThinkingBlock,
-} from './chat-page/streaming-thinking.js';
+} from '../components/session-conversation/runtime/streaming-thinking.js';
 import { buildSubAgentRunItems, SubAgentRunList } from './chat-page/sub-agent-run-list.js';
 import { SubSessionDetailPanel } from './chat-page/sub-session-detail-panel.js';
 import {
@@ -191,19 +198,20 @@ import {
   sanitizeComposerPlainText,
   upsertPermissionEventMessage,
   type WorkspaceFileMentionItem,
-} from './chat-page/support.js';
+} from '../components/session-conversation/runtime/support.js';
 import {
   buildTaskToolRuntimeLookup,
   buildTerminalTaskSyncMarker,
   resolveTaskToolRuntimeSnapshot,
-} from './chat-page/task-tool-runtime.js';
-import { detectThinkKeyword } from './chat-page/think-keyword-detector.js';
+} from '../components/session-conversation/runtime/task-tool-runtime.js';
+import { detectThinkKeyword } from '../components/session-conversation/runtime/think-keyword-detector.js';
+import { useChatTodoController } from '../components/session-conversation/runtime/todo-bar.js';
 import {
   filterTranscriptMessages,
   shouldShowRunEventInTranscript,
-} from './chat-page/transcript-visibility.js';
-import { useAssistantMessageProcessing } from './chat-page/use-assistant-message-processing.js';
-import { useChatDataLoaders } from './chat-page/use-chat-data-loaders.js';
+} from '../components/session-conversation/runtime/transcript-visibility.js';
+import { useAssistantMessageProcessing } from '../components/session-conversation/runtime/use-assistant-message-processing.js';
+import { useChatDataLoaders } from '../components/session-conversation/runtime/use-chat-data-loaders.js';
 import type { SessionImageGenerationResponse } from './chat-page/use-chat-image-generation.js';
 import { useChatImageGeneration } from './chat-page/use-chat-image-generation.js';
 import {
@@ -211,25 +219,28 @@ import {
   type RetryPrompt,
   useChatMessageActions,
 } from './chat-page/use-chat-message-actions.js';
-import { useChatRenderData } from './chat-page/use-chat-render-data.js';
+import { useChatRenderData } from '../components/session-conversation/runtime/use-chat-render-data.js';
 import { useChatUiActions } from './chat-page/use-chat-ui-actions.js';
-import { useModelPrices } from './chat-page/use-model-prices.js';
-import { useProviderModelInfo } from './chat-page/use-provider-model-info.js';
-import { useScrollManager } from './chat-page/use-scroll-manager.js';
-import { useSessionContentArtifactCount } from './chat-page/use-session-content-artifact-count.js';
-import { useSessionTerminals } from './chat-page/use-session-terminals.js';
-import { detectDevServerUrl, isLikelyDevServerCommand } from './chat-page/dev-server-detect.js';
-import { useSessionSettingsCallbacks } from './chat-page/use-session-settings-callbacks.js';
-import { useSessionSidebarRunState } from './chat-page/use-session-sidebar-run-state.js';
-import { useSessionSnapshotLoader } from './chat-page/use-session-snapshot-loader.js';
+import { useModelPrices } from '../components/session-conversation/runtime/use-model-prices.js';
+import { useProviderModelInfo } from '../components/session-conversation/runtime/use-provider-model-info.js';
+import { useScrollManager } from '../components/session-conversation/runtime/use-scroll-manager.js';
+import { useSessionContentArtifactCount } from '../components/session-conversation/runtime/use-session-content-artifact-count.js';
+import { useSessionTerminals } from '../components/session-conversation/runtime/use-session-terminals.js';
+import {
+  detectDevServerUrl,
+  isLikelyDevServerCommand,
+} from '../components/session-conversation/runtime/dev-server-detect.js';
+import { useSessionSettingsCallbacks } from '../components/session-conversation/runtime/use-session-settings-callbacks.js';
+import { useSessionSidebarRunState } from '../components/session-conversation/runtime/use-session-sidebar-run-state.js';
+import { useSessionSnapshotLoader } from '../components/session-conversation/runtime/use-session-snapshot-loader.js';
 import { type SessionArtifactsResponse } from './artifacts/artifact-workspace-types.js';
 import {
   type SessionViewStreamingSnapshot,
   useSessionViewCache,
-} from './chat-page/use-session-view-cache.js';
-import { useSessionViewGuard } from './chat-page/use-session-view-guard.js';
-import { useStreamAttachRetry } from './chat-page/use-stream-attach-retry.js';
-import { useStreamReveal } from './chat-page/use-stream-reveal.js';
+} from '../components/session-conversation/runtime/use-session-view-cache.js';
+import { useSessionViewGuard } from '../components/session-conversation/runtime/use-session-view-guard.js';
+import { useStreamAttachRetry } from '../components/session-conversation/runtime/use-stream-attach-retry.js';
+import { useStreamReveal } from '../components/session-conversation/runtime/use-stream-reveal.js';
 import {
   applyChatRightPanelChunk,
   applyChatRightPanelEvent,
@@ -258,6 +269,7 @@ import {
 } from '../components/chat/message-export.js';
 import { useBookmarkStore } from '../stores/bookmarks.js';
 import { useChatKeyboardShortcuts } from '../hooks/useChatKeyboardShortcuts.js';
+import { SessionConversationView } from '../components/session-conversation/SessionConversationView.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
 const LOAD_MORE_MESSAGE_INCREMENT = 20;
@@ -372,6 +384,10 @@ export default function ChatPage() {
   const [childSessions, setChildSessions] = useState<Session[]>([]);
   const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
   const [sessionTodos, setSessionTodos] = useState<SessionTodoItem[]>([]);
+  // 待办控制器：在 ChatPage 创建一份，让 ChatTopBar 内嵌 todo slot 与
+  // SessionConversationView 内的浮层共享展开状态、避免双份 state。
+  const todoController = useChatTodoController(sessionTodos);
+  const todoDetailsId = useId();
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionRequest[]>([]);
@@ -5210,52 +5226,6 @@ export default function ChatPage() {
             transition: splitDragging.current ? 'none' : 'width 240ms ease',
           }}
         >
-          <ChatTopBar
-            dialogueMode={dialogueMode}
-            onChangeDialogueMode={handleDialogueModeChange}
-            yoloMode={yoloMode}
-            onToggleYolo={handleToggleYolo}
-            editorMode={editorMode}
-            onToggleEditorMode={() => setEditorMode(!editorMode)}
-            rightOpen={rightOpen}
-            onToggleRightOpen={() => setRightOpen((o) => !o)}
-            contextUsedTokens={contextUsageSnapshot?.usedTokens}
-            contextMaxTokens={contextUsageSnapshot?.maxTokens}
-            contextIsEstimated={contextUsageSnapshot?.estimated}
-            terminalsChip={
-              currentSessionId ? (
-                <SessionTerminalsChip
-                  terminals={sessionTerminals.terminals}
-                  runningCount={sessionTerminals.runningCount}
-                  loading={sessionTerminals.loading}
-                  error={sessionTerminals.error}
-                  pendingKillIds={sessionTerminals.pendingKillIds}
-                  onKillTerminal={sessionTerminals.killTerminal}
-                  onReload={sessionTerminals.reload}
-                  gatewayUrl={gatewayUrl}
-                  token={token}
-                  sessionId={currentSessionId}
-                />
-              ) : null
-            }
-            onOpenCommandPalette={commandPalette.open}
-            bookmarkCount={bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length}
-            multiSelectActive={multiSelect.multiSelect.enabled}
-            onToggleMultiSelect={() => {
-              if (multiSelect.multiSelect.enabled) {
-                multiSelect.disableMultiSelect();
-              } else {
-                multiSelect.enableMultiSelect();
-              }
-            }}
-            onOpenBrowser={() => {
-              if (!browserPreviewUrl) {
-                setBrowserPreviewUrl('http://localhost:3000');
-              }
-              setEditorMode(true);
-            }}
-            browserActive={!!browserPreviewUrl}
-          />
           <WorkspacePickerModal
             isOpen={showWorkspaceSelector}
             onClose={() => setShowWorkspaceSelector(false)}
@@ -5275,338 +5245,259 @@ export default function ChatPage() {
             validatePath={workspace.validatePath}
             loading={workspace.loading}
           />
-          <HistoryEditDialog
-            open={historyEditPrompt !== null}
-            initialText={historyEditPrompt?.text ?? ''}
-            inputParts={historyEditPrompt?.inputParts}
-            onClose={() => setHistoryEditPrompt(null)}
-            onResendCurrent={(text, editedInputParts) => {
+          <SessionConversationView
+            sessionId={currentSessionId}
+            sessionSource="chat"
+            currentUserEmail={currentUserEmail}
+            gatewayUrl={gatewayUrl}
+            token={token}
+            topBar={
+              <ChatTopBar
+                dialogueMode={dialogueMode}
+                onChangeDialogueMode={handleDialogueModeChange}
+                yoloMode={yoloMode}
+                onToggleYolo={handleToggleYolo}
+                editorMode={editorMode}
+                onToggleEditorMode={() => setEditorMode(!editorMode)}
+                rightOpen={rightOpen}
+                onToggleRightOpen={() => setRightOpen((o) => !o)}
+                contextUsedTokens={contextUsageSnapshot?.usedTokens}
+                contextMaxTokens={contextUsageSnapshot?.maxTokens}
+                contextIsEstimated={contextUsageSnapshot?.estimated}
+                terminalsChip={
+                  currentSessionId ? (
+                    <SessionTerminalsChip
+                      terminals={sessionTerminals.terminals}
+                      runningCount={sessionTerminals.runningCount}
+                      loading={sessionTerminals.loading}
+                      error={sessionTerminals.error}
+                      pendingKillIds={sessionTerminals.pendingKillIds}
+                      onKillTerminal={sessionTerminals.killTerminal}
+                      onReload={sessionTerminals.reload}
+                      gatewayUrl={gatewayUrl}
+                      token={token}
+                      sessionId={currentSessionId}
+                    />
+                  ) : null
+                }
+                onOpenCommandPalette={commandPalette.open}
+                bookmarkCount={bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length}
+                multiSelectActive={multiSelect.multiSelect.enabled}
+                onToggleMultiSelect={() => {
+                  if (multiSelect.multiSelect.enabled) {
+                    multiSelect.disableMultiSelect();
+                  } else {
+                    multiSelect.enableMultiSelect();
+                  }
+                }}
+                onOpenBrowser={() => {
+                  if (!browserPreviewUrl) {
+                    setBrowserPreviewUrl('http://localhost:3000');
+                  }
+                  setEditorMode(true);
+                }}
+                browserActive={!!browserPreviewUrl}
+                todoController={todoController}
+                todoDetailsId={todoDetailsId}
+              />
+            }
+            beforeMessages={
+              <SubAgentRunList
+                items={subAgentRunItems}
+                selectedSessionId={selectedChildSessionId}
+                onSelectSession={openChildSessionInspector}
+              />
+            }
+            afterMessages={
+              <>
+                <CompanionStage
+                  agentId={effectiveAgentId}
+                  attachedCount={0}
+                  currentUserEmail={currentUserEmail}
+                  editorMode={editorMode}
+                  input={input}
+                  panelOpenSignal={companionPanelSignal}
+                  pendingPermissionCount={pendingPermissions.length}
+                  prefersReducedMotion={prefersReducedMotion}
+                  queuedCount={0}
+                  rightOpen={rightOpen}
+                  sessionBusyState={remoteSessionBusyState}
+                  sessionId={currentSessionId}
+                  showVoice={false}
+                  streaming={streaming}
+                  todoCount={sessionTodos.length}
+                />
+                {latestGeneratedImageResult && artifactsWorkspaceHref && (
+                  <ChatImageGenerationResultStrip
+                    artifactTitle={latestGeneratedImageResult.artifactTitle}
+                    modelLabel={latestGeneratedImageResult.modelLabel}
+                    onContinueEditing={continueEditingLatestGeneratedImage}
+                    onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
+                  />
+                )}
+                {multiSelect.multiSelect.enabled && (
+                  <MultiSelectToolbar
+                    selectedCount={multiSelect.selectedCount}
+                    onCopy={() => {
+                      const selected = multiSelect.getSelectedMessages(messages);
+                      if (selected.length > 0) {
+                        void copyExportToClipboard(selected, 'text').then((ok) => {
+                          if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
+                        });
+                      }
+                    }}
+                    onExport={() => {
+                      const selected = multiSelect.getSelectedMessages(messages);
+                      if (selected.length > 0) {
+                        const content = exportMessages(selected, 'markdown');
+                        downloadExport(content, `chat-selected-${Date.now()}.md`, 'text/markdown');
+                        toast(`已导出 ${selected.length} 条消息`, 'success');
+                      }
+                    }}
+                    onBookmark={() => {
+                      const selected = multiSelect.getSelectedMessages(messages);
+                      for (const msg of selected) {
+                        if (!bookmarkStore.isBookmarked(msg.id)) {
+                          bookmarkStore.addBookmark({
+                            messageId: msg.id,
+                            sessionId: currentSessionId ?? '',
+                            content: msg.content.slice(0, 200),
+                            role: msg.role,
+                          });
+                        }
+                      }
+                      toast(`已收藏 ${selected.length} 条消息`, 'success');
+                      multiSelect.disableMultiSelect();
+                    }}
+                    onSelectAll={() => multiSelect.selectAll(messages)}
+                    onCancel={() => multiSelect.disableMultiSelect()}
+                  />
+                )}
+              </>
+            }
+            composerExtras={{
+              imageGeneration: true,
+              skillRecommendation: true,
+              multiSelect: true,
+              bookmarks: true,
+              promptTemplate: true,
+              commandPalette: true,
+              dialogueModeToggle: true,
+              yoloMode: true,
+              agentSwitch: true,
+            }}
+            messages={messages}
+            groupedMessageEntries={groupedMessageEntries}
+            visibleMessageCount={visibleMessageCount ?? sanitizedHistoricalMessages.length}
+            hiddenMessageCount={hiddenMessageCount}
+            visibleStreaming={visibleStreaming}
+            showSessionSwitchSkeleton={showSessionSwitchSkeleton}
+            remoteSessionBusyState={remoteSessionBusyState}
+            pendingPermissions={pendingPermissions}
+            resolveInlinePermissionActions={resolveInlinePermissionActions}
+            providerCatalog={providerCatalog}
+            activeProviderId={activeProviderId}
+            activeModelId={activeModelId}
+            activeModelLabel={activeModelOption?.label}
+            onLoadEarlier={() => {
+              const localHidden =
+                sanitizedHistoricalMessages.length -
+                (visibleMessageCount ?? sanitizedHistoricalMessages.length);
+              if (localHidden > 0) {
+                setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+              } else if (currentSessionId) {
+                void loadCurrentSessionSnapshot(currentSessionId, {
+                  replaceMessages: true,
+                })
+                  .then(() => {
+                    setServerTotalTurnCount(null);
+                    setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+                  })
+                  .catch(() => undefined);
+              }
+            }}
+            welcomeScreen={{
+              hasWorkspace: !!effectiveWorkingDirectory,
+              dialogueMode,
+              onNewSession: () => void ensureSession(),
+              onOpenWorkspace: () => setShowWorkspaceSelector(true),
+              onSelectMode: handleDialogueModeChange,
+            }}
+            streaming={streaming}
+            stoppingStream={stoppingStream}
+            streamError={streamError}
+            onDismissStreamError={() => setStreamError(null)}
+            checkpointCount={compactions.length}
+            pendingQuestionsCount={pendingQuestions.length}
+            stopCapability={stopCapability}
+            onOpenRecovery={() => {
+              setRightOpen(true);
+              setRightTab('overview');
+            }}
+            scrollRegionRef={scrollRegionRef}
+            contentColumnRef={contentColumnRef}
+            bottomRef={bottomRef}
+            onScroll={handleScroll}
+            showScrollToBottom={showScrollToBottom}
+            hasPendingFollowContent={hasPendingFollowContent}
+            onScrollToBottom={(behavior, target) => scrollToBottom(behavior, target)}
+            editorMode={editorMode}
+            sessionTodos={sessionTodos}
+            rightOpen={rightOpen}
+            activePendingQuestion={activePendingQuestion}
+            inlineQuestionAnswers={inlineQuestionAnswers}
+            inlineQuestionCustomInputs={inlineQuestionCustomInputs}
+            inlineQuestionReplyStatus={inlineQuestionReplyStatus}
+            inlineQuestionReplyError={inlineQuestionReplyError}
+            onToggleInlineQuestionOption={toggleInlineQuestionOption}
+            onChangeInlineQuestionCustomInput={handleInlineQuestionCustomInput}
+            onReplyInlineQuestion={replyInlineQuestion}
+            historyEditPrompt={historyEditPrompt}
+            onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
+            onResendHistoryEdit={(text, editedInputParts) => {
               if (!historyEditPrompt) return;
               void handleEditResendInCurrentSession(
                 text,
                 historyEditPrompt.messageId,
-                editedInputParts,
+                editedInputParts as never,
               );
               setHistoryEditPrompt(null);
             }}
-            onContinueCurrent={(text, editedInputParts) => {
-              if (editedInputParts && editedInputParts.length > 0) {
+            onContinueHistoryEdit={(text, editedInputParts) => {
+              if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
                 void sendMessage(text, {
-                  existingInputParts: editedInputParts,
+                  existingInputParts: editedInputParts as never,
                 });
               } else {
                 focusComposerWithText(text);
               }
               setHistoryEditPrompt(null);
             }}
-            onCreateBranch={(text, editedInputParts) => {
+            onCreateBranchFromHistoryEdit={(text, editedInputParts) => {
               if (!historyEditPrompt) return;
               void createBranchSessionFromMessage(
                 text,
                 historyEditPrompt.messageId,
-                editedInputParts,
+                editedInputParts as never,
               );
               setHistoryEditPrompt(null);
             }}
-          />
-          <RetryModeDialog
-            open={retryPrompt !== null}
-            messagePreview={retryPrompt?.text ?? ''}
-            onClose={() => setRetryPrompt(null)}
+            retryPrompt={retryPrompt}
+            onCloseRetry={() => setRetryPrompt(null)}
             onRetryCurrent={() => {
               void handleRetryInCurrentSession();
             }}
             onRetryBranch={() => {
               void handleRetryInNewSession();
             }}
-          />
-          <div
-            style={{
-              display: 'flex',
-              flex: 1,
-              minHeight: 0,
-              overflow: 'hidden',
-              position: 'relative',
-            }}
-          >
-            <SubAgentRunList
-              items={subAgentRunItems}
-              selectedSessionId={selectedChildSessionId}
-              onSelectSession={openChildSessionInspector}
-            />
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                width: '100%',
-                minWidth: 0,
-                overflow: 'hidden',
-                position: 'relative',
-                transition: 'none',
-              }}
-            >
-              <ChatSearchOverlay controller={chatSearch} />
-              <div
-                ref={scrollRegionRef}
-                onScroll={handleScroll}
-                data-testid="chat-scroll-region"
-                style={{
-                  flex: 1,
-                  overflowY: 'auto',
-                  padding: editorMode
-                    ? `1rem clamp(20px, 4vw, 44px) ${CHAT_SCROLL_BOTTOM_PADDING}`
-                    : `0.9rem clamp(10px, 3vw, 32px) ${CHAT_SCROLL_BOTTOM_PADDING}`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  minHeight: 0,
-                  scrollPaddingBottom: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
-                }}
-              >
-                <div
-                  ref={contentColumnRef}
-                  data-testid="chat-content-column"
-                  style={{
-                    width: '100%',
-                    maxWidth: editorMode ? 680 : 768,
-                    margin: '0 auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'stretch',
-                    gap: '1.5rem',
-                    minHeight: '100%',
-                  }}
-                >
-                  {showSessionSwitchSkeleton ? (
-                    <ChatSessionSkeleton />
-                  ) : messages.length === 0 && !visibleStreaming && !remoteSessionBusyState ? (
-                    <WelcomeScreen
-                      hasWorkspace={!!effectiveWorkingDirectory}
-                      dialogueMode={dialogueMode}
-                      onNewSession={() => void ensureSession()}
-                      onOpenWorkspace={() => setShowWorkspaceSelector(true)}
-                      onSelectMode={handleDialogueModeChange}
-                    />
-                  ) : null}
-                  {showSessionSwitchSkeleton ? (
-                    <div
-                      ref={bottomRef}
-                      style={{
-                        height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
-                        flexShrink: 0,
-                      }}
-                    />
-                  ) : messages.length > 0 || visibleStreaming || remoteSessionBusyState ? (
-                    <>
-                      {hiddenMessageCount > 0 && (
-                        <button
-                          type="button"
-                          data-testid="chat-load-earlier"
-                          onClick={() => {
-                            const localHidden =
-                              sanitizedHistoricalMessages.length -
-                              (visibleMessageCount ?? sanitizedHistoricalMessages.length);
-                            if (localHidden > 0) {
-                              setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-                            } else if (currentSessionId) {
-                              void loadCurrentSessionSnapshot(currentSessionId, {
-                                replaceMessages: true,
-                              })
-                                .then(() => {
-                                  setServerTotalTurnCount(null);
-                                  setVisibleMessageCount(
-                                    (prev) => prev + LOAD_MORE_MESSAGE_INCREMENT,
-                                  );
-                                })
-                                .catch(() => undefined);
-                            }
-                          }}
-                          style={{
-                            alignSelf: 'center',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            minHeight: 32,
-                            padding: '0 14px',
-                            borderRadius: 999,
-                            border: '1px solid var(--border)',
-                            background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
-                            color: 'var(--text-2)',
-                            fontSize: 11,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            marginBottom: 4,
-                            flexShrink: 0,
-                          }}
-                        >
-                          <svg
-                            aria-hidden="true"
-                            width="12"
-                            height="12"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M12 19V5" />
-                            <path d="m5 12 7-7 7 7" />
-                          </svg>
-                          加载更早的 {Math.min(hiddenMessageCount, LOAD_MORE_MESSAGE_INCREMENT)}{' '}
-                          条消息（共 {hiddenMessageCount} 条隐藏）
-                        </button>
-                      )}
-                      <ChatMessageGroupList
-                        activeModelId={activeModelId}
-                        activeModelLabel={activeModelOption?.label}
-                        activeProviderId={activeProviderId}
-                        bottomRef={bottomRef}
-                        currentUserEmail={currentUserEmail}
-                        groups={groupedMessageEntries}
-                        pendingPermissions={pendingPermissions}
-                        providerCatalog={providerCatalog}
-                        resolveInlinePermissionActions={resolveInlinePermissionActions}
-                        scrollRegionRef={scrollRegionRef}
-                      />
-                      {!visibleStreaming && remoteSessionBusyState ? (
-                        <ChatRemoteStreamPlaceholder status={remoteSessionBusyState} />
-                      ) : null}
-                    </>
-                  ) : (
-                    <div ref={bottomRef} style={{ flexShrink: 0 }} />
-                  )}
-                </div>
-              </div>
-
-              {showScrollToBottom && (
-                <ChatScrollBottomButton
-                  streaming={streaming}
-                  hasPendingFollowContent={hasPendingFollowContent}
-                  onScrollToBottom={() => scrollToBottom('smooth', 'latest-edge')}
-                />
-              )}
-            </div>
-          </div>
-
-          <ChatStreamErrorBar streamError={streamError} onDismiss={() => setStreamError(null)} />
-
-          {remoteSessionBusyState && (
-            <SessionRunStateBar
-              checkpointCount={compactions.length}
-              onOpenRecovery={() => {
-                setRightOpen(true);
-                setRightTab('overview');
-              }}
-              pendingPermissionsCount={pendingPermissions.length}
-              pendingQuestionsCount={pendingQuestions.length}
-              status={remoteSessionBusyState}
-              stopCapability={stopCapability}
-            />
-          )}
-
-          <ChatTodoBar sessionTodos={sessionTodos} editorMode={editorMode} rightOpen={rightOpen} />
-
-          <CompanionStage
-            agentId={effectiveAgentId}
-            attachedCount={0}
-            currentUserEmail={currentUserEmail}
-            editorMode={editorMode}
-            input={input}
-            panelOpenSignal={companionPanelSignal}
-            pendingPermissionCount={pendingPermissions.length}
-            prefersReducedMotion={prefersReducedMotion}
-            queuedCount={0}
-            rightOpen={rightOpen}
-            sessionBusyState={remoteSessionBusyState}
-            sessionId={currentSessionId}
-            showVoice={false}
-            streaming={streaming}
-            todoCount={sessionTodos.length}
-          />
-
-          {activePendingQuestion && (
-            <InlineQuestionPanel
-              answers={inlineQuestionAnswers}
-              customInputs={inlineQuestionCustomInputs}
-              editorMode={editorMode}
-              errorMessage={inlineQuestionReplyError ?? undefined}
-              pendingAction={inlineQuestionReplyStatus}
-              request={activePendingQuestion}
-              onDismiss={() => void replyInlineQuestion('dismissed')}
-              onSubmit={() => void replyInlineQuestion('answered')}
-              onToggleOption={toggleInlineQuestionOption}
-              onCustomInputChange={handleInlineQuestionCustomInput}
-            />
-          )}
-
-          {latestGeneratedImageResult && artifactsWorkspaceHref && (
-            <ChatImageGenerationResultStrip
-              artifactTitle={latestGeneratedImageResult.artifactTitle}
-              modelLabel={latestGeneratedImageResult.modelLabel}
-              onContinueEditing={continueEditingLatestGeneratedImage}
-              onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
-            />
-          )}
-
-          {/* ─── Multi-select toolbar ─── */}
-          {multiSelect.multiSelect.enabled && (
-            <MultiSelectToolbar
-              selectedCount={multiSelect.selectedCount}
-              onCopy={() => {
-                const selected = multiSelect.getSelectedMessages(messages);
-                if (selected.length > 0) {
-                  void copyExportToClipboard(selected, 'text').then((ok) => {
-                    if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
-                  });
-                }
-              }}
-              onExport={() => {
-                const selected = multiSelect.getSelectedMessages(messages);
-                if (selected.length > 0) {
-                  const content = exportMessages(selected, 'markdown');
-                  downloadExport(content, `chat-selected-${Date.now()}.md`, 'text/markdown');
-                  toast(`已导出 ${selected.length} 条消息`, 'success');
-                }
-              }}
-              onBookmark={() => {
-                const selected = multiSelect.getSelectedMessages(messages);
-                for (const msg of selected) {
-                  if (!bookmarkStore.isBookmarked(msg.id)) {
-                    bookmarkStore.addBookmark({
-                      messageId: msg.id,
-                      sessionId: currentSessionId ?? '',
-                      content: msg.content.slice(0, 200),
-                      role: msg.role,
-                    });
-                  }
-                }
-                toast(`已收藏 ${selected.length} 条消息`, 'success');
-                multiSelect.disableMultiSelect();
-              }}
-              onSelectAll={() => multiSelect.selectAll(messages)}
-              onCancel={() => multiSelect.disableMultiSelect()}
-            />
-          )}
-
-          <UnifiedComposer
-            variant={composerVariant}
-            sessionId={currentSessionId}
-            currentUserEmail={currentUserEmail}
-            gatewayUrl={gatewayUrl}
-            token={token}
-            streaming={streaming}
-            stoppingStream={stoppingStream}
-            canStopSession={canStopCurrentSessionStream}
-            stopCapability={stopCapability}
-            sessionBusyState={remoteSessionBusyState}
-            editorMode={editorMode}
+            chatSearch={chatSearch}
+            composerVariant={composerVariant}
             providers={providers}
-            activeProviderId={activeProviderId}
-            activeModelId={activeModelId}
             activeProvider={activeProvider}
             activeModelOption={activeModelOption}
             activeModelCanConfigureThinking={activeModelCanConfigureThinking}
             activeModelTooltip={activeModelTooltip}
+            canStopCurrentSessionStream={canStopCurrentSessionStream}
             dialogueMode={dialogueMode}
             manualAgentId={manualAgentId}
             yoloMode={yoloMode}
@@ -5614,7 +5505,7 @@ export default function ChatPage() {
             thinkingEnabled={thinkingEnabled}
             reasoningEffort={reasoningEffort}
             imageReferenceArtifacts={availableImageEditReferenceArtifacts}
-            selectedImageReferenceArtifactId={selectedImageEditReferenceArtifactId}
+            selectedImageEditReferenceArtifactId={selectedImageEditReferenceArtifactId}
             latestGeneratedImageResult={latestGeneratedImageResult}
             artifactsWorkspaceHref={artifactsWorkspaceHref}
             imageGenerationMode={imageGenerationMode}
@@ -5633,15 +5524,15 @@ export default function ChatPage() {
             input={input}
             setInput={setInput}
             textareaRef={textareaRef}
-            onSubmit={async (payload) => {
+            onComposerSubmit={async (payload) => {
               await sendMessage(payload.text, {
                 queuedFiles: payload.files,
                 queuedAttachmentItems: payload.attachmentItems,
                 queuedMessageId: payload.queuedMessageId,
               });
             }}
-            onStop={() => void stopActiveMessage()}
-            onModelSelect={async (pid: string, mid: string) => {
+            onStopComposer={() => void stopActiveMessage()}
+            onComposerModelSelect={async (pid: string, mid: string) => {
               setActiveProviderId(pid);
               setActiveModelId(mid);
               markSessionMetadataDirty();

@@ -8,7 +8,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type { SessionTerminalView } from '../../pages/chat-page/terminals-api.js';
+import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
 import { SessionTerminalsPanel } from './SessionTerminalsPanel.js';
 
 interface SessionTerminalsChipProps {

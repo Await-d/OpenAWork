@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 interface SessionTodoItem {
   content: string;
@@ -229,17 +229,29 @@ function buildSummary(sessionTodos: SessionTodoItem[]) {
   };
 }
 
-export function ChatTodoBar(props: {
-  editorMode: boolean;
-  rightOpen: boolean;
-  sessionTodos: SessionTodoItem[];
-}) {
-  const { editorMode, rightOpen, sessionTodos } = props;
-  const [expanded, setExpanded] = useState(false);
-  const detailsId = useId();
-  const previousTodoFingerprintRef = useRef<string | null>(null);
+// ---------------------------------------------------------------------------
+// Hook：共享 expanded 状态 + 摘要计算（header bar / floating panel 同一份）。
+// ---------------------------------------------------------------------------
 
-  const todoFingerprint = useMemo(
+export interface ChatTodoController {
+  expanded: boolean;
+  setExpanded: (next: boolean) => void;
+  toggle: () => void;
+  collapse: () => void;
+  laneGroups: Array<{
+    lane: SessionTodoLane;
+    summary: ReturnType<typeof buildSummary>;
+    todos: SessionTodoItem[];
+  }>;
+  summary: ReturnType<typeof buildSummary>;
+  sessionTodos: SessionTodoItem[];
+}
+
+export function useChatTodoController(sessionTodos: SessionTodoItem[]): ChatTodoController {
+  const [expanded, setExpanded] = useState(false);
+  const previousFingerprintRef = useRef<string | null>(null);
+
+  const fingerprint = useMemo(
     () =>
       sessionTodos
         .map((todo) => `${todo.lane ?? 'main'}|${todo.content}|${todo.status}|${todo.priority}`)
@@ -247,32 +259,285 @@ export function ChatTodoBar(props: {
     [sessionTodos],
   );
 
-  const { mainTodos, tempTodos } = useMemo(
-    () => splitSessionTodosByLane(sessionTodos),
-    [sessionTodos],
-  );
-
+  // 待办内容变化时自动收起浮层，避免用户看到"过时"展开内容。
   useEffect(() => {
-    if (previousTodoFingerprintRef.current === null) {
-      previousTodoFingerprintRef.current = todoFingerprint;
+    if (previousFingerprintRef.current === null) {
+      previousFingerprintRef.current = fingerprint;
       return;
     }
-
-    if (previousTodoFingerprintRef.current !== todoFingerprint) {
-      previousTodoFingerprintRef.current = todoFingerprint;
+    if (previousFingerprintRef.current !== fingerprint) {
+      previousFingerprintRef.current = fingerprint;
       setExpanded(false);
     }
-  }, [todoFingerprint]);
+  }, [fingerprint]);
 
   const summary = useMemo(() => buildSummary(sessionTodos), [sessionTodos]);
-  const laneGroups = useMemo(
-    () =>
-      [
-        { lane: 'main' as const, summary: buildSummary(mainTodos), todos: mainTodos },
-        { lane: 'temp' as const, summary: buildSummary(tempTodos), todos: tempTodos },
-      ].filter((group) => group.todos.length > 0),
-    [mainTodos, tempTodos],
+
+  const laneGroups = useMemo(() => {
+    const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
+    return [
+      { lane: 'main' as const, summary: buildSummary(mainTodos), todos: mainTodos },
+      { lane: 'temp' as const, summary: buildSummary(tempTodos), todos: tempTodos },
+    ].filter((group) => group.todos.length > 0);
+  }, [sessionTodos]);
+
+  const toggle = useCallback(() => setExpanded((value) => !value), []);
+  const collapse = useCallback(() => setExpanded(false), []);
+
+  return { expanded, setExpanded, toggle, collapse, laneGroups, summary, sessionTodos };
+}
+
+// ---------------------------------------------------------------------------
+// 内部辅助：与消息列内宽对齐。editor 分屏时收窄到 680，普通模式 768。
+// ---------------------------------------------------------------------------
+
+function getTodoMaxWidth(editorMode: boolean): number {
+  return editorMode ? 680 : 768;
+}
+
+// ---------------------------------------------------------------------------
+// ChatTopBar 内嵌入口（2+4 自适应方案）。
+// - compact=false：完整摘要按钮 `◐ 进行中：xxx · 4 项 · ▾`
+// - compact=true ：徽章按钮 `◐ 4`
+// 是否 compact 由 ChatTopBar 用 ResizeObserver 测量自身宽度决定。
+// 浮层 anchor 仍由 ChatTodoFloatingPanel 在 composer 上方挂载。
+// ---------------------------------------------------------------------------
+
+export function ChatTopBarTodoSlot(props: {
+  controller: ChatTodoController;
+  detailsId: string;
+  compact: boolean;
+}): React.ReactElement | null {
+  const { controller, detailsId, compact } = props;
+  const { expanded, toggle, summary, sessionTodos } = controller;
+
+  if (sessionTodos.length === 0) {
+    return null;
+  }
+
+  const marker = STATUS_META[summary.summaryState].marker;
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        data-testid="chat-todo-header-toggle"
+        className="chat-todo-topbar-badge"
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        aria-label={`待办 ${summary.totalCount} 项,${summary.description}`}
+        title={summary.description}
+        onClick={toggle}
+        data-active={expanded ? 'true' : 'false'}
+      >
+        <span
+          aria-hidden="true"
+          className="chat-todo-topbar-badge-icon"
+          style={createIconStyle(summary.summaryState)}
+        >
+          {marker}
+        </span>
+        <span className="chat-todo-topbar-badge-count">
+          {summary.activeCount > 0 ? summary.activeCount : summary.totalCount}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      data-testid="chat-todo-header-toggle"
+      className="chat-todo-topbar-summary"
+      aria-expanded={expanded}
+      aria-controls={detailsId}
+      onClick={toggle}
+      data-active={expanded ? 'true' : 'false'}
+    >
+      <span
+        aria-hidden="true"
+        className="chat-todo-summary-icon"
+        style={createIconStyle(summary.summaryState)}
+      >
+        {marker}
+      </span>
+      <span className="chat-todo-topbar-summary-text" title={summary.description}>
+        {summary.description}
+      </span>
+      <span className="chat-todo-topbar-summary-count">{summary.summaryCountLabel}</span>
+      <span className="chat-todo-topbar-summary-caret" aria-hidden="true">
+        {expanded ? '▴' : '▾'}
+      </span>
+    </button>
   );
+}
+
+// ---------------------------------------------------------------------------
+// 浮层（方案 A 展开 UI）。
+// 由 SessionConversationView 在 composer 上方挂载，position: absolute。
+// 父级容器需要是 position: relative。
+// ---------------------------------------------------------------------------
+
+const PRIORITY_GLYPH: Record<SessionTodoItem['priority'], string> = {
+  high: '▲',
+  medium: '',
+  low: '▽',
+};
+
+export function ChatTodoFloatingPanel(props: {
+  controller: ChatTodoController;
+  detailsId: string;
+  /**
+   * 当浮层挂在 composer 上方（旧 anchor）时，传入 editorMode 让浮层最大宽度
+   * 与消息列对齐。挂在 ChatTopBar 内部（顶部 popover）时无需传入。
+   */
+  editorMode?: boolean;
+}): React.ReactElement | null {
+  const { controller, detailsId, editorMode } = props;
+  const { expanded, collapse, summary, laneGroups, sessionTodos } = controller;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Esc 关闭。
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        collapse();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [expanded, collapse]);
+
+  // 点击浮层外部关闭。点击 header bar 上的按钮交给 toggle 处理。
+  useEffect(() => {
+    if (!expanded) return;
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (panelRef.current && panelRef.current.contains(target)) return;
+      // header bar 自己会 toggle，不在这里关闭。
+      const headerToggle = (target as HTMLElement).closest?.(
+        '[data-testid="chat-todo-header-toggle"]',
+      );
+      if (headerToggle) return;
+      collapse();
+    };
+    window.addEventListener('mousedown', onPointer, true);
+    return () => window.removeEventListener('mousedown', onPointer, true);
+  }, [expanded, collapse]);
+
+  if (!expanded || sessionTodos.length === 0) {
+    return null;
+  }
+
+  const showLaneTitles = laneGroups.length > 1;
+
+  return (
+    <div
+      ref={panelRef}
+      id={detailsId}
+      className="chat-todo-floating-panel"
+      role="dialog"
+      aria-label="会话待办详情"
+      data-testid="chat-todo-floating-panel"
+      data-anchor={editorMode === undefined ? 'topbar' : 'composer'}
+      style={editorMode === undefined ? undefined : { maxWidth: getTodoMaxWidth(editorMode) }}
+    >
+      <div className="chat-todo-floating-head">
+        <span className="chat-todo-floating-title">待办</span>
+        <span className="chat-todo-floating-meta">
+          {summary.totalCount} 项 · {summary.summaryCountLabel}
+        </span>
+        <button
+          type="button"
+          className="chat-todo-floating-close"
+          onClick={collapse}
+          aria-label="关闭待办浮层"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="chat-todo-floating-body">
+        {laneGroups.map((group) => (
+          <section
+            key={group.lane}
+            className="chat-todo-lane-block"
+            data-lane={group.lane}
+            aria-label={getLaneLabel(group.lane)}
+          >
+            {showLaneTitles ? (
+              <header className="chat-todo-lane-row">
+                <span className="chat-todo-lane-dot" data-lane={group.lane} aria-hidden="true" />
+                <span className="chat-todo-lane-name">{getLaneLabel(group.lane)}</span>
+                <span className="chat-todo-lane-stat">{group.summary.summaryCountLabel}</span>
+              </header>
+            ) : null}
+
+            <ul className="chat-todo-rows">
+              {group.todos.map((todo, index) => {
+                const isDone = todo.status === 'completed' || todo.status === 'cancelled';
+                const statusMeta = STATUS_META[todo.status];
+                const priorityGlyph = PRIORITY_GLYPH[todo.priority];
+
+                return (
+                  <li
+                    key={`${group.lane}-${todo.content}-${index}`}
+                    className="chat-todo-row"
+                    data-status={todo.status}
+                    data-priority={todo.priority}
+                    data-done={isDone ? 'true' : 'false'}
+                    title={todo.content}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="chat-todo-row-marker"
+                      style={{ color: statusMeta.tone.color }}
+                    >
+                      {statusMeta.marker}
+                    </span>
+                    <span className="chat-todo-row-title">{todo.content}</span>
+                    {priorityGlyph ? (
+                      <span
+                        className="chat-todo-row-priority"
+                        data-priority={todo.priority}
+                        aria-label={`${todo.priority === 'high' ? '高' : '低'}优先级`}
+                      >
+                        {priorityGlyph}
+                      </span>
+                    ) : null}
+                    <span className="chat-todo-row-status-label" aria-hidden="true">
+                      {statusMeta.label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 历史 API 兼容：旧的 ChatTodoBar（composer 上方折叠条 + 内联展开）。
+// 当前布局已切换到 ChatTopBarTodoSlot + ChatTodoFloatingPanel；保留导出
+// 是为了让外部消费方（若有）在过渡期不破坏。在 SessionConversationView 中
+// 已不再使用此组件。
+// ---------------------------------------------------------------------------
+
+export function ChatTodoBar(props: {
+  editorMode: boolean;
+  rightOpen: boolean;
+  sessionTodos: SessionTodoItem[];
+}): React.ReactElement | null {
+  const { editorMode, rightOpen, sessionTodos } = props;
+  const controller = useChatTodoController(sessionTodos);
+  const detailsId = useId();
+  const { expanded, toggle, summary, laneGroups } = controller;
 
   if (sessionTodos.length === 0) {
     return null;
@@ -292,7 +557,7 @@ export function ChatTodoBar(props: {
           className="chat-todo-toggle"
           aria-expanded={expanded}
           aria-controls={detailsId}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={toggle}
         >
           <div className="chat-todo-summary-main">
             <span

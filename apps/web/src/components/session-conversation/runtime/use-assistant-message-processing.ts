@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { RunEvent } from '@openAwork/shared';
-import type { ComposerWorkspaceCatalog } from '../../hooks/useComposerWorkspaceCatalog.js';
+import type { ComposerWorkspaceCatalog } from '../../../hooks/useComposerWorkspaceCatalog.js';
 import { type AssistantEventKind, type ChatMessage } from './support.js';
 
 export interface AssistantMessageProcessingDeps {

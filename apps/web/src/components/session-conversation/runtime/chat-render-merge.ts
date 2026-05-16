@@ -1,4 +1,4 @@
-import type { ChatRenderEntry } from '../../components/chat/chat-message-group-list.js';
+import type { ChatRenderEntry } from '../../chat/chat-message-group-list.js';
 
 export function mergeStreamingEntryIntoHistoricalEntries(
   historicalRenderedMessageEntries: ChatRenderEntry[],

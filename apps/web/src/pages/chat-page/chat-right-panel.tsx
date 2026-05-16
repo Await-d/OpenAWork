@@ -20,8 +20,8 @@ import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/
 import { TaskToolInline } from '../../components/chat/task-tool-inline.js';
 import SkillSettingsPanel from '../../components/chat/SkillSettingsPanel.js';
 import { ChatHistoryTabContent, ChatOverviewTabContent } from './right-panel-sections.js';
-import type { SessionTerminalView } from './terminals-api.js';
-import { deleteSessionTerminal } from './terminals-api.js';
+import type { SessionTerminalView } from '../../components/session-conversation/runtime/terminals-api.js';
+import { deleteSessionTerminal } from '../../components/session-conversation/runtime/terminals-api.js';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
 import { BookmarksPanel } from '../../components/chat/bookmarks-panel.js';
@@ -31,10 +31,19 @@ import {
   renderRightPanelTabIcon,
 } from './right-panel-tabs.js';
 import type { RightPanelTabId } from './right-panel-tabs.js';
-import type { ChatMessage, WorkspaceFileMentionItem } from './support.js';
-import type { ChatContextUsageSnapshot } from './context-usage.js';
-import type { SessionStateStatus, SessionTodoItem } from './session-runtime.js';
-import type { TaskToolRuntimeLookup, TaskToolRuntimeSnapshot } from './task-tool-runtime.js';
+import type {
+  ChatMessage,
+  WorkspaceFileMentionItem,
+} from '../../components/session-conversation/runtime/support.js';
+import type { ChatContextUsageSnapshot } from '../../components/session-conversation/runtime/context-usage.js';
+import type {
+  SessionStateStatus,
+  SessionTodoItem,
+} from '../../components/session-conversation/runtime/session-runtime.js';
+import type {
+  TaskToolRuntimeLookup,
+  TaskToolRuntimeSnapshot,
+} from '../../components/session-conversation/runtime/task-tool-runtime.js';
 import type { DialogueMode } from '../dialogue-mode.js';
 
 const EMPTY_KILL_SET = new Set<string>();

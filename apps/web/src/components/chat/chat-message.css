@@ -558,6 +558,438 @@
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 34%, transparent);
 }
 
+/* ─── ChatTopBar 内嵌待办入口（2+4 自适应）─────────────────────────── */
+
+/* 完整摘要按钮（宽屏） */
+.chat-todo-topbar-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  max-width: 320px;
+  min-width: 0;
+  flex-shrink: 1;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--surface) 80%, transparent);
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.chat-todo-topbar-summary:hover {
+  background: color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%);
+  border-color: color-mix(in oklch, var(--accent) 18%, var(--border) 82%);
+}
+
+.chat-todo-topbar-summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.chat-todo-topbar-summary[data-active='true'] {
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface) 92%);
+  border-color: color-mix(in oklch, var(--accent) 28%, var(--border) 72%);
+  color: var(--text);
+}
+
+.chat-todo-topbar-summary-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.chat-todo-topbar-summary-count {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%);
+  color: var(--text-3);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.chat-todo-topbar-summary[data-active='true'] .chat-todo-topbar-summary-count {
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface) 86%);
+  color: color-mix(in oklch, var(--accent) 70%, var(--text) 30%);
+}
+
+.chat-todo-topbar-summary-caret {
+  flex-shrink: 0;
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+/* 徽章按钮（窄屏） */
+.chat-todo-topbar-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--surface) 80%, transparent);
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.chat-todo-topbar-badge:hover {
+  background: color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%);
+  border-color: color-mix(in oklch, var(--accent) 18%, var(--border) 82%);
+}
+
+.chat-todo-topbar-badge:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.chat-todo-topbar-badge[data-active='true'] {
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface) 90%);
+  border-color: color-mix(in oklch, var(--accent) 30%, var(--border) 70%);
+  color: var(--text);
+}
+
+.chat-todo-topbar-badge-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.chat-todo-topbar-badge-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* ─── 浮层（A 方案展开态）─────────────────────────────────────────── */
+
+/* ChatTopBar 内的浮层 anchor（顶部右侧 popover 模式）。 */
+.chat-todo-topbar-anchor {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  margin-left: auto;
+}
+
+/* 兼容旧 anchor：composer 上方挂载（当前已不再使用，保留以防回滚）。 */
+.chat-todo-composer-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.chat-todo-floating-panel {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  max-height: min(60vh, 420px);
+  padding: 8px 10px 10px;
+  border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border) 82%);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--surface) 96%, transparent);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 12px 28px -12px rgba(0, 0, 0, 0.32);
+  flex-direction: column;
+  gap: 6px;
+  animation: chat-todo-floating-rise 160ms ease-out;
+}
+
+/* 顶部 popover：从 ChatTopBar 内 slot 下方右对齐弹出。 */
+.chat-todo-floating-panel[data-anchor='topbar'] {
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  min-width: 320px;
+  max-width: min(440px, calc(100vw - 24px));
+}
+
+/* 旧 composer 上方模式（保留兼容，本工程已不走这条路径）。 */
+.chat-todo-floating-panel[data-anchor='composer'] {
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 6px);
+  margin-left: auto;
+  margin-right: auto;
+  max-height: min(50vh, 360px);
+}
+
+@keyframes chat-todo-floating-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chat-todo-floating-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.chat-todo-floating-title {
+  flex-shrink: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.chat-todo-floating-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-todo-floating-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.chat-todo-floating-close:hover {
+  background: color-mix(in oklch, var(--surface) 86%, var(--bg-2) 14%);
+  color: var(--text);
+  border-color: var(--border-subtle);
+}
+
+.chat-todo-floating-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.chat-todo-floating-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+/* ── lane 分组（仅在 ≥2 lane 时显示标题行）─────────────────────────── */
+
+.chat-todo-lane-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-todo-lane-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 2px;
+}
+
+.chat-todo-lane-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--accent) 60%, var(--border) 40%);
+}
+
+.chat-todo-lane-dot[data-lane='temp'] {
+  background: color-mix(in oklch, var(--warning) 65%, var(--border) 35%);
+}
+
+.chat-todo-lane-name {
+  flex: 1;
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.chat-todo-lane-stat {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* ── 待办行（紧凑单行）────────────────────────────────────────────── */
+
+.chat-todo-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-todo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.chat-todo-row:hover {
+  background: color-mix(in oklch, var(--surface) 84%, var(--bg-2) 16%);
+}
+
+/* 高优先级 + 未完成：左边一条红色提示线 */
+.chat-todo-row[data-priority='high'][data-done='false'] {
+  border-left: 2px solid color-mix(in srgb, var(--danger) 65%, transparent);
+  padding-left: 6px;
+}
+
+/* 进行中：淡蓝色背景，强调当前关注项 */
+.chat-todo-row[data-status='in_progress'] {
+  background: color-mix(in oklch, #38bdf8 7%, var(--surface) 93%);
+  border-color: color-mix(in srgb, #38bdf8 22%, var(--border-subtle));
+}
+
+.chat-todo-row[data-done='true'] {
+  opacity: 0.62;
+}
+
+.chat-todo-row[data-done='true'] .chat-todo-row-title {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, var(--text-3) 60%, transparent);
+}
+
+.chat-todo-row-marker {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+}
+
+.chat-todo-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-todo-row-priority {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.chat-todo-row-priority[data-priority='high'] {
+  color: color-mix(in oklch, var(--danger) 80%, white 20%);
+}
+
+.chat-todo-row-priority[data-priority='low'] {
+  color: var(--text-3);
+}
+
+.chat-todo-row-status-label {
+  flex-shrink: 0;
+  min-width: 32px;
+  color: var(--text-3);
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: right;
+}
+
+.chat-todo-row[data-status='in_progress'] .chat-todo-row-status-label {
+  color: color-mix(in oklch, #38bdf8 60%, var(--text-2) 40%);
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .chat-todo-floating-panel[data-anchor='composer'] {
+    left: 8px;
+    right: 8px;
+    bottom: calc(100% + 4px);
+    padding: 8px 8px 10px;
+  }
+
+  .chat-todo-floating-panel[data-anchor='topbar'] {
+    /* 窄屏下右对齐 popover 容易被裁剪，改为贴左右边距、不再固定 width。 */
+    left: 8px;
+    right: 8px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    padding: 8px 8px 10px;
+  }
+
+  .chat-todo-row {
+    padding: 4px 6px;
+    gap: 6px;
+  }
+
+  .chat-todo-row-status-label {
+    display: none;
+  }
+}
+
+/* ─── 旧版 ChatTodoBar（已不再使用，但保留样式以避免外部依赖意外破坏） ─ */
+
 .chat-todo-shell {
   padding: 15px 10px 6px;
   background: var(--bg);
@@ -818,9 +1250,6 @@
     background 160ms ease,
     border-color 160ms ease,
     opacity 160ms ease;
-}
-
-.chat-todo-item[data-active='true'] {
 }
 
 .chat-todo-item[data-done='true'] {

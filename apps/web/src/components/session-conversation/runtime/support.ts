@@ -1,4 +1,4 @@
-import type { DialogueMode } from '../dialogue-mode.js';
+import type { DialogueMode } from '../../../pages/dialogue-mode.js';
 import type {
   AssistantTracePart,
   AssistantTracePayload,

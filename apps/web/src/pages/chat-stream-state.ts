@@ -5,7 +5,7 @@ import type {
   TaskTimeoutSource,
   ToolSearchStatus,
 } from '@openAwork/shared';
-import { hasActivePendingPermissionRequest } from './chat-page/support.js';
+import { hasActivePendingPermissionRequest } from '../components/session-conversation/runtime/support.js';
 import type {
   AgentVizEvent,
   DAGNodeInfo,

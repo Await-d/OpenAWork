@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { DialogueMode } from '../dialogue-mode.js';
+import type { DialogueMode } from '../../../pages/dialogue-mode.js';
 import type { ReasoningEffort } from './support.js';
 
 export interface SessionSettingsState {

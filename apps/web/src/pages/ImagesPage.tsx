@@ -13,8 +13,8 @@ import { useChatImageGeneration } from './chat-page/use-chat-image-generation.js
 import {
   toImageEditReferenceArtifacts,
   type ImageEditReferenceArtifact,
-} from './chat-page/image-edit-reference-artifacts.js';
-import { uploadChatAttachments } from './chat-page/attachment-upload.js';
+} from '../components/session-conversation/runtime/image-edit-reference-artifacts.js';
+import { uploadChatAttachments } from '../components/session-conversation/runtime/attachment-upload.js';
 import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,

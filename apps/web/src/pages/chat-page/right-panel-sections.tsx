@@ -4,8 +4,11 @@ import { ContextPanel, PlanHistoryPanel } from '@openAwork/shared-ui';
 import type { AttachmentItem, ContextItem, HistoricalPlan } from '@openAwork/shared-ui';
 import { Link } from 'react-router';
 import type { DialogueMode } from '../dialogue-mode.js';
-import type { ChatContextUsageSnapshot } from './context-usage.js';
-import type { ChatMessage, WorkspaceFileMentionItem } from './support.js';
+import type { ChatContextUsageSnapshot } from '../../components/session-conversation/runtime/context-usage.js';
+import type {
+  ChatMessage,
+  WorkspaceFileMentionItem,
+} from '../../components/session-conversation/runtime/support.js';
 
 type HierarchicalSessionTask = SessionTask & {
   completedSubtaskCount?: number;

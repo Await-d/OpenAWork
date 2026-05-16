@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
-import type { ComposerWorkspaceCatalog } from '../../hooks/useComposerWorkspaceCatalog.js';
+import type { ComposerWorkspaceCatalog } from '../../../hooks/useComposerWorkspaceCatalog.js';
 import {
   type ComposerMenuState,
   type SlashCommandItem,

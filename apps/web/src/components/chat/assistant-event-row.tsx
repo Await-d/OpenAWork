@@ -1,4 +1,4 @@
-import type { AssistantEventPayload } from '../../pages/chat-page/support.js';
+import type { AssistantEventPayload } from '../session-conversation/runtime/support.js';
 
 export function AssistantEventRow({ payload }: { payload: AssistantEventPayload }) {
   const kindLabel =

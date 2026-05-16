@@ -1,6 +1,6 @@
 import { createSettingsClient } from '@openAwork/web-client';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
-import type { ReasoningEffort } from '../pages/chat-page/support.js';
+import type { ReasoningEffort } from '../components/session-conversation/runtime/support.js';
 
 export interface ChatSettingsModel {
   id: string;

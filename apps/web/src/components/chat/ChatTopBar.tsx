@@ -1,7 +1,12 @@
-import { type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import DialogueModeToggle from '../../pages/DialogueModeToggle.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
 import { ContextUsageMeter } from './context-usage-meter.js';
+import {
+  ChatTodoFloatingPanel,
+  ChatTopBarTodoSlot,
+  type ChatTodoController,
+} from '../session-conversation/runtime/todo-bar.js';
 
 interface ChatTopBarProps {
   dialogueMode: DialogueMode;
@@ -32,7 +37,14 @@ interface ChatTopBarProps {
   onOpenBrowser?: () => void;
   /** Whether browser preview is currently active. */
   browserActive?: boolean;
+  /** Todo controller from upstream (shared with ChatTodoFloatingPanel). */
+  todoController?: ChatTodoController;
+  /** id for aria-controls linking the slot button to the floating panel. */
+  todoDetailsId?: string;
 }
+
+// ChatTopBar 总宽度小于此阈值时，todo 入口切到 compact 徽章形态。
+const TODO_COMPACT_WIDTH_THRESHOLD = 720;
 
 export function ChatTopBar({
   dialogueMode,
@@ -53,11 +65,32 @@ export function ChatTopBar({
   onToggleMultiSelect,
   onOpenBrowser,
   browserActive = false,
+  todoController,
+  todoDetailsId,
 }: ChatTopBarProps) {
   const showContextMeter =
     contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0;
+
+  // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
+  const barRef = useRef<HTMLDivElement>(null);
+  const [isCompact, setIsCompact] = useState(false);
+
+  useEffect(() => {
+    const node = barRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        setIsCompact(width < TODO_COMPACT_WIDTH_THRESHOLD);
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
+      ref={barRef}
       data-testid="chat-controls-bar"
       style={{
         display: 'flex',
@@ -178,13 +211,26 @@ export function ChatTopBar({
         )}
       </div>
 
+      {todoController && todoDetailsId ? (
+        <div className="chat-todo-topbar-anchor">
+          <ChatTopBarTodoSlot
+            controller={todoController}
+            detailsId={todoDetailsId}
+            compact={isCompact}
+          />
+          <ChatTodoFloatingPanel controller={todoController} detailsId={todoDetailsId} />
+        </div>
+      ) : null}
+
       {/* Right group: YOLO + editor + panel — unified pill container */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 2,
-          marginLeft: 'auto',
+          // todo anchor 存在时由其 margin-left:auto 把右 pill 一起推到右侧；
+          // anchor 不存在时右 pill 自己负责对齐。
+          marginLeft: todoController && todoDetailsId ? undefined : 'auto',
           flexShrink: 0,
           padding: '2px 3px',
           borderRadius: 8,

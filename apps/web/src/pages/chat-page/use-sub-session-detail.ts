@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPermissionsClient, createSessionsClient } from '@openAwork/web-client';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
-import { normalizeChatMessages, type ChatMessage } from './support.js';
-import { filterTranscriptMessages } from './transcript-visibility.js';
+import {
+  normalizeChatMessages,
+  type ChatMessage,
+} from '../../components/session-conversation/runtime/support.js';
+import { filterTranscriptMessages } from '../../components/session-conversation/runtime/transcript-visibility.js';
 
 export interface SubSessionDetailState {
   error: string | null;

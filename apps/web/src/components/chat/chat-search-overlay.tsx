@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage } from '../../pages/chat-page/support.js';
+import type { ChatMessage } from '../session-conversation/runtime/support.js';
 import {
   type ChatSearchMatch,
   clampSearchIndex,

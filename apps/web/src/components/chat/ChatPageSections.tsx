@@ -19,11 +19,11 @@ import {
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
   readAssistantTracePayload,
-} from '../../pages/chat-page/support.js';
+} from '../session-conversation/runtime/support.js';
 import {
   resolveTaskToolRuntimeSnapshot,
   type TaskToolRuntimeLookup,
-} from '../../pages/chat-page/task-tool-runtime.js';
+} from '../session-conversation/runtime/task-tool-runtime.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
 import { DIALOGUE_MODE_OPTIONS } from '../../pages/dialogue-mode.js';
 import { resolveAgentAccentColor } from './agent-color-map.js';

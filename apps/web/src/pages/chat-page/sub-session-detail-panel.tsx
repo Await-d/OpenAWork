@@ -17,9 +17,9 @@ import {
   hasActivePendingPermissionRequest,
   type AssistantTraceToolCall,
   type ChatMessage,
-} from './support.js';
+} from '../../components/session-conversation/runtime/support.js';
 import { useSubSessionDetail } from './use-sub-session-detail.js';
-import type { TaskToolRuntimeLookup } from './task-tool-runtime.js';
+import type { TaskToolRuntimeLookup } from '../../components/session-conversation/runtime/task-tool-runtime.js';
 import { requestCurrentSessionRefresh } from '../../utils/session-list-events.js';
 
 type CancelableSessionsClient = ReturnType<typeof createSessionsClient> & {

@@ -6,7 +6,7 @@ import type {
   SessionTodo,
   SessionTodoLanes,
 } from '@openAwork/web-client';
-export { toSessionPendingPermissionState } from '../../utils/pending-permission-state.js';
+export { toSessionPendingPermissionState } from '../../../utils/pending-permission-state.js';
 
 type AbortableSessionsClient = ReturnType<typeof createSessionsClient> & {
   getChildren: (

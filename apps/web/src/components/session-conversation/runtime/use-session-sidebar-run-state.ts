@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { publishSessionRunState } from '../../utils/session-list-events.js';
+import { publishSessionRunState } from '../../../utils/session-list-events.js';
 import type { SessionStateStatus } from './session-runtime.js';
 
 function resolveSessionRunState(

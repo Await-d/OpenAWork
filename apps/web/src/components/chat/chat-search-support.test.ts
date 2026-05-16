@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '../../pages/chat-page/support.js';
+import type { ChatMessage } from '../session-conversation/runtime/support.js';
 import {
   clampSearchIndex,
   extractSearchableText,

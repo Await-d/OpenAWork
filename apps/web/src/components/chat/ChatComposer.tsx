@@ -5,7 +5,7 @@ import type {
   ComposerMenuState,
   MentionItem,
   SlashCommandItem,
-} from '../../pages/chat-page/support.js';
+} from '../session-conversation/runtime/support.js';
 import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
 import { ProviderMark } from './chat-provider-display.js';
 import { ChatImageGenerationControls } from './ChatImageGenerationControls.js';
@@ -15,7 +15,7 @@ import {
   composerListPrimaryTextStyle,
   getSlashBadgeStyle,
 } from './chat-composer-primitives.js';
-import { detectThinkKeyword } from '../../pages/chat-page/think-keyword-detector.js';
+import { detectThinkKeyword } from '../session-conversation/runtime/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../utils/chat-session-defaults.js';
 import type { ChatImageGenerationReferenceArtifact } from './ChatImageGenerationControls.js';
 

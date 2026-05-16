@@ -14,8 +14,8 @@
 
 import { useState } from 'react';
 import type { SessionTerminalStatus } from '@openAwork/shared';
-import type { SessionTerminalView } from '../../pages/chat-page/terminals-api.js';
-import { deleteSessionTerminal } from '../../pages/chat-page/terminals-api.js';
+import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
+import { deleteSessionTerminal } from '../session-conversation/runtime/terminals-api.js';
 
 interface SessionTerminalsPanelProps {
   open: boolean;

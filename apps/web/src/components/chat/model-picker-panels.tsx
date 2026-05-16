@@ -3,7 +3,7 @@ import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
 } from '@openAwork/shared-ui';
-import type { ReasoningEffort } from '../../pages/chat-page/support.js';
+import type { ReasoningEffort } from '../session-conversation/runtime/support.js';
 import { buildFilteredModelGroups, type ModelPickerProvider } from './model-picker-search.js';
 
 function formatContextWindow(value: number | undefined): string | null {

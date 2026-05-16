@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { canConfigureThinkingForModel } from '@openAwork/shared-ui';
-import type { ChatSettingsProvider } from '../../utils/chat-session-defaults.js';
+import type { ChatSettingsProvider } from '../../../utils/chat-session-defaults.js';
 
 export interface ProviderModelInfoDeps {
   providers: ChatSettingsProvider[];

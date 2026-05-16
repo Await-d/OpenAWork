@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, ChatUsageDetails } from '../../pages/chat-page/support.js';
-import { readAssistantTracePayload } from '../../pages/chat-page/support.js';
+import type { ChatMessage, ChatUsageDetails } from '../session-conversation/runtime/support.js';
+import { readAssistantTracePayload } from '../session-conversation/runtime/support.js';
 import {
   InlinePermissionQuickBar,
   MessageRow,

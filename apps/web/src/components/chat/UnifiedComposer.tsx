@@ -15,8 +15,8 @@ import type {
   ComposerMenuState,
   ReasoningEffort,
   WorkspaceFileMentionItem,
-} from '../../pages/chat-page/support.js';
-import type { ImageEditReferenceArtifact } from '../../pages/chat-page/image-edit-reference-artifacts.js';
+} from '../session-conversation/runtime/support.js';
+import type { ImageEditReferenceArtifact } from '../session-conversation/runtime/image-edit-reference-artifacts.js';
 import type { ChatImageGenerationReferenceArtifact } from './ChatImageGenerationControls.js';
 import type { ComposerWorkspaceCatalog } from '../../hooks/useComposerWorkspaceCatalog.js';
 import { useUnifiedComposerState } from './unified-composer/use-unified-composer-state.js';

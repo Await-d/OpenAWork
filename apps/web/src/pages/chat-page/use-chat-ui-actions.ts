@@ -1,7 +1,10 @@
 import { useCallback, useEffect } from 'react';
 import type { CommandResultCard, RunEvent } from '@openAwork/shared';
-import { createCommandCardContent, matchServerSlashCommand } from './support.js';
-import { executeServerCommand } from './server-command-item.js';
+import {
+  createCommandCardContent,
+  matchServerSlashCommand,
+} from '../../components/session-conversation/runtime/support.js';
+import { executeServerCommand } from '../../components/session-conversation/runtime/server-command-item.js';
 import { requestSessionListRefresh } from '../../utils/session-list-events.js';
 import { applyChatRightPanelEvent, type ChatRightPanelState } from '../chat-stream-state.js';
 

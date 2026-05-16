@@ -11,7 +11,7 @@ import type { ChatMessage } from './support.js';
 import type { SessionStateStatus, SessionTodoItem } from './session-runtime.js';
 import type { RecoveredActiveAssistantStream } from './stream-recovery.js';
 import { createSessionsClient } from '@openAwork/web-client';
-import type { ChatRightPanelState } from '../chat-stream-state.js';
+import type { ChatRightPanelState } from '../../../pages/chat-stream-state.js';
 import { reconcileSnapshotChatMessages } from './support.js';
 import {
   prepareSessionRecoveryState,
