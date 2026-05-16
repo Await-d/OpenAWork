@@ -9,7 +9,7 @@
  * - name (必填) — 工作区名称
  * - description — 描述
  * - defaultWorkingRoot — 默认工作目录（可选，给 c/d/e 用）
- * - visibility — private (默认) / closed / open
+ *   通过 chat 同款 \`<WorkspacePickerModal/>\` 浏览选择
  *
  * 提交后通过 useTeamRuntimeReferenceViewData().createWorkspace 走 reference-data 层，
  * 成功后调 onCreated(newId)，由父级决定是否 navigate。
@@ -93,44 +93,6 @@ const TEXTAREA_STYLE: CSSProperties = {
   minHeight: 60,
 };
 
-const VISIBILITY_OPTIONS: Array<{
-  value: 'private' | 'closed' | 'open';
-  label: string;
-  description: string;
-}> = [
-  { value: 'private', label: '私有', description: '仅自己可见与操作' },
-  { value: 'closed', label: '受限', description: '团队成员可见，外部需邀请' },
-  { value: 'open', label: '公开', description: '所有用户可加入与查看' },
-];
-
-const VISIBILITY_GROUP_STYLE: CSSProperties = {
-  display: 'flex',
-  gap: 8,
-};
-
-const VISIBILITY_OPTION_BASE_STYLE: CSSProperties = {
-  flex: 1,
-  display: 'grid',
-  gap: 4,
-  padding: '10px 12px',
-  borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'transparent',
-  color: 'var(--text-2)',
-  fontSize: 12,
-  textAlign: 'left',
-  cursor: 'pointer',
-  transition: 'all 150ms ease',
-};
-
-const VISIBILITY_OPTION_ACTIVE_STYLE: CSSProperties = {
-  ...VISIBILITY_OPTION_BASE_STYLE,
-  border: '1px solid color-mix(in srgb, var(--accent) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-  color: 'var(--accent)',
-  fontWeight: 600,
-};
-
 const ACTIONS_ROW_STYLE: CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
@@ -177,7 +139,6 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [defaultWorkingRoot, setDefaultWorkingRoot] = useState('');
-  const [visibility, setVisibility] = useState<'private' | 'closed' | 'open'>('private');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -367,29 +328,6 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
             <span style={HINT_STYLE}>
               c/d/e 派生的会话将默认绑定此目录；可在创建会话时单独覆盖。
             </span>
-          </div>
-
-          <div style={FIELD_STYLE}>
-            <span style={LABEL_STYLE}>可见性</span>
-            <div style={VISIBILITY_GROUP_STYLE}>
-              {VISIBILITY_OPTIONS.map((opt) => {
-                const active = visibility === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setVisibility(opt.value)}
-                    style={active ? VISIBILITY_OPTION_ACTIVE_STYLE : VISIBILITY_OPTION_BASE_STYLE}
-                    aria-pressed={active}
-                  >
-                    <span style={{ fontWeight: 700 }}>{opt.label}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
-                      {opt.description}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           {error ? (

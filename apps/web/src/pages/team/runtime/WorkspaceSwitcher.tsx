@@ -252,20 +252,6 @@ export function WorkspaceSwitcher({
                 >
                   {ws.name}
                 </span>
-                {ws.visibility !== 'private' ? (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: 'var(--text-3)',
-                      flexShrink: 0,
-                      padding: '1px 5px',
-                      borderRadius: 4,
-                      border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-                    }}
-                  >
-                    {ws.visibility}
-                  </span>
-                ) : null}
               </button>
             );
           })}
