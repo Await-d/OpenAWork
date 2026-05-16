@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import { isGatewayHealthy, login, loginWithPairingToken } from '@openAwork/web-client';
 import { useAuthStore } from '../store/auth';
 import { normalizeMobileGatewayUrl } from '../store/auth';
 
@@ -301,19 +302,7 @@ function HostLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${gUrl}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (res.status === 401) throw new Error('邮箱或密码错误');
-      if (!res.ok) throw new Error(`服务器错误 (${res.status})`);
-      const data = (await res.json()) as {
-        accessToken: string;
-        refreshToken: string;
-        expiresIn?: string;
-      };
+      const data = await login(gUrl, email.trim(), password, 8000);
       await setGatewayUrl(gUrl);
       await setTokens(data.accessToken, data.refreshToken);
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
@@ -381,21 +370,22 @@ function HostHealthStep({ step, hostConfig, onNext, onBack }: StepProps) {
         return 'http://localhost:3000';
       }
     })();
-    void fetch(`${gatewayUrl}/health`, { signal: AbortSignal.timeout(5000) })
-      .then((res) => {
+    void (async () => {
+      try {
+        const ok = await isGatewayHealthy(gatewayUrl, { timeoutMs: 5000 });
         if (cancelled) return;
-        if (res.ok) {
+        if (ok) {
           setStatus('success');
         } else {
           setStatus('error');
-          setErrorMsg(`Gateway 返回 ${res.status}，请检查服务是否正常运行`);
+          setErrorMsg('Gateway 健康检查未通过，请检查服务是否正常运行');
         }
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (cancelled) return;
         setStatus('error');
         setErrorMsg(err instanceof Error ? err.message : '无法连接 Gateway');
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -480,25 +470,10 @@ function ClientScanStep({ step, onNext, onBack, onComplete }: StepProps) {
       const { hostUrl, token } = parsed;
       if (!hostUrl || !token) throw new Error('缺少 hostUrl 或 token 字段');
       const url = normalizeMobileGatewayUrl(hostUrl);
-      const res = await fetch(`${url}/pairing/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          deviceName: 'Mobile',
-          platform: Platform.OS === 'ios' ? 'ios' : 'android',
-        }),
-        signal: AbortSignal.timeout(8000),
+      const data = await loginWithPairingToken(url, token, {
+        deviceName: 'Mobile',
+        platform: Platform.OS === 'ios' ? 'ios' : 'android',
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `扫码登录失败 (${res.status})`);
-      }
-      const data = (await res.json()) as {
-        accessToken: string;
-        refreshToken: string;
-        expiresIn?: string;
-      };
       await setGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
@@ -605,19 +580,7 @@ function ClientLoginStep({ step, hostConfig, onNext, onBack }: StepProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${gatewayUrl}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (res.status === 401) throw new Error('邮箱或密码错误');
-      if (!res.ok) throw new Error(`服务器错误 (${res.status})`);
-      const data = (await res.json()) as {
-        accessToken: string;
-        refreshToken: string;
-        expiresIn?: string;
-      };
+      const data = await login(gatewayUrl, email.trim(), password, 8000);
       await setGatewayUrl(gatewayUrl);
       await setTokens(data.accessToken, data.refreshToken);
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;
@@ -687,18 +650,7 @@ function CloudLoginStep({ step, onNext, onBack }: StepProps) {
     setError(null);
     const url = normalizeMobileGatewayUrl(gatewayUrl);
     try {
-      const res = await fetch(`${url}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
-      if (res.status === 401) throw new Error('邮箱或密码错误');
-      if (!res.ok) throw new Error(`服务器错误 (${res.status})`);
-      const data = (await res.json()) as {
-        accessToken: string;
-        refreshToken: string;
-        expiresIn?: string;
-      };
+      const data = await login(url, email.trim(), password);
       await setGatewayUrl(url);
       await setTokens(data.accessToken, data.refreshToken);
       const expiresMs = data.expiresIn ? parseExpIn(data.expiresIn) : 15 * 60 * 1000;

@@ -15,7 +15,7 @@ import {
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useAuthStore } from '../store/auth';
 import { useGatewayClient } from '../hooks/useGatewayClient';
-import { createSessionsClient } from '@openAwork/web-client';
+import { createArtifactsClient, createSessionsClient } from '@openAwork/web-client';
 import {
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
@@ -318,11 +318,10 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     async (requestSessionId = sessionId) => {
       if (!accessToken) return;
       try {
-        const res = await fetch(`${gatewayUrl}/sessions/${requestSessionId}/artifacts`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as { artifacts?: ArtifactRecord[] };
+        const data = (await createArtifactsClient(gatewayUrl).listForSession(
+          accessToken,
+          requestSessionId,
+        )) as { artifacts?: ArtifactRecord[] };
         if (!canApplySessionMutation(requestSessionId)) {
           return;
         }
@@ -361,24 +360,16 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           const contentBase64 = await FileSystem.readAsStringAsync(attachment.uri, {
             encoding: FileSystem.EncodingType.Base64,
           });
-          const res = await fetch(`${gatewayUrl}/sessions/${requestSessionId}/artifacts`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({
+          const data = (await createArtifactsClient(gatewayUrl).uploadToSession(
+            accessToken,
+            requestSessionId,
+            {
               name: attachment.name,
               mimeType: attachment.mimeType,
               sizeBytes: attachment.sizeBytes,
               contentBase64,
-            }),
-          });
-          if (!res.ok) {
-            continue;
-          }
-
-          const data = (await res.json()) as {
+            },
+          )) as {
             artifact?: { id: string; name: string; preview?: string; mimeType?: string };
           };
           if (!data.artifact?.id) {
@@ -413,35 +404,24 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         throw new Error('当前未登录，无法生成图片。');
       }
 
-      const response = await fetch(
-        `${gatewayUrl}/sessions/${params.requestSessionId}/images/generations`,
+      const payload = (await createArtifactsClient(gatewayUrl).generateImage(
+        accessToken,
+        params.requestSessionId,
         {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ...(params.inputArtifacts ? { inputArtifacts: params.inputArtifacts } : {}),
-            prompt: params.prompt,
-            size: imageDefaults.size,
-            quality: imageDefaults.quality,
-            outputFormat: imageDefaults.outputFormat,
-            background: imageDefaults.background,
-          }),
+          ...(params.inputArtifacts ? { inputArtifacts: params.inputArtifacts } : {}),
+          prompt: params.prompt,
+          size: imageDefaults.size,
+          quality: imageDefaults.quality,
+          outputFormat: imageDefaults.outputFormat,
+          background: imageDefaults.background,
         },
-      );
-
-      const payload = (await response.json().catch(() => ({}))) as {
+      )) as {
         artifact?: { id: string; title: string; type: 'image' };
         error?: { message?: string };
         messageSummary?: string;
         parameters?: { modelId?: string; providerId?: string };
         revisedPrompt?: string | null;
       };
-      if (!response.ok) {
-        throw new Error(payload.error?.message ?? '图片生成失败，请稍后重试。');
-      }
 
       return payload;
     },

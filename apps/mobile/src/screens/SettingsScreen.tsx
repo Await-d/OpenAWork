@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useAuthStore } from '../store/auth';
+import { createSettingsClient } from '@openAwork/web-client';
 import {
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
@@ -183,19 +184,12 @@ export function SettingsScreen({ onLogout }: SettingsScreenProps) {
     let syncedToGateway = false;
     if (accessToken && gatewayUrl) {
       try {
-        const response = await fetch(`${gatewayUrl}/settings/providers`, {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            providers: config.providers,
-            activeSelection: config.active,
-            imageGenerationDefaults: imageDefaults,
-          }),
+        await createSettingsClient(gatewayUrl).putProviders(accessToken, {
+          providers: config.providers,
+          activeSelection: config.active,
+          imageGenerationDefaults: imageDefaults,
         });
-        syncedToGateway = response.ok;
+        syncedToGateway = true;
       } catch {
         syncedToGateway = false;
       }

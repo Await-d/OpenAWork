@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { refreshAccessToken } from '@openAwork/web-client';
 import { useAuthStore } from '../store/auth';
 import { SessionsScreen } from '../screens/SessionsScreen';
 import { ChatScreen } from '../screens/ChatScreen';
@@ -65,18 +66,7 @@ export function AppNavigator() {
         const refreshToken = await SecureStore.getItemAsync('openwork_refresh_token');
         if (!refreshToken) return;
 
-        const res = await fetch(`${gatewayUrl}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          accessToken: string;
-          refreshToken: string;
-          expiresIn?: string;
-        };
+        const data = await refreshAccessToken(gatewayUrl, refreshToken, 8000);
         await setTokens(data.accessToken, data.refreshToken);
         const expiresInMs = data.expiresIn ? parseExpiresIn(data.expiresIn) : 15 * 60 * 1000;
         await SecureStore.setItemAsync(TOKEN_EXPIRES_AT_KEY, String(Date.now() + expiresInMs));
