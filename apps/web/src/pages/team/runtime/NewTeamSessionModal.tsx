@@ -1365,6 +1365,255 @@ export function NewTeamSessionModal({
                       </span>
                     </div>
 
+                    {/* 已加入成员面板：按层级分组，每行清晰显示「agent → 层级」 */}
+                    {creation.draft.optionalAgentIds.length > 0
+                      ? (() => {
+                          // 按 layer 分组已选成员
+                          const selectedBuckets = new Map<
+                            string,
+                            Array<{
+                              id: string;
+                              agent: (typeof roleBindings.agents)[number] | null;
+                            }>
+                          >();
+                          for (const id of creation.draft.optionalAgentIds) {
+                            const agent = agentById.get(id) ?? null;
+                            const key = agent ? getAgentGroupKey(agent) : 'unknown';
+                            const list = selectedBuckets.get(key) ?? [];
+                            list.push({ id, agent });
+                            selectedBuckets.set(key, list);
+                          }
+                          const SELECTED_ORDER = [
+                            'leader',
+                            'general',
+                            'planner',
+                            'researcher',
+                            'executor',
+                            'reviewer',
+                            'unknown',
+                          ];
+                          const orderedSelected = SELECTED_ORDER.map((key) => ({
+                            meta: getAgentGroupMeta(key),
+                            items: selectedBuckets.get(key) ?? [],
+                          })).filter((g) => g.items.length > 0);
+
+                          return (
+                            <div
+                              style={{
+                                display: 'grid',
+                                gap: 10,
+                                padding: '12px 14px',
+                                borderRadius: 12,
+                                background: 'color-mix(in srgb, var(--accent) 6%, var(--surface))',
+                                border:
+                                  '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  color: 'var(--accent)',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                }}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                <span>已加入成员（{creation.draft.optionalAgentIds.length}）</span>
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    height: 1,
+                                    background:
+                                      'color-mix(in srgb, var(--accent) 30%, transparent)',
+                                  }}
+                                />
+                              </div>
+                              <div style={{ display: 'grid', gap: 8 }}>
+                                {orderedSelected.map(({ meta, items }) => (
+                                  <div
+                                    key={`selected-${meta.key}`}
+                                    style={{
+                                      display: 'grid',
+                                      gridTemplateColumns: 'auto 1fr',
+                                      gap: 10,
+                                      alignItems: 'flex-start',
+                                    }}
+                                  >
+                                    {/* 层级标签 */}
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 5,
+                                        padding: '4px 9px',
+                                        borderRadius: 6,
+                                        background: `color-mix(in srgb, ${meta.color} 16%, transparent)`,
+                                        color: meta.color,
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        flexShrink: 0,
+                                        marginTop: 2,
+                                      }}
+                                      title={meta.hint}
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        style={{
+                                          width: 6,
+                                          height: 6,
+                                          borderRadius: '50%',
+                                          background: meta.color,
+                                        }}
+                                      />
+                                      {meta.label}
+                                      <span
+                                        style={{
+                                          fontSize: 9,
+                                          opacity: 0.7,
+                                          fontFamily: 'ui-monospace, monospace',
+                                        }}
+                                      >
+                                        {meta.key}
+                                      </span>
+                                    </span>
+                                    {/* agent chips */}
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        gap: 6,
+                                      }}
+                                    >
+                                      {items.map(({ id, agent }) => {
+                                        const color = agent?.color ?? meta.color;
+                                        return (
+                                          <span
+                                            key={id}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 6,
+                                              padding: '5px 6px 5px 10px',
+                                              borderRadius: 999,
+                                              background: 'var(--surface)',
+                                              border:
+                                                '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+                                              fontSize: 11,
+                                              color: 'var(--text)',
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            <span
+                                              aria-hidden="true"
+                                              style={{
+                                                width: 7,
+                                                height: 7,
+                                                borderRadius: '50%',
+                                                background: color,
+                                                flexShrink: 0,
+                                              }}
+                                            />
+                                            <span>{agent?.label ?? id}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => creation.toggleOptionalAgent(id)}
+                                              style={{
+                                                width: 18,
+                                                height: 18,
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                border: 'none',
+                                                borderRadius: '50%',
+                                                background: 'transparent',
+                                                color: 'var(--text-3)',
+                                                cursor: 'pointer',
+                                                padding: 0,
+                                              }}
+                                              aria-label={`从「${meta.label}」层移除 ${agent?.label ?? id}`}
+                                              title={`从「${meta.label}」层移除`}
+                                              onMouseEnter={(e) => {
+                                                e.currentTarget.style.background =
+                                                  'color-mix(in srgb, var(--error, #ef4444) 18%, transparent)';
+                                                e.currentTarget.style.color =
+                                                  'var(--error, #ef4444)';
+                                              }}
+                                              onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = 'transparent';
+                                                e.currentTarget.style.color = 'var(--text-3)';
+                                              }}
+                                            >
+                                              <svg
+                                                aria-hidden="true"
+                                                width="9"
+                                                height="9"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2.5"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              >
+                                                <line x1="18" y1="6" x2="6" y2="18" />
+                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                              </svg>
+                                            </button>
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()
+                      : null}
+
+                    {/* 选取面板：按层级分组待选 agent */}
+                    <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 11,
+                          color: 'var(--text-3)',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        <span>可加入</span>
+                        <span
+                          style={{
+                            flex: 1,
+                            height: 1,
+                            background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+                          }}
+                        />
+                        <span style={{ textTransform: 'none', fontSize: 10, fontWeight: 400 }}>
+                          点击 agent 即加入对应层
+                        </span>
+                      </div>
+                    </div>
+
                     {(() => {
                       // 按 canonicalRole.coreRole 分组
                       const buckets = new Map<string, typeof availableOptionalAgents>();
@@ -1426,7 +1675,7 @@ export function NewTeamSessionModal({
                                       gap: 6,
                                     }}
                                   >
-                                    {meta.label}
+                                    点击加入「{meta.label}」层
                                     <span
                                       style={{
                                         fontSize: 10,
@@ -1448,16 +1697,28 @@ export function NewTeamSessionModal({
                                     {meta.hint}
                                   </span>
                                 </div>
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    color: 'var(--text-3)',
-                                    fontVariantNumeric: 'tabular-nums',
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  {items.length} 个候选
-                                </span>
+                                {(() => {
+                                  const selectedInLayer = items.filter((a) =>
+                                    creation.draft.optionalAgentIds.includes(a.id),
+                                  ).length;
+                                  return (
+                                    <span
+                                      style={{
+                                        ...BADGE_BASE_STYLE,
+                                        background:
+                                          selectedInLayer > 0
+                                            ? `color-mix(in srgb, ${meta.color} 22%, transparent)`
+                                            : 'color-mix(in srgb, var(--text-3) 14%, transparent)',
+                                        color: selectedInLayer > 0 ? meta.color : 'var(--text-3)',
+                                        fontSize: 10,
+                                        fontVariantNumeric: 'tabular-nums',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {selectedInLayer} / {items.length}
+                                    </span>
+                                  );
+                                })()}
                               </div>
 
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
