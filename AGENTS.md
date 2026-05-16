@@ -276,6 +276,7 @@ Docker：`docker-compose up` 启动网关 + Web + Redis，并把 Gateway durable
 - 禁止将包加入 `apps/` 的根 ESLint——设计上排除
 - 禁止使用 CommonJS（`require`、`module.exports`）——项目为纯 ESM（`"type": "module"`）
 - **严禁执行任何 git 回滚指令**，包括但不限于：`git reset --hard`、`git reset --soft`、`git reset --mixed`、`git revert`、`git checkout -- .`、`git restore`、`git clean -fd`——除非用户明确以书面形式授权，否则一律禁止
+- **禁止在 `apps/` 或 `packages/`（web-client 除外）中直接调用 `fetch()` 访问网关端点**——所有对 `agent-gateway` 的 HTTP 请求必须通过 `@openAwork/web-client` 的封装客户端发起。新增网关路由时，必须先在 `packages/web-client/src/` 中新建或扩展对应客户端模块，再在消费端调用。唯一例外：第三方外部 API（LLM 厂商、GitHub releases 等）和 `packages/` 内各自子领域客户端（`pairing`、`lsp-client`、`telemetry`）可保留直连。
 
 ## 注意事项
 
