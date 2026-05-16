@@ -3,8 +3,6 @@ import type { WorkflowTemplateRecord } from '@openAwork/web-client';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS } from '@openAwork/shared';
 import {
   createBlankTeamSessionDraft,
-  REQUIRED_CORE_ROLES,
-  type RequiredCoreRole,
   type TeamSessionCreationDraft,
   type TeamSessionCreationFieldErrors,
   type TeamSessionCreationSource,

@@ -377,11 +377,6 @@ const INPUT_STYLE: CSSProperties = {
   fontFamily: 'inherit',
 };
 
-const INPUT_ERROR_STYLE: CSSProperties = {
-  ...INPUT_STYLE,
-  borderColor: 'var(--warning, #f59e0b)',
-};
-
 const SOURCE_TAB_BAR_STYLE: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '1fr 1fr',
