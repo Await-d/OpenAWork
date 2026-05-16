@@ -1037,12 +1037,17 @@ export function TeamSessionListSidebar({
                                   style={{
                                     flexShrink: 0,
                                     fontSize: 10,
-                                    color: 'var(--text-3)',
+                                    color: active ? 'var(--accent)' : 'var(--text-3)',
                                     fontWeight: 500,
                                     fontVariantNumeric: 'tabular-nums',
-                                    opacity: showActions ? 0 : 1,
+                                    opacity: hovered ? 0 : 1,
                                     transition: 'opacity 120ms ease',
                                   }}
+                                  title={
+                                    session.updatedAt
+                                      ? new Date(session.updatedAt).toLocaleString('zh-CN')
+                                      : undefined
+                                  }
                                 >
                                   {formatRelativeTime(session.updatedAt)}
                                 </span>
@@ -1141,9 +1146,10 @@ export function TeamSessionListSidebar({
                                   fontFamily:
                                     'ui-monospace, SFMono-Regular, Menlo, monospace, Consolas, "Liberation Mono"',
                                   color: 'var(--text-3)',
-                                  fontSize: 9,
-                                  opacity: 0.7,
+                                  fontSize: 10,
+                                  opacity: 0.85,
                                   flexShrink: 0,
+                                  letterSpacing: '0.02em',
                                 }}
                                 title={`会话 ID：${session.id}`}
                               >
@@ -1486,6 +1492,80 @@ export function TeamSessionListSidebar({
                                   }}
                                 >
                                   {session.lastMessage}
+                                </span>
+                              </span>
+                            ) : null}
+
+                            {/* 空状态兜底：当没有任何动态内容时，显示创建时间 + 引导 */}
+                            {taskTotal === 0 &&
+                            !session.lastMessage &&
+                            !currentTaskTitle &&
+                            agents.length === 0 ? (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  fontSize: 11,
+                                  color: 'var(--text-3)',
+                                  fontStyle: 'italic',
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="11"
+                                  height="11"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  style={{ flexShrink: 0, opacity: 0.55 }}
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <line x1="12" y1="8" x2="12" y2="12" />
+                                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                                </svg>
+                                <span>会话已创建，等待第一条消息或任务</span>
+                              </span>
+                            ) : null}
+
+                            {/* 第 5 行：底部元信息（创建/更新时间 + 完整时间） */}
+                            {session.updatedAt ? (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  fontSize: 10,
+                                  color: 'var(--text-3)',
+                                  opacity: 0.75,
+                                  borderTop:
+                                    '1px dashed color-mix(in srgb, var(--border) 50%, transparent)',
+                                  paddingTop: 5,
+                                  marginTop: 1,
+                                }}
+                                title={new Date(session.updatedAt).toLocaleString('zh-CN')}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  style={{ flexShrink: 0, opacity: 0.6 }}
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <polyline points="12 6 12 12 16 14" />
+                                </svg>
+                                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                  最近活跃 {formatRelativeTime(session.updatedAt)}
                                 </span>
                               </span>
                             ) : null}
