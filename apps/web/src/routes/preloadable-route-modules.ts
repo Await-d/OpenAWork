@@ -39,6 +39,11 @@ function createPreloadableRouteModule(
 }
 
 export const PRELOADABLE_ROUTE_MODULES = {
+  about: createPreloadableRouteModule(
+    'about',
+    () => import('../pages/AboutPage.js'),
+    '关于 OpenAWork',
+  ),
   agents: createPreloadableRouteModule(
     'agents',
     () => import('../pages/AgentsPage.js'),

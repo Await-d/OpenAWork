@@ -10,6 +10,8 @@
  *   __APP_BUILD_TIME__ → "2026-03-20T03:25:40.000Z"
  *   __APP_GIT_HASH__  → "f659896"
  *   __APP_GIT_BRANCH__ → "main"
+ *   __APP_REPOSITORY_URL__ → "https://github.com/Await-d/OpenAWork"
+ *   __APP_RECENT_COMMITS__ → JSON array of last 20 commits
  */
 import { getVersionInfo } from './version.mjs';
 
@@ -27,6 +29,8 @@ export default function versionPlugin() {
           __APP_GIT_HASH__: JSON.stringify(info.gitHash),
           __APP_GIT_BRANCH__: JSON.stringify(info.branch),
           __APP_GIT_TAG__: JSON.stringify(info.gitTag),
+          __APP_REPOSITORY_URL__: JSON.stringify(info.repositoryUrl ?? ''),
+          __APP_RECENT_COMMITS__: JSON.stringify(info.recentCommits ?? []),
         },
       };
     },

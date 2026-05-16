@@ -128,14 +128,19 @@ export function ContextPanel({
       {usagePct !== null && (
         <div
           style={{
-            height: 2,
+            position: 'relative',
+            height: 4,
             background: 'var(--color-border, #334155)',
             borderBottom: '1px solid var(--color-border, #334155)',
           }}
         >
+          {/* fill */}
           <div
             style={{
-              height: '100%',
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              height: 2,
               width: `${usagePct * 100}%`,
               background: overLimit
                 ? tokens.color.danger
@@ -143,6 +148,19 @@ export function ContextPanel({
                   ? tokens.color.warning
                   : tokens.color.success,
               transition: 'width 0.3s ease',
+            }}
+          />
+          {/* 95% 压缩刻度 */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 'calc(95% - 1.5px)',
+              top: 0,
+              width: 3,
+              height: 4,
+              background: tokens.color.warning,
+              pointerEvents: 'none',
             }}
           />
         </div>

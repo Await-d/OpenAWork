@@ -1,4 +1,19 @@
-# L1.3 流式 Handoff 协议实施设计稿（v1.0）
+# L1.3 流式 Handoff 协议实施设计稿（v1.1）
+
+> ⚠️ **复查发现的现状（2026-05-16）**：
+>
+> 本设计稿初稿（v1.0）假设 v3.10 原子 handoff 尚未实施。**实际上 Phase A/B/C/D/E 均已完成实施**：
+>
+> - Phase A：constitution / agent_personas / 7 层注入栈 / memory / ForceApply（260515-team-phase-a 已完成）
+> - Phase B：sessions 5 字段扩展 + handoff_records 表 + Watcher + InProcessScheduler（260515-team-phase-b 已完成）
+> - Phase C：c 层产物链 spec/plan/tasks + Constitution Check + [NEEDS CLARIFICATION] 推送（260515-team-phase-c 已完成）
+> - Phase D / Phase E：见 `.agentdocs/workflow/done/260516-team-phase-{d,e}-实施方案.md`
+>
+> **关键事实**（来自 `services/agent-gateway/src/handoff/artifact-chain.ts` 行 22 注释）："[NEEDS CLARIFICATION] 推送后不等待回复（Phase D 加阻塞门禁）"——即**当前 Phase C 实现仍是单次原子 c session**：c 输出含 NEEDS CLARIFICATION 的 spec → 通过 team-events 推送给 b → 但 c session 不等回答直接继续做 plan/tasks。这正是本设计稿要解决的核心问题。
+>
+> 因此 v1.1 把本设计稿**重新定位为"对现有 Phase B/C/D 实施的增量改造方案"**，而不是从零设计。增量差异分析见 §0.A。
+>
+> ---
 
 > 用途：把 L1 基线决策中的 **L1.3 流式 handoff + 子状态机 + 双向消息通道** 展开为完整可实施的协议设计。本文档面向实施者，覆盖 SQL、状态机、消息时序、并发约束、错误处理、迁移路径与测试清单。
 >
@@ -6,11 +21,160 @@
 >
 > - L1 基线：`team-architecture-l1-baseline.md`（L1.3 概述）
 > - 思想分析：`team-architecture-spec-kit-borrowing-discussion.md`（v3.10 ⑥ Handoff Protocol，原"原子 handoff"设计已被本文档替代）
-> - Phase A 决策：`team-architecture-phase-a-decisions.md`（Phase A 不实施本协议，Phase B 启动时实施）
+> - Phase A 决策：`team-architecture-phase-a-decisions.md`（Phase A 已完成实施）
+> - **Phase B 实施记录**：`.agentdocs/workflow/done/260515-team-phase-b-实施方案.md`（已完成）
+> - **Phase C 实施记录**：`.agentdocs/workflow/done/260515-team-phase-c-实施方案.md`（已完成）
+> - **Phase D 实施记录**：`.agentdocs/workflow/done/260516-team-phase-d-实施方案.md`（已完成）
 >
-> 创建时间：2026-05-16
-> 当前状态：**草稿，待团队 review**
-> 实施时机：Phase B（Phase A 验证通过后启动）
+> 创建时间：2026-05-16（v1.0 → v1.1 复查修订）
+> 当前状态：**v1.1 草稿，待团队 review**
+> 实施时机：**Phase F 增量改造**（不是 Phase B 的一部分，因 Phase B 已上线）
+
+---
+
+## 0.A 与现有实现的差异分析（v1.1 新增）
+
+### 0.A.1 现有 schema 与本稿假设的对照
+
+`services/agent-gateway/src/db.ts` 当前 schema（节选自 line 1032+）：
+
+| 本稿假设字段名                                                     | 现有实际字段名                      | 差异类型           | 处理                                                |
+| ------------------------------------------------------------------ | ----------------------------------- | ------------------ | --------------------------------------------------- |
+| `sessions.parent_session_id`                                       | `sessions.team_parent_session_id`   | 命名不同           | **保持现有命名**，本稿改用 `team_parent_session_id` |
+| `handoff_records.source_session_id`                                | `from_session_id`                   | 命名不同           | **保持现有命名**，本稿改用 `from_session_id`        |
+| `handoff_records.target_session_id`                                | `to_session_id`                     | 命名不同           | 同上                                                |
+| `handoff_records.source_layer` / `target_layer`                    | `from_role_layer` / `to_role_layer` | 命名不同           | 同上                                                |
+| 时间戳 INTEGER ms epoch                                            | TEXT (ISO datetime)                 | 类型不同           | **保持现有类型 TEXT**（Phase B 已确定）             |
+| `handoff_records.idempotency_key`                                  | 不存在                              | **现有缺失**       | 需要新增（改造 4）                                  |
+| `handoff_records.claim_token`                                      | 已存在                              | **现有有，本稿无** | 本稿采纳（这是真实防双 claim 机制）                 |
+| `sessions.last_heartbeat`                                          | 已存在（TEXT 类型）                 | 已实现             | 不动                                                |
+| `sessions.substate` / `substate_updated_at`                        | **不存在**                          | **本稿新增**       | 改造 2                                              |
+| `session_inbound_messages` 表                                      | **不存在**                          | **本稿新增**       | 改造 1                                              |
+| `sessions.structural_depth` / `execution_depth`                    | 看 D18 落地状态                     | 待确认             | 与 D18 对齐                                         |
+| `handoff_records.paused_at` / `paused_by_user_id` / `pause_reason` | **缺失**，只有 `paused`             | 部分实现           | 改造 4 补全（与 D42 对齐）                          |
+
+### 0.A.2 真正需要的增量改造（4 项）
+
+把 v1.0 的"全量重写"修正为以下 4 项增量改造：
+
+**改造 1：`session_inbound_messages` 表（新增）**
+
+这是反向消息通道的载体。现有 Phase C 用 team-events WS 单向推送给前端，没有反向通道让 c 等待用户回答。
+
+```sql
+CREATE TABLE IF NOT EXISTS session_inbound_messages (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  from_role_layer TEXT NOT NULL,
+  message_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  consumed_at TEXT,
+  expires_at TEXT,
+  consumed_by_loop_iteration INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_inbound_to_pending
+  ON session_inbound_messages(to_session_id, state, created_at)
+  WHERE state = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_session_inbound_cancel
+  ON session_inbound_messages(to_session_id, message_type)
+  WHERE message_type = 'cancel_signal' AND state = 'pending';
+```
+
+**改造 2：`sessions.substate` 字段（新增）**
+
+把现在分散在前端状态机的 `spec_draft → clarifying → plan_ready → tasks_ready` 提升到 DB 字段，让上游（b）可以查询而不必订阅 WS。
+
+```ts
+// 用 ensureColumn 与 Phase A/B/C 一致
+ensureColumn('sessions', 'substate', 'TEXT DEFAULT NULL');
+ensureColumn('sessions', 'substate_updated_at', 'TEXT DEFAULT NULL');
+```
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_sessions_substate
+  ON sessions(substate) WHERE substate IS NOT NULL;
+```
+
+**改造 3：c 层引入"等待 inbound"循环（核心改造）**
+
+修改 `services/agent-gateway/src/handoff/artifact-chain.ts`：
+
+```ts
+// 现状（Phase C，artifact-chain.ts 行 22 注释）：
+//   "[NEEDS CLARIFICATION] 推送后不等待回复（Phase D 加阻塞门禁）"
+// 实际行为：c 输出含 NEEDS CLARIFICATION 的 spec → 推送 → 直接做 plan
+
+// 改造后：
+//   1. 若有 NEEDS CLARIFICATION → c 进入"等待 inbound"循环
+//   2. 写入 sessions.substate='clarifying'
+//   3. 推送 escalation_request 到 session_inbound_messages（target=reception session）
+//   4. 通过定时轮询（或 EventEmitter 通知）等 clarification_answer
+//   5. 收到答案 → 注入 c 的 LLM context → 回到 spec_ready 或前进到 plan
+```
+
+**改造 4：handoff_records 补字段**
+
+```ts
+ensureColumn('handoff_records', 'idempotency_key', 'TEXT DEFAULT NULL');
+ensureColumn('handoff_records', 'paused_at', 'TEXT DEFAULT NULL');
+ensureColumn('handoff_records', 'paused_by_user_id', 'TEXT DEFAULT NULL');
+ensureColumn('handoff_records', 'pause_reason', 'TEXT DEFAULT NULL');
+```
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_records_idempotency
+  ON handoff_records(idempotency_key) WHERE idempotency_key IS NOT NULL;
+```
+
+### 0.A.3 v1.0 设计稿中需要重写或废弃的章节
+
+| v1.0 章节                                       | v1.1 处理                                                                              |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| §1.1 handoff_records SQL Schema（CREATE TABLE） | **重写**：基于现有 schema 列出"补充字段"而不是"全表 CREATE"                            |
+| §1.2 sessions.substate 新增                     | **保留**：是真正的新增字段（改造 2）                                                   |
+| §1.3 session_inbound_messages 表                | **保留 + 命名调整**：字段名按现有惯例（to_session_id 等）                              |
+| §2 端到端时序                                   | **保留 + 标注**：注明这是改造后行为，对比 Phase C 当前行为                             |
+| §3 cancel/pause 级联                            | **保留 + 与现有对齐**：Phase B 已实现 cancel_requested/paused，本稿补 inbound 信号机制 |
+| §4 Scheduler 对接                               | **保留**：D40 已实现，本稿是补充使用方式                                               |
+| §5 Watcher 设计                                 | **缩减**：Phase B 已实现 Watcher，本稿仅说明"Watcher 需要新增哪些处理"                 |
+| §6 不变量与测试                                 | **保留**：所有 7 条不变量都对增量改造同样适用                                          |
+| §7 迁移路径                                     | **重写**：从"Phase B 上线方案"改为"Phase F 增量改造方案"                               |
+
+### 0.A.4 工作量评估（v1.1 修订）
+
+| 任务                                 | v1.0 估算 | v1.1 修订   | 备注                   |
+| ------------------------------------ | --------- | ----------- | ---------------------- |
+| 改造 1：session_inbound_messages 表  | 2 天      | 1 天        | 已有 schema 模式可参考 |
+| 改造 2：substate 字段 + 上游查询 API | 3 天      | 2 天        | ensureColumn 已熟练    |
+| 改造 3：c 层等待 inbound 循环        | 5 天      | 5 天        | 这是核心难点           |
+| 改造 4：handoff_records 补字段       | 1 天      | 0.5 天      |                        |
+| 测试 + chaos test                    | 5 天      | 5 天        | 不变                   |
+| **总计**                             | 16 天     | **13.5 天** |                        |
+
+> **关键判断**：本协议**不应该作为 Phase F 的全部内容**，而是 Phase D 阻塞门禁的真实实现。Phase D 实施方案中已经预留了"Phase D 加阻塞门禁"的位置（artifact-chain.ts 行 22）。本设计稿等于回填 Phase D 那一句注释背后的协议设计。
+
+### 0.A.5 v1.0 vs 现有实现的字段命名对照表（重要！）
+
+读后续章节时**必须按以下对照阅读**，否则字段名会与代码对不上：
+
+| v1.0 用名（本稿后续章节）        | 现有代码实际字段名                |
+| -------------------------------- | --------------------------------- |
+| `parent_session_id`              | `team_parent_session_id`          |
+| `source_session_id`              | `from_session_id`                 |
+| `target_session_id`              | `to_session_id`                   |
+| `source_layer`                   | `from_role_layer`                 |
+| `target_layer`                   | `to_role_layer`                   |
+| `created_at`（INTEGER ms epoch） | `created_at`（TEXT ISO datetime） |
+| `claimed_at`（INTEGER ms epoch） | `claimed_at`（TEXT ISO datetime） |
+
+> **v2.0 待办**：把 v1.0 后续章节按上表统一改名（避免阅读混淆）。v1.1 暂以本对照表作为修正。
+
+---
 
 ---
 

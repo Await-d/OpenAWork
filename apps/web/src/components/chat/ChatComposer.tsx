@@ -91,6 +91,10 @@ interface ChatComposerProps {
   onDropFiles?: (files: File[]) => void;
   onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
   onReplaceInput?: (nextValue: string) => void;
+  /** Context window usage to render inline next to the send button. */
+  contextUsedTokens?: number;
+  contextMaxTokens?: number;
+  contextIsEstimated?: boolean;
 }
 
 export function ChatComposer({
@@ -160,6 +164,9 @@ export function ChatComposer({
   onDropFiles,
   onOptimizePrompt,
   onReplaceInput,
+  contextUsedTokens,
+  contextMaxTokens,
+  contextIsEstimated,
 }: ChatComposerProps) {
   const [composerDragging, setComposerDragging] = useState(false);
   const composerDragCounterRef = useRef(0);
@@ -203,6 +210,26 @@ export function ChatComposer({
     ? (agentOptions.find((a) => a.id === manualAgentId.trim())?.label ?? manualAgentId.trim())
     : defaultAgentLabel;
   const hasAgentOverride = manualAgentId.trim().length > 0;
+
+  // 上下文容量进度条:把 composer-shell 的下边框替换为状态色填充。
+  // 阈值与原 ContextUsageMeter 保持一致(70%/90% 切换 success/warning/danger)。
+  const contextPctRaw =
+    contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0
+      ? Math.max(0, Math.round((Math.max(0, contextUsedTokens) / contextMaxTokens) * 100))
+      : null;
+  const contextPctVisible = contextPctRaw != null ? Math.min(100, contextPctRaw) : null;
+  const contextStateColor =
+    contextPctRaw == null
+      ? null
+      : contextPctRaw >= 90
+        ? 'var(--danger)'
+        : contextPctRaw >= 70
+          ? 'var(--warning)'
+          : 'var(--success)';
+  const contextBarTitle =
+    contextPctRaw != null && contextUsedTokens != null && contextMaxTokens != null
+      ? `${contextIsEstimated ? '上下文估算已用' : '上下文已用'} ${contextUsedTokens.toLocaleString()} / ${contextMaxTokens.toLocaleString()} (${contextPctRaw}%)${contextIsEstimated ? ' · 基于当前会话消息与流式输出估算' : ''}`
+      : undefined;
 
   const handleAgentTabCycle = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -516,6 +543,9 @@ export function ChatComposer({
 
         <div
           className={`composer-shell${hasAgentOverride ? ' agent-override' : ''}`}
+          data-context-bar={contextPctVisible != null ? '1' : undefined}
+          title={contextBarTitle}
+          aria-label={contextBarTitle}
           onDragEnter={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -552,6 +582,12 @@ export function ChatComposer({
             transition:
               'padding 220ms ease, border-radius 220ms ease, gap 220ms ease, border-color 150ms ease, background 150ms ease',
             position: 'relative',
+            ...(contextPctVisible != null && contextStateColor
+              ? ({
+                  ['--ctx-bar-pct' as string]: `${contextPctVisible}%`,
+                  ['--ctx-bar-color' as string]: contextStateColor,
+                } as React.CSSProperties)
+              : {}),
             ...(composerDragging
               ? {
                   borderColor: 'var(--accent)',

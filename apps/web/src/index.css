@@ -351,27 +351,314 @@ textarea {
 }
 
 .nav-rail-btn {
+  position: relative;
+  isolation: isolate;
   transition:
-    background 150ms ease,
-    color 150ms ease;
+    background 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 200ms ease,
+    transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nav-rail-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--accent) 22%, transparent) 0%,
+    color-mix(in oklch, var(--accent) 6%, transparent) 60%,
+    transparent 100%
+  );
+  transition: opacity 200ms ease;
+  z-index: -1;
 }
 .nav-rail-btn:hover {
-  background: var(--surface-hover) !important;
-  color: var(--text-2) !important;
+  color: var(--text) !important;
+}
+.nav-rail-btn:hover::before {
+  opacity: 1;
+}
+.nav-rail-btn:hover .nav-rail-icon {
+  color: var(--accent);
+  transform: scale(1.08);
+}
+.nav-rail-btn:hover .nav-rail-icon::after {
+  opacity: 1;
+  transform: scale(1);
 }
 .nav-rail-btn:active {
-  background: var(--surface-2) !important;
+  transform: scale(0.97);
+}
+.nav-rail-btn:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 8%);
+  outline-offset: -2px;
+}
+
+.nav-rail-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition:
+    color 200ms ease,
+    transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nav-rail-icon::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in oklch, var(--accent) 32%, transparent) 0%,
+    transparent 70%
+  );
+  opacity: 0;
+  transform: scale(0.6);
+  pointer-events: none;
+  transition:
+    opacity 220ms ease,
+    transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: -1;
+}
+
+.nav-rail-link-active {
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--accent) 18%, var(--surface) 50%),
+    color-mix(in oklch, var(--accent) 8%, var(--surface) 80%)
+  ) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
+    inset 0 1px 0 color-mix(in oklch, var(--accent) 22%, transparent),
+    0 4px 14px -8px color-mix(in oklch, var(--accent) 60%, transparent);
+}
+.nav-rail-link-active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(
+    180deg,
+    var(--accent),
+    color-mix(in oklch, var(--accent) 60%, transparent)
+  );
+  box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 60%, transparent);
+}
+.nav-rail-link-active .nav-rail-icon {
+  color: var(--accent);
+}
+.nav-rail-link-active .nav-rail-icon::after {
+  opacity: 0.7;
+  transform: scale(1);
+}
+.nav-rail-link-active:hover {
+  color: var(--accent) !important;
+}
+.nav-rail-link-active:hover .nav-rail-icon {
+  transform: scale(1.05);
 }
 
 .nav-rail-logout {
+  position: relative;
+  isolation: isolate;
   transition:
-    background 150ms ease,
-    color 150ms ease;
+    background 200ms ease,
+    color 200ms ease,
+    transform 200ms ease;
   cursor: pointer;
 }
+.nav-rail-logout::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--danger) 22%, transparent) 0%,
+    color-mix(in oklch, var(--danger) 4%, transparent) 70%,
+    transparent 100%
+  );
+  transition: opacity 200ms ease;
+  z-index: -1;
+}
 .nav-rail-logout:hover {
-  background: var(--surface-hover);
-  color: var(--text-2);
+  color: var(--danger) !important;
+}
+.nav-rail-logout:hover::before {
+  opacity: 1;
+}
+.nav-rail-logout:hover .nav-rail-icon {
+  color: var(--danger);
+  transform: translateX(2px);
+}
+.nav-rail-logout:active {
+  transform: scale(0.97);
+}
+
+.layout-nav-rail {
+  position: relative;
+  box-shadow:
+    inset -1px 0 0 var(--border-subtle),
+    1px 0 24px -16px color-mix(in oklch, black 60%, transparent);
+  background:
+    radial-gradient(
+      ellipse 80% 30% at 50% 0%,
+      color-mix(in oklch, var(--accent) 12%, transparent) 0%,
+      transparent 70%
+    ),
+    var(--nav-rail-bg);
+}
+
+.layout-nav-rail .nav-rail-divider {
+  height: 1px;
+  margin: 4px 10px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--border) 90%, transparent) 30%,
+    color-mix(in oklch, var(--border) 90%, transparent) 70%,
+    transparent
+  );
+  flex-shrink: 0;
+}
+
+.nav-rail-group-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--text-3) 75%, transparent);
+  padding: 8px 10px 3px;
+  user-select: none;
+}
+
+.nav-rail-group-spacer {
+  height: 10px;
+  margin: 2px 16px;
+  position: relative;
+}
+.nav-rail-group-spacer::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--border) 70%, transparent);
+  transform: translate(-50%, -50%);
+}
+
+.layout-nav-rail-brand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+.layout-nav-rail-brand-logo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9px;
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.layout-nav-rail-brand-logo::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 13px;
+  background: radial-gradient(
+    circle at 30% 30%,
+    color-mix(in oklch, var(--accent) 50%, transparent) 0%,
+    color-mix(in oklch, var(--accent) 14%, transparent) 50%,
+    transparent 80%
+  );
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: -1;
+  filter: blur(2px);
+}
+.layout-nav-rail-brand:hover .layout-nav-rail-brand-logo {
+  transform: rotate(-8deg) scale(1.08);
+}
+
+@keyframes nav-rail-status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--success) 70%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--success) 0%, transparent);
+  }
+}
+.nav-rail-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+  animation: nav-rail-status-pulse 2.4s ease-in-out infinite;
+}
+.nav-rail-status-dot[data-status='offline'] {
+  background: var(--text-3);
+  animation: none;
+}
+.nav-rail-status-dot[data-status='warning'] {
+  background: var(--warning, #f59e0b);
+}
+
+.nav-rail-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--border) 60%, transparent) transparent;
+}
+.nav-rail-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.nav-rail-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nav-rail-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--border) 60%, transparent);
+  border-radius: 999px;
+}
+.nav-rail-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--border) 90%, transparent);
+}
+
+.nav-rail-label {
+  display: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+@media (min-width: 1920px) {
+  .nav-rail-label {
+    display: block;
+    opacity: 1;
+  }
+
+  .layout-nav-rail {
+    align-items: stretch !important;
+  }
 }
 
 .session-item {
@@ -544,41 +831,6 @@ textarea {
   color: var(--text-2) !important;
 }
 
-.nav-rail-label {
-  display: none;
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-@media (min-width: 1920px) {
-  .nav-rail-label {
-    display: block;
-    opacity: 1;
-  }
-
-  .layout-nav-rail {
-    align-items: stretch !important;
-  }
-
-  .nav-rail-link-active {
-    display: flex;
-    width: 100%;
-    min-height: 36px;
-    align-items: center;
-    gap: 8px;
-    padding: 0 8px;
-    border-radius: 8px;
-    text-decoration: none;
-    background: var(--accent-muted);
-    color: var(--accent);
-    font-weight: 600;
-    transition:
-      background 150ms ease,
-      color 150ms ease;
-    overflow: hidden;
-  }
-}
-
 @media (min-width: 2560px) {
   .outlet-content-wrap > * {
     max-width: 100%;
@@ -732,6 +984,74 @@ textarea {
     border-color 150ms ease,
     box-shadow 150ms ease,
     transform 150ms ease;
+}
+
+/* Token 用量进度条:替代下边框,沿 composer-shell 底部按 --ctx-bar-pct 填充。
+   --ctx-bar-pct(0%-100%)与 --ctx-bar-color(success/warning/danger)由
+   ChatComposer 注入。data-context-bar='1' 触发渲染。
+   --ctx-bar-threshold:压缩触发位置(默认 95%),在 track 上画一个橙色刻度。 */
+
+.composer-shell[data-context-bar='1'] {
+  --ctx-bar-threshold: 95%;
+}
+
+/* 底部 track:整条衬底 + threshold 位置的橙色刻度线。
+   ::before 容器高度 4px,内部用两层 background-image 合成:
+   - 底部 2px 的灰色 track(展示总容量)
+   - threshold 位置 3px 宽的橙色竖线,从 top 0 延展到 bottom,刻度线高于 track */
+.composer-shell[data-context-bar='1']::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 4px;
+  background:
+    /* 上层:threshold 竖线,完整 4px 高,饱和橙色 */
+    linear-gradient(
+      to right,
+      transparent calc(var(--ctx-bar-threshold) - 1.5px),
+      var(--warning) calc(var(--ctx-bar-threshold) - 1.5px),
+      var(--warning) calc(var(--ctx-bar-threshold) + 1.5px),
+      transparent calc(var(--ctx-bar-threshold) + 1.5px)
+    ),
+    /* 下层:仅底部 2px 是 track 灰色 */
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      color-mix(in oklch, var(--border) 100%, transparent) 2px,
+      color-mix(in oklch, var(--border) 100%, transparent) 4px
+    );
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+
+/* 顶层 fill:在 track 上叠按 --ctx-bar-pct 填充状态色。位置贴齐底部 track。 */
+.composer-shell[data-context-bar='1']::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  bottom: 0;
+  width: calc((100% - 24px) * (var(--ctx-bar-pct, 0%) / 100%));
+  max-width: calc(100% - 24px);
+  height: 2px;
+  background: var(--ctx-bar-color, var(--accent));
+  border-radius: 999px;
+  pointer-events: none;
+  transition:
+    width 400ms cubic-bezier(.4, 0, .2, 1),
+    background 300ms ease,
+    opacity 200ms ease;
+}
+
+/* focus 时降低存在感,把焦点让给 ring。 */
+.composer-shell[data-context-bar='1']:focus-within::before {
+  opacity: 0.55;
+}
+.composer-shell[data-context-bar='1']:focus-within::after {
+  opacity: 0.7;
 }
 .composer-shell:focus-within {
   border-color: var(--accent);

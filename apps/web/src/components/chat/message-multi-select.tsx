@@ -103,8 +103,10 @@ export function MultiSelectToolbar({
     <div
       data-testid="multi-select-toolbar"
       style={{
-        position: 'sticky',
-        bottom: 80,
+        // 使用 fixed 定位让 toolbar 始终对齐视口中心,而非父级(此前 sticky
+        // 在窄消息列容器内,会被侧边栏/编辑器影响视觉位置)。
+        position: 'fixed',
+        bottom: 96,
         left: '50%',
         transform: 'translateX(-50%)',
         display: 'inline-flex',
@@ -117,7 +119,9 @@ export function MultiSelectToolbar({
         boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
         zIndex: 100,
         width: 'fit-content',
-        margin: '0 auto',
+        // 防止超过视口
+        maxWidth: 'calc(100vw - 32px)',
+        flexWrap: 'wrap',
       }}
     >
       <span

@@ -103,6 +103,10 @@ export interface UnifiedComposerProps {
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
   markSessionMetadataDirty?: () => void;
+  /** Context window usage (tokens/maxTokens) to render next to the send button. */
+  contextUsedTokens?: number;
+  contextMaxTokens?: number;
+  contextIsEstimated?: boolean;
 
   imageGenerationMode?: boolean;
   hasConfiguredImageModel?: boolean;
@@ -434,6 +438,9 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         onOptimizePrompt={features.promptOptimize && token ? handleOptimizePrompt : undefined}
         onDropFiles={appendFiles}
         onReplaceInput={(nextValue: string) => setInput(nextValue)}
+        contextUsedTokens={props.contextUsedTokens}
+        contextMaxTokens={props.contextMaxTokens}
+        contextIsEstimated={props.contextIsEstimated}
       />
 
       {features.modelPicker && showModelPicker && (

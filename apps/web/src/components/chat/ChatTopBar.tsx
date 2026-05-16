@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import DialogueModeToggle from '../../pages/DialogueModeToggle.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
-import { ContextUsageMeter } from './context-usage-meter.js';
 import {
   ChatTodoFloatingPanel,
   ChatTopBarTodoSlot,
@@ -17,9 +16,15 @@ interface ChatTopBarProps {
   onToggleEditorMode: () => void;
   rightOpen: boolean;
   onToggleRightOpen: () => void;
-  contextUsedTokens?: number;
-  contextMaxTokens?: number;
-  contextIsEstimated?: boolean;
+  /**
+   * Editor pane 当前激活的 tab(用于 code/browser 按钮的 active 视觉状态)。
+   * 不传时 fallback 到只看 editorMode。
+   */
+  editorPaneTab?: 'code' | 'browser';
+  /** 进入/切到 code tab。默认行为:进入分屏 + 设置 tab='code'。 */
+  onActivateCodeTab?: () => void;
+  /** 进入/切到 browser tab。默认行为:进入分屏 + 设置 tab='browser'。 */
+  onActivateBrowserTab?: () => void;
   /**
    * Optional terminals chip (running terminal indicator + popover trigger).
    * Rendered inside the right-side pill so it sits next to the YOLO toggle
@@ -37,6 +42,10 @@ interface ChatTopBarProps {
   onOpenBrowser?: () => void;
   /** Whether browser preview is currently active. */
   browserActive?: boolean;
+  /** 是否显示会话列表切换按钮(左侧)。 */
+  sidebarOpen?: boolean;
+  /** 切换左侧会话列表 sidebar 的回调。 */
+  onToggleSidebar?: () => void;
   /** Todo controller from upstream (shared with ChatTodoFloatingPanel). */
   todoController?: ChatTodoController;
   /** id for aria-controls linking the slot button to the floating panel. */
@@ -55,9 +64,9 @@ export function ChatTopBar({
   onToggleEditorMode,
   rightOpen,
   onToggleRightOpen,
-  contextUsedTokens,
-  contextMaxTokens,
-  contextIsEstimated,
+  editorPaneTab,
+  onActivateCodeTab,
+  onActivateBrowserTab,
   terminalsChip,
   onOpenCommandPalette,
   bookmarkCount = 0,
@@ -65,12 +74,11 @@ export function ChatTopBar({
   onToggleMultiSelect,
   onOpenBrowser,
   browserActive = false,
+  sidebarOpen,
+  onToggleSidebar,
   todoController,
   todoDetailsId,
 }: ChatTopBarProps) {
-  const showContextMeter =
-    contextUsedTokens != null && contextMaxTokens != null && contextMaxTokens > 0;
-
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
   const [isCompact, setIsCompact] = useState(false);
@@ -115,6 +123,49 @@ export function ChatTopBar({
           flexWrap: 'wrap',
         }}
       >
+        {onToggleSidebar && (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            title={sidebarOpen ? '收起会话列表' : '展开会话列表'}
+            aria-label={sidebarOpen ? '收起会话列表' : '展开会话列表'}
+            aria-pressed={!!sidebarOpen}
+            style={{
+              width: 26,
+              height: 26,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: sidebarOpen
+                ? '1px solid color-mix(in oklch, var(--accent) 30%, var(--border))'
+                : '1px solid var(--border-subtle)',
+              borderRadius: 6,
+              background: sidebarOpen
+                ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+                : 'transparent',
+              color: sidebarOpen ? 'var(--accent)' : 'var(--text-2)',
+              cursor: 'pointer',
+              flexShrink: 0,
+              fontSize: 0,
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+          </button>
+        )}
+
         <DialogueModeToggle
           mode={dialogueMode}
           onChange={onChangeDialogueMode}
@@ -238,24 +289,6 @@ export function ChatTopBar({
           border: '1px solid var(--border-subtle)',
         }}
       >
-        {showContextMeter ? (
-          <>
-            <ContextUsageMeter
-              usedTokens={contextUsedTokens}
-              maxTokens={contextMaxTokens}
-              estimated={contextIsEstimated}
-            />
-            <div
-              aria-hidden="true"
-              style={{
-                width: 1,
-                height: 14,
-                background: 'var(--border-subtle)',
-                flexShrink: 0,
-              }}
-            />
-          </>
-        ) : null}
         {terminalsChip}
         <button
           type="button"
@@ -298,9 +331,21 @@ export function ChatTopBar({
         </button>
         <button
           type="button"
-          onClick={onToggleEditorMode}
-          title={editorMode ? '关闭编辑器' : '打开文件编辑器'}
-          className={`icon-btn${editorMode ? ' active' : ''}`}
+          onClick={() => {
+            if (onActivateCodeTab) {
+              onActivateCodeTab();
+              return;
+            }
+            onToggleEditorMode();
+          }}
+          title={
+            editorMode && editorPaneTab === 'code'
+              ? '关闭代码编辑器'
+              : editorMode
+                ? '切换到代码编辑器'
+                : '打开代码编辑器'
+          }
+          className={`icon-btn${editorMode && (editorPaneTab === undefined || editorPaneTab === 'code') ? ' active' : ''}`}
           style={{
             width: 28,
             height: 28,
@@ -329,9 +374,21 @@ export function ChatTopBar({
         {onOpenBrowser && (
           <button
             type="button"
-            onClick={onOpenBrowser}
-            title="打开浏览器预览"
-            className={`icon-btn${browserActive ? ' active' : ''}`}
+            onClick={() => {
+              if (onActivateBrowserTab) {
+                onActivateBrowserTab();
+                return;
+              }
+              onOpenBrowser();
+            }}
+            title={
+              editorMode && editorPaneTab === 'browser'
+                ? '关闭浏览器预览'
+                : editorMode
+                  ? '切换到浏览器预览'
+                  : '打开浏览器预览'
+            }
+            className={`icon-btn${editorMode && editorPaneTab === 'browser' ? ' active' : ''}`}
             style={{
               width: 28,
               height: 28,

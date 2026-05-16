@@ -679,6 +679,16 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/about"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.about.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.about.title}
+              />
+            }
+          />
         </Route>
       </Routes>
     </>

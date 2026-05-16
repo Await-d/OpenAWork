@@ -121,6 +121,7 @@ import {
   type SessionsClientWithActiveStop,
 } from '../components/session-conversation/runtime/chat-page-utils.js';
 import { ChatRightPanel } from './chat-page/chat-right-panel.js';
+import { SessionSidebar } from '../components/layout/SessionSidebar.js';
 import type { RightPanelTabId } from './chat-page/right-panel-tabs.js';
 import { ChatScrollBottomButton } from '../components/session-conversation/runtime/scroll-bottom-button.js';
 import { ChatStreamErrorBar } from '../components/session-conversation/runtime/stream-error-bar.js';
@@ -347,10 +348,31 @@ export default function ChatPage() {
     thinkingEnabled: boolean;
   } | null>(null);
 
-  const [rightTab, setRightTab] = useState<RightPanelTabId>('overview');
+  const rightTabRaw = useUIStateStore((s) => s.rightTab);
+  const setRightTabStore = useUIStateStore((s) => s.setRightTab);
+  const rightTab = (rightTabRaw as RightPanelTabId) ?? 'overview';
+  const setRightTab = useCallback(
+    (value: RightPanelTabId | ((prev: RightPanelTabId) => RightPanelTabId)) => {
+      const next =
+        typeof value === 'function'
+          ? (value as (p: RightPanelTabId) => RightPanelTabId)(rightTab)
+          : value;
+      setRightTabStore(next);
+    },
+    [rightTab, setRightTabStore],
+  );
   const [toolFilter, setToolFilter] = useState<'all' | 'lsp' | 'file' | 'network' | 'other'>('all');
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
-  const [rightOpen, setRightOpen] = useState(false);
+  const rightOpen = useUIStateStore((s) => s.rightOpen);
+  const setRightOpenStore = useUIStateStore((s) => s.setRightOpen);
+  const setRightOpen = useCallback(
+    (value: boolean | ((prev: boolean) => boolean)) => {
+      const next =
+        typeof value === 'function' ? (value as (p: boolean) => boolean)(rightOpen) : value;
+      setRightOpenStore(next);
+    },
+    [rightOpen, setRightOpenStore],
+  );
   const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
   const [manualAgentId, setManualAgentId] = useState('');
@@ -412,7 +434,16 @@ export default function ChatPage() {
     decision: PermissionDecision;
     requestId: string;
   } | null>(null);
-  const [browserPreviewUrl, setBrowserPreviewUrl] = useState<string | null>(null);
+  const browserActive = useUIStateStore((s) => s.browserActive);
+  const setBrowserActive = useUIStateStore((s) => s.setBrowserActive);
+  const editorPaneTab = useUIStateStore((s) => s.editorPaneTab);
+  const setEditorPaneTab = useUIStateStore((s) => s.setEditorPaneTab);
+  const browserPreviewUrlByWorkspace = useUIStateStore((s) => s.browserPreviewUrlByWorkspace);
+  const setBrowserPreviewUrlForWorkspace = useUIStateStore(
+    (s) => s.setBrowserPreviewUrlForWorkspace,
+  );
+  // browserPreviewUrl / setBrowserPreviewUrl 在 effectiveWorkingDirectory 定义之后才声明
+  // (见下方),因为它们依赖 workspace path。
   const devServerDetectedTerminalIdsRef = useRef<Set<string>>(new Set());
   const [inlinePermissionErrors, setInlinePermissionErrors] = useState<Record<string, string>>({});
   const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
@@ -448,6 +479,38 @@ export default function ChatPage() {
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const setLastChatPath = useUIStateStore((s) => s.setLastChatPath);
   const toggleLeftSidebar = useUIStateStore((s) => s.toggleLeftSidebar);
+  const leftSidebarOpen = useUIStateStore((s) => s.leftSidebarOpen);
+  const setLeftSidebarOpen = useUIStateStore((s) => s.setLeftSidebarOpen);
+
+  // 窄屏(≤960px)下 sidebar 改为 overlay 模式,会浮在主对话区上而不是占位。
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= 960 : false,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(max-width: 960px)');
+    const update = () => setIsNarrowViewport(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  // 自愈:首次进入 chat 路由 + 宽屏时,如果 sidebar 因历史原因被关闭,自动展开一次。
+  // 只在 ChatPage 挂载的"首次"跑(empty deps),用户后续手动关闭后不会被强制重开。
+  const sidebarSelfHealRef = useRef(false);
+  useEffect(() => {
+    if (sidebarSelfHealRef.current) return;
+    sidebarSelfHealRef.current = true;
+    if (!leftSidebarOpen && !isNarrowViewport) {
+      setLeftSidebarOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const shouldOverlaySidebar = isNarrowViewport;
+  const sidebarWidth = shouldOverlaySidebar
+    ? 'min(86vw, var(--sidebar-width, 260px))'
+    : 'var(--sidebar-width, 260px)';
   const splitDragging = useRef(false);
   const rightOpenRef = useRef(rightOpen);
   const {
@@ -494,6 +557,20 @@ export default function ChatPage() {
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
+  // 浏览器预览 URL 按 workspace 路径派生:同 workspace 的会话共享 url,跨 workspace
+  // 自动切到对应 workspace 的 url(若无则 null)。无 workspace 的会话归入 __default__ 桶。
+  const browserWorkspaceKey =
+    effectiveWorkingDirectory && effectiveWorkingDirectory.trim().length > 0
+      ? effectiveWorkingDirectory
+      : '__default__';
+  const browserPreviewUrl = browserPreviewUrlByWorkspace[browserWorkspaceKey] ?? null;
+  const setBrowserPreviewUrl = useCallback(
+    (url: string | null) => {
+      setBrowserPreviewUrlForWorkspace(effectiveWorkingDirectory, url);
+      if (url) setBrowserActive(true);
+    },
+    [effectiveWorkingDirectory, setBrowserPreviewUrlForWorkspace, setBrowserActive],
+  );
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
     : null;
@@ -678,7 +755,8 @@ export default function ChatPage() {
     setLatestGeneratedImageResult(null);
     setSessionImageEditReferenceArtifacts([]);
     setSelectedImageEditReferenceArtifactId(null);
-    setBrowserPreviewUrl(null);
+    // browserPreviewUrl 是按 workspace 路径持久化的(browserPreviewUrlByWorkspace),
+    // 跨 workspace 切会话自动切到对应 workspace 的 url;同 workspace 内会话共享 url。
     devServerDetectedTerminalIdsRef.current = new Set();
   }, [currentSessionId]);
 
@@ -743,6 +821,38 @@ export default function ChatPage() {
   useEffect(() => {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
   }, [effectiveWorkingDirectory, setFileTreeRootPath]);
+
+  // 跨 workspace 切会话时,旧 workspace 的打开的文件应该关掉(路径无意义且会读失败)。
+  // 同 workspace 内会话间切换,保留文件不变;跨 workspace 才清。
+  // 注意:切会话时 effectiveWorkingDirectory 会经历 old → null → new 的过渡(useWorkspace
+  // 异步 fetch),所以这里只记录"上一个非空 workspace path",仅在新的非空 path 与
+  // 它不同时触发清理,避免中间 null 状态干扰判定。
+  const fileEditorCloseAllRef = useRef(fileEditor.closeAll);
+  fileEditorCloseAllRef.current = fileEditor.closeAll;
+  const lastNonEmptyWorkspaceRef = useRef<string | null>(
+    typeof effectiveWorkingDirectory === 'string' ? effectiveWorkingDirectory : null,
+  );
+  useEffect(() => {
+    // 调试日志:观察切会话时 effectiveWorkingDirectory 的变化轨迹
+    console.log('[ChatPage workspace-effect]', {
+      currentSessionId,
+      effectiveWorkingDirectory,
+      lastNonEmpty: lastNonEmptyWorkspaceRef.current,
+      type: typeof effectiveWorkingDirectory,
+    });
+    if (typeof effectiveWorkingDirectory !== 'string') return;
+    const prev = lastNonEmptyWorkspaceRef.current;
+    lastNonEmptyWorkspaceRef.current = effectiveWorkingDirectory;
+    if (prev !== null && prev !== effectiveWorkingDirectory) {
+      console.log(
+        '[ChatPage workspace-effect] CROSS-WORKSPACE → closeAll',
+        prev,
+        '→',
+        effectiveWorkingDirectory,
+      );
+      fileEditorCloseAllRef.current?.();
+    }
+  }, [currentSessionId, effectiveWorkingDirectory]);
 
   const { planTasks, agentEvents, planHistory, dagNodes, dagEdges, compactions } = rightPanelState;
   const toolCallCards = useMemo(() => getToolCallCards(rightPanelState), [rightPanelState]);
@@ -2112,6 +2222,40 @@ export default function ChatPage() {
     const requestOriginSessionId = activeSessionRef.current;
     setStreamError(null);
     let text = sourceInput.trim();
+
+    // ── 内置 client 命令:/open <url> ─────────────────────────────────
+    // 直接打开内置浏览器到指定 URL,不发送给 LLM。
+    // 支持:/open https://example.com、/open localhost:3000、/open example.com
+    {
+      const openMatch = text.match(/^\/open\s+(.+)$/i);
+      if (openMatch) {
+        const arg = openMatch[1]?.trim() ?? '';
+        if (arg.length === 0) {
+          toast('用法:/open <url>', 'warning');
+          return false;
+        }
+        const normalizedUrl = (() => {
+          if (/^https?:\/\//i.test(arg)) return arg;
+          if (/^[a-z0-9-]+\.[a-z]{2,}/i.test(arg)) return `https://${arg}`;
+          // localhost:3000 / 127.0.0.1:5173 之类不带 schema 的本地地址
+          if (/^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/.*)?$/i.test(arg)) {
+            return `http://${arg}`;
+          }
+          return arg;
+        })();
+        // 派发 BuiltInBrowser 监听的事件,新建 tab 并跳转。
+        window.dispatchEvent(
+          new CustomEvent('openawork:browser:open-url', {
+            detail: { url: normalizedUrl, mode: 'newTab' },
+          }),
+        );
+        // 同时激活浏览器面板:存到 store + 切到 browser tab
+        setBrowserPreviewUrl(normalizedUrl);
+        setEditorMode(true);
+        toast(`已在浏览器中打开 ${normalizedUrl}`, 'success');
+        return true;
+      }
+    }
 
     if (imageGenerationMode) {
       if (!hasConfiguredImageModel) {
@@ -4962,6 +5106,9 @@ export default function ChatPage() {
             multiSelect.disableMultiSelect();
           } else {
             multiSelect.enableMultiSelect();
+            // 默认全选,避免空选导致用户以为操作失效。
+            // 用户随后用 toolbar 的"全选/取消"或单条菜单的"☐ 选择"调整。
+            requestAnimationFrame(() => multiSelect.selectAll(messages));
           }
         },
       },
@@ -5119,6 +5266,7 @@ export default function ChatPage() {
           multiSelect.disableMultiSelect();
         } else {
           multiSelect.enableMultiSelect();
+          requestAnimationFrame(() => multiSelect.selectAll(messages));
         }
       },
       onOpenTemplates: () => setShowTemplatePanel(true),
@@ -5175,18 +5323,34 @@ export default function ChatPage() {
       }
       setEditorMode(true);
     };
+    const handleComposerInsert = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { text?: string; mode?: 'append' | 'replace' }
+        | undefined;
+      const insertText = detail?.text;
+      if (typeof insertText !== 'string' || insertText.length === 0) return;
+      setInput((prev) => {
+        if (detail?.mode === 'replace') return insertText;
+        // append:trim 末尾,中间用换行连接
+        if (prev.trim().length === 0) return insertText;
+        return `${prev.trimEnd()}\n${insertText}`;
+      });
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
     window.addEventListener('openAwork:open-templates', handleOpenTemplates);
     window.addEventListener('openAwork:export-chat', handleExportChat);
     window.addEventListener('openAwork:open-browser', handleOpenBrowser);
+    window.addEventListener('openawork:composer:insert', handleComposerInsert);
     return () => {
       window.removeEventListener('openAwork:open-templates', handleOpenTemplates);
       window.removeEventListener('openAwork:export-chat', handleExportChat);
       window.removeEventListener('openAwork:open-browser', handleOpenBrowser);
+      window.removeEventListener('openawork:composer:insert', handleComposerInsert);
     };
   }, [messages]);
 
   return (
-    <div className="page-root page-root-row">
+    <div className="page-root page-root-row" style={{ position: 'relative' }}>
       {/* ─── Command Palette ─── */}
       <CommandPalette
         items={commandPaletteItems}
@@ -5203,6 +5367,72 @@ export default function ChatPage() {
           requestAnimationFrame(() => textareaRef.current?.focus());
         }}
       />
+
+      <div
+        aria-hidden={!leftSidebarOpen}
+        style={{
+          width: shouldOverlaySidebar ? sidebarWidth : leftSidebarOpen ? sidebarWidth : 0,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          height: '100%',
+          borderRight: leftSidebarOpen ? '1px solid var(--border-subtle)' : 'none',
+          transition: shouldOverlaySidebar
+            ? 'transform 200ms ease, opacity 200ms ease'
+            : 'width 200ms ease',
+          pointerEvents: leftSidebarOpen ? undefined : 'none',
+          position: shouldOverlaySidebar ? 'absolute' : 'relative',
+          left: shouldOverlaySidebar ? 0 : undefined,
+          top: shouldOverlaySidebar ? 0 : undefined,
+          bottom: shouldOverlaySidebar ? 0 : undefined,
+          zIndex: shouldOverlaySidebar ? 35 : undefined,
+          transform: shouldOverlaySidebar
+            ? leftSidebarOpen
+              ? 'translateX(0)'
+              : 'translateX(-100%)'
+            : undefined,
+          opacity: shouldOverlaySidebar ? (leftSidebarOpen ? 1 : 0) : 1,
+          boxShadow: shouldOverlaySidebar && leftSidebarOpen ? 'var(--shadow-lg)' : 'none',
+          background: shouldOverlaySidebar ? 'var(--surface)' : undefined,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            width: sidebarWidth,
+            maxWidth: '100%',
+          }}
+        >
+          <SessionSidebar
+            onOpenFile={(path) => {
+              void fileEditor.openFile(path);
+              setEditorMode(true);
+              setEditorPaneTab('code');
+            }}
+            fetchRootPath={workspace.fetchRootPath}
+            fetchTree={workspace.fetchTree}
+            onOpenWorkspacePicker={() => setShowWorkspaceSelector(true)}
+          />
+        </div>
+      </div>
+
+      {shouldOverlaySidebar && leftSidebarOpen && (
+        <button
+          type="button"
+          aria-label="关闭侧栏遮罩"
+          onClick={() => setLeftSidebarOpen(false)}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 30,
+            background: 'oklch(0 0 0 / 0.42)',
+            backdropFilter: 'blur(1px)',
+          }}
+        />
+      )}
 
       <div
         ref={splitContainerRef}
@@ -5261,9 +5491,6 @@ export default function ChatPage() {
                 onToggleEditorMode={() => setEditorMode(!editorMode)}
                 rightOpen={rightOpen}
                 onToggleRightOpen={() => setRightOpen((o) => !o)}
-                contextUsedTokens={contextUsageSnapshot?.usedTokens}
-                contextMaxTokens={contextUsageSnapshot?.maxTokens}
-                contextIsEstimated={contextUsageSnapshot?.estimated}
                 terminalsChip={
                   currentSessionId ? (
                     <SessionTerminalsChip
@@ -5288,6 +5515,7 @@ export default function ChatPage() {
                     multiSelect.disableMultiSelect();
                   } else {
                     multiSelect.enableMultiSelect();
+                    requestAnimationFrame(() => multiSelect.selectAll(messages));
                   }
                 }}
                 onOpenBrowser={() => {
@@ -5295,8 +5523,33 @@ export default function ChatPage() {
                     setBrowserPreviewUrl('http://localhost:3000');
                   }
                   setEditorMode(true);
+                  setEditorPaneTab('browser');
                 }}
                 browserActive={!!browserPreviewUrl}
+                sidebarOpen={leftSidebarOpen}
+                onToggleSidebar={() => toggleLeftSidebar()}
+                editorPaneTab={editorPaneTab}
+                onActivateCodeTab={() => {
+                  // 已经在 code tab + 分屏模式 → 关闭分屏
+                  if (editorMode && editorPaneTab === 'code') {
+                    setEditorMode(false);
+                    return;
+                  }
+                  setEditorMode(true);
+                  setEditorPaneTab('code');
+                }}
+                onActivateBrowserTab={() => {
+                  // 已经在 browser tab + 分屏模式 → 关闭分屏(保留 url 不清,下次还能恢复)
+                  if (editorMode && editorPaneTab === 'browser') {
+                    setEditorMode(false);
+                    return;
+                  }
+                  if (!browserPreviewUrl) {
+                    setBrowserPreviewUrl('http://localhost:3000');
+                  }
+                  setEditorMode(true);
+                  setEditorPaneTab('browser');
+                }}
                 todoController={todoController}
                 todoDetailsId={todoDetailsId}
               />
@@ -5554,6 +5807,9 @@ export default function ChatPage() {
             }
             onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
             markSessionMetadataDirty={markSessionMetadataDirty}
+            contextUsedTokens={contextUsageSnapshot?.usedTokens}
+            contextMaxTokens={contextUsageSnapshot?.maxTokens}
+            contextIsEstimated={contextUsageSnapshot?.estimated}
           />
         </div>
         <ChatEditorPane
@@ -5566,6 +5822,9 @@ export default function ChatPage() {
           saving={saving}
           handleSaveFile={handleSaveFile}
           browserPreviewUrl={browserPreviewUrl}
+          workspacePath={effectiveWorkingDirectory}
+          activeTab={editorPaneTab}
+          onTabChange={setEditorPaneTab}
         />
       </div>
 

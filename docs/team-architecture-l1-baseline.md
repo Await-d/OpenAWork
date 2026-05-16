@@ -1,15 +1,36 @@
-# Team 架构 L1 基线决策（v1.0）
+# Team 架构 L1 基线决策（v1.1）
+
+> ⚠️ **复查发现的现状（2026-05-16）**：
+>
+> 本文档初稿（v1.0）是基于 v3.10 讨论稿"还没实施"的假设写的，但**实际上 Phase A/B/C/D/E 均已完成实施**（见 `.agentdocs/workflow/done/260515-team-phase-{a,b,c}-实施方案.md` 和 `260516-team-phase-{d,e}-实施方案.md`）。
+>
+> **追溯性审计已完成**（见 `team-architecture-traceback-audit.md`），9 项 L1 决策的真实状态：
+>
+> - ✅ **5 项已完整实施且符合假设**：L1.1 / L1.2（意外符合）/ L1.5 / L1.7 / L1.9
+> - ❌ **3 项未实施**：L1.3（流式 handoff，artifact-chain.ts 行 22 已注明）/ L1.6（延迟监控）/ L1.8 部分字段
+> - ⚠️ **1 项部分实施**：L1.4（feature flag 灰度而非"完全废弃"，但实际方案更稳妥）
+>
+> **真正需要做的事**（约 17-19 天工作量）：
+>
+> - 🔴 P0：L1.3 流式 handoff 增量改造（13.5 天，详见 `team-architecture-l1-3-streaming-handoff-spec.md`）
+> - 🟡 P1：L1.8 补缺失字段（0.5 天，可与 P0 合并）
+> - 🟡 P2：L1.6 延迟监控（3-5 天）
+>
+> ---
 
 > 用途：本文档是 OpenAWork 团队架构的**最高优先级决策清单**。所有 L1 决策必须现在锁定，因为它们决定整个系统的"形状"，错了会导致后续全推倒重来。
 >
 > 关联文档：
 >
 > - 思想分析归档：`team-architecture-spec-kit-borrowing-discussion.md`（v3.12，讨论历史）
-> - Phase A 决策：`team-architecture-phase-a-decisions.md`（启动时拍板）
+> - **追溯性审计报告**（关键 ⭐）：`team-architecture-traceback-audit.md`
+> - Phase A 决策：`team-architecture-phase-a-decisions.md`（已完成实施）
+> - **L1.3 流式 handoff 详细设计**：`team-architecture-l1-3-streaming-handoff-spec.md`（v1.1，含与现有实现的差异分析）
 > - 延后决策：`team-architecture-deferred-decisions.md`（L3/L4，实施/运营时拍板）
+> - **Phase A-E 实施记录**（已完成）：`.agentdocs/workflow/done/260515-team-phase-{a,b,c}-实施方案.md` 和 `260516-team-phase-{d,e}-实施方案.md`
 >
-> 创建时间：2026-05-16（基于讨论稿 v3.12 重组）
-> 当前状态：**草稿，待团队 review**
+> 创建时间：2026-05-16（v1.0 → v1.1 复查修订 + 追溯审计）
+> 当前状态：**v1.1 草稿，待团队 review**
 
 ---
 
@@ -62,27 +83,31 @@ L1 决策遵循三条原则：
 
 **决策**：b 层和 d 层均拆为"规则代码 + 多 LLM agent"混合架构，不允许"一个 LLM 干所有事"。
 
+> 📊 **审计结论（v1.1 反向更新，2026-05-16）**：基于追溯审计结果（`team-architecture-traceback-audit.md` §2），现有 d 层（`pm2-runner.ts`）实际实施**意外符合本拆分原则**——`buildDispatchPackages` 是纯代码（基于 [P]/[US1] 标记的文本解析），不需要 LLM。下表已根据现状修正：d.3 改为"纯代码"。
+
 **问题动机**：当前讨论稿把 d 层奉为桥接节点，但同时让 d 一个 LLM 承担 5 件事（Constitution Check + architecture review + dispatch 拆分 + 双重 review + escalation 决策）。这是过度依赖 LLM 的反模式——能用 if/else 判断的事情不应该交给 LLM。
 
-#### L1.2.1 d 层拆分
+#### L1.2.1 d 层拆分（v1.1 修订）
 
 ```
 当前讨论稿设计：d 层 = 1 个 LLM 干 5 件事
        ↓
 L1 决策：d 层 = 规则代码 + LLM agent 混合
+       ↓
+实际实施（pm2-runner.ts）：5 子职责中 3 项已是规则代码
 ```
 
 具体拆分：
 
-| 子职责                      | 实现                                  | 输入                                 | 输出                                      |
-| --------------------------- | ------------------------------------- | ------------------------------------ | ----------------------------------------- |
-| **d.1 Constitution Check**  | 规则代码（基于关键词匹配 + LLM 兜底） | plan.md / tasks.md + constitution.md | check_result（pass/fail + 违反条款列表）  |
-| **d.2 architecture review** | 规则代码（lint 工具）+ LLM 兜底       | 实际代码 patch + architecture.md     | review_result（pass/fail + 违反规则列表） |
-| **d.3 dispatch 拆分**       | LLM（核心创造性工作）                 | tasks.md + 角色能力清单              | dispatch_packages 列表                    |
-| **d.4 spec/quality review** | LLM（综合判断）                       | e/f/g 产物 + spec/plan               | review_report                             |
-| **d.5 escalation 决策**     | 规则代码（按 escalation_round 计数）  | handoff_records.escalation_round     | 'retry' / 'rebuild' / 'escalate_user'     |
+| 子职责                      | 实现                                                    | 输入                             | 输出                                      | 实施状态  |
+| --------------------------- | ------------------------------------------------------- | -------------------------------- | ----------------------------------------- | --------- |
+| **d.1 Constitution Check**  | LLM 调用 + PASS/VIOLATION 输出格式约束                  | plan.md + constitution.md        | check_result（pass/fail + 违反条款列表）  | ✅ 已实施 |
+| **d.2 architecture review** | 规则代码（lint 工具）+ LLM 兜底                         | 实际代码 patch + architecture.md | review_result（pass/fail + 违反规则列表） | ❌ 未实施 |
+| **d.3 dispatch 拆分**       | **纯代码**（解析 tasks.md 的 [P]/[US1] 标记）           | tasks.md                         | dispatch_packages 列表                    | ✅ 已实施 |
+| **d.4 spec/quality review** | LLM（综合判断）                                         | e/f/g 产物 + spec/plan           | review_report                             | ❌ 未实施 |
+| **d.5 escalation 决策**     | 规则代码（throw Error → watcher reclaim → retry_count） | handoff_records.escalation_round | 'retry' / 'rebuild' / 'escalate_user'     | ✅ 已实施 |
 
-**强制约束**：d.1、d.2、d.5 **不允许**用 LLM 实现核心逻辑。LLM 只能作为兜底（规则无法覆盖的边缘情况）。
+**强制约束**：d.2、d.3、d.5 **不允许**用 LLM 实现核心逻辑。d.1 因需要自然语言对齐判断必须用 LLM，但通过结构化输出格式（`PASS` / `VIOLATION: xxx`）约束 LLM 行为，不属于"自由 LLM 决策"。LLM 只能作为兜底（规则无法覆盖的边缘情况）。
 
 #### L1.2.2 b 层拆分
 
@@ -244,9 +269,14 @@ OpenAWork 落地：
 
 ### L1.4 跨层调用是否允许直连 ★ architecture 纯度
 
-**决策**：默认禁止跨层直连，但明确 3 个 escape hatch。
+**决策**：默认禁止跨层直连，但明确 4 个 escape hatch（其中 #4 为迁移期专用）。
 
-**问题动机**：v3.12 讨论稿 D24 拍板"无 escape hatch 完全禁止"，但这与 D29 的"d 升级用户"路径冲突——d 必须跨过 c 直接通知 b，这本身就违反 D24。
+> 📊 **审计结论（v1.1 反向更新，2026-05-16）**：基于追溯审计（`team-architecture-traceback-audit.md` §4），现有实施采用了 `OPENAWORK_TEAM_HANDOFF_MODE=1` feature flag 灰度策略，**没有完全废弃 `team-leader dispatch` / `interaction-agent rewrite`**。这与 v3.10 D24"完全废弃"决策不符，但实际是**更稳妥的工程选择**。v1.1 正式接受 feature flag 作为合法的迁移期机制。
+
+**问题动机**：v3.12 讨论稿 D24 拍板"无 escape hatch 完全禁止"，但这与两个真实需求冲突：
+
+1. D29 的"d 升级用户"路径——d 必须跨过 c 直接通知 b，本身就违反 D24
+2. **现有代码迁移期**——突然废弃老路径会导致大量回归，团队选择 feature flag 灰度更稳妥
 
 #### L1.4.1 默认禁止规则
 
@@ -256,19 +286,32 @@ a → b → c → d → e/f/g 单向链式调用，**严格禁止**：
 - d 直接调 a（跨过 b）
 - c 直接调 e（跨过 d）
 
-#### L1.4.2 三个 escape hatch
+#### L1.4.2 四个 escape hatch（v1.1 新增 #4）
 
-| Escape Hatch              | 方向       | 协议                                                                          | 限制                                                                                                         |
-| ------------------------- | ---------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **escalation 反向通道**   | 任意层 → b | 通过 `session_inbound_messages` (message_type='escalation_request')           | 只能传结构化 escalation 事件，不能传业务数据；必须经 audit log；必须在 handoff_records.escalation_round 留痕 |
-| **进度上报通道**          | 任意层 → b | 通过 EventEmitter 推送 progress event                                         | 只能传 substate 变更 + 进度数字（如 "3/8 task 完成"）；不携带业务上下文                                      |
-| **cancel/pause 信号广播** | b → 任意层 | 通过 `session_inbound_messages` (message_type='cancel_signal'/'pause_signal') | 只能携带控制信号；由各层主动检查（pull 模式）；级联生效（父→子）                                             |
+| Escape Hatch                       | 方向       | 协议                                                                          | 限制                                                                                                         |
+| ---------------------------------- | ---------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **#1 escalation 反向通道**         | 任意层 → b | 通过 `session_inbound_messages` (message_type='escalation_request')           | 只能传结构化 escalation 事件，不能传业务数据；必须经 audit log；必须在 handoff_records.escalation_round 留痕 |
+| **#2 进度上报通道**                | 任意层 → b | 通过 EventEmitter 推送 progress event                                         | 只能传 substate 变更 + 进度数字（如 "3/8 task 完成"）；不携带业务上下文                                      |
+| **#3 cancel/pause 信号广播**       | b → 任意层 | 通过 `session_inbound_messages` (message_type='cancel_signal'/'pause_signal') | 只能携带控制信号；由各层主动检查（pull 模式）；级联生效（父→子）                                             |
+| **#4 迁移期 feature flag**（新增） | 老路径     | `OPENAWORK_TEAM_HANDOFF_MODE` 环境变量；`isHandoffModeEnabled()` 控制         | **临时**机制；新功能不允许走老路径；只能修 bug 不能加功能；Phase F+ 评估彻底删除时机                         |
 
 #### L1.4.3 实施约束
 
 - **类型层强制**：每个跨层调用点必须在代码中标注允许的 escape hatch 类型，由 lint 规则检查
 - **审计强制**：所有 escape hatch 调用必须写 audit log，标明 hatch_type
-- **演化机制**：发现新的需要反向通信的场景 → 扩展 escape hatch 类型（最多 5 个），不允许"绕过 D24"
+- **演化机制**：发现新的需要反向通信的场景 → 扩展 escape hatch 类型（最多 5 个），不允许"绕过 L1.4"
+
+#### L1.4.4 feature flag 退出策略（v1.1 新增）
+
+`OPENAWORK_TEAM_HANDOFF_MODE` 是**临时机制**，必须有退出计划：
+
+| 阶段     | flag 状态            | 行为                                         | 触发条件                               |
+| -------- | -------------------- | -------------------------------------------- | -------------------------------------- |
+| 当前     | 默认关闭，可手动开启 | 老路径完全跑，handoff 协议 opt-in 验证       | 已实施                                 |
+| Phase F  | 默认开启，可手动关闭 | 优先 handoff 路径，老路径降级为 fallback     | L1.3 流式 handoff 改造完成 + 稳定 4 周 |
+| Phase G+ | 老路径删除           | flag 字段保留但不再读取；老路由返回 410 Gone | Phase F 默认开启 ≥ 12 周无回归         |
+
+**禁止**：把 flag 设计为"永久存在"。如果某场景必须保留老路径，必须升级为正式的 escape hatch（#5+）走 RFC 流程。
 
 ---
 
@@ -291,6 +334,14 @@ a → b → c → d → e/f/g 单向链式调用，**严格禁止**：
 - 仓库级 git 文件由 git 版本控制，不进数据库
 - DB 字段（user_memory_md）字符上限交给 L3（实施时定）
 - 注入顺序固定：AGENTS → architecture → constitution → project-memory → lessons-learned → user_memory → SOUL
+
+> 📊 **审计补充亮点（v1.1 反向更新）**：现有 `team-instruction-stack.ts` 实施**比设计更完善**，3 个额外亮点：
+>
+> 1. **AGENTS.md 去重处理**：第 1 层 AGENTS.md 由 `routes/stream.ts::buildWorkspaceContext` 注入到 stable 段，本模块**不再重复注入**，避免 token 翻倍 + prompt cache prefix 抖动
+> 2. **24K token 软上限警告**：当总 token 估算超过 24,000 时自动加 `oversize-warning` 段，让模型主动声明上下文受限
+> 3. **ForceApply cache breaker tag**：用户改任意一层后通过 `getForceApplyCacheTag` 推进 cache breaker tag，强制下一轮重新拼装；与 D41 配合实现"不破坏 prefix cache 但用户能强制刷新"
+>
+> 这些细节应该作为 L1.5 的**正式约束**保留，而不是被当作实施细节遗漏。
 
 ---
 
@@ -331,6 +382,23 @@ a → b → c → d → e/f/g 单向链式调用，**严格禁止**：
 **为什么是 L1**：决定核心通信机制的数据底座。
 
 **已锁定**（v3.12 D14）：见 L1.3.1。
+
+> 📊 **审计补充：claim_token 防双 claim（v1.1 反向更新）**
+>
+> 现有 `handoff-store.ts::claimHandoff` 使用 `claim_token` 字段实现防双 claim，是**教科书级**实现：
+>
+> ```sql
+> -- 原子 UPDATE：state='pending' AND id=? 是单语句原子操作
+> UPDATE handoff_records
+>    SET state = 'claimed',
+>        claim_token = ?,         -- 随机 UUID
+>        claimed_at = datetime('now')
+>  WHERE id = ? AND state = 'pending'
+>
+> -- 回读 + 双重检查：state == 'claimed' AND claim_token 匹配
+> ```
+>
+> **claim_token 是正式机制**（不是 L3 实施细节）。多 watcher 场景下用 UUID 而非时间戳避免碰撞，单语句 SQL 保证原子性。本字段必须保留在 schema 中。
 
 ---
 
@@ -388,6 +456,38 @@ interface BackgroundTaskScheduler {
 - MVP 实现 `InProcessScheduler`（直接转 `createHandoff`）
 - 接口字段先扩展不限定最小集（priority / scheduledAt / deadline / retryPolicy / idempotencyKey 等）
 - scheduler 接口外**不能**直接调 createHandoff（与 L1.4 同源约束）
+
+> 📊 **审计反向更新（v1.1，2026-05-16）**：现有 `scheduler.ts::InProcessScheduler` 实施**比上面接口更精简**，9 个方法都对应但签名不同：
+>
+> ```ts
+> // 实际签名（建议作为 L1 正式接口）
+> interface BackgroundTaskScheduler {
+>   schedule(input: ScheduledTaskInput): ScheduledTaskSnapshot; // 同步返回
+>   cancel(taskId: string): boolean;
+>   pause(taskId: string): boolean;
+>   resume(taskId: string): boolean;
+>   pauseAll(): number;
+>   resumeAll(): number;
+>   listActive(): ScheduledTaskSnapshot[];
+>   getStatus(taskId: string): ScheduledTaskSnapshot | null;
+>   subscribe(listener: SchedulerListener): () => void;
+> }
+>
+> interface ScheduledTaskInput {
+>   id: string; // 唯一 id（兼具 idempotency key 作用）
+>   meta?: Record<string, unknown>; // 透传元数据
+>   run: (signal: AbortSignal) => Promise<void>; // 实际任务体
+> }
+> ```
+>
+> **简化合理性**：
+>
+> 1. `priority` / `scheduledAt` / `deadline` / `retryPolicy` 等扩展字段属于 L3 实施细节，没有真实使用场景就不应该放在 L1 接口
+> 2. `id` 兼具 `idempotency_key` 作用——同 id 再次 schedule 返回 noop，覆盖了 D40 idempotency 需求
+> 3. 同步返回（`ScheduledTaskSnapshot`）比 `Promise<ScheduledTask>` 简单，因为入队是 in-process 操作
+> 4. 9 个方法本身完整覆盖 D40 锁定的能力
+>
+> **L1.9 决策修订**：以现有接口为正式 L1 接口。未来需要扩展字段时通过 RFC 流程加入，不预先在文档假设。
 
 ---
 
@@ -452,16 +552,50 @@ L2/L3/L4 修改不需要这套流程，按各自规则处理。
 
 ---
 
-## 5. 当前状态
+## 5. 当前状态（v1.1 修订）
 
-- ✅ L1.1 五层架构（基于 v3.12 D11+D12 沉淀）
-- ⚠️ L1.2 d/b 拆分原则（**新增**，需要团队 review）
-- ⚠️ L1.3 流式 handoff（**修改**自 v3.12 D14，需要团队 review）
-- ⚠️ L1.4 跨层调用（**修订**自 v3.12 D24，需要团队 review）
-- ✅ L1.5 项目记忆双存储（保持 v3.12 D34）
-- ⚠️ L1.6 延迟硬约束（**新增**，需要团队 review）
-- ✅ L1.7 Handoff 存储位置（保持 v3.12 D14）
-- ✅ L1.8 Session 状态机（保持 v3.12 D13 + D18 整合）
-- ✅ L1.9 BackgroundTaskScheduler（保持 v3.12 D40）
+### 5.1 实施现状对照
 
-**4 项需要 review 的新增/修改**（L1.2 / L1.3 / L1.4 / L1.6）。一旦这 4 项达成共识，L1 即锁定，可启动 Phase A 设计稿。
+| L1 决策                      | v3.10/v3.11 决策 | 实施状态                     | 实施位置                                                                           |
+| ---------------------------- | ---------------- | ---------------------------- | ---------------------------------------------------------------------------------- |
+| L1.1 五层架构                | D11+D12          | ✅ **已实施**                | Phase B 落地（260515-team-phase-b）                                                |
+| L1.2 d/b 拆分原则            | （新增）         | ⚠️ **未实施**                | 需要团队 review 后启动                                                             |
+| L1.3 流式 handoff            | （修改 D14）     | ⚠️ **部分实施 + 需增量改造** | Phase C/D 实现了原子 handoff，反向通道未实现（artifact-chain.ts 行 22 已预留位置） |
+| L1.4 跨层调用 + escape hatch | （修订 D24）     | ⚠️ **未明确实施**            | 需要 review 现有代码是否符合此约束                                                 |
+| L1.5 项目记忆双存储          | D34 + D55        | ✅ **已实施**                | Phase A 落地（260515-team-phase-a）                                                |
+| L1.6 延迟硬约束              | （新增）         | ⚠️ **未实施**                | 需要团队 review + 接入 telemetry                                                   |
+| L1.7 Handoff 存储位置        | D14              | ✅ **已实施**                | `handoff_records` 表已建（db.ts:1063+）                                            |
+| L1.8 Session 状态机扩展      | D13 + D18 + D42  | ⚠️ **部分实施**              | sessions 5 字段已加，但缺 `substate` / `structural_depth` / `execution_depth`      |
+| L1.9 BackgroundTaskScheduler | D40              | ✅ **已实施**                | `InProcessScheduler` 已在 Phase B 落地                                             |
+
+### 5.2 真正需要团队 review 的项目（v1.1 修订聚焦）
+
+由于很多决策已经实施，剩下需要做的是：
+
+**A. 验证已实施部分是否符合 L1 假设**（追溯性检查）
+
+- [ ] 检查现有 `team-leader dispatch` 是否完全废弃（D24 = L1.4 要求）
+- [ ] 检查现有 watcher 是否正确处理双 claim（claim_token 已存在但需测试覆盖）
+- [ ] 检查 BackgroundTaskScheduler 的 9 个方法是否完整实现
+
+**B. 4 项需要新增/改造**
+
+- [ ] **L1.2 d/b 拆分原则**：现有 d 层是否一个 LLM 干所有事？需要看 Phase D 实施代码确认
+- [ ] **L1.3 流式 handoff 增量改造**：详细方案见 `team-architecture-l1-3-streaming-handoff-spec.md`，4 项改造任务（13.5 天工作量）
+- [ ] **L1.4 escape hatch 协议**：需要在代码中加入 audit log 标记和 lint 规则
+- [ ] **L1.6 延迟约束**：需要新增 telemetry 监控
+
+**C. 已实施部分的潜在缺陷需要 follow-up**
+
+- [ ] 字段命名不一致：本稿写的 `parent_session_id` 与现有 `team_parent_session_id` 不同 —— 决定后续以哪个为准
+- [ ] 时间戳类型不一致：本稿假设 INTEGER ms epoch，现有用 TEXT ISO datetime —— 后续新增字段保持现有类型
+- [ ] L1.8 缺失字段：`substate` / `structural_depth` / `execution_depth` 需要补加
+
+### 5.3 下一步动作建议
+
+1. **追溯性 review**：找一名熟悉 Phase A-E 实施的工程师确认 5.2.A 三项
+2. **L1.2 落地评估**：看 Phase D 真实代码确认 d 层是否需要拆分（最坏情况：全部已是单 LLM 实现，需要重写）
+3. **L1.3 增量改造启动**：见 `team-architecture-l1-3-streaming-handoff-spec.md` §0.A.2 的 4 项改造任务
+4. **L1.4 lint 规则添加**：在 `services/agent-gateway/src/eslint-rules/` 加入"禁止跨层直连"规则
+5. **L1.6 telemetry 接入**：与现有埋点系统对齐，加入 4 个延迟指标
+6. **Phase A 决策文档校准**：v3.12 写的 Phase A 任务清单与实际 Phase A 实施有偏差（v3.12 写"5 天工作量+剥离 SOUL"，但真实 Phase A 已经引入 SOUL）—— 需要更新 `team-architecture-phase-a-decisions.md`

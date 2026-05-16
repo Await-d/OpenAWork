@@ -60,6 +60,9 @@ export function useFileEditor() {
   const persistedActive = activeFilePath;
   const openFilePathsRef = useRef(openFiles.map((f) => f.path));
   openFilePathsRef.current = openFiles.map((f) => f.path);
+  // closeAll 设置该 ref 让接下来的 reload effect 跳过一次,避免 setOpenFiles([]) 之后
+  // store 还没同步完成时,reload effect 看到 persistedPaths 旧值再次 readFile 加载。
+  const skipNextReloadRef = useRef(false);
   useEffect(() => {
     const next = openFilePathsRef.current;
     setOpenFilePaths(next);
@@ -96,6 +99,10 @@ export function useFileEditor() {
   );
 
   useEffect(() => {
+    if (skipNextReloadRef.current) {
+      skipNextReloadRef.current = false;
+      return;
+    }
     if (persistedPaths.length === 0 || openFiles.length > 0) return;
     let cancelled = false;
     void (async () => {
@@ -161,6 +168,15 @@ export function useFileEditor() {
     [openFiles, token, workspaceClient],
   );
 
+  const closeAll = useCallback(() => {
+    console.log('[useFileEditor closeAll] called, prev openFiles:', openFiles.length);
+    // 标记跳过下一次 reload effect,避免在 store 同步前 reload 把旧路径再加载回来。
+    skipNextReloadRef.current = true;
+    setOpenFilePaths([]);
+    setOpenFiles([]);
+    setActiveFilePath(null);
+  }, [setActiveFilePath, setOpenFilePaths, openFiles.length]);
+
   const activeFile = openFiles.find((f) => f.path === activeFilePath) ?? null;
 
   const isDirty = (path: string) => {
@@ -176,6 +192,7 @@ export function useFileEditor() {
     saveError,
     openFile,
     closeFile,
+    closeAll,
     updateContent,
     saveFile,
     setActiveFilePath,

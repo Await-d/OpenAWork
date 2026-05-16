@@ -14,6 +14,7 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import { MarkdownPathRef } from './markdown-path-ref.js';
 import { tokenizePathsInText } from './tool-call/shared/tokenize-paths.js';
+import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -43,6 +44,7 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
   content: string;
   streaming?: boolean;
 }) {
+  const normalizedContent = useMemo(() => transformInlineReasoningTags(content), [content]);
   return (
     <div className="chat-markdown">
       <ReactMarkdown
@@ -50,7 +52,7 @@ const MarkdownMessageContent = memo(function MarkdownMessageContent({
         rehypePlugins={streaming ? [] : [rehypeHighlight]}
         components={markdownComponents}
       >
-        {content}
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );

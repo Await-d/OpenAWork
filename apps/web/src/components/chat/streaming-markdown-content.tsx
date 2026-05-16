@@ -1,11 +1,16 @@
 import { lazy, memo, Suspense, useMemo } from 'react';
 import { splitStreamingMarkdownIntoSegments } from './streaming-markdown-chunks.js';
+import { transformInlineReasoningTags } from './transform-inline-reasoning-tags.js';
 
 const MarkdownMessageContent = lazy(() => import('./markdown-message-content.js'));
 const STREAMING_PLAIN_TAIL_THRESHOLD = 280;
 
 export default function StreamingMarkdownContent({ content }: { content: string }) {
-  const segments = useMemo(() => splitStreamingMarkdownIntoSegments(content), [content]);
+  const normalizedContent = useMemo(() => transformInlineReasoningTags(content), [content]);
+  const segments = useMemo(
+    () => splitStreamingMarkdownIntoSegments(normalizedContent),
+    [normalizedContent],
+  );
   const shouldRenderPlainTail = useMemo(() => {
     return shouldRenderStreamingTailAsPlainText(segments.activeTail);
   }, [segments.activeTail]);

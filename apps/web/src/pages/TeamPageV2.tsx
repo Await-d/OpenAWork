@@ -39,6 +39,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  Fragment,
   type CSSProperties,
   type MouseEvent,
 } from 'react';
@@ -57,7 +58,6 @@ import { TeamStatusBar } from './team/runtime/TeamStatusBar.js';
 import { LayerConversationDrawer } from './team/runtime/LayerConversationDrawer.js';
 import { SessionTreeView } from './team/runtime/SessionTreeView.js';
 import { TeamArtifactSection } from './team/runtime/TeamArtifactSection.js';
-import { ReviewReportView } from './team/runtime/ReviewReportView.js';
 import { TeamRuntimeSettingsPanel } from './team/runtime/team-runtime-settings-panel.js';
 import { TeamTabContent } from './team/runtime/TeamTabContent.js';
 import { TeamSessionListSidebar } from './team/runtime/TeamSessionListSidebar.js';
@@ -65,6 +65,7 @@ import { WorkspaceSwitcher } from './team/runtime/WorkspaceSwitcher.js';
 import { TeamHeaderMetrics } from './team/runtime/TeamHeaderMetrics.js';
 import { NewTeamWorkspaceModal } from './team/runtime/NewTeamWorkspaceModal.js';
 import { ConfirmDeleteWorkspaceModal } from './team/runtime/ConfirmDeleteWorkspaceModal.js';
+import { renderMiddleTabContent, type MiddleTabKey } from './team/runtime/MiddleTabRouter.js';
 import {
   useBreakpoint,
   useTeamPageMode,
@@ -90,14 +91,44 @@ const SIDEBAR_COLLAPSED_WIDTH = 52;
 const RIGHT_PANEL_WIDTH = 360;
 const RIGHT_PANEL_TABLET_WIDTH = 320;
 
-type MiddleTabKey = 'conversation' | 'tasks' | 'artifacts' | 'review';
+interface MiddleTabDef {
+  key: MiddleTabKey;
+  label: string;
+  icon: string;
+  /** 同 group 的 tab 在 tab 栏中放在一起。 */
+  group: '3D' | 'A' | 'B' | 'C' | 'D' | 'E';
+}
 
-const MIDDLE_TABS: ReadonlyArray<{ key: MiddleTabKey; label: string; icon: string }> = [
-  { key: 'conversation', label: '对话', icon: '💬' },
-  { key: 'tasks', label: '任务流', icon: '📋' },
-  { key: 'artifacts', label: '产物', icon: '📦' },
-  { key: 'review', label: '评审', icon: '✅' },
+const MIDDLE_TABS: ReadonlyArray<MiddleTabDef> = [
+  { group: '3D', key: 'office', label: '3D 办公', icon: '🏢' },
+  // A. 概览
+  { group: 'A', key: 'dashboard', label: '仪表盘', icon: '📊' },
+  { group: 'A', key: 'topology', label: '拓扑', icon: '🕸️' },
+  { group: 'A', key: 'health', label: '健康度', icon: '🩺' },
+  // B. 通讯
+  { group: 'B', key: 'conversation', label: '对话', icon: '💬' },
+  { group: 'B', key: 'layered', label: '层级对话', icon: '🪜' },
+  { group: 'B', key: 'messages', label: '消息', icon: '✉️' },
+  { group: 'B', key: 'mentions', label: '待回复', icon: '🔔' },
+  // C. 任务/产物
+  { group: 'C', key: 'tasks', label: '任务流', icon: '📋' },
+  { group: 'C', key: 'dispatch', label: '派发包', icon: '📦' },
+  { group: 'C', key: 'session-tree', label: '会话树', icon: '🌳' },
+  { group: 'C', key: 'artifacts', label: '产物', icon: '🧱' },
+  { group: 'C', key: 'review', label: '评审', icon: '✅' },
+  { group: 'C', key: 'review-queue', label: '评审待办', icon: '🗂️' },
+  // D. 度量
+  { group: 'D', key: 'timing', label: '耗时', icon: '⏱️' },
+  { group: 'D', key: 'usage', label: '用量', icon: '🔋' },
+  { group: 'D', key: 'tools', label: '工具调用', icon: '🛠️' },
+  // E. 配置/治理
+  { group: 'E', key: 'members', label: '成员', icon: '👥' },
+  { group: 'E', key: 'templates', label: '模板', icon: '📐' },
+  { group: 'E', key: 'shares', label: '共享', icon: '🤝' },
+  { group: 'E', key: 'audit', label: '审计', icon: '📜' },
 ];
+
+const MIDDLE_TAB_KEYS: ReadonlySet<MiddleTabKey> = new Set(MIDDLE_TABS.map((tab) => tab.key));
 
 const MIDDLE_TAB_BAR_STYLE: CSSProperties = {
   display: 'flex',
@@ -106,6 +137,16 @@ const MIDDLE_TAB_BAR_STYLE: CSSProperties = {
   borderBottom: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
   flexShrink: 0,
   background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
+  overflowX: 'auto',
+  scrollbarWidth: 'thin',
+};
+
+const TAB_GROUP_SEPARATOR_STYLE: CSSProperties = {
+  alignSelf: 'stretch',
+  width: 1,
+  margin: '6px 4px 4px',
+  background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+  flexShrink: 0,
 };
 
 const MIDDLE_TAB_BTN_STYLE: CSSProperties = {
@@ -121,6 +162,8 @@ const MIDDLE_TAB_BTN_STYLE: CSSProperties = {
   fontWeight: 600,
   cursor: 'pointer',
   borderRadius: '6px 6px 0 0',
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
 };
 
 const MIDDLE_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
@@ -239,11 +282,12 @@ export default function TeamPageV2() {
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null);
   const [showOfficeFullscreen, setShowOfficeFullscreen] = useState(false);
   const [middleTab, setMiddleTab] = useState<MiddleTabKey>(() => {
-    if (typeof window === 'undefined') return 'conversation';
+    if (typeof window === 'undefined') return 'office';
     const saved = window.localStorage.getItem('teamV2.middleTab');
-    return (
-      saved === 'tasks' || saved === 'artifacts' || saved === 'review' ? saved : 'conversation'
-    ) as MiddleTabKey;
+    if (saved && MIDDLE_TAB_KEYS.has(saved as MiddleTabKey)) {
+      return saved as MiddleTabKey;
+    }
+    return 'office';
   });
   const {
     collapsed: rightCollapsed,
@@ -276,6 +320,16 @@ export default function TeamPageV2() {
       setSelectedTeamId(data.defaultSelectedTeamId);
     }
   }, [data.defaultSelectedTeamId, selectedTeamId]);
+
+  // 派生当前选中的会话（用于 tab 中的展示）
+  const selectedTeam = useMemo(() => {
+    if (!selectedTeamId) return null;
+    for (const group of data.workspaceGroups) {
+      const found = group.sessions.find((s) => s.id === selectedTeamId);
+      if (found) return found;
+    }
+    return null;
+  }, [data.workspaceGroups, selectedTeamId]);
 
   // 连接 team-events WS
   useEffect(() => {
@@ -542,31 +596,37 @@ export default function TeamPageV2() {
               hideInput={middleTab === 'conversation' && Boolean(selectedTeamId)}
               topBar={
                 <div style={MIDDLE_TAB_BAR_STYLE} role="tablist" aria-label="中间区视图切换">
-                  {MIDDLE_TABS.map((tab) => {
+                  {MIDDLE_TABS.map((tab, idx) => {
                     const active = middleTab === tab.key;
+                    const prev = idx > 0 ? MIDDLE_TABS[idx - 1] : undefined;
+                    const showSeparator = prev && prev.group !== tab.group;
                     return (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        aria-controls={`middle-panel-${tab.key}`}
-                        onClick={() => handleMiddleTabChange(tab.key)}
-                        style={active ? MIDDLE_TAB_BTN_ACTIVE_STYLE : MIDDLE_TAB_BTN_STYLE}
-                        onMouseEnter={(e) => {
-                          if (!active) {
-                            e.currentTarget.style.color = 'var(--text-2)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!active) {
-                            e.currentTarget.style.color = 'var(--text-3)';
-                          }
-                        }}
-                      >
-                        <span aria-hidden>{tab.icon}</span>
-                        <span>{tab.label}</span>
-                      </button>
+                      <Fragment key={tab.key}>
+                        {showSeparator ? (
+                          <span aria-hidden style={TAB_GROUP_SEPARATOR_STYLE} />
+                        ) : null}
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          aria-controls={`middle-panel-${tab.key}`}
+                          onClick={() => handleMiddleTabChange(tab.key)}
+                          style={active ? MIDDLE_TAB_BTN_ACTIVE_STYLE : MIDDLE_TAB_BTN_STYLE}
+                          onMouseEnter={(e) => {
+                            if (!active) {
+                              e.currentTarget.style.color = 'var(--text-2)';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!active) {
+                              e.currentTarget.style.color = 'var(--text-3)';
+                            }
+                          }}
+                        >
+                          <span aria-hidden>{tab.icon}</span>
+                          <span>{tab.label}</span>
+                        </button>
+                      </Fragment>
                     );
                   })}
                   {showOffice && officeCollapsed ? (
@@ -591,6 +651,7 @@ export default function TeamPageV2() {
                         alignItems: 'center',
                         gap: 4,
                         alignSelf: 'center',
+                        flexShrink: 0,
                       }}
                     >
                       <span aria-hidden>▼</span>
@@ -609,20 +670,30 @@ export default function TeamPageV2() {
                     id={`middle-panel-${middleTab}`}
                     role="tabpanel"
                     aria-labelledby={`middle-tab-${middleTab}`}
-                    style={{ display: 'grid', gap: 12 }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                      flex: 1,
+                      minHeight: 0,
+                      overflow: 'auto',
+                    }}
                   >
-                    {middleTab === 'tasks' ? (
-                      <SessionTreeView onSelectSession={handleSelectLayerSession} />
-                    ) : null}
-                    {middleTab === 'artifacts' ? <TeamArtifactSection /> : null}
-                    {middleTab === 'review' ? (
-                      <ReviewReportView
-                        reportMarkdown={null}
-                        overallVerdict={null}
-                        specReviewPassed={null}
-                        qualityReviewPassed={null}
-                      />
-                    ) : null}
+                    {renderMiddleTabContent({
+                      middleTab,
+                      selectedTeamId,
+                      selectedTeam,
+                      officeSceneState,
+                      onSelectTeam: handleSelectTeam,
+                      onOpenFullscreen: handleOpenFullscreen,
+                      onSelectLayerSession: handleSelectLayerSession,
+                      onCancelHandoff: handleCancelHandoff,
+                      handoffs,
+                      gatewayUrl,
+                      accessToken,
+                      activeWorkspaceName: workspaceState.activeWorkspace?.name ?? undefined,
+                      teamWorkspaceId: resolvedTeamWorkspaceId,
+                    })}
                   </div>
                 )
               }

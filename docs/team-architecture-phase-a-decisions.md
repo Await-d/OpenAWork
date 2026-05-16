@@ -1,15 +1,62 @@
-# Team 架构 Phase A 决策（L2，v1.0）
+# Team 架构 Phase A 决策（L2，v1.1 - 复查修订）
+
+> ⚠️ **复查发现的现状（2026-05-16）**：
+>
+> 本文档初稿（v1.0）建议"Phase A 剥离 SOUL，只验证 constitution 编辑"，但**Phase A 实际已经完成实施**且包含了 SOUL。详见 `.agentdocs/workflow/done/260515-team-phase-a-实施方案.md` 与 `services/agent-gateway/src/team-phase-a-content/soul-defaults.ts`。
+>
+> **现状概要**：
+>
+> - ✅ constitution_md 字段 + 编辑 UI（已上线）
+> - ✅ agent_personas 表 + 5 个内置 SOUL（已上线，非 v1.0 建议的"剥离"）
+> - ✅ 7 层注入栈（已上线）
+> - ✅ Memory 双存储 + 13 条威胁模式扫描（已上线）
+> - ✅ ForceApply 24h ≤ 5 次限流（已上线）
+>
+> **本文档的真正价值变为**：
+>
+> 1. 沉淀 Phase A 已实施部分的设计依据
+> 2. 标注 v1.0 中**与现实偏差**的部分（特别是 Phase-A.1 SOUL 剥离建议已被推翻）
+> 3. 评估 Phase A 验证指标（v1.0 提的 4 个指标是否已收集？）
+>
+> ---
 
 > 用途：Phase A 启动需要拍板的决策清单。Phase A 目标是**最小切口验证 constitution 编辑假设**——用户是否真的会编辑团队约束。
 >
 > 关联文档：
 >
-> - L1 基线：`team-architecture-l1-baseline.md`（必须先锁定 L1）
+> - L1 基线：`team-architecture-l1-baseline.md`（v1.1）
 > - 思想分析归档：`team-architecture-spec-kit-borrowing-discussion.md`
-> - Phase B 决策：`team-architecture-phase-b-decisions.md`（待 Phase A 验证后创建）
+> - **Phase A 实施方案**：`.agentdocs/workflow/done/260515-team-phase-a-实施方案.md`（已完成）
+> - Phase B 决策：（已实施，详见 `.agentdocs/workflow/done/260515-team-phase-b-实施方案.md`）
 >
-> 创建时间：2026-05-16
-> 当前状态：**草稿，待 Phase A 启动前 review**
+> 创建时间：2026-05-16（v1.0 → v1.1 复查修订）
+> 当前状态：**v1.1 草稿，仅作 Phase A 复盘归档使用**
+
+---
+
+## 0. v1.1 修订说明
+
+### 0.1 v1.0 的核心错误
+
+v1.0 建议"Phase A 剥离 SOUL，只验证 constitution"，理由是"避免验证失败时无法定位原因"。
+
+**这个建议本身有道理，但来得太晚**——Phase A 实际已实施时同时引入了 constitution + SOUL + 7 层注入栈。
+
+### 0.2 v1.1 的处理
+
+不再"重新设计 Phase A"，而是：
+
+1. 把 v1.0 §1 的 6 项决策从"待拍板"改为"复盘对照表"
+2. 把 v1.0 §3 工作量估算从"5 天预测"改为"实际工作量记录"
+3. 把 v1.0 §5 验证指标从"上线后收集"改为"现状评估"
+
+### 0.3 v1.0 文档的剩余价值
+
+- §1 决策清单：作为 Phase A 决策考古资料
+- §5 验证指标：仍然是"评估 Phase A 是否成功"的合理指标
+- §6 不做清单：仍然是"避免 Phase A scope creep"的有用边界
+
+---
 
 ---
 

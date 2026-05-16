@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import NavRail from './layout/NavRail.js';
 import WorkspacePickerModal from './WorkspacePickerModal.js';
-import { SessionSidebar } from './layout/SessionSidebar.js';
 import { CachedRouteOutlet } from './CachedRouteOutlet.js';
 import QuestionPromptCard from './QuestionPromptCard.js';
 import { useUIStateStore } from '../stores/uiState.js';
@@ -622,10 +621,8 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
     };
   }, [accessToken, gatewayUrl, isPaletteOpen, paletteQuery]);
 
-  const shouldOverlaySessionSidebar = isChatRoute && isNarrowViewport;
-  const sessionSidebarWidth = shouldOverlaySessionSidebar
-    ? 'min(86vw, var(--sidebar-width, 260px))'
-    : 'var(--sidebar-width, 260px)';
+  // shouldOverlaySessionSidebar / sessionSidebarWidth 已随 SessionSidebar 一起
+  // 迁出至 ChatPage 内部计算;Layout 不再渲染会话列表。
 
   const handleSelectWorkspace = useCallback(
     async (path: string) => {
@@ -822,83 +819,8 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
             pendingPermissionIndicator={!!pendingPermission}
           />
 
-          <div
-            aria-hidden={!leftSidebarOpen || !isChatRoute}
-            style={{
-              width: shouldOverlaySessionSidebar
-                ? sessionSidebarWidth
-                : isChatRoute && leftSidebarOpen
-                  ? sessionSidebarWidth
-                  : 0,
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              height: '100%',
-              borderRight:
-                isChatRoute && leftSidebarOpen ? '1px solid var(--border-subtle)' : 'none',
-              transition: shouldOverlaySessionSidebar
-                ? 'transform 200ms ease, opacity 200ms ease'
-                : 'width 200ms ease',
-              pointerEvents: isChatRoute && leftSidebarOpen ? undefined : 'none',
-              position: shouldOverlaySessionSidebar ? 'absolute' : 'relative',
-              left: shouldOverlaySessionSidebar ? 0 : undefined,
-              top: shouldOverlaySessionSidebar ? 0 : undefined,
-              bottom: shouldOverlaySessionSidebar ? 0 : undefined,
-              zIndex: shouldOverlaySessionSidebar ? 35 : undefined,
-              transform: shouldOverlaySessionSidebar
-                ? leftSidebarOpen
-                  ? 'translateX(0)'
-                  : 'translateX(-100%)'
-                : undefined,
-              opacity: shouldOverlaySessionSidebar ? (leftSidebarOpen ? 1 : 0) : 1,
-              boxShadow:
-                shouldOverlaySessionSidebar && leftSidebarOpen ? 'var(--shadow-lg)' : 'none',
-              background: shouldOverlaySessionSidebar ? 'var(--surface)' : undefined,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                width: sessionSidebarWidth,
-                maxWidth: '100%',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  height: '100%',
-                  width: sessionSidebarWidth,
-                  maxWidth: '100%',
-                }}
-              >
-                <SessionSidebar
-                  onOpenFile={onOpenFile}
-                  fetchRootPath={fetchRootPath}
-                  fetchTree={fetchTree}
-                  onOpenWorkspacePicker={() => setShowWorkspacePicker(true)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {shouldOverlaySessionSidebar && leftSidebarOpen && (
-            <button
-              type="button"
-              aria-label="关闭侧栏遮罩"
-              onClick={() => setLeftSidebarOpen(false)}
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 30,
-                background: 'oklch(0 0 0 / 0.42)',
-                backdropFilter: 'blur(1px)',
-              }}
-            />
-          )}
+          {/* 会话列表 (SessionSidebar) 已迁至 ChatPage 内部渲染。
+              其他页面(团队/设置/技能等)由各自页面自行决定是否需要 left rail。 */}
 
           <div
             style={{

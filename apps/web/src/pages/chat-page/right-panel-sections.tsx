@@ -874,12 +874,6 @@ export function ChatOverviewTabContent(props: {
       value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
     },
     { label: 'YOLO', value: yoloMode ? '开启' : '关闭', highlight: yoloMode },
-    {
-      label: '上下文用量',
-      value: contextUsageSnapshot
-        ? `${contextUsageSnapshot.estimated ? '≈' : ''}${Math.round((contextUsageSnapshot.usedTokens / Math.max(1, contextUsageSnapshot.maxTokens)) * 100)}% · ${fmtOverviewTokens(contextUsageSnapshot.usedTokens)}/${fmtOverviewTokens(contextUsageSnapshot.maxTokens)}`
-        : '—',
-    },
     { label: '最近压缩', value: compactions[0]?.summary ?? '无' },
   ];
 
@@ -905,6 +899,104 @@ export function ChatOverviewTabContent(props: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* 上下文用量条:与 composer 底部进度条同款,带 95% 压缩刻度 */}
+      {contextUsageSnapshot ? (
+        <div
+          style={{
+            padding: '8px 4px 6px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          {(() => {
+            const used = Math.max(0, contextUsageSnapshot.usedTokens);
+            const max = Math.max(1, contextUsageSnapshot.maxTokens);
+            const pctRaw = Math.round((used / max) * 100);
+            const pct = Math.min(100, pctRaw);
+            const color =
+              pctRaw >= 90 ? 'var(--danger)' : pctRaw >= 70 ? 'var(--warning)' : 'var(--success)';
+            const compactionPct = 95; // 默认压缩阈值,后续可从 active model 注入
+            const title = `${contextUsageSnapshot.estimated ? '上下文估算已用' : '上下文已用'} ${used.toLocaleString()} / ${max.toLocaleString()} (${pctRaw}%)`;
+            return (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    fontSize: 10.5,
+                    color: 'var(--text-3)',
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>上下文用量</span>
+                  <span style={{ color, fontVariantNumeric: 'tabular-nums' }}>
+                    {contextUsageSnapshot.estimated ? '≈' : ''}
+                    {pctRaw}%
+                    <span
+                      style={{
+                        color: 'var(--text-3)',
+                        fontWeight: 500,
+                        marginLeft: 6,
+                      }}
+                    >
+                      {fmtOverviewTokens(used)} / {fmtOverviewTokens(max)}
+                    </span>
+                  </span>
+                </div>
+                <div
+                  role="meter"
+                  aria-valuenow={Math.min(used, max)}
+                  aria-valuemin={0}
+                  aria-valuemax={max}
+                  aria-label="上下文用量"
+                  title={title}
+                  style={{
+                    position: 'relative',
+                    height: 4,
+                    width: '100%',
+                  }}
+                >
+                  {/* track + 压缩刻度 */}
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 4,
+                      background: `linear-gradient(
+                        to right,
+                        transparent calc(${compactionPct}% - 1.5px),
+                        var(--warning) calc(${compactionPct}% - 1.5px),
+                        var(--warning) calc(${compactionPct}% + 1.5px),
+                        transparent calc(${compactionPct}% + 1.5px)
+                      ), linear-gradient(to bottom, transparent 0, transparent 2px, color-mix(in oklch, var(--border) 100%, transparent) 2px, color-mix(in oklch, var(--border) 100%, transparent) 4px)`,
+                    }}
+                  />
+                  {/* fill */}
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      bottom: 0,
+                      width: `${pct}%`,
+                      height: 2,
+                      background: color,
+                      borderRadius: 999,
+                      transition: 'width 400ms cubic-bezier(.4, 0, .2, 1), background 300ms ease',
+                    }}
+                  />
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
+
       {/* 会话元信息 */}
       <div
         style={{

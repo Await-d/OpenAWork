@@ -21,6 +21,47 @@ function git(cmd) {
   }
 }
 
+function deriveRepositoryUrl(rawRemote) {
+  if (!rawRemote) return '';
+  // Normalise common forms:
+  //   git@github.com:Await-d/OpenAWork.git → https://github.com/Await-d/OpenAWork
+  //   https://github.com/Await-d/OpenAWork.git → https://github.com/Await-d/OpenAWork
+  const sshMatch = rawRemote.match(/^git@([^:]+):(.+?)(\.git)?$/);
+  if (sshMatch) {
+    return `https://${sshMatch[1]}/${sshMatch[2]}`;
+  }
+  const httpsMatch = rawRemote.match(/^(https?:\/\/[^\s]+?)(\.git)?$/);
+  if (httpsMatch) {
+    return httpsMatch[1];
+  }
+  return rawRemote;
+}
+
+function getRecentCommits(limit = 20) {
+  // Use a unit-separator + record-separator combo so messages with newlines
+  // or pipes don't break parsing.
+  const FIELD = '\u001f';
+  const RECORD = '\u001e';
+  const format = ['%h', '%H', '%cI', '%an', '%s'].join(FIELD);
+  const raw = git(`git log -n ${limit} --pretty=format:"${format}${RECORD}"`);
+  if (!raw) return [];
+
+  return raw
+    .split(RECORD)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [shortHash, fullHash, date, author, subject] = line.split(FIELD);
+      return {
+        shortHash: shortHash ?? '',
+        fullHash: fullHash ?? '',
+        date: date ?? '',
+        author: author ?? '',
+        subject: subject ?? '',
+      };
+    });
+}
+
 export function getVersionInfo() {
   const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf-8'));
   const baseVersion = pkg.version;
@@ -30,6 +71,8 @@ export function getVersionInfo() {
   const isDirty = git('git status --porcelain') !== '';
   const branch = git('git rev-parse --abbrev-ref HEAD') || 'unknown';
   const buildTime = new Date().toISOString();
+  const repositoryUrl = deriveRepositoryUrl(git('git config --get remote.origin.url'));
+  const recentCommits = getRecentCommits(20);
 
   // User-facing version stays semver from package.json.
   // Build identity keeps git metadata for debugging and traceability.
@@ -44,6 +87,8 @@ export function getVersionInfo() {
     branch,
     isDirty,
     buildTime,
+    repositoryUrl,
+    recentCommits,
   };
 }
 

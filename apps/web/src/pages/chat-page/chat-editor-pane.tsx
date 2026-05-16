@@ -25,6 +25,8 @@ export interface ChatEditorPaneProps {
   handleSaveFile: (path: string) => Promise<void>;
   /** Browser preview URL — when set, shows a browser tab in the editor pane. */
   browserPreviewUrl?: string | null;
+  /** Current workspace path — used to namespace BuiltInBrowser tabs storage. */
+  workspacePath?: string | null;
   /** Active tab in the editor pane. */
   activeTab?: EditorPaneTab;
   /** Callback when the active tab changes. */
@@ -41,6 +43,7 @@ export function ChatEditorPane({
   saving,
   handleSaveFile,
   browserPreviewUrl,
+  workspacePath,
   activeTab = 'code',
   onTabChange,
 }: ChatEditorPaneProps) {
@@ -52,11 +55,19 @@ export function ChatEditorPane({
   const [browserMounted, setBrowserMounted] = useState(false);
   const showBrowserTab = !!browserPreviewUrl || browserMounted;
 
-  // Auto-switch to browser tab when a preview URL is first detected
+  // Auto-switch to browser tab only when browserPreviewUrl is *newly* set
+  // (e.g. dev-server detect 推入或用户主动打开)。挂载时 url 已存在(刷新后从持久化
+  // 恢复)的情况不切 tab,以保留用户上次留下的 code/browser 选择。
+  const previousBrowserUrlRef = React.useRef<string | null | undefined>(browserPreviewUrl);
   useEffect(() => {
+    const prev = previousBrowserUrlRef.current;
+    previousBrowserUrlRef.current = browserPreviewUrl;
     if (browserPreviewUrl) {
       setBrowserMounted(true);
-      setCurrentTab('browser');
+      // 只有从无到有才切 tab(用户主动触发)。
+      if (!prev) {
+        setCurrentTab('browser');
+      }
     }
   }, [browserPreviewUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -192,6 +203,7 @@ export function ChatEditorPane({
               display: currentTab === 'browser' ? 'flex' : 'none',
             }}
             previewUrl={browserPreviewUrl}
+            workspacePath={workspacePath}
             hidden={currentTab !== 'browser'}
           />
         )}

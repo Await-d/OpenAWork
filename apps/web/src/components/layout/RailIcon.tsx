@@ -1,16 +1,54 @@
 import React from 'react';
 
-export const railItems = [
-  { to: '/chat', label: 'Chat' },
-  { to: '/images', label: 'Images' },
-  { to: '/team', label: 'Team' },
-  { to: '/templates', label: 'Templates' },
-  { to: '/sessions', label: 'Sessions' },
-  { to: '/skills', label: 'Skills' },
-  { to: '/agents', label: 'Agents' },
-  { to: '/workflows', label: 'Workflows' },
-  { to: '/schedules', label: 'Schedules' },
+export interface RailItem {
+  to: string;
+  label: string;
+}
+
+export interface RailGroup {
+  /** Unique id for keying. */
+  id: string;
+  /** Title shown above the group when the rail is expanded. */
+  title: string;
+  items: RailItem[];
+}
+
+export const railGroups: RailGroup[] = [
+  {
+    id: 'workspace',
+    title: '工作台',
+    items: [
+      { to: '/chat', label: 'Chat' },
+      { to: '/sessions', label: 'Sessions' },
+    ],
+  },
+  {
+    id: 'collaboration',
+    title: '协作',
+    items: [
+      { to: '/team', label: 'Team' },
+      { to: '/templates', label: 'Templates' },
+    ],
+  },
+  {
+    id: 'automation',
+    title: '自动化',
+    items: [
+      { to: '/agents', label: 'Agents' },
+      { to: '/skills', label: 'Skills' },
+      { to: '/workflows', label: 'Workflows' },
+      { to: '/schedules', label: 'Schedules' },
+    ],
+  },
+  {
+    id: 'content',
+    title: '内容',
+    items: [{ to: '/images', label: 'Images' }],
+  },
 ];
+
+/** @deprecated Use railGroups instead. Kept for backward compatibility. */
+export const railItems: RailItem[] = railGroups.flatMap((group) => group.items);
 
 export const railLabelCn: Record<string, string> = {
   Chat: '对话',
@@ -23,16 +61,17 @@ export const railLabelCn: Record<string, string> = {
   Team: '团队',
   Templates: '模板',
   Schedules: '定时',
+  About: '关于',
 };
 
 const I = ({ d, children }: { d?: string; children?: React.ReactNode }) => (
   <svg
-    width="18"
-    height="18"
+    width="17"
+    height="17"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    strokeWidth="2"
+    strokeWidth="1.75"
     strokeLinecap="round"
     strokeLinejoin="round"
     aria-hidden="true"
@@ -138,6 +177,14 @@ export function railIcon(label: string) {
         <I>
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </I>
+      );
+    case 'About':
+      return (
+        <I>
+          <circle cx="12" cy="12" r="9" />
+          <line x1="12" y1="11" x2="12" y2="17" />
+          <line x1="12" y1="7.5" x2="12" y2="7.51" />
         </I>
       );
     default:
