@@ -47,3 +47,6 @@ coverage
 /**/**/*.db-*
 services/agent-gateway/data/
 /tsconfig.tsbuildinfo
+
+# 本地重构前的代码备份
+.backup/
