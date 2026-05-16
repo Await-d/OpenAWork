@@ -506,26 +506,12 @@ export default function TeamPageV2() {
 
           {/* 中：紧凑栏 + 对话区 */}
           <section style={LEFT_AREA_STYLE}>
-            {showOffice ? (
-              <>
-                {officeCollapsed ? (
-                  <button
-                    className="team-v2-control team-v2-control--surface"
-                    type="button"
-                    onClick={() => setOfficeCollapsed(false)}
-                    style={OFFICE_EXPAND_BUTTON_STYLE}
-                    aria-label="展开 3D 流程动画"
-                    title="展开 3D 流程动画"
-                  >
-                    ▼ 流程
-                  </button>
-                ) : null}
-                <OfficeCompactBar
-                  collapsed={officeCollapsed}
-                  onToggle={() => setOfficeCollapsed((v) => !v)}
-                  onFullscreen={handleOpenFullscreen}
-                />
-              </>
+            {showOffice && !officeCollapsed ? (
+              <OfficeCompactBar
+                collapsed={officeCollapsed}
+                onToggle={() => setOfficeCollapsed((v) => !v)}
+                onFullscreen={handleOpenFullscreen}
+              />
             ) : null}
 
             <ConversationArea
@@ -562,6 +548,34 @@ export default function TeamPageV2() {
                       </button>
                     );
                   })}
+                  {showOffice && officeCollapsed ? (
+                    <button
+                      type="button"
+                      onClick={() => setOfficeCollapsed(false)}
+                      aria-label="展开 3D 流程动画"
+                      title="展开 3D 流程动画"
+                      style={{
+                        marginLeft: 'auto',
+                        marginRight: 8,
+                        marginBottom: 6,
+                        padding: '4px 10px',
+                        border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+                        borderRadius: 6,
+                        background: 'transparent',
+                        color: 'var(--text-3)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        alignSelf: 'center',
+                      }}
+                    >
+                      <span aria-hidden>▼</span>
+                      <span>流程</span>
+                    </button>
+                  ) : null}
                 </div>
               }
               messagesOverride={

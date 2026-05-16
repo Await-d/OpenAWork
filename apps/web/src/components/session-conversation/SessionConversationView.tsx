@@ -159,7 +159,9 @@ export interface SessionConversationViewProps {
   activeModelId: string;
   activeModelLabel?: string;
   onLoadEarlier: () => void;
-  /** 初始无消息时显示的 WelcomeScreen 行为（chat 用，team 不传 = 不显示）。 */
+  /**
+   * 初始无消息时显示的 WelcomeScreen 行为（chat 用，team 不传 = 不显示）。
+   */
   welcomeScreen?: {
     hasWorkspace: boolean;
     dialogueMode: DialogueMode;
@@ -167,6 +169,12 @@ export interface SessionConversationViewProps {
     onOpenWorkspace: () => void;
     onSelectMode: (mode: DialogueMode) => void;
   };
+  /**
+   * 当 messages 为空、未在 streaming、且 remoteSessionBusyState 为 null 时
+   * 显示的空状态内容。chat 端可不传（继续使用 WelcomeScreen），team 端用此
+   * slot 注入自己的空态（如"会话尚未开始 / 等待 b 派发任务"等引导）。
+   */
+  emptyContent?: ReactNode;
 
   // ─── 流式状态 ───────────────────────────────────────────────────────
   streaming: boolean;
@@ -189,6 +197,8 @@ export interface SessionConversationViewProps {
   onScrollToBottom: (behavior: 'smooth' | 'auto', target: 'latest-edge' | 'center') => void;
   /** 编辑器分屏打开时调整 padding。 */
   editorMode: boolean;
+  /** 紧凑模式（team 嵌入时用）：减少顶部/侧边 padding，充分利用空间。 */
+  compact?: boolean;
 
   // ─── todo bar ───────────────────────────────────────────────────────
   sessionTodos: SessionTodoItem[];
@@ -279,6 +289,10 @@ export interface SessionConversationViewProps {
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
   markSessionMetadataDirty?: () => void;
+  /** Context window usage to render inline next to the send button. */
+  contextUsedTokens?: number;
+  contextMaxTokens?: number;
+  contextIsEstimated?: boolean;
 }
 
 // ─── 内部样式常量（提到顶层避免每次渲染创建新对象）────────────────────────
@@ -379,6 +393,7 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
     activeModelLabel,
     onLoadEarlier,
     welcomeScreen,
+    emptyContent,
 
     streaming,
     stoppingStream,
@@ -397,6 +412,7 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
     hasPendingFollowContent,
     onScrollToBottom,
     editorMode,
+    compact,
 
     sessionTodos,
     rightOpen,
@@ -468,6 +484,9 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
     markSessionMetadataDirty,
+    contextUsedTokens,
+    contextMaxTokens,
+    contextIsEstimated,
   } = props;
 
   const composerFeatures = buildComposerFeatures(composerExtras);
@@ -479,9 +498,11 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
     !visibleStreaming &&
     !remoteSessionBusyState;
 
-  const scrollPadding = editorMode
-    ? `1rem clamp(20px, 4vw, 44px) ${CHAT_SCROLL_BOTTOM_PADDING}`
-    : `0.9rem clamp(10px, 3vw, 32px) ${CHAT_SCROLL_BOTTOM_PADDING}`;
+  const scrollPadding = compact
+    ? `0.5rem 12px ${CHAT_SCROLL_BOTTOM_PADDING}`
+    : editorMode
+      ? `1rem clamp(20px, 4vw, 44px) ${CHAT_SCROLL_BOTTOM_PADDING}`
+      : `0.9rem clamp(10px, 3vw, 32px) ${CHAT_SCROLL_BOTTOM_PADDING}`;
 
   const scrollRegionStyle: CSSProperties = {
     flex: 1,
@@ -495,8 +516,8 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
 
   const contentColumnStyle: CSSProperties = {
     width: '100%',
-    maxWidth: editorMode ? 680 : 768,
-    margin: '0 auto',
+    maxWidth: compact ? '100%' : editorMode ? 680 : 768,
+    margin: compact ? 0 : '0 auto',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
@@ -606,7 +627,10 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
                   ) : null}
                 </>
               ) : (
-                <div ref={bottomRef} style={EMPTY_BOTTOM_REF_STYLE} />
+                <>
+                  {emptyContent ?? null}
+                  <div ref={bottomRef} style={EMPTY_BOTTOM_REF_STYLE} />
+                </>
               )}
             </div>
           </div>
@@ -651,80 +675,108 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
         />
       )}
 
-      <UnifiedComposer
-        variant={composerVariant}
-        sessionId={sessionId}
-        currentUserEmail={currentUserEmail}
-        gatewayUrl={gatewayUrl}
-        token={token}
-        streaming={streaming}
-        stoppingStream={stoppingStream}
-        canStopSession={canStopCurrentSessionStream}
-        stopCapability={stopCapability}
-        sessionBusyState={remoteSessionBusyState}
-        editorMode={editorMode}
-        providers={providers}
-        activeProviderId={activeProviderId}
-        activeModelId={activeModelId}
-        activeProvider={activeProvider}
-        activeModelOption={activeModelOption}
-        activeModelCanConfigureThinking={activeModelCanConfigureThinking}
-        activeModelTooltip={activeModelTooltip}
-        dialogueMode={dialogueMode}
-        manualAgentId={manualAgentId}
-        yoloMode={yoloMode}
-        webSearchEnabled={webSearchEnabled}
-        thinkingEnabled={thinkingEnabled}
-        reasoningEffort={reasoningEffort}
-        imageReferenceArtifacts={imageReferenceArtifacts}
-        selectedImageReferenceArtifactId={selectedImageEditReferenceArtifactId}
-        latestGeneratedImageResult={latestGeneratedImageResult}
-        artifactsWorkspaceHref={artifactsWorkspaceHref}
-        imageGenerationMode={imageGenerationMode}
-        hasConfiguredImageModel={hasConfiguredImageModel}
-        imageGenerationBusy={imageGenerationBusy}
-        imageGenerationDefaults={imageGenerationDefaults}
-        imageModelLabel={imageModelLabel}
-        imagePluginEnabled={imagePluginEnabled}
-        toggleImageGenerationMode={toggleImageGenerationMode}
-        updateImageGenerationDefaults={updateImageGenerationDefaults}
-        composerWorkspaceCatalog={composerWorkspaceCatalog}
-        composerCommandDescriptors={composerCommandDescriptors}
-        agentOptions={agentOptions}
-        effectiveAgentId={effectiveAgentId}
-        defaultAgentLabel={defaultAgentLabel}
-        input={input}
-        setInput={setInput}
-        textareaRef={textareaRef}
-        features={composerFeatures}
-        onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
-        onStop={onStopComposer}
-        onModelSelect={onComposerModelSelect}
-        onToggleWebSearch={onToggleWebSearch}
-        onThinkingEnabledChange={onThinkingEnabledChange}
-        onReasoningEffortChange={onReasoningEffortChange}
-        onManualAgentChange={onManualAgentChange}
-        onClearManualAgentId={onClearManualAgentId}
-        onContinueEditingImage={onContinueEditingImage}
-        onNavigateToArtifacts={onNavigateToArtifacts}
-        onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}
-        markSessionMetadataDirty={markSessionMetadataDirty}
-      />
-      {composerDisabled && composerDisabledHint ? (
-        <div
-          role="note"
-          style={{
-            padding: '6px 16px',
-            fontSize: 11,
-            color: 'var(--text-3)',
-            background: 'color-mix(in srgb, var(--surface) 70%, var(--bg))',
-            borderTop: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-            textAlign: 'center',
-          }}
-        >
-          {composerDisabledHint}
-        </div>
-      ) : null}
+      {composerDisabled ? (
+        composerDisabledHint ? (
+          <div
+            role="note"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              padding: '10px 16px',
+              fontSize: 12,
+              fontWeight: 500,
+              color: 'var(--text-2)',
+              background:
+                'color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--surface) 80%, var(--bg)))',
+              borderTop: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ flexShrink: 0, color: 'var(--accent)' }}
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>{composerDisabledHint}</span>
+          </div>
+        ) : null
+      ) : (
+        <UnifiedComposer
+          variant={composerVariant}
+          sessionId={sessionId}
+          currentUserEmail={currentUserEmail}
+          gatewayUrl={gatewayUrl}
+          token={token}
+          streaming={streaming}
+          stoppingStream={stoppingStream}
+          canStopSession={canStopCurrentSessionStream}
+          stopCapability={stopCapability}
+          sessionBusyState={remoteSessionBusyState}
+          editorMode={editorMode}
+          providers={providers}
+          activeProviderId={activeProviderId}
+          activeModelId={activeModelId}
+          activeProvider={activeProvider}
+          activeModelOption={activeModelOption}
+          activeModelCanConfigureThinking={activeModelCanConfigureThinking}
+          activeModelTooltip={activeModelTooltip}
+          dialogueMode={dialogueMode}
+          manualAgentId={manualAgentId}
+          yoloMode={yoloMode}
+          webSearchEnabled={webSearchEnabled}
+          thinkingEnabled={thinkingEnabled}
+          reasoningEffort={reasoningEffort}
+          imageReferenceArtifacts={imageReferenceArtifacts}
+          selectedImageReferenceArtifactId={selectedImageEditReferenceArtifactId}
+          latestGeneratedImageResult={latestGeneratedImageResult}
+          artifactsWorkspaceHref={artifactsWorkspaceHref}
+          imageGenerationMode={imageGenerationMode}
+          hasConfiguredImageModel={hasConfiguredImageModel}
+          imageGenerationBusy={imageGenerationBusy}
+          imageGenerationDefaults={imageGenerationDefaults}
+          imageModelLabel={imageModelLabel}
+          imagePluginEnabled={imagePluginEnabled}
+          toggleImageGenerationMode={toggleImageGenerationMode}
+          updateImageGenerationDefaults={updateImageGenerationDefaults}
+          composerWorkspaceCatalog={composerWorkspaceCatalog}
+          composerCommandDescriptors={composerCommandDescriptors}
+          agentOptions={agentOptions}
+          effectiveAgentId={effectiveAgentId}
+          defaultAgentLabel={defaultAgentLabel}
+          input={input}
+          setInput={setInput}
+          textareaRef={textareaRef}
+          features={composerFeatures}
+          onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
+          onStop={onStopComposer}
+          onModelSelect={onComposerModelSelect}
+          onToggleWebSearch={onToggleWebSearch}
+          onThinkingEnabledChange={onThinkingEnabledChange}
+          onReasoningEffortChange={onReasoningEffortChange}
+          onManualAgentChange={onManualAgentChange}
+          onClearManualAgentId={onClearManualAgentId}
+          onContinueEditingImage={onContinueEditingImage}
+          onNavigateToArtifacts={onNavigateToArtifacts}
+          onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}
+          markSessionMetadataDirty={markSessionMetadataDirty}
+          contextUsedTokens={contextUsedTokens}
+          contextMaxTokens={contextMaxTokens}
+          contextIsEstimated={contextIsEstimated}
+        />
+      )}
     </>
   );
 }

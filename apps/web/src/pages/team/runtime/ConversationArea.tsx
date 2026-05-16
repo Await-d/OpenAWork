@@ -206,7 +206,12 @@ export function ConversationArea({
     <section style={CONTAINER_STYLE} aria-label="对话区">
       {topBar}
       {messagesOverride !== undefined ? (
-        <div style={MESSAGES_AREA_STYLE}>{messagesOverride}</div>
+        // 当外部注入 messagesOverride（如 SessionConversationView）时，
+        // 不再套 MESSAGES_AREA_STYLE 的 padding——交由内部组件自己控制 layout，
+        // 避免双层内边距吃掉空间。仅保留 flex/min-height 让子元素能正确撑满。
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {messagesOverride}
+        </div>
       ) : (
         <div ref={messagesRef} style={MESSAGES_AREA_STYLE}>
           {loading ? <LoadingState /> : null}

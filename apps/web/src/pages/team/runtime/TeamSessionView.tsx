@@ -18,8 +18,15 @@ import { useCallback, useMemo, type ReactNode } from 'react';
 import { SessionConversationView } from '../../../components/session-conversation/SessionConversationView.js';
 import { useSessionConversationState } from '../../../components/session-conversation/use-session-conversation-state.js';
 import { useChatSearch } from '../../../components/chat/chat-search-overlay.js';
+import { renderChatMessageContentWithOptions } from '../../../components/chat/ChatPageSections.js';
+import type {
+  ChatRenderEntry,
+  ChatRenderGroup,
+} from '../../../components/chat/chat-message-group-list.js';
+import { groupChatRenderEntries } from '../../../components/session-conversation/runtime/chat-page-utils.js';
 import { useAuthStore } from '../../../stores/auth.js';
 import { TeamSubstateProgressBar } from './TeamSubstateProgressBar.js';
+import { TeamSessionEmptyState } from './TeamSessionEmptyState.js';
 
 export interface TeamSessionViewProps {
   sessionId: string;
@@ -85,11 +92,23 @@ export function TeamSessionView({
   }, []);
 
   // ─── 派生 props ─────────────────────────────────────────────────────
-  const groupedMessageEntries = useMemo(() => {
-    // Phase 2a 暂不做 grouping；直接展示原始 messages 作为最简 fallback
-    // 后续 v1.0 hook 会把 useChatRenderData 集成进来，自动产生 grouping
-    return [] as never;
-  }, []);
+  /**
+   * 把消息列表 group 成 ChatRenderGroup[]，让 SessionConversationView 内部的
+   * ChatMessageGroupList 能正常渲染（与 chat 端视觉一致）。
+   *
+   * 这里不接 useChatRenderData——那个 hook 需要 25+ 字段（toolCallCards/
+   * buildMessageActions/handleCopyMessageGroup 等），是 chat 业务范畴。
+   * team 走最简路径：每条 message 直接渲染，不带 actions/usageDetails。
+   *
+   * 若后续 team 需要 actions（编辑/重试/收藏）等能力，再扩展本函数。
+   */
+  const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
+    const entries: ChatRenderEntry[] = state.messages.map((message) => ({
+      message,
+      renderContent: (m) => renderChatMessageContentWithOptions(m),
+    }));
+    return groupChatRenderEntries(entries);
+  }, [state.messages]);
 
   return (
     <SessionConversationView
@@ -126,6 +145,13 @@ export function TeamSessionView({
       activeProviderId={state.activeProviderId}
       activeModelId={state.activeModelId}
       onLoadEarlier={noopVoid}
+      emptyContent={
+        <TeamSessionEmptyState
+          roleLayer={state.roleLayer}
+          stateStatus={state.sessionStateStatus}
+          isLoading={state.isSessionLoading}
+        />
+      }
       streaming={state.streaming}
       stoppingStream={state.stoppingStream}
       streamError={state.streamError}
@@ -142,6 +168,7 @@ export function TeamSessionView({
       hasPendingFollowContent={state.hasPendingFollowContent}
       onScrollToBottom={handleScrollToBottom}
       editorMode={false}
+      compact
       sessionTodos={state.sessionTodos}
       rightOpen={false}
       activePendingQuestion={state.pendingQuestions[0] ?? null}

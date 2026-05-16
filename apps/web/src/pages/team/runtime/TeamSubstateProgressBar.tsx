@@ -36,8 +36,8 @@ export interface TeamSubstateProgressBarProps {
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 12,
-  padding: '8px 16px',
+  gap: 10,
+  padding: '5px 12px',
   borderBottom: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
   background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
   fontSize: 12,
