@@ -813,6 +813,42 @@ export function useResolvedTeamRuntimeReferenceData(
       return [];
     }
 
+    // 预聚合：以 sessionId 为 key 的任务统计（runtimeTasks 含 SessionTask.sessionId 字段）
+    const taskStats = new Map<
+      string,
+      { total: number; running: number; completed: number; failed: number }
+    >();
+    for (const task of collaboration.runtimeTasks) {
+      const sid = task.sessionId;
+      if (!sid) continue;
+      const cur = taskStats.get(sid) ?? { total: 0, running: 0, completed: 0, failed: 0 };
+      cur.total += 1;
+      if (task.status === 'running') cur.running += 1;
+      else if (task.status === 'completed') cur.completed += 1;
+      else if (task.status === 'failed') cur.failed += 1;
+      taskStats.set(sid, cur);
+    }
+
+    // 反向汇总：parent → 子会话数
+    const childCount = new Map<string, number>();
+    for (const session of effectiveSessions) {
+      if (session.parentSessionId) {
+        childCount.set(session.parentSessionId, (childCount.get(session.parentSessionId) ?? 0) + 1);
+      }
+    }
+
+    // 解析 metadataJson 工具
+    const parseWorkingDirectory = (metadataJson: string): string | undefined => {
+      if (!metadataJson) return undefined;
+      try {
+        const meta = JSON.parse(metadataJson) as Record<string, unknown>;
+        const wd = meta['workingDirectory'];
+        return typeof wd === 'string' && wd.length > 0 ? wd : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
     const groups = new Map<string, AgentTeamsWorkspaceGroup>();
     const seenSessionIds = new Set<string>();
 
@@ -825,12 +861,25 @@ export function useResolvedTeamRuntimeReferenceData(
         workspacePath: session.workspacePath,
         sessions: [],
       };
+      const stats = taskStats.get(session.id);
+      const wd = parseWorkingDirectory(session.metadataJson ?? '');
       current.sessions.push({
         id: session.id,
         status: mapSidebarStatus(session.stateStatus),
         subtitle: getSharedSessionStateLabel(session.stateStatus),
         title: session.title ?? session.id,
         updatedAt: session.updatedAt,
+        ...(stats
+          ? {
+              taskTotal: stats.total,
+              taskRunning: stats.running,
+              taskCompleted: stats.completed,
+              taskFailed: stats.failed,
+            }
+          : {}),
+        ...(childCount.has(session.id) ? { childSessionCount: childCount.get(session.id) } : {}),
+        ...(wd ? { workingDirectory: wd } : {}),
+        ...(session.parentSessionId ? { isDerived: true } : {}),
       });
       groups.set(key, current);
     }
@@ -844,12 +893,24 @@ export function useResolvedTeamRuntimeReferenceData(
         workspacePath: sharedSession.workspacePath,
         sessions: [],
       };
+      const stats = taskStats.get(sharedSession.sessionId);
       current.sessions.push({
         id: sharedSession.sessionId,
         status: mapSidebarStatus(sharedSession.stateStatus),
         subtitle: getSharedSessionStateLabel(sharedSession.stateStatus),
         title: sharedSession.title ?? sharedSession.sessionId,
         updatedAt: sharedSession.shareUpdatedAt,
+        ...(stats
+          ? {
+              taskTotal: stats.total,
+              taskRunning: stats.running,
+              taskCompleted: stats.completed,
+              taskFailed: stats.failed,
+            }
+          : {}),
+        ...(childCount.has(sharedSession.sessionId)
+          ? { childSessionCount: childCount.get(sharedSession.sessionId) }
+          : {}),
       });
       groups.set(key, current);
     }
@@ -863,6 +924,7 @@ export function useResolvedTeamRuntimeReferenceData(
   }, [
     collaboration.sessions,
     collaboration.sharedSessions,
+    collaboration.runtimeTasks,
     snapshotSessions,
     snapshotSharedSessions,
   ]);

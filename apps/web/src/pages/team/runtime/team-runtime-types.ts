@@ -152,6 +152,20 @@ export interface AgentTeamsSidebarTeam {
   subtitle: string;
   title: string;
   updatedAt?: string;
+  /** 任务总数（关联到此 sessionId 的任务）。 */
+  taskTotal?: number;
+  /** 已完成任务数。 */
+  taskCompleted?: number;
+  /** 运行中任务数（用于 spinner 提示）。 */
+  taskRunning?: number;
+  /** 失败任务数（用于异常徽章）。 */
+  taskFailed?: number;
+  /** 子会话数（基于 parentSessionId 反向汇总）。 */
+  childSessionCount?: number;
+  /** 工作目录（从 metadataJson.workingDirectory 解析）。 */
+  workingDirectory?: string;
+  /** 是否为派生会话（有 parentSessionId）。 */
+  isDerived?: boolean;
 }
 
 export interface AgentTeamsWorkspaceGroup {
