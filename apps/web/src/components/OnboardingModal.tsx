@@ -569,6 +569,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             type="button"
             onClick={onComplete}
             aria-label="关闭引导"
+            className="ui-hover-text-bg"
             style={{
               position: 'absolute',
               top: 12,
@@ -583,15 +584,6 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              transition: 'background 150ms ease, color 150ms ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--surface-hover)';
-              e.currentTarget.style.color = 'var(--text)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--text-3)';
             }}
           >
             <svg
@@ -792,6 +784,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             <button
               type="button"
               onClick={onComplete}
+              className="ui-hover-color"
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -800,13 +793,6 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 cursor: 'pointer',
                 alignSelf: 'center',
                 marginTop: '0.25rem',
-                transition: 'color 150ms ease',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = 'var(--text-2)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = 'var(--text-3)';
               }}
             >
               跳过引导，直接登录

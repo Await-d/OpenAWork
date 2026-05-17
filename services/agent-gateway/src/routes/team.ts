@@ -117,6 +117,25 @@ const createMessageSchema = z.object({
   type: z.enum(['update', 'question', 'result', 'error']).default('update'),
 });
 
+// L1.3 §1.3 反向消息通道载荷 schema（与 packages/web-client/src/team-inbound.ts 协议对齐）
+const inboundSubmitSchema = z.object({
+  messageType: z.enum([
+    'cancel_signal',
+    'pause_signal',
+    'resume_signal',
+    'clarification_answer',
+    'user_input',
+    'escalation_request',
+    'progress_report',
+  ]),
+  // payload 由 messageType 决定形状；这里只校验是 object，具体 shape
+  // 由消费方 LLM 循环解释（避免每次扩展类型都要改 schema）。
+  payload: z.record(z.unknown()).optional(),
+  clientIdempotencyKey: z.string().min(1).max(200).optional(),
+  // 客户端可指定过期时间（毫秒 epoch），缺省由 inbound-store 按类型给默认 TTL
+  expiresAt: z.number().int().positive().optional(),
+});
+
 const createSessionShareSchema = z.object({
   memberId: z.string().min(1),
   permission: z.enum(['view', 'comment', 'operate']).default('view'),
@@ -230,6 +249,12 @@ const workflowTeamTemplateSchema = z.object({
   requiredRoles: z
     .array(z.enum(['leader', 'planner', 'researcher', 'executor', 'reviewer']))
     .optional(),
+  /**
+   * 模板内置的快捷起始建议，前端 ReceptionStarterCard 渲染为 chip。
+   * 用户点击 chip → 填入 composer（不直接发送，由用户确认后再发出）。
+   * 与 D31 对齐：starter 仍要被视作"用户主动给出的意图"，不允许自动派发。
+   */
+  starterSuggestions: z.array(z.string().min(1).max(200)).max(8).optional(),
 });
 
 // ─── Phase B T-09/T-10 helpers ──────────────────────────────────────────────
@@ -851,6 +876,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           ...(body.data.source?.templateId ? { templateId: body.data.source.templateId } : {}),
           ...(templateLookup ? { templateName: templateLookup.name } : {}),
         },
+        // 模板内置的快捷起始建议（D 项 starter chips）。前端 empty state 渲染为
+        // chip，点击只填 composer 不直接发送（D31：starter 仍须用户主动确认）。
+        ...(templateLookup?.teamTemplate.starterSuggestions
+          ? { starterSuggestions: templateLookup.teamTemplate.starterSuggestions }
+          : {}),
       };
 
       const metadataPatch = validateSessionMetadataPatch({
@@ -883,25 +913,26 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
       }
 
-      const sessionId = randomUUID();
-      sqliteRun(
-        'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, ?, ?, ?, ?)',
-        [
-          sessionId,
-          user.sub,
-          '[]',
-          'idle',
-          JSON.stringify(normalizedMetadata.metadata),
-          body.data.title ?? workspace.name,
-        ],
-      );
+      // L1.3 §1.3 + L1.8：通过 b 层创建的 session 必须打上 reception 语义
+      // （role_layer='reception'），否则 Watcher 后续无法把它当作 handoff 的
+      // from_session_id，整条 b → c → d → e/f/g 链路无法挂载到这条会话上。
+      // 这里改用 handoff/team-session-create.ts::createTeamSession 而不是
+      // 直接 INSERT，统一与 Watcher 内部创建子 session 的语义。
+      const sessionTitle = body.data.title?.trim() || workspace.name;
+      const { sessionId } = createTeamSession({
+        userId: user.sub,
+        roleLayer: 'reception',
+        teamParentSessionId: requestedParentSessionId ?? null,
+        metadataJson: JSON.stringify(normalizedMetadata.metadata),
+        title: sessionTitle,
+      });
       step.succeed(undefined, { sessionId, teamWorkspaceId });
 
       return reply.status(201).send({
         id: sessionId,
         metadata_json: JSON.stringify(normalizedMetadata.metadata),
         state_status: 'idle',
-        title: body.data.title ?? workspace.name,
+        title: sessionTitle,
       });
     },
   );
@@ -910,6 +941,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
     '/team/workspaces/:teamWorkspaceId/threads',
     { onRequest: [requireAuth] },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      // ⚠️ DEPRECATED：保留作为兼容入口（v3.10 之前的"generic team thread"语义）。
+      // 新代码请改用 POST /team/workspaces/:id/sessions（接受完整 source/optionalAgentIds/
+      // defaultProvider，并且产出带 role_layer='reception' 的合法 b 层会话）。
+      //
+      // 退出策略（与 L1.4 §1.4.4 feature flag 退出策略对齐）：
+      //   - 当前阶段：与 /sessions 共用同一会话创建路径，确保产出 reception session
+      //   - Phase F：response header 加 deprecation 标记（运维埋点）
+      //   - Phase G+：返回 410 Gone
       const teamWorkspaceId = (request.params as { teamWorkspaceId: string }).teamWorkspaceId;
       const { step, child } = startRequestWorkflow(request, 'team.thread.create', undefined, {
         teamWorkspaceId,
@@ -970,25 +1009,26 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(parentValidation.statusCode).send({ error: parentValidation.error });
       }
 
-      const sessionId = randomUUID();
-      sqliteRun(
-        'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json, title) VALUES (?, ?, ?, ?, ?, ?)',
-        [
-          sessionId,
-          user.sub,
-          '[]',
-          'idle',
-          JSON.stringify(normalizedMetadata.metadata),
-          body.data.title ?? workspace.name,
-        ],
-      );
+      // 与 /sessions 路径产出语义一致的 reception session
+      const sessionTitle = body.data.title?.trim() || workspace.name;
+      const { sessionId } = createTeamSession({
+        userId: user.sub,
+        roleLayer: 'reception',
+        teamParentSessionId: requestedParentSessionId ?? null,
+        metadataJson: JSON.stringify(normalizedMetadata.metadata),
+        title: sessionTitle,
+      });
       step.succeed(undefined, { sessionId, teamWorkspaceId });
+
+      // Deprecation 提示：让客户端日志能看到这条警告
+      reply.header('Deprecation', 'true');
+      reply.header('Sunset', 'use POST /team/workspaces/:id/sessions instead');
 
       return reply.status(201).send({
         id: sessionId,
         metadata_json: JSON.stringify(normalizedMetadata.metadata),
         state_status: 'idle',
-        title: body.data.title ?? workspace.name,
+        title: sessionTitle,
       });
     },
   );
@@ -2369,6 +2409,166 @@ REVIEW GATE CHECKLIST:
         analyzeStep.fail('llm error');
         step.fail('llm error');
         return reply.status(500).send({ error: 'Team leader dispatch failed' });
+      }
+    },
+  );
+
+  // ─── L1.3 §1.3 反向消息通道：POST /team/sessions/:sessionId/inbound-messages ───
+  // 关联文档：docs/team-architecture-l1-3-streaming-handoff-spec.md §1.3
+  // 关联实现：handoff/inbound-store.ts
+  //
+  // 用途：
+  //   - team 用户回答 c 的 [NEEDS CLARIFICATION] → clarification_answer
+  //   - team 用户中途追加输入 → user_input
+  //   - 取消 / 暂停 / 恢复信号
+  // 这条端点写入 session_inbound_messages 表，下游 session 在 LLM 循环中
+  // 通过 consumePendingInboundMessage 拉取消费。
+  app.post(
+    '/team/sessions/:sessionId/inbound-messages',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const sessionId = (request.params as { sessionId: string }).sessionId;
+      const { step, child } = startRequestWorkflow(request, 'team.session.inbound', undefined, {
+        sessionId,
+      });
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = inboundSubmitSchema.safeParse(request.body);
+      if (!body.success) {
+        parseStep.fail('invalid input');
+        step.fail('invalid input');
+        return reply.status(400).send({ error: 'Invalid input', issues: body.error.issues });
+      }
+      parseStep.succeed();
+
+      // 校验 session 归属
+      const sessionStep = child('resolve-session');
+      const session = sqliteGet<{ id: string; user_id: string; role_layer: string | null }>(
+        `SELECT id, user_id, role_layer FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        sessionStep.fail('session not found');
+        step.fail('session not found');
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      sessionStep.succeed();
+
+      const submitStep = child('submit-inbound');
+      try {
+        const { submitInboundMessage } = await import('../handoff/inbound-store.js');
+        const expiresAtIso =
+          typeof body.data.expiresAt === 'number'
+            ? new Date(body.data.expiresAt)
+                .toISOString()
+                .replace('T', ' ')
+                .replace('Z', '')
+                .slice(0, 19)
+            : undefined;
+        const result = submitInboundMessage({
+          userId: user.sub,
+          toSessionId: sessionId,
+          // 来源：reception 会话由 b 转发用户输入（fromRoleLayer='reception'）；
+          //      其他场景由系统组件写入（'system'）。HTTP 入口默认按 reception。
+          fromRoleLayer: 'reception',
+          messageType: body.data.messageType,
+          payload: body.data.payload ?? {},
+          clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
+          ...(expiresAtIso ? { expiresAt: expiresAtIso } : {}),
+        });
+        submitStep.succeed(undefined, {
+          messageId: result.record.id,
+          reused: result.reused,
+        });
+
+        // ─── B1 自动编排（只对 reception session 的 user_input 触发） ─────────
+        // user_input 到达 reception 会话 → 自动调 interaction-agent 改写 +
+        // 创建 handoff(reception → pm1)，推动 b → c 链路。
+        // 设计要点：
+        //   - 已 reused（同 idempotency key）→ 跳过，避免重复编排
+        //   - 非 reception session（如直接给 c 发 user_input）→ 跳过
+        //   - cancel/pause/clarification_answer 等 → 跳过
+        //   - feature flag 关闭 → 跳过（feature-flags.ts 决定）
+        //
+        // 性能约束（L1.6）：a→b 确认 p95 < 2s。LLM 改写可能需要 3-10s，
+        // 因此：
+        //   1. 同步在响应前把用户消息写入 reception session（让 reload 能看到）
+        //   2. orchestration 异步后台执行（assistant ack 会在 LLM 返回后落库，
+        //      前端通过 WS substate.changed 事件感知后再次 reload 即可）
+        const shouldOrchestrate =
+          !result.reused &&
+          session.role_layer === 'reception' &&
+          body.data.messageType === 'user_input';
+        if (shouldOrchestrate) {
+          const userInputText =
+            typeof body.data.payload?.['text'] === 'string' ? body.data.payload['text'] : '';
+          // 从 session metadata 读 teamWorkspaceId（reception session 创建时已写入）
+          const sessionMeta = sqliteGet<{ metadata_json: string | null }>(
+            `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
+            [sessionId],
+          );
+          let teamWorkspaceIdFromMeta: string | null = null;
+          if (sessionMeta?.metadata_json) {
+            try {
+              const parsed = JSON.parse(sessionMeta.metadata_json) as Record<string, unknown>;
+              if (typeof parsed['teamWorkspaceId'] === 'string') {
+                teamWorkspaceIdFromMeta = parsed['teamWorkspaceId'];
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          // 同步：把用户消息写到 reception session（保证 reload 能看到）
+          try {
+            const { persistReceptionUserMessage } =
+              await import('../handoff/reception-orchestrator.js');
+            persistReceptionUserMessage({
+              userId: user.sub,
+              receptionSessionId: sessionId,
+              userIntent: userInputText,
+              clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
+            });
+          } catch (err) {
+            console.warn(
+              `[team.session.inbound] persist user msg failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+
+          // 异步：把 LLM 改写 + handoff 创建放到后台。assistant ack 由
+          // orchestrator 在完成时落库，前端可通过 WS 或下一次 reload 看到。
+          void (async () => {
+            try {
+              const { orchestrateReceptionInput } =
+                await import('../handoff/reception-orchestrator.js');
+              await orchestrateReceptionInput({
+                userId: user.sub,
+                receptionSessionId: sessionId,
+                userIntent: userInputText,
+                teamWorkspaceId: teamWorkspaceIdFromMeta,
+                clientIdempotencyKey: body.data.clientIdempotencyKey ?? null,
+                // user 消息已在同步路径写过，避免重复写
+                persistUserMessage: false,
+              });
+            } catch (err) {
+              console.warn(
+                `[team.session.inbound] orchestrate (async) failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          })();
+        }
+
+        step.succeed(undefined, { messageId: result.record.id });
+        return reply.status(result.reused ? 200 : 201).send({
+          messageId: result.record.id,
+          createdAt: result.record.createdAt,
+        });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'inbound submit failed';
+        submitStep.fail(reason);
+        step.fail(reason);
+        return reply.status(500).send({ error: reason });
       }
     },
   );

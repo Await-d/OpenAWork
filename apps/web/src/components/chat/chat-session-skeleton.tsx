@@ -1,24 +1,11 @@
-import { useEffect } from 'react';
-
-const CHAT_SESSION_SKELETON_CSS = `
-@keyframes omo-chat-session-pulse{0%,100%{opacity:1}50%{opacity:0.42}}
-.omo-chat-session-skel{animation:omo-chat-session-pulse 1.45s ease-in-out infinite;background:var(--surface-2);border-radius:6px;}
-`;
-
-let chatSessionSkeletonStyleInjected = false;
+/**
+ * 260517-chat-session-skeleton · 会话首屏骨架
+ *
+ * 关联样式：`.omo-chat-session-skel` 与 `@keyframes omo-chat-session-pulse`
+ * 已统一收纳到 `src/styles/loaders.css`，由 `main.tsx` 一次性 import。
+ */
 
 export function ChatSessionSkeleton() {
-  useEffect(() => {
-    if (chatSessionSkeletonStyleInjected) {
-      return;
-    }
-
-    chatSessionSkeletonStyleInjected = true;
-    const styleElement = document.createElement('style');
-    styleElement.textContent = CHAT_SESSION_SKELETON_CSS;
-    document.head.appendChild(styleElement);
-  }, []);
-
   return (
     <div
       data-testid="chat-session-skeleton"

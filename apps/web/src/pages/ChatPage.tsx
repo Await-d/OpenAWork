@@ -50,6 +50,9 @@ import {
 import { UnifiedComposer } from '../components/chat/UnifiedComposer.js';
 import { ChatTopBar } from '../components/chat/ChatTopBar.js';
 import { SessionTerminalsChip } from '../components/chat/SessionTerminalsChip.js';
+import { LatestAssistantMessageContext } from '../components/chat/collapsible-assistant-content.js';
+import { QuickTerminalToggle } from '../components/chat/QuickTerminalToggle.js';
+import { QuickTerminalPanel } from '../components/chat/QuickTerminalPanel.js';
 import {
   ChatMessageGroupList,
   type ChatRenderEntry,
@@ -175,6 +178,10 @@ import {
 import { buildSubAgentRunItems, SubAgentRunList } from './chat-page/sub-agent-run-list.js';
 import { SubSessionDetailPanel } from './chat-page/sub-session-detail-panel.js';
 import {
+  buildUserHistoryJumpItems,
+  UserHistoryJumpList,
+} from './chat-page/user-history-jump-list.js';
+import {
   type AssistantTraceToolCall,
   applyPermissionDecisionToLocalAssistantMessages,
   applyToolResultToLocalAssistantMessages,
@@ -222,6 +229,7 @@ import {
 } from './chat-page/use-chat-message-actions.js';
 import { useChatRenderData } from '../components/session-conversation/runtime/use-chat-render-data.js';
 import { useChatUiActions } from './chat-page/use-chat-ui-actions.js';
+import { readSplitPos, writeSplitPos } from './chat-page/split-pos-storage.js';
 import { useModelPrices } from '../components/session-conversation/runtime/use-model-prices.js';
 import { useProviderModelInfo } from '../components/session-conversation/runtime/use-provider-model-info.js';
 import { useScrollManager } from '../components/session-conversation/runtime/use-scroll-manager.js';
@@ -436,11 +444,16 @@ export default function ChatPage() {
   } | null>(null);
   const browserActive = useUIStateStore((s) => s.browserActive);
   const setBrowserActive = useUIStateStore((s) => s.setBrowserActive);
-  const editorPaneTab = useUIStateStore((s) => s.editorPaneTab);
-  const setEditorPaneTab = useUIStateStore((s) => s.setEditorPaneTab);
+  const editorPaneTabByWorkspace = useUIStateStore((s) => s.editorPaneTabByWorkspace);
+  const setEditorPaneTabForWorkspace = useUIStateStore((s) => s.setEditorPaneTabForWorkspace);
   const browserPreviewUrlByWorkspace = useUIStateStore((s) => s.browserPreviewUrlByWorkspace);
   const setBrowserPreviewUrlForWorkspace = useUIStateStore(
     (s) => s.setBrowserPreviewUrlForWorkspace,
+  );
+  // 快捷终端面板:by-workspace 持久化是否开启 + 全局共用高度。
+  const quickTerminalOpenByWorkspace = useUIStateStore((s) => s.quickTerminalOpenByWorkspace);
+  const setQuickTerminalOpenForWorkspace = useUIStateStore(
+    (s) => s.setQuickTerminalOpenForWorkspace,
   );
   // browserPreviewUrl / setBrowserPreviewUrl 在 effectiveWorkingDirectory 定义之后才声明
   // (见下方),因为它们依赖 workspace path。
@@ -467,8 +480,14 @@ export default function ChatPage() {
   const prefersReducedMotion = usePrefersReducedMotion();
   const editorMode = useUIStateStore((s) => s.editorMode);
   const setEditorMode = useUIStateStore((s) => s.setEditorMode);
-  const splitPos = useUIStateStore((s) => s.splitPos);
-  const setSplitPos = useUIStateStore((s) => s.setSplitPos);
+  // splitPos 完全独立于 zustand UI state,直接走自己的小 localStorage 键:
+  //   1) 不订阅,避免拖动结束 commit 触发整树 rerender
+  //   2) 不走 zustand persist,避免每次 commit 都把 75 个字段的整个
+  //      UI state JSON.stringify 写盘 (即 [Violation] 'click'/
+  //      'requestIdleCallback' handler took 70~167ms 的根因)
+  // 见 ./chat-page/split-pos-storage.ts 的注释。
+  const [splitPos] = useState(() => readSplitPos());
+  const setSplitPos = writeSplitPos;
   const navigateToHome = useUIStateStore((s) => s.navigateToHome);
   const navigateToSession = useUIStateStore((s) => s.navigateToSession);
   const chatView = useUIStateStore((s) => s.chatView);
@@ -551,12 +570,20 @@ export default function ChatPage() {
     });
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const editorPaneRef = useRef<HTMLDivElement>(null);
-  const fileEditor = useFileEditor();
   const [saving, setSaving] = useState(false);
   const openFileRef = useFileEditorContext();
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
+  // useFileEditor 按 workspace 隔离打开的文件:跨 workspace 切换时自动加载对应 workspace
+  // 上次留下的文件,而不是共享一个全局文件列表。
+  const fileEditor = useFileEditor(effectiveWorkingDirectory);
+  // 快捷终端面板:by-workspace 持久化(跟 BuiltInBrowser / fileEditor 同一套 wsKey 兜底)。
+  const quickTerminalWorkspaceKey =
+    effectiveWorkingDirectory && effectiveWorkingDirectory.trim().length > 0
+      ? effectiveWorkingDirectory
+      : '__default__';
+  const quickTerminalOpen = quickTerminalOpenByWorkspace[quickTerminalWorkspaceKey] ?? false;
   // 浏览器预览 URL 按 workspace 路径派生:同 workspace 的会话共享 url,跨 workspace
   // 自动切到对应 workspace 的 url(若无则 null)。无 workspace 的会话归入 __default__ 桶。
   const browserWorkspaceKey =
@@ -570,6 +597,15 @@ export default function ChatPage() {
       if (url) setBrowserActive(true);
     },
     [effectiveWorkingDirectory, setBrowserPreviewUrlForWorkspace, setBrowserActive],
+  );
+  // editor pane 当前 tab(code/browser)按 workspace 持久化,跨 workspace 切换时
+  // 各自互不影响;用户上次在 workspace A 留在 code,B 留在 browser → 切回时自动恢复。
+  const editorPaneTab = editorPaneTabByWorkspace[browserWorkspaceKey] ?? 'code';
+  const setEditorPaneTab = useCallback(
+    (tab: 'code' | 'browser') => {
+      setEditorPaneTabForWorkspace(effectiveWorkingDirectory, tab);
+    },
+    [effectiveWorkingDirectory, setEditorPaneTabForWorkspace],
   );
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
@@ -822,37 +858,9 @@ export default function ChatPage() {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
   }, [effectiveWorkingDirectory, setFileTreeRootPath]);
 
-  // 跨 workspace 切会话时,旧 workspace 的打开的文件应该关掉(路径无意义且会读失败)。
-  // 同 workspace 内会话间切换,保留文件不变;跨 workspace 才清。
-  // 注意:切会话时 effectiveWorkingDirectory 会经历 old → null → new 的过渡(useWorkspace
-  // 异步 fetch),所以这里只记录"上一个非空 workspace path",仅在新的非空 path 与
-  // 它不同时触发清理,避免中间 null 状态干扰判定。
-  const fileEditorCloseAllRef = useRef(fileEditor.closeAll);
-  fileEditorCloseAllRef.current = fileEditor.closeAll;
-  const lastNonEmptyWorkspaceRef = useRef<string | null>(
-    typeof effectiveWorkingDirectory === 'string' ? effectiveWorkingDirectory : null,
-  );
-  useEffect(() => {
-    // 调试日志:观察切会话时 effectiveWorkingDirectory 的变化轨迹
-    console.log('[ChatPage workspace-effect]', {
-      currentSessionId,
-      effectiveWorkingDirectory,
-      lastNonEmpty: lastNonEmptyWorkspaceRef.current,
-      type: typeof effectiveWorkingDirectory,
-    });
-    if (typeof effectiveWorkingDirectory !== 'string') return;
-    const prev = lastNonEmptyWorkspaceRef.current;
-    lastNonEmptyWorkspaceRef.current = effectiveWorkingDirectory;
-    if (prev !== null && prev !== effectiveWorkingDirectory) {
-      console.log(
-        '[ChatPage workspace-effect] CROSS-WORKSPACE → closeAll',
-        prev,
-        '→',
-        effectiveWorkingDirectory,
-      );
-      fileEditorCloseAllRef.current?.();
-    }
-  }, [currentSessionId, effectiveWorkingDirectory]);
+  // workspace 变化时 fileEditor 内部自动加载该 workspace 持久化的文件,无需在这里
+  // 主动关闭 / 重载。useFileEditor 按 workspace 桶隔离 openFilePaths,跨 workspace
+  // 切回旧 workspace 时上次留下的文件会自动恢复。
 
   const { planTasks, agentEvents, planHistory, dagNodes, dagEdges, compactions } = rightPanelState;
   const toolCallCards = useMemo(() => getToolCallCards(rightPanelState), [rightPanelState]);
@@ -862,9 +870,31 @@ export default function ChatPage() {
     [childSessions, sessionTasks],
   );
   const subAgentRunItems = useMemo(
-    () => buildSubAgentRunItems(childSessions, sessionTasks),
-    [childSessions, sessionTasks],
+    () => buildSubAgentRunItems(childSessions, sessionTasks, currentSessionId),
+    [childSessions, sessionTasks, currentSessionId],
   );
+  const userHistoryJumpItems = useMemo(() => buildUserHistoryJumpItems(messages), [messages]);
+  /**
+   * Latest non-streaming assistant message id. `CollapsibleAssistantContent`
+   * skips its auto-fold for this exact message so the most recent reply
+   * stays fully visible — long replies usually carry the answer to the
+   * just-asked question and folding them hides the punchline. Older long
+   * replies still collapse to keep the scrollback compact.
+   *
+   * Streaming messages are skipped because their fold wrapper is already
+   * disabled (the streaming branch in AssistantRichContentBody bypasses
+   * CollapsibleAssistantContent entirely).
+   */
+  const latestAssistantMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (!m) continue;
+      if (m.role !== 'assistant') continue;
+      if (m.status === 'streaming') continue;
+      return m.id;
+    }
+    return null;
+  }, [messages]);
   const openChildSessionInspector = useCallback((nextSessionId: string) => {
     setSelectedChildSessionId(nextSessionId);
     setRightOpen(true);
@@ -1011,6 +1041,58 @@ export default function ChatPage() {
         setIsSessionSnapshotReady,
       },
     );
+
+  /**
+   * 历史跳转 / 搜索 / 收藏三个入口共用:点目标消息时,如果它没在当前
+   * 渲染窗口里(分页只渲染最近 N 条 / 服务端还没拉到本地),先把它「弄
+   * 出来」再让调用方滚动。否则点击会静默无响应,用户看不到任何反馈。
+   *
+   * 必须放在 `useSessionSnapshotLoader` 解构之后,否则 useCallback 的
+   * 依赖数组会在初始化时读取尚未声明的 `loadCurrentSessionSnapshot`
+   * 触发 TDZ 错误。
+   */
+  const ensureMessageVisible = useCallback(
+    async (messageId: string) => {
+      if (!messageId) return;
+      // 先在本地完整列表里找。如果在,但被分页裁掉了 → 把窗口拉到包含它。
+      const localIndex = messages.findIndex((m) => m.id === messageId);
+      if (localIndex >= 0) {
+        // visibleMessageCount === undefined 表示「全部展开」,本就可见。
+        if (visibleMessageCount !== undefined) {
+          // 渲染的是 `slice(-visibleMessageCount)`,所以可见区间是
+          // [messages.length - visibleMessageCount, messages.length)。
+          // 把窗口扩到能覆盖目标的位置。多加 5 条作为上下文 buffer。
+          const requiredCount = messages.length - localIndex + 5;
+          if (requiredCount > visibleMessageCount) {
+            setVisibleMessageCount(requiredCount);
+          }
+        }
+        return;
+      }
+      // 本地数组里也没有 → 服务端可能还没拉过来,触发一次 snapshot
+      // 重载并把窗口扩到全部新消息可见。
+      if (currentSessionId) {
+        try {
+          await loadCurrentSessionSnapshot(currentSessionId, { replaceMessages: true });
+          setServerTotalTurnCount(null);
+          // 拉一个足够大的值,使 `slice(-visibleMessageCount)` 等同于全部。
+          // useChatRenderData 会在 visibleMessageCount >= 总长时返回完整列表,
+          // 不会真的展示 9999 条空 slot。
+          setVisibleMessageCount(9_999);
+        } catch {
+          /* swallow — caller will fall through to its own missing-target branch */
+        }
+      }
+    },
+    [
+      messages,
+      visibleMessageCount,
+      currentSessionId,
+      loadCurrentSessionSnapshot,
+      setVisibleMessageCount,
+      setServerTotalTurnCount,
+    ],
+  );
 
   const remoteSessionBusyState = useMemo<Extract<
     SessionStateStatus,
@@ -1518,13 +1600,21 @@ export default function ChatPage() {
 
     setSelectedChildSessionId(null);
     if (cachedView) {
-      // Apply cached messages immediately — skip skeleton
+      // Apply cached messages immediately — skip skeleton.
+      // Wrap state mutations in `startTransition` so React 19 can yield
+      // during the commit. With long histories the cached snapshot
+      // applies in one synchronous setState chain; without a transition
+      // that's a single ~200–350ms task surfacing as
+      // `[Violation] 'message' handler took XYZms`.
       sessionRestoredFromCacheRef.current = true;
-      setMessages(cachedView.messages);
-      setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
-      setIsSessionLoading(false);
-      // Restore scroll position after React renders the cached messages
+      const cachedMessages = cachedView.messages;
       const cachedScrollTop = cachedView.scrollTop;
+      startSessionSwitchTransition(() => {
+        setMessages(cachedMessages);
+        setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+        setIsSessionLoading(false);
+      });
+      // Restore scroll position after React renders the cached messages
       ignoreScrollEventsUntilRef.current = performance.now() + 600;
       requestAnimationFrame(() => {
         const sr = scrollRegionRef.current;
@@ -1534,9 +1624,11 @@ export default function ChatPage() {
       });
     } else {
       sessionRestoredFromCacheRef.current = false;
-      setIsSessionLoading(true);
-      setMessages([]);
-      setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+      startSessionSwitchTransition(() => {
+        setIsSessionLoading(true);
+        setMessages([]);
+        setVisibleMessageCount(DEFAULT_VISIBLE_MESSAGE_COUNT);
+      });
     }
     setRightPanelState(createInitialChatRightPanelState());
     setServerTotalTurnCount(null);
@@ -3506,6 +3598,7 @@ export default function ChatPage() {
       fileEditor,
       openFileRef,
       setEditorMode,
+      setEditorPaneTab,
       setSaving,
       splitDragging,
       splitContainerRef,
@@ -5071,7 +5164,7 @@ export default function ChatPage() {
     onStopActiveMessage: stopActiveMessage,
   });
 
-  const chatSearch = useChatSearch({ messages, scrollRegionRef });
+  const chatSearch = useChatSearch({ messages, scrollRegionRef, ensureMessageVisible });
 
   // ─── Command Palette items ──────────────────────────────────────────────
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
@@ -5436,24 +5529,30 @@ export default function ChatPage() {
 
       <div
         ref={splitContainerRef}
-        style={{
-          display: 'flex',
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          background: 'var(--bg)',
-        }}
+        style={
+          {
+            display: 'flex',
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            background: 'var(--bg)',
+            // CSS variable — drag handler 在拖动期间直接更新这个值,
+            // 避免每帧通过 React state 触发整页 rerender + persist 落盘。
+            ['--split-pos' as string]: `${splitPos}%`,
+          } as React.CSSProperties
+        }
       >
         <div
           style={{
             display: 'flex',
             flexDirection: 'column',
             flex: editorMode ? '0 0 auto' : 1,
-            width: editorMode ? `calc(${splitPos}% - 2.5px)` : '100%',
+            width: editorMode ? 'calc(var(--split-pos) - 2.5px)' : '100%',
             minWidth: 0,
             minHeight: 0,
             overflow: 'hidden',
             transition: splitDragging.current ? 'none' : 'width 240ms ease',
+            position: 'relative',
           }}
         >
           <WorkspacePickerModal
@@ -5475,94 +5574,181 @@ export default function ChatPage() {
             validatePath={workspace.validatePath}
             loading={workspace.loading}
           />
-          <SessionConversationView
-            sessionId={currentSessionId}
-            sessionSource="chat"
-            currentUserEmail={currentUserEmail}
-            gatewayUrl={gatewayUrl}
-            token={token}
-            topBar={
-              <ChatTopBar
-                dialogueMode={dialogueMode}
-                onChangeDialogueMode={handleDialogueModeChange}
-                yoloMode={yoloMode}
-                onToggleYolo={handleToggleYolo}
-                editorMode={editorMode}
-                onToggleEditorMode={() => setEditorMode(!editorMode)}
-                rightOpen={rightOpen}
-                onToggleRightOpen={() => setRightOpen((o) => !o)}
-                terminalsChip={
-                  currentSessionId ? (
-                    <SessionTerminalsChip
-                      terminals={sessionTerminals.terminals}
-                      runningCount={sessionTerminals.runningCount}
-                      loading={sessionTerminals.loading}
-                      error={sessionTerminals.error}
-                      pendingKillIds={sessionTerminals.pendingKillIds}
-                      onKillTerminal={sessionTerminals.killTerminal}
-                      onReload={sessionTerminals.reload}
-                      gatewayUrl={gatewayUrl}
-                      token={token}
-                      sessionId={currentSessionId}
+          <LatestAssistantMessageContext.Provider value={latestAssistantMessageId}>
+            <SessionConversationView
+              sessionId={currentSessionId}
+              sessionSource="chat"
+              currentUserEmail={currentUserEmail}
+              gatewayUrl={gatewayUrl}
+              token={token}
+              topBar={
+                <>
+                  <ChatTopBar
+                    dialogueMode={dialogueMode}
+                    onChangeDialogueMode={handleDialogueModeChange}
+                    yoloMode={yoloMode}
+                    onToggleYolo={handleToggleYolo}
+                    editorMode={editorMode}
+                    onToggleEditorMode={() =>
+                      startSessionSwitchTransition(() => setEditorMode(!editorMode))
+                    }
+                    rightOpen={rightOpen}
+                    onToggleRightOpen={() => setRightOpen((o) => !o)}
+                    terminalsChip={
+                      currentSessionId ? (
+                        <SessionTerminalsChip
+                          terminals={sessionTerminals.terminals}
+                          runningCount={sessionTerminals.runningCount}
+                          loading={sessionTerminals.loading}
+                          error={sessionTerminals.error}
+                          pendingKillIds={sessionTerminals.pendingKillIds}
+                          onKillTerminal={sessionTerminals.killTerminal}
+                          onReload={sessionTerminals.reload}
+                          gatewayUrl={gatewayUrl}
+                          token={token}
+                          sessionId={currentSessionId}
+                        />
+                      ) : null
+                    }
+                    quickTerminalToggle={
+                      currentSessionId ? (
+                        <QuickTerminalToggle
+                          open={quickTerminalOpen}
+                          onToggle={() =>
+                            setQuickTerminalOpenForWorkspace(
+                              effectiveWorkingDirectory,
+                              !quickTerminalOpen,
+                            )
+                          }
+                        />
+                      ) : null
+                    }
+                    onOpenCommandPalette={commandPalette.open}
+                    bookmarkCount={bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length}
+                    multiSelectActive={multiSelect.multiSelect.enabled}
+                    onToggleMultiSelect={() => {
+                      if (multiSelect.multiSelect.enabled) {
+                        multiSelect.disableMultiSelect();
+                      } else {
+                        multiSelect.enableMultiSelect();
+                        requestAnimationFrame(() => multiSelect.selectAll(messages));
+                      }
+                    }}
+                    onOpenBrowser={() => {
+                      startSessionSwitchTransition(() => {
+                        if (!browserPreviewUrl) {
+                          setBrowserPreviewUrl('http://localhost:3000');
+                        }
+                        setEditorMode(true);
+                        setEditorPaneTab('browser');
+                      });
+                    }}
+                    browserActive={!!browserPreviewUrl}
+                    sidebarOpen={leftSidebarOpen}
+                    onToggleSidebar={() => toggleLeftSidebar()}
+                    editorPaneTab={editorPaneTab}
+                    onActivateCodeTab={() => {
+                      // 用 transition 降级为非阻塞更新 — `editorMode` /
+                      // `editorPaneTab` 同时被多处 ChatPage 订阅,没有
+                      // transition 的话整树 rerender 会在 click handler
+                      // 内同步发生,触发 [Violation] 'click' handler
+                      // took ~190ms。视觉切换走 React concurrent 调度。
+                      startSessionSwitchTransition(() => {
+                        if (editorMode && editorPaneTab === 'code') {
+                          setEditorMode(false);
+                          return;
+                        }
+                        setEditorMode(true);
+                        setEditorPaneTab('code');
+                      });
+                    }}
+                    onActivateBrowserTab={() => {
+                      startSessionSwitchTransition(() => {
+                        if (editorMode && editorPaneTab === 'browser') {
+                          setEditorMode(false);
+                          return;
+                        }
+                        if (!browserPreviewUrl) {
+                          setBrowserPreviewUrl('http://localhost:3000');
+                        }
+                        setEditorMode(true);
+                        setEditorPaneTab('browser');
+                      });
+                    }}
+                    todoController={todoController}
+                    todoDetailsId={todoDetailsId}
+                  />
+                  {multiSelect.multiSelect.enabled && (
+                    <MultiSelectToolbar
+                      selectedCount={multiSelect.selectedCount}
+                      onCopy={() => {
+                        const selected = multiSelect.getSelectedMessages(messages);
+                        if (selected.length > 0) {
+                          void copyExportToClipboard(selected, 'text').then((ok) => {
+                            if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
+                          });
+                        }
+                      }}
+                      onExport={() => {
+                        const selected = multiSelect.getSelectedMessages(messages);
+                        if (selected.length > 0) {
+                          const content = exportMessages(selected, 'markdown');
+                          downloadExport(
+                            content,
+                            `chat-selected-${Date.now()}.md`,
+                            'text/markdown',
+                          );
+                          toast(`已导出 ${selected.length} 条消息`, 'success');
+                        }
+                      }}
+                      onBookmark={() => {
+                        const selected = multiSelect.getSelectedMessages(messages);
+                        for (const msg of selected) {
+                          if (!bookmarkStore.isBookmarked(msg.id)) {
+                            bookmarkStore.addBookmark({
+                              messageId: msg.id,
+                              sessionId: currentSessionId ?? '',
+                              content: msg.content.slice(0, 200),
+                              role: msg.role,
+                            });
+                          }
+                        }
+                        toast(`已收藏 ${selected.length} 条消息`, 'success');
+                        multiSelect.disableMultiSelect();
+                      }}
+                      onSelectAll={() => multiSelect.selectAll(messages)}
+                      onCancel={() => multiSelect.disableMultiSelect()}
                     />
-                  ) : null
-                }
-                onOpenCommandPalette={commandPalette.open}
-                bookmarkCount={bookmarkStore.getSessionBookmarks(currentSessionId ?? '').length}
-                multiSelectActive={multiSelect.multiSelect.enabled}
-                onToggleMultiSelect={() => {
-                  if (multiSelect.multiSelect.enabled) {
-                    multiSelect.disableMultiSelect();
-                  } else {
-                    multiSelect.enableMultiSelect();
-                    requestAnimationFrame(() => multiSelect.selectAll(messages));
-                  }
-                }}
-                onOpenBrowser={() => {
-                  if (!browserPreviewUrl) {
-                    setBrowserPreviewUrl('http://localhost:3000');
-                  }
-                  setEditorMode(true);
-                  setEditorPaneTab('browser');
-                }}
-                browserActive={!!browserPreviewUrl}
-                sidebarOpen={leftSidebarOpen}
-                onToggleSidebar={() => toggleLeftSidebar()}
-                editorPaneTab={editorPaneTab}
-                onActivateCodeTab={() => {
-                  // 已经在 code tab + 分屏模式 → 关闭分屏
-                  if (editorMode && editorPaneTab === 'code') {
-                    setEditorMode(false);
-                    return;
-                  }
-                  setEditorMode(true);
-                  setEditorPaneTab('code');
-                }}
-                onActivateBrowserTab={() => {
-                  // 已经在 browser tab + 分屏模式 → 关闭分屏(保留 url 不清,下次还能恢复)
-                  if (editorMode && editorPaneTab === 'browser') {
-                    setEditorMode(false);
-                    return;
-                  }
-                  if (!browserPreviewUrl) {
-                    setBrowserPreviewUrl('http://localhost:3000');
-                  }
-                  setEditorMode(true);
-                  setEditorPaneTab('browser');
-                }}
-                todoController={todoController}
-                todoDetailsId={todoDetailsId}
-              />
-            }
-            beforeMessages={
-              <SubAgentRunList
-                items={subAgentRunItems}
-                selectedSessionId={selectedChildSessionId}
-                onSelectSession={openChildSessionInspector}
-              />
-            }
-            afterMessages={
-              <>
+                  )}
+                </>
+              }
+              beforeMessages={
+                <>
+                  <SubAgentRunList
+                    items={subAgentRunItems}
+                    selectedSessionId={selectedChildSessionId}
+                    onSelectSession={openChildSessionInspector}
+                  />
+                  <UserHistoryJumpList
+                    items={userHistoryJumpItems}
+                    scrollRegionRef={scrollRegionRef}
+                    ensureMessageVisible={ensureMessageVisible}
+                  />
+                </>
+              }
+              afterMessages={
+                <>
+                  {latestGeneratedImageResult && artifactsWorkspaceHref && (
+                    <ChatImageGenerationResultStrip
+                      artifactTitle={latestGeneratedImageResult.artifactTitle}
+                      modelLabel={latestGeneratedImageResult.modelLabel}
+                      onContinueEditing={continueEditingLatestGeneratedImage}
+                      onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
+                    />
+                  )}
+                </>
+              }
+              composerRightSlot={
                 <CompanionStage
                   agentId={effectiveAgentId}
                   attachedCount={0}
@@ -5580,237 +5766,206 @@ export default function ChatPage() {
                   streaming={streaming}
                   todoCount={sessionTodos.length}
                 />
-                {latestGeneratedImageResult && artifactsWorkspaceHref && (
-                  <ChatImageGenerationResultStrip
-                    artifactTitle={latestGeneratedImageResult.artifactTitle}
-                    modelLabel={latestGeneratedImageResult.modelLabel}
-                    onContinueEditing={continueEditingLatestGeneratedImage}
-                    onOpenArtifactsWorkspace={() => navigate(artifactsWorkspaceHref)}
-                  />
-                )}
-                {multiSelect.multiSelect.enabled && (
-                  <MultiSelectToolbar
-                    selectedCount={multiSelect.selectedCount}
-                    onCopy={() => {
-                      const selected = multiSelect.getSelectedMessages(messages);
-                      if (selected.length > 0) {
-                        void copyExportToClipboard(selected, 'text').then((ok) => {
-                          if (ok) toast(`已复制 ${selected.length} 条消息`, 'success');
-                        });
-                      }
-                    }}
-                    onExport={() => {
-                      const selected = multiSelect.getSelectedMessages(messages);
-                      if (selected.length > 0) {
-                        const content = exportMessages(selected, 'markdown');
-                        downloadExport(content, `chat-selected-${Date.now()}.md`, 'text/markdown');
-                        toast(`已导出 ${selected.length} 条消息`, 'success');
-                      }
-                    }}
-                    onBookmark={() => {
-                      const selected = multiSelect.getSelectedMessages(messages);
-                      for (const msg of selected) {
-                        if (!bookmarkStore.isBookmarked(msg.id)) {
-                          bookmarkStore.addBookmark({
-                            messageId: msg.id,
-                            sessionId: currentSessionId ?? '',
-                            content: msg.content.slice(0, 200),
-                            role: msg.role,
-                          });
-                        }
-                      }
-                      toast(`已收藏 ${selected.length} 条消息`, 'success');
-                      multiSelect.disableMultiSelect();
-                    }}
-                    onSelectAll={() => multiSelect.selectAll(messages)}
-                    onCancel={() => multiSelect.disableMultiSelect()}
-                  />
-                )}
-              </>
-            }
-            composerExtras={{
-              imageGeneration: true,
-              skillRecommendation: true,
-              multiSelect: true,
-              bookmarks: true,
-              promptTemplate: true,
-              commandPalette: true,
-              dialogueModeToggle: true,
-              yoloMode: true,
-              agentSwitch: true,
-            }}
-            messages={messages}
-            groupedMessageEntries={groupedMessageEntries}
-            visibleMessageCount={visibleMessageCount ?? sanitizedHistoricalMessages.length}
-            hiddenMessageCount={hiddenMessageCount}
-            visibleStreaming={visibleStreaming}
-            showSessionSwitchSkeleton={showSessionSwitchSkeleton}
-            remoteSessionBusyState={remoteSessionBusyState}
-            pendingPermissions={pendingPermissions}
-            resolveInlinePermissionActions={resolveInlinePermissionActions}
-            providerCatalog={providerCatalog}
-            activeProviderId={activeProviderId}
-            activeModelId={activeModelId}
-            activeModelLabel={activeModelOption?.label}
-            onLoadEarlier={() => {
-              const localHidden =
-                sanitizedHistoricalMessages.length -
-                (visibleMessageCount ?? sanitizedHistoricalMessages.length);
-              if (localHidden > 0) {
-                setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-              } else if (currentSessionId) {
-                void loadCurrentSessionSnapshot(currentSessionId, {
-                  replaceMessages: true,
-                })
-                  .then(() => {
-                    setServerTotalTurnCount(null);
-                    setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+              }
+              composerExtras={{
+                imageGeneration: true,
+                skillRecommendation: true,
+                multiSelect: true,
+                bookmarks: true,
+                promptTemplate: true,
+                commandPalette: true,
+                dialogueModeToggle: true,
+                yoloMode: true,
+                agentSwitch: true,
+              }}
+              messages={messages}
+              groupedMessageEntries={groupedMessageEntries}
+              visibleMessageCount={visibleMessageCount ?? sanitizedHistoricalMessages.length}
+              hiddenMessageCount={hiddenMessageCount}
+              visibleStreaming={visibleStreaming}
+              showSessionSwitchSkeleton={showSessionSwitchSkeleton}
+              remoteSessionBusyState={remoteSessionBusyState}
+              pendingPermissions={pendingPermissions}
+              resolveInlinePermissionActions={resolveInlinePermissionActions}
+              providerCatalog={providerCatalog}
+              activeProviderId={activeProviderId}
+              activeModelId={activeModelId}
+              activeModelLabel={activeModelOption?.label}
+              onLoadEarlier={() => {
+                const localHidden =
+                  sanitizedHistoricalMessages.length -
+                  (visibleMessageCount ?? sanitizedHistoricalMessages.length);
+                if (localHidden > 0) {
+                  setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+                } else if (currentSessionId) {
+                  void loadCurrentSessionSnapshot(currentSessionId, {
+                    replaceMessages: true,
                   })
-                  .catch(() => undefined);
-              }
-            }}
-            welcomeScreen={{
-              hasWorkspace: !!effectiveWorkingDirectory,
-              dialogueMode,
-              onNewSession: () => void ensureSession(),
-              onOpenWorkspace: () => setShowWorkspaceSelector(true),
-              onSelectMode: handleDialogueModeChange,
-            }}
-            streaming={streaming}
-            stoppingStream={stoppingStream}
-            streamError={streamError}
-            onDismissStreamError={() => setStreamError(null)}
-            checkpointCount={compactions.length}
-            pendingQuestionsCount={pendingQuestions.length}
-            stopCapability={stopCapability}
-            onOpenRecovery={() => {
-              setRightOpen(true);
-              setRightTab('overview');
-            }}
-            scrollRegionRef={scrollRegionRef}
-            contentColumnRef={contentColumnRef}
-            bottomRef={bottomRef}
-            onScroll={handleScroll}
-            showScrollToBottom={showScrollToBottom}
-            hasPendingFollowContent={hasPendingFollowContent}
-            onScrollToBottom={(behavior, target) => scrollToBottom(behavior, target)}
-            editorMode={editorMode}
-            sessionTodos={sessionTodos}
-            rightOpen={rightOpen}
-            activePendingQuestion={activePendingQuestion}
-            inlineQuestionAnswers={inlineQuestionAnswers}
-            inlineQuestionCustomInputs={inlineQuestionCustomInputs}
-            inlineQuestionReplyStatus={inlineQuestionReplyStatus}
-            inlineQuestionReplyError={inlineQuestionReplyError}
-            onToggleInlineQuestionOption={toggleInlineQuestionOption}
-            onChangeInlineQuestionCustomInput={handleInlineQuestionCustomInput}
-            onReplyInlineQuestion={replyInlineQuestion}
-            historyEditPrompt={historyEditPrompt}
-            onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
-            onResendHistoryEdit={(text, editedInputParts) => {
-              if (!historyEditPrompt) return;
-              void handleEditResendInCurrentSession(
-                text,
-                historyEditPrompt.messageId,
-                editedInputParts as never,
-              );
-              setHistoryEditPrompt(null);
-            }}
-            onContinueHistoryEdit={(text, editedInputParts) => {
-              if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
-                void sendMessage(text, {
-                  existingInputParts: editedInputParts as never,
+                    .then(() => {
+                      setServerTotalTurnCount(null);
+                      setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+                    })
+                    .catch(() => undefined);
+                }
+              }}
+              welcomeScreen={{
+                hasWorkspace: !!effectiveWorkingDirectory,
+                dialogueMode,
+                onNewSession: () => void ensureSession(),
+                onOpenWorkspace: () => setShowWorkspaceSelector(true),
+                onSelectMode: handleDialogueModeChange,
+              }}
+              streaming={streaming}
+              stoppingStream={stoppingStream}
+              streamError={streamError}
+              onDismissStreamError={() => setStreamError(null)}
+              checkpointCount={compactions.length}
+              pendingQuestionsCount={pendingQuestions.length}
+              stopCapability={stopCapability}
+              onOpenRecovery={() => {
+                setRightOpen(true);
+                setRightTab('overview');
+              }}
+              scrollRegionRef={scrollRegionRef}
+              contentColumnRef={contentColumnRef}
+              bottomRef={bottomRef}
+              onScroll={handleScroll}
+              showScrollToBottom={showScrollToBottom}
+              hasPendingFollowContent={hasPendingFollowContent}
+              onScrollToBottom={(behavior, target) => scrollToBottom(behavior, target)}
+              editorMode={editorMode}
+              sessionTodos={sessionTodos}
+              rightOpen={rightOpen}
+              activePendingQuestion={activePendingQuestion}
+              inlineQuestionAnswers={inlineQuestionAnswers}
+              inlineQuestionCustomInputs={inlineQuestionCustomInputs}
+              inlineQuestionReplyStatus={inlineQuestionReplyStatus}
+              inlineQuestionReplyError={inlineQuestionReplyError}
+              onToggleInlineQuestionOption={toggleInlineQuestionOption}
+              onChangeInlineQuestionCustomInput={handleInlineQuestionCustomInput}
+              onReplyInlineQuestion={replyInlineQuestion}
+              historyEditPrompt={historyEditPrompt}
+              onCloseHistoryEdit={() => setHistoryEditPrompt(null)}
+              onResendHistoryEdit={(text, editedInputParts) => {
+                if (!historyEditPrompt) return;
+                void handleEditResendInCurrentSession(
+                  text,
+                  historyEditPrompt.messageId,
+                  editedInputParts as never,
+                );
+                setHistoryEditPrompt(null);
+              }}
+              onContinueHistoryEdit={(text, editedInputParts) => {
+                if (editedInputParts && (editedInputParts as unknown[]).length > 0) {
+                  void sendMessage(text, {
+                    existingInputParts: editedInputParts as never,
+                  });
+                } else {
+                  focusComposerWithText(text);
+                }
+                setHistoryEditPrompt(null);
+              }}
+              onCreateBranchFromHistoryEdit={(text, editedInputParts) => {
+                if (!historyEditPrompt) return;
+                void createBranchSessionFromMessage(
+                  text,
+                  historyEditPrompt.messageId,
+                  editedInputParts as never,
+                );
+                setHistoryEditPrompt(null);
+              }}
+              retryPrompt={retryPrompt}
+              onCloseRetry={() => setRetryPrompt(null)}
+              onRetryCurrent={() => {
+                void handleRetryInCurrentSession();
+              }}
+              onRetryBranch={() => {
+                void handleRetryInNewSession();
+              }}
+              chatSearch={chatSearch}
+              composerVariant={composerVariant}
+              providers={providers}
+              activeProvider={activeProvider}
+              activeModelOption={activeModelOption}
+              activeModelCanConfigureThinking={activeModelCanConfigureThinking}
+              activeModelTooltip={activeModelTooltip}
+              canStopCurrentSessionStream={canStopCurrentSessionStream}
+              dialogueMode={dialogueMode}
+              manualAgentId={manualAgentId}
+              yoloMode={yoloMode}
+              webSearchEnabled={webSearchEnabled}
+              thinkingEnabled={thinkingEnabled}
+              reasoningEffort={reasoningEffort}
+              imageReferenceArtifacts={availableImageEditReferenceArtifacts}
+              selectedImageEditReferenceArtifactId={selectedImageEditReferenceArtifactId}
+              latestGeneratedImageResult={latestGeneratedImageResult}
+              artifactsWorkspaceHref={artifactsWorkspaceHref}
+              imageGenerationMode={imageGenerationMode}
+              hasConfiguredImageModel={hasConfiguredImageModel}
+              imageGenerationBusy={imageGenerationBusy}
+              imageGenerationDefaults={imageGenerationDefaults}
+              imageModelLabel={imageModelLabel}
+              imagePluginEnabled={imagePluginEnabled}
+              toggleImageGenerationMode={toggleImageGenerationMode}
+              updateImageGenerationDefaults={updateImageGenerationDefaults}
+              composerWorkspaceCatalog={composerWorkspaceCatalog}
+              composerCommandDescriptors={composerCommandDescriptors}
+              agentOptions={agentOptions}
+              effectiveAgentId={effectiveAgentId}
+              defaultAgentLabel={defaultAgentLabel}
+              input={input}
+              setInput={setInput}
+              textareaRef={textareaRef}
+              onComposerSubmit={async (payload) => {
+                await sendMessage(payload.text, {
+                  queuedFiles: payload.files,
+                  queuedAttachmentItems: payload.attachmentItems,
+                  queuedMessageId: payload.queuedMessageId,
                 });
-              } else {
-                focusComposerWithText(text);
+              }}
+              onStopComposer={() => void stopActiveMessage()}
+              onComposerModelSelect={async (pid: string, mid: string) => {
+                setActiveProviderId(pid);
+                setActiveModelId(mid);
+                markSessionMetadataDirty();
+              }}
+              onToggleWebSearch={handleToggleWebSearch}
+              onThinkingEnabledChange={(enabled) => {
+                setThinkingEnabled(enabled);
+                markSessionMetadataDirty();
+              }}
+              onReasoningEffortChange={(effort) => {
+                setReasoningEffort(effort);
+                markSessionMetadataDirty();
+              }}
+              onManualAgentChange={handleManualAgentChange}
+              onClearManualAgentId={handleClearManualAgentId}
+              onContinueEditingImage={continueEditingLatestGeneratedImage}
+              onNavigateToArtifacts={
+                artifactsWorkspaceHref ? () => navigate(artifactsWorkspaceHref) : undefined
               }
-              setHistoryEditPrompt(null);
-            }}
-            onCreateBranchFromHistoryEdit={(text, editedInputParts) => {
-              if (!historyEditPrompt) return;
-              void createBranchSessionFromMessage(
-                text,
-                historyEditPrompt.messageId,
-                editedInputParts as never,
-              );
-              setHistoryEditPrompt(null);
-            }}
-            retryPrompt={retryPrompt}
-            onCloseRetry={() => setRetryPrompt(null)}
-            onRetryCurrent={() => {
-              void handleRetryInCurrentSession();
-            }}
-            onRetryBranch={() => {
-              void handleRetryInNewSession();
-            }}
-            chatSearch={chatSearch}
-            composerVariant={composerVariant}
-            providers={providers}
-            activeProvider={activeProvider}
-            activeModelOption={activeModelOption}
-            activeModelCanConfigureThinking={activeModelCanConfigureThinking}
-            activeModelTooltip={activeModelTooltip}
-            canStopCurrentSessionStream={canStopCurrentSessionStream}
-            dialogueMode={dialogueMode}
-            manualAgentId={manualAgentId}
-            yoloMode={yoloMode}
-            webSearchEnabled={webSearchEnabled}
-            thinkingEnabled={thinkingEnabled}
-            reasoningEffort={reasoningEffort}
-            imageReferenceArtifacts={availableImageEditReferenceArtifacts}
-            selectedImageEditReferenceArtifactId={selectedImageEditReferenceArtifactId}
-            latestGeneratedImageResult={latestGeneratedImageResult}
-            artifactsWorkspaceHref={artifactsWorkspaceHref}
-            imageGenerationMode={imageGenerationMode}
-            hasConfiguredImageModel={hasConfiguredImageModel}
-            imageGenerationBusy={imageGenerationBusy}
-            imageGenerationDefaults={imageGenerationDefaults}
-            imageModelLabel={imageModelLabel}
-            imagePluginEnabled={imagePluginEnabled}
-            toggleImageGenerationMode={toggleImageGenerationMode}
-            updateImageGenerationDefaults={updateImageGenerationDefaults}
-            composerWorkspaceCatalog={composerWorkspaceCatalog}
-            composerCommandDescriptors={composerCommandDescriptors}
-            agentOptions={agentOptions}
-            effectiveAgentId={effectiveAgentId}
-            defaultAgentLabel={defaultAgentLabel}
-            input={input}
-            setInput={setInput}
-            textareaRef={textareaRef}
-            onComposerSubmit={async (payload) => {
-              await sendMessage(payload.text, {
-                queuedFiles: payload.files,
-                queuedAttachmentItems: payload.attachmentItems,
-                queuedMessageId: payload.queuedMessageId,
-              });
-            }}
-            onStopComposer={() => void stopActiveMessage()}
-            onComposerModelSelect={async (pid: string, mid: string) => {
-              setActiveProviderId(pid);
-              setActiveModelId(mid);
-              markSessionMetadataDirty();
-            }}
-            onToggleWebSearch={handleToggleWebSearch}
-            onThinkingEnabledChange={(enabled) => {
-              setThinkingEnabled(enabled);
-              markSessionMetadataDirty();
-            }}
-            onReasoningEffortChange={(effort) => {
-              setReasoningEffort(effort);
-              markSessionMetadataDirty();
-            }}
-            onManualAgentChange={handleManualAgentChange}
-            onClearManualAgentId={handleClearManualAgentId}
-            onContinueEditingImage={continueEditingLatestGeneratedImage}
-            onNavigateToArtifacts={
-              artifactsWorkspaceHref ? () => navigate(artifactsWorkspaceHref) : undefined
-            }
-            onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
-            markSessionMetadataDirty={markSessionMetadataDirty}
-            contextUsedTokens={contextUsageSnapshot?.usedTokens}
-            contextMaxTokens={contextUsageSnapshot?.maxTokens}
-            contextIsEstimated={contextUsageSnapshot?.estimated}
-          />
+              onSelectImageReferenceArtifactId={setSelectedImageEditReferenceArtifactId}
+              markSessionMetadataDirty={markSessionMetadataDirty}
+              contextUsedTokens={contextUsageSnapshot?.usedTokens}
+              contextMaxTokens={contextUsageSnapshot?.maxTokens}
+              contextIsEstimated={contextUsageSnapshot?.estimated}
+            />
+            {currentSessionId ? (
+              <QuickTerminalPanel
+                open={quickTerminalOpen}
+                onRequestClose={() =>
+                  setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, false)
+                }
+                workspacePath={effectiveWorkingDirectory}
+                gatewayUrl={gatewayUrl}
+                token={token}
+                sessionId={currentSessionId}
+                terminals={sessionTerminals.terminals}
+                loading={sessionTerminals.loading}
+                onReload={sessionTerminals.reload}
+              />
+            ) : null}
+          </LatestAssistantMessageContext.Provider>
         </div>
         <ChatEditorPane
           editorMode={editorMode}
@@ -5882,6 +6037,7 @@ export default function ChatPage() {
         sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
         onKillTerminal={sessionTerminals.killTerminal}
         onReloadTerminals={sessionTerminals.reload}
+        ensureMessageVisible={ensureMessageVisible}
       />
     </div>
   );

@@ -1,0 +1,149 @@
+/**
+ * 260517-ui-hovers · 跨页通用 hover 工具类
+ *
+ * 用来替换非 team 文件里那一批 `onMouseEnter / onMouseLeave` 直接改
+ * `e.currentTarget.style` 的反模式。`team-runtime.css` 里有同名意图的
+ * `team-*` 类，但只在 team 页加载；这里用 `ui-*` 前缀做全局集合，由
+ * `main.tsx` 一次性 import。
+ *
+ * 设计：
+ *   - 颜色靠 CSS 变量；少数 per-element 颜色通过 element `style={{ '--ui-hover-x': … }}`
+ *     注入。
+ *   - hover 行为受 `:disabled / [aria-pressed='true'] / [data-active='true']` 排除态保护。
+ *   - 全部带 `transition`，无须组件再写。
+ */
+
+/* surface 微提亮（菜单项、按钮 hover 标准款） */
+.ui-hover-surface {
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.ui-hover-surface:hover:not(:disabled):not([aria-pressed='true']):not([data-active='true']) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* 透明按钮 hover 出 var(--surface) 实色（折叠/快捷按钮等） */
+.ui-hover-surface-bg {
+  transition: background 150ms ease;
+}
+.ui-hover-surface-bg:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+/* 提亮 + 边框出现（弹出按钮、setting 行） */
+.ui-hover-surface-bordered {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.ui-hover-surface-bordered:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border-subtle);
+}
+
+/* accent 软背景 + 边色（导航、chip、bookmark 行） */
+.ui-hover-accent-soft {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.ui-hover-accent-soft:hover:not(:disabled):not([aria-pressed='true']):not([data-active='true']) {
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  border-color: var(--border-subtle);
+  color: var(--text);
+}
+
+/* 仅文字色变化（链接 / icon-only 按钮） */
+.ui-hover-color {
+  transition: color 150ms ease;
+}
+.ui-hover-color:hover:not(:disabled) {
+  color: var(--text-2);
+}
+.ui-hover-color[data-tone='accent']:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* 文字 + 背景同时切（icon ghost 标准款） */
+.ui-hover-text-bg {
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.ui-hover-text-bg:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* 链接下划线（hover 时显现） */
+.ui-hover-underline {
+  transition: text-decoration-color 150ms ease;
+}
+.ui-hover-underline:hover {
+  text-decoration: underline;
+}
+
+/* 透明背景 → accent 软底（cursor 列表、提示项） */
+.ui-hover-tint-bg {
+  transition: background 80ms ease;
+}
+.ui-hover-tint-bg:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+}
+
+/* surface alpha 提亮 + 透明度全开（关闭按钮、轻量 icon） */
+.ui-hover-icon-pop {
+  transition:
+    background 150ms ease,
+    opacity 150ms ease,
+    color 150ms ease;
+}
+.ui-hover-icon-pop:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%);
+  opacity: 1;
+}
+.ui-hover-icon-pop[data-tone='danger']:hover:not(:disabled) {
+  color: var(--danger);
+  background: transparent;
+}
+
+/* 受 prefers-reduced-motion 影响：transition 关掉变量切换的渐变 */
+@media (prefers-reduced-motion: reduce) {
+  .ui-hover-surface,
+  .ui-hover-surface-bg,
+  .ui-hover-surface-bordered,
+  .ui-hover-accent-soft,
+  .ui-hover-color,
+  .ui-hover-text-bg,
+  .ui-hover-tint-bg,
+  .ui-hover-icon-pop {
+    transition: none;
+  }
+}
+
+
+/* file-tree 节点 hover；只在非高亮态下生效。
+ * 注意：节点 inline style 已经控制了「expanded / active」时的底色，
+ * 这里只覆盖 hover 时的临时态，不与状态色冲突。 */
+.file-tree-node:hover:not([data-highlighted='true']):not(:disabled) {
+  background: color-mix(in oklch, var(--text) 5%, transparent);
+}
+.file-tree-file:hover:not([data-active='true']):not([data-highlighted='true']):not(:disabled) {
+  background: color-mix(in oklch, var(--text) 6%, transparent);
+}
+
+
+/* list-row：var(--bg-2) 底色行 hover 出更亮的 var(--bg-1) + 实边 */
+.ui-hover-list-row {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.ui-hover-list-row:hover:not(:disabled) {
+  background: var(--bg-1);
+  border-color: var(--border);
+}

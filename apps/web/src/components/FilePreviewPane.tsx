@@ -5,8 +5,11 @@ import {
   getPreviewNote,
   getPreviewSandbox,
   getPreviewTitle,
+  isBinaryPreviewKind,
   type FilePreviewKind,
 } from '../utils/file-preview.js';
+import { OfficePreview } from './office-preview/OfficePreview.js';
+import './office-preview/office-preview.css';
 
 export function FilePreviewPane({ content, path }: { content: string; path: string }) {
   const previewKind = getFilePreviewKind(path);
@@ -28,6 +31,16 @@ export function FilePreviewPane({ content, path }: { content: string; path: stri
         当前文件类型暂不支持预览。
       </div>
     );
+  }
+
+  // Binary kinds (office docs, pdf, archives) — server reads them as
+  // utf-8 which produces mojibake. Office docs go through dedicated
+  // renderers (mammoth / SheetJS); archives keep the friendly notice.
+  if (previewKind === 'binary-office' || previewKind === 'binary-pdf') {
+    return <OfficePreview path={path} />;
+  }
+  if (isBinaryPreviewKind(previewKind)) {
+    return <BinaryFileNotice path={path} kind={previewKind} />;
   }
 
   // Markdown preview
@@ -576,4 +589,89 @@ function JsonHighlighted({ json }: { json: string }) {
 
   // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON highlighting is safe (content is from JSON.stringify)
   return <code dangerouslySetInnerHTML={{ __html: highlighted }} />;
+}
+
+// ---------------------------------------------------------------------------
+// Binary file notice — Office docs / PDFs / archives can't be safely shown
+// as text. The gateway's readFile is a utf-8 decode, so the bytes we get
+// back for these files are mojibake. Render a clear placeholder so the
+// user understands the file exists but isn't text-previewable yet.
+// ---------------------------------------------------------------------------
+function BinaryFileNotice({ path, kind }: { path: string; kind: FilePreviewKind }) {
+  const ext = (path.split('.').pop() ?? '').toUpperCase();
+  const kindLabel =
+    kind === 'binary-office'
+      ? 'Office 文档'
+      : kind === 'binary-pdf'
+        ? 'PDF 文档'
+        : kind === 'binary-archive'
+          ? '压缩包'
+          : '二进制文件';
+  const tip =
+    kind === 'binary-office'
+      ? '这是 Office 二进制文档（Word / Excel / PowerPoint）。文本预览会显示乱码，建议在系统中用对应程序打开。'
+      : kind === 'binary-pdf'
+        ? '这是 PDF 二进制文档。请在系统中用 PDF 阅读器打开。'
+        : kind === 'binary-archive'
+          ? '这是压缩归档（zip / tar / 7z 等）。请在文件管理器中解压后再查看其中文件。'
+          : '该文件为二进制内容，无法以文本方式预览。';
+  const filename = path.split('/').pop() ?? path;
+  return (
+    <div
+      data-testid="file-editor-binary-notice"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        background: 'var(--surface)',
+        gap: 12,
+        textAlign: 'center',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'color-mix(in oklch, var(--accent) 12%, var(--surface))',
+          color: 'var(--accent)',
+          fontSize: 24,
+        }}
+      >
+        📄
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)' }}>
+        {kindLabel} · {ext}
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: 'var(--text-3)',
+          fontFamily: 'var(--font-mono, monospace)',
+          maxWidth: 400,
+          wordBreak: 'break-all',
+        }}
+      >
+        {filename}
+      </div>
+      <div
+        style={{
+          maxWidth: 360,
+          fontSize: 12,
+          color: 'var(--text-2)',
+          lineHeight: 1.6,
+        }}
+      >
+        {tip}
+      </div>
+    </div>
+  );
 }

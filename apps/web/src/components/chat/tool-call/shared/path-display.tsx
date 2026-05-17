@@ -16,7 +16,8 @@
  * Windows-shaped paths render the same way.
  */
 
-import type { ReactElement } from 'react';
+import type { CSSProperties, ReactElement } from 'react';
+import { useFileEditorContext } from '../../../../App.js';
 
 /**
  * Find the longest directory prefix shared by every path in the list.
@@ -91,23 +92,81 @@ export function splitPathParts(path: string): { dir: string; name: string } {
  * Honours an optional `prefix` which, when supplied, is removed from the
  * front of the path before splitting (the prefix is shown elsewhere as a
  * single header badge — repeating it on every row defeats the purpose).
+ *
+ * Becomes clickable when `App.tsx` has wired `FileEditorContext` (i.e.
+ * the user is on the chat page with the editor pane available). Clicking
+ * opens the file in the editor pane via `useFileEditor.openFile`, the
+ * same path used by `MarkdownPathRef`. Outside the chat page (e.g. in a
+ * standalone artifact viewer) the context is null and the path renders
+ * as a passive span without any click affordance — no behaviour change
+ * for non-chat consumers.
  */
 export function StyledPath({
   path,
   prefix,
   className,
+  interactive = true,
 }: {
   path: string;
   prefix?: string;
   className?: string;
+  /**
+   * Set to `false` to force a passive span even when a FileEditor
+   * context is available — useful for paths that are part of an
+   * already-clickable card (e.g. row-level button).
+   */
+  interactive?: boolean;
 }): ReactElement {
+  const fileEditorRef = useFileEditorContext();
   const relative = prefix ? stripPathPrefix(path, prefix) : path;
   const { dir, name } = splitPathParts(relative);
-  return (
-    <span className={className ? `styled-path ${className}` : 'styled-path'} title={path}>
+  const canOpen = interactive && fileEditorRef?.current !== null;
+
+  const inner = (
+    <>
       {dir && <span className="styled-path-dir">{dir}</span>}
       <span className="styled-path-name">{name}</span>
-    </span>
+    </>
+  );
+  const composedClass = className ? `styled-path ${className}` : 'styled-path';
+
+  if (!canOpen) {
+    return (
+      <span className={composedClass} title={path}>
+        {inner}
+      </span>
+    );
+  }
+
+  // Inline cursor:pointer + hover underline via tokens; the parent
+  // preview cards may already wrap the full row in a button, but those
+  // wrappers swallow the click and we still want the path itself to
+  // surface as the open trigger.
+  const buttonStyle: CSSProperties = {
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    padding: 0,
+    margin: 0,
+    font: 'inherit',
+    cursor: 'pointer',
+    textAlign: 'left',
+    minWidth: 0,
+  };
+  return (
+    <button
+      type="button"
+      className={`${composedClass} styled-path-clickable`}
+      title={`点击打开 ${path}`}
+      style={buttonStyle}
+      onClick={(event) => {
+        event.stopPropagation();
+        const open = fileEditorRef?.current;
+        if (open) open(path);
+      }}
+    >
+      {inner}
+    </button>
   );
 }
 

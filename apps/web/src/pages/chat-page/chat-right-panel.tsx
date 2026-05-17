@@ -50,6 +50,7 @@ const EMPTY_KILL_SET = new Set<string>();
 
 const TERMINAL_STATUS_LABELS: Record<SessionTerminalStatus, string> = {
   running: '运行中',
+  idle: '空闲',
   exited: '已退出',
   aborted: '已取消',
   timeout: '超时',
@@ -62,6 +63,7 @@ const TERMINAL_STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 
 const TERMINAL_STATUS_COLORS: Record<SessionTerminalStatus, string> = {
   running: '#34d399',
+  idle: '#94a3b8',
   exited: '#94a3b8',
   aborted: '#f59e0b',
   timeout: '#f59e0b',
@@ -172,6 +174,13 @@ export interface ChatRightPanelProps {
   sessionTerminalsPendingKillIds?: Set<string>;
   onKillTerminal?: (terminalId: string) => Promise<void>;
   onReloadTerminals?: () => void;
+  /**
+   * Bridge from `ChatPage`: bookmark navigate / future message-jump
+   * surfaces use this to expand pagination so a target message that's
+   * currently outside the rendered window actually appears in the DOM
+   * before we try to scroll to it.
+   */
+  ensureMessageVisible?: (messageId: string) => Promise<void> | void;
 }
 
 export function ChatRightPanel(props: ChatRightPanelProps) {
@@ -431,21 +440,45 @@ export function ChatRightPanel(props: ChatRightPanelProps) {
                     <BookmarksPanel
                       sessionId={currentSessionId ?? ''}
                       onNavigateToMessage={(messageId) => {
-                        // Scroll to the message in the chat
-                        const scrollRegion = document.querySelector(
-                          '[data-testid="chat-scroll-region"]',
-                        );
-                        if (!scrollRegion) return;
-                        const target = scrollRegion.querySelector(
-                          `[data-message-id="${messageId}"]`,
-                        );
-                        if (target) {
+                        // Scroll to the message in the chat. If it's
+                        // not in the rendered window (paged-out), let
+                        // the host expand pagination first, then poll
+                        // briefly for the node to land in the DOM.
+                        const flash = (target: HTMLElement) => {
                           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          (target as HTMLElement).setAttribute('data-search-flash', 'true');
+                          target.setAttribute('data-search-flash', 'true');
                           setTimeout(() => {
-                            (target as HTMLElement).removeAttribute('data-search-flash');
+                            target.removeAttribute('data-search-flash');
                           }, 1500);
+                        };
+                        const tryFocus = () => {
+                          const scrollRegion = document.querySelector(
+                            '[data-testid="chat-scroll-region"]',
+                          );
+                          if (!scrollRegion) return null;
+                          return scrollRegion.querySelector<HTMLElement>(
+                            `[data-message-id="${messageId}"]`,
+                          );
+                        };
+                        const initial = tryFocus();
+                        if (initial) {
+                          flash(initial);
+                          return;
                         }
+                        if (!props.ensureMessageVisible) return;
+                        void Promise.resolve(props.ensureMessageVisible(messageId)).then(
+                          async () => {
+                            const deadlineMs = performance.now() + 1500;
+                            let target: HTMLElement | null = null;
+                            while (!target && performance.now() < deadlineMs) {
+                              await new Promise<void>((resolve) =>
+                                requestAnimationFrame(() => resolve()),
+                              );
+                              target = tryFocus();
+                            }
+                            if (target) flash(target);
+                          },
+                        );
                       }}
                     />
                   )}

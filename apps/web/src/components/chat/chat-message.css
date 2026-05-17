@@ -719,10 +719,11 @@
   animation: chat-todo-floating-rise 160ms ease-out;
 }
 
-/* 顶部 popover：从 ChatTopBar 内 slot 下方右对齐弹出。 */
+/* 顶部 popover：浮层挂在 ChatTopBar 内 slot 下方右对齐弹出。
+ * 位置由 ChatTodoFloatingPanel 用 fixed + getBoundingClientRect 在 inline
+ * style 中赋值（绕开 ChatTopBar 父级的 overflow:hidden 截断）。这里
+ * 只兜底尺寸约束。 */
 .chat-todo-floating-panel[data-anchor='topbar'] {
-  top: calc(100% + 6px);
-  right: 0;
   width: max-content;
   min-width: 320px;
   max-width: min(440px, calc(100vw - 24px));

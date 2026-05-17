@@ -20,6 +20,14 @@ import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { sqliteGet } from '../db.js';
 import {
+  closePersistentTerminal,
+  isPersistentTerminal,
+  resizeTerminal,
+  spawnPersistentTerminal,
+  writeStdinToTerminal,
+} from '../persistent-terminals.js';
+import { subscribeSessionRunEvents } from '../session-run-events.js';
+import {
   deleteTerminalRecord,
   getTerminal,
   killTerminal,
@@ -159,6 +167,251 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
         });
       }
       return reply.send({ deleted: result.deleted });
+    },
+  );
+
+  /**
+   * POST /sessions/:sessionId/terminals
+   * Create a new user-driven persistent terminal. The terminal stays
+   * open across requests; the user's keystrokes go through the stdin
+   * endpoint below and output is streamed via the SSE endpoint.
+   */
+  app.post(
+    '/sessions/:sessionId/terminals',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload | undefined;
+      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      const { sessionId } = request.params as { sessionId: string };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+      const body = (request.body ?? {}) as {
+        cwd?: string;
+        initialCommand?: string;
+        description?: string;
+      };
+      const cwd =
+        typeof body.cwd === 'string' && body.cwd.trim().length > 0 ? body.cwd : process.cwd();
+      try {
+        const result = spawnPersistentTerminal({
+          sessionId,
+          userId: user.sub,
+          cwd,
+          source: 'user',
+          ...(body.initialCommand ? { initialCommand: body.initialCommand } : {}),
+          ...(body.description ? { description: body.description } : {}),
+        });
+        return reply.send({ terminal: toPublicTerminal(result.terminal) });
+      } catch (error) {
+        return reply.code(500).send({
+          error: 'spawn_failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /sessions/:sessionId/terminals/:terminalId/stdin
+   * Write user-typed bytes into a persistent shell's stdin. The frontend
+   * sends raw key sequences (including '\r' for Enter); the shell does
+   * its own line editing.
+   */
+  app.post(
+    '/sessions/:sessionId/terminals/:terminalId/stdin',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload | undefined;
+      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      const { sessionId, terminalId } = request.params as {
+        sessionId: string;
+        terminalId: string;
+      };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+      const record = getTerminal(terminalId, user.sub);
+      if (!record || record.sessionId !== sessionId) {
+        return reply.code(404).send({ error: 'terminal_not_found' });
+      }
+      if (!isPersistentTerminal(terminalId)) {
+        return reply.code(409).send({
+          error: 'terminal_not_persistent',
+          message: '该终端是 agent 的一次性命令，不支持继续输入。',
+        });
+      }
+      const body = (request.body ?? {}) as { data?: string };
+      if (typeof body.data !== 'string') {
+        return reply.code(400).send({ error: 'invalid_body' });
+      }
+      const result = writeStdinToTerminal(terminalId, body.data);
+      if (!result.ok) return reply.code(409).send(result);
+      return reply.send({ ok: true });
+    },
+  );
+
+  /**
+   * POST /sessions/:sessionId/terminals/:terminalId/resize
+   * No-op stub for xterm fit-addon resize events; kept stable so we
+   * can swap in a real PTY later without touching the frontend.
+   */
+  app.post(
+    '/sessions/:sessionId/terminals/:terminalId/resize',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload | undefined;
+      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      const { sessionId, terminalId } = request.params as {
+        sessionId: string;
+        terminalId: string;
+      };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+      const record = getTerminal(terminalId, user.sub);
+      if (!record || record.sessionId !== sessionId) {
+        return reply.code(404).send({ error: 'terminal_not_found' });
+      }
+      const body = (request.body ?? {}) as { cols?: number; rows?: number };
+      const cols = Number.isFinite(body.cols) ? Math.max(1, Math.floor(body.cols ?? 80)) : 80;
+      const rows = Number.isFinite(body.rows) ? Math.max(1, Math.floor(body.rows ?? 24)) : 24;
+      resizeTerminal({ terminalId, cols, rows });
+      return reply.send({ ok: true });
+    },
+  );
+
+  /**
+   * POST /sessions/:sessionId/terminals/:terminalId/close
+   * User-initiated close of a persistent terminal — equivalent to
+   * "I'm done with this tab". For non-persistent terminals this falls
+   * back to the kill path.
+   */
+  app.post(
+    '/sessions/:sessionId/terminals/:terminalId/close',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload | undefined;
+      if (!user?.sub) return reply.code(401).send({ error: 'unauthorized' });
+      const { sessionId, terminalId } = request.params as {
+        sessionId: string;
+        terminalId: string;
+      };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+      const record = getTerminal(terminalId, user.sub);
+      if (!record || record.sessionId !== sessionId) {
+        return reply.code(404).send({ error: 'terminal_not_found' });
+      }
+      if (isPersistentTerminal(terminalId)) {
+        closePersistentTerminal(terminalId);
+      } else {
+        killTerminal({ terminalId, userId: user.sub });
+      }
+      return reply.send({ ok: true });
+    },
+  );
+
+  /**
+   * GET /sessions/:sessionId/terminals/:terminalId/stream
+   * Server-Sent Events stream filtered to a single terminal. SSE can't
+   * send Authorization headers so we accept `?token=<jwt>`, mirroring
+   * `/mcp/events`.
+   */
+  app.get(
+    '/sessions/:sessionId/terminals/:terminalId/stream',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const rawQuery = (request.query as Record<string, string | undefined>) ?? {};
+      const sseToken = rawQuery['token'];
+      let user: JwtPayload;
+      try {
+        user = request.server.jwt.verify<JwtPayload>(sseToken ?? '');
+      } catch {
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+      const { sessionId, terminalId } = request.params as {
+        sessionId: string;
+        terminalId: string;
+      };
+      if (!ensureSessionOwnedByUser(sessionId, user.sub)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+      const record = getTerminal(terminalId, user.sub);
+      if (!record || record.sessionId !== sessionId) {
+        return reply.code(404).send({ error: 'terminal_not_found' });
+      }
+
+      const requestOrigin = request.headers['origin'] ?? '*';
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Access-Control-Allow-Origin': requestOrigin,
+        'Access-Control-Allow-Credentials': 'true',
+        Vary: 'Origin',
+      });
+      reply.raw.write('retry: 1000\n\n');
+
+      let clientClosed = false;
+      const safeWrite = (eventName: string, data: unknown): void => {
+        if (clientClosed) return;
+        try {
+          reply.raw.write(`event: ${eventName}\n`);
+          reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          clientClosed = true;
+        }
+      };
+
+      // Initial snapshot so xterm has output to render immediately.
+      safeWrite('snapshot', {
+        terminalId: record.terminalId,
+        outputTail: record.outputTail,
+        outputBytesTotal: record.outputBytesTotal,
+        status: record.status,
+      });
+
+      const unsubscribe = subscribeSessionRunEvents(sessionId, (event) => {
+        if (event.type === 'terminal_output' && event.terminalId === terminalId) {
+          safeWrite('output', event);
+          return;
+        }
+        if (event.type === 'terminal_exited' && event.terminalId === terminalId) {
+          safeWrite('exited', event);
+          return;
+        }
+      });
+
+      const heartbeat = setInterval(() => {
+        if (clientClosed) return;
+        try {
+          reply.raw.write(': keepalive\n\n');
+        } catch {
+          clientClosed = true;
+        }
+      }, 25_000);
+
+      return new Promise<void>((resolve) => {
+        const finish = (): void => {
+          clientClosed = true;
+          clearInterval(heartbeat);
+          try {
+            unsubscribe();
+          } catch {
+            /* ignore */
+          }
+          request.raw.off('close', finish);
+          try {
+            reply.raw.end();
+          } catch {
+            /* ignore */
+          }
+          resolve();
+        };
+        request.raw.on('close', finish);
+      });
     },
   );
 }

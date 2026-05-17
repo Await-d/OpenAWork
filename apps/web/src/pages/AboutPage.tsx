@@ -69,9 +69,8 @@ function InfoCardRow({ row }: { row: InfoRow }) {
             href={row.href}
             target="_blank"
             rel="noopener noreferrer"
+            className="ui-hover-underline"
             style={{ color: 'var(--accent)', textDecoration: 'none' }}
-            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
-            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
           >
             {row.value}
           </a>
@@ -466,6 +465,8 @@ export default function AboutPage() {
                             href={commitUrl}
                             target="_blank"
                             rel="noopener noreferrer"
+                            className="ui-hover-color"
+                            data-tone="accent"
                             style={{
                               color: 'var(--text-3)',
                               textDecoration: 'none',
@@ -476,8 +477,6 @@ export default function AboutPage() {
                               background: 'var(--bg-2)',
                               border: '1px solid var(--border-subtle)',
                             }}
-                            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-3)')}
                           >
                             {commit.shortHash}
                           </a>

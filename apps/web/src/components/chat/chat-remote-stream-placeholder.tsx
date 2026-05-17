@@ -1,55 +1,11 @@
-import { useEffect } from 'react';
-
-const CHAT_REMOTE_STREAM_PLACEHOLDER_CSS = `
-@keyframes omo-chat-remote-stream-pulse {
-  0%, 100% { opacity: 0.6; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.05); }
-}
-@keyframes omo-chat-remote-stream-blink {
-  0%, 100% { opacity: 0.25; }
-  50% { opacity: 1; }
-}
-.omo-chat-remote-stream-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: inline-block;
-}
-.omo-chat-remote-stream-dot[data-index='0'] {
-  animation: omo-chat-remote-stream-blink 1.2s ease-in-out infinite;
-}
-.omo-chat-remote-stream-dot[data-index='1'] {
-  animation: omo-chat-remote-stream-blink 1.2s ease-in-out 0.18s infinite;
-}
-.omo-chat-remote-stream-dot[data-index='2'] {
-  animation: omo-chat-remote-stream-blink 1.2s ease-in-out 0.36s infinite;
-}
-.omo-chat-remote-stream-glow {
-  animation: omo-chat-remote-stream-pulse 1.6s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .omo-chat-remote-stream-dot,
-  .omo-chat-remote-stream-glow {
-    animation: none !important;
-  }
-}
-`;
-
-let chatRemoteStreamPlaceholderStyleInjected = false;
+/**
+ * 260517-chat-remote-stream-placeholder · 远端流恢复占位
+ *
+ * 关联样式：`.omo-chat-remote-stream-*` 与 `@keyframes omo-chat-remote-stream-*`
+ * 已统一收纳到 `src/styles/loaders.css`，由 `main.tsx` 一次性 import。
+ */
 
 export function ChatRemoteStreamPlaceholder({ status }: { status: 'running' | 'paused' }) {
-  useEffect(() => {
-    if (chatRemoteStreamPlaceholderStyleInjected) {
-      return;
-    }
-
-    chatRemoteStreamPlaceholderStyleInjected = true;
-    const styleElement = document.createElement('style');
-    styleElement.textContent = CHAT_REMOTE_STREAM_PLACEHOLDER_CSS;
-    document.head.appendChild(styleElement);
-  }, []);
-
   const label = status === 'paused' ? '会话已暂停，等待处理…' : '正在恢复输出…';
   const description =
     status === 'paused'

@@ -12,14 +12,25 @@
  *    so wide log lines stay readable without horizontal scroll.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SessionTerminalStatus } from '@openAwork/shared';
 import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
-import { deleteSessionTerminal } from '../session-conversation/runtime/terminals-api.js';
+import {
+  closeTerminal,
+  deleteSessionTerminal,
+} from '../session-conversation/runtime/terminals-api.js';
+import { InteractiveTerminalView } from './InteractiveTerminalView.js';
 
 interface SessionTerminalsPanelProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * 触发按钮的 ref。Panel 用 fixed 定位 + getBoundingClientRect 计算
+   * 弹出位置,从而独立于父级 layout — 即使顶栏 chip 因为换行 / 压缩
+   * 落在意外位置,popover 也始终贴在按钮下方且不会被父级 overflow:
+   * hidden 截断。
+   */
+  anchorRef?: React.RefObject<HTMLElement | null>;
   terminals: SessionTerminalView[];
   loading: boolean;
   error: string | null;
@@ -33,6 +44,7 @@ interface SessionTerminalsPanelProps {
 
 const STATUS_LABELS: Record<SessionTerminalStatus, string> = {
   running: '运行中',
+  idle: '空闲',
   exited: '已退出',
   aborted: '已取消',
   timeout: '超时',
@@ -45,6 +57,11 @@ const STATUS_LABELS: Record<SessionTerminalStatus, string> = {
 
 const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot: string }> = {
   running: { fg: '#34d399', bg: 'color-mix(in srgb, #34d399 18%, transparent)', dot: '#34d399' },
+  idle: {
+    fg: '#3b82f6',
+    bg: 'color-mix(in srgb, #3b82f6 14%, transparent)',
+    dot: '#3b82f6',
+  },
   exited: {
     fg: 'var(--text-2)',
     bg: 'color-mix(in srgb, var(--text-3) 12%, transparent)',
@@ -75,7 +92,7 @@ const STATUS_COLORS: Record<SessionTerminalStatus, { fg: string; bg: string; dot
   },
 };
 
-const ACTIVE_STATUSES = new Set<SessionTerminalStatus>(['running', 'tmux-spawned']);
+const ACTIVE_STATUSES = new Set<SessionTerminalStatus>(['running', 'idle', 'tmux-spawned']);
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -132,14 +149,30 @@ function TerminalRow({
   pendingKill,
   onKill,
   onDelete,
+  gatewayUrl,
+  token,
+  sessionId,
+  onClose,
 }: {
   terminal: SessionTerminalView;
   pendingKill: boolean;
   onKill: () => void;
   onDelete: (() => Promise<void>) | null;
+  gatewayUrl: string;
+  token: string | null;
+  sessionId: string | null;
+  onClose: (terminalId: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isActive = ACTIVE_STATUSES.has(terminal.status);
+  // Persistent terminals (kind 'foreground' from spawnPersistentTerminal)
+  // can be typed into. We can't query the metadata flag from the public
+  // payload, but we can rely on `toolName === 'quick_terminal'` for user
+  // tabs and on a heuristic for agent persistent shells. For now treat
+  // any active foreground terminal as input-capable; the backend gates
+  // the actual stdin write and replies with `terminal_not_persistent`
+  // for one-shot agent commands so the UI just silently no-ops.
+  const inputEnabled = isActive && terminal.kind === 'foreground';
   return (
     <li
       style={{
@@ -257,25 +290,63 @@ function TerminalRow({
         {terminal.exitCode !== undefined ? <span>exit {terminal.exitCode}</span> : null}
       </div>
       {expanded ? (
-        <pre
+        <div
           style={{
-            margin: 0,
-            padding: '8px 10px',
-            background: 'color-mix(in srgb, var(--surface) 60%, #000 30%)',
-            color: '#dcdcdc',
             border: '1px solid var(--border-subtle)',
             borderRadius: 6,
-            maxHeight: 240,
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
-            fontSize: 11.5,
-            lineHeight: 1.4,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          {terminal.outputTail || '(无输出)'}
-        </pre>
+          <div
+            style={{
+              height: 240,
+              background: '#0b1117',
+            }}
+          >
+            <InteractiveTerminalView
+              gatewayUrl={gatewayUrl}
+              token={token}
+              sessionId={sessionId}
+              terminal={terminal}
+              inputEnabled={inputEnabled}
+            />
+          </div>
+          {isActive && inputEnabled ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                fontSize: 10.5,
+                color: 'var(--text-3)',
+                background: 'var(--surface)',
+                borderTop: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span>👆 直接输入命令并回车 · 完整 PTY 暂未支持(vim/top 等可能异常)</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void onClose(terminal.terminalId);
+                }}
+                style={{
+                  fontSize: 10.5,
+                  border: '1px solid var(--border-subtle)',
+                  background: 'transparent',
+                  color: 'var(--text-2)',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                关闭终端
+              </button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </li>
   );
@@ -284,6 +355,7 @@ function TerminalRow({
 export function SessionTerminalsPanel({
   open,
   onClose,
+  anchorRef,
   terminals,
   loading,
   error,
@@ -294,6 +366,32 @@ export function SessionTerminalsPanel({
   token,
   sessionId,
 }: SessionTerminalsPanelProps) {
+  // Compute popover position from the anchor's viewport rect on every
+  // open / window resize / scroll. Fixed positioning means parent
+  // `overflow: hidden` and flex-wrap shenanigans no longer matter.
+  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!open || !anchorRef?.current) {
+      setPosition(null);
+      return;
+    }
+    const update = (): void => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPosition({
+        top: rect.bottom + 6,
+        right: Math.max(8, window.innerWidth - rect.right),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open, anchorRef]);
+
   if (!open) return null;
   const active = terminals.filter((t) => ACTIVE_STATUSES.has(t.status));
   const closed = terminals.filter((t) => !ACTIVE_STATUSES.has(t.status));
@@ -318,9 +416,10 @@ export function SessionTerminalsPanel({
         role="dialog"
         aria-label="会话终端"
         style={{
-          position: 'absolute',
-          top: 'calc(100% + 6px)',
-          right: 4,
+          // fixed 相对视口,绕开任何父级 overflow / wrap 影响。
+          position: 'fixed',
+          top: position?.top ?? 64,
+          right: position?.right ?? 16,
           width: 'min(520px, calc(100vw - 32px))',
           maxHeight: 'min(560px, calc(100vh - 96px))',
           display: 'flex',
@@ -439,6 +538,23 @@ export function SessionTerminalsPanel({
                     void onKillTerminal(terminal.terminalId);
                   }}
                   onDelete={null}
+                  gatewayUrl={gatewayUrl}
+                  token={token}
+                  sessionId={sessionId}
+                  onClose={async (terminalId) => {
+                    if (!sessionId || !token) return;
+                    try {
+                      await closeTerminal({
+                        gatewayUrl,
+                        sessionId,
+                        terminalId,
+                        token,
+                      });
+                    } catch {
+                      /* surfaced via onReload */
+                    }
+                    onReload();
+                  }}
                 />
               ))}
               {closed.map((terminal) => (
@@ -462,6 +578,12 @@ export function SessionTerminalsPanel({
                         }
                       : null
                   }
+                  gatewayUrl={gatewayUrl}
+                  token={token}
+                  sessionId={sessionId}
+                  onClose={async () => {
+                    /* closed terminal — close button is hidden */
+                  }}
                 />
               ))}
             </>

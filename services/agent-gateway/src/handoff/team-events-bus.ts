@@ -22,7 +22,7 @@
  * 这里只做"发布订阅"，不持久化、不重放（重放走 DB 查询）。
  */
 
-import type { HandoffRecord, HandoffRoleLayer } from './handoff-store.js';
+import type { HandoffRecord } from './handoff-store.js';
 
 export type TeamEventType =
   | 'handoff.created'
@@ -33,6 +33,8 @@ export type TeamEventType =
   | 'handoff.cancelled'
   | 'handoff.reclaimed'
   | 'session.heartbeat'
+  | 'session.substate.changed'
+  | 'session.inbound.submitted'
   | 'scheduler.task-paused'
   | 'scheduler.task-resumed'
   | 'scheduler.all-paused'
@@ -44,7 +46,13 @@ export interface TeamEventEnvelope {
   type: TeamEventType;
   taskId?: string;
   sessionId?: string;
-  layer?: HandoffRoleLayer;
+  /**
+   * 来源层级。绝大多数事件是 HandoffRoleLayer 的 6 个固定值，
+   * 但 substate / inbound 事件的 layer 可能是组件级别（如 'system'），
+   * 因此放宽到 string——再用 lint 同志的 union narrowing 处理也可以，
+   * 但这里更简单。
+   */
+  layer?: string;
   timestamp: number;
   payload: Record<string, unknown>;
   /** 收件人 user_id；事件总线按此过滤订阅者。 */

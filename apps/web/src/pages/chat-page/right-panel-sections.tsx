@@ -231,6 +231,7 @@ export function ChatHistoryTabContent(props: {
                   key={session.id}
                   type="button"
                   onClick={() => onOpenSession(session.id)}
+                  className="ui-hover-surface"
                   style={{
                     width: '100%',
                     textAlign: 'left',
@@ -243,14 +244,6 @@ export function ChatHistoryTabContent(props: {
                     fontSize: 12,
                     textDecoration: 'none',
                     lineHeight: 1.45,
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background =
-                      'color-mix(in oklch, var(--surface) 88%, var(--bg) 12%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background =
-                      'color-mix(in oklch, var(--surface) 70%, transparent)';
                   }}
                 >
                   {session.title ?? '未命名'} · {session.id.slice(0, 8)}…

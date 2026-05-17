@@ -75,10 +75,14 @@ export default MarkdownMessageContent;
  * inside emphasis (`**apps/web/foo.ts**`) are uncommon enough that
  * they don't justify the extra complexity for V1.
  */
-function renderTextWithPaths(children: ReactNode, keyBase: string): ReactNode {
+function renderTextWithPaths(
+  children: ReactNode,
+  keyBase: string,
+  options?: { allowBareFilename?: boolean },
+): ReactNode {
   let nextIndex = 0;
   const tokenizeOne = (text: string): ReactNode => {
-    const tokens = tokenizePathsInText(text);
+    const tokens = tokenizePathsInText(text, options);
     if (tokens.length === 0) return text;
     if (tokens.length === 1 && tokens[0]?.type === 'text') {
       return text;
@@ -100,13 +104,21 @@ function renderTextWithPaths(children: ReactNode, keyBase: string): ReactNode {
 }
 
 const markdownComponents: Components = {
-  h1: ({ children }) => <h1 className="chat-markdown-h1">{children}</h1>,
-  h2: ({ children }) => <h2 className="chat-markdown-h2">{children}</h2>,
-  h3: ({ children }) => <h3 className="chat-markdown-h3">{children}</h3>,
+  h1: ({ children }) => <h1 className="chat-markdown-h1">{renderTextWithPaths(children, 'h1')}</h1>,
+  h2: ({ children }) => <h2 className="chat-markdown-h2">{renderTextWithPaths(children, 'h2')}</h2>,
+  h3: ({ children }) => <h3 className="chat-markdown-h3">{renderTextWithPaths(children, 'h3')}</h3>,
   p: ({ children }) => <p className="chat-markdown-p">{renderTextWithPaths(children, 'p')}</p>,
   ul: ({ children }) => <ul className="chat-markdown-ul">{children}</ul>,
   ol: ({ children }) => <ol className="chat-markdown-ol">{children}</ol>,
   li: ({ children }) => <li className="chat-markdown-li">{renderTextWithPaths(children, 'li')}</li>,
+  // Inline emphasis variants that frequently wrap path-style strings —
+  // typical assistant output looks like "查看 **apps/web/src/foo.ts**"
+  // or "the *src/utils.ts:42* function". Tokenize their text children
+  // too so those references stay clickable. Bolds are recursed shallowly
+  // (string-only walk) so deeper nested elements still pass through.
+  strong: ({ children }) => <strong>{renderTextWithPaths(children, 'strong')}</strong>,
+  em: ({ children }) => <em>{renderTextWithPaths(children, 'em')}</em>,
+  del: ({ children }) => <del>{renderTextWithPaths(children, 'del')}</del>,
   blockquote: ({ children }) => (
     <blockquote className="chat-markdown-blockquote">
       {renderTextWithPaths(children, 'bq')}
@@ -117,7 +129,7 @@ const markdownComponents: Components = {
       <table className="chat-markdown-table">{children}</table>
     </div>
   ),
-  th: ({ children }) => <th className="chat-markdown-th">{children}</th>,
+  th: ({ children }) => <th className="chat-markdown-th">{renderTextWithPaths(children, 'th')}</th>,
   td: ({ children }) => <td className="chat-markdown-td">{renderTextWithPaths(children, 'td')}</td>,
   a: ({ children, href }) => (
     <a className="chat-markdown-link" href={href} target="_blank" rel="noreferrer">
@@ -130,9 +142,14 @@ const markdownComponents: Components = {
     const codeContent = normalizeCodeChildren(children);
 
     if (!match && !className) {
+      // Inline code — `path/to/file.ts` is a common authoring pattern
+      // in assistant replies. Tokenize so those refs stay clickable.
+      // Inside backticks we accept bare filenames too (e.g.
+      // `create_quotation.py`, `需求分析.md`) since the user has
+      // already framed it as a code-ish token.
       return (
         <code className="chat-markdown-inline-code" {...props}>
-          {children}
+          {renderTextWithPaths(children, 'code', { allowBareFilename: true })}
         </code>
       );
     }
@@ -186,9 +203,11 @@ const noMarkdownPreviewComponents: Components = {
     const codeContent = normalizeCodeChildren(children);
 
     if (!match && !className) {
+      // See `markdownComponents.code` — same inline-code tokenization
+      // with bare-filename support.
       return (
         <code className="chat-markdown-inline-code" {...props}>
-          {children}
+          {renderTextWithPaths(children, 'code', { allowBareFilename: true })}
         </code>
       );
     }

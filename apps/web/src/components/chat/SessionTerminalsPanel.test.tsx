@@ -19,6 +19,15 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { SessionTerminalView } from '../session-conversation/runtime/terminals-api.js';
 import { SessionTerminalsPanel } from './SessionTerminalsPanel.js';
 
+// xterm.js relies on browser-only APIs (matchMedia, canvas) that jsdom
+// doesn't fully provide. Stub the interactive view with a placeholder so
+// the smoke test stays focused on the panel chrome.
+vi.mock('./InteractiveTerminalView.js', () => ({
+  InteractiveTerminalView: (props: { terminal: { outputTail: string } }) => (
+    <div data-testid="terminal-view-mock">{props.terminal.outputTail}</div>
+  ),
+}));
+
 function makeTerminal(overrides: Partial<SessionTerminalView>): SessionTerminalView {
   return {
     terminalId: 'term_default',

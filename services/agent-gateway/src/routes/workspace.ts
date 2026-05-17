@@ -2,6 +2,7 @@ import { promises as fsp, type Dirent, type Stats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { JwtPayload } from '../auth.js';
 import { requireAuth } from '../auth.js';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
@@ -12,13 +13,43 @@ import {
   WORKSPACE_ROOTS,
 } from '../db.js';
 import { startRequestWorkflow } from '../request-workflow.js';
-import { validateWorkspacePath, validateWorkspaceRelativePath } from '../workspace-paths.js';
+import {
+  validateWorkspacePath,
+  validateWorkspaceRelativePath,
+  isPathWithinRoot,
+} from '../workspace-paths.js';
 import { ensureIgnoreRulesLoadedForPath } from '../workspace-safety.js';
+import { isPathInUserAllowlist } from '../user-workspace-allowlist.js';
 import {
   getWorkspaceReviewDiff,
   listWorkspaceReviewChanges,
   revertWorkspaceReviewPath,
 } from '../workspace-review.js';
+
+/**
+ * Reject workspace operations that target a path outside the user's
+ * registered workspace set. Used as a second-level check on top of
+ * `validateWorkspacePath` (which only enforces the global
+ * `WORKSPACE_ROOTS` whitelist) to prevent one logged-in user from
+ * reading another user's project just because both happen to live
+ * under the same root. Returns true when access is allowed.
+ */
+function checkUserWorkspaceAccess(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  safePath: string,
+): boolean {
+  const user = request.user as JwtPayload | undefined;
+  if (!user?.sub) {
+    reply.status(401).send({ error: 'unauthorized' });
+    return false;
+  }
+  if (!isPathInUserAllowlist(user.sub, safePath)) {
+    reply.status(403).send({ error: 'Path not in user workspace allowlist' });
+    return false;
+  }
+  return true;
+}
 
 interface FileTreeNode {
   path: string;
@@ -124,6 +155,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ valid: false, path: parsed.data.path, error: 'Forbidden' });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -177,6 +209,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ nodes: [] });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -218,7 +251,19 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.file.get');
-      const schema = z.object({ path: z.string() });
+      const schema = z.object({
+        path: z.string(),
+        // Optional caller-supplied workspace boundary. When present
+        // the requested file MUST live under this root, not just
+        // under any allowed WORKSPACE_ROOT. Front-end callers should
+        // always supply the user's active workspace root so opening
+        // a file in chat / file tree / search hit can never leak a
+        // file from a sibling project that the same login also
+        // happens to own. The server still applies its own root
+        // safety check on top, so a client that omits this parameter
+        // (e.g. legacy code paths) keeps working.
+        workspaceRoot: z.string().optional(),
+      });
 
       const parseStep = child('parse-query');
       const parsed = schema.safeParse(request.query);
@@ -236,12 +281,25 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         step.fail('forbidden path');
         return reply.status(403).send({ error: 'Forbidden' });
       }
-      pathStep.succeed();
-      await ensureIgnoreRulesLoadedForPath(safePath);
-      if (defaultIgnoreManager.shouldIgnore(safePath)) {
-        step.fail('ignored path');
-        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+      // Caller-supplied root narrows the safe set to that one root.
+      // We resolve + validate the root the same way so a malformed /
+      // non-workspace root is rejected before being used for the
+      // prefix check.
+      if (parsed.data.workspaceRoot !== undefined) {
+        const safeRoot = validateWorkspacePath(parsed.data.workspaceRoot);
+        if (!safeRoot) {
+          pathStep.fail('forbidden workspace root');
+          step.fail('forbidden workspace root');
+          return reply.status(403).send({ error: 'Forbidden workspace root' });
+        }
+        if (!isPathWithinRoot(safePath, safeRoot)) {
+          pathStep.fail('path outside workspace root');
+          step.fail('path outside workspace root');
+          return reply.status(403).send({ error: 'Path outside requested workspace' });
+        }
       }
+      pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -281,6 +339,101 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  /**
+   * GET /workspace/file/binary?path=&workspaceRoot=
+   *
+   * Returns the file as raw bytes with a guessed Content-Type.
+   * Distinct from /workspace/file (which utf-8-decodes into a JSON
+   * string field) — needed for binary previewables like .docx,
+   * .xlsx, .pdf where any decode would corrupt the bytes.
+   *
+   * Same workspace + user allowlist + ignore-rules safety as the
+   * text endpoint. Size capped at MAX_FILE_BYTES so a malicious
+   * user can't pull GB-sized files.
+   */
+  app.get(
+    '/workspace/file/binary',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'workspace.file.get-binary');
+      const schema = z.object({
+        path: z.string(),
+        workspaceRoot: z.string().optional(),
+      });
+      const parsed = schema.safeParse(request.query);
+      if (!parsed.success) {
+        step.fail('missing path');
+        return reply.status(400).send({ error: 'Missing path' });
+      }
+
+      const safePath = validateWorkspacePath(parsed.data.path);
+      if (!safePath) {
+        step.fail('forbidden path');
+        return reply.status(403).send({ error: 'Forbidden' });
+      }
+      if (parsed.data.workspaceRoot !== undefined) {
+        const safeRoot = validateWorkspacePath(parsed.data.workspaceRoot);
+        if (!safeRoot || !isPathWithinRoot(safePath, safeRoot)) {
+          step.fail('path outside workspace root');
+          return reply.status(403).send({ error: 'Path outside requested workspace' });
+        }
+      }
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      await ensureIgnoreRulesLoadedForPath(safePath);
+      if (defaultIgnoreManager.shouldIgnore(safePath)) {
+        step.fail('ignored path');
+        return reply.status(403).send({ error: 'Forbidden by agentignore rules' });
+      }
+
+      let stat: Stats;
+      try {
+        stat = await fsp.stat(safePath);
+      } catch {
+        step.fail('file not found');
+        return reply.status(404).send({ error: 'File not found' });
+      }
+      if (!stat.isFile()) {
+        step.fail('not a file');
+        return reply.status(400).send({ error: 'Not a file' });
+      }
+      if (stat.size > MAX_FILE_BYTES) {
+        step.fail('file too large');
+        return reply.status(413).send({ error: 'File too large for preview' });
+      }
+
+      const ext = (safePath.split('.').pop() ?? '').toLowerCase();
+      const contentType =
+        ext === 'docx'
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : ext === 'xlsx'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : ext === 'pptx'
+              ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+              : ext === 'pdf'
+                ? 'application/pdf'
+                : ext === 'doc'
+                  ? 'application/msword'
+                  : ext === 'xls'
+                    ? 'application/vnd.ms-excel'
+                    : 'application/octet-stream';
+
+      const fd = await fsp.open(safePath, 'r');
+      try {
+        const buffer = Buffer.alloc(stat.size);
+        await fd.read(buffer, 0, buffer.length, 0);
+        step.succeed(undefined, { bytesRead: buffer.length, contentType });
+        reply.header('Content-Type', contentType);
+        reply.header('Content-Length', String(buffer.length));
+        // Cache-Control: short cache so repeated previews of the
+        // same file (e.g. switching between tabs) don't re-fetch.
+        reply.header('Cache-Control', 'private, max-age=30');
+        return reply.send(buffer);
+      } finally {
+        await fd.close();
+      }
+    },
+  );
+
   app.put(
     '/workspace/file',
     { preHandler: requireAuth },
@@ -306,6 +459,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
       await ensureIgnoreRulesLoadedForPath(safePath);
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const writeStep = child('write');
       try {
@@ -345,6 +499,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ error: 'Forbidden' });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const parentPath = resolve(join(safePath, '..'));
       const parentStep = child('parent-directory');
@@ -420,6 +575,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ error: 'Forbidden' });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const mkdirStep = child('mkdir');
       try {
@@ -470,6 +626,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ changes: [] });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const readStep = child('list-review-changes');
       const changes = await listWorkspaceReviewChanges(safePath);
@@ -510,6 +667,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ diff: '', error: 'Forbidden by agentignore rules' });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const diffStep = child('load-diff');
       const diff = await getWorkspaceReviewDiff(safePath, relativeFilePath);
@@ -551,12 +709,77 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ ok: false, error: 'Forbidden by agentignore rules' });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const revertStep = child('revert');
       await revertWorkspaceReviewPath(safePath, relativeFilePath);
       revertStep.succeed(undefined, { filePath: relativeFilePath });
       step.succeed(undefined, { filePath: relativeFilePath });
       return reply.send({ ok: true });
+    },
+  );
+
+  app.get(
+    '/workspace/find-by-name',
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // Resolve a bare filename (e.g. `create_quotation.py`) to all
+      // file paths under `path` whose basename matches. Distinct from
+      // `/workspace/search` which is a content grep — for "user clicked
+      // a filename in chat, find the actual file" we need a basename
+      // lookup, not a content lookup.
+      //
+      // Returns up to `maxResults` matches. Callers (notably the chat
+      // path-ref click handler) should prefer the shortest path among
+      // exact basename matches when multiple are returned.
+      const { step, child } = startRequestWorkflow(request, 'workspace.find-by-name');
+      const schema = z.object({
+        name: z.string().min(1),
+        path: z.string(),
+        maxResults: z.coerce.number().int().min(1).max(50).default(8),
+      });
+      const parsed = schema.safeParse(request.query);
+      if (!parsed.success) {
+        step.fail('missing name or path');
+        return reply.status(400).send({ results: [], error: 'Missing name or path' });
+      }
+      const safePath = validateWorkspacePath(parsed.data.path);
+      if (!safePath) {
+        step.fail('forbidden path');
+        return reply.status(403).send({ results: [] });
+      }
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      await ensureIgnoreRulesLoadedForPath(safePath);
+
+      const { name, maxResults } = parsed.data;
+      const results: Array<{ path: string }> = [];
+      const scanStep = child('scan', undefined, { maxResults });
+
+      async function walk(dirPath: string): Promise<void> {
+        if (results.length >= maxResults) return;
+        let entries: Dirent[];
+        try {
+          entries = await fsp.readdir(dirPath, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          if (results.length >= maxResults) break;
+          if (IGNORED.has(entry.name)) continue;
+          const fullPath = join(dirPath, entry.name);
+          if (defaultIgnoreManager.shouldIgnore(fullPath)) continue;
+          if (entry.isDirectory()) {
+            await walk(fullPath);
+          } else if (entry.isFile() && entry.name === name) {
+            results.push({ path: fullPath });
+          }
+        }
+      }
+
+      await walk(safePath);
+      scanStep.succeed(undefined, { results: results.length });
+      step.succeed(undefined, { results: results.length });
+      return reply.send({ results });
     },
   );
 
@@ -588,6 +811,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(403).send({ results: [] });
       }
       pathStep.succeed();
+      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
 
       const { maxResults, q } = parsed.data;

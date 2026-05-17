@@ -54,7 +54,11 @@ export type SessionsClientWithActiveStop = ReturnType<typeof createSessionsClien
 export const SESSION_SWITCH_DEFER_THRESHOLD = 32;
 export const REMOTE_STREAM_RECOVERY_POLL_MS = 1000;
 export const CHAT_SCROLL_BOTTOM_PADDING = '0.95rem';
-export const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
+// 消息列底部 spacer:让最后一条消息可以滚到合适的视口位置。之前
+// `clamp(180px, 34vh, 320px)` 留了大块空白(约 1/3 视口高度),让最新
+// 消息看着浮在中间;改到 `clamp(80px, 14vh, 160px)` 让它贴近输入框,
+// 整体视觉上跟 composer 之间空隙缩短约 20% 视口高度。
+export const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(80px, 14vh, 160px)';
 export const CHAT_LATEST_FOCUS_THRESHOLD_PX = 32;
 export const CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX = 40;
 export const CHAT_LATEST_REGION_FALLBACK_PX = 420;

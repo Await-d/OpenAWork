@@ -1,5 +1,81 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+/**
+ * Throttled localStorage adapter for the persist middleware.
+ *
+ * The persist middleware writes to storage on every `set()` call.
+ * For high-frequency UI state (active file tab clicks, file tree
+ * expand/collapse, sidebar toggle bursts) this means JSON.stringify
+ * of the entire ~75-field state plus a synchronous localStorage.setItem
+ * on every interaction — the source of `[Violation] 'click' handler
+ * took XYZms` warnings on tab switches and similar.
+ *
+ * Strategy:
+ *   - getItem / removeItem are synchronous pass-through (rare and
+ *     ok-to-be-eager on the boot path).
+ *   - setItem coalesces multiple writes per FLUSH_DELAY_MS window
+ *     into one. The most recent value wins.
+ *   - Pending write is flushed synchronously on `pagehide` /
+ *     `beforeunload` so a fast click → close doesn't lose state.
+ */
+const FLUSH_DELAY_MS = 200;
+let pendingKey: string | null = null;
+let pendingValue: string | null = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPending(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (pendingKey !== null && pendingValue !== null) {
+    try {
+      window.localStorage.setItem(pendingKey, pendingValue);
+    } catch {
+      /* quota / SecurityError — surface in console only */
+    }
+  }
+  pendingKey = null;
+  pendingValue = null;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPending);
+  window.addEventListener('beforeunload', flushPending);
+}
+
+const throttledStorage = createJSONStorage(() => ({
+  getItem: (name: string): string | null => {
+    if (pendingKey === name && pendingValue !== null) return pendingValue;
+    try {
+      return window.localStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    pendingKey = name;
+    pendingValue = value;
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = setTimeout(flushPending, FLUSH_DELAY_MS);
+  },
+  removeItem: (name: string): void => {
+    if (pendingKey === name) {
+      pendingKey = null;
+      pendingValue = null;
+    }
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    try {
+      window.localStorage.removeItem(name);
+    } catch {
+      /* ignore */
+    }
+  },
+}));
 
 export type ChatView = 'home' | 'session';
 
@@ -85,14 +161,19 @@ export interface UIStateStore {
   splitPos: number;
   setSplitPos: (v: number) => void;
 
-  openFilePaths: string[];
-  activeFilePath: string | null;
-  setOpenFilePaths: (paths: string[]) => void;
-  setActiveFilePath: (path: string | null) => void;
+  /**
+   * 按 workspace 路径记忆每个工作区打开的文件列表 + 当前激活文件,跨 workspace 切换
+   * 时各自互不干扰。无 workspace 时归入 __default__ 桶。
+   */
+  openFilePathsByWorkspace: Record<string, string[]>;
+  activeFilePathByWorkspace: Record<string, string | null>;
+  setOpenFilePathsForWorkspace: (workspacePath: string | null, paths: string[]) => void;
+  setActiveFilePathForWorkspace: (workspacePath: string | null, path: string | null) => void;
 
-  // Editor pane right-tab (code / browser) — 持久化让用户上次开着的视图刷新后还在
-  editorPaneTab: 'code' | 'browser';
-  setEditorPaneTab: (tab: 'code' | 'browser') => void;
+  // Editor pane right-tab (code / browser)— 按 workspace 持久化,跨 workspace
+  // 切换时各自互不影响;无 workspace 时归入 __default__ 桶。
+  editorPaneTabByWorkspace: Record<string, 'code' | 'browser'>;
+  setEditorPaneTabForWorkspace: (workspacePath: string | null, tab: 'code' | 'browser') => void;
 
   // 内置浏览器最近访问的 URL(从 dev-server detect / 用户主动打开 / chat 命令进来),
   // 刷新后用此值重新挂载 BuiltInBrowser,让它从持久化 tabs 列表中加载
@@ -115,6 +196,22 @@ export interface UIStateStore {
   toggleRightOpen: () => void;
   rightTab: string;
   setRightTab: (tab: string) => void;
+
+  /**
+   * 快捷终端面板(VS Code 风格底部抽屉)是否开启,按 workspace 持久化。
+   * 用户主动开/关,刷新后保留;无 workspace 时归入 __default__ 桶。
+   */
+  quickTerminalOpenByWorkspace: Record<string, boolean>;
+  setQuickTerminalOpenForWorkspace: (workspacePath: string | null, open: boolean) => void;
+  /** 抽屉高度(像素),全局共用一个值。 */
+  quickTerminalHeight: number;
+  setQuickTerminalHeight: (height: number) => void;
+  /** 用户最后选中的终端 tab,按 workspace 记忆,刷新后自动激活回去。 */
+  quickTerminalActiveIdByWorkspace: Record<string, string | null>;
+  setQuickTerminalActiveIdForWorkspace: (
+    workspacePath: string | null,
+    terminalId: string | null,
+  ) => void;
 }
 
 function normalizeWorkspacePath(path: string): string | null {
@@ -286,13 +383,45 @@ export const useUIStateStore = create<UIStateStore>()(
       splitPos: 50,
       setSplitPos: (v) => set({ splitPos: v }),
 
-      openFilePaths: [],
-      activeFilePath: null,
-      setOpenFilePaths: (paths) => set({ openFilePaths: paths }),
-      setActiveFilePath: (path) => set({ activeFilePath: path }),
+      openFilePathsByWorkspace: {},
+      activeFilePathByWorkspace: {},
+      setOpenFilePathsForWorkspace: (workspacePath, paths) =>
+        set((state) => {
+          const key =
+            workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
+          const next = { ...state.openFilePathsByWorkspace };
+          if (paths.length === 0) {
+            delete next[key];
+          } else {
+            next[key] = paths;
+          }
+          return { openFilePathsByWorkspace: next };
+        }),
+      setActiveFilePathForWorkspace: (workspacePath, path) =>
+        set((state) => {
+          const key =
+            workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
+          const next = { ...state.activeFilePathByWorkspace };
+          if (path) {
+            next[key] = path;
+          } else {
+            delete next[key];
+          }
+          return { activeFilePathByWorkspace: next };
+        }),
 
-      editorPaneTab: 'code',
-      setEditorPaneTab: (tab) => set({ editorPaneTab: tab }),
+      editorPaneTabByWorkspace: {},
+      setEditorPaneTabForWorkspace: (workspacePath, tab) =>
+        set((state) => {
+          const key =
+            workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
+          return {
+            editorPaneTabByWorkspace: {
+              ...state.editorPaneTabByWorkspace,
+              [key]: tab,
+            },
+          };
+        }),
 
       browserPreviewUrl: null,
       setBrowserPreviewUrl: (url) => set({ browserPreviewUrl: url }),
@@ -318,10 +447,44 @@ export const useUIStateStore = create<UIStateStore>()(
       toggleRightOpen: () => set((s) => ({ rightOpen: !s.rightOpen })),
       rightTab: 'overview',
       setRightTab: (tab) => set({ rightTab: tab }),
+
+      quickTerminalOpenByWorkspace: {},
+      setQuickTerminalOpenForWorkspace: (workspacePath, open) =>
+        set((state) => {
+          const key =
+            workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
+          const next = { ...state.quickTerminalOpenByWorkspace };
+          if (open) {
+            next[key] = true;
+          } else {
+            delete next[key];
+          }
+          return { quickTerminalOpenByWorkspace: next };
+        }),
+      quickTerminalHeight: 280,
+      setQuickTerminalHeight: (height) =>
+        set({ quickTerminalHeight: Math.max(160, Math.min(720, Math.floor(height))) }),
+      quickTerminalActiveIdByWorkspace: {},
+      setQuickTerminalActiveIdForWorkspace: (workspacePath, terminalId) =>
+        set((state) => {
+          const key =
+            workspacePath && workspacePath.trim().length > 0 ? workspacePath : '__default__';
+          const next = { ...state.quickTerminalActiveIdByWorkspace };
+          if (terminalId) {
+            next[key] = terminalId;
+          } else {
+            delete next[key];
+          }
+          return { quickTerminalActiveIdByWorkspace: next };
+        }),
     }),
     {
       name: 'openAwork-ui-state',
-      version: 9,
+      version: 12,
+      // Throttle storage writes to avoid JSON.stringify+setItem on
+      // every fast UI mutation (tab clicks, expand/collapse). See
+      // throttledStorage definition above.
+      storage: throttledStorage,
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
 
@@ -364,6 +527,36 @@ export const useUIStateStore = create<UIStateStore>()(
         if (version < 9) {
           delete nextState.browserPreviewUrlBySession;
           nextState.browserPreviewUrlByWorkspace = {};
+        }
+
+        // v10:openFilePaths / activeFilePath 也从全局改为按 workspace 持久化,跨
+        // workspace 切换时各自互不干扰,切回旧 workspace 时自动恢复打开过的文件。
+        if (version < 10) {
+          const oldOpen = Array.isArray(nextState.openFilePaths)
+            ? (nextState.openFilePaths as string[])
+            : [];
+          const oldActive =
+            typeof nextState.activeFilePath === 'string' ? nextState.activeFilePath : null;
+          delete nextState.openFilePaths;
+          delete nextState.activeFilePath;
+          // 旧的全局值归入 __default__ 桶,避免用户立刻丢上次打开的文件。
+          nextState.openFilePathsByWorkspace = oldOpen.length > 0 ? { __default__: oldOpen } : {};
+          nextState.activeFilePathByWorkspace = oldActive ? { __default__: oldActive } : {};
+        }
+
+        // v11:editorPaneTab(code / browser)也改为按 workspace 持久化,跨 workspace
+        // 切换时不再被上一个 workspace 留下的视图覆盖。
+        if (version < 11) {
+          const oldTab = nextState.editorPaneTab === 'browser' ? 'browser' : 'code';
+          delete nextState.editorPaneTab;
+          nextState.editorPaneTabByWorkspace = { __default__: oldTab };
+        }
+
+        // v12:快捷终端面板字段。沿用 by-workspace + __default__ 兜底。
+        if (version < 12) {
+          nextState.quickTerminalOpenByWorkspace = {};
+          nextState.quickTerminalHeight = 280;
+          nextState.quickTerminalActiveIdByWorkspace = {};
         }
 
         if (!isStringArray(nextState.savedWorkspacePaths)) {

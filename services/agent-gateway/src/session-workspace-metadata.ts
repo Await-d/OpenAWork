@@ -29,6 +29,11 @@ const teamDefinitionSchema = z.object({
     templateId: z.string().min(1).max(200).optional(),
     templateName: z.string().min(1).max(200).optional(),
   }),
+  /**
+   * 起始快捷建议（D 项）：模板内置，向 reception session metadata 透传，
+   * 前端 ReceptionStarterCard 渲染为 chip。
+   */
+  starterSuggestions: z.array(z.string().min(1).max(200)).max(8).optional(),
 });
 
 const sessionMetadataPatchSchema = z

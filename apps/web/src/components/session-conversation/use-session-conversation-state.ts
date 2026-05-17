@@ -50,6 +50,7 @@ import type { StreamingThinkingBlock } from './runtime/streaming-thinking.js';
 import type { DialogueMode } from '../../pages/dialogue-mode.js';
 import type { ReasoningEffort } from './runtime/support.js';
 import type { ChatSettingsProvider } from '../../utils/chat-session-defaults.js';
+import { useTeamNotificationStore } from '../../stores/team-events.js';
 
 // ─── Hook 输入 ────────────────────────────────────────────────────────────
 
@@ -146,6 +147,13 @@ export interface SessionConversationState {
    * 后端落地前此字段始终为 null；前端组件应 fallback 到 sessionStateStatus。
    */
   substate: string | null;
+  /**
+   * 已解析的 sessions.metadata_json（JSON.parse 结果）。
+   * 形如 `{ teamDefinition?: {...}, teamWorkspaceId?: string, workingDirectory?: string }`。
+   * 团队会话从这里读取 `teamDefinition` 渲染初始化引导（成员清单、来源、provider）。
+   * chat 端单会话此字段为 chat 自己的 metadata，与 team 无关。
+   */
+  sessionMetadata: Record<string, unknown> | null;
 
   // ─── 派生 ────────────────────────────────────────────────────────
   /** 远端 session 的运行 / 暂停状态（基于 sessionStateStatus 计算）。 */
@@ -250,6 +258,10 @@ export function useSessionConversationState(
   // L1.8 / L1.3 扩展字段（hook v0.2 新增）
   const [roleLayer, setRoleLayer] = useState<string | null>(null);
   const [substate, setSubstate] = useState<string | null>(null);
+  // 解析后的 sessions.metadata_json（不直接放原 JSON 字符串，避免消费方再次解析）。
+  // 形如 { teamDefinition?: {...}, teamWorkspaceId?: string, workingDirectory?: string, ... }
+  // 解析失败 / 缺失时为 null。
+  const [sessionMetadata, setSessionMetadata] = useState<Record<string, unknown> | null>(null);
 
   // ─── 派生 ────────────────────────────────────────────────────────
   const remoteSessionBusyState = useMemo<'running' | 'paused' | null>(() => {
@@ -272,6 +284,7 @@ export function useSessionConversationState(
       setPendingQuestions([]);
       setRoleLayer(null);
       setSubstate(null);
+      setSessionMetadata(null);
       return;
     }
 
@@ -299,6 +312,25 @@ export function useSessionConversationState(
       setRoleLayer(roleLayerValue);
       setSubstate(substateValue);
 
+      // sessions.metadata_json：后端写入的 team session 结构（teamDefinition 等）。
+      // 解析失败时不抛错，让消费方按 null 处理；前端只读，不回写不重试。
+      const metadataJson =
+        typeof sessionRow?.['metadata_json'] === 'string'
+          ? (sessionRow['metadata_json'] as string)
+          : null;
+      if (metadataJson) {
+        try {
+          const parsed = JSON.parse(metadataJson) as unknown;
+          setSessionMetadata(
+            parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null,
+          );
+        } catch {
+          setSessionMetadata(null);
+        }
+      } else {
+        setSessionMetadata(null);
+      }
+
       // pending permissions / questions（来自 recovery，避免再发请求）
       setPendingPermissions(recovery.pendingPermissions ?? []);
       setPendingQuestions(recovery.pendingQuestions ?? []);
@@ -314,6 +346,33 @@ export function useSessionConversationState(
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // ─── 订阅 team events：reception orchestrator 异步落 ack 消息后，
+  //     通过 'session.inbound.submitted' / 'session.substate.changed'
+  //     事件通知前端再 reload。也覆盖 handoff completed / failed 之后
+  //     pm1 在子 session 写产物完后 reception 端自动刷新。
+  useEffect(() => {
+    if (!sessionId || !enabled) return undefined;
+    let lastSeenTimestamp = 0;
+    const unsub = useTeamNotificationStore.subscribe((state) => {
+      const events = state.events;
+      const last = events[events.length - 1];
+      if (!last || last.timestamp <= lastSeenTimestamp) return;
+      lastSeenTimestamp = last.timestamp;
+      if (last.sessionId !== sessionId) return;
+      if (
+        last.type === 'session.inbound.submitted' ||
+        last.type === 'session.substate.changed' ||
+        last.type === 'handoff.completed' ||
+        last.type === 'handoff.failed'
+      ) {
+        void reload();
+      }
+    });
+    return () => {
+      unsub();
+    };
+  }, [sessionId, enabled, reload]);
 
   // ─── inbound writer（v0.2 新增，L1.3 反向通道）──────────────────
   const submitInbound = useCallback<SessionConversationState['submitInbound']>(
@@ -387,6 +446,7 @@ export function useSessionConversationState(
     setPendingQuestions,
     roleLayer,
     substate,
+    sessionMetadata,
 
     remoteSessionBusyState,
     visibleStreaming,

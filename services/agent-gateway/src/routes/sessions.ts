@@ -41,6 +41,7 @@ import {
   validateImportedMessagesPayload,
 } from './session-route-helpers.js';
 import { validateWorkspacePath } from '../workspace-paths.js';
+import { invalidateUserWorkspaceAllowlist } from '../user-workspace-allowlist.js';
 import { listWorkspaceReviewChangesWithAvailability } from '../workspace-review.js';
 import {
   extractSessionWorkingDirectory,
@@ -1316,6 +1317,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json) VALUES (?, ?, ?, ?, ?)',
         [id, user.sub, '[]', 'idle', JSON.stringify(normalizedMetadata.metadata)],
       );
+      // Invalidate the workspace allowlist so the user can immediately
+      // hit /workspace/* endpoints against the working directory of
+      // the freshly-created session.
+      invalidateUserWorkspaceAllowlist(user.sub);
       step.succeed(undefined, { sessionId: id });
       return reply.status(201).send({ sessionId: id });
     },
@@ -2408,6 +2413,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         );
       }
 
+      // Workspace metadata may have changed (working directory etc).
+      // Invalidate the per-user allowlist cache so the next workspace
+      // endpoint call sees the new value.
+      if (nextMetadataJson !== null) {
+        invalidateUserWorkspaceAllowlist(user.sub);
+      }
+
       step.succeed();
       return reply.send({ ok: true });
     },
@@ -2509,6 +2521,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       );
 
       step.succeed(undefined, isForcedWarp ? { warped: true } : undefined);
+      // Workspace warp may have introduced a new working directory.
+      // Refresh the per-user allowlist cache.
+      invalidateUserWorkspaceAllowlist(user.sub);
       return reply.send({
         ok: true,
         workingDirectory: safeWorkingDirectory,

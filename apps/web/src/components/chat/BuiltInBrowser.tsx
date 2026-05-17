@@ -202,10 +202,14 @@ export function BuiltInBrowser({
     return tabs[0]?.id ?? makeTabId();
   });
 
+  // 跨 workspace 切换时记录"已经 load 完毕的 workspace"。persist effect 用它判断
+  // tabs 是否真已属于当前 workspacePath(避免在 ws-effect 还没替换 tabs 前就把旧
+  // workspace 的 tabs 写到新 workspace 的 storage key)。
+  const lastLoadedWorkspaceRef = useRef<string | null | undefined>(workspacePath);
+
   // 持久化(按 workspace key 写)。注意:workspacePath 变化时 ws-effect 会重新 load
   // 并 setTabs,这之前 tabs 还属于旧 workspace,绝不能在这一帧把旧 tabs 写到新 ws key,
-  // 否则会污染目标 workspace 的持久化数据。用 ref 同步追踪"已经为当前 ws 同步过 tabs",
-  // 只有在 ws 与 lastLoadedWorkspaceRef 一致时才 persist。
+  // 否则会污染目标 workspace 的持久化数据。
   useEffect(() => {
     if (lastLoadedWorkspaceRef.current !== workspacePath) return;
     persistState(workspacePath, tabs, activeTabId);
@@ -213,22 +217,10 @@ export function BuiltInBrowser({
 
   // 跨 workspace 切换:重新从 storage 加载该 workspace 的 tabs。
   // 避免上一个 workspace 的 tabs 残留在内存(从而通过持久化覆盖新 workspace 的状态)。
-  const lastLoadedWorkspaceRef = useRef<string | null | undefined>(workspacePath);
   useEffect(() => {
-    console.log('[BuiltInBrowser ws-effect]', {
-      workspacePath,
-      lastLoaded: lastLoadedWorkspaceRef.current,
-      changed: lastLoadedWorkspaceRef.current !== workspacePath,
-    });
     if (lastLoadedWorkspaceRef.current === workspacePath) return;
     lastLoadedWorkspaceRef.current = workspacePath;
     const persisted = loadPersistedState(workspacePath);
-    console.log(
-      '[BuiltInBrowser ws-effect] reload tabs for ws',
-      workspacePath,
-      'persisted=',
-      persisted,
-    );
     if (persisted) {
       setTabs(persisted.tabs as BrowserTab[]);
       const validActive = persisted.tabs.find((t) => t.id === persisted.activeTabId)
@@ -472,12 +464,46 @@ export function BuiltInBrowser({
 
   const consoleLogs = consoleLogsByTab[activeTabId] ?? [];
 
-  const appendLogToActiveTab = useCallback((entry: ConsoleEntry) => {
-    const tid = activeTabIdRef.current;
-    setConsoleLogsByTab((prev) => {
-      const list = prev[tid] ?? [];
-      return { ...prev, [tid]: [...list.slice(-200), entry] };
-    });
+  // 缓冲 + 节流:iframe 内的 console proxy 短时间内会发出大量 message 事件
+  // (dev server 启动、SPA 路由切换、多次 fetch 等)。直接每条都 setState 会让
+  // React 同步重渲染上百次,触发 "[Violation] 'message' handler took 157ms"。
+  // 这里用 ref 缓存待处理 entries,每 80ms flush 一次到 state。
+  const pendingLogEntriesRef = useRef<Array<{ tabId: string; entry: ConsoleEntry }>>([]);
+  const pendingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLogFlush = useCallback(() => {
+    if (pendingFlushTimerRef.current !== null) return;
+    pendingFlushTimerRef.current = setTimeout(() => {
+      pendingFlushTimerRef.current = null;
+      const queued = pendingLogEntriesRef.current;
+      if (queued.length === 0) return;
+      pendingLogEntriesRef.current = [];
+      setConsoleLogsByTab((prev) => {
+        const next: Record<string, ConsoleEntry[]> = { ...prev };
+        for (const { tabId, entry } of queued) {
+          const list = next[tabId] ?? [];
+          next[tabId] = [...list.slice(-200), entry];
+        }
+        return next;
+      });
+    }, 80);
+  }, []);
+
+  const appendLogToActiveTab = useCallback(
+    (entry: ConsoleEntry) => {
+      pendingLogEntriesRef.current.push({ tabId: activeTabIdRef.current, entry });
+      scheduleLogFlush();
+    },
+    [scheduleLogFlush],
+  );
+
+  // 卸载时清掉 timer
+  useEffect(() => {
+    return () => {
+      if (pendingFlushTimerRef.current !== null) {
+        clearTimeout(pendingFlushTimerRef.current);
+        pendingFlushTimerRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1266,6 +1292,7 @@ function BrowserTabBar(props: {
                 e.stopPropagation();
                 onCloseTab(tab.id);
               }}
+              className="ui-hover-icon-pop"
               style={{
                 width: 16,
                 height: 16,
@@ -1281,15 +1308,6 @@ function BrowserTabBar(props: {
                 cursor: 'pointer',
                 opacity: 0.7,
                 flexShrink: 0,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background =
-                  'color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%)';
-                e.currentTarget.style.opacity = '1';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.opacity = '0.7';
               }}
             >
               ✕
@@ -1357,16 +1375,8 @@ function NavButton(props: {
         opacity: disabled ? 0.5 : 1,
         flexShrink: 0,
         fontSize: 0,
-        transition: 'background 120ms ease, color 120ms ease',
       }}
-      onMouseEnter={(e) => {
-        if (disabled) return;
-        e.currentTarget.style.background =
-          'color-mix(in oklch, var(--surface) 80%, var(--bg-2) 20%)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent';
-      }}
+      className="ui-hover-icon-pop"
     >
       <svg
         width="13"
@@ -1496,6 +1506,7 @@ function BrowserBookmarksDropdown(props: {
                   key={bm.id}
                   role="menuitem"
                   onClick={() => onSelect(bm.url)}
+                  className="ui-hover-icon-pop"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1503,13 +1514,6 @@ function BrowserBookmarksDropdown(props: {
                     padding: '6px 10px',
                     cursor: 'pointer',
                     minWidth: 0,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background =
-                      'color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent';
                   }}
                 >
                   {bm.faviconUrl ? (
@@ -1575,14 +1579,8 @@ function BrowserBookmarksDropdown(props: {
                       opacity: 0.7,
                       flexShrink: 0,
                     }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.opacity = '1';
-                      e.currentTarget.style.color = 'var(--danger)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.opacity = '0.7';
-                      e.currentTarget.style.color = 'var(--text-3)';
-                    }}
+                    className="ui-hover-icon-pop"
+                    data-tone="danger"
                   >
                     ✕
                   </button>

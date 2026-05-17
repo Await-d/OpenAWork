@@ -107,6 +107,16 @@ export interface UnifiedComposerProps {
   contextUsedTokens?: number;
   contextMaxTokens?: number;
   contextIsEstimated?: boolean;
+  /**
+   * Optional slot rendered next to the composer input box on the right.
+   * Forwarded to ChatComposer.composerRightSlot which renders it as a
+   * sibling of the visible input box (outside, not inside).
+   */
+  composerRightSlot?: React.ReactNode;
+  /**
+   * 自定义 textarea placeholder。team 接待会话用此覆盖默认的 chat 占位文案。
+   */
+  placeholder?: string;
 
   imageGenerationMode?: boolean;
   hasConfiguredImageModel?: boolean;
@@ -441,6 +451,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         contextUsedTokens={props.contextUsedTokens}
         contextMaxTokens={props.contextMaxTokens}
         contextIsEstimated={props.contextIsEstimated}
+        placeholder={props.placeholder}
+        composerRightSlot={props.composerRightSlot}
       />
 
       {features.modelPicker && showModelPicker && (

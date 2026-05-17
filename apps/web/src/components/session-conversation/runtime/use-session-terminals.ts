@@ -243,8 +243,16 @@ export function useSessionTerminals(
   }, []);
 
   const sortedTerminals = useMemo<SessionTerminalView[]>(() => {
-    return Object.values(terminalsById).sort((a, b) => b.startedAtMs - a.startedAtMs);
-  }, [terminalsById]);
+    // Defensive sessionId filter: when the user switches sessions there
+    // is a tick where `currentSessionId` updates but `terminalsById`
+    // hasn't been reset yet (effect runs after commit). Without this
+    // filter, downstream views would mount SSE / send POSTs against
+    // a stale session id, producing 404s like
+    //   GET /sessions/<new>/terminals/<old-term>/stream → 404
+    const list = Object.values(terminalsById);
+    const filtered = currentSessionId ? list.filter((t) => t.sessionId === currentSessionId) : list;
+    return filtered.sort((a, b) => b.startedAtMs - a.startedAtMs);
+  }, [terminalsById, currentSessionId]);
 
   const runningCount = useMemo(
     () => sortedTerminals.filter((t) => ACTIVE_STATUSES.has(t.status)).length,

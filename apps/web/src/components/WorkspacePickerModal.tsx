@@ -459,7 +459,7 @@ export default function WorkspacePickerModal({
                   key={directory.path}
                   type="button"
                   onClick={() => void openDirectory(directory.path)}
-                  className="workspace-picker-dir-btn"
+                  className="workspace-picker-dir-btn ui-hover-accent-soft"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -473,16 +473,6 @@ export default function WorkspacePickerModal({
                     color: 'var(--text)',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    transition: 'background 80ms ease, border-color 80ms ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      'color-mix(in oklch, var(--accent) 8%, transparent)';
-                    (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = 'transparent';
-                    (e.currentTarget as HTMLElement).style.borderColor = 'transparent';
                   }}
                 >
                   <FolderIcon size={14} name={directory.name} />

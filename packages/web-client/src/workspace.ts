@@ -74,12 +74,29 @@ export interface WorkspaceClient {
     path: string,
     options?: { depth?: number; signal?: AbortSignal },
   ): Promise<FileTreeNode[]>;
-  /** GET `/workspace/file?path=`，读取单个文件内容（含 `truncated` 标志）。 */
+  /**
+   * GET `/workspace/file?path=&workspaceRoot=`,读取单个文件内容（含 `truncated` 标志）。
+   *
+   * 当 `workspaceRoot` 提供时,后端会校验目标路径必须在该 root 之下,
+   * 阻止跨工作区读取。前端常规调用应当总是带上当前会话的 workspace
+   * root,默认情况下后端只会校验全局 WORKSPACE_ROOTS 白名单 — 不够严格。
+   */
   readFile(
     token: string,
     path: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; workspaceRoot?: string },
   ): Promise<WorkspaceFileContent>;
+  /**
+   * GET `/workspace/file/binary?path=&workspaceRoot=`,读取文件原始字节。
+   *
+   * 用于 docx / xlsx / pdf 等二进制预览。返回 ArrayBuffer + 推断
+   * 的 Content-Type。复用 readFile 同款的 workspaceRoot 校验。
+   */
+  readFileBinary(
+    token: string,
+    path: string,
+    options?: { signal?: AbortSignal; workspaceRoot?: string },
+  ): Promise<{ buffer: ArrayBuffer; contentType: string }>;
   /** PUT `/workspace/file`，按 `path` 覆盖写入。 */
   writeFile(token: string, path: string, content: string): Promise<void>;
   /** POST `/workspace/file`，创建新文件（默认空内容）。 */
@@ -95,6 +112,21 @@ export interface WorkspaceClient {
     rootPath: string,
     options?: { maxResults?: number; signal?: AbortSignal },
   ): Promise<WorkspaceSearchHit[]>;
+  /**
+   * GET `/workspace/find-by-name?name=&path=&maxResults=`.
+   *
+   * Locates files whose **basename** matches `name` exactly. Distinct
+   * from `search()` which is a content grep — this is the right
+   * primitive for "user clicked a bare filename in chat, find the
+   * actual file" since search() can't surface a file that doesn't
+   * mention itself in its own contents.
+   */
+  findByName(
+    token: string,
+    name: string,
+    rootPath: string,
+    options?: { maxResults?: number; signal?: AbortSignal },
+  ): Promise<Array<{ path: string }>>;
   /** GET `/workspace/review/status?path=`，列出未提交改动。 */
   reviewStatus(
     token: string,
@@ -178,11 +210,31 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
 
     async readFile(token, path, options) {
       const params = buildPathParams(path);
+      if (options?.workspaceRoot) {
+        params.set('workspaceRoot', options.workspaceRoot);
+      }
       const response = await fetch(withQuery(`${baseUrl}/workspace/file`, params), {
         headers: authHeader(token),
         signal: options?.signal,
       });
       return expectJson<WorkspaceFileContent>(response, 'readFile');
+    },
+
+    async readFileBinary(token, path, options) {
+      const params = buildPathParams(path);
+      if (options?.workspaceRoot) {
+        params.set('workspaceRoot', options.workspaceRoot);
+      }
+      const response = await fetch(withQuery(`${baseUrl}/workspace/file/binary`, params), {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!response.ok) {
+        throw new HttpError(`Failed to read binary: ${response.status}`, response.status);
+      }
+      const buffer = await response.arrayBuffer();
+      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+      return { buffer, contentType };
     },
 
     async writeFile(token, path, content) {
@@ -247,6 +299,24 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
         throw new HttpError(`Failed to search workspace: ${response.status}`, response.status);
       }
       const data = (await response.json()) as { results?: WorkspaceSearchHit[] };
+      return data.results ?? [];
+    },
+
+    async findByName(token, name, rootPath, options) {
+      const params = new URLSearchParams();
+      params.set('name', name);
+      params.set('path', rootPath);
+      if (options?.maxResults !== undefined) {
+        params.set('maxResults', String(options.maxResults));
+      }
+      const response = await fetch(withQuery(`${baseUrl}/workspace/find-by-name`, params), {
+        headers: authHeader(token),
+        signal: options?.signal,
+      });
+      if (!response.ok) {
+        throw new HttpError(`Failed to find file by name: ${response.status}`, response.status);
+      }
+      const data = (await response.json()) as { results?: Array<{ path: string }> };
       return data.results ?? [];
     },
 

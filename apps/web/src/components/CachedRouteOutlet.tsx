@@ -226,6 +226,11 @@ export function CachedRouteOutlet({ maxCacheEntries }: CachedRouteOutletProps) {
         minHeight: 0,
         width: '100%',
         overflow: 'hidden',
+        // 把整个路由出口隔离成一个 layout / style / paint containment 边界。
+        // 切换页面时频繁触发的 display / animation 变化只在这个子树内部
+        // 重算,不会向上冒泡导致 NavRail / Layout 的 flex 重计 — 这是
+        // 切换时 [Violation] Forced reflow 40ms 的主要来源之一。
+        contain: 'layout style paint',
       }}
     >
       {entriesToRender.map((entry) => {
@@ -242,23 +247,30 @@ export function CachedRouteOutlet({ maxCacheEntries }: CachedRouteOutletProps) {
               aria-hidden={!isActive}
               style={{
                 display: shouldDisplay ? 'flex' : 'none',
-                flex: 1,
                 minWidth: 0,
                 minHeight: 0,
                 width: '100%',
                 overflow: 'hidden',
-                position: isTransitioning ? 'absolute' : 'relative',
-                inset: isTransitioning ? 0 : undefined,
+                // 始终 absolute + inset:0,而不是在 transition 期间从 relative
+                // 切到 absolute。position 切换是 reflow trigger,过去每次切页都
+                // 要先把所有 entry 重新算一次定位,40ms 的 forced reflow 大头在
+                // 这里。父容器是 flex + position:relative,absolute 子级会铺满。
+                position: 'absolute',
+                inset: 0,
                 zIndex: isEntering ? 2 : isLeaving ? 1 : 0,
                 pointerEvents: isActive ? undefined : 'none',
                 transformOrigin: '50% 18%',
-                willChange: isTransitioning ? 'opacity, transform, filter' : undefined,
+                // 仅在切换的那一帧标 willChange — 一直挂会无谓占用合成层内存。
+                willChange: isTransitioning ? 'opacity, transform' : undefined,
                 animation: isEntering
                   ? `route-page-enter ${ROUTE_TRANSITION_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both`
                   : isLeaving
                     ? `route-page-exit ${ROUTE_TRANSITION_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both`
                     : undefined,
-                filter: isLeaving ? 'blur(6px) saturate(0.88)' : undefined,
+                // 单层 layout containment 限制 entry 内部子树 reflow 不外传 —
+                // 切到 ChatPage 这种重组件时,messages 数组的初次布局就只在
+                // entry 里完成,不会触发整树重算。
+                contain: 'layout style',
               }}
             >
               <UNSAFE_LocationContext.Provider value={entry.locationContextValue}>

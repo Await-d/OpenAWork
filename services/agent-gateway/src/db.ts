@@ -1118,6 +1118,60 @@ export async function migrate(): Promise<void> {
   // T-04: handoff_records 扩展 result_json（c 完成后写入 plan/tasks 产物引用）
   ensureColumn('handoff_records', 'result_json', 'TEXT DEFAULT NULL');
 
+  // ─── L1.3 §1.3 流式 handoff 协议三件套（260518 增量改造） ────────────────
+  // 关联文档：docs/team-architecture-l1-3-streaming-handoff-spec.md §0.A.2
+  //
+  // 改造 1：session_inbound_messages —— 反向消息通道
+  //   让上游（b）可以在不重启 c session 的前提下注入 clarification_answer /
+  //   user_input / cancel_signal / pause_signal 等结构化消息。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_inbound_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      to_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      from_role_layer TEXT NOT NULL,
+      message_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      state TEXT NOT NULL DEFAULT 'pending',
+      client_idempotency_key TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      consumed_at TEXT,
+      consumed_by_loop_iteration INTEGER,
+      expires_at TEXT
+    )
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_session_inbound_to_pending ON session_inbound_messages(to_session_id, state, created_at) WHERE state = 'pending'",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_session_inbound_cancel ON session_inbound_messages(to_session_id, message_type) WHERE message_type = 'cancel_signal' AND state = 'pending'",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_session_inbound_expires ON session_inbound_messages(expires_at) WHERE state = 'pending' AND expires_at IS NOT NULL",
+  );
+  // 客户端幂等：同一 user + key 不允许重复入库（避免重试误投递）
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_session_inbound_idempotency ON session_inbound_messages(user_id, client_idempotency_key) WHERE client_idempotency_key IS NOT NULL',
+  );
+
+  // 改造 2：sessions 子状态机字段
+  ensureColumn('sessions', 'substate', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'substate_updated_at', 'TEXT DEFAULT NULL');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_sessions_substate ON sessions(substate) WHERE substate IS NOT NULL',
+  );
+
+  // 改造 4：handoff_records 补字段
+  //   - idempotency_key：scheduler 入队幂等 key（与 client_idempotency_key 不同源）
+  //   - paused_at / paused_by_user_id / pause_reason：D42 一键暂停信息
+  ensureColumn('handoff_records', 'idempotency_key', 'TEXT DEFAULT NULL');
+  ensureColumn('handoff_records', 'paused_at', 'TEXT DEFAULT NULL');
+  ensureColumn('handoff_records', 'paused_by_user_id', 'TEXT DEFAULT NULL');
+  ensureColumn('handoff_records', 'pause_reason', 'TEXT DEFAULT NULL');
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_records_idempotency ON handoff_records(idempotency_key) WHERE idempotency_key IS NOT NULL',
+  );
+
   // ─── App meta：跨版本状态戳 ───
   // 卸载桌面端但「保留用户数据」时，旧的 sqlite 仍在新版本启动时被复用。
   // 这里建立一张轻量的 key/value meta 表，为后续「按版本号触发兼容修补」

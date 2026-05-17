@@ -9,17 +9,16 @@
  *
  *   ┌──────────────────────────────────────────────────────────────────┐
  *   │ .page-header（44px）：团队 · 工作区 / 当前会话 · 状态栏 · 暂停    │
- *   ├────────┬─────────────────────────────────────┬───────────────────┤
- *   │        │ OfficeCompactBar（折叠 36 / 展开 132） │  RightPanel       │
- *   │ 左侧    ├─────────────────────────────────────┤   240/360         │
- *   │ 会话栏  │                                     │   tabs：           │
- *   │ 240    │  ConversationArea（flex 1）          │  任务/团队/设置    │
- *   │ 可折叠  │   - 系统/事件徽章                    │                    │
- *   │        │   - 对话流（占位）                    │                    │
- *   │        │   - 推送提示                          │                    │
- *   │        ├─────────────────────────────────────┤                    │
- *   │        │ MessageInput（粘底）                 │                    │
- *   └────────┴─────────────────────────────────────┴───────────────────┘
+ *   ├────────┬───────────────────────────────────────────────────────┤
+ *   │        │                                                       │
+ *   │ 左侧    │  ConversationArea / 主 tab 内容                        │
+ *   │ 会话栏  │   - 主 tab 栏（5 主分类 + 3D 入口）                    │
+ *   │ 240    │   - 子 tab segmented                                   │
+ *   │ 可折叠  │   - 中央内容区（设置等原右侧面板内容已并入子 tab）     │
+ *   │        │                                                       │
+ *   │        ├───────────────────────────────────────────────────────┤
+ *   │        │ MessageInput（粘底）                                   │
+ *   └────────┴───────────────────────────────────────────────────────┘
  *
  * 三态：
  *   - idle：无活跃 handoff，对话区显示引导文案
@@ -39,139 +38,82 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  Fragment,
+  useRef,
   type CSSProperties,
   type MouseEvent,
 } from 'react';
 import { useParams, useNavigate } from 'react-router';
+// 团队页专属样式（team-v2-* / 局部 keyframes）— 入口处一次性挂载
+import './team/runtime/styles/team-runtime.css';
 import {
   TeamRuntimeReferenceDataProvider,
   useResolvedTeamRuntimeReferenceData,
-} from './team/runtime/team-runtime-reference-data.js';
+} from './team/runtime/data/team-runtime-reference-data.js';
 import { useTeamWorkspaceState } from './team/use-team-workspace-state.js';
 import { useTeamWorkspaceSnapshotState } from './team/use-team-workspace-snapshot-state.js';
-import { ConversationArea } from './team/runtime/ConversationArea.js';
-import { TeamSessionView } from './team/runtime/TeamSessionView.js';
-import { OfficeCompactBar } from './team/runtime/OfficeCompactBar.js';
-import { RightPanel, useRightPanelState } from './team/runtime/RightPanel.js';
-import { TeamStatusBar } from './team/runtime/TeamStatusBar.js';
-import { LayerConversationDrawer } from './team/runtime/LayerConversationDrawer.js';
-import { SessionTreeView } from './team/runtime/SessionTreeView.js';
-import { TeamArtifactSection } from './team/runtime/TeamArtifactSection.js';
-import { TeamRuntimeSettingsPanel } from './team/runtime/team-runtime-settings-panel.js';
-import { TeamTabContent } from './team/runtime/TeamTabContent.js';
-import { TeamSessionListSidebar } from './team/runtime/TeamSessionListSidebar.js';
-import { WorkspaceSwitcher } from './team/runtime/WorkspaceSwitcher.js';
-import { TeamHeaderMetrics } from './team/runtime/TeamHeaderMetrics.js';
-import { NewTeamWorkspaceModal } from './team/runtime/NewTeamWorkspaceModal.js';
-import { ConfirmDeleteWorkspaceModal } from './team/runtime/ConfirmDeleteWorkspaceModal.js';
-import { renderMiddleTabContent, type MiddleTabKey } from './team/runtime/MiddleTabRouter.js';
+import { ConversationArea } from './team/runtime/shell/ConversationArea.js';
+import { TeamSessionView } from './team/runtime/shell/TeamSessionView.js';
+import { TeamStatusBar } from './team/runtime/shell/TeamStatusBar.js';
+import { LayerConversationDrawer } from './team/runtime/shell/LayerConversationDrawer.js';
+import { TeamSessionListSidebar } from './team/runtime/shell/TeamSessionListSidebar.js';
+import { WorkspaceSwitcher } from './team/runtime/shell/WorkspaceSwitcher.js';
+import { TeamHeaderMetrics } from './team/runtime/shell/TeamHeaderMetrics.js';
+import { NewTeamWorkspaceModal } from './team/runtime/shell/modals/NewTeamWorkspaceModal.js';
+import { ConfirmDeleteWorkspaceModal } from './team/runtime/shell/modals/ConfirmDeleteWorkspaceModal.js';
+import { renderMiddleTabContent, type MiddleTabKey } from './team/runtime/tabs/MiddleTabRouter.js';
+import {
+  PRIMARY_TABS,
+  LEAF_TO_PRIMARY,
+  MIDDLE_TAB_KEYS,
+  getDefaultLeafFor,
+  PRIMARY_TAB_BAR_STYLE,
+  PRIMARY_TAB_BTN_STYLE,
+  PRIMARY_TAB_BTN_ACTIVE_STYLE,
+  SUB_TAB_BAR_STYLE,
+  SUB_TAB_BTN_STYLE,
+  SUB_TAB_BTN_ACTIVE_STYLE,
+  OFFICE_TOGGLE_STYLE,
+  OFFICE_TOGGLE_ACTIVE_STYLE,
+  type PrimaryTabKey,
+} from './team/runtime/tabs/team-page-v2-tabs.js';
 import {
   useBreakpoint,
   useTeamPageMode,
   setTeamPagePaused,
-} from './team/runtime/use-team-page-state.js';
+} from './team/runtime/hooks/use-team-page-state.js';
 import { useAuthStore } from '../stores/auth.js';
 import {
   connectTeamEvents,
   disconnectTeamEvents,
   useHandoffStore,
-  type HandoffEntry,
+  useTeamNotificationStore,
+  useClarificationStore,
 } from '../stores/team-events.js';
-import { OfficeThreeCanvas } from './team/runtime/OfficeThreeCanvas.js';
-import { useOfficeSceneState } from './team/runtime/OfficeScene.js';
-import type { TeamSessionCreationDraft } from './team/runtime/team-session-creation.types.js';
-import type { TeamWorkspaceSummary } from '@openAwork/web-client';
+import { OfficeThreeCanvas } from './team/runtime/tabs/office/OfficeThreeCanvas.js';
+import { useOfficeSceneState } from './team/runtime/tabs/office/OfficeScene.js';
+import type { TeamSessionCreationDraft } from './team/runtime/data/team-session-creation.types.js';
+import { createTeamHandoffsClient, type TeamWorkspaceSummary } from '@openAwork/web-client';
 
 // ───── 尺寸常量 ─────
 
 const SIDEBAR_WIDTH = 240;
 const SIDEBAR_TABLET_WIDTH = 200;
 const SIDEBAR_COLLAPSED_WIDTH = 52;
-const RIGHT_PANEL_WIDTH = 360;
-const RIGHT_PANEL_TABLET_WIDTH = 320;
 
-interface MiddleTabDef {
-  key: MiddleTabKey;
-  label: string;
-  icon: string;
-  /** 同 group 的 tab 在 tab 栏中放在一起。 */
-  group: '3D' | 'A' | 'B' | 'C' | 'D' | 'E';
-}
-
-const MIDDLE_TABS: ReadonlyArray<MiddleTabDef> = [
-  { group: '3D', key: 'office', label: '3D 办公', icon: '🏢' },
-  // A. 概览
-  { group: 'A', key: 'dashboard', label: '仪表盘', icon: '📊' },
-  { group: 'A', key: 'topology', label: '拓扑', icon: '🕸️' },
-  { group: 'A', key: 'health', label: '健康度', icon: '🩺' },
-  // B. 通讯
-  { group: 'B', key: 'conversation', label: '对话', icon: '💬' },
-  { group: 'B', key: 'layered', label: '层级对话', icon: '🪜' },
-  { group: 'B', key: 'messages', label: '消息', icon: '✉️' },
-  { group: 'B', key: 'mentions', label: '待回复', icon: '🔔' },
-  // C. 任务/产物
-  { group: 'C', key: 'tasks', label: '任务流', icon: '📋' },
-  { group: 'C', key: 'dispatch', label: '派发包', icon: '📦' },
-  { group: 'C', key: 'session-tree', label: '会话树', icon: '🌳' },
-  { group: 'C', key: 'artifacts', label: '产物', icon: '🧱' },
-  { group: 'C', key: 'review', label: '评审', icon: '✅' },
-  { group: 'C', key: 'review-queue', label: '评审待办', icon: '🗂️' },
-  // D. 度量
-  { group: 'D', key: 'timing', label: '耗时', icon: '⏱️' },
-  { group: 'D', key: 'usage', label: '用量', icon: '🔋' },
-  { group: 'D', key: 'tools', label: '工具调用', icon: '🛠️' },
-  // E. 配置/治理
-  { group: 'E', key: 'members', label: '成员', icon: '👥' },
-  { group: 'E', key: 'templates', label: '模板', icon: '📐' },
-  { group: 'E', key: 'shares', label: '共享', icon: '🤝' },
-  { group: 'E', key: 'audit', label: '审计', icon: '📜' },
-];
-
-const MIDDLE_TAB_KEYS: ReadonlySet<MiddleTabKey> = new Set(MIDDLE_TABS.map((tab) => tab.key));
-
-const MIDDLE_TAB_BAR_STYLE: CSSProperties = {
-  display: 'flex',
-  gap: 4,
-  padding: '6px 12px 0',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  flexShrink: 0,
-  background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
-  overflowX: 'auto',
-  scrollbarWidth: 'thin',
-};
-
-const TAB_GROUP_SEPARATOR_STYLE: CSSProperties = {
-  alignSelf: 'stretch',
-  width: 1,
-  margin: '6px 4px 4px',
-  background: 'color-mix(in srgb, var(--border) 50%, transparent)',
-  flexShrink: 0,
-};
-
-const MIDDLE_TAB_BTN_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '7px 14px 8px',
-  border: 'none',
-  borderBottom: '2px solid transparent',
-  background: 'transparent',
-  color: 'var(--text-3)',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-  borderRadius: '6px 6px 0 0',
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-};
-
-const MIDDLE_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
-  ...MIDDLE_TAB_BTN_STYLE,
-  borderBottomColor: 'var(--accent)',
-  color: 'var(--text)',
-  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-};
+/**
+ * 主 tab 重构（260517）：
+ *
+ * 原本 23 个 tab 平铺在一行，认知负担过高。现在改为两层：
+ *   - 主 tab（5 个）：概览 / 对话 / 任务 / 度量 / 治理
+ *   - 子 tab（segmented）：仅显示当前主 tab 下的视图
+ *   - 3D 办公：独立按钮，从 tab 栏抽出，按下切到沉浸视图
+ *
+ * 实现策略：MiddleTabKey 不动，子 tab 的 key 仍然是叶子 key，
+ * 这样 MiddleTabRouter / localStorage / 现有 conversation 特例
+ * 都不需要改，零风险。
+ *
+ * 数据 / 样式：见 team/runtime/team-page-v2-tabs.ts。
+ */
 
 // ───── 样式 ─────
 
@@ -269,7 +211,12 @@ export default function TeamPageV2() {
     resolvedTeamWorkspaceId ?? undefined,
   );
   const [selectedTeamId, setSelectedTeamId] = useState('');
-  const [officeCollapsed, setOfficeCollapsed] = useState(true);
+  /**
+   * 标识用户是否主动从左栏 / TeamPageV2 自己的菜单选过具体 team session。
+   * - false：自动填充的 selectedTeamId 视为「未选」，对话 tab 默认显示接待
+   * - true：用户明确选了某个 team session，对话 tab 优先显示该会话
+   */
+  const userSelectedTeamRef = useRef(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
   const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<TeamWorkspaceSummary | null>(
@@ -282,23 +229,35 @@ export default function TeamPageV2() {
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null);
   const [showOfficeFullscreen, setShowOfficeFullscreen] = useState(false);
   const [middleTab, setMiddleTab] = useState<MiddleTabKey>(() => {
-    if (typeof window === 'undefined') return 'office';
+    if (typeof window === 'undefined') return 'conversation';
     const saved = window.localStorage.getItem('teamV2.middleTab');
     if (saved && MIDDLE_TAB_KEYS.has(saved as MiddleTabKey)) {
       return saved as MiddleTabKey;
     }
-    return 'office';
+    return 'conversation';
   });
-  const {
-    collapsed: rightCollapsed,
-    toggleCollapsed: toggleRight,
-    activeTab,
-    setActiveTab,
-  } = useRightPanelState();
+  /**
+   * 是否启用 team 端 composer 输入（L1.3 inbound 反向通道）。
+   *
+   * 后端 L1.3 改造 1（session_inbound_messages 表 + POST /team/sessions/:id/inbound-messages
+   * 端点）已落地，默认开启。如需回到只读模式（如调试或后端兼容），
+   * 设置 `localStorage['teamV2.inboundComposer.enabled']='0'` 强制关闭。
+   *
+   * 当 substate='clarifying' 时，提交走 'clarification_answer'；其他情况走 'user_input'。
+   * reception session 的 user_input 会触发服务端 B1 自动编排（reception → pm1）。
+   */
+  const [inboundComposerEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem('teamV2.inboundComposer.enabled');
+    if (stored === null) return true;
+    return stored === '1';
+  });
   const { accessToken, gatewayUrl } = useAuthStore();
   const mode = useTeamPageMode();
   const breakpoint = useBreakpoint();
   const handoffs = useHandoffStore((s) => s.handoffs);
+  const unreadCount = useTeamNotificationStore((s) => s.unreadCount);
+  const clarificationPending = useClarificationStore((s) => s.pendingCount);
   const officeSceneState = useOfficeSceneState();
 
   const data = useResolvedTeamRuntimeReferenceData({
@@ -345,9 +304,7 @@ export default function TeamPageV2() {
 
   // 移动端：默认折叠左侧会话栏 + 隐藏 3D
   const effectiveSidebarCollapsed = isMobile ? true : sidebarCollapsed;
-  const effectiveRightCollapsed = isMobile ? true : rightCollapsed;
   const showOffice = !isMobile;
-  const rightPanelExpandedWidth = isTablet ? RIGHT_PANEL_TABLET_WIDTH : RIGHT_PANEL_WIDTH;
 
   const handleToggleSidebar = () => {
     setSidebarCollapsed((prev) => {
@@ -360,6 +317,7 @@ export default function TeamPageV2() {
   };
 
   const handleSelectTeam = (teamId: string) => {
+    userSelectedTeamRef.current = true;
     setSelectedTeamId(teamId);
     data.selectTeam(teamId);
   };
@@ -391,8 +349,13 @@ export default function TeamPageV2() {
   }, []);
 
   const handleSubmitDraft = useCallback(
-    async (_draft: TeamSessionCreationDraft) => {
-      await data.createSession(_draft.teamWorkspaceId);
+    async (draft: TeamSessionCreationDraft) => {
+      // 把 4 步向导产出的完整 draft（title / source / defaultProvider /
+      // optionalAgentIds / requiredRoleBindings）整体下发给后端 /sessions
+      // 路径，由 createSession 内部映射到 CreateTeamSessionInput。
+      // 之前只传 teamWorkspaceId 会导致 source / defaultProvider / optional
+      // agents 全部丢失（参见 docs/team-architecture-deferred-decisions.md）。
+      await data.createSession(draft);
     },
     [data],
   );
@@ -415,20 +378,44 @@ export default function TeamPageV2() {
     }
   }, []);
 
+  /**
+   * 当前激活的主 tab：从叶子 key 反向查表得到。
+   * 'office' 不属于任何主 tab（沉浸视图），此时 activePrimary 为 null，
+   * UI 上让主 tab 栏全部置非激活态即可。
+   */
+  const activePrimary = useMemo<PrimaryTabKey | null>(
+    () => LEAF_TO_PRIMARY.get(middleTab) ?? null,
+    [middleTab],
+  );
+
+  const handlePrimaryTabChange = useCallback(
+    (next: PrimaryTabKey) => {
+      // 切主 tab 时：若当前 leaf 已属于该主 tab，则保留 leaf；否则回落到该主 tab 的默认子 tab。
+      if (LEAF_TO_PRIMARY.get(middleTab) === next) return;
+      handleMiddleTabChange(getDefaultLeafFor(next));
+    },
+    [handleMiddleTabChange, middleTab],
+  );
+
+  const handoffsClient = useMemo(
+    () => (gatewayUrl ? createTeamHandoffsClient(gatewayUrl) : null),
+    [gatewayUrl],
+  );
+
   const handleCancelHandoff = useCallback(
     (handoffId: string) => {
-      if (!gatewayUrl || !accessToken) return;
-      // TODO: 后续迁移到 @openAwork/web-client 封装
-      void fetch(`${gatewayUrl}/team/handoffs/${handoffId}/cancel`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }).then((res) => {
-        if (!res.ok) {
-          console.error('[TeamPageV2] cancel handoff failed:', handoffId, res.status);
+      if (!handoffsClient || !accessToken) return;
+      void handoffsClient.cancelHandoff(accessToken, handoffId).then((result) => {
+        if (!result.ok) {
+          console.error(
+            '[TeamPageV2] cancel handoff failed:',
+            handoffId,
+            result.state ? `state=${result.state}` : 'unknown',
+          );
         }
       });
     },
-    [gatewayUrl, accessToken],
+    [handoffsClient, accessToken],
   );
 
   const handleOpenFullscreen = useCallback(() => {
@@ -451,15 +438,8 @@ export default function TeamPageV2() {
     const left = effectiveSidebarCollapsed
       ? `${SIDEBAR_COLLAPSED_WIDTH}px`
       : `${sidebarExpanded}px`;
-    const right = effectiveRightCollapsed ? '0px' : `${rightPanelExpandedWidth}px`;
-    return `${left} minmax(0, 1fr) ${right}`;
-  }, [
-    effectiveRightCollapsed,
-    effectiveSidebarCollapsed,
-    isMobile,
-    isTablet,
-    rightPanelExpandedWidth,
-  ]);
+    return `${left} minmax(0, 1fr)`;
+  }, [effectiveSidebarCollapsed, isMobile, isTablet]);
 
   const mainGridStyle: CSSProperties = {
     ...MAIN_GRID_BASE_STYLE,
@@ -579,91 +559,260 @@ export default function TeamPageV2() {
             />
           ) : null}
 
-          {/* 中：紧凑栏 + 对话区 */}
+          {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
           <section style={LEFT_AREA_STYLE}>
-            {showOffice && !officeCollapsed ? (
-              <OfficeCompactBar
-                collapsed={officeCollapsed}
-                onToggle={() => setOfficeCollapsed((v) => !v)}
-                onFullscreen={handleOpenFullscreen}
-              />
-            ) : null}
-
             <ConversationArea
               onSubmitMessage={handleSubmitMessage}
               onSelectSuggestion={handleSubmitMessage}
               onRetryConnection={handleRetryConnection}
-              hideInput={middleTab === 'conversation' && Boolean(selectedTeamId)}
+              receptionSessionId={data.defaultReceptionSessionId}
+              receptionComposerEnabled={true}
               topBar={
-                <div style={MIDDLE_TAB_BAR_STYLE} role="tablist" aria-label="中间区视图切换">
-                  {MIDDLE_TABS.map((tab, idx) => {
-                    const active = middleTab === tab.key;
-                    const prev = idx > 0 ? MIDDLE_TABS[idx - 1] : undefined;
-                    const showSeparator = prev && prev.group !== tab.group;
-                    return (
-                      <Fragment key={tab.key}>
-                        {showSeparator ? (
-                          <span aria-hidden style={TAB_GROUP_SEPARATOR_STYLE} />
-                        ) : null}
+                <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                  {/* 主 tab 行：5 个主分类 + 右侧 3D 办公独立切换 */}
+                  <div style={PRIMARY_TAB_BAR_STYLE} role="tablist" aria-label="中间区主分类切换">
+                    {PRIMARY_TABS.map((primary) => {
+                      const active = activePrimary === primary.key;
+                      return (
                         <button
+                          key={primary.key}
                           type="button"
                           role="tab"
                           aria-selected={active}
-                          aria-controls={`middle-panel-${tab.key}`}
-                          onClick={() => handleMiddleTabChange(tab.key)}
-                          style={active ? MIDDLE_TAB_BTN_ACTIVE_STYLE : MIDDLE_TAB_BTN_STYLE}
-                          onMouseEnter={(e) => {
-                            if (!active) {
-                              e.currentTarget.style.color = 'var(--text-2)';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!active) {
-                              e.currentTarget.style.color = 'var(--text-3)';
-                            }
-                          }}
+                          aria-controls={`primary-panel-${primary.key}`}
+                          onClick={() => handlePrimaryTabChange(primary.key)}
+                          className="team-primary-tab"
+                          data-active={active || undefined}
+                          style={active ? PRIMARY_TAB_BTN_ACTIVE_STYLE : PRIMARY_TAB_BTN_STYLE}
                         >
-                          <span aria-hidden>{tab.icon}</span>
-                          <span>{tab.label}</span>
+                          <span aria-hidden>{primary.icon}</span>
+                          <span>{primary.label}</span>
+                          {primary.key === 'conversation' && unreadCount > 0 ? (
+                            <span
+                              aria-label={`待回复 ${unreadCount} 条`}
+                              style={{
+                                marginLeft: 4,
+                                padding: '0 6px',
+                                minWidth: 18,
+                                height: 18,
+                                borderRadius: 999,
+                                background: 'var(--danger, #d4574e)',
+                                color: '#fff',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {unreadCount > 99 ? '99+' : unreadCount}
+                            </span>
+                          ) : null}
+                          {primary.key === 'tasks' && clarificationPending > 0 ? (
+                            <span
+                              aria-label={`待澄清 ${clarificationPending} 条`}
+                              style={{
+                                marginLeft: 4,
+                                padding: '0 6px',
+                                minWidth: 18,
+                                height: 18,
+                                borderRadius: 999,
+                                background: 'var(--warning, #f59e0b)',
+                                color: '#fff',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {clarificationPending > 99 ? '99+' : clarificationPending}
+                            </span>
+                          ) : null}
                         </button>
-                      </Fragment>
-                    );
-                  })}
-                  {showOffice && officeCollapsed ? (
-                    <button
-                      type="button"
-                      onClick={() => setOfficeCollapsed(false)}
-                      aria-label="展开 3D 流程动画"
-                      title="展开 3D 流程动画"
-                      style={{
-                        marginLeft: 'auto',
-                        marginRight: 8,
-                        marginBottom: 6,
-                        padding: '4px 10px',
-                        border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-                        borderRadius: 6,
-                        background: 'transparent',
-                        color: 'var(--text-3)',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        alignSelf: 'center',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <span aria-hidden>▼</span>
-                      <span>流程</span>
-                    </button>
+                      );
+                    })}
+
+                    {/* 对话主 tab 下的内嵌视图切换：层级 / 消息 / 待回复
+                        被合并到主 tab 行右侧（替代原本的子 tab 行），让用户
+                        在不打断接待对话的情况下快速切换次要视图。 */}
+                    {activePrimary === 'conversation' ? (
+                      <div
+                        style={{
+                          marginLeft: 'auto',
+                          display: 'inline-flex',
+                          gap: 2,
+                          alignSelf: 'center',
+                          paddingRight: 4,
+                        }}
+                      >
+                        {[
+                          { key: 'layered', label: '层级', icon: '🪜' },
+                          { key: 'messages', label: '消息', icon: '✉️' },
+                        ].map((view) => {
+                          const viewActive = middleTab === view.key;
+                          return (
+                            <button
+                              key={view.key}
+                              type="button"
+                              onClick={() => handleMiddleTabChange(view.key as MiddleTabKey)}
+                              className="team-sub-tab"
+                              data-active={viewActive || undefined}
+                              title={`切到${view.label}视图`}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: '4px 10px',
+                                border: '1px solid transparent',
+                                background: viewActive
+                                  ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
+                                  : 'transparent',
+                                color: viewActive ? 'var(--accent)' : 'var(--text-3)',
+                                fontSize: 11,
+                                fontWeight: viewActive ? 700 : 600,
+                                cursor: 'pointer',
+                                borderRadius: 6,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              <span aria-hidden>{view.icon}</span>
+                              <span>{view.label}</span>
+                            </button>
+                          );
+                        })}
+                        {middleTab === 'conversation' ||
+                        middleTab === 'layered' ||
+                        middleTab === 'messages' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleMiddleTabChange('conversation')}
+                            className="team-sub-tab"
+                            data-active={middleTab === 'conversation' || undefined}
+                            title="回到接待对话"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '4px 10px',
+                              border: '1px solid transparent',
+                              background:
+                                middleTab === 'conversation'
+                                  ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
+                                  : 'transparent',
+                              color:
+                                middleTab === 'conversation' ? 'var(--accent)' : 'var(--text-3)',
+                              fontSize: 11,
+                              fontWeight: middleTab === 'conversation' ? 700 : 600,
+                              cursor: 'pointer',
+                              borderRadius: 6,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            <span aria-hidden>💬</span>
+                            <span>对话</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {/* 3D 办公：独立按钮，从主分类中抽出 */}
+                    {showOffice ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (middleTab === 'office') {
+                            handleOpenFullscreen();
+                          } else {
+                            handleMiddleTabChange('office');
+                          }
+                        }}
+                        aria-pressed={middleTab === 'office'}
+                        title={
+                          middleTab === 'office' ? '全屏 3D 办公（ESC 关闭）' : '切到 3D 办公视图'
+                        }
+                        style={
+                          middleTab === 'office' ? OFFICE_TOGGLE_ACTIVE_STYLE : OFFICE_TOGGLE_STYLE
+                        }
+                      >
+                        <span aria-hidden>🏢</span>
+                        <span>3D 办公</span>
+                        {middleTab === 'office' ? (
+                          <span aria-hidden style={{ fontSize: 10 }}>
+                            ⛶
+                          </span>
+                        ) : null}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {/* 子 tab 行（segmented）：仅当处于某个主 tab 时显示。
+                      对话主 tab 默认进入接待对话，不展示子 tab 以最大化对话视野；
+                      用户需要看「层级 / 消息 / 待回复」时通过 LayerConversationDrawer
+                      或主动选别的 leaf 时再显示。 */}
+                  {activePrimary && activePrimary !== 'conversation' ? (
+                    <div style={SUB_TAB_BAR_STYLE} role="tablist" aria-label="子视图切换">
+                      {(PRIMARY_TABS.find((tab) => tab.key === activePrimary)?.children ?? []).map(
+                        (sub) => {
+                          const active = middleTab === sub.key;
+                          return (
+                            <button
+                              key={sub.key}
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              aria-controls={`middle-panel-${sub.key}`}
+                              onClick={() => handleMiddleTabChange(sub.key)}
+                              className="team-sub-tab"
+                              data-active={active || undefined}
+                              style={active ? SUB_TAB_BTN_ACTIVE_STYLE : SUB_TAB_BTN_STYLE}
+                            >
+                              <span aria-hidden>{sub.icon}</span>
+                              <span>{sub.label}</span>
+                              {sub.key === 'messages' && unreadCount > 0 ? (
+                                <span
+                                  aria-label={`待回复 ${unreadCount} 条`}
+                                  style={{
+                                    marginLeft: 2,
+                                    padding: '0 5px',
+                                    minWidth: 16,
+                                    height: 16,
+                                    borderRadius: 999,
+                                    background: 'var(--danger, #d4574e)',
+                                    color: '#fff',
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontVariantNumeric: 'tabular-nums',
+                                  }}
+                                >
+                                  {unreadCount > 99 ? '99+' : unreadCount}
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        },
+                      )}
+                    </div>
                   ) : null}
                 </div>
               }
               messagesOverride={
                 middleTab === 'conversation' ? (
-                  selectedTeamId ? (
-                    <TeamSessionView sessionId={selectedTeamId} />
+                  // 默认行为：进入对话 tab 时优先显示「接待 b 层对话」（receptionSessionId）。
+                  // 仅当用户主动从左栏点了某个 team session 后（userSelectedTeamRef=true），
+                  // 才切到该 team session 的 chat 视图。这样新用户首次进入直接看到接待对话。
+                  userSelectedTeamRef.current &&
+                  selectedTeamId &&
+                  selectedTeamId !== data.defaultReceptionSessionId ? (
+                    <TeamSessionView
+                      sessionId={selectedTeamId}
+                      composerEnabled={inboundComposerEnabled}
+                    />
                   ) : undefined
                 ) : (
                   <div
@@ -673,10 +822,12 @@ export default function TeamPageV2() {
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 12,
                       flex: 1,
                       minHeight: 0,
-                      overflow: 'auto',
+                      overflow: 'hidden',
+                      background: 'var(--bg)',
+                      // 让 tab 内部的 sticky header 不被父级的 overflow 截断
+                      isolation: 'isolate',
                     }}
                   >
                     {renderMiddleTabContent({
@@ -698,7 +849,10 @@ export default function TeamPageV2() {
                 )
               }
               fallbackContent={
-                mode === 'idle' ? (
+                // 对话主 tab：依赖 chat 流自身的视觉，不再额外注入 IdleHint
+                // 与 EmptyState（避免在已经有 composer / 接待对话流的页面下方
+                // 再堆一段「团队待命中」的 hero 卡）。
+                middleTab === 'conversation' ? null : mode === 'idle' ? (
                   <IdleHint />
                 ) : mode === 'paused' ? null : (
                   <div
@@ -715,69 +869,7 @@ export default function TeamPageV2() {
               }
             />
           </section>
-
-          {/* 右：任务/团队/设置 Tab */}
-          {!isMobile ? (
-            <RightPanel
-              collapsed={effectiveRightCollapsed}
-              expandedWidth={rightPanelExpandedWidth}
-              onToggleCollapsed={toggleRight}
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-              tasksContent={
-                <div style={{ display: 'grid', gap: 12 }}>
-                  <SessionTreeView onSelectSession={handleSelectLayerSession} />
-                  <HandoffCancelList handoffs={handoffs} onCancel={handleCancelHandoff} />
-                  <TeamArtifactSection />
-                </div>
-              }
-              teamContent={
-                <TeamTabContent
-                  workspaceName={workspaceState.activeWorkspace?.name ?? undefined}
-                  onOpenFullscreen3D={handleOpenFullscreen}
-                />
-              }
-              settingsContent={
-                <TeamRuntimeSettingsPanel
-                  gatewayUrl={gatewayUrl}
-                  accessToken={accessToken}
-                  teamWorkspaceId={resolvedTeamWorkspaceId}
-                />
-              }
-            />
-          ) : null}
         </main>
-
-        {/* 右侧面板折叠态浮动展开按钮（贴右边缘，相对 page-root 定位） */}
-        {!isMobile && effectiveRightCollapsed ? (
-          <button
-            className="team-v2-control team-v2-control--surface"
-            type="button"
-            onClick={toggleRight}
-            aria-label="展开右侧面板"
-            title="展开右侧面板"
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: 100,
-              width: 22,
-              height: 44,
-              border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-              borderRight: 'none',
-              borderTopLeftRadius: 8,
-              borderBottomLeftRadius: 8,
-              color: 'var(--text-2)',
-              fontSize: 12,
-              cursor: 'pointer',
-              display: 'grid',
-              placeItems: 'center',
-              boxShadow: '-2px 0 8px color-mix(in srgb, #000 10%, transparent)',
-              zIndex: 5,
-            }}
-          >
-            ◀
-          </button>
-        ) : null}
 
         {/* 移动端浮动按钮：唤起会话列表 */}
         {isMobile && effectiveSidebarCollapsed ? (
@@ -966,97 +1058,6 @@ function IdleHint() {
         <span aria-hidden>↓</span>
         <span>在下方输入框开始你的第一个需求</span>
       </div>
-    </div>
-  );
-}
-
-function HandoffCancelList({
-  handoffs,
-  onCancel,
-}: {
-  handoffs: Map<string, HandoffEntry>;
-  onCancel: (handoffId: string) => void;
-}) {
-  const cancellable = useMemo(() => {
-    const result: HandoffEntry[] = [];
-    for (const entry of handoffs.values()) {
-      if (entry.state === 'running' || entry.state === 'pending' || entry.state === 'claimed') {
-        result.push(entry);
-      }
-    }
-    return result;
-  }, [handoffs]);
-
-  if (cancellable.length === 0) return null;
-
-  return (
-    <div style={{ display: 'grid', gap: 6 }}>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: 'var(--text-3)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-        }}
-      >
-        运行中任务
-      </span>
-      {cancellable.map((entry) => (
-        <div
-          key={entry.id}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 10px',
-            borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-            background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-            fontSize: 12,
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 999,
-              background: entry.state === 'running' ? 'var(--success, #22c55e)' : '#f59e0b',
-              flexShrink: 0,
-            }}
-          />
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              color: 'var(--text-2)',
-            }}
-          >
-            {entry.fromRoleLayer} → {entry.toRoleLayer}
-          </span>
-          <button
-            type="button"
-            onClick={() => onCancel(entry.id)}
-            style={{
-              padding: '2px 8px',
-              borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, transparent)',
-              color: 'var(--danger, #d4574e)',
-              fontSize: 10,
-              fontWeight: 700,
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-            aria-label={`取消任务 ${entry.id}`}
-          >
-            取消
-          </button>
-        </div>
-      ))}
     </div>
   );
 }

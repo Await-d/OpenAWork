@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth.js';
+import { useUIStateStore } from '../../../stores/uiState.js';
+import { getFilePreviewKind, isBinaryPreviewKind } from '../../../utils/file-preview.js';
 import { extractSnippet, type FileSnippet } from './extract-snippet.js';
+import { resolveBareFilename } from './resolve-bare-filename.js';
 
 /**
  * Cache & inflight registry used by `useFilePreview` so hovering the
@@ -23,7 +26,12 @@ export function invalidateFilePreviewCache(path: string): void {
   cache.delete(path);
 }
 
-async function fetchFileContent(gatewayUrl: string, token: string, path: string): Promise<string> {
+async function fetchFileContent(
+  gatewayUrl: string,
+  token: string,
+  path: string,
+  workspaceRoot: string | null,
+): Promise<string> {
   const cached = cache.get(path);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return cached.content;
@@ -33,7 +41,11 @@ async function fetchFileContent(gatewayUrl: string, token: string, path: string)
 
   const promise = (async () => {
     try {
-      const data = await createWorkspaceClient(gatewayUrl).readFile(token, path);
+      const readOptions: { workspaceRoot?: string } = {};
+      if (workspaceRoot && workspaceRoot.trim().length > 0) {
+        readOptions.workspaceRoot = workspaceRoot;
+      }
+      const data = await createWorkspaceClient(gatewayUrl).readFile(token, path, readOptions);
       cache.set(path, { content: data.content, ts: Date.now() });
       return data.content;
     } finally {
@@ -42,6 +54,19 @@ async function fetchFileContent(gatewayUrl: string, token: string, path: string)
   })();
   inflight.set(path, promise);
   return promise;
+}
+
+/**
+ * Read the active workspace root from the UI state store. Hook-shaped
+ * so the popover can subscribe and re-resolve when the user switches
+ * workspaces while a popover is open.
+ */
+function useActiveWorkspaceRoot(): string | null {
+  // Prefer the explicit selection (sidebar workspace switch) over the
+  // file-tree root (which is sometimes a sub-directory).
+  const selected = useUIStateStore((s) => s.selectedWorkspacePath);
+  const treeRoot = useUIStateStore((s) => s.fileTreeRootPath);
+  return selected ?? treeRoot ?? null;
 }
 
 export type FilePreviewState =
@@ -62,6 +87,7 @@ export type FilePreviewState =
 export function useFilePreview(path: string, line: number | null): FilePreviewState {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  const workspaceRoot = useActiveWorkspaceRoot();
   const [state, setState] = useState<FilePreviewState>({ status: 'loading' });
 
   useEffect(() => {
@@ -75,7 +101,26 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
 
     void (async () => {
       try {
-        const content = await fetchFileContent(gatewayUrl, token, path);
+        // Mirror the click-to-open flow: bare filenames need a search
+        // resolution against the active workspace root before
+        // `/workspace/file` is willing to read them.
+        const client = createWorkspaceClient(gatewayUrl);
+        const resolvedPath = await resolveBareFilename({
+          client,
+          token,
+          workspaceRoot,
+          rawPath: path,
+        });
+        // Binary file kinds (Office docs, PDFs, archives) — surface
+        // a "binary, no text preview" message instead of fetching
+        // the bytes and feeding mojibake to extractSnippet.
+        const previewKind = getFilePreviewKind(resolvedPath);
+        if (isBinaryPreviewKind(previewKind)) {
+          if (cancelled) return;
+          setState({ status: 'error', error: '该文件为二进制内容,无法以文本方式预览' });
+          return;
+        }
+        const content = await fetchFileContent(gatewayUrl, token, resolvedPath, workspaceRoot);
         if (cancelled) return;
         setState({
           status: 'ready',
@@ -91,7 +136,7 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
     return () => {
       cancelled = true;
     };
-  }, [path, line, token, gatewayUrl]);
+  }, [path, line, token, gatewayUrl, workspaceRoot]);
 
   return state;
 }

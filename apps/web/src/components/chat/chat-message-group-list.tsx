@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ChatUsageDetails } from '../session-conversation/runtime/support.js';
 import { readAssistantTracePayload } from '../session-conversation/runtime/support.js';
+import { CHAT_SCROLL_BOTTOM_SPACER_HEIGHT } from '../session-conversation/runtime/use-chat-scroll.js';
 import {
   InlinePermissionQuickBar,
   MessageRow,
@@ -64,7 +65,9 @@ const GROUP_GAP_PX = 24;
 const TIME_DIVIDER_HEIGHT_PX = 28;
 const VIRTUALIZATION_GROUP_THRESHOLD = 32;
 const FALLBACK_VIEWPORT_HEIGHT = 720;
-const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
+// Shared bottom-spacer height — see use-chat-scroll.ts for rationale.
+// Importing here means the value is single-sourced; trimming it
+// brings the latest message closer to the composer everywhere.
 
 export function ChatMessageGroupList({
   activeModelId,

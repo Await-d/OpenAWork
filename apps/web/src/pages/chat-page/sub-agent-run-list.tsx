@@ -134,12 +134,23 @@ function resolveExistingItemStatus(
 export function buildSubAgentRunItems(
   childSessions: Session[],
   sessionTasks: SessionTask[],
+  /**
+   * 当前正在查看的会话 id。父会话派发任务时 task.sessionId 指向被派发的子会话；
+   * 如果当前正处于该子会话视图中，recovery 返回的 tasks 会带上「父会话派发给本会话」
+   * 那条任务（task.sessionId === currentSessionId），这里需要剔除以避免子代理列表
+   * 显示「自己」。
+   */
+  currentSessionId?: string | null,
 ): SubAgentRunItem[] {
   const itemsBySessionId = new Map<string, SubAgentRunItem>();
   const childSessionsById = new Map(childSessions.map((session) => [session.id, session]));
 
   for (const task of sessionTasks) {
     if (!task.sessionId) {
+      continue;
+    }
+
+    if (currentSessionId && task.sessionId === currentSessionId) {
       continue;
     }
 
@@ -164,6 +175,10 @@ export function buildSubAgentRunItems(
   }
 
   for (const session of childSessions) {
+    if (currentSessionId && session.id === currentSessionId) {
+      continue;
+    }
+
     const existing = itemsBySessionId.get(session.id);
     const shortSessionId = session.id.slice(0, 8);
     const existingStatus = resolveExistingItemStatus(existing?.status, session.state_status);
@@ -358,6 +373,10 @@ export function SubAgentRunList({
   onSelectSession: (sessionId: string) => void;
   selectedSessionId: string | null;
 }) {
+  // 浮动栏的显示条件：只要有任何子代理（含已完成 / 失败 / 取消的历史子代理）
+  // 就在主对话区左侧悬浮显示，方便随时跳查。判断已经在 `buildSubAgentRunItems`
+  // 阶段剔除了「自己」，所以这里的 items.length === 0 直接代表「本会话没有派发过
+  // 子代理」，对应需求：「如果子代理下中的对话没有开启子代理就不应该显示」。
   if (items.length === 0) {
     return null;
   }

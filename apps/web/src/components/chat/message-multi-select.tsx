@@ -103,37 +103,54 @@ export function MultiSelectToolbar({
     <div
       data-testid="multi-select-toolbar"
       style={{
-        // 使用 fixed 定位让 toolbar 始终对齐视口中心,而非父级(此前 sticky
-        // 在窄消息列容器内,会被侧边栏/编辑器影响视觉位置)。
-        position: 'fixed',
-        bottom: 96,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        display: 'inline-flex',
+        // 渲染在 ChatTopBar 槽内、紧贴顶栏下方,所以是普通 block;
+        // sticky/fixed 都会和 SessionConversationView 的 split flex 行冲突。
+        display: 'flex',
         alignItems: 'center',
-        gap: 6,
+        gap: 8,
         padding: '8px 14px',
-        borderRadius: 10,
-        border: '1px solid var(--border)',
-        background: 'var(--surface)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-        zIndex: 100,
-        width: 'fit-content',
-        // 防止超过视口
-        maxWidth: 'calc(100vw - 32px)',
+        background: 'color-mix(in oklch, var(--accent) 10%, var(--surface))',
+        borderBottom: '1px solid color-mix(in oklch, var(--accent) 35%, var(--border))',
         flexWrap: 'wrap',
       }}
     >
       <span
+        aria-hidden="true"
         style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: 'var(--text-2)',
-          marginRight: 4,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          background: 'color-mix(in oklch, var(--accent) 24%, var(--surface))',
+          color: 'var(--accent)',
         }}
       >
-        已选 {selectedCount} 条
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
       </span>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: 'var(--text)',
+        }}
+      >
+        多选模式 · 已选 <span style={{ color: 'var(--accent)' }}>{selectedCount}</span> 条
+      </span>
+
+      <span style={{ flex: 1 }} aria-hidden="true" />
 
       <ToolbarButton label="复制" icon="📋" onClick={onCopy} disabled={selectedCount === 0} />
       <ToolbarButton label="导出" icon="📤" onClick={onExport} disabled={selectedCount === 0} />
@@ -149,7 +166,7 @@ export function MultiSelectToolbar({
       />
 
       <ToolbarButton label="全选" icon="☑" onClick={onSelectAll} />
-      <ToolbarButton label="取消" icon="✕" onClick={onCancel} />
+      <ToolbarButton label="退出" icon="✕" onClick={onCancel} />
     </div>
   );
 }

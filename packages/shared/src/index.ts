@@ -999,6 +999,7 @@ export interface StreamAuditRefChunk {
  */
 export type SessionTerminalStatus =
   | 'running'
+  | 'idle'
   | 'exited'
   | 'aborted'
   | 'timeout'

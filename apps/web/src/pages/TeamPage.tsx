@@ -1,29 +1,34 @@
 import { useNavigate, useParams } from 'react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createTeamClient } from '@openAwork/web-client';
-import type { AgentTeamsSidebarTeam, AgentTeamsTabKey } from './team/runtime/team-runtime-types.js';
+// 团队页专属样式（含 team-* hover 工具类）— V1 fallback 也加载
+import './team/runtime/styles/team-runtime.css';
+import type {
+  AgentTeamsSidebarTeam,
+  AgentTeamsTabKey,
+} from './team/runtime/data/team-runtime-types.js';
 import {
   TeamRuntimeReferenceDataProvider,
   useTeamRuntimeReferenceViewData,
   useResolvedTeamRuntimeReferenceData,
-} from './team/runtime/team-runtime-reference-data.js';
-import { SHELL_BACKGROUND } from './team/runtime/team-runtime-shared.js';
-import { TopTeamHeader } from './team/runtime/TopTeamHeader.js';
-import { TabRow } from './team/runtime/TabRow.js';
-import { FooterBar, MainWorkspace } from './team/runtime/MainWorkspace.js';
-import { NewTeamSessionModal } from './team/runtime/NewTeamSessionModal.js';
-import { NewTeamTemplateModal } from './team/runtime/NewTeamTemplateModal.js';
-import { LayerConversationDrawer } from './team/runtime/LayerConversationDrawer.js';
-import { PauseConfirmDialog, ResumeStaleDialog } from './team/runtime/PauseResumeControls.js';
-import { SessionTreeView } from './team/runtime/SessionTreeView.js';
-import { TeamArtifactSection } from './team/runtime/TeamArtifactSection.js';
-import { SessionSidebar } from './team/runtime/TeamSessionSidebar.js';
-import { TeamStatusBar } from './team/runtime/TeamStatusBar.js';
+} from './team/runtime/data/team-runtime-reference-data.js';
+import { SHELL_BACKGROUND } from './team/runtime/shared/team-runtime-shared.js';
+import { TopTeamHeader } from './team/runtime/shell/TopTeamHeader.js';
+import { TabRow } from './team/runtime/shell/TabRow.js';
+import { FooterBar, MainWorkspace } from './team/runtime/shell/MainWorkspace.js';
+import { NewTeamSessionModal } from './team/runtime/shell/modals/NewTeamSessionModal.js';
+import { NewTeamTemplateModal } from './team/runtime/shell/modals/NewTeamTemplateModal.js';
+import { LayerConversationDrawer } from './team/runtime/shell/LayerConversationDrawer.js';
+import { PauseConfirmDialog, ResumeStaleDialog } from './team/runtime/shell/PauseResumeControls.js';
+import { SessionTreeView } from './team/runtime/tabs/tasks/SessionTreeView.js';
+import { TeamArtifactSection } from './team/runtime/tabs/tasks/TeamArtifactSection.js';
+import { SessionSidebar } from './team/runtime/shell/TeamSessionSidebar.js';
+import { TeamStatusBar } from './team/runtime/shell/TeamStatusBar.js';
 import { useTeamWorkspaceSnapshotState } from './team/use-team-workspace-snapshot-state.js';
 import { useTeamWorkspaceState } from './team/use-team-workspace-state.js';
 import { useAuthStore } from '../stores/auth.js';
 import { connectTeamEvents, disconnectTeamEvents, useHandoffStore } from '../stores/team-events.js';
-import type { TeamSessionCreationDraft } from './team/runtime/team-session-creation.types.js';
+import type { TeamSessionCreationDraft } from './team/runtime/data/team-session-creation.types.js';
 
 function TeamPageLayout({
   activeWorkspaceId,

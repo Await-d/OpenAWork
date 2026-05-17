@@ -26,7 +26,7 @@ interface SessionTerminalsChipProps {
 
 export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
   const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const hasAny = props.terminals.length > 0;
 
   const handleClose = useCallback(() => setOpen(false), []);
@@ -45,8 +45,9 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
     props.runningCount > 0 ? '#34d399' : hasAny ? 'var(--text-3)' : 'var(--text-3)';
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex' }}>
+    <>
       <button
+        ref={buttonRef}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -74,7 +75,6 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
           display: 'inline-flex',
           alignItems: 'center',
           gap: 4,
-          position: 'relative',
         }}
       >
         <svg
@@ -111,6 +111,7 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
       <SessionTerminalsPanel
         open={open}
         onClose={handleClose}
+        anchorRef={buttonRef}
         terminals={props.terminals}
         loading={props.loading}
         error={props.error}
@@ -121,6 +122,6 @@ export function SessionTerminalsChip(props: SessionTerminalsChipProps) {
         token={props.token}
         sessionId={props.sessionId}
       />
-    </div>
+    </>
   );
 }

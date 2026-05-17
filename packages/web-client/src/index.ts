@@ -262,6 +262,28 @@ export type {
   UserInputPayload,
 } from './team-inbound.js';
 
+export { createTeamHandoffsClient } from './team-handoffs.js';
+export type {
+  HandoffCancelResult,
+  HandoffRecord,
+  HandoffRoleLayer,
+  HandoffState,
+  TeamHandoffsClient,
+} from './team-handoffs.js';
+
+export { createTeamWorkflowsClient } from './team-workflows.js';
+export type {
+  CreateTeamWorkflowResponse,
+  TeamWorkflow,
+  TeamWorkflowsClient,
+  TeamWorkflowWithDbId,
+  UpdateTeamWorkflowResponse,
+  WorkflowGate,
+  WorkflowRoleLayer,
+  WorkflowSource,
+  WorkflowStep,
+} from './team-workflows.js';
+
 export { createSettingsClient } from './settings.js';
 export type { SettingsClient } from './settings.js';
 

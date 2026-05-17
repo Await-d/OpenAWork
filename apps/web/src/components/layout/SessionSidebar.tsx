@@ -78,16 +78,19 @@ export function SessionSidebar({
   const {
     sidebarTab,
     setSidebarTab,
-    setLeftSidebarOpen,
     togglePinSession,
     isPinned,
     expandedDirs: expandedDirsArr,
     setExpandedDirs: setExpandedDirsArr,
     fileTreeRootPath,
-    activeFilePath: uiActiveFilePath,
+    activeFilePathByWorkspace,
     bumpWorkspaceTreeVersion,
     removeSavedWorkspacePath,
   } = useUIStateStore();
+  const uiActiveFilePath =
+    activeFilePathByWorkspace[
+      fileTreeRootPath && fileTreeRootPath.trim().length > 0 ? fileTreeRootPath : '__default__'
+    ] ?? null;
   const expandedDirs = new Set(expandedDirsArr);
   const setExpandedDirs = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
@@ -844,36 +847,6 @@ export function SessionSidebar({
             </svg>
           </button>
         </div>
-        <button
-          type="button"
-          title="收起面板"
-          onClick={() => setLeftSidebarOpen(false)}
-          className="icon-btn"
-          style={{
-            display: 'flex',
-            width: 28,
-            height: 28,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 7,
-            color: 'var(--text-3)',
-            flexShrink: 0,
-          }}
-        >
-          <svg
-            aria-hidden="true"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
       </div>
 
       <div

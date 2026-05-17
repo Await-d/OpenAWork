@@ -2,11 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isScrollTopNearLatest, resolveLatestScrollTop } from './scroll-alignment.js';
 
 export const CHAT_SCROLL_BOTTOM_PADDING = '0.95rem';
-export const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(180px, 34vh, 320px)';
+// 消息列底部 spacer:让最新消息可以滚到 viewport 中线/中下区域。
+// 之前 34vh 留太多空(截图里最新消息下方一大块空白),把它压到 14vh 让
+// 最新消息默认就贴近输入框(同时保留一点空间避免被 composer 阴影叠盖)。
+export const CHAT_SCROLL_BOTTOM_SPACER_HEIGHT = 'clamp(80px, 14vh, 160px)';
+// Center alignment bias when scrolling latest message into view.
+// Kept at 0.5 (viewport vertical middle) — the visual "latest message
+// closer to composer" effect now comes from the smaller bottom spacer
+// (CHAT_SCROLL_BOTTOM_SPACER_HEIGHT) rather than from off-centre
+// alignment, which kept feeling odd while streaming.
+const CHAT_LATEST_CENTER_BIAS = 0.5;
+
 const CHAT_LATEST_FOCUS_THRESHOLD_PX = 32;
 const CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX = 40;
 const CHAT_LATEST_REGION_FALLBACK_PX = 420;
-const CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS = 420;
+const CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS = 700;
 
 export interface UseChatScrollOptions {
   visibleStreaming: boolean;
@@ -38,6 +48,25 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
   const pendingScrollFrameRef = useRef<number | null>(null);
   const isNearBottomRef = useRef(true);
   const ignoreScrollEventsUntilRef = useRef(0);
+  // Cache the most recent anchor measurement for the duration of a
+  // single animation frame. Multiple call sites
+  // (handleScroll → isScrollRegionNearLatest → getLatestAnchorMetrics,
+  //  scrollToBottom → getLatestAnchorMetrics) can hit this in the same
+  // frame, especially during smooth-scroll where browsers fire
+  // additional scroll events. Recomputing means another
+  // querySelectorAll + getBoundingClientRect (forced layout) per call,
+  // which is the source of `[Violation] 'message' handler took 100ms+`
+  // during initial render and the click→smooth-scroll animation.
+  const latestAnchorMetricsCacheRef = useRef<{
+    expiresAt: number;
+    metrics: {
+      anchorHeight: number;
+      anchorTop: number;
+      clientHeight: number;
+      maxScrollTop: number;
+    } | null;
+  } | null>(null);
+  const ANCHOR_METRICS_CACHE_MS = 32; // ≈ 2 frames at 60Hz
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
@@ -68,27 +97,47 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
         return null;
       }
 
+      // Frame-scoped cache: if a recent measurement is still valid, return it.
+      const cache = latestAnchorMetricsCacheRef.current;
+      const now = performance.now();
+      if (cache && cache.expiresAt > now) {
+        return cache.metrics;
+      }
+
       const latestAnchor = getLatestAssistantAnchor();
       if (
         !latestAnchor ||
         latestAnchor === bottomRef.current ||
         !scrollRegion.contains(latestAnchor)
       ) {
+        latestAnchorMetricsCacheRef.current = {
+          expiresAt: now + ANCHOR_METRICS_CACHE_MS,
+          metrics: null,
+        };
         return null;
       }
 
       const scrollRegionRect = scrollRegion.getBoundingClientRect();
       const latestAnchorRect = latestAnchor.getBoundingClientRect();
       if (scrollRegionRect.height === 0 || latestAnchorRect.height === 0) {
+        latestAnchorMetricsCacheRef.current = {
+          expiresAt: now + ANCHOR_METRICS_CACHE_MS,
+          metrics: null,
+        };
         return null;
       }
 
-      return {
+      const metrics = {
         anchorHeight: latestAnchorRect.height,
         anchorTop: scrollRegion.scrollTop + (latestAnchorRect.top - scrollRegionRect.top),
         clientHeight: scrollRegion.clientHeight,
         maxScrollTop: Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight),
       };
+      latestAnchorMetricsCacheRef.current = {
+        expiresAt: now + ANCHOR_METRICS_CACHE_MS,
+        metrics,
+      };
+      return metrics;
     },
     [getLatestAssistantAnchor],
   );
@@ -101,16 +150,23 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
 
       const distanceToBottom =
         scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight;
+      // Cheap path 1: at the very bottom — definitely near latest.
       if (distanceToBottom <= CHAT_LATEST_EDGE_VISIBILITY_THRESHOLD_PX) {
         return true;
+      }
+      // Cheap path 2: clearly far from the bottom (more than the
+      // fallback region) — definitely NOT near latest. Skip the
+      // expensive anchor measurement entirely.
+      // querySelectorAll + getBoundingClientRect on a long DOM after
+      // a session switch can cost 80–150ms per call, which shows up
+      // as `[Violation] 'message' handler took ...` warnings.
+      if (distanceToBottom > CHAT_LATEST_REGION_FALLBACK_PX * 2) {
+        return false;
       }
 
       const latestAnchorMetrics = getLatestAnchorMetrics(scrollRegion);
       if (!latestAnchorMetrics) {
-        return (
-          scrollRegion.scrollHeight - scrollRegion.scrollTop - scrollRegion.clientHeight <
-          CHAT_LATEST_REGION_FALLBACK_PX
-        );
+        return distanceToBottom < CHAT_LATEST_REGION_FALLBACK_PX;
       }
 
       const followTolerance = Math.min(
@@ -121,6 +177,7 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
       return isScrollTopNearLatest({
         ...latestAnchorMetrics,
         align: visibleStreaming ? 'center' : 'latest-edge',
+        centerBias: CHAT_LATEST_CENTER_BIAS,
         centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
         scrollTop: scrollRegion.scrollTop,
         tolerancePx: followTolerance,
@@ -129,28 +186,48 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
     [getLatestAnchorMetrics, visibleStreaming],
   );
 
+  const handleScrollFrameRef = useRef<number | null>(null);
+  const handleScrollLastTargetRef = useRef<HTMLDivElement | null>(null);
+
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
     if (performance.now() < ignoreScrollEventsUntilRef.current) {
       return;
     }
 
-    const isNearLatest = isScrollRegionNearLatest(el);
-    isNearBottomRef.current = isNearLatest;
-    setShowScrollToBottom(!isNearLatest);
-    if (isNearLatest) {
-      setHasPendingFollowContent(false);
+    // Coalesce multiple scroll events per frame into one measurement.
+    // Reading scrollTop / scrollHeight + getBoundingClientRect inside
+    // the handler forces a layout sync; doing it 60+ times per second
+    // (browsers fire scroll well above rAF cadence) was the source of
+    // `[Violation] 'message' handler took 100ms+` warnings.
+    handleScrollLastTargetRef.current = el;
+    if (handleScrollFrameRef.current !== null) {
+      return;
     }
+    handleScrollFrameRef.current = requestAnimationFrame(() => {
+      handleScrollFrameRef.current = null;
+      const target = handleScrollLastTargetRef.current;
+      if (!target) return;
+
+      const isNearLatest = isScrollRegionNearLatest(target);
+      isNearBottomRef.current = isNearLatest;
+      // Only call setState when the actual flag flips — avoids
+      // useless rerender churn during continuous scroll where the
+      // value is stable.
+      setShowScrollToBottom((prev) => (prev === !isNearLatest ? prev : !isNearLatest));
+      if (isNearLatest) {
+        setHasPendingFollowContent((prev) => (prev ? false : prev));
+      }
+    });
   }
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = 'smooth', align: 'center' | 'latest-edge' = 'center') => {
       const scrollRegion = scrollRegionRef.current;
-      const latestAnchor = getLatestAssistantAnchor();
 
       isNearBottomRef.current = true;
-      setShowScrollToBottom(false);
-      setHasPendingFollowContent(false);
+      setShowScrollToBottom((prev) => (prev ? false : prev));
+      setHasPendingFollowContent((prev) => (prev ? false : prev));
       if (pendingScrollFrameRef.current !== null) {
         cancelAnimationFrame(pendingScrollFrameRef.current);
       }
@@ -159,6 +236,11 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
         behavior === 'smooth' ? performance.now() + CHAT_PROGRAMMATIC_SCROLL_LOCK_SMOOTH_MS : 0;
 
       pendingScrollFrameRef.current = requestAnimationFrame(() => {
+        // Move the DOM lookup *inside* the rAF so any pending React
+        // commit has fully landed (and we don't risk reading stale
+        // layout). Keeping it here also defers the querySelectorAll
+        // until the browser is in the read phase of the frame.
+        const latestAnchor = getLatestAssistantAnchor();
         if (scrollRegion) {
           const maxScrollTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
           const latestAnchorMetrics =
@@ -171,6 +253,7 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
             ? resolveLatestScrollTop({
                 ...latestAnchorMetrics,
                 align,
+                centerBias: CHAT_LATEST_CENTER_BIAS,
                 centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
               })
             : maxScrollTop;
@@ -198,6 +281,9 @@ export function useChatScroll(options: UseChatScrollOptions): UseChatScrollRetur
     return () => {
       if (pendingScrollFrameRef.current !== null) {
         cancelAnimationFrame(pendingScrollFrameRef.current);
+      }
+      if (handleScrollFrameRef.current !== null) {
+        cancelAnimationFrame(handleScrollFrameRef.current);
       }
     };
   }, []);

@@ -527,16 +527,8 @@ export default function NotificationCenter({
                       border: '1px solid var(--border-subtle)',
                       background: 'var(--bg-2)',
                       cursor: 'pointer',
-                      transition: 'background 150ms ease, border-color 150ms ease',
                     }}
-                    onMouseEnter={(event) => {
-                      event.currentTarget.style.background = 'var(--bg-1)';
-                      event.currentTarget.style.borderColor = 'var(--border)';
-                    }}
-                    onMouseLeave={(event) => {
-                      event.currentTarget.style.background = 'var(--bg-2)';
-                      event.currentTarget.style.borderColor = 'var(--border-subtle)';
-                    }}
+                    className="ui-hover-list-row"
                   >
                     <span
                       aria-hidden="true"

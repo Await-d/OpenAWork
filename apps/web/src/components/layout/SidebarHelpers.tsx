@@ -181,19 +181,6 @@ export function FileTreeView({
                     y: event.clientY,
                   });
                 }}
-                onMouseEnter={(e) => {
-                  if (!isHighlighted) {
-                    (e.currentTarget as HTMLElement).style.background =
-                      'color-mix(in oklch, var(--text) 5%, transparent)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isHighlighted) {
-                    (e.currentTarget as HTMLElement).style.background = isExpanded
-                      ? 'color-mix(in oklch, var(--accent) 4%, transparent)'
-                      : 'transparent';
-                  }
-                }}
                 className="file-tree-node file-tree-dir"
                 data-highlighted={isHighlighted ? 'true' : undefined}
                 data-expanded={isExpanded ? 'true' : undefined}
@@ -280,17 +267,6 @@ export function FileTreeView({
                     x: event.clientX,
                     y: event.clientY,
                   });
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) {
-                    (e.currentTarget as HTMLElement).style.background =
-                      'color-mix(in oklch, var(--text) 6%, transparent)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    (e.currentTarget as HTMLElement).style.background = 'transparent';
-                  }
                 }}
                 className="file-tree-node file-tree-file"
                 data-highlighted={isHighlighted ? 'true' : undefined}

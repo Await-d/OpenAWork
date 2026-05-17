@@ -1,19 +1,27 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import type { UpdateWorkflowTemplateInput, WorkflowTemplateRecord } from '@openAwork/web-client';
-import { useTeamWorkflowTemplates } from './team/runtime/use-team-workflow-templates.js';
-import { SHELL_BACKGROUND } from './team/runtime/team-runtime-shared.js';
-import { agentTeamsNewTemplateProviders } from './team/runtime/team-runtime-ui-config.js';
+import { useTeamWorkflowTemplates } from './team/runtime/hooks/use-team-workflow-templates.js';
+import { SHELL_BACKGROUND } from './team/runtime/shared/team-runtime-shared.js';
+import { agentTeamsNewTemplateProviders } from './team/runtime/data/team-runtime-ui-config.js';
 import {
   ROLE_COLOR_MAP,
   type EditorMode,
   type EditorState,
   type RoleBindingEdit,
   REQUIRED_TEMPLATE_ROLES,
-} from './team/runtime/template-editor-shared.js';
-import { TemplateEditor, editorStateToTemplateData } from './team/runtime/TemplateEditorPanel.js';
-import { TemplateDetailView } from './team/runtime/TemplateDetailView.js';
-import { PlusIcon, TemplateIcon, SyncIcon, CollapseLeftIcon } from './team/runtime/TeamIcons.js';
+} from './team/runtime/tabs/governance/template-editor-shared.js';
+import {
+  TemplateEditor,
+  editorStateToTemplateData,
+} from './team/runtime/tabs/governance/TemplateEditorPanel.js';
+import { TemplateDetailView } from './team/runtime/tabs/governance/TemplateDetailView.js';
+import {
+  PlusIcon,
+  TemplateIcon,
+  SyncIcon,
+  CollapseLeftIcon,
+} from './team/runtime/shared/TeamIcons.js';
 
 /* ── Template list item ───────────────────────────────────────────────── */
 
@@ -36,6 +44,8 @@ function TemplateListItem({
     <button
       type="button"
       onClick={onSelect}
+      className="ui-hover-surface"
+      data-active={selected || undefined}
       style={{
         appearance: 'none',
         display: 'grid',
@@ -46,15 +56,8 @@ function TemplateListItem({
         background: selected ? 'color-mix(in oklch, var(--accent) 8%, transparent)' : 'transparent',
         cursor: 'pointer',
         textAlign: 'left',
-        transition: 'all 0.15s',
         width: '100%',
         boxSizing: 'border-box' as const,
-      }}
-      onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = 'var(--surface-hover)';
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = 'transparent';
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -342,6 +345,7 @@ export default function TeamTemplatesPage() {
             <button
               type="button"
               onClick={() => navigate('/team')}
+              className="ui-hover-text-bg"
               style={{
                 appearance: 'none',
                 border: 'none',
@@ -353,15 +357,6 @@ export default function TeamTemplatesPage() {
                 placeItems: 'center',
                 cursor: 'pointer',
                 color: 'var(--text-2)',
-                transition: 'background 0.15s, color 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--surface-hover)';
-                e.currentTarget.style.color = 'var(--text)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--surface-2)';
-                e.currentTarget.style.color = 'var(--text-2)';
               }}
             >
               <CollapseLeftIcon size={14} color="currentColor" />
@@ -541,6 +536,7 @@ export default function TeamTemplatesPage() {
                     setSelectedId(null);
                     setEditorMode('create');
                   }}
+                  className="ui-hover-accent-soft"
                   style={{
                     width: '100%',
                     minHeight: 36,
@@ -555,18 +551,6 @@ export default function TeamTemplatesPage() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 6,
-                    transition: 'all 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background =
-                      'color-mix(in oklch, var(--accent) 10%, transparent)';
-                    e.currentTarget.style.borderColor = 'var(--accent)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background =
-                      'color-mix(in oklch, var(--accent) 4%, transparent)';
-                    e.currentTarget.style.borderColor =
-                      'color-mix(in oklch, var(--accent) 40%, transparent)';
                   }}
                 >
                   <PlusIcon size={13} color="currentColor" />

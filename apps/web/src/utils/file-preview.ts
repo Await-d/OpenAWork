@@ -1,7 +1,18 @@
 export const DEFAULT_FILE_PREVIEW_HEIGHT = 280;
 export const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
 
-export type FilePreviewKind = 'html' | 'css' | 'javascript' | 'markdown' | 'svg' | 'image' | 'json';
+export type FilePreviewKind =
+  | 'html'
+  | 'css'
+  | 'javascript'
+  | 'markdown'
+  | 'svg'
+  | 'image'
+  | 'json'
+  | 'binary-office'
+  | 'binary-pdf'
+  | 'binary-archive'
+  | 'binary-other';
 
 export function getCodeBlockPreviewKind(language: string | undefined): FilePreviewKind | null {
   if (language === 'html') {
@@ -58,7 +69,55 @@ export function getFilePreviewKind(path: string): FilePreviewKind | null {
     return 'json';
   }
 
+  // Binary file kinds — these can't be displayed as text and the
+  // server's readFile is a utf-8 decode, so any byte stream we get
+  // back is mojibake. Surfacing them through a dedicated preview
+  // kind lets the UI show a "binary file, can't be previewed as
+  // text" panel instead of dumping garbage into the editor.
+  if (
+    ext === 'docx' ||
+    ext === 'doc' ||
+    ext === 'xlsx' ||
+    ext === 'xls' ||
+    ext === 'pptx' ||
+    ext === 'ppt'
+  ) {
+    return 'binary-office';
+  }
+
+  if (ext === 'pdf') {
+    return 'binary-pdf';
+  }
+
+  if (
+    ext === 'zip' ||
+    ext === 'tar' ||
+    ext === 'gz' ||
+    ext === 'tgz' ||
+    ext === 'rar' ||
+    ext === '7z' ||
+    ext === 'bz2' ||
+    ext === 'xz'
+  ) {
+    return 'binary-archive';
+  }
+
   return null;
+}
+
+/**
+ * True for `FilePreviewKind` values that represent non-text files.
+ * Callers should not feed binary kinds through the text editor /
+ * markdown preview / iframe `srcDoc` paths — those all assume
+ * utf-8-decodable text.
+ */
+export function isBinaryPreviewKind(kind: FilePreviewKind | null): boolean {
+  return (
+    kind === 'binary-office' ||
+    kind === 'binary-pdf' ||
+    kind === 'binary-archive' ||
+    kind === 'binary-other'
+  );
 }
 
 const RESIZE_SCRIPT = `<script>

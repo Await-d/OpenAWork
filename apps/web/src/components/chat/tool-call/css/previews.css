@@ -733,6 +733,33 @@
   min-width: 0;
 }
 
+/* Clickable path button rendered by `StyledPath` when a FileEditor
+   context is available. The button wrapper inherits typography from
+   the enclosing row (font/cursor/style is set inline in JS for
+   maximum specificity), and we add a subtle hover highlight on the
+   filename so the affordance is discoverable without dominating
+   dense lists like grep results. */
+.styled-path-clickable {
+  border-radius: 4px;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.styled-path-clickable:hover .styled-path-name,
+.styled-path-clickable:focus-visible .styled-path-name {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.styled-path-clickable:hover {
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+.styled-path-clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
 /* ── ParameterListPreview ──
  * Single-row inline layout: parameters are secondary context, so the whole
  * panel collapses into one wrap-friendly line of `key value · key value`

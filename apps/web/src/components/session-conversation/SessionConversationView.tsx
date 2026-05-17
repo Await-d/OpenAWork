@@ -293,6 +293,17 @@ export interface SessionConversationViewProps {
   contextUsedTokens?: number;
   contextMaxTokens?: number;
   contextIsEstimated?: boolean;
+  /**
+   * 自定义 composer textarea placeholder。team 接待会话用此覆盖默认占位，
+   * 与 D26（b 直答 vs 走 c 路由）的语义对齐——告诉用户"输入需求会被派发给团队"。
+   */
+  composerPlaceholder?: string;
+  /**
+   * Optional slot rendered on the right side of the composer's bottom
+   * toolbar (alongside the send button). Forwarded straight to
+   * UnifiedComposer.composerRightSlot.
+   */
+  composerRightSlot?: ReactNode;
 }
 
 // ─── 内部样式常量（提到顶层避免每次渲染创建新对象）────────────────────────
@@ -487,6 +498,8 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
     contextUsedTokens,
     contextMaxTokens,
     contextIsEstimated,
+    composerPlaceholder,
+    composerRightSlot,
   } = props;
 
   const composerFeatures = buildComposerFeatures(composerExtras);
@@ -775,6 +788,8 @@ export function SessionConversationView(props: SessionConversationViewProps): Re
           contextUsedTokens={contextUsedTokens}
           contextMaxTokens={contextMaxTokens}
           contextIsEstimated={contextIsEstimated}
+          placeholder={composerPlaceholder}
+          composerRightSlot={composerRightSlot}
         />
       )}
     </>

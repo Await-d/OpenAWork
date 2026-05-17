@@ -45,15 +45,8 @@ function resolveDeletedSessionIds(
   return [fallbackSessionId];
 }
 
-const PULSE_CSS = `
-@keyframes omo-pulse{0%,100%{opacity:1}50%{opacity:0.35}}
-.omo-skel{animation:omo-pulse 1.5s ease-in-out infinite;background:var(--surface-2);border-radius:4px;}
-@keyframes omo-session-running-dot{0%,100%{opacity:0.58;transform:scale(0.9)}50%{opacity:1;transform:scale(1.2)}}
-.omo-session-running-dot{animation:omo-session-running-dot 1.15s ease-in-out infinite;will-change:transform,opacity;}
-@media (prefers-reduced-motion: reduce){.omo-skel,.omo-session-running-dot{animation:none;}}
-`;
-
-const SESSION_PAGE_STYLE_ID = 'omo-sessions-page-animations';
+// 关联样式：`.omo-skel` / `.omo-session-running-dot` 与对应 keyframes 已统一
+// 收纳到 `src/styles/loaders.css`，由 `main.tsx` 一次性 import。
 
 function SkeletonCard() {
   return (
@@ -196,22 +189,6 @@ export default function SessionsPage() {
     },
     [gatewayUrl, token, mergeSavedWorkspacePaths],
   );
-
-  useEffect(() => {
-    const existingStyle = document.getElementById(SESSION_PAGE_STYLE_ID);
-    if (existingStyle instanceof HTMLStyleElement) {
-      return undefined;
-    }
-
-    const el = document.createElement('style');
-    el.id = SESSION_PAGE_STYLE_ID;
-    el.textContent = PULSE_CSS;
-    document.head.appendChild(el);
-
-    return () => {
-      el.remove();
-    };
-  }, []);
 
   useEffect(() => {
     void loadSessions();

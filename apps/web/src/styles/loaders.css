@@ -1,0 +1,121 @@
+/**
+ * 260517-loaders · 通用加载/占位动画
+ *
+ * 收纳之前散落在多个组件里通过 `useEffect + document.head.appendChild('style')`
+ * 运行时注入的 keyframes / class，统一在 `main.tsx` 里一次性 import：
+ *
+ *   - SessionsPage 的 `.omo-skel` / `.omo-pulse`
+ *   - SessionsPage / sessions-page/session-card 的 `.omo-session-running-dot`
+ *   - chat-session-skeleton 的 `.omo-chat-session-skel`
+ *   - chat-remote-stream-placeholder 的 `.omo-chat-remote-stream-*`
+ *
+ * 优点：
+ *   - SSR 安全（构建期就在 bundle 里，不依赖 useEffect）
+ *   - 不会因竞态导致首屏 skeleton 没动画
+ *   - 同名 keyframe 跨文件冲突由 IDE / 构建器即时报错
+ *   - 不再需要 `let X = false` 的全局标志位
+ */
+
+/* ─── 通用骨架脉冲 ─────────────────────────────────────────────── */
+@keyframes omo-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.omo-skel {
+  animation: omo-pulse 1.5s ease-in-out infinite;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+/* ─── 会话运行中状态点（呼吸） ────────────────────────────────── */
+@keyframes omo-session-running-dot {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+.omo-session-running-dot {
+  animation: omo-session-running-dot 1.15s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* ─── chat 会话骨架（专门的脉冲节奏，比通用 omo-skel 更强对比） ─ */
+@keyframes omo-chat-session-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
+}
+
+.omo-chat-session-skel {
+  animation: omo-chat-session-pulse 1.45s ease-in-out infinite;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+/* ─── chat 远端流恢复占位（光晕 + 三点闪烁） ───────────────────── */
+@keyframes omo-chat-remote-stream-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+@keyframes omo-chat-remote-stream-blink {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.omo-chat-remote-stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+.omo-chat-remote-stream-dot[data-index='0'] {
+  animation: omo-chat-remote-stream-blink 1.2s ease-in-out infinite;
+}
+.omo-chat-remote-stream-dot[data-index='1'] {
+  animation: omo-chat-remote-stream-blink 1.2s ease-in-out 0.18s infinite;
+}
+.omo-chat-remote-stream-dot[data-index='2'] {
+  animation: omo-chat-remote-stream-blink 1.2s ease-in-out 0.36s infinite;
+}
+.omo-chat-remote-stream-glow {
+  animation: omo-chat-remote-stream-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omo-skel,
+  .omo-session-running-dot,
+  .omo-chat-session-skel,
+  .omo-chat-remote-stream-dot,
+  .omo-chat-remote-stream-glow {
+    animation: none !important;
+  }
+}

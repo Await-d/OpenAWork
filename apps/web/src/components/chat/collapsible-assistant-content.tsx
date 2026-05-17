@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { createContext, type ReactNode, useContext, useState } from 'react';
 
 /**
  * Threshold above which an assistant message body is collapsed by
@@ -13,6 +13,17 @@ import { type ReactNode, useState } from 'react';
 const FOLD_CHAR_THRESHOLD = 1500;
 
 /**
+ * Provider-supplied id of the most recent non-streaming assistant
+ * message. The latest reply usually contains the answer to whatever
+ * the user just asked; auto-collapsing it would hide the punchline
+ * behind a "展开全部" button. Set this to the latest message id from
+ * `ChatPage` and `CollapsibleAssistantContent` will skip the fold for
+ * just that one message — older long replies still collapse to keep
+ * the scrollback compact.
+ */
+export const LatestAssistantMessageContext = createContext<string | null>(null);
+
+/**
  * Wrap a long assistant message body in a fold container that clips
  * the overflow to ~60vh and reveals a "展开全部" button at the
  * bottom. Short messages render their children unchanged so we
@@ -22,18 +33,26 @@ const FOLD_CHAR_THRESHOLD = 1500;
  * watching the response grow and we don't want the fade-out
  * indicator competing with the streaming cursor. The caller is
  * responsible for not invoking this for streaming content.
+ *
+ * If `messageId` matches the value supplied by
+ * `LatestAssistantMessageContext`, the fold is skipped so the latest
+ * answer stays fully visible.
  */
 export function CollapsibleAssistantContent({
   content,
   children,
+  messageId,
 }: {
   content: string;
   children: ReactNode;
+  messageId?: string;
 }) {
+  const latestAssistantId = useContext(LatestAssistantMessageContext);
+  const isLatest = messageId !== undefined && messageId === latestAssistantId;
   const isLong = content.length > FOLD_CHAR_THRESHOLD;
   const [expanded, setExpanded] = useState(false);
 
-  if (!isLong) return <>{children}</>;
+  if (!isLong || isLatest) return <>{children}</>;
 
   return (
     <div className="chat-markdown-fold-container" data-expanded={expanded ? 'true' : 'false'}>

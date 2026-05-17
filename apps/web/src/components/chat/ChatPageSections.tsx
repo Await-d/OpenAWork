@@ -668,6 +668,7 @@ function renderAssistantMessageContentValue(
             <AssistantRichContent
               content={companionBlocks.mainContent}
               streaming={options?.streaming}
+              messageId={options?.messageId}
             />
           )}
           {companionBlocks.companionContent && (
@@ -676,7 +677,13 @@ function renderAssistantMessageContentValue(
         </div>
       );
     }
-    return <AssistantRichContent content={content} streaming={options?.streaming} />;
+    return (
+      <AssistantRichContent
+        content={content}
+        streaming={options?.streaming}
+        messageId={options?.messageId}
+      />
+    );
   }
 
   const assistantTrace =
@@ -775,10 +782,22 @@ function renderAssistantMessageContentValue(
       return <GenerativeUIRenderer message={parsed} />;
     }
   } catch {
-    return <AssistantRichContent content={content} streaming={options?.streaming} />;
+    return (
+      <AssistantRichContent
+        content={content}
+        streaming={options?.streaming}
+        messageId={options?.messageId}
+      />
+    );
   }
 
-  return <AssistantRichContent content={content} streaming={options?.streaming} />;
+  return (
+    <AssistantRichContent
+      content={content}
+      streaming={options?.streaming}
+      messageId={options?.messageId}
+    />
+  );
 }
 
 function AssistantPartsContent({
@@ -852,7 +871,12 @@ function AssistantPartsContent({
         if (part.type === 'text') {
           if (part.text.length === 0) return null;
           return (
-            <AssistantRichContentBody key={part.id} content={part.text} streaming={streaming} />
+            <AssistantRichContentBody
+              key={part.id}
+              content={part.text}
+              streaming={streaming}
+              messageId={message.id}
+            />
           );
         }
         if (part.type === 'tool') {
@@ -966,7 +990,11 @@ function AssistantTraceContent({
         );
       })}
       {payload.text.length > 0 && (
-        <AssistantRichContentBody content={payload.text} streaming={streaming} />
+        <AssistantRichContentBody
+          content={payload.text}
+          streaming={streaming}
+          messageId={messageId}
+        />
       )}
       {/* Collapse runs of ≥2 consecutive read/grep/glob calls into a
           single grouped pill so a session that reads 8 files in a row
@@ -1015,13 +1043,15 @@ function AssistantTraceContent({
 function AssistantRichContent({
   content,
   streaming = false,
+  messageId,
 }: {
   content: string;
   streaming?: boolean;
+  messageId?: string;
 }) {
   return (
     <div className="assistant-rich-content">
-      <AssistantRichContentBody content={content} streaming={streaming} />
+      <AssistantRichContentBody content={content} streaming={streaming} messageId={messageId} />
     </div>
   );
 }
@@ -1038,9 +1068,11 @@ const renderReasoningRichBody = (reasoningContent: string, isStreaming: boolean)
 function AssistantRichContentBody({
   content,
   streaming = false,
+  messageId,
 }: {
   content: string;
   streaming?: boolean;
+  messageId?: string;
 }) {
   if (streaming && content.trim().length === 0) {
     return <AssistantPendingBubble />;
@@ -1063,7 +1095,7 @@ function AssistantRichContentBody({
   return (
     <div className="assistant-rich-content-body">
       <React.Suspense fallback={<div className="chat-markdown-streaming">{content}</div>}>
-        <CollapsibleAssistantContent content={content}>
+        <CollapsibleAssistantContent content={content} messageId={messageId}>
           <MarkdownMessageContent content={content} />
         </CollapsibleAssistantContent>
       </React.Suspense>

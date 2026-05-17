@@ -75,5 +75,6 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     rewrittenIntent,
     teamWorkspaceId,
     callLlm,
+    signal: input.signal,
   });
 }

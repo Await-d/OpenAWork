@@ -15,6 +15,15 @@ interface ResolveLatestScrollTopOptions {
   centerMarginPx: number;
   clientHeight: number;
   maxScrollTop: number;
+  /**
+   * Bias factor for `align: 'center'`. Default 0.5 puts the anchor's
+   * centre at the viewport's vertical centre (50% from top). Larger
+   * values push the anchor further down — e.g. 0.7 keeps the latest
+   * message ~30% above the bottom of the viewport, which feels closer
+   * to the composer than the literal centre and reduces the empty
+   * space below the most recent reply.
+   */
+  centerBias?: number;
 }
 
 interface IsScrollTopNearLatestOptions extends ResolveLatestScrollTopOptions {
@@ -29,6 +38,7 @@ export function resolveLatestScrollTop({
   centerMarginPx,
   clientHeight,
   maxScrollTop,
+  centerBias = 0.5,
 }: ResolveLatestScrollTopOptions): number {
   const boundedMaxScrollTop = Math.max(0, maxScrollTop);
   if (align === 'latest-edge') {
@@ -45,8 +55,11 @@ export function resolveLatestScrollTop({
     return boundedMaxScrollTop;
   }
 
+  const clampedBias = Math.max(0, Math.min(1, centerBias));
   const anchorCenter = anchorTop + anchorHeight / 2;
-  return Math.max(0, Math.min(boundedMaxScrollTop, anchorCenter - clientHeight / 2));
+  // bias=0.5 → anchor centre at viewport vertical middle (legacy)
+  // bias=0.7 → anchor centre at 70% down viewport (closer to composer)
+  return Math.max(0, Math.min(boundedMaxScrollTop, anchorCenter - clientHeight * clampedBias));
 }
 
 export function isScrollTopNearLatest({

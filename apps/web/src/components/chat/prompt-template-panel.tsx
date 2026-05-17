@@ -473,13 +473,7 @@ function TemplateRow({
         transition: 'background 80ms ease',
       }}
       onClick={onUse}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background =
-          'color-mix(in oklch, var(--accent) 8%, transparent)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = 'transparent';
-      }}
+      className="ui-hover-tint-bg"
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div

@@ -1,9 +1,11 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import type { OpenFile } from '../hooks/useFileEditor.js';
+import { isBinaryPreviewKind } from '../utils/file-preview.js';
 import { getFilePreviewKind } from '../utils/file-preview.js';
 import { EditorTabBar } from './EditorTabBar.js';
 import { FileBreadcrumb } from './FileBreadcrumb.js';
 import { FilePreviewPane } from './FilePreviewPane.js';
+import { MonacoErrorBoundary } from './MonacoErrorBoundary.js';
 
 const MonacoEditor = lazy(() =>
   import('@monaco-editor/react').then((m) => ({ default: m.default })),
@@ -55,15 +57,23 @@ export function FileEditorPanel({
     if (!activePreviewKind && panelMode === 'preview') {
       setPanelMode('code');
     }
-    // Auto-switch to preview for markdown files
+    // Auto-switch to preview for markdown / svg / image / binary
+    // files. Binary files in particular MUST stay on preview because
+    // their utf-8 decoded content is mojibake that would otherwise
+    // be dumped into Monaco.
     if (
       activePreviewKind === 'markdown' ||
       activePreviewKind === 'svg' ||
-      activePreviewKind === 'image'
+      activePreviewKind === 'image' ||
+      isBinaryPreviewKind(activePreviewKind)
     ) {
       setPanelMode('preview');
     }
   }, [activePreviewKind, panelMode]);
+
+  // Lock panelMode to 'preview' for binary files — there's nothing
+  // useful to show in the code editor for these.
+  const effectivePanelMode = isBinaryPreviewKind(activePreviewKind) ? 'preview' : panelMode;
 
   const handlePreview = useCallback(
     (path: string) => {
@@ -94,7 +104,7 @@ export function FileEditorPanel({
         onActivate={onActivate}
         onClose={onClose}
         onPreview={handlePreview}
-        previewFilePath={panelMode === 'preview' ? activeFilePath : null}
+        previewFilePath={effectivePanelMode === 'preview' ? activeFilePath : null}
       />
       {activeFile ? (
         <>
@@ -126,35 +136,43 @@ export function FileEditorPanel({
                 >
                   <button
                     type="button"
-                    aria-pressed={panelMode === 'code'}
+                    aria-pressed={effectivePanelMode === 'code'}
                     onClick={() => setPanelMode('code')}
+                    disabled={isBinaryPreviewKind(activePreviewKind)}
+                    title={
+                      isBinaryPreviewKind(activePreviewKind)
+                        ? '二进制文件无法以代码形式查看'
+                        : undefined
+                    }
                     style={{
                       height: 24,
                       padding: '0 10px',
                       borderRadius: 6,
                       border: 'none',
-                      background: panelMode === 'code' ? 'var(--surface)' : 'transparent',
-                      color: panelMode === 'code' ? 'var(--text)' : 'var(--text-3)',
+                      background: effectivePanelMode === 'code' ? 'var(--surface)' : 'transparent',
+                      color: effectivePanelMode === 'code' ? 'var(--text)' : 'var(--text-3)',
                       fontSize: 11,
-                      fontWeight: panelMode === 'code' ? 600 : 500,
-                      cursor: 'pointer',
+                      fontWeight: effectivePanelMode === 'code' ? 600 : 500,
+                      cursor: isBinaryPreviewKind(activePreviewKind) ? 'not-allowed' : 'pointer',
+                      opacity: isBinaryPreviewKind(activePreviewKind) ? 0.5 : 1,
                     }}
                   >
                     代码
                   </button>
                   <button
                     type="button"
-                    aria-pressed={panelMode === 'preview'}
+                    aria-pressed={effectivePanelMode === 'preview'}
                     onClick={() => setPanelMode('preview')}
                     style={{
                       height: 24,
                       padding: '0 10px',
                       borderRadius: 6,
                       border: 'none',
-                      background: panelMode === 'preview' ? 'var(--surface)' : 'transparent',
-                      color: panelMode === 'preview' ? 'var(--text)' : 'var(--text-3)',
+                      background:
+                        effectivePanelMode === 'preview' ? 'var(--surface)' : 'transparent',
+                      color: effectivePanelMode === 'preview' ? 'var(--text)' : 'var(--text-3)',
                       fontSize: 11,
-                      fontWeight: panelMode === 'preview' ? 600 : 500,
+                      fontWeight: effectivePanelMode === 'preview' ? 600 : 500,
                       cursor: 'pointer',
                     }}
                   >
@@ -191,38 +209,42 @@ export function FileEditorPanel({
             </div>
           </div>
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            {panelMode === 'preview' && activePreviewKind ? (
+            {effectivePanelMode === 'preview' && activePreviewKind ? (
               <FilePreviewPane path={activeFile.path} content={activeFile.content} />
             ) : (
-              <Suspense
-                fallback={
-                  <div style={{ padding: 24, fontSize: 12, color: 'var(--text-3)' }}>
-                    加载编辑器…
-                  </div>
-                }
-              >
-                <MonacoEditor
-                  key={activeFile.path}
-                  height="100%"
-                  language={activeFile.language}
-                  value={activeFile.content}
-                  theme={theme === 'light' ? 'vs' : 'vs-dark'}
-                  onChange={(val) => {
-                    if (val !== undefined) onChange(activeFile.path, val);
-                  }}
-                  options={{
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    tabSize: 2,
-                    renderWhitespace: 'none',
-                    lineNumbers: 'on',
-                    folding: true,
-                    automaticLayout: true,
-                  }}
-                />
-              </Suspense>
+              <MonacoErrorBoundary>
+                {(mountKey) => (
+                  <Suspense
+                    fallback={
+                      <div style={{ padding: 24, fontSize: 12, color: 'var(--text-3)' }}>
+                        加载编辑器…
+                      </div>
+                    }
+                  >
+                    <MonacoEditor
+                      key={`${activeFile.path}::${mountKey}`}
+                      height="100%"
+                      language={activeFile.language}
+                      value={activeFile.content}
+                      theme={theme === 'light' ? 'vs' : 'vs-dark'}
+                      onChange={(val) => {
+                        if (val !== undefined) onChange(activeFile.path, val);
+                      }}
+                      options={{
+                        fontSize: 12,
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        tabSize: 2,
+                        renderWhitespace: 'none',
+                        lineNumbers: 'on',
+                        folding: true,
+                        automaticLayout: true,
+                      }}
+                    />
+                  </Suspense>
+                )}
+              </MonacoErrorBoundary>
             )}
           </div>
         </>

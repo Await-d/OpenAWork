@@ -33,6 +33,14 @@ export interface ChatUiActionsDeps {
   };
   openFileRef: React.MutableRefObject<((path: string) => void) | null>;
   setEditorMode: (value: boolean) => void;
+  /**
+   * Force the editor pane onto the code tab when a file is opened
+   * via openFileRef (chat path-ref click, tool-call path click, etc).
+   * Without this, clicking a file while the editor pane is already
+   * showing the browser preview tab would silently drop the open
+   * intent — the file would be loaded but never displayed.
+   */
+  setEditorPaneTab: (tab: 'code' | 'browser') => void;
   setSaving: (value: boolean | ((prev: boolean) => boolean)) => void;
   splitDragging: React.MutableRefObject<boolean>;
   splitContainerRef: React.RefObject<HTMLElement | null>;
@@ -61,6 +69,7 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
     fileEditor,
     openFileRef,
     setEditorMode,
+    setEditorPaneTab,
     setSaving,
     splitDragging,
     splitContainerRef,
@@ -143,16 +152,55 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       splitDragging.current = true;
       const container = splitContainerRef.current;
       if (!container) return;
+
+      // 拖动期间在 document.body 上挂一层全屏透明 overlay,目的是:
+      //   1) 屏蔽 iframe 的 pointer events — 否则鼠标一进入浏览器预览
+      //      iframe 区域,mousemove 会被 iframe 文档吃掉,外层 window
+      //      监听不到,拖动方向受限只能往代码区域那一侧。
+      //   2) 锁定光标为 col-resize,保持拖动时的视觉反馈。
+      // mouseup 时移除 overlay,正常事件流恢复。
+      const overlay = document.createElement('div');
+      overlay.setAttribute('aria-hidden', 'true');
+      overlay.style.cssText =
+        'position:fixed;inset:0;z-index:2147483646;cursor:col-resize;background:transparent;user-select:none;';
+      document.body.appendChild(overlay);
+
+      // 拖动期间走 CSS variable 直接改样式,不进 React state — 60Hz 下避免:
+      //  1) zustand persist 每帧 JSON.stringify ui-state 并写 localStorage
+      //  2) ChatPage 顶层订阅 splitPos 触发整树 rerender
+      let latestPct = 50;
+      let rafScheduled = false;
+      const applyPct = (pct: number) => {
+        latestPct = pct;
+        if (rafScheduled) return;
+        rafScheduled = true;
+        requestAnimationFrame(() => {
+          rafScheduled = false;
+          container.style.setProperty('--split-pos', `${latestPct}%`);
+        });
+      };
+
       const onMove = (ev: MouseEvent) => {
         if (!splitDragging.current) return;
         const rect = container.getBoundingClientRect();
         const pct = Math.min(80, Math.max(20, ((ev.clientX - rect.left) / rect.width) * 100));
-        setSplitPos(pct);
+        applyPct(pct);
       };
       const onUp = () => {
         splitDragging.current = false;
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        try {
+          overlay.remove();
+        } catch {
+          /* already removed */
+        }
+        // setSplitPos here points at writeSplitPos (see ChatPage),
+        // a tiny `localStorage.setItem` call. No zustand subscriber
+        // chain, no persist middleware re-stringifying the entire UI
+        // state — sub-millisecond, safe to run synchronously in the
+        // mouseup handler.
+        setSplitPos(latestPct);
       };
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
@@ -162,13 +210,18 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
 
   useEffect(() => {
     openFileRef.current = (path: string) => {
+      // Always force the editor pane open on the code tab so a click
+      // from chat / tool-call / hover popover lands in a visible
+      // panel, even if the pane was previously on the browser tab
+      // or fully collapsed.
       setEditorMode(true);
+      setEditorPaneTab('code');
       void fileEditor.openFile(path);
     };
     return () => {
       openFileRef.current = null;
     };
-  }, [openFileRef, fileEditor, setEditorMode]);
+  }, [openFileRef, fileEditor, setEditorMode, setEditorPaneTab]);
 
   return {
     appendCommandCard,

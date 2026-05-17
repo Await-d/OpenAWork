@@ -28,6 +28,23 @@
 const PATH_PATTERN =
   /(?<![\w/:])((?:\.{1,2}\/|\/)?(?:[\w@.+-]+\/){1,}[\w@.+-]+\.[a-z]{1,5})(?::(\d+))?(?![\w/])/gi;
 
+/**
+ * Bare-filename pattern for use inside backtick-wrapped inline code.
+ * Once the user has signalled "this is code-ish" by wrapping it in
+ * `…`, even a path-less reference like `create_quotation.py` or
+ * `需求分析.md` is overwhelmingly a file name. Outside of inline
+ * code we keep the stricter `PATH_PATTERN` (requires at least one
+ * slash) to avoid false positives like `Buffer.byteLength`.
+ *
+ * Differences from PATH_PATTERN:
+ *   - At least one CJK or word/dot/dash char before the extension
+ *     (no slashes required)
+ *   - Allows CJK characters in the file name (matches 中文 file names)
+ *   - Same trailing optional `:<line>` suffix
+ */
+const BARE_FILENAME_PATTERN =
+  /(?<![\w/:])([\w@.+\-\u4e00-\u9fff]+\.[a-z]{1,5})(?::(\d+))?(?![\w/])/gi;
+
 export interface PathToken {
   type: 'path';
   path: string;
@@ -47,12 +64,21 @@ export type PathTextToken = PathToken | TextToken;
  * concatenation of token raw values reproduces the input exactly, so
  * downstream rendering can rebuild the text with paths wrapped in
  * clickable elements without losing whitespace or punctuation.
+ *
+ * @param options.allowBareFilename — when `true`, also match
+ *   path-less file references like `create_quotation.py`. Intended
+ *   for callers rendering inside inline-code segments where the
+ *   author has already signalled "this is a file token".
  */
-export function tokenizePathsInText(text: string): PathTextToken[] {
+export function tokenizePathsInText(
+  text: string,
+  options?: { allowBareFilename?: boolean },
+): PathTextToken[] {
   if (text.length === 0) return [];
+  const pattern = options?.allowBareFilename ? BARE_FILENAME_PATTERN : PATH_PATTERN;
   const result: PathTextToken[] = [];
   let lastEnd = 0;
-  for (const match of text.matchAll(PATH_PATTERN)) {
+  for (const match of text.matchAll(pattern)) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
     if (start > lastEnd) {

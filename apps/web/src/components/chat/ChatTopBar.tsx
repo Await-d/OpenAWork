@@ -31,6 +31,11 @@ interface ChatTopBarProps {
    * without forcing a layout shift when undefined.
    */
   terminalsChip?: ReactNode;
+  /**
+   * Optional quick terminal toggle button. Rendered alongside the
+   * terminals chip; toggles the bottom QuickTerminalPanel.
+   */
+  quickTerminalToggle?: ReactNode;
   /** Callback to open the command palette (Cmd+K). */
   onOpenCommandPalette?: () => void;
   /** Number of bookmarked messages in the current session. */
@@ -68,6 +73,7 @@ export function ChatTopBar({
   onActivateCodeTab,
   onActivateBrowserTab,
   terminalsChip,
+  quickTerminalToggle,
   onOpenCommandPalette,
   bookmarkCount = 0,
   multiSelectActive = false,
@@ -81,6 +87,7 @@ export function ChatTopBar({
 }: ChatTopBarProps) {
   // 测量自身宽度，决定 todo slot 是 compact（徽章）还是 full（摘要）。
   const barRef = useRef<HTMLDivElement>(null);
+  const todoAnchorRef = useRef<HTMLDivElement>(null);
   const [isCompact, setIsCompact] = useState(false);
 
   useEffect(() => {
@@ -105,12 +112,16 @@ export function ChatTopBar({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: 8,
-        flexWrap: 'wrap',
+        // 一定不换行 — 一旦换行右侧 pill 会跑到下一行,而 SessionTerminalsPanel
+        // 等 popover 是相对 pill 定位的,跟随换行就会显示在错乱位置。
+        flexWrap: 'nowrap',
         padding: '6px 12px',
         borderBottom: '1px solid var(--border-subtle)',
         flexShrink: 0,
         background: 'var(--header-bg)',
         minHeight: 44,
+        // 让中间 group 在窄屏时可被压缩,但本行不换。
+        overflow: 'hidden',
       }}
     >
       <div
@@ -119,8 +130,11 @@ export function ChatTopBar({
           alignItems: 'center',
           gap: 8,
           minWidth: 0,
-          flex: '1 1 420px',
-          flexWrap: 'wrap',
+          // 抢占除右侧 pill 与 todo anchor 之外的所有可用宽度;窄屏时
+          // 内部子元素自身有 ellipsis / compact 模式(见 isCompact)。
+          flex: '1 1 0',
+          flexWrap: 'nowrap',
+          overflow: 'hidden',
         }}
       >
         {onToggleSidebar && (
@@ -263,13 +277,17 @@ export function ChatTopBar({
       </div>
 
       {todoController && todoDetailsId ? (
-        <div className="chat-todo-topbar-anchor">
+        <div ref={todoAnchorRef} className="chat-todo-topbar-anchor">
           <ChatTopBarTodoSlot
             controller={todoController}
             detailsId={todoDetailsId}
             compact={isCompact}
           />
-          <ChatTodoFloatingPanel controller={todoController} detailsId={todoDetailsId} />
+          <ChatTodoFloatingPanel
+            controller={todoController}
+            detailsId={todoDetailsId}
+            anchorRef={todoAnchorRef}
+          />
         </div>
       ) : null}
 
@@ -290,6 +308,7 @@ export function ChatTopBar({
         }}
       >
         {terminalsChip}
+        {quickTerminalToggle}
         <button
           type="button"
           aria-pressed={yoloMode}

@@ -1586,6 +1586,23 @@ export async function executeToolCalls(input: {
       }),
     );
 
+    // ─── Team tabs data: tool call event ─────────────────────────────
+    if (input.sessionContext.roleLayer) {
+      const { publishTeamToolCallEvent } = await import('./stream-team-events.js');
+      publishTeamToolCallEvent({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        sessionContext: input.sessionContext,
+        toolName: toolCall.toolName,
+        durationMs: result.durationMs ?? 0,
+        success: !result.isError,
+        errorMessage:
+          result.isError && typeof result.output === 'string'
+            ? result.output.slice(0, 200)
+            : undefined,
+      });
+    }
+
     if (result.pendingPermissionRequestId) {
       console.log(
         '[PERMISSION_PAUSE] pending permission detected for tool',
@@ -2150,6 +2167,7 @@ export async function handleStreamRequest(input: {
         | undefined;
 
       for (let round = 1; ; round += 1) {
+        const roundStartedAt = Date.now();
         // P0: Proactive compaction — compact before overflow if token usage is near threshold.
         // This prevents the user-visible error → compact → retry cycle.
         if (
@@ -2311,6 +2329,45 @@ export async function handleStreamRequest(input: {
             usage: result.usage,
             userId: input.user.sub,
           });
+
+          // ─── Team tabs data: usage + timing events ─────────────────────
+          // 只对 team session（roleLayer != null）生效，chat 端不触发。
+          if (input.sessionContext.roleLayer) {
+            const { publishTeamUsageEvent, publishTeamTimingEvent } =
+              await import('./stream-team-events.js');
+            publishTeamUsageEvent({
+              userId: input.user.sub,
+              sessionId: input.sessionId,
+              sessionContext: input.sessionContext,
+              round,
+              agentId: route.effectiveAgentId ?? undefined,
+              provider: route.providerType ?? undefined,
+              model: route.model ?? undefined,
+              inputTokens: result.usage.inputTokens,
+              outputTokens: result.usage.outputTokens,
+              reasoningTokens: result.usage.reasoningTokens,
+              cacheReadTokens: result.usage.cacheReadTokens,
+              cacheWriteTokens: result.usage.cacheWriteTokens,
+              costUsd:
+                typeof route.inputPricePerMillion === 'number' &&
+                typeof route.outputPricePerMillion === 'number'
+                  ? (result.usage.inputTokens * route.inputPricePerMillion +
+                      result.usage.outputTokens * route.outputPricePerMillion) /
+                    1_000_000
+                  : undefined,
+            });
+            publishTeamTimingEvent({
+              userId: input.user.sub,
+              sessionId: input.sessionId,
+              sessionContext: input.sessionContext,
+              round,
+              totalMs: result.usageOccurredAt
+                ? result.usageOccurredAt - roundStartedAt
+                : Date.now() - roundStartedAt,
+              model: route.model ?? undefined,
+              provider: route.providerType ?? undefined,
+            });
+          }
         }
 
         let recoveredFromOverflowError = false;

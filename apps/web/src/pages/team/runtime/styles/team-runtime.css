@@ -1,0 +1,551 @@
+/**
+ * 260517-team-runtime · 团队页专属样式
+ *
+ * 仅服务 `pages/team/runtime/**` 下的组件；通过 `TeamPageV2.tsx`
+ * 顶层 `import './team/runtime/styles/team-runtime.css'` 一次性挂入。
+ *
+ * 切分原则（与 `index.css` 的边界）：
+ *   - `index.css` 只保留跨页复用的 token、骨架（page-root / page-header）、
+ *     全局组件（nav-rail / session-item / composer-shell …）。
+ *   - 任何只被 team 页用到的伪类、关键帧、状态化 class，都进本文件。
+ *   - 命名空间统一 `team-v2-*` / `team-runtime-*`，禁止泄漏到其他页面。
+ *
+ * 入口元素 `.team-v2-root` 来自 `TeamPageV2.tsx`：作用域选择器靠它收口，
+ * 这样即使本文件被其他页面误加载，也不会干扰非 team 内容。
+ */
+
+/* ───── 通用控件态：hover / active / focus / disabled ───── */
+.team-v2-control {
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
+  touch-action: manipulation;
+}
+.team-v2-root button:not(.team-v2-control),
+.team-v2-root [role='button']:not(.team-v2-control) {
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.team-v2-control--surface {
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+}
+.team-v2-control--transparent {
+  background: transparent;
+}
+.team-v2-control--accent-soft {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.team-v2-control--tab-active {
+  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
+}
+.team-v2-control:hover:not(:disabled),
+.team-v2-control[role='button']:hover,
+.team-v2-root button:not(.team-v2-control):hover:not(:disabled),
+.team-v2-root [role='button']:not(.team-v2-control):hover {
+  background: color-mix(in srgb, var(--surface-hover) 72%, var(--surface));
+}
+.team-v2-control--accent-soft:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+.team-v2-control:active:not(:disabled),
+.team-v2-control[role='button']:active,
+.team-v2-root button:not(.team-v2-control):active:not(:disabled),
+.team-v2-root [role='button']:not(.team-v2-control):active {
+  transform: scale(0.97);
+  background: color-mix(in srgb, var(--surface-hover) 82%, var(--bg-2));
+}
+.team-v2-control:focus-visible,
+.team-v2-control[role='button']:focus-visible,
+.team-v2-root button:not(.team-v2-control):focus-visible,
+.team-v2-root [role='button']:not(.team-v2-control):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.team-v2-control:disabled,
+.team-v2-root button:not(.team-v2-control):disabled {
+  transform: none;
+}
+
+/* ───── 任务卡 ───── */
+.team-v2-task-card {
+  background: color-mix(in srgb, var(--bg-2) 80%, var(--bg));
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.team-v2-task-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+/* ───── tab 面板淡入 ───── */
+.team-v2-panel-tab-content {
+  animation: team-v2-panel-tab-fade 150ms ease;
+}
+@keyframes team-v2-panel-tab-fade {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ───── 流程图 layer 卡片激活时的轻微脉冲 ───── */
+.team-v2-layer-card-active {
+  animation: team-v2-pulse 2.4s ease-in-out infinite;
+}
+@keyframes team-v2-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+/* ───── 加载占位 shimmer（TeamSessionListSidebar 使用） ───── */
+@keyframes team-v2-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ───── TeamSessionListSidebar 局部动画 ─────
+   原先以 `<style>{...}` 注入到 DOM，存在两个问题：
+     1. `team-v2-pulse` 与上面 layer 卡片版本同名但语义不同（缩放 vs 水波），
+        sidebar 一旦挂载就会覆盖 layer 卡片的动画。
+     2. 关键帧字面量塞进 JSX，IDE 没法 lint，复用也困难。
+   切到独立命名 `team-v2-status-spin` / `team-v2-status-pulse` /
+   `team-v2-status-pulse-fade`，避免冲突。 */
+@keyframes team-v2-status-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes team-v2-status-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+@keyframes team-v2-status-pulse-fade {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .team-v2-layer-card-active,
+  .team-v2-panel-tab-content {
+    animation: none;
+  }
+}
+
+
+/* ──────────────────────────────────────────────────────────────────
+ * 通用 hover / active 工具类
+ *
+ * 用来替换 team/ 下那一批 `onMouseEnter / onMouseLeave` 手动改 inline style
+ * 的写法。约束：
+ *   - 只服务 team 页（V1/V2），加 `team-*` 前缀；CSS 文件本身仅在
+ *     `TeamPageV2.tsx` / `TeamPage.tsx` 入口加载，不会泄漏到其他页面。
+ *   - 颜色依赖 CSS 变量 token；少量需要 per-element 颜色（如角色 chip）的，
+ *     通过 element `style={{ '--chip-accent': ... }}` 注入，CSS 用 var() 读取。
+ *   - 所有 class 都满足 `:focus-visible` 行为（依赖 `team-v2-root` 内的全局规则
+ *     或 `team-v2-control` 类显式叠加）。
+ * ──────────────────────────────────────────────────────────────── */
+
+/* 通用：surface 微提亮（最常见的 icon-btn / pill 按钮 hover） */
+.team-hover-surface {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.team-hover-surface:hover:not(:disabled):not([aria-pressed='true']):not([data-active='true']) {
+  background: var(--surface-hover);
+  color: var(--text-2);
+}
+
+/* 通用：surface 提亮 + 边框出现（弹出按钮、setting 行等） */
+.team-hover-surface-bordered {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.team-hover-surface-bordered:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border-subtle);
+}
+
+/* accent 软背景 + 强字色（建议条、accent CTA 第二态） */
+.team-hover-accent-soft {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.team-hover-accent-soft:hover:not(:disabled):not([aria-pressed='true']):not([data-active='true']) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--text);
+}
+
+/* tab-pill：未选中时 hover 出 surface-hover 底；data-active='true' 锁住高亮 */
+.team-tab-pill {
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
+}
+.team-tab-pill:hover:not([data-active='true']):not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-2);
+}
+
+/* primary tab（横条，文字色变化即可） */
+.team-primary-tab {
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.team-primary-tab:hover:not([data-active='true']):not(:disabled) {
+  color: var(--text-2);
+}
+/* 防止全局 button hover 灰色背景渗透到 tab 按钮上（hover 与 active 都不要） */
+.team-v2-root button.team-primary-tab:hover:not(:disabled),
+.team-v2-root button.team-primary-tab:active:not(:disabled),
+.team-v2-root button.team-primary-tab[data-active='true']:hover {
+  background: transparent;
+  transform: none;
+}
+
+/* sub tab（segmented，accent-soft 风） */
+.team-sub-tab {
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.team-sub-tab:hover:not([data-active='true']):not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+}
+/* active 时锁住 accent 背景，禁止全局 button:active 灰色覆盖 */
+.team-v2-root button.team-sub-tab[data-active='true'],
+.team-v2-root button.team-sub-tab[data-active='true']:hover,
+.team-v2-root button.team-sub-tab[data-active='true']:active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  transform: none;
+}
+.team-v2-root button.team-sub-tab:active:not(:disabled) {
+  transform: none;
+}
+
+/* role chip：依赖 element `style={{ '--chip-accent': item.accent }}` */
+.team-role-chip {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.team-role-chip:hover:not([data-active='true']):not(:disabled) {
+  background: color-mix(in srgb, var(--chip-accent, var(--accent)) 8%, transparent);
+  border-color: color-mix(in srgb, var(--chip-accent, var(--accent)) 20%, transparent);
+}
+
+/* glow press：状态徽章 hover 放大 + 加强 glow（success / danger 双色版本） */
+.team-glow-press {
+  transition:
+    transform 250ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.team-glow-press:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+.team-glow-press[data-tone='success']:hover:not(:disabled) {
+  box-shadow:
+    0 0 20px color-mix(in oklch, var(--success) 40%, transparent),
+    inset 0 1px 0 color-mix(in oklch, var(--success) 25%, transparent);
+}
+.team-glow-press[data-tone='danger']:hover:not(:disabled) {
+  box-shadow:
+    0 0 20px color-mix(in oklch, var(--danger) 40%, transparent),
+    inset 0 1px 0 color-mix(in oklch, var(--danger) 25%, transparent);
+}
+
+/* sprite-ring：buddy / pet 头像 hover 出蓝色环 */
+.team-sprite-ring {
+  transition: box-shadow 150ms ease;
+}
+.team-sprite-ring:hover {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* card-soft：通用卡片 hover 微抬高 + accent 边 */
+.team-card-soft {
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+.team-card-soft:hover:not(:disabled):not([data-active='true']) {
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  box-shadow: var(--shadow-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .team-glow-press {
+    transition: none;
+  }
+  .team-glow-press:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+
+/* context menu item：hover 与 focus 行为一致（菜单键盘导航需要） */
+.team-menu-item {
+  transition: background 120ms ease, color 120ms ease;
+}
+.team-menu-item:hover:not(:disabled),
+.team-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  outline: none;
+}
+.team-menu-item[data-tone='danger']:hover:not(:disabled),
+.team-menu-item[data-tone='danger']:focus-visible {
+  background: color-mix(in srgb, var(--danger, var(--error, #d4574e)) 10%, transparent);
+}
+
+/* create CTA：accent 半透底，hover 加深 */
+.team-cta-accent {
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.team-cta-accent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+/* 透明 icon button：hover 出 surface alpha */
+.team-icon-ghost {
+  transition: background 120ms ease, color 120ms ease;
+}
+.team-icon-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-3) 16%, transparent);
+}
+
+
+/* dynamic-border：依赖 element `style={{ '--hover-border': someColor }}` */
+.team-hover-border {
+  transition: border-color 150ms ease;
+}
+.team-hover-border:hover:not(:disabled) {
+  border-color: var(--hover-border, var(--accent));
+}
+
+
+/* success-CTA：success 主调按钮 hover 加深 */
+.team-cta-success {
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.team-cta-success:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--success) 18%, var(--bg));
+}
+
+/* outline-secondary：边框默认按钮 hover 边色变浅 + 字色提亮 */
+.team-btn-outline {
+  transition: border-color 150ms ease, color 150ms ease;
+}
+.team-btn-outline:hover:not(:disabled) {
+  border-color: var(--border-subtle);
+  color: var(--text-2);
+}
+
+
+/* danger ghost icon button：hover 出红底红字（用于 chip 关闭等） */
+.team-icon-danger {
+  transition: background 120ms ease, color 120ms ease;
+}
+.team-icon-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, var(--error, #ef4444)) 18%, transparent);
+  color: var(--danger, var(--error, #ef4444));
+}
+
+
+/* dashed-add：dashed-border 新建按钮 hover 把边色变成 accent + 内底变浅 */
+.team-dashed-add {
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.team-dashed-add:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-2);
+  border-color: var(--accent);
+}
+
+/* dashed-add-accent：text 也变 accent，常用于内部新建 sub-task */
+.team-dashed-add-accent {
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.team-dashed-add-accent:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+
+/* dynamic-tint card：依赖 element `style={{ '--tint': someColor }}`
+ * 仅改动背景与阴影，边框保持原状。 */
+.team-card-tinted {
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+.team-card-tinted:hover:not(:disabled):not([data-active='true']) {
+  background: color-mix(in oklch, var(--tint, var(--accent)) 3%, var(--card-bg));
+  box-shadow: var(--shadow-md);
+}
+
+/* 同上但 hover 时连带把边框变成同色调，用于「点击卡片切换选中态」类交互。 */
+.team-card-tinted-bordered {
+  transition: background 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.team-card-tinted-bordered:hover:not(:disabled):not([data-active='true']) {
+  background: color-mix(in oklch, var(--tint, var(--accent)) 3%, var(--card-bg));
+  box-shadow: var(--shadow-md);
+  border-color: color-mix(in oklch, var(--tint, var(--accent)) 25%, var(--border-subtle));
+}
+
+
+/* surface-bg：透明按钮 hover 出 var(--surface) 实色（轻量 chevron / 折叠按钮等） */
+.team-hover-surface-bg {
+  transition: background 150ms ease;
+}
+.team-hover-surface-bg:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+
+/* hover-surface-bordered-strong：surface-hover + 出现 border（agent chip 等） */
+.team-hover-surface-bordered-strong {
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.team-hover-surface-bordered-strong:hover:not(:disabled):not([data-active='true']) {
+  background: var(--surface-hover);
+  border-color: var(--border-subtle);
+}
+
+
+/* ───── 状态点呼吸 glow（暂停/恢复按钮内的状态点） ──────────────
+   原先以 `<style>{...}` 形式由 `TopTeamHeader.tsx` 在组件 body 中注入；
+   现统一在此声明，被该 button 内的状态点通过 `animation:` inline 引用。 */
+@keyframes pulse-glow-success {
+  0%,
+  100% {
+    box-shadow: 0 0 4px var(--success);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 10px var(--success);
+    opacity: 0.7;
+  }
+}
+@keyframes pulse-glow-danger {
+  0%,
+  100% {
+    box-shadow: 0 0 4px var(--danger);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 10px var(--danger);
+    opacity: 0.7;
+  }
+}
+
+/* ───── 通用 dot-pulse（旧 V1 sidebar 内状态点闪烁） ───── */
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ───── 团队空态 hero 容器动画（TeamSessionEmptyState） ───── */
+@keyframes team-empty-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes team-empty-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes team-empty-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* 标准输入框 focus：边色变 accent。
+ * 替代 onFocus/onBlur 手改 borderColor 的写法。 */
+.team-input-focusable {
+  transition: border-color 150ms ease;
+}
+.team-input-focusable:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* 同上但 focus 同时叠一圈 accent 光晕（写消息那种主输入框）。 */
+.team-input-focusable-glow {
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.team-input-focusable-glow:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 12%, transparent);
+  outline: none;
+}

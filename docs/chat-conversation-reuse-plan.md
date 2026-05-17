@@ -1,4 +1,4 @@
-# Chat 对话布局复用方案（v1.3）
+# Chat 对话布局复用方案（v1.4）
 
 > 用途：把 ChatPage 的"单 session 对话布局"抽成 `<SessionConversationView>`，让 TeamPageV2 直接复用，避免 team 在 `ConversationArea.tsx` 重新发明一套消息列表 + composer + 流式渲染。
 >
@@ -10,8 +10,8 @@
 > - 当前 team v2 方案：`.agentdocs/workflow/260516-team-page-功能加强方案.md`
 >
 > 创建时间：2026-05-16
-> 最近更新：2026-05-16（v1.3：Phase 2b/2c 前端契约完成；后端依赖 L1.3 改造 1+2+3+4；前端零改动等后端）
-> 当前状态：**Phase 1 + Phase 2a + Phase 2b/2c 前端契约全部完成；待后端 L1.3 改造落地**
+> 最近更新：2026-05-17（v1.4：完成主对话区/层级对话/消息总线三处的 chat 渲染统一；composer feature flag 接入；前端契约就绪）
+> 当前状态：**Phase 1 + 2a 全量落地 + 2b 前端契约 + composer feature flag 接入；待后端 L1.3 改造启用 inbound 写入**
 
 ---
 
@@ -494,6 +494,70 @@ Phase 2b 启动时唯一需要给 hook 增加的能力是 **inbound writer**：
 **实际工时显著小于估算**：核心原因是 IDE 的 smartRelocate 工具自动更新跨文件 import，使得文件迁移阶段（Phase 1 §1.1）从"2-3 周"压缩到"半天"。Phase 2b/2c 前端契约也比估算快——因为它们本质是"按 spec 写类型 + 写 client + 写 hook 方法 + 写测试"，没有任何业务逻辑。
 
 **剩余工作全部在后端**：L1.3 改造 1+2+3+4（13.5 天，由后端开发完成）。前端在 Phase 2b/2c 后端落地后**无需改动**即可工作（hook 已经 transparent 透传 sessions.role_layer/substate；submitInbound 已经按 spec 调对应端点）。
+
+---
+
+## 9. v1.4 增量（260517）：UI 链路统一
+
+> v1.3 完成「TeamPageV2 → ConversationArea → TeamSessionView」单一入口；v1.4 把
+> 整个 team 页面里所有"对话型"视图都对齐到 chat 渲染。
+
+### 9.1 主对话区默认 reception 渲染
+
+- `useResolvedTeamRuntimeReferenceData` 暴露新字段 `defaultReceptionSessionId`：
+  当前 workspace 中第一个 `parentSessionId == null` 的根会话即视作 b session。
+- `ConversationArea` 重写为三态路径：
+  1. `messagesOverride` 注入 → pass-through（保留对话 tab 选中具体子 session 的能力）
+  2. `receptionSessionId` 存在 → 内嵌 `<TeamSessionView/>` 渲染主对话流
+  3. 都没有 → idle/loading/error 引导面板
+- 旧的 `ConversationCard` 自定义渲染、内置 textarea、`MOCK_PUSH_MESSAGES` 全部删除。
+- `team-events` 推送的通知卡片改为通过 `SessionConversationView.afterMessages` slot
+  注入，不再侵入 LLM 主消息流。
+
+### 9.2 层级对话双栏化
+
+- `LayeredConversationView` 从单栏 timeline 升级为左 timeline / 右 TeamSessionView。
+- 点击 timeline 行选中对应 to_session，右栏即时切到该 session 的 chat 渲染。
+- 抽屉版 `LayerConversationDrawer` 同步升级：选中非 reviewer 层级时直接内嵌
+  `<TeamSessionView/>`（之前只展示 sessionId/state 元数据），与 tab 双栏右侧
+  视觉一致；reviewer 层仍走 `<ReviewReportView/>` 独立 layout。
+
+### 9.3 消息总线视觉对齐
+
+- `MessagesTab`（消息总线）的卡片 body 从纯文本切到 `MarkdownMessageContent`
+  渲染，回复 / 广播片段同步 markdown 化。代码块、链接、内联格式与 chat 端一致。
+- `MentionsView`（待回复 / @ 我的）的通知 body 同步换 `MarkdownMessageContent`，
+  让团队推送的提醒文案与主 chat 流保持同样的字体 / 链接 / 内联格式样式。
+- 协议保留：MessagesTab / MentionsView 仍读 team-events 总线消息，写入仍走
+  `sendMessage`，不接 inbound 端点（这条线属于"控制平面信令"，与 LLM session
+  消息正交）。
+
+### 9.4 Phase 2b 前端 composer 接入
+
+- `TeamSessionView` 增加 `composerEnabled?: boolean`（默认 false 与 D2 对齐）。
+- 启用后 `onComposerSubmit` 调 `submitInbound(messageType, payload)`：
+  - `state.substate === 'clarifying'` → `clarification_answer`
+  - 其他 → `user_input`
+- 提交完成后自动 `state.reload()`，让最新落库的消息出现在视图里。
+- TeamPageV2 用 `localStorage['teamV2.inboundComposer.enabled']==='1'` 作为
+  feature flag。后端 L1.3 改造完成后，把 flag 默认值切到 `'1'` 即可面向所有用户开放。
+
+### 9.5 V1 路径标记弃用
+
+- `MainWorkspace.tsx` / `tabs/conversation/ConversationTab.tsx` 添加 `@deprecated`
+  注释，明确这些只为 V1 fallback 保留；V2 合稳后随 fallback 一并删除。
+
+### 9.6 v1.4 验收
+
+- `pnpm --filter @openAwork/web typecheck` ✅
+- `pnpm --filter @openAwork/web test` 408/408 ✅
+  - 新增 `ConversationArea.test.tsx`（5 tests）覆盖三态路由
+  - 新增 `LayeredConversationView.test.tsx`（4 tests）覆盖 timeline 行点击 → 右栏 TeamSessionView
+- 用户进 `/team/<workspace>` 第一眼即 chat 视觉（不再是卡片 mock）
+- 「对话 / 层级」子 tab 切到具体 handoff 时右栏即时渲染 chat 对话
+- 顶部 LayerConversationDrawer 抽屉非 reviewer 层同步用 chat 渲染
+- 「对话 / 消息」总线 + 「对话 / 待回复」MentionsView 卡片代码 / 链接 / 列表与 chat 端样式一致
+- 设置 feature flag 后，team composer 解锁并通过 inbound 通道写入
 
 ---
 

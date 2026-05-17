@@ -392,10 +392,42 @@ export function ChatTodoFloatingPanel(props: {
    * 与消息列对齐。挂在 ChatTopBar 内部（顶部 popover）时无需传入。
    */
   editorMode?: boolean;
+  /**
+   * 顶部 popover 模式下,浮层用 fixed + getBoundingClientRect 计算位置,
+   * 这样不会被 ChatTopBar 父级的 `overflow: hidden` 截断(我们把根容器
+   * 改成 nowrap + overflow:hidden 是为了防止 chip 换行错位,代价是
+   * absolute 子节点会被裁)。anchorRef 指向触发按钮(slot 行为),
+   * 浮层贴在它的下方右对齐。
+   */
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }): React.ReactElement | null {
-  const { controller, detailsId, editorMode } = props;
+  const { controller, detailsId, editorMode, anchorRef } = props;
   const { expanded, collapse, summary, laneGroups, sessionTodos } = controller;
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [fixedPosition, setFixedPosition] = useState<{ top: number; right: number } | null>(null);
+
+  // 顶部 popover 模式下,根据 anchor 实时计算视口坐标。
+  useEffect(() => {
+    if (!expanded || editorMode !== undefined || !anchorRef?.current) {
+      setFixedPosition(null);
+      return;
+    }
+    const update = (): void => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setFixedPosition({
+        top: rect.bottom + 6,
+        right: Math.max(8, window.innerWidth - rect.right),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [expanded, editorMode, anchorRef]);
 
   // Esc 关闭。
   useEffect(() => {
@@ -443,7 +475,19 @@ export function ChatTodoFloatingPanel(props: {
       aria-label="会话待办详情"
       data-testid="chat-todo-floating-panel"
       data-anchor={editorMode === undefined ? 'topbar' : 'composer'}
-      style={editorMode === undefined ? undefined : { maxWidth: getTodoMaxWidth(editorMode) }}
+      style={
+        editorMode === undefined
+          ? // 顶部 popover 模式:fixed 定位,通过 anchor 计算的视口坐标
+            // 摆放,绕开 ChatTopBar 的 overflow:hidden 截断。
+            fixedPosition
+            ? {
+                position: 'fixed',
+                top: fixedPosition.top,
+                right: fixedPosition.right,
+              }
+            : undefined
+          : { maxWidth: getTodoMaxWidth(editorMode) }
+      }
     >
       <div className="chat-todo-floating-head">
         <span className="chat-todo-floating-title">待办</span>

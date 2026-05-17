@@ -15,6 +15,9 @@ import type * as HandoffStoreModule from '../handoff/handoff-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+// L1.3 改造 3：c 层等 inbound 时不要拖慢测试
+process.env['OPENAWORK_TEAM_INBOUND_POLL_MS'] = '20';
+process.env['OPENAWORK_TEAM_CLARIFICATION_TIMEOUT_MS'] = '300';
 
 let dbModule: typeof DbModule;
 let artifactChain: typeof ArtifactChainModule;
@@ -230,5 +233,92 @@ describe('runArtifactChain', () => {
 
     // plan 的 user message 不应包含 <constitution> 块
     expect(planPrompt).not.toContain('<constitution>');
+  });
+
+  it('clarification 阻塞门禁：超时回退继续生成 plan（fallback assumption）', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        if (!planPrompt) planPrompt = user;
+        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐检查\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 任务`;
+      }
+      // spec：含一个 NEEDS CLARIFICATION，让阻塞门禁生效
+      return `# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: 系统必须 [NEEDS CLARIFICATION: x?]`;
+    };
+
+    await artifactChain.runArtifactChain({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      handoff,
+      sourceIntent: '原始',
+      rewrittenIntent: '改写',
+      teamWorkspaceId: null,
+      callLlm: mockLlm,
+    });
+
+    // 阻塞超时 fallback：plan 输入里应该包含"用户未在超时前回答"提示
+    expect(planPrompt).toMatch(/用户未在超时前回答|默认假设/);
+  });
+
+  it('clarification 阻塞门禁：收到 inbound 答案后注入到 plan', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: {},
+    });
+
+    const inboundStore = await import('../handoff/inbound-store.js');
+
+    let planPrompt = '';
+    const mockLlm = async (system: string, user: string): Promise<string> => {
+      if (system.includes('实施计划')) {
+        if (!planPrompt) planPrompt = user;
+        return `# 实施计划\n\n## 技术上下文\n\nTypeScript\n\n## 宪法对齐\n\n| 宪法条目 | 本计划是否符合 | 备注 |\n|---|---|---|\n| 禁止空 catch | ✅ | ok |`;
+      }
+      if (system.includes('任务清单')) {
+        return `# 任务清单\n\n## Phase 1\n- [ ] T001 [US1] 任务`;
+      }
+      return `# 规格\n\n## 用户故事 1\n\n## 需求\n- **FR-001**: 系统必须 [NEEDS CLARIFICATION: 认证方式?]`;
+    };
+
+    // 在 100ms 后投递 clarification answer
+    const injectionTimer = setTimeout(() => {
+      inboundStore.submitInboundMessage({
+        userId: USER_ID,
+        toSessionId: SESSION_ID,
+        fromRoleLayer: 'reception',
+        messageType: 'clarification_answer',
+        payload: { answer: '使用 OAuth 2.0', answeredBy: 'user' },
+      });
+    }, 100);
+
+    try {
+      await artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: '原始',
+        rewrittenIntent: '改写',
+        teamWorkspaceId: null,
+        callLlm: mockLlm,
+      });
+    } finally {
+      clearTimeout(injectionTimer);
+    }
+
+    // plan 输入里应该包含 OAuth 2.0 的回答
+    expect(planPrompt).toContain('OAuth 2.0');
   });
 });

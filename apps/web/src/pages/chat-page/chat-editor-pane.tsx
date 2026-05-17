@@ -98,7 +98,7 @@ export function ChatEditorPane({
         aria-hidden={!editorMode}
         style={{
           flex: '0 0 auto',
-          width: editorMode ? `calc(${100 - splitPos}% - 2.5px)` : 0,
+          width: editorMode ? 'calc(100% - var(--split-pos) - 2.5px)' : 0,
           minWidth: 0,
           overflow: 'hidden',
           display: 'flex',

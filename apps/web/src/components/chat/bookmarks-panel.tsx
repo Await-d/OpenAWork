@@ -142,13 +142,7 @@ function BookmarkItem({
         cursor: 'pointer',
       }}
       onClick={onNavigate}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background =
-          'color-mix(in oklch, var(--accent) 4%, transparent)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = 'transparent';
-      }}
+      className="ui-hover-tint-bg"
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <span style={{ fontSize: 11 }}>{roleIcon}</span>

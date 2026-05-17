@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createSettingsClient } from '@openAwork/web-client';
 import {
   buildCompanionIntroText,
@@ -324,7 +325,7 @@ export function CompanionStage({
   streaming,
   todoCount,
 }: CompanionStageProps) {
-  const [panelOpen, setPanelOpen] = useState<boolean>(() => sessionId === null);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [liveOutputId, setLiveOutputId] = useState<string | null>(null);
   const [fadingOutputId, setFadingOutputId] = useState<string | null>(null);
   const [outputHistory, setOutputHistory] = useState<CompanionOutputEntry[]>(() => {
@@ -348,7 +349,7 @@ export function CompanionStage({
   const lastPanelOpenSignalRef = useRef(panelOpenSignal);
 
   useEffect(() => {
-    setPanelOpen(sessionId === null);
+    setPanelOpen(false);
   }, [sessionId]);
 
   const snapshot = useMemo<CompanionActivitySnapshot>(
@@ -672,483 +673,631 @@ export function CompanionStage({
     setPanelOpen(true);
   }, [panelOpenSignal]);
 
+  // The buddy chip lives next to the input box now. When clicked it opens
+  // a fixed-positioned popover that contains the full settings + details
+  // panel — the same display pattern used by the top-bar
+  // SessionTerminalsChip / SessionTerminalsPanel pair.
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState<{
+    bottom: number;
+    left: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!panelOpen || !chipRef.current) {
+      setPopoverPosition(null);
+      return;
+    }
+    const update = (): void => {
+      const rect = chipRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportW = globalThis.window?.innerWidth ?? rect.right;
+      const viewportH = globalThis.window?.innerHeight ?? rect.bottom;
+      // Popover 从 chip 向右展开:左边对齐 chip 左边,沿 chip 右侧延伸出去。
+      // 视口右侧空间不够时,把 left 收回到能完全显示的位置(viewportW - width - 8)。
+      const POPOVER_WIDTH = 360;
+      const preferredLeft = rect.left;
+      const maxLeft = viewportW - POPOVER_WIDTH - 8;
+      const left = Math.max(8, Math.min(preferredLeft, maxLeft));
+      setPopoverPosition({
+        bottom: Math.max(8, viewportH - rect.top + 6),
+        left,
+      });
+    };
+    update();
+    if (typeof globalThis.window !== 'undefined') {
+      globalThis.window.addEventListener('resize', update);
+      globalThis.window.addEventListener('scroll', update, true);
+      return () => {
+        globalThis.window.removeEventListener('resize', update);
+        globalThis.window.removeEventListener('scroll', update, true);
+      };
+    }
+    return undefined;
+  }, [panelOpen]);
+
+  // Close the popover on Escape — matches SessionTerminalsPanel.
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setPanelOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [panelOpen]);
+
   if (isVoiceOutputFeatureReady && !isCompanionFeatureEnabled) {
     return (
-      <section
+      <button
+        type="button"
         data-testid="companion-stage"
+        onClick={() => setEnabled(true)}
+        aria-label="重新启用 Buddy 伴侣"
         style={{
-          maxWidth: editorMode ? 680 : rightOpen ? 700 : 740,
-          margin: '0 auto 3px',
-          width: '100%',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '3px 8px',
+          borderRadius: 999,
+          border: '1px solid var(--border-subtle)',
+          background: 'transparent',
+          color: 'var(--text-3)',
+          fontSize: 9,
+          fontWeight: 600,
+          cursor: 'pointer',
+          transition: 'color 160ms ease, border-color 160ms ease',
+          flexShrink: 0,
         }}
       >
-        <button
-          type="button"
-          onClick={() => setEnabled(true)}
-          aria-label="重新启用 Buddy 伴侣"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '3px 8px',
-            borderRadius: 999,
-            border: '1px solid var(--border-subtle)',
-            background: 'transparent',
-            color: 'var(--text-3)',
-            fontSize: 9,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'color 160ms ease, border-color 160ms ease',
-          }}
-        >
-          <span aria-hidden="true" style={{ fontSize: 10 }}>
-            ◈
-          </span>
-          <span>启用 Buddy</span>
-        </button>
-      </section>
+        <span aria-hidden="true" style={{ fontSize: 10 }}>
+          ◈
+        </span>
+        <span>启用 Buddy</span>
+      </button>
     );
   }
 
   return (
-    <section
-      data-testid="companion-stage"
-      style={{
-        maxWidth: editorMode ? 680 : rightOpen ? 700 : 740,
-        margin: '0 auto 3px',
-        width: '100%',
-      }}
-    >
-      <div
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        data-testid="companion-stage"
+        onClick={() => setPanelOpen((value) => !value)}
+        aria-haspopup="dialog"
+        aria-expanded={panelOpen}
+        aria-controls="chat-companion-panel"
+        aria-label={panelOpen ? `收起 ${profile.name} 设置面板` : `展开 ${profile.name} 设置面板`}
+        title={`${profile.name} · ${statusText}`}
         style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '4px 6px',
+          // 让 chip 自己撑开高度，sprite 通常需要 60~80px。视觉上跟输入框
+          // 同高，所以 minHeight 用 composer 的高度 (96px) 略小一点。
+          minHeight: 60,
+          alignSelf: 'stretch',
           borderRadius: 12,
-          border: '1px solid var(--bg-glass-border)',
-          background:
-            'linear-gradient(180deg, color-mix(in oklch, var(--bg-glass) 88%, transparent), color-mix(in oklch, var(--surface) 94%, transparent))',
-          backdropFilter: 'blur(12px)',
-          boxShadow: panelOpen
-            ? '0 6px 14px -20px rgba(0, 0, 0, 0.36)'
-            : '0 3px 8px -16px rgba(0, 0, 0, 0.26)',
-          padding: panelOpen ? '4px 5px 5px' : '3px 5px 3px',
+          border: panelOpen
+            ? '1px solid color-mix(in oklch, var(--accent) 38%, var(--border-subtle))'
+            : '1px solid var(--border-subtle)',
+          background: panelOpen
+            ? 'color-mix(in oklch, var(--accent) 8%, var(--surface))'
+            : 'color-mix(in oklch, var(--bg-glass) 60%, var(--surface))',
+          backdropFilter: 'blur(8px)',
+          color: 'var(--text-2)',
+          cursor: 'pointer',
+          flexShrink: 0,
           transition: baseTransition,
+          // Glow when buddy was just triggered or has live output, so the
+          // chip itself reads as a small animation effect.
+          boxShadow:
+            buddyTriggerActive || (liveOutput && !muted)
+              ? '0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent)'
+              : 'none',
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 6,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div
+        <CompanionTerminalSprite
+          fading={liveOutput !== null && fadingOutputId === liveOutput.id}
+          liveOutput={null}
+          petNonce={petNonce}
+          prefersReducedMotion={effectiveReducedMotion}
+          profile={profile}
+        />
+        {pendingPermissionCount > 0 ? (
+          <span
+            aria-hidden="true"
             style={{
-              minWidth: 0,
-              flex: '1 1 260px',
-              display: 'flex',
+              minWidth: 14,
+              height: 14,
+              padding: '0 4px',
+              borderRadius: 999,
+              background: 'color-mix(in oklch, var(--warning) 22%, transparent)',
+              color: 'var(--warning)',
+              fontSize: 8,
+              fontWeight: 800,
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: 4,
+              justifyContent: 'center',
             }}
           >
-            <CompanionTerminalSprite
-              fading={liveOutput !== null && fadingOutputId === liveOutput.id}
-              liveOutput={muted ? null : liveOutput}
-              petNonce={petNonce}
-              prefersReducedMotion={effectiveReducedMotion}
-              profile={profile}
-            />
-            <button
-              type="button"
-              onClick={() => setPanelOpen((value) => !value)}
-              aria-label={panelOpen ? '收起 Buddy 展示详情' : '展开 Buddy 展示详情'}
-              aria-expanded={panelOpen}
-              aria-controls="chat-companion-panel"
-              style={{
-                minWidth: 0,
-                flex: '1 1 176px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                padding: 0,
-                textAlign: 'left',
-                alignItems: 'flex-start',
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text)' }}>
-                  {profile.name}
-                </span>
-                <span
-                  style={{
-                    height: 15,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0 4px',
-                    borderRadius: 999,
-                    border: '1px solid var(--border-subtle)',
-                    background: profile.accentTint,
-                    color: profile.accentColor,
-                    fontSize: 7.5,
-                    fontWeight: 700,
-                  }}
-                >
-                  Buddy 精灵
-                </span>
-                <span
-                  style={{
-                    height: 15,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0 4px',
-                    borderRadius: 999,
-                    background: rarityVisual.background,
-                    border: `1px solid ${rarityVisual.borderColor}`,
-                    color: rarityVisual.color,
-                    fontSize: 7.5,
-                    fontWeight: 800,
-                  }}
-                >
-                  {rarityVisual.label}
-                </span>
-                {activeBinding?.behaviorTone ? (
-                  <span
-                    style={{
-                      height: 15,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '0 4px',
-                      borderRadius: 999,
-                      border: '1px solid var(--border-subtle)',
-                      background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
-                      color: 'var(--text-2)',
-                      fontSize: 7.5,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {activeBinding.behaviorTone}
-                  </span>
-                ) : null}
-                {buddyTriggerActive ? <RainbowTriggerBadge text="/buddy" /> : null}
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                <span
-                  style={{
-                    height: 14,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0 3px',
-                    borderRadius: 999,
-                    background: 'var(--bg-2)',
-                    color: 'var(--text-2)',
-                    fontSize: 7.5,
-                    fontWeight: 700,
-                  }}
-                >
-                  {profile.species}
-                </span>
-                <span
-                  style={{
-                    height: 14,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0 3px',
-                    borderRadius: 999,
-                    background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-                    color: 'var(--text-2)',
-                    fontSize: 7.5,
-                    fontWeight: 700,
-                  }}
-                >
-                  {statusText}
-                </span>
-              </span>
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              flexWrap: 'wrap',
-              justifyContent: 'flex-end',
-              flex: '0 1 auto',
-            }}
-          >
-            <CompanionModeButton
-              active={enabled}
-              ariaLabel={enabled ? '关闭 Buddy 主开关' : '开启 Buddy 主开关'}
-              label={enabled ? '伴侣开' : '伴侣关'}
-              onClick={() => setEnabled((value) => !value)}
-            />
-            <CompanionModeButton
-              active={voiceOutputEffectiveEnabled && isVoiceOutputAvailable}
-              ariaLabel={
-                !isVoiceOutputFeatureReady
-                  ? '正在读取 Buddy 远端设置'
-                  : !isVoiceOutputFeatureEnabled
-                    ? '远端已关闭 Buddy 播报功能'
-                    : isVoiceOutputAvailable
-                      ? voiceOutputEnabled
-                        ? '关闭 Buddy 本地播报'
-                        : '开启 Buddy 本地播报'
-                      : '当前环境不支持 Buddy 本地播报'
-              }
-              disabled={
-                !isVoiceOutputAvailable ||
-                !isVoiceOutputFeatureReady ||
-                !isVoiceOutputFeatureEnabled
-              }
-              label={
-                !isVoiceOutputFeatureReady
-                  ? '读取中'
-                  : !isVoiceOutputFeatureEnabled
-                    ? companionFeatureMode === 'off'
-                      ? '功能关闭'
-                      : '远端关闭'
-                    : !isVoiceOutputAvailable
-                      ? '无播报'
-                      : isSpeaking
-                        ? '播报中'
-                        : voiceOutputEnabled
-                          ? '播报开'
-                          : '播报关'
-              }
-              onClick={() => setVoiceOutputEnabled((value) => !value)}
-            />
-            <CompanionSyncBadge label={syncStatusLabel} state={syncStatus} />
-            <CompanionModeButton
-              active={quietMode}
-              ariaLabel={quietMode ? '关闭安静模式' : '开启安静模式'}
-              label={quietMode ? '安静模式' : '低打扰'}
-              onClick={() => setQuietMode((value) => !value)}
-            />
-            <CompanionModeButton
-              active={muted}
-              ariaLabel={muted ? '取消 Buddy 静音' : '将 Buddy 设为静音'}
-              label={muted ? '已静音' : '可出声'}
-              onClick={() => setMuted((value) => !value)}
-            />
-            <CompanionModeButton
-              active={reducedMotion}
-              ariaLabel={reducedMotion ? '关闭 Buddy 减少动效' : '开启 Buddy 减少动效'}
-              label={reducedMotion ? '减动效' : '完整动效'}
-              onClick={() => setReducedMotion((value) => !value)}
-            />
-            <CompanionModeButton
-              active={panelOpen}
-              ariaLabel={panelOpen ? '收起 Buddy 详情面板' : '展开 Buddy 详情面板'}
-              label={panelOpen ? '收起详情' : '展开详情'}
-              onClick={() => setPanelOpen((value) => !value)}
-            />
-          </div>
-        </div>
-
-        {panelOpen ? (
-          <div
-            id="chat-companion-panel"
-            data-testid="companion-panel"
-            style={{
-              marginTop: 3,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 3,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                gap: 4,
-                flexWrap: 'wrap',
-                borderRadius: 8,
-                border: '1px solid var(--border-subtle)',
-                padding: '4px 5px 4px',
-                background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
-              }}
-            >
-              <div style={{ minWidth: 0, flex: '1 1 220px' }}>
-                <div style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--text)' }}>
-                  {profile.name} · {profile.species}
-                </div>
+            {pendingPermissionCount}
+          </span>
+        ) : null}
+      </button>
+      {panelOpen
+        ? createPortal(
+            <>
+              {/* Click-outside scrim — same pattern as SessionTerminalsPanel. */}
+              <button
+                type="button"
+                aria-label="关闭 Buddy 面板"
+                onClick={() => setPanelOpen(false)}
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  margin: 0,
+                  zIndex: 998,
+                  cursor: 'default',
+                }}
+              />
+              <section
+                role="dialog"
+                aria-label={`${profile.name} 设置面板`}
+                data-testid="companion-popover"
+                style={{
+                  position: 'fixed',
+                  bottom: popoverPosition?.bottom ?? 80,
+                  left: popoverPosition?.left ?? 16,
+                  width: 'min(360px, calc(100vw - 24px))',
+                  maxHeight: 'min(520px, calc(100vh - 96px))',
+                  overflowY: 'auto',
+                  borderRadius: 12,
+                  border: '1px solid var(--bg-glass-border)',
+                  background: 'var(--surface)',
+                  boxShadow: '0 12px 32px -12px rgba(0,0,0,0.32)',
+                  zIndex: 999,
+                }}
+              >
                 <div
                   style={{
-                    marginTop: 1,
-                    fontSize: 9,
-                    lineHeight: 1.28,
-                    color: 'var(--text-2)',
-                    wordBreak: 'break-word',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 1,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
+                    padding: '8px 10px 10px',
                   }}
                 >
-                  {profile.note}
-                </div>
-                <div style={{ marginTop: 3, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                  {companionStats.map((stat) => (
-                    <span
-                      key={stat.key}
-                      style={{
-                        height: 15,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 3,
-                        padding: '0 4px',
-                        borderRadius: 999,
-                        background: 'color-mix(in oklch, var(--surface-hover) 88%, transparent)',
-                        color: 'var(--text-2)',
-                        fontSize: 7.5,
-                        fontWeight: 700,
-                      }}
-                    >
-                      <span>{stat.label}</span>
-                      <span style={{ color: 'var(--text)' }}>{stat.value}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                {profile.traits.map((trait) => (
-                  <span
-                    key={trait}
+                  <div
                     style={{
-                      height: 15,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '0 3px',
-                      borderRadius: 999,
-                      background: 'color-mix(in oklch, var(--surface-hover) 86%, transparent)',
-                      color: 'var(--text-2)',
-                      fontSize: 7.5,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {trait}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-              <CompanionMetaCard label="当前状态" value={statusText} />
-              <CompanionMetaCard
-                label="语音播报"
-                value={`${speechStatusLabel} · ${syncStatusLabel}`}
-              />
-              <CompanionMetaCard
-                label="关注范围"
-                value={
-                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                    {focusTags.map((tag) => (
-                      <span
-                        key={tag}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          height: 15,
-                          padding: '0 3px',
-                          borderRadius: 999,
-                          background: 'var(--bg-2)',
-                          color: 'var(--text-2)',
-                          fontSize: 7.5,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </span>
-                }
-              />
-              <CompanionMetaCard
-                label="当前阶段"
-                value={`注入模式：${enabled ? companionFeatureMode : 'off'}`}
-              />
-              <CompanionMetaCard
-                label="稀有度"
-                value={
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 3,
-                      justifyContent: 'flex-end',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between',
+                      gap: 6,
                       flexWrap: 'wrap',
                     }}
                   >
-                    <span>{profile.rarityStars}</span>
-                    <span style={{ color: rarityVisual.color }}>{rarityVisual.label}</span>
-                  </span>
-                }
-              />
-            </div>
+                    <div
+                      style={{
+                        minWidth: 0,
+                        flex: '1 1 260px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <CompanionTerminalSprite
+                        fading={liveOutput !== null && fadingOutputId === liveOutput.id}
+                        liveOutput={muted ? null : liveOutput}
+                        petNonce={petNonce}
+                        prefersReducedMotion={effectiveReducedMotion}
+                        profile={profile}
+                      />
+                      <div
+                        style={{
+                          minWidth: 0,
+                          flex: '1 1 176px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 1,
+                          padding: 0,
+                          textAlign: 'left',
+                          alignItems: 'flex-start',
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text)' }}>
+                            {profile.name}
+                          </span>
+                          <span
+                            style={{
+                              height: 15,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0 4px',
+                              borderRadius: 999,
+                              border: '1px solid var(--border-subtle)',
+                              background: profile.accentTint,
+                              color: profile.accentColor,
+                              fontSize: 7.5,
+                              fontWeight: 700,
+                            }}
+                          >
+                            Buddy 精灵
+                          </span>
+                          <span
+                            style={{
+                              height: 15,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0 4px',
+                              borderRadius: 999,
+                              background: rarityVisual.background,
+                              border: `1px solid ${rarityVisual.borderColor}`,
+                              color: rarityVisual.color,
+                              fontSize: 7.5,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {rarityVisual.label}
+                          </span>
+                          {activeBinding?.behaviorTone ? (
+                            <span
+                              style={{
+                                height: 15,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '0 4px',
+                                borderRadius: 999,
+                                border: '1px solid var(--border-subtle)',
+                                background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
+                                color: 'var(--text-2)',
+                                fontSize: 7.5,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {activeBinding.behaviorTone}
+                            </span>
+                          ) : null}
+                          {buddyTriggerActive ? <RainbowTriggerBadge text="/buddy" /> : null}
+                        </span>
+                        <span
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <span
+                            style={{
+                              height: 14,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0 3px',
+                              borderRadius: 999,
+                              background: 'var(--bg-2)',
+                              color: 'var(--text-2)',
+                              fontSize: 7.5,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {profile.species}
+                          </span>
+                          <span
+                            style={{
+                              height: 14,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0 3px',
+                              borderRadius: 999,
+                              background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
+                              color: 'var(--text-2)',
+                              fontSize: 7.5,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {statusText}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
 
-            <div
-              data-testid="companion-output-log"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-                borderRadius: 8,
-                border: '1px solid var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
-                padding: '4px 5px 4px',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 3,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        flexWrap: 'wrap',
+                        justifyContent: 'flex-end',
+                        flex: '0 1 auto',
+                      }}
+                    >
+                      <CompanionModeButton
+                        active={enabled}
+                        ariaLabel={enabled ? '关闭 Buddy 主开关' : '开启 Buddy 主开关'}
+                        label={enabled ? '伴侣开' : '伴侣关'}
+                        onClick={() => setEnabled((value) => !value)}
+                      />
+                      <CompanionModeButton
+                        active={voiceOutputEffectiveEnabled && isVoiceOutputAvailable}
+                        ariaLabel={
+                          !isVoiceOutputFeatureReady
+                            ? '正在读取 Buddy 远端设置'
+                            : !isVoiceOutputFeatureEnabled
+                              ? '远端已关闭 Buddy 播报功能'
+                              : isVoiceOutputAvailable
+                                ? voiceOutputEnabled
+                                  ? '关闭 Buddy 本地播报'
+                                  : '开启 Buddy 本地播报'
+                                : '当前环境不支持 Buddy 本地播报'
+                        }
+                        disabled={
+                          !isVoiceOutputAvailable ||
+                          !isVoiceOutputFeatureReady ||
+                          !isVoiceOutputFeatureEnabled
+                        }
+                        label={
+                          !isVoiceOutputFeatureReady
+                            ? '读取中'
+                            : !isVoiceOutputFeatureEnabled
+                              ? companionFeatureMode === 'off'
+                                ? '功能关闭'
+                                : '远端关闭'
+                              : !isVoiceOutputAvailable
+                                ? '无播报'
+                                : isSpeaking
+                                  ? '播报中'
+                                  : voiceOutputEnabled
+                                    ? '播报开'
+                                    : '播报关'
+                        }
+                        onClick={() => setVoiceOutputEnabled((value) => !value)}
+                      />
+                      <CompanionSyncBadge label={syncStatusLabel} state={syncStatus} />
+                      <CompanionModeButton
+                        active={quietMode}
+                        ariaLabel={quietMode ? '关闭安静模式' : '开启安静模式'}
+                        label={quietMode ? '安静模式' : '低打扰'}
+                        onClick={() => setQuietMode((value) => !value)}
+                      />
+                      <CompanionModeButton
+                        active={muted}
+                        ariaLabel={muted ? '取消 Buddy 静音' : '将 Buddy 设为静音'}
+                        label={muted ? '已静音' : '可出声'}
+                        onClick={() => setMuted((value) => !value)}
+                      />
+                      <CompanionModeButton
+                        active={reducedMotion}
+                        ariaLabel={reducedMotion ? '关闭 Buddy 减少动效' : '开启 Buddy 减少动效'}
+                        label={reducedMotion ? '减动效' : '完整动效'}
+                        onClick={() => setReducedMotion((value) => !value)}
+                      />
+                      <CompanionModeButton
+                        active={false}
+                        ariaLabel="关闭 Buddy 设置面板"
+                        label="关闭"
+                        onClick={() => setPanelOpen(false)}
+                      />
+                    </div>
+                  </div>
+
                   <div
+                    id="chat-companion-panel"
+                    data-testid="companion-panel"
                     style={{
-                      fontSize: 8,
-                      letterSpacing: '0.04em',
-                      textTransform: 'uppercase',
-                      color: 'var(--text-3)',
-                      fontWeight: 700,
+                      marginTop: 3,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 3,
                     }}
                   >
-                    最近会话输出
-                  </div>
-                  <div style={{ marginTop: 1, fontSize: 8.5, color: 'var(--text-2)' }}>
-                    短句出声后退回边缘。
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: 4,
+                        flexWrap: 'wrap',
+                        borderRadius: 8,
+                        border: '1px solid var(--border-subtle)',
+                        padding: '4px 5px 4px',
+                        background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+                        <div style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--text)' }}>
+                          {profile.name} · {profile.species}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 1,
+                            fontSize: 9,
+                            lineHeight: 1.28,
+                            color: 'var(--text-2)',
+                            wordBreak: 'break-word',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 1,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {profile.note}
+                        </div>
+                        <div style={{ marginTop: 3, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                          {companionStats.map((stat) => (
+                            <span
+                              key={stat.key}
+                              style={{
+                                height: 15,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3,
+                                padding: '0 4px',
+                                borderRadius: 999,
+                                background:
+                                  'color-mix(in oklch, var(--surface-hover) 88%, transparent)',
+                                color: 'var(--text-2)',
+                                fontSize: 7.5,
+                                fontWeight: 700,
+                              }}
+                            >
+                              <span>{stat.label}</span>
+                              <span style={{ color: 'var(--text)' }}>{stat.value}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                        {profile.traits.map((trait) => (
+                          <span
+                            key={trait}
+                            style={{
+                              height: 15,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0 3px',
+                              borderRadius: 999,
+                              background:
+                                'color-mix(in oklch, var(--surface-hover) 86%, transparent)',
+                              color: 'var(--text-2)',
+                              fontSize: 7.5,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {trait}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                      <CompanionMetaCard label="当前状态" value={statusText} />
+                      <CompanionMetaCard
+                        label="语音播报"
+                        value={`${speechStatusLabel} · ${syncStatusLabel}`}
+                      />
+                      <CompanionMetaCard
+                        label="关注范围"
+                        value={
+                          <span style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                            {focusTags.map((tag) => (
+                              <span
+                                key={tag}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  height: 15,
+                                  padding: '0 3px',
+                                  borderRadius: 999,
+                                  background: 'var(--bg-2)',
+                                  color: 'var(--text-2)',
+                                  fontSize: 7.5,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </span>
+                        }
+                      />
+                      <CompanionMetaCard
+                        label="当前阶段"
+                        value={`注入模式：${enabled ? companionFeatureMode : 'off'}`}
+                      />
+                      <CompanionMetaCard
+                        label="稀有度"
+                        value={
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3,
+                              justifyContent: 'flex-end',
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <span>{profile.rarityStars}</span>
+                            <span style={{ color: rarityVisual.color }}>{rarityVisual.label}</span>
+                          </span>
+                        }
+                      />
+                    </div>
+
+                    <div
+                      data-testid="companion-output-log"
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                        borderRadius: 8,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+                        padding: '4px 5px 4px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 3,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <div>
+                          <div
+                            style={{
+                              fontSize: 8,
+                              letterSpacing: '0.04em',
+                              textTransform: 'uppercase',
+                              color: 'var(--text-3)',
+                              fontWeight: 700,
+                            }}
+                          >
+                            最近会话输出
+                          </div>
+                          <div style={{ marginTop: 1, fontSize: 8.5, color: 'var(--text-2)' }}>
+                            短句出声后退回边缘。
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            height: 17,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '0 4px',
+                            borderRadius: 999,
+                            background: 'var(--bg-2)',
+                            color: 'var(--text-3)',
+                            fontSize: 8,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {outputHistory.length} 条
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {outputHistory.map((entry, index) => (
+                          <CompanionOutputRow key={entry.id} entry={entry} isLatest={index === 0} />
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <span
-                  style={{
-                    height: 17,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0 4px',
-                    borderRadius: 999,
-                    background: 'var(--bg-2)',
-                    color: 'var(--text-3)',
-                    fontSize: 8,
-                    fontWeight: 700,
-                  }}
-                >
-                  {outputHistory.length} 条
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {outputHistory.map((entry, index) => (
-                  <CompanionOutputRow key={entry.id} entry={entry} isLatest={index === 0} />
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </section>
+              </section>
+            </>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }

@@ -23,6 +23,13 @@ const MIN_QUERY_LENGTH = 2;
 interface UseChatSearchOptions {
   messages: ChatMessage[];
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * Optional hook that loads paged-out messages back into the DOM.
+   * When the search hit lives outside the currently rendered window
+   * (because we virtualize the tail of long sessions), the focus pass
+   * will call this and then re-query the DOM.
+   */
+  ensureMessageVisible?: (messageId: string) => Promise<void> | void;
 }
 
 interface UseChatSearchReturn {
@@ -56,6 +63,7 @@ interface UseChatSearchReturn {
 export function useChatSearch({
   messages,
   scrollRegionRef,
+  ensureMessageVisible,
 }: UseChatSearchOptions): UseChatSearchReturn {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQueryState] = useState('');
@@ -97,12 +105,30 @@ export function useChatSearch({
   useEffect(() => clearFlash, [clearFlash]);
 
   const focusMessage = useCallback(
-    (messageId: string) => {
+    async (messageId: string) => {
       const region = scrollRegionRef.current;
       if (!region) return;
-      const target = region.querySelector<HTMLElement>(
+      let target = region.querySelector<HTMLElement>(
         `[data-message-id="${cssAttrEscape(messageId)}"]`,
       );
+
+      // Hit lives outside the currently-rendered window (paged out).
+      // Ask the host to expand the visible range, then poll for the
+      // node to appear before bailing.
+      if (!target && ensureMessageVisible) {
+        try {
+          await ensureMessageVisible(messageId);
+        } catch {
+          /* fall through */
+        }
+        const deadlineMs = performance.now() + 1500;
+        while (!target && performance.now() < deadlineMs) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          target = region.querySelector<HTMLElement>(
+            `[data-message-id="${cssAttrEscape(messageId)}"]`,
+          );
+        }
+      }
       if (!target) return;
 
       // Smooth-scroll into view. `block: 'center'` so the matched card
@@ -123,7 +149,7 @@ export function useChatSearch({
         flashTimerRef.current = null;
       }, FLASH_DURATION_MS);
     },
-    [clearFlash, scrollRegionRef],
+    [clearFlash, ensureMessageVisible, scrollRegionRef],
   );
 
   const open = useCallback((initialQuery?: string) => {
@@ -148,7 +174,9 @@ export function useChatSearch({
       const wrapped = clampSearchIndex(matchIndex, matches.length);
       setCurrentIndex(wrapped);
       const target = matches[wrapped];
-      if (target) focusMessage(target.messageId);
+      if (target) {
+        void focusMessage(target.messageId);
+      }
     },
     [matches, focusMessage],
   );

@@ -218,15 +218,6 @@ textarea {
   }
 }
 
-@keyframes team-v2-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -244,73 +235,122 @@ textarea {
   }
 }
 
+@keyframes route-loader-orbit-reverse {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
 @keyframes route-loader-pulse {
   0%,
   100% {
-    transform: scale(0.88);
-    opacity: 0.72;
+    transform: scale(0.86);
+    opacity: 0.7;
+    box-shadow:
+      0 0 0 6px var(--accent-muted),
+      0 0 18px -2px var(--accent);
   }
 
   50% {
-    transform: scale(1);
+    transform: scale(1.04);
     opacity: 1;
+    box-shadow:
+      0 0 0 10px var(--accent-muted),
+      0 0 28px -2px var(--accent);
+  }
+}
+
+@keyframes route-loader-aura {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 0.95;
+    transform: scale(1.08);
   }
 }
 
 @keyframes route-loader-track {
   0% {
-    transform: translateX(-72%) scaleX(0.55);
-    opacity: 0.32;
+    transform: translateX(-110%) scaleX(0.55);
+    opacity: 0.28;
   }
 
-  55% {
-    transform: translateX(18%) scaleX(1);
+  45% {
+    transform: translateX(0%) scaleX(1);
     opacity: 1;
   }
 
   100% {
-    transform: translateX(82%) scaleX(0.62);
-    opacity: 0.38;
+    transform: translateX(110%) scaleX(0.6);
+    opacity: 0.32;
+  }
+}
+
+@keyframes route-loader-track-tail {
+  0% {
+    transform: translateX(-160%) scaleX(0.4);
+    opacity: 0;
+  }
+
+  50% {
+    transform: translateX(-30%) scaleX(0.7);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: translateX(140%) scaleX(0.4);
+    opacity: 0;
+  }
+}
+
+@keyframes route-loader-caption-shimmer {
+  0% {
+    background-position: -180% 0;
+  }
+  100% {
+    background-position: 280% 0;
   }
 }
 
 @keyframes route-loader-panel-in {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.985);
+    transform: translateY(12px) scale(0.978);
+    filter: blur(6px);
   }
 
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 }
 
 @keyframes route-page-enter {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.986);
-    filter: blur(12px) saturate(0.84);
+    transform: translate3d(0, 18px, 0) scale(0.986);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0) saturate(1);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes route-page-exit {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0) saturate(1);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 
   to {
     opacity: 0;
-    transform: translateY(-12px) scale(0.992);
-    filter: blur(10px) saturate(0.84);
+    transform: translate3d(0, -12px, 0) scale(0.992);
   }
 }
 
@@ -852,83 +892,9 @@ textarea {
   flex-direction: column;
   overflow: hidden;
 }
-.team-v2-control {
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    color 120ms ease,
-    opacity 120ms ease,
-    transform 120ms ease;
-  touch-action: manipulation;
-}
-.team-v2-root button:not(.team-v2-control),
-.team-v2-root [role='button']:not(.team-v2-control) {
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    color 120ms ease,
-    opacity 120ms ease,
-    transform 120ms ease;
-}
-.team-v2-control--surface {
-  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
-}
-.team-v2-control--transparent {
-  background: transparent;
-}
-.team-v2-control--accent-soft {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-}
-.team-v2-control--tab-active {
-  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
-}
-.team-v2-control:hover:not(:disabled),
-.team-v2-control[role='button']:hover,
-.team-v2-root button:not(.team-v2-control):hover:not(:disabled),
-.team-v2-root [role='button']:not(.team-v2-control):hover {
-  background: color-mix(in srgb, var(--surface-hover) 72%, var(--surface));
-}
-.team-v2-control--accent-soft:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
-}
-.team-v2-control:active:not(:disabled),
-.team-v2-control[role='button']:active,
-.team-v2-root button:not(.team-v2-control):active:not(:disabled),
-.team-v2-root [role='button']:not(.team-v2-control):active {
-  transform: scale(0.97);
-  background: color-mix(in srgb, var(--surface-hover) 82%, var(--bg-2));
-}
-.team-v2-control:focus-visible,
-.team-v2-control[role='button']:focus-visible,
-.team-v2-root button:not(.team-v2-control):focus-visible,
-.team-v2-root [role='button']:not(.team-v2-control):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.team-v2-control:disabled,
-.team-v2-root button:not(.team-v2-control):disabled {
-  transform: none;
-}
-.team-v2-task-card {
-  background: color-mix(in srgb, var(--bg-2) 80%, var(--bg));
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
-}
-.team-v2-task-card:hover {
-  box-shadow: var(--shadow-md);
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-}
-.team-v2-panel-tab-content {
-  animation: team-v2-panel-tab-fade 150ms ease;
-}
-.team-v2-layer-card-active {
-  animation: team-v2-pulse 2.4s ease-in-out infinite;
-}
+/* team-v2 控件 / 任务卡 / 面板动画规则已迁移到
+   `pages/team/runtime/styles/team-runtime.css`，由 `TeamPageV2.tsx` 加载。 */
+
 .page-root-row {
   flex-direction: row;
 }
@@ -1121,13 +1087,41 @@ textarea {
   font-size: 12px;
 }
 .spinner {
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  animation: spin 0.8s linear infinite;
+  position: relative;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--accent) 110deg,
+    transparent 220deg,
+    var(--accent) 320deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(circle at center, transparent 9px, #000 10px);
+  mask: radial-gradient(circle at center, transparent 9px, #000 10px);
+  animation: spin 1s cubic-bezier(0.6, 0.05, 0.4, 0.95) infinite;
+  filter: drop-shadow(0 0 6px var(--accent-muted));
+}
+
+.spinner::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-top-color: var(--accent);
+  opacity: 0.55;
+  animation: spin 1.6s linear infinite reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .spinner::after {
+    animation: none;
+  }
 }
 
 /* ── Login Page ── */
@@ -1599,32 +1593,3 @@ textarea {
   }
 }
 
-/* ───── 260516-team-page-v2 · 紧凑流程图脉冲动画 ───── */
-@keyframes team-v2-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.02);
-  }
-}
-
-@keyframes team-v2-panel-tab-fade {
-  from {
-    opacity: 0;
-    transform: translateX(4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .team-v2-layer-card-active,
-  .team-v2-panel-tab-content {
-    animation: none;
-  }
-}

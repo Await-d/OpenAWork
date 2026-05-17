@@ -22,7 +22,10 @@
     "@openAwork/web-client": "workspace:*",
     "@tauri-apps/api": "^2.10.1",
     "@types/three": "^0.183.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "fuzzysort": "^3.1.0",
+    "mammoth": "^1.12.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
@@ -30,6 +33,7 @@
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "three": "^0.183.2",
+    "xlsx": "^0.18.5",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
