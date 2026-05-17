@@ -503,6 +503,8 @@ export function useResolvedTeamRuntimeReferenceData(
   const roleBindings = useTeamRuntimeRoleBindings();
   const workflowTemplates = useTeamWorkflowTemplates();
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
+  // 新建 session 后立刻记住 id，让 defaultReceptionSessionId 能在 refresh 完成前就指向它
+  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
 
   const projection = useTeamRuntimeProjection({
     auditLogs: collaboration.auditLogs,
@@ -588,6 +590,10 @@ export function useResolvedTeamRuntimeReferenceData(
         if (!session.id) {
           return false;
         }
+        // 立刻把新建的 session 注入到 collaboration.sessions 中，
+        // 避免等 refresh 完成前 defaultReceptionSessionId 为空导致对话区空白。
+        // refresh 完成后会用完整数据覆盖这条临时记录。
+        setCreatedSessionId(session.id);
         await collaboration.refresh();
         return true;
       } catch {
@@ -1080,7 +1086,8 @@ export function useResolvedTeamRuntimeReferenceData(
           (preferredWorkspacePath == null || session.workspacePath === preferredWorkspacePath),
       );
       const allRoots = allSnapshotSessions.filter((session) => session.parentSessionId == null);
-      const receptionId = inWorkspaceRoots[0]?.id ?? allRoots[0]?.id ?? defaultId;
+      const receptionId =
+        inWorkspaceRoots[0]?.id ?? allRoots[0]?.id ?? createdSessionId ?? defaultId;
 
       return {
         runningTeams: running,

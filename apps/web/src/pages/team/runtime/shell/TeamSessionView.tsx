@@ -174,6 +174,8 @@ export function TeamSessionView({
         } else {
           await state.submitInbound('user_input', { text } as never);
         }
+        // 清空输入框
+        state.setInput('');
         // 重新加载快照，让最新落库的消息显示出来
         await state.reload();
       } catch (err) {

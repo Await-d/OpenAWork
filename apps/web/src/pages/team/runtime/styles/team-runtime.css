@@ -170,7 +170,6 @@
   }
 }
 
-
 /* ──────────────────────────────────────────────────────────────────
  * 通用 hover / active 工具类
  *
@@ -334,10 +333,11 @@
   }
 }
 
-
 /* context menu item：hover 与 focus 行为一致（菜单键盘导航需要） */
 .team-menu-item {
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .team-menu-item:hover:not(:disabled),
 .team-menu-item:focus-visible {
@@ -351,7 +351,9 @@
 
 /* create CTA：accent 半透底，hover 加深 */
 .team-cta-accent {
-  transition: background 150ms ease, border-color 150ms ease;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
 }
 .team-cta-accent:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 22%, var(--surface));
@@ -359,12 +361,13 @@
 
 /* 透明 icon button：hover 出 surface alpha */
 .team-icon-ghost {
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .team-icon-ghost:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text-3) 16%, transparent);
 }
-
 
 /* dynamic-border：依赖 element `style={{ '--hover-border': someColor }}` */
 .team-hover-border {
@@ -374,10 +377,11 @@
   border-color: var(--hover-border, var(--accent));
 }
 
-
 /* success-CTA：success 主调按钮 hover 加深 */
 .team-cta-success {
-  transition: background 150ms ease, border-color 150ms ease;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
 }
 .team-cta-success:hover:not(:disabled) {
   background: color-mix(in oklch, var(--success) 18%, var(--bg));
@@ -385,27 +389,32 @@
 
 /* outline-secondary：边框默认按钮 hover 边色变浅 + 字色提亮 */
 .team-btn-outline {
-  transition: border-color 150ms ease, color 150ms ease;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease;
 }
 .team-btn-outline:hover:not(:disabled) {
   border-color: var(--border-subtle);
   color: var(--text-2);
 }
 
-
 /* danger ghost icon button：hover 出红底红字（用于 chip 关闭等） */
 .team-icon-danger {
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .team-icon-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger, var(--error, #ef4444)) 18%, transparent);
   color: var(--danger, var(--error, #ef4444));
 }
 
-
 /* dashed-add：dashed-border 新建按钮 hover 把边色变成 accent + 内底变浅 */
 .team-dashed-add {
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
 }
 .team-dashed-add:hover:not(:disabled) {
   background: var(--surface-hover);
@@ -415,18 +424,21 @@
 
 /* dashed-add-accent：text 也变 accent，常用于内部新建 sub-task */
 .team-dashed-add-accent {
-  transition: color 150ms ease, border-color 150ms ease;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
 }
 .team-dashed-add-accent:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
 }
 
-
 /* dynamic-tint card：依赖 element `style={{ '--tint': someColor }}`
  * 仅改动背景与阴影，边框保持原状。 */
 .team-card-tinted {
-  transition: background 150ms ease, box-shadow 150ms ease;
+  transition:
+    background 150ms ease,
+    box-shadow 150ms ease;
 }
 .team-card-tinted:hover:not(:disabled):not([data-active='true']) {
   background: color-mix(in oklch, var(--tint, var(--accent)) 3%, var(--card-bg));
@@ -435,14 +447,16 @@
 
 /* 同上但 hover 时连带把边框变成同色调，用于「点击卡片切换选中态」类交互。 */
 .team-card-tinted-bordered {
-  transition: background 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  transition:
+    background 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease;
 }
 .team-card-tinted-bordered:hover:not(:disabled):not([data-active='true']) {
   background: color-mix(in oklch, var(--tint, var(--accent)) 3%, var(--card-bg));
   box-shadow: var(--shadow-md);
   border-color: color-mix(in oklch, var(--tint, var(--accent)) 25%, var(--border-subtle));
 }
-
 
 /* surface-bg：透明按钮 hover 出 var(--surface) 实色（轻量 chevron / 折叠按钮等） */
 .team-hover-surface-bg {
@@ -452,16 +466,16 @@
   background: var(--surface);
 }
 
-
 /* hover-surface-bordered-strong：surface-hover + 出现 border（agent chip 等） */
 .team-hover-surface-bordered-strong {
-  transition: background 150ms ease, border-color 150ms ease;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
 }
 .team-hover-surface-bordered-strong:hover:not(:disabled):not([data-active='true']) {
   background: var(--surface-hover);
   border-color: var(--border-subtle);
 }
-
 
 /* ───── 状态点呼吸 glow（暂停/恢复按钮内的状态点） ──────────────
    原先以 `<style>{...}` 形式由 `TopTeamHeader.tsx` 在组件 body 中注入；
@@ -529,7 +543,6 @@
   }
 }
 
-
 /* 标准输入框 focus：边色变 accent。
  * 替代 onFocus/onBlur 手改 borderColor 的写法。 */
 .team-input-focusable {
@@ -542,7 +555,9 @@
 
 /* 同上但 focus 同时叠一圈 accent 光晕（写消息那种主输入框）。 */
 .team-input-focusable-glow {
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 .team-input-focusable-glow:focus {
   border-color: var(--accent);

@@ -741,7 +741,9 @@
    dense lists like grep results. */
 .styled-path-clickable {
   border-radius: 4px;
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .styled-path-clickable:hover .styled-path-name,

@@ -983,12 +983,12 @@ textarea {
     ),
     /* 下层:仅底部 2px 是 track 灰色 */
     linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 2px,
-      color-mix(in oklch, var(--border) 100%, transparent) 2px,
-      color-mix(in oklch, var(--border) 100%, transparent) 4px
-    );
+        to bottom,
+        transparent 0,
+        transparent 2px,
+        color-mix(in oklch, var(--border) 100%, transparent) 2px,
+        color-mix(in oklch, var(--border) 100%, transparent) 4px
+      );
   pointer-events: none;
   opacity: 1;
   transition: opacity 200ms ease;
@@ -1007,7 +1007,7 @@ textarea {
   border-radius: 999px;
   pointer-events: none;
   transition:
-    width 400ms cubic-bezier(.4, 0, .2, 1),
+    width 400ms cubic-bezier(0.4, 0, 0.2, 1),
     background 300ms ease,
     opacity 200ms ease;
 }
@@ -1592,4 +1592,3 @@ textarea {
     animation: none;
   }
 }
-

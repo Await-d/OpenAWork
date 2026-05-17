@@ -125,7 +125,6 @@
   }
 }
 
-
 /* file-tree 节点 hover；只在非高亮态下生效。
  * 注意：节点 inline style 已经控制了「expanded / active」时的底色，
  * 这里只覆盖 hover 时的临时态，不与状态色冲突。 */
@@ -135,7 +134,6 @@
 .file-tree-file:hover:not([data-active='true']):not([data-highlighted='true']):not(:disabled) {
   background: color-mix(in oklch, var(--text) 6%, transparent);
 }
-
 
 /* list-row：var(--bg-2) 底色行 hover 出更亮的 var(--bg-1) + 实边 */
 .ui-hover-list-row {
