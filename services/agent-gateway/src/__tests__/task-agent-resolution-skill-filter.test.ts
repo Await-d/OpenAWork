@@ -7,9 +7,16 @@
  *   - droppedSkills is reported so the caller can audit-log.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveDelegatedAgent } from '../task-agent-resolution.js';
 import type { EffectiveSkill } from '../skill-selection.js';
+
+vi.mock('../db.js', () => ({
+  sqliteAll: vi.fn(() => []),
+  sqliteGet: vi.fn(() => undefined),
+  sqliteRun: vi.fn(),
+  sqliteTransaction: <T>(fn: () => T) => fn(),
+}));
 
 function effective(skillId: string, enabled = true): EffectiveSkill {
   return {
