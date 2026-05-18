@@ -16,8 +16,8 @@
     "notification:default",
     "autostart:default",
     "core:webview:allow-create-webview",
-    "core:webview:allow-set-size",
-    "core:webview:allow-set-position",
-    "core:webview:allow-close"
+    "core:webview:allow-set-webview-size",
+    "core:webview:allow-set-webview-position",
+    "core:webview:allow-webview-close"
   ]
 }
