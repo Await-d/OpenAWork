@@ -236,7 +236,7 @@ ${escapeForInlineScript(code)}
         margin: 0;
         min-height: 100%;
         background: var(--fg-on-accent);
-        color: var(--bg-base, #080b12);
+        color: var(--bg-base);
       }
 
       body {

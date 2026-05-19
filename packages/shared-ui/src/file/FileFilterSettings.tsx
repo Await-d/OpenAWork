@@ -10,10 +10,10 @@ export interface FileFilterSettingsProps {
 }
 
 const inputBase: CSSProperties = {
-  background: 'var(--bg-base, #080b12)',
+  background: 'var(--bg-base))',
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   borderRadius: 6,
-  color: 'var(--fg-default, #c8d1e0)',
+  color: 'var(--fg-default))',
   fontSize: 12,
   padding: '0.35rem 0.6rem',
   outline: 'none',
@@ -37,7 +37,7 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         fontFamily: 'system-ui, sans-serif',
@@ -51,10 +51,10 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
           文件过滤规则
         </span>
-        <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)', marginTop: 2 }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted))', marginTop: 2 }}>
           .crushignore 规则 — 每行一条
         </div>
       </div>
@@ -66,7 +66,7 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
               padding: '1.5rem',
               textAlign: 'center',
               fontSize: 12,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
             }}
           >
             暂无过滤规则。
@@ -87,7 +87,7 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
                 style={{
                   fontFamily: 'monospace',
                   fontSize: 12,
-                  color: 'var(--fg-default, #c8d1e0)',
+                  color: 'var(--fg-default))',
                 }}
               >
                 {p}
@@ -97,7 +97,7 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
                 onClick={() => onRemove(p)}
                 style={{
                   background: 'transparent',
-                  border: '1px solid var(--fg-subtle, #4d5b6e)',
+                  border: '1px solid var(--fg-subtle))',
                   borderRadius: 5,
                   color: color.danger,
                   padding: '0.15rem 0.5rem',
@@ -133,7 +133,7 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
           onClick={handleAdd}
           disabled={!draft.trim()}
           style={{
-            background: draft.trim() ? 'var(--accent, #5cd4c0)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            background: draft.trim() ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,

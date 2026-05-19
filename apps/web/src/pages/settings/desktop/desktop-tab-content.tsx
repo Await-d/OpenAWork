@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { getPairingQr, type PairingQrResponse } from '@openAwork/web-client';
 import { QRCodeDisplay } from '@openAwork/shared-ui';
-import { PinInput } from '../../../components/common/PinInput.js';
-import { useAuthStore } from '../../../stores/auth.js';
-import { logger } from '../../../utils/logger.js';
+import { PinInput } from '../../../components/common/modal/PinInput.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
+import { logger } from '../../../utils/log/logger.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -104,7 +104,7 @@ const ROW_STYLE: React.CSSProperties = {
   border: '1px solid var(--border-subtle)',
   borderRadius: 10,
   padding: '10px 12px',
-  background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+  background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
 };
 
 const PATH_BOX: React.CSSProperties = {
@@ -120,14 +120,14 @@ const PATH_BOX: React.CSSProperties = {
 const SECONDARY_BTN: React.CSSProperties = {
   ...BP,
   background: 'transparent',
-  border: '1px solid var(--border)',
-  color: 'var(--text-2)',
+  border: '1px solid var(--border-default)',
+  color: 'var(--fg-default)',
 };
 
 const DANGER_BTN: React.CSSProperties = {
   ...SECONDARY_BTN,
-  color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))',
-  borderColor: 'color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 40%, transparent)',
+  color: 'var(--danger))',
+  borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
 };
 
 function ToggleSwitch({
@@ -156,7 +156,7 @@ function ToggleSwitch({
         border: 'none',
         padding: 0,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--border)',
+        background: checked ? 'var(--accent)' : 'var(--border-default)',
         flexShrink: 0,
         opacity: disabled ? 0.5 : 1,
       }}
@@ -169,7 +169,7 @@ function ToggleSwitch({
           width: 20,
           height: 20,
           borderRadius: '50%',
-          background: 'var(--surface)',
+          background: 'var(--bg-overlay)',
           boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
           transition: 'left 180ms ease',
         }}
@@ -515,7 +515,7 @@ export function DesktopTabContent() {
     return (
       <section style={SS}>
         <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
           这些设置仅在 OpenAWork 桌面端（Tauri）应用中生效。请在桌面端启动后再访问此面板。
         </div>
       </section>
@@ -526,7 +526,7 @@ export function DesktopTabContent() {
     return (
       <section style={SS}>
         <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>正在加载桌面端配置…</div>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载桌面端配置…</div>
       </section>
     );
   }
@@ -535,7 +535,7 @@ export function DesktopTabContent() {
     return (
       <section style={SS}>
         <h3 style={ST}>桌面端</h3>
-        <div style={{ fontSize: 12, color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))' }}>
+        <div style={{ fontSize: 12, color: 'var(--danger))' }}>
           {error ?? '桌面端配置加载失败。请重启应用后重试。'}
         </div>
       </section>
@@ -585,9 +585,9 @@ export function DesktopTabContent() {
           style={{
             padding: '10px 12px',
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 40%, transparent)',
-            background: 'color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 8%, transparent)',
-            color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))',
+            border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+            background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+            color: 'var(--danger))',
             fontSize: 12,
           }}
         >
@@ -597,7 +597,7 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>关闭按钮行为</h3>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           决定点击主窗口右上角 X
           按钮时的默认动作。也可在右键托盘菜单的「关闭按钮行为」子菜单实时切换。
         </div>
@@ -615,13 +615,13 @@ export function DesktopTabContent() {
                   cursor: 'pointer',
                   borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
                   background: active
-                    ? 'color-mix(in srgb, var(--accent) 8%, var(--surface))'
+                    ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
                     : ROW_STYLE.background,
                   textAlign: 'left',
                 }}
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                     {opt.label}
                   </div>
                   <div
@@ -629,7 +629,7 @@ export function DesktopTabContent() {
                       marginTop: 3,
                       fontSize: 11,
                       lineHeight: 1.5,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                     }}
                   >
                     {opt.description}
@@ -641,7 +641,7 @@ export function DesktopTabContent() {
                     width: 18,
                     height: 18,
                     borderRadius: '50%',
-                    border: `2px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                    border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -669,7 +669,7 @@ export function DesktopTabContent() {
         <h3 style={ST}>开机自启</h3>
         <div style={ROW_STYLE}>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
               开机时自动启动 OpenAWork
             </div>
             <div
@@ -677,7 +677,7 @@ export function DesktopTabContent() {
                 marginTop: 3,
                 fontSize: 11,
                 lineHeight: 1.5,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
               }}
             >
               通过系统级机制注册（Windows: 注册表 Run 项 / macOS: LaunchAgent / Linux: autostart）。
@@ -720,13 +720,13 @@ export function DesktopTabContent() {
               lineHeight: 1.5,
               border:
                 autostartMsg.type === 'success'
-                  ? '1px solid color-mix(in srgb, var(--success, #3dd49a) 35%, transparent)'
-                  : '1px solid color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 40%, transparent)',
+                  ? '1px solid color-mix(in srgb, var(--success) 35%, transparent)'
+                  : '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
               background:
                 autostartMsg.type === 'success'
-                  ? 'color-mix(in srgb, var(--success, #3dd49a) 8%, transparent)'
-                  : 'color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 8%, transparent)',
-              color: autostartMsg.type === 'success' ? 'var(--success, #3dd49a)' : 'var(--danger, var(--danger, var(--danger, #f06b7e)))',
+                  ? 'color-mix(in srgb, var(--success) 8%, transparent)'
+                  : 'color-mix(in srgb, var(--danger) 8%, transparent)',
+              color: autostartMsg.type === 'success' ? 'var(--success))' : 'var(--danger))',
             }}
           >
             <span aria-hidden style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>
@@ -770,13 +770,13 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>数据根目录</h3>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           所有桌面端持久化数据（Gateway 数据库、缓存等）的存放根目录。 切换后将自动停止 sidecar，把
           <code
             style={{
               padding: '0 4px',
               borderRadius: 4,
-              background: 'var(--surface-raised, var(--surface))',
+              background: 'var(--surface-raised, var(--bg-overlay))',
               fontFamily: 'ui-monospace, monospace',
             }}
           >
@@ -788,7 +788,7 @@ export function DesktopTabContent() {
             style={{
               padding: '0 4px',
               borderRadius: 4,
-              background: 'var(--surface-raised, var(--surface))',
+              background: 'var(--surface-raised, var(--bg-overlay))',
               fontFamily: 'ui-monospace, monospace',
             }}
           >
@@ -798,7 +798,7 @@ export function DesktopTabContent() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
             当前生效的数据目录
           </span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -815,11 +815,11 @@ export function DesktopTabContent() {
             </button>
           </div>
           {view.customDataRoot ? (
-            <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+            <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
               已自定义；默认为 <code>{view.defaultDataRoot}</code>
             </div>
           ) : (
-            <div style={{ fontSize: 10, color: 'var(--text-3)' }}>当前使用默认根目录</div>
+            <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>当前使用默认根目录</div>
           )}
         </div>
 
@@ -847,7 +847,7 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>解锁 PIN</h3>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           为桌面端设置一个 4-8 位数字 PIN。每次<strong>应用启动</strong>或
           <strong>从托盘唤醒主窗口</strong>时都会要求输入 PIN，避免他人开机后直接看到 OpenAWork
           数据。PIN 仅在本机存储 argon2 哈希，不会同步到 Gateway。
@@ -862,13 +862,13 @@ export function DesktopTabContent() {
             }}
           >
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>空闲自动锁</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>空闲自动锁</div>
               <div
                 style={{
                   marginTop: 3,
                   fontSize: 11,
                   lineHeight: 1.5,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 超过设定时长无键鼠活动时自动锁定。选「禁用」则仅启动和从托盘唤醒时要求 PIN。
@@ -885,11 +885,11 @@ export function DesktopTabContent() {
                     disabled={migrationInFlight}
                     style={{
                       borderRadius: 6,
-                      border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                      border: `1px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
                       background: active
-                        ? 'color-mix(in srgb, var(--accent) 15%, var(--surface))'
-                        : 'var(--surface)',
-                      color: active ? 'var(--accent)' : 'var(--text-2)',
+                        ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-overlay))'
+                        : 'var(--bg-overlay)',
+                      color: active ? 'var(--accent)' : 'var(--fg-default)',
                       padding: '4px 10px',
                       fontSize: 11,
                       cursor: migrationInFlight ? 'not-allowed' : 'pointer',
@@ -907,7 +907,7 @@ export function DesktopTabContent() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={ROW_STYLE}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   {view.hasPin ? '已启用 PIN 锁屏' : '当前未设置 PIN'}
                 </div>
                 <div
@@ -915,7 +915,7 @@ export function DesktopTabContent() {
                     marginTop: 3,
                     fontSize: 11,
                     lineHeight: 1.5,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                   }}
                 >
                   {view.hasPin
@@ -974,12 +974,12 @@ export function DesktopTabContent() {
               padding: '16px 18px',
               borderRadius: 10,
               border: '1px solid var(--border-subtle)',
-              background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
             }}
           >
             {pinMode === 'change' || pinMode === 'remove' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
                   当前 PIN
                 </span>
                 <PinInput
@@ -1000,7 +1000,7 @@ export function DesktopTabContent() {
             {pinMode === 'set' || pinMode === 'change' ? (
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
                     新 PIN（{view.pinDigits} 位数字）
                   </span>
                   <PinInput
@@ -1017,7 +1017,7 @@ export function DesktopTabContent() {
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
                     确认新 PIN
                   </span>
                   <PinInput
@@ -1038,7 +1038,7 @@ export function DesktopTabContent() {
             {pinError ? (
               <div
                 role="alert"
-                style={{ fontSize: 11, color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))', lineHeight: 1.5 }}
+                style={{ fontSize: 11, color: 'var(--danger))', lineHeight: 1.5 }}
               >
                 {pinError}
               </div>
@@ -1083,7 +1083,7 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>手机端配对</h3>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           生成一次性二维码让手机端 APP 扫描登录。二维码有效期 5 分钟，扫描后手机端会直接完成登录，
           并共享此桌面端的 admin 会话。
         </div>
@@ -1097,7 +1097,7 @@ export function DesktopTabContent() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {pairingLoading && !pairingQr ? (
-              <div style={{ fontSize: 12, color: 'var(--text-3)' }}>正在生成二维码…</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在生成二维码…</div>
             ) : null}
 
             {pairingError ? (
@@ -1106,9 +1106,9 @@ export function DesktopTabContent() {
                 style={{
                   padding: '8px 10px',
                   borderRadius: 8,
-                  border: '1px solid color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 40%, transparent)',
-                  background: 'color-mix(in srgb, var(--danger, var(--danger, var(--danger, #f06b7e))) 8%, transparent)',
-                  color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))',
+                  border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+                  background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+                  color: 'var(--danger))',
                   fontSize: 12,
                 }}
               >
@@ -1140,7 +1140,7 @@ export function DesktopTabContent() {
                     flex: 1,
                   }}
                 >
-                  <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
                     手机端扫描步骤
                   </span>
                   <ol
@@ -1148,7 +1148,7 @@ export function DesktopTabContent() {
                       margin: 0,
                       paddingLeft: 18,
                       fontSize: 11,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       lineHeight: 1.6,
                     }}
                   >
@@ -1158,7 +1158,7 @@ export function DesktopTabContent() {
                   </ol>
 
                   <div style={{ marginTop: 4 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+                    <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
                       Host 地址
                     </span>
                     <code
@@ -1194,7 +1194,7 @@ export function DesktopTabContent() {
                     </button>
                   </div>
 
-                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginTop: 4 }}>
                     提示：若手机端与桌面端不在同一局域网，需先把网关暴露到公网 / 内网穿透， 再确保{' '}
                     <code>{pairingQr.hostUrl}</code> 在手机端能直接访问。
                   </div>
@@ -1207,13 +1207,13 @@ export function DesktopTabContent() {
 
       <section style={SS}>
         <h3 style={ST}>关于本地配置文件</h3>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
           桌面端持久化设置文件路径：
         </div>
         <code style={PATH_BOX} title={view.settingsFilePath}>
           {view.settingsFilePath}
         </code>
-        <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
           系统首次启动若检测到旧位置（<code>%APPDATA%\com.openAwork.desktop\settings.json</code>），
           会自动迁移到上述新位置，无需手动处理。
         </div>

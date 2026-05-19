@@ -37,8 +37,8 @@ const CATEGORY_COLOR: Record<RootCauseInfo['category'], string> = {
   logic_error: color.danger,
   missing_dependency: color.warning,
   env_issue: color.contrast,
-  input_format: 'var(--aux, #8b9cf5)',
-  model_capability: 'var(--aux, #8b9cf5)',
+  input_format: 'var(--aux))',
+  model_capability: 'var(--aux))',
 };
 
 export function RootCausePanel({
@@ -67,7 +67,7 @@ export function RootCausePanel({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: color.complementHover }}>✗ 失败：{nodeLabel}</span>
-        <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
           {attempts} 次尝试
         </span>
       </div>
@@ -108,11 +108,11 @@ export function RootCausePanel({
             )}
           </div>
 
-          <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' }}>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted))' }}>
             {analysis.whyRetryFailed}
           </div>
 
-          <div style={{ fontSize: 12, color: 'var(--fg-strong, #f1f4f8)', fontStyle: 'italic' }}>
+          <div style={{ fontSize: 12, color: 'var(--fg-strong))', fontStyle: 'italic' }}>
             建议：{analysis.fixSuggestion}
           </div>
 
@@ -133,7 +133,7 @@ export function RootCausePanel({
               style={{
                 fontSize: 12,
                 padding: '0.3rem 0.75rem',
-                background: 'var(--accent, #5cd4c0)',
+                background: 'var(--accent))',
                 color: color.fgOnAccent,
                 border: 'none',
                 borderRadius: 6,
@@ -151,7 +151,7 @@ export function RootCausePanel({
                 fontSize: 12,
                 padding: '0.3rem 0.75rem',
                 background: 'transparent',
-                color: 'var(--fg-muted, #7b8a9e)',
+                color: 'var(--fg-muted))',
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 borderRadius: 6,
                 cursor: 'pointer',

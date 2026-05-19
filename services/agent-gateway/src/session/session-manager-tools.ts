@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { Message, MessageContent } from '@openAwork/shared';
 import { z } from 'zod';
-import { sqliteAll, sqliteGet } from '../db.js';
+import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { extractMessageText } from './session-message-store.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';

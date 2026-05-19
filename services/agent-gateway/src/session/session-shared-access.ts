@@ -1,4 +1,4 @@
-import { sqliteAll, sqliteGet } from '../db.js';
+import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { sanitizeSessionMetadataJson } from './session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from './session-workspace-resolution.js';
 

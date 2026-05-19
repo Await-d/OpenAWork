@@ -29,23 +29,23 @@ const BADGE_BASE: CSSProperties = {
 
 const NEEDS_CLARIFICATION_STYLE: CSSProperties = {
   ...BADGE_BASE,
-  background: 'color-mix(in srgb, var(--danger, #d4574e) 14%, transparent)',
-  color: 'var(--danger, #d4574e)',
-  border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+  color: 'var(--danger))',
+  border: '1px solid color-mix(in srgb, var(--danger) 36%, transparent)',
 };
 
 const PARALLEL_STYLE: CSSProperties = {
   ...BADGE_BASE,
-  background: 'color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 14%, transparent)',
-  color: 'var(--aux, var(--aux, #8b9cf5))',
-  border: '1px solid color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--aux) 14%, transparent)',
+  color: 'var(--aux))',
+  border: '1px solid color-mix(in srgb, var(--aux) 36%, transparent)',
 };
 
 const STORY_STYLE: CSSProperties = {
   ...BADGE_BASE,
-  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 14%, transparent)',
-  color: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--success) 14%, transparent)',
+  color: 'var(--success))',
+  border: '1px solid color-mix(in srgb, var(--success) 36%, transparent)',
 };
 
 interface ArtifactMarkerInfo {
@@ -144,7 +144,7 @@ function Marker({
         style={{
           ...NEEDS_CLARIFICATION_STYLE,
           cursor: onClarificationClick ? 'pointer' : 'help',
-          background: 'color-mix(in srgb, var(--danger, #d4574e) 14%, transparent)',
+          background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
         }}
         title={`需要澄清：${info.question ?? ''}`}
       >

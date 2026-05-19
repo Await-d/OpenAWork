@@ -39,7 +39,7 @@ export function SkillManagerMobile({
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         overflow: 'hidden',
@@ -54,7 +54,7 @@ export function SkillManagerMobile({
         }}
       >
         <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' }}
+          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
         >
           Installed Skills
         </h2>
@@ -65,7 +65,7 @@ export function SkillManagerMobile({
           style={{
             padding: '2rem',
             textAlign: 'center',
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             fontSize: 12,
           }}
         >
@@ -94,7 +94,7 @@ export function SkillManagerMobile({
                     style={{
                       fontSize: 12,
                       fontWeight: 600,
-                      color: 'var(--fg-default, #c8d1e0)',
+                      color: 'var(--fg-default))',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -105,7 +105,7 @@ export function SkillManagerMobile({
                   <div
                     style={{
                       fontSize: 11,
-                      color: 'var(--fg-muted, #7b8a9e)',
+                      color: 'var(--fg-muted))',
                       marginTop: 2,
                       display: 'flex',
                       alignItems: 'center',
@@ -133,14 +133,14 @@ export function SkillManagerMobile({
                   <button
                     type="button"
                     onClick={() => onInstall(skill.id)}
-                    style={actionBtn('var(--accent, #5cd4c0)')}
+                    style={actionBtn('var(--accent))')}
                   >
                     Install
                   </button>
                   <button
                     type="button"
                     onClick={() => onUninstall(skill.id)}
-                    style={actionBtn('var(--fg-subtle, #4d5b6e)', clr.danger as string)}
+                    style={actionBtn('var(--fg-subtle))', clr.danger as string)}
                   >
                     Remove
                   </button>

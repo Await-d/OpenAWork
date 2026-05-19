@@ -25,9 +25,9 @@ const SEGMENT_BAR_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   padding: '8px 12px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 32%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 32%, transparent)',
   flexShrink: 0,
-  background: 'var(--bg)',
+  background: 'var(--bg-base)',
 };
 
 const SEGMENT_BTN_STYLE: CSSProperties = {
@@ -35,9 +35,9 @@ const SEGMENT_BTN_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '4px 12px',
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
   background: 'transparent',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
@@ -49,7 +49,7 @@ const SEGMENT_BTN_ACTIVE_STYLE: CSSProperties = {
   ...SEGMENT_BTN_STYLE,
   background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
   borderColor: 'color-mix(in srgb, var(--accent) 50%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const BADGE_STYLE: CSSProperties = {
@@ -58,8 +58,8 @@ const BADGE_STYLE: CSSProperties = {
   minWidth: 16,
   height: 16,
   borderRadius: 999,
-  background: 'var(--danger, #d4574e)',
-  color: 'var(--fg-on-accent, #ffffff)',
+  background: 'var(--danger))',
+  color: 'var(--fg-on-accent))',
   fontSize: 9,
   fontWeight: 700,
   display: 'inline-flex',

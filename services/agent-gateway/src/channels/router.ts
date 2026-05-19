@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { extractMessageText } from '../session/session-message-store.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';

@@ -8,9 +8,9 @@ import {
   type SSHConnectionEntry,
   type SSHAuthType,
 } from '@openAwork/shared-ui';
-import type { DevtoolsSourceState, SettingsVersionInfo } from '../settings-types.js';
+import type { DevtoolsSourceState, SettingsVersionInfo } from '../state/settings-types.js';
 import { InlineFailureNotice } from '../devtools/devtools-workbench-primitives.js';
-import { useUIStateStore } from '../../../stores/uiState.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 interface GitHubTriggerConfig {
   appId: string;
@@ -51,22 +51,22 @@ interface WorkspaceTabContentProps {
 
 const CARD: React.CSSProperties = {
   borderRadius: 8,
-  border: '1px solid var(--border)',
-  background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   padding: '8px 10px',
 };
 
 const DASHED_CARD: React.CSSProperties = {
   borderRadius: 8,
-  border: '1px dashed var(--border)',
-  background: 'color-mix(in srgb, var(--surface) 94%, var(--bg))',
+  border: '1px dashed var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
   padding: '8px 10px',
 };
 
 const SECTION_TITLE: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   margin: 0,
   lineHeight: 1.3,
   letterSpacing: '0.01em',
@@ -74,7 +74,7 @@ const SECTION_TITLE: React.CSSProperties = {
 
 const SECTION_SUB: React.CSSProperties = {
   fontSize: 10,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   margin: 0,
   marginTop: 2,
   lineHeight: 1.4,
@@ -88,7 +88,7 @@ const BADGE: React.CSSProperties = {
   height: 15,
   borderRadius: 8,
   background: 'var(--accent)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   fontSize: 9,
   fontWeight: 700,
   padding: '0 4px',
@@ -106,7 +106,7 @@ const ACTION_BTN: React.CSSProperties = {
   borderRadius: 6,
   border: '1px solid var(--accent)',
   background: 'var(--accent)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   fontSize: 10,
   fontWeight: 600,
   padding: '4px 9px',
@@ -116,9 +116,9 @@ const ACTION_BTN: React.CSSProperties = {
 
 const GHOST_BTN: React.CSSProperties = {
   borderRadius: 6,
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-default)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 10,
   padding: '4px 8px',
   cursor: 'pointer',
@@ -133,9 +133,9 @@ const DANGER_BTN: React.CSSProperties = {
 
 const FIELD_INPUT: React.CSSProperties = {
   borderRadius: 6,
-  border: '1px solid var(--border)',
-  background: 'color-mix(in srgb, var(--bg) 70%, var(--surface))',
-  color: 'var(--text)',
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-base) 70%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   fontSize: 10,
   padding: '5px 8px',
   outline: 'none',
@@ -150,20 +150,20 @@ const ROW: React.CSSProperties = {
 };
 
 function eventPillStyle(event: string): React.CSSProperties {
-  let bg = 'color-mix(in srgb, var(--text-3) 18%, transparent)';
-  let color = 'var(--text-2)';
+  let bg = 'color-mix(in srgb, var(--fg-muted) 18%, transparent)';
+  let color = 'var(--fg-default)';
   if (event.startsWith('push')) {
-    bg = 'color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 18%, transparent)';
-    color = 'var(--aux, var(--aux, #8b9cf5))';
+    bg = 'color-mix(in srgb, var(--aux) 18%, transparent)';
+    color = 'var(--aux))';
   } else if (event.startsWith('pull_request')) {
-    bg = 'color-mix(in srgb, var(--chart-5, var(--chart-5, #c4b5fd)) 18%, transparent)';
-    color = 'var(--chart-5, var(--chart-5, #c4b5fd))';
+    bg = 'color-mix(in srgb, var(--chart-5) 18%, transparent)';
+    color = 'var(--chart-5))';
   } else if (event.startsWith('issues')) {
-    bg = 'color-mix(in srgb, var(--warning, #f0b429) 18%, transparent)';
-    color = 'var(--warning, #f0b429)';
+    bg = 'color-mix(in srgb, var(--warning) 18%, transparent)';
+    color = 'var(--warning))';
   } else if (event.startsWith('workflow_run')) {
-    bg = 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 18%, transparent)';
-    color = 'var(--success, var(--success, #3dd49a))';
+    bg = 'color-mix(in srgb, var(--success) 18%, transparent)';
+    color = 'var(--success))';
   }
   return {
     display: 'inline-flex',
@@ -203,7 +203,7 @@ function CapabilityGrid({ enabled }: { enabled: boolean }) {
       {items.map((cap) => (
         <div
           key={cap}
-          style={{ ...ROW, fontSize: 10, color: enabled ? 'var(--accent)' : 'var(--text-3)' }}
+          style={{ ...ROW, fontSize: 10, color: enabled ? 'var(--accent)' : 'var(--fg-muted)' }}
         >
           <span style={{ fontSize: 9, fontWeight: 700 }}>{enabled ? '✓' : '○'}</span>
           <span>{cap}</span>
@@ -217,7 +217,7 @@ function BreadcrumbPath({ path, onNavigate }: { path: string; onNavigate: (p: st
   const parts = path.split('/').filter(Boolean);
   return (
     <div
-      style={{ ...ROW, flexWrap: 'wrap', fontSize: 10, color: 'var(--text-3)', marginBottom: 6 }}
+      style={{ ...ROW, flexWrap: 'wrap', fontSize: 10, color: 'var(--fg-muted)', marginBottom: 6 }}
     >
       <button
         type="button"
@@ -385,7 +385,7 @@ export function WorkspaceTabContent({
               .crushignore 规则
             </span>
           </div>
-          <div style={{ borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
+          <div style={{ borderRadius: 6, border: '1px solid var(--border-default)', overflow: 'hidden' }}>
             <FileFilterSettings
               patterns={filePatterns}
               onAdd={(p) => setFilePatterns((prev) => [...prev, p])}
@@ -402,11 +402,11 @@ export function WorkspaceTabContent({
                   gap: 3,
                   padding: '1px 6px',
                   borderRadius: 4,
-                  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-                  border: '1px solid var(--border)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                  border: '1px solid var(--border-default)',
                   fontFamily: 'monospace',
                   fontSize: 10,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                 }}
               >
                 <span>{p}</span>
@@ -417,7 +417,7 @@ export function WorkspaceTabContent({
                     background: 'none',
                     border: 'none',
                     cursor: 'pointer',
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     fontSize: 11,
                     padding: 0,
                     lineHeight: 1,
@@ -435,11 +435,11 @@ export function WorkspaceTabContent({
               alignItems: 'center',
               gap: 5,
               paddingTop: 3,
-              borderTop: '1px solid var(--border)',
+              borderTop: '1px solid var(--border-default)',
             }}
           >
             <span style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700 }}>●</span>
-            <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
               规则已自动保存到 .crushignore
             </span>
           </div>
@@ -461,7 +461,7 @@ export function WorkspaceTabContent({
                     width: 8,
                     height: 8,
                     borderRadius: '50%',
-                    background: desktopAutomationEnabled ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-3)',
+                    background: desktopAutomationEnabled ? 'var(--success))' : 'var(--fg-muted)',
                     flexShrink: 0,
                   }}
                 />
@@ -473,16 +473,16 @@ export function WorkspaceTabContent({
               style={{
                 marginTop: 5,
                 paddingTop: 5,
-                borderTop: '1px solid var(--border)',
+                borderTop: '1px solid var(--border-default)',
                 fontSize: 10,
-                color: desktopAutomationEnabled ? 'var(--accent)' : 'var(--text-3)',
+                color: desktopAutomationEnabled ? 'var(--accent)' : 'var(--fg-muted)',
               }}
             >
               当前模式：{desktopAutomationEnabled ? '桌面 Sidecar' : 'Web 降级'}
             </div>
             {desktopAutomationEnabled ? (
-              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-                <span style={{ ...SECTION_SUB, fontWeight: 700, color: 'var(--text-2)' }}>
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-default)' }}>
+                <span style={{ ...SECTION_SUB, fontWeight: 700, color: 'var(--fg-default)' }}>
                   操作控制台
                 </span>
                 <div style={{ ...ROW, marginTop: 8, flexWrap: 'wrap', gap: 4 }}>
@@ -512,8 +512,8 @@ export function WorkspaceTabContent({
                                 ? 'color-mix(in srgb, var(--accent) 15%, transparent)'
                                 : 'transparent',
                             borderColor:
-                              automationAction === act ? 'var(--accent)' : 'var(--border)',
-                            color: automationAction === act ? 'var(--accent)' : 'var(--text-2)',
+                              automationAction === act ? 'var(--accent)' : 'var(--border-default)',
+                            color: automationAction === act ? 'var(--accent)' : 'var(--fg-default)',
                           }}
                         >
                           {labels[act]}
@@ -574,10 +574,10 @@ export function WorkspaceTabContent({
                         padding: '4px 8px',
                         borderRadius: 5,
                         background: automationResult.ok
-                          ? 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 15%, transparent)'
+                          ? 'color-mix(in srgb, var(--success) 15%, transparent)'
                           : 'color-mix(in srgb, var(--danger) 15%, transparent)',
-                        color: automationResult.ok ? 'var(--success, var(--success, #3dd49a))' : 'var(--danger)',
-                        border: `1px solid ${automationResult.ok ? 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 35%, transparent)' : 'color-mix(in srgb, var(--danger) 35%, transparent)'}`,
+                        color: automationResult.ok ? 'var(--success))' : 'var(--danger)',
+                        border: `1px solid ${automationResult.ok ? 'color-mix(in srgb, var(--success) 35%, transparent)' : 'color-mix(in srgb, var(--danger) 35%, transparent)'}`,
                       }}
                     >
                       {automationResult.msg}
@@ -590,7 +590,7 @@ export function WorkspaceTabContent({
                       style={{
                         maxWidth: '100%',
                         borderRadius: 6,
-                        border: '1px solid var(--border)',
+                        border: '1px solid var(--border-default)',
                         marginTop: 4,
                       }}
                     />
@@ -602,9 +602,9 @@ export function WorkspaceTabContent({
                 style={{
                   marginTop: 10,
                   paddingTop: 10,
-                  borderTop: '1px solid var(--border)',
+                  borderTop: '1px solid var(--border-default)',
                   fontSize: 10,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
@@ -657,8 +657,8 @@ export function WorkspaceTabContent({
                       gap: 4,
                       padding: '6px 8px',
                       borderRadius: 7,
-                      background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-                      border: '1px solid var(--border)',
+                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                      border: '1px solid var(--border-default)',
                     }}
                   >
                     <span
@@ -666,7 +666,7 @@ export function WorkspaceTabContent({
                         fontFamily: 'monospace',
                         fontSize: 10,
                         fontWeight: 600,
-                        color: 'var(--text)',
+                        color: 'var(--fg-strong)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -694,8 +694,8 @@ export function WorkspaceTabContent({
                   marginTop: 8,
                   padding: '10px 12px',
                   borderRadius: 8,
-                  border: '1px dashed var(--border)',
-                  background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
+                  border: '1px dashed var(--border-default)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
                 }}
               >
                 <input
@@ -725,13 +725,13 @@ export function WorkspaceTabContent({
                   onChange={(e) => setTriggerForm((f) => ({ ...f, privateKeyPem: e.target.value }))}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ ...SECTION_SUB, color: 'var(--text-2)', fontWeight: 600 }}>
+                  <span style={{ ...SECTION_SUB, color: 'var(--fg-default)', fontWeight: 600 }}>
                     事件
                   </span>
                   {GITHUB_EVENTS.map((ev) => (
                     <label
                       key={ev}
-                      style={{ ...ROW, fontSize: 10, color: 'var(--text-2)', cursor: 'pointer' }}
+                      style={{ ...ROW, fontSize: 10, color: 'var(--fg-default)', cursor: 'pointer' }}
                     >
                       <input
                         type="checkbox"
@@ -758,7 +758,7 @@ export function WorkspaceTabContent({
                     setTriggerForm((f) => ({ ...f, agentPromptTemplate: e.target.value }))
                   }
                 />
-                <label style={{ ...ROW, fontSize: 10, color: 'var(--text-2)', cursor: 'pointer' }}>
+                <label style={{ ...ROW, fontSize: 10, color: 'var(--fg-default)', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={triggerForm.autoApprove}
@@ -770,7 +770,7 @@ export function WorkspaceTabContent({
                 </label>
                 <div style={{ ...ROW, justifyContent: 'flex-end', gap: 8 }}>
                   {isSubmittingTrigger && (
-                    <span style={{ fontSize: 10, color: 'var(--text-3)' }}>保存中\u2026</span>
+                    <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>保存中\u2026</span>
                   )}
                   <button
                     type="button"
@@ -806,10 +806,10 @@ export function WorkspaceTabContent({
                   margin: '6px 0 0',
                   padding: '8px 10px',
                   borderRadius: 7,
-                  background: 'color-mix(in srgb, var(--bg) 80%, var(--surface))',
-                  border: '1px solid var(--border)',
+                  background: 'color-mix(in srgb, var(--bg-base) 80%, var(--bg-overlay))',
+                  border: '1px solid var(--border-default)',
                   fontSize: 10,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                   overflowX: 'auto',
                   lineHeight: 1.6,
                 }}
@@ -827,12 +827,12 @@ export function WorkspaceTabContent({
                     width: 14,
                     height: 14,
                     borderRadius: 3,
-                    border: '1.5px solid var(--text-3)',
+                    border: '1.5px solid var(--fg-muted)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: 8,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     flexShrink: 0,
                   }}
                 >
@@ -867,12 +867,12 @@ export function WorkspaceTabContent({
                 <span
                   style={{
                     fontSize: 10,
-                    color: 'var(--success, var(--success, #3dd49a))',
+                    color: 'var(--success))',
                     fontWeight: 600,
-                    background: 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 12%, transparent)',
+                    background: 'color-mix(in srgb, var(--success) 12%, transparent)',
                     borderRadius: 5,
                     padding: '1px 7px',
-                    border: '1px solid color-mix(in srgb, var(--success, var(--success, #3dd49a)) 30%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
                   }}
                 >
                   已是最新
@@ -882,24 +882,24 @@ export function WorkspaceTabContent({
                 <span
                   style={{
                     fontSize: 10,
-                    color: 'var(--warning, var(--warning, #f0b429))',
+                    color: 'var(--warning))',
                     fontWeight: 600,
-                    background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 12%, transparent)',
+                    background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
                     borderRadius: 5,
                     padding: '1px 7px',
-                    border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 30%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
                   }}
                 >
                   有新版本 v{versionInfo.latestVersion}
                 </span>
               )}
             </div>
-            <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--text-3)' }}>
+            <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--fg-muted)' }}>
               上次检查：
               {versionInfo.checkedAt ? new Date(versionInfo.checkedAt).toLocaleString() : '—'}
             </p>
             {versionInfo.checkError && (
-              <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--danger, var(--danger, var(--danger, #f06b7e)))' }}>
+              <p style={{ ...SECTION_SUB, margin: '4px 0 0', color: 'var(--danger))' }}>
                 {versionInfo.checkError}
               </p>
             )}
@@ -909,10 +909,10 @@ export function WorkspaceTabContent({
                   marginTop: 8,
                   padding: '6px 10px',
                   borderRadius: 6,
-                  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 10%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 30%, transparent)',
+                  background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
                   fontSize: 11,
-                  color: 'var(--warning, var(--warning, #f0b429))',
+                  color: 'var(--warning))',
                   fontWeight: 600,
                 }}
               >
@@ -954,15 +954,15 @@ export function WorkspaceTabContent({
                   gap: 6,
                   padding: '6px 8px',
                   borderRadius: 7,
-                  border: '1px solid var(--border)',
-                  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+                  border: '1px solid var(--border-default)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                 }}
               >
                 <span
                   style={{
                     fontFamily: 'monospace',
                     fontSize: 11,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     flexShrink: 0,
                   }}
                 >
@@ -973,7 +973,7 @@ export function WorkspaceTabContent({
                     style={{
                       fontSize: 10,
                       fontWeight: 600,
-                      color: 'var(--text)',
+                      color: 'var(--fg-strong)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -981,7 +981,7 @@ export function WorkspaceTabContent({
                   >
                     {conn.host}:{conn.port}
                   </div>
-                  <div style={{ fontSize: 9, color: 'var(--text-3)' }}>{conn.username}</div>
+                  <div style={{ fontSize: 9, color: 'var(--fg-muted)' }}>{conn.username}</div>
                 </div>
                 <span
                   style={{
@@ -991,9 +991,9 @@ export function WorkspaceTabContent({
                     borderRadius: 4,
                     background:
                       conn.status === 'connected'
-                        ? 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 18%, transparent)'
-                        : 'color-mix(in srgb, var(--text-3) 15%, transparent)',
-                    color: conn.status === 'connected' ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-3)',
+                        ? 'color-mix(in srgb, var(--success) 18%, transparent)'
+                        : 'color-mix(in srgb, var(--fg-muted) 15%, transparent)',
+                    color: conn.status === 'connected' ? 'var(--success))' : 'var(--fg-muted)',
                   }}
                 >
                   {conn.status === 'connected' ? '已连接' : '断开'}
@@ -1020,8 +1020,8 @@ export function WorkspaceTabContent({
               gap: 6,
               padding: 10,
               borderRadius: 7,
-              border: '1px dashed var(--border)',
-              background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
+              border: '1px dashed var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
               marginBottom: 8,
             }}
           >
@@ -1095,7 +1095,7 @@ export function WorkspaceTabContent({
                   onShare={() => undefined}
                 />
               ) : (
-                <p style={{ fontSize: 10, color: 'var(--text-3)', margin: 0 }}>
+                <p style={{ fontSize: 10, color: 'var(--fg-muted)', margin: 0 }}>
                   选择远程文件以预览。
                 </p>
               )}
@@ -1140,7 +1140,7 @@ function SessionListPathFilterFeatureToggle(): React.ReactElement {
           alignItems: 'center',
           gap: 6,
           fontSize: 11,
-          color: 'var(--text-2)',
+          color: 'var(--fg-default)',
           cursor: 'pointer',
           userSelect: 'none',
           flexShrink: 0,

@@ -1,4 +1,4 @@
-import { connectDb, closeDb, sqliteAll } from '../db.js';
+import { connectDb, closeDb, sqliteAll } from '../infra/db.js';
 
 async function main(): Promise<void> {
   const dbUrl = process.env.DATABASE_URL ?? './data/openAwork.db';

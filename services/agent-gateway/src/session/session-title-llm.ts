@@ -1,5 +1,5 @@
 import type { ModelRouteConfig } from '../provider/model-router.js';
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 

@@ -12,7 +12,7 @@ export function StreamRenderer({ content, done = false, style }: StreamRendererP
       style={{
         maxWidth: '75%',
         alignSelf: 'flex-start',
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '0.6rem 0.9rem',
@@ -31,7 +31,7 @@ export function StreamRenderer({ content, done = false, style }: StreamRendererP
             display: 'inline-block',
             width: 8,
             height: 14,
-            background: 'var(--fg-muted, #7b8a9e)',
+            background: 'var(--fg-muted))',
             borderRadius: 2,
             marginLeft: 2,
             verticalAlign: 'middle',

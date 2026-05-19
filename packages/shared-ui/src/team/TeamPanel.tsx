@@ -32,8 +32,8 @@ export interface TeamPanelProps {
 }
 
 const TASK_STATUS_COLOR: Record<TaskStatus, string> = {
-  pending: 'var(--fg-muted, #7b8a9e)',
-  in_progress: 'var(--accent, #5cd4c0)',
+  pending: 'var(--fg-muted))',
+  in_progress: 'var(--accent))',
   completed: color.success,
   failed: color.danger,
 };
@@ -46,7 +46,7 @@ const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 const MSG_TYPE_COLOR: Record<TeamMessage['type'], string> = {
-  update: 'var(--accent, #5cd4c0)',
+  update: 'var(--accent))',
   question: color.contrast,
   result: color.success,
   error: color.danger,
@@ -82,7 +82,7 @@ export function TeamPanel({
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         ...style,
       }}
     >
@@ -90,7 +90,7 @@ export function TeamPanel({
         style={{
           padding: '0.6rem 0.875rem',
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-          background: 'var(--color-surface-raised, #0f172a)',
+          background: 'var(--bg-raised)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -98,7 +98,7 @@ export function TeamPanel({
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               textTransform: 'uppercase',
               letterSpacing: 0.6,
             }}
@@ -109,9 +109,9 @@ export function TeamPanel({
             style={{
               fontSize: 10,
               fontWeight: 600,
-              color: working > 0 ? 'var(--accent, #5cd4c0)' : 'var(--fg-muted, #7b8a9e)',
-              background: working > 0 ? color.accentSubtle : 'var(--bg-overlay, #121721)',
-              border: `1px solid ${working > 0 ? 'var(--accent, #5cd4c0)40' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
+              color: working > 0 ? 'var(--accent))' : 'var(--fg-muted))',
+              background: working > 0 ? color.accentSubtle : 'var(--bg-overlay))',
+              border: `1px solid ${working > 0 ? 'var(--accent))40' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
               borderRadius: 4,
               padding: '0.15rem 0.45rem',
             }}
@@ -123,7 +123,7 @@ export function TeamPanel({
           <div
             style={{
               fontSize: 11,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               marginTop: 2,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -144,7 +144,7 @@ export function TeamPanel({
           style={{
             fontSize: 10,
             fontWeight: 700,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textTransform: 'uppercase',
             letterSpacing: 0.5,
             padding: '0.35rem 0.875rem 0.2rem',
@@ -157,7 +157,7 @@ export function TeamPanel({
             style={{
               padding: '0.6rem 0.875rem',
               fontSize: 12,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
             }}
           >
             No members
@@ -184,7 +184,7 @@ export function TeamPanel({
           style={{
             fontSize: 10,
             fontWeight: 700,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textTransform: 'uppercase',
             letterSpacing: 0.5,
             padding: '0.35rem 0.875rem 0.2rem',
@@ -197,7 +197,7 @@ export function TeamPanel({
             style={{
               padding: '0.6rem 0.875rem',
               fontSize: 12,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
             }}
           >
             No tasks
@@ -229,8 +229,8 @@ export function TeamPanel({
                   fontSize: 12,
                   color:
                     t.status === 'completed'
-                      ? 'var(--fg-muted, #7b8a9e)'
-                      : 'var(--fg-strong, #f1f4f8)',
+                      ? 'var(--fg-muted))'
+                      : 'var(--fg-strong))',
                   textDecoration: t.status === 'completed' ? 'line-through' : 'none',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -240,7 +240,7 @@ export function TeamPanel({
                 {t.title}
               </span>
               {t.assignedTo && (
-                <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)', flexShrink: 0 }}>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted))', flexShrink: 0 }}>
                   @{t.assignedTo}
                 </span>
               )}
@@ -249,7 +249,7 @@ export function TeamPanel({
                   fontSize: 10,
                   fontWeight: 600,
                   color: TASK_STATUS_COLOR[t.status],
-                  background: 'var(--color-surface-raised, #0f172a)',
+                  background: 'var(--bg-raised)',
                   border: `1px solid ${TASK_STATUS_COLOR[t.status]}40`,
                   borderRadius: 4,
                   padding: '0.1rem 0.4rem',
@@ -269,7 +269,7 @@ export function TeamPanel({
             style={{
               fontSize: 10,
               fontWeight: 700,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               textTransform: 'uppercase',
               letterSpacing: 0.5,
               padding: '0.35rem 0.875rem 0.2rem',
@@ -292,7 +292,7 @@ export function TeamPanel({
                   width: 16,
                   height: 16,
                   borderRadius: 4,
-                  background: 'var(--color-surface-raised, #0f172a)',
+                  background: 'var(--bg-raised)',
                   border: `1px solid ${MSG_TYPE_COLOR[msg.type]}40`,
                   color: MSG_TYPE_COLOR[msg.type],
                   fontSize: 10,
@@ -309,18 +309,18 @@ export function TeamPanel({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 1 }}>
                   <span
-                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong, #f1f4f8)' }}
+                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong))' }}
                   >
                     {msg.memberId}
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)' }}>
+                  <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>
                     {formatTime(msg.timestamp)}
                   </span>
                 </div>
                 <div
                   style={{
                     fontSize: 12,
-                    color: 'var(--fg-muted, #7b8a9e)',
+                    color: 'var(--fg-muted))',
                     lineHeight: 1.4,
                     wordBreak: 'break-word',
                   }}

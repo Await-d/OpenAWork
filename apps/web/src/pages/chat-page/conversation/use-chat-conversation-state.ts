@@ -51,15 +51,15 @@ import { normalizeChatMessages } from '../../../components/conversation-runtime/
 import type { SessionStateStatus, SessionTodoItem } from '../../../components/conversation-runtime/session/session-runtime.js';
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
-import type { DialogueMode } from '../dialogue-mode.js';
+import type { DialogueMode } from '../mode/dialogue-mode.js';
 import type { ReasoningEffort } from '../../../components/conversation-runtime/messages/support.js';
 import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
 import { useTeamNotificationStore } from '../../../stores/team/team-events.js';
-import { useGatewayClient } from '../../../hooks/useGatewayClient.js';
-import { usePrefersReducedMotion } from '../../../hooks/usePrefersReducedMotion.js';
+import { useGatewayClient } from '../../../hooks/gateway/useGatewayClient.js';
+import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useStreamReveal } from '../../../components/conversation-runtime/reveal/use-stream-reveal.js';
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';

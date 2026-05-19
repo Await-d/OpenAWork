@@ -4,7 +4,7 @@ import { Effect, Layer } from 'effect';
 // Same rationale as v2-runtime-services.test.ts — stub the legacy
 // db helpers so BusService.live's transitive sync-event import does
 // not pull `node:sqlite` through the bundler.
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(),

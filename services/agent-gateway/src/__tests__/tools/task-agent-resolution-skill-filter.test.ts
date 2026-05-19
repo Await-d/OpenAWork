@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveDelegatedAgent } from '../../task/task-agent-resolution.js';
 import type { EffectiveSkill } from '../../skill/skill-selection.js';
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(),

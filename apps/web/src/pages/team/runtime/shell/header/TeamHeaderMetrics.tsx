@@ -38,8 +38,8 @@ const SPLIT_PILL_STYLE: CSSProperties = {
   alignItems: 'center',
   padding: '3px 4px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
   fontSize: 11,
   lineHeight: 1.2,
   cursor: 'default',
@@ -50,24 +50,24 @@ const SPLIT_CELL_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '0 8px',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const SPLIT_DIVIDER_STYLE: CSSProperties = {
   width: 1,
   height: 12,
-  background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
   flexShrink: 0,
 };
 
 const VALUE_STYLE: CSSProperties = {
   fontVariantNumeric: 'tabular-nums',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   fontWeight: 700,
 };
 
 const LABEL_STYLE: CSSProperties = {
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontSize: 10,
 };
 
@@ -87,9 +87,9 @@ const ACTIVITY_BADGE_BASE: CSSProperties = {
 
 const RUNNING_BADGE_STYLE: CSSProperties = {
   ...ACTIVITY_BADGE_BASE,
-  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 14%, transparent)',
-  color: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 35%, transparent)',
+  background: 'color-mix(in srgb, var(--success) 14%, transparent)',
+  color: 'var(--success))',
+  border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
 };
 
 const HANDOFF_BADGE_STYLE: CSSProperties = {

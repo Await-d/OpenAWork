@@ -14,14 +14,14 @@ import type {
 const PANEL: React.CSSProperties = {
   borderRadius: 22,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface)',
+  background: 'var(--bg-overlay)',
   boxShadow: 'var(--shadow-md)',
 };
 
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
   background:
-    'linear-gradient(180deg, color-mix(in oklab, var(--header-bg) 84%, var(--surface) 16%), var(--surface))',
+    'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 84%, var(--bg-overlay) 16%), var(--bg-overlay))',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -31,10 +31,10 @@ const HERO_PANEL: React.CSSProperties = {
 };
 
 const sharedUiThemeVars = {
-  '--color-surface': 'var(--surface)',
-  '--color-border': 'var(--border)',
-  '--color-text': 'var(--text)',
-  '--color-muted': 'var(--text-3)',
+  '--color-surface': 'var(--bg-overlay)',
+  '--color-border': 'var(--border-default)',
+  '--color-text': 'var(--fg-strong)',
+  '--color-muted': 'var(--fg-muted)',
   '--color-accent': 'var(--accent)',
 } as React.CSSProperties;
 
@@ -45,7 +45,7 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled
       ? 'rgba(99, 102, 241, 0.35)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
-    color: 'var(--fg-on-accent, #ffffff)',
+    color: 'var(--fg-on-accent))',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -58,8 +58,8 @@ function secondaryButtonStyle(disabled = false): React.CSSProperties {
   return {
     border: '1px solid var(--border-subtle)',
     borderRadius: 14,
-    background: 'color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%)',
-    color: disabled ? 'var(--text-3)' : 'var(--text-2)',
+    background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+    color: disabled ? 'var(--fg-muted)' : 'var(--fg-default)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 600,
@@ -75,11 +75,11 @@ function StatCard({ label, value }: { label: string; value: string }) {
         ...PANEL,
         padding: '14px 16px',
         background:
-          'linear-gradient(180deg, color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%), var(--surface))',
+          'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%), var(--bg-overlay))',
       }}
     >
-      <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--fg-strong)' }}>{value}</div>
     </div>
   );
 }
@@ -108,7 +108,7 @@ export function SkillsHero({
       />
       <div style={{ position: 'relative', display: 'grid', gap: 8, maxWidth: 760 }}>
         <span className="page-title">技能市场</span>
-        <div style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.7 }}>
+        <div style={{ color: 'var(--fg-default)', fontSize: 14, lineHeight: 1.7 }}>
           统一浏览技能市场、管理已安装技能和注册源，让技能发现、安装与维护保持与当前工作台一致的节奏。
         </div>
       </div>
@@ -153,8 +153,8 @@ export function SkillsToolbar({
       }}
     >
       <div style={{ display: 'grid', gap: 4 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>技能工作区</div>
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>技能工作区</div>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           在市场、本地与已安装视图间切换，并随时刷新当前数据。
         </div>
       </div>
@@ -171,7 +171,7 @@ export function SkillsToolbar({
           style={{
             display: 'flex',
             gap: 4,
-            background: 'color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%)',
+            background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
             borderRadius: 14,
             padding: 4,
             border: '1px solid var(--border-subtle)',
@@ -232,10 +232,10 @@ export function SkillsMarketSection({
       {(title || subtitle) && (
         <div style={{ padding: '18px 20px 0', display: 'grid', gap: 6 }}>
           {title ? (
-            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{title}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>{title}</div>
           ) : null}
           {subtitle ? (
-            <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.6 }}>{subtitle}</div>
+            <div style={{ fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.6 }}>{subtitle}</div>
           ) : null}
         </div>
       )}
@@ -293,7 +293,7 @@ export function SkillsInstalledSection({
     >
       <section style={{ ...HEADER_PANEL, overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ padding: 28, color: 'var(--text-3)', fontSize: 13, textAlign: 'center' }}>
+          <div style={{ padding: 28, color: 'var(--fg-muted)', fontSize: 13, textAlign: 'center' }}>
             加载中…
           </div>
         ) : (

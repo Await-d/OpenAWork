@@ -10,7 +10,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as Caps from '../../handoff/capability/layer-capabilities.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -20,7 +20,7 @@ let dbModule: typeof DbModule;
 let caps: typeof Caps;
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
   caps = await import('../../handoff/capability/layer-capabilities.js');
 });

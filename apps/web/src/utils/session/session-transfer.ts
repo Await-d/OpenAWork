@@ -1,6 +1,6 @@
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { createSessionsClient } from '@openAwork/web-client';
-import { logger } from '../logger.js';
+import { logger } from '../log/logger.js';
 
 export interface ExportedSession {
   id: string;

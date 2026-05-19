@@ -11,7 +11,7 @@
  * 这里只做最小写入接口；安全扫描由 routes/* 层在调用前完成。
  */
 
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 
 interface UserMemoryRow {
   id: string;

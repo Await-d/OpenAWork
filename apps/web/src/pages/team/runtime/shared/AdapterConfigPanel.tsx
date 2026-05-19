@@ -11,8 +11,8 @@ const PANEL_STYLE: CSSProperties = {
   gap: 12,
   padding: 16,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 86%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const ROW_STYLE: CSSProperties = {
@@ -21,7 +21,7 @@ const ROW_STYLE: CSSProperties = {
   gap: 8,
   alignItems: 'center',
   padding: '6px 0',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
 };
 
 export interface AdapterConfig {
@@ -45,7 +45,7 @@ export function AdapterConfigPanel({
     <div style={PANEL_STYLE}>
       <header style={{ display: 'grid', gap: 4 }}>
         <strong style={{ fontSize: 14 }}>角色 Adapter 配置</strong>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           为每个层级选择 adapter 实现。Adapter 决定该层使用哪个 agent、prompt 模板和工具集。
         </span>
       </header>
@@ -59,9 +59,9 @@ export function AdapterConfigPanel({
             style={{
               padding: '4px 8px',
               borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
-              color: 'var(--text)',
+              border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+              color: 'var(--fg-strong)',
               fontSize: 12,
             }}
           >

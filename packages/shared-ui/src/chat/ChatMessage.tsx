@@ -25,7 +25,7 @@ export function ChatMessage({ message, style }: ChatMessageProps) {
       style={{
         maxWidth: '75%',
         alignSelf: isUser ? 'flex-end' : 'flex-start',
-        background: isUser ? 'var(--accent, #5cd4c0)' : 'var(--bg-overlay, #121721)',
+        background: isUser ? 'var(--accent))' : 'var(--bg-overlay))',
         border: isUser ? 'none' : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '0.6rem 0.9rem',

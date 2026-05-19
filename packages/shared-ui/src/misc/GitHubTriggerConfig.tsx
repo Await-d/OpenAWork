@@ -38,7 +38,7 @@ export function GitHubTriggerConfig({
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         padding: '1rem',
@@ -51,7 +51,7 @@ export function GitHubTriggerConfig({
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textTransform: 'uppercase',
             letterSpacing: 0.6,
           }}
@@ -64,10 +64,10 @@ export function GitHubTriggerConfig({
           onChange={(e) => onRepoChange?.(e.target.value)}
           style={{
             padding: '0.4rem 0.6rem',
-            background: 'var(--bg-base, #080b12)',
+            background: 'var(--bg-base))',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
-            color: 'var(--fg-strong, #f1f4f8)',
+            color: 'var(--fg-strong))',
             fontSize: 12,
           }}
         >
@@ -88,7 +88,7 @@ export function GitHubTriggerConfig({
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textTransform: 'uppercase',
             letterSpacing: 0.6,
           }}
@@ -104,7 +104,7 @@ export function GitHubTriggerConfig({
                 alignItems: 'center',
                 gap: 5,
                 fontSize: 12,
-                color: 'var(--fg-strong, #f1f4f8)',
+                color: 'var(--fg-strong))',
                 cursor: 'pointer',
               }}
             >
@@ -125,7 +125,7 @@ export function GitHubTriggerConfig({
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textTransform: 'uppercase',
             letterSpacing: 0.6,
           }}
@@ -140,10 +140,10 @@ export function GitHubTriggerConfig({
           onChange={(e) => onFilterChange?.(e.target.value)}
           style={{
             padding: '0.4rem 0.6rem',
-            background: 'var(--bg-base, #080b12)',
+            background: 'var(--bg-base))',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
-            color: 'var(--fg-strong, #f1f4f8)',
+            color: 'var(--fg-strong))',
             fontSize: 12,
           }}
         />

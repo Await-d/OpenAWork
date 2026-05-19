@@ -70,7 +70,7 @@ export default function NavRail() {
       className="w-12 shrink-0 h-full flex flex-col items-center py-2 gap-1"
       style={{
         background: 'hsl(var(--muted) / 0.3)',
-        borderRight: '1px solid hsl(var(--border))',
+        borderRight: '1px solid hsl(var(--border-default))',
       }}
     >
       {navItems.map((item) => {

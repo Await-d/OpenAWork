@@ -9,7 +9,7 @@
  */
 
 import type { RunEvent, StreamChunk } from '@openAwork/shared';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   type SessionEvent,
   type SessionEventID,

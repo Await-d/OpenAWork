@@ -13,9 +13,9 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
-import type * as AuthModule from '../../auth.js';
-import type * as RequestWorkflowModule from '../../request-workflow.js';
+import type * as DbModule from '../../infra/db.js';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as TeamPhaseARoutesModule from '../../routes/team-phase-a.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -58,11 +58,11 @@ function seedTeamWorkspace(workspaceId: string, userId: string): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
-  const auth = await import('../../auth.js');
+  const auth = await import('../../infra/auth.js');
   authPlugin = auth.default;
-  const requestWorkflow = await import('../../request-workflow.js');
+  const requestWorkflow = await import('../../runtime/request-workflow.js');
   requestWorkflowPlugin = requestWorkflow.default;
   const team = await import('../../routes/team-phase-a.js');
   teamPhaseARoutes = team.teamPhaseARoutes;

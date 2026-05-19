@@ -29,7 +29,7 @@ function TaskCard({
         gap: 5,
         padding: '8px 10px',
         borderRadius: 8,
-        background: 'var(--surface)',
+        background: 'var(--bg-overlay)',
         border: '1px solid var(--border-subtle)',
         borderLeft: `3px solid ${priorityMeta.color}`,
       }}
@@ -52,13 +52,13 @@ function TaskCard({
               transform: expanded ? 'rotate(90deg)' : 'none',
             }}
           >
-            <ChevronRightIcon size={9} color="var(--text-3)" />
+            <ChevronRightIcon size={9} color="var(--fg-muted)" />
           </button>
           <span
             style={{
               fontSize: 12,
               fontWeight: 600,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -83,7 +83,7 @@ function TaskCard({
       </div>
 
       {expanded && card.description ? (
-        <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4 }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
           {card.description}
         </span>
       ) : null}
@@ -111,7 +111,7 @@ function TaskCard({
               padding: '1px 5px',
               borderRadius: 4,
               background: 'var(--border-subtle)',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontSize: 9,
             }}
           >
@@ -129,7 +129,7 @@ function TaskCard({
             border: 'none',
             cursor: movable ? 'pointer' : 'not-allowed',
             padding: '1px 3px',
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             fontSize: 9,
             display: 'inline-flex',
             alignItems: 'center',
@@ -148,7 +148,7 @@ function TaskCard({
             border: 'none',
             cursor: movable ? 'pointer' : 'not-allowed',
             padding: '1px 3px',
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             fontSize: 9,
             display: 'inline-flex',
             alignItems: 'center',
@@ -239,7 +239,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
     <div style={{ display: 'grid', gap: 10 }}>
       {/* Header */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>任务看板</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>任务看板</span>
         <span
           style={{
             padding: '1px 8px',
@@ -265,15 +265,15 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
             padding: '10px 12px',
             borderRadius: 10,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--card-bg)',
+            background: 'var(--bg-overlay)',
             boxShadow: 'var(--shadow-sm)',
           }}
         >
           <div style={{ display: 'grid', gap: 3 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
               当前任务会话
             </span>
-            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </span>
           </div>
@@ -297,7 +297,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
         {taskLanes.map((lane) => {
           const laneColor =
             lane.id === 'todo'
-              ? 'var(--text-3)'
+              ? 'var(--fg-muted)'
               : lane.id === 'doing'
                 ? 'var(--accent)'
                 : 'var(--warning)';
@@ -324,7 +324,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                   gap: 8,
                   alignItems: 'center',
                   padding: '10px 12px',
-                  background: `linear-gradient(135deg, color-mix(in oklch, ${laneColor} 8%, var(--card-bg)), var(--card-bg))`,
+                  background: `linear-gradient(135deg, color-mix(in oklch, ${laneColor} 8%, var(--bg-overlay), var(--bg-overlay))`,
                   borderBottom: '1px solid var(--border-subtle)',
                 }}
               >
@@ -339,7 +339,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                       boxShadow: `0 0 6px ${laneColor}60`,
                     }}
                   />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
                     {lane.title}
                   </span>
                 </div>
@@ -350,8 +350,8 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                     borderRadius: 6,
                     display: 'grid',
                     placeItems: 'center',
-                    background: 'var(--surface-2)',
-                    color: 'var(--text-2)',
+                    background: 'var(--bg-surface)',
+                    color: 'var(--fg-default)',
                     fontSize: 10,
                     fontWeight: 700,
                   }}
@@ -396,8 +396,8 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                         padding: '7px 10px',
                         borderRadius: 8,
                         border: '1px solid var(--accent)',
-                        background: 'var(--surface)',
-                        color: 'var(--text)',
+                        background: 'var(--bg-overlay)',
+                        color: 'var(--fg-strong)',
                         fontSize: 12,
                         outline: 'none',
                       }}
@@ -412,7 +412,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                           borderRadius: 6,
                           border: 'none',
                           background: 'var(--accent)',
-                          color: 'var(--bg)',
+                          color: 'var(--bg-base)',
                           fontSize: 11,
                           fontWeight: 700,
                           cursor: busy || !newTitle.trim() ? 'not-allowed' : 'pointer',
@@ -431,9 +431,9 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                         style={{
                           padding: '5px 10px',
                           borderRadius: 6,
-                          border: '1px solid var(--border)',
+                          border: '1px solid var(--border-default)',
                           background: 'transparent',
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontSize: 11,
                           cursor: 'pointer',
                         }}
@@ -450,8 +450,8 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                       width: '100%',
                       minHeight: 28,
                       borderRadius: 8,
-                      border: '1px dashed color-mix(in oklch, var(--border) 50%, transparent)',
-                      color: 'var(--text-3)',
+                      border: '1px dashed color-mix(in oklch, var(--border-default) 50%, transparent)',
+                      color: 'var(--fg-muted)',
                       background: 'transparent',
                       fontSize: 11,
                       fontWeight: 500,
@@ -459,7 +459,7 @@ export function TasksTab({ selectedTeam = null }: { selectedTeam?: AgentTeamsSid
                     }}
                     className="team-dashed-add-accent"
                   >
-                    <PlusIcon size={12} color="var(--text-3)" /> 添加任务
+                    <PlusIcon size={12} color="var(--fg-muted)" /> 添加任务
                   </button>
                 )}
               </div>

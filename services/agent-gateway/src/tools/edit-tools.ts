@@ -3,7 +3,7 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
-import { sqliteAll } from '../db.js';
+import { sqliteAll } from '../infra/db.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { captureBeforeWriteBackup } from '../session/session-file-backup-store.js';

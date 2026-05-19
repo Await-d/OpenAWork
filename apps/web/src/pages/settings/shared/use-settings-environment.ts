@@ -1,6 +1,6 @@
 import React from 'react';
 import { createSettingsClient, login } from '@openAwork/web-client';
-import { logger } from '../../../utils/logger.js';
+import { logger } from '../../../utils/log/logger.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -15,7 +15,7 @@ import {
   waitForGatewayHealth,
   writeDesktopGatewayMode,
 } from '../../../utils/gateway/desktop-gateway.js';
-import type { SettingsVersionInfo } from '../settings-types.js';
+import type { SettingsVersionInfo } from '../state/settings-types.js';
 import { tauriInvoke } from './settings-page-helpers.js';
 
 interface UseSettingsEnvironmentInput {

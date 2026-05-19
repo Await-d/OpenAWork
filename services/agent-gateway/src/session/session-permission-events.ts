@@ -5,7 +5,7 @@ import {
   type PermissionRequestStatus,
   type PermissionRiskLevel,
 } from '../permission/permission-contract.js';
-import { sqliteAll } from '../db.js';
+import { sqliteAll } from '../infra/db.js';
 
 interface PermissionRequestEventRow {
   id: string;

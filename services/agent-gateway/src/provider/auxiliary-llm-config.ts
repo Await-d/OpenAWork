@@ -28,7 +28,7 @@
  */
 
 import type { AIProvider } from '@openAwork/agent-core';
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import { getActiveChatProviderConfig, getFastProviderConfig } from './provider-config.js';
 
 interface UserSettingRow {

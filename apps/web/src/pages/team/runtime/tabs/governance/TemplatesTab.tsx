@@ -29,14 +29,14 @@ function TemplateCard({
     .map((node) => ({
       label: node.label.split(' · ')[0]?.trim() ?? node.label,
       color: node.label.includes('负责人')
-        ? 'var(--warning, #f0b429)'
+        ? 'var(--warning))'
         : node.label.includes('研究员')
-          ? 'var(--accent, var(--accent, #5cd4c0))'
+          ? 'var(--accent))'
           : node.label.includes('执行者')
-            ? 'var(--aux, var(--aux, #8b9cf5))'
+            ? 'var(--aux))'
             : node.label.includes('批评者')
-              ? 'var(--danger, #f06b7e)'
-              : 'var(--chart-5, var(--chart-5, #c4b5fd))',
+              ? 'var(--danger))'
+              : 'var(--chart-5))',
     }));
 
   return (
@@ -77,10 +77,10 @@ function TemplateCard({
             marginTop: 2,
           }}
         >
-          <ChevronDownIcon size={11} color="var(--text-3)" />
+          <ChevronDownIcon size={11} color="var(--fg-muted)" />
         </span>
         <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
             {template.name}
           </span>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -103,12 +103,12 @@ function TemplateCard({
                           : 'var(--surface-3)',
                   color:
                     badge.tone === 'accent'
-                      ? 'var(--chart-5, var(--chart-5, #c4b5fd))'
+                      ? 'var(--chart-5))'
                       : badge.tone === 'success'
-                        ? 'var(--success, var(--success, #3dd49a))'
+                        ? 'var(--success))'
                         : badge.tone === 'warning'
-                          ? 'var(--warning, var(--warning, #f0b429))'
-                          : 'var(--text-2)',
+                          ? 'var(--warning))'
+                          : 'var(--fg-default)',
                   fontSize: 9,
                   fontWeight: 700,
                 }}
@@ -138,7 +138,7 @@ function TemplateCard({
             ))}
           </div>
         </div>
-        <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
           {template.nodes.length} 节点 · {template.edges.length} 边
         </span>
       </button>
@@ -156,19 +156,19 @@ function TemplateCard({
           }}
         >
           {template.description && (
-            <span style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.6 }}>
               {template.description}
             </span>
           )}
           {template.metaLine && (
-            <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
               {template.metaLine}
             </span>
           )}
 
           {/* Node list */}
           <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-2)' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-default)' }}>
               工作流节点
             </span>
             {template.nodes.map((node) => (
@@ -180,7 +180,7 @@ function TemplateCard({
                   alignItems: 'center',
                   padding: '4px 8px',
                   borderRadius: 6,
-                  background: 'var(--surface)',
+                  background: 'var(--bg-overlay)',
                   fontSize: 11,
                 }}
               >
@@ -193,13 +193,13 @@ function TemplateCard({
                       node.type === 'start'
                         ? 'var(--success)'
                         : node.type === 'end'
-                          ? 'var(--text-3)'
+                          ? 'var(--fg-muted)'
                           : 'var(--accent)',
                     flexShrink: 0,
                   }}
                 />
-                <span style={{ color: 'var(--text)', fontWeight: 600 }}>{node.label}</span>
-                <span style={{ color: 'var(--text-3)', fontSize: 9 }}>{node.type}</span>
+                <span style={{ color: 'var(--fg-strong)', fontWeight: 600 }}>{node.label}</span>
+                <span style={{ color: 'var(--fg-muted)', fontSize: 9 }}>{node.type}</span>
               </div>
             ))}
           </div>
@@ -213,8 +213,8 @@ function TemplateCard({
               minHeight: 32,
               borderRadius: 8,
               border: 'none',
-              background: canUse ? 'var(--accent)' : 'var(--surface-2)',
-              color: canUse ? 'var(--accent-text)' : 'var(--text-3)',
+              background: canUse ? 'var(--accent)' : 'var(--bg-surface)',
+              color: canUse ? 'var(--fg-on-accent)' : 'var(--fg-muted)',
               fontSize: 12,
               fontWeight: 600,
               cursor: canUse ? 'pointer' : 'not-allowed',
@@ -257,9 +257,9 @@ function CreateTemplateForm({
         style={{
           minHeight: 36,
           borderRadius: 10,
-          border: '1px dashed color-mix(in oklch, var(--border) 40%, transparent)',
-          color: 'var(--text-3)',
-          background: 'var(--surface)',
+          border: '1px dashed color-mix(in oklch, var(--border-default) 40%, transparent)',
+          color: 'var(--fg-muted)',
+          background: 'var(--bg-overlay)',
           fontSize: 12,
           fontWeight: 600,
           cursor: 'pointer',
@@ -285,10 +285,10 @@ function CreateTemplateForm({
         gap: 10,
       }}
     >
-      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>新建团队模板</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>新建团队模板</span>
 
       <div style={{ display: 'grid', gap: 6 }}>
-        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)' }}>模板名称</label>
+        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-default)' }}>模板名称</label>
         <input
           type="text"
           placeholder="例如：代码审查流水线"
@@ -298,8 +298,8 @@ function CreateTemplateForm({
             padding: '6px 10px',
             borderRadius: 6,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--surface)',
-            color: 'var(--text)',
+            background: 'var(--bg-overlay)',
+            color: 'var(--fg-strong)',
             fontSize: 12,
             outline: 'none',
           }}
@@ -310,7 +310,7 @@ function CreateTemplateForm({
       </div>
 
       <div style={{ display: 'grid', gap: 6 }}>
-        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)' }}>
+        <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-default)' }}>
           默认 Provider
         </label>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -329,8 +329,8 @@ function CreateTemplateForm({
                 background:
                   provider === opt.value
                     ? 'color-mix(in oklch, var(--accent) 10%, transparent)'
-                    : 'var(--surface)',
-                color: provider === opt.value ? 'var(--accent)' : 'var(--text-2)',
+                    : 'var(--bg-overlay)',
+                color: provider === opt.value ? 'var(--accent)' : 'var(--fg-default)',
                 fontSize: 11,
                 fontWeight: provider === opt.value ? 700 : 500,
                 cursor: 'pointer',
@@ -351,8 +351,8 @@ function CreateTemplateForm({
             padding: '5px 14px',
             borderRadius: 6,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--surface)',
-            color: 'var(--text-3)',
+            background: 'var(--bg-overlay)',
+            color: 'var(--fg-muted)',
             fontSize: 11,
             cursor: 'pointer',
           }}
@@ -374,7 +374,7 @@ function CreateTemplateForm({
             borderRadius: 6,
             border: 'none',
             background: 'var(--accent)',
-            color: 'var(--accent-text)',
+            color: 'var(--fg-on-accent)',
             fontSize: 11,
             fontWeight: 600,
             cursor: name.trim() && !busy ? 'pointer' : 'not-allowed',
@@ -438,8 +438,8 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'var(--surface-2)',
-              color: 'var(--text-2)',
+              background: 'var(--bg-surface)',
+              color: 'var(--fg-default)',
               fontSize: 11,
               fontWeight: 700,
               fontVariantNumeric: 'tabular-nums',
@@ -451,13 +451,13 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
             <span
               style={{
                 fontSize: 11,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'inline-flex',
                 gap: 4,
                 alignItems: 'center',
               }}
             >
-              <SyncIcon size={11} color="var(--text-3)" />
+              <SyncIcon size={11} color="var(--fg-muted)" />
               同步中…
             </span>
           ) : null}
@@ -495,11 +495,11 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
               textAlign: 'center',
             }}
           >
-            <TemplateIcon size={28} color="var(--text-3)" />
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>
+            <TemplateIcon size={28} color="var(--fg-muted)" />
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-default)' }}>
               暂无团队模板
             </span>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6, maxWidth: 360 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6, maxWidth: 360 }}>
               创建一个持久化团队模板后，所有团队成员可复用同一工作流配置，快速启动新的协作会话。
             </span>
           </div>
@@ -525,7 +525,7 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
                 display: 'flex',
                 gap: 8,
                 alignItems: 'center',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
                 fontWeight: 800,
                 background: 'none',
@@ -543,9 +543,9 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
                   alignItems: 'center',
                 }}
               >
-                <ChevronDownIcon size={11} color="var(--text-3)" />
+                <ChevronDownIcon size={11} color="var(--fg-muted)" />
               </span>
-              <span style={{ color: 'var(--text-2)' }}>{categoryLabel(sectionId)}</span>
+              <span style={{ color: 'var(--fg-default)' }}>{categoryLabel(sectionId)}</span>
               <span
                 style={{
                   minWidth: 18,
@@ -553,8 +553,8 @@ export function TemplatesTab({ onNewTemplate }: { onNewTemplate: () => void }) {
                   borderRadius: 6,
                   display: 'grid',
                   placeItems: 'center',
-                  background: 'var(--surface-2)',
-                  color: 'var(--text-2)',
+                  background: 'var(--bg-surface)',
+                  color: 'var(--fg-default)',
                   fontSize: 10,
                   fontWeight: 700,
                 }}

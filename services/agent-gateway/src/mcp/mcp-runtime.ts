@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { MCPToolDef, MCPToolResult } from '@openAwork/mcp-client';
 import type { MCPServerRef } from '@openAwork/skill-types';
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import { mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
 import { mcpConnectionPool } from '../skill/skill-mcp-connection-pool.js';
 import {

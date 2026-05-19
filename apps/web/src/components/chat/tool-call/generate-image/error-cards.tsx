@@ -23,7 +23,7 @@ export function GenerateImageFetchErrorCard({
       style={{
         borderRadius: 10,
         border: '1px solid color-mix(in oklch, var(--warning) 22%, var(--border-subtle))',
-        background: 'color-mix(in oklch, var(--warning) 5%, var(--surface))',
+        background: 'color-mix(in oklch, var(--warning) 5%, var(--bg-overlay))',
         padding: '10px 14px',
         display: 'flex',
         flexDirection: 'column',
@@ -47,7 +47,7 @@ export function GenerateImageFetchErrorCard({
         style={{
           fontSize: 11,
           lineHeight: 1.6,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           wordBreak: 'break-word',
           fontFamily: 'var(--font-mono, monospace)',
         }}
@@ -63,8 +63,8 @@ export function GenerateImageFetchErrorCard({
             padding: '0 10px',
             borderRadius: 6,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--surface)',
-            color: 'var(--text-2)',
+            background: 'var(--bg-overlay)',
+            color: 'var(--fg-default)',
             fontSize: 11,
             fontWeight: 600,
             cursor: 'pointer',
@@ -83,7 +83,7 @@ export function GenerateImageToolErrorCard({ rawOutput }: { rawOutput?: unknown 
       style={{
         borderRadius: 10,
         border: '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
-        background: 'color-mix(in oklch, var(--danger) 4%, var(--surface))',
+        background: 'color-mix(in oklch, var(--danger) 4%, var(--bg-overlay))',
         padding: '10px 14px',
         display: 'flex',
         flexDirection: 'column',
@@ -108,7 +108,7 @@ export function GenerateImageToolErrorCard({ rawOutput }: { rawOutput?: unknown 
           style={{
             fontSize: 11,
             lineHeight: 1.6,
-            color: 'color-mix(in oklch, var(--danger) 70%, var(--text-3))',
+            color: 'color-mix(in oklch, var(--danger) 70%, var(--fg-muted))',
             wordBreak: 'break-word',
           }}
         >

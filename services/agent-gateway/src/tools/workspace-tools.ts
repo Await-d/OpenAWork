@@ -4,7 +4,7 @@ import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { FileBackupRef } from '@openAwork/shared';
 import { z } from 'zod';
-import { WORKSPACE_ROOT } from '../db.js';
+import { WORKSPACE_ROOT } from '../infra/db.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
 import { ensureIgnoreRulesLoadedForPath } from '../workspace/workspace-safety.js';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';

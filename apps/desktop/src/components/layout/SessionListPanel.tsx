@@ -51,13 +51,13 @@ export default function SessionListPanel() {
       className="shrink-0 h-full flex flex-col"
       style={{
         width: 240,
-        borderRight: '1px solid hsl(var(--border))',
+        borderRight: '1px solid hsl(var(--border-default))',
         background: 'hsl(var(--muted) / 0.15)',
       }}
     >
       <div
         className="flex items-center justify-between px-3 py-2 shrink-0"
-        style={{ borderBottom: '1px solid hsl(var(--border) / 0.6)' }}
+        style={{ borderBottom: '1px solid hsl(var(--border-default) / 0.6)' }}
       >
         <span
           className="text-xs font-semibold uppercase tracking-wider"

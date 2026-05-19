@@ -28,7 +28,7 @@ const DANGER_BADGE: React.CSSProperties = {
   height: 16,
   borderRadius: 999,
   background: 'var(--danger)',
-  color: 'var(--fg-on-accent, #ffffff)',
+  color: 'var(--fg-on-accent))',
   fontSize: 9,
   fontWeight: 800,
   padding: '0 4px',
@@ -38,8 +38,8 @@ const DANGER_BADGE: React.CSSProperties = {
 
 const WARNING_BADGE: React.CSSProperties = {
   ...DANGER_BADGE,
-  background: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
-  color: 'var(--bg-base, #080b12)',
+  background: 'var(--warning))',
+  color: 'var(--bg-base))',
 };
 
 export function DevtoolsToolbarSection({
@@ -68,7 +68,7 @@ export function DevtoolsToolbarSection({
             fontWeight: 700,
             textTransform: 'uppercase',
             letterSpacing: '0.08em',
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             marginRight: 4,
             flexShrink: 0,
           }}
@@ -80,10 +80,10 @@ export function DevtoolsToolbarSection({
           onClick={() => onScrollToSection('overview')}
           style={{
             borderRadius: 8,
-            border: '1px solid var(--border)',
-            background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+            border: '1px solid var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -103,13 +103,13 @@ export function DevtoolsToolbarSection({
             borderRadius: 8,
             border:
               counts.diagnostics > 0
-                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border))'
-                : '1px solid var(--border)',
+                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
+                : '1px solid var(--border-default)',
             borderLeft:
-              counts.diagnostics > 0 ? '3px solid var(--danger)' : '1px solid var(--border)',
-            background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+              counts.diagnostics > 0 ? '3px solid var(--danger)' : '1px solid var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -125,10 +125,10 @@ export function DevtoolsToolbarSection({
           onClick={() => onScrollToSection('logs')}
           style={{
             borderRadius: 8,
-            border: '1px solid var(--border)',
-            background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+            border: '1px solid var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -137,17 +137,17 @@ export function DevtoolsToolbarSection({
           }}
         >
           <span style={{ fontSize: 11, fontWeight: 700 }}>日志</span>
-          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{counts.logs} 条可见日志</span>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{counts.logs} 条可见日志</span>
         </button>
         <button
           type="button"
           onClick={() => onScrollToSection('ssh')}
           style={{
             borderRadius: 8,
-            border: '1px solid var(--border)',
-            background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+            border: '1px solid var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -162,10 +162,10 @@ export function DevtoolsToolbarSection({
           onClick={() => onScrollToSection('workers')}
           style={{
             borderRadius: 8,
-            border: '1px solid var(--border)',
-            background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+            border: '1px solid var(--border-default)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
             padding: '7px 10px',
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -180,7 +180,7 @@ export function DevtoolsToolbarSection({
           style={{
             width: 1,
             height: 20,
-            background: 'var(--border)',
+            background: 'var(--border-default)',
             flexShrink: 0,
             margin: '0 2px',
           }}
@@ -192,10 +192,10 @@ export function DevtoolsToolbarSection({
           aria-label="刷新全部数据源"
           style={{
             borderRadius: 8,
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-default)',
             padding: '5px 8px',
-            background: 'var(--surface)',
-            color: anyRefreshableSourceLoading ? 'var(--text-3)' : 'var(--text)',
+            background: 'var(--bg-overlay)',
+            color: anyRefreshableSourceLoading ? 'var(--fg-muted)' : 'var(--fg-strong)',
             fontSize: 10,
             cursor: anyRefreshableSourceLoading ? 'not-allowed' : 'pointer',
             opacity: anyRefreshableSourceLoading ? 0.55 : 1,
@@ -208,12 +208,12 @@ export function DevtoolsToolbarSection({
           onClick={onToggleAutoRefresh}
           style={{
             borderRadius: 8,
-            border: `1px solid ${autoRefreshEnabled ? 'color-mix(in srgb, var(--accent) 30%, var(--border))' : 'var(--border)'}`,
+            border: `1px solid ${autoRefreshEnabled ? 'color-mix(in srgb, var(--accent) 30%, var(--border-default))' : 'var(--border-default)'}`,
             padding: '5px 8px',
             background: autoRefreshEnabled
-              ? 'color-mix(in srgb, var(--accent) 8%, var(--surface))'
-              : 'var(--surface)',
-            color: autoRefreshEnabled ? 'var(--accent)' : 'var(--text-3)',
+              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
+              : 'var(--bg-overlay)',
+            color: autoRefreshEnabled ? 'var(--accent)' : 'var(--fg-muted)',
             fontSize: 10,
             fontWeight: autoRefreshEnabled ? 700 : 400,
             cursor: 'pointer',
@@ -225,7 +225,7 @@ export function DevtoolsToolbarSection({
           style={{
             width: 1,
             height: 20,
-            background: 'var(--border)',
+            background: 'var(--border-default)',
             flexShrink: 0,
             margin: '0 2px',
           }}
@@ -238,7 +238,7 @@ export function DevtoolsToolbarSection({
             border: '1px solid var(--accent)',
             padding: '5px 8px',
             background: 'var(--accent)',
-            color: 'var(--accent-text)',
+            color: 'var(--fg-on-accent)',
             fontSize: 10,
             fontWeight: 700,
             cursor: 'pointer',
@@ -251,10 +251,10 @@ export function DevtoolsToolbarSection({
           onClick={onExportMarkdownBundle}
           style={{
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border))',
+            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default))',
             padding: '5px 8px',
-            background: 'var(--surface)',
-            color: 'var(--text)',
+            background: 'var(--bg-overlay)',
+            color: 'var(--fg-strong)',
             fontSize: 10,
             cursor: 'pointer',
           }}

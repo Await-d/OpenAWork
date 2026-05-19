@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { getAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
 
 const TASK_PARENT_AUTO_RESUME_DELAY_MS = 800;

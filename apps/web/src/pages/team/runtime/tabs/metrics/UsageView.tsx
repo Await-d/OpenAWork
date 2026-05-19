@@ -19,7 +19,7 @@ const CONTAINER_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -35,26 +35,26 @@ const CARD_STYLE: CSSProperties = {
   gap: 4,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 const TAB_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const TAB_BTN_ACTIVE_STYLE: CSSProperties = {
   ...TAB_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -62,8 +62,8 @@ const EMPTY_STYLE: CSSProperties = {
   placeItems: 'center',
   padding: 32,
   borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-  color: 'var(--text-3)',
+  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+  color: 'var(--fg-muted)',
   fontSize: 13,
   gap: 6,
   textAlign: 'center',
@@ -118,7 +118,7 @@ export function UsageView() {
             <span style={{ fontSize: 26 }} aria-hidden>
               🔋
             </span>
-            <strong style={{ color: 'var(--text-2)' }}>暂无用量数据</strong>
+            <strong style={{ color: 'var(--fg-default)' }}>暂无用量数据</strong>
             <span style={{ maxWidth: 420 }}>
               用量数据来自 agent-gateway 的 stream usage 事件。
               <br />
@@ -166,7 +166,7 @@ export function UsageView() {
 
         <div style={{ display: 'grid', gap: 6 }}>
           {groupedRows.length === 0 ? (
-            <div style={{ padding: 16, color: 'var(--text-3)', fontSize: 12 }}>
+            <div style={{ padding: 16, color: 'var(--fg-muted)', fontSize: 12 }}>
               该维度暂无聚合数据。
             </div>
           ) : (
@@ -175,7 +175,7 @@ export function UsageView() {
         </div>
 
         <span style={SECTION_TITLE_STYLE}>最近 {recent.length} 条调用</span>
-        <div style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--text-2)' }}>
+        <div style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--fg-default)' }}>
           {recent
             .slice()
             .reverse()
@@ -188,16 +188,16 @@ export function UsageView() {
                   gap: 8,
                   padding: '4px 8px',
                   borderRadius: 6,
-                  background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
+                  background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
                 }}
               >
-                <span style={{ minWidth: 90, color: 'var(--text-3)' }}>
+                <span style={{ minWidth: 90, color: 'var(--fg-muted)' }}>
                   {new Date(event.timestamp).toLocaleTimeString()}
                 </span>
-                <span style={{ minWidth: 90, color: 'var(--text-2)' }}>
+                <span style={{ minWidth: 90, color: 'var(--fg-default)' }}>
                   {event.provider ?? '—'}
                 </span>
-                <span style={{ minWidth: 80, color: 'var(--text-2)' }}>{event.model ?? ''}</span>
+                <span style={{ minWidth: 80, color: 'var(--fg-default)' }}>{event.model ?? ''}</span>
                 <span style={{ flex: 1 }} />
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                   in {formatTokens(event.inputTokens)} · out {formatTokens(event.outputTokens)}
@@ -213,8 +213,8 @@ export function UsageView() {
 function UsageCard({ label, value }: { label: string; value: string }) {
   return (
     <div style={CARD_STYLE}>
-      <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>{value}</span>
-      <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg-strong)' }}>{value}</span>
+      <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
     </div>
   );
 }
@@ -228,15 +228,15 @@ function UsageRow({ label, bucket }: { label: string; bucket: UsageBucket }) {
         gap: 10,
         padding: '8px 12px',
         borderRadius: 10,
-        border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-        background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+        border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
         fontSize: 12,
       }}
     >
       <strong
         style={{
           minWidth: 140,
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -245,22 +245,22 @@ function UsageRow({ label, bucket }: { label: string; bucket: UsageBucket }) {
       >
         {label}
       </strong>
-      <span style={{ color: 'var(--text-3)' }}>{bucket.count} 次</span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-2)' }}>
-        in <strong style={{ color: 'var(--text)' }}>{formatTokens(bucket.inputTokens)}</strong>
+      <span style={{ color: 'var(--fg-muted)' }}>{bucket.count} 次</span>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-default)' }}>
+        in <strong style={{ color: 'var(--fg-strong)' }}>{formatTokens(bucket.inputTokens)}</strong>
       </span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-2)' }}>
-        out <strong style={{ color: 'var(--text)' }}>{formatTokens(bucket.outputTokens)}</strong>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-default)' }}>
+        out <strong style={{ color: 'var(--fg-strong)' }}>{formatTokens(bucket.outputTokens)}</strong>
       </span>
       {bucket.cacheReadTokens > 0 ? (
-        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-3)' }}>
+        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-muted)' }}>
           cache {formatTokens(bucket.cacheReadTokens)}
         </span>
       ) : null}
       <span style={{ flex: 1 }} />
       <span
         style={{
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           fontWeight: 700,
           fontVariantNumeric: 'tabular-nums',
         }}

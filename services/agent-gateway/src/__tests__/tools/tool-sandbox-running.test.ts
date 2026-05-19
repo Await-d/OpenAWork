@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   transitionToolToRunningMock: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ROOT: '/home/await/project/OpenAWork',
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],

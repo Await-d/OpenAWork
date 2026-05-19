@@ -53,12 +53,12 @@ const STATE_LABEL: Record<HandoffRecord['state'], string> = {
 };
 
 const STATE_COLOR: Record<HandoffRecord['state'], string> = {
-  pending: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
-  claimed: 'var(--aux, var(--aux, #8b9cf5))',
-  running: 'var(--success, var(--success, #3dd49a))',
-  completed: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  failed: 'var(--danger, #d4574e)',
-  cancelled: 'var(--text-3)',
+  pending: 'var(--warning))',
+  claimed: 'var(--aux))',
+  running: 'var(--success))',
+  completed: 'var(--success))',
+  failed: 'var(--danger))',
+  cancelled: 'var(--fg-muted)',
 };
 
 const META_BAR_STYLE: CSSProperties = {
@@ -67,7 +67,7 @@ const META_BAR_STYLE: CSSProperties = {
   gap: 10,
   marginBottom: 12,
   paddingBottom: 8,
-  borderBottom: '1px dashed color-mix(in srgb, var(--border) 50%, transparent)',
+  borderBottom: '1px dashed color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
 const PACKAGE_ROW_STYLE: CSSProperties = {
@@ -75,8 +75,8 @@ const PACKAGE_ROW_STYLE: CSSProperties = {
   gap: 10,
   padding: '12px 14px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 84%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 84%, var(--bg-base))',
 };
 
 const ACTION_BTN_STYLE: CSSProperties = {
@@ -85,9 +85,9 @@ const ACTION_BTN_STYLE: CSSProperties = {
   gap: 4,
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 36%, transparent)',
-  background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, transparent)',
-  color: 'var(--danger, #d4574e)',
+  border: '1px solid color-mix(in srgb, var(--danger) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+  color: 'var(--danger))',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
@@ -171,9 +171,9 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
           style={{
             padding: '4px 10px',
             borderRadius: 6,
-            border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
             background: 'transparent',
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             fontSize: 11,
             fontWeight: 600,
             cursor: 'pointer',
@@ -184,10 +184,10 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
       }
     >
       <div style={META_BAR_STYLE}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-default)' }}>
           派发记录 {dispatchHandoffs.length} 个
         </span>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           {packages.length} 个携带 dispatch_package
         </span>
       </div>
@@ -197,8 +197,8 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
           style={{
             padding: '8px 12px',
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 32%, transparent)',
-            color: 'var(--danger, #d4574e)',
+            border: '1px solid color-mix(in srgb, var(--danger) 32%, transparent)',
+            color: 'var(--danger))',
             fontSize: 12,
             marginBottom: 12,
           }}
@@ -229,7 +229,7 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
           <span
             style={{
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
               fontWeight: 700,
@@ -254,14 +254,14 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
                 >
                   {STATE_LABEL[record.state]}
                 </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   {record.fromRoleLayer} → {record.toRoleLayer}
                 </span>
                 <span
                   style={{
                     marginLeft: 'auto',
                     fontSize: 10,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     fontVariantNumeric: 'tabular-nums',
                   }}
                   title={`Handoff ID: ${record.id}`}
@@ -270,7 +270,7 @@ export function DispatchTab({ selectedTeamId, onCancelHandoff }: DispatchTabProp
                 </span>
               </div>
               {record.failureReason ? (
-                <span style={{ fontSize: 11, color: 'var(--danger, #d4574e)' }}>
+                <span style={{ fontSize: 11, color: 'var(--danger))' }}>
                   失败原因：{record.failureReason}
                 </span>
               ) : null}

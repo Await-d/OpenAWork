@@ -20,10 +20,10 @@ export interface MCPServerConfigProps {
 }
 
 const inputBase: CSSProperties = {
-  background: 'var(--bg-base, #080b12)',
+  background: 'var(--bg-base))',
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   borderRadius: 6,
-  color: 'var(--fg-default, #c8d1e0)',
+  color: 'var(--fg-default))',
   fontSize: 12,
   padding: '0.35rem 0.6rem',
   outline: 'none',
@@ -33,7 +33,7 @@ const inputBase: CSSProperties = {
 
 const labelStyle: CSSProperties = {
   fontSize: 12,
-  color: 'var(--fg-muted, #7b8a9e)',
+  color: 'var(--fg-muted))',
   marginBottom: 4,
   display: 'block',
 };
@@ -78,7 +78,7 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         overflow: 'hidden',
@@ -90,7 +90,7 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
         style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))' }}
       >
         <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' }}
+          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
         >
           MCP 服务器配置
         </h2>
@@ -98,7 +98,7 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
 
       {servers.length === 0 ? (
         <div
-          style={{ padding: '1.25rem 1.5rem', color: 'var(--fg-muted, #7b8a9e)', fontSize: 12 }}
+          style={{ padding: '1.25rem 1.5rem', color: 'var(--fg-muted))', fontSize: 12 }}
         >
           暂无服务器配置。
         </div>
@@ -118,13 +118,13 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}>
                   {s.name}
                 </div>
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--fg-muted, #7b8a9e)',
+                    color: 'var(--fg-muted))',
                     marginTop: 2,
                     fontFamily: 'monospace',
                   }}
@@ -142,7 +142,7 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
                   padding: '2px 6px',
                   borderRadius: 4,
                   background: 'rgba(99,102,241,0.15)',
-                  color: 'var(--accent, #5cd4c0)',
+                  color: 'var(--accent))',
                   textTransform: 'uppercase',
                   flexShrink: 0,
                 }}
@@ -154,7 +154,7 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
                 onClick={() => onRemove(s.id)}
                 style={{
                   background: 'transparent',
-                  border: '1px solid var(--fg-subtle, #4d5b6e)',
+                  border: '1px solid var(--fg-subtle))',
                   borderRadius: 6,
                   color: color.danger,
                   padding: '0.2rem 0.5rem',
@@ -192,8 +192,8 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
                 borderRadius: 6,
                 cursor: 'pointer',
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                background: transport === t ? 'var(--accent, #5cd4c0)' : 'transparent',
-                color: transport === t ? color.fgOnAccent : 'var(--fg-muted, #7b8a9e)',
+                background: transport === t ? 'var(--accent))' : 'transparent',
+                color: transport === t ? color.fgOnAccent : 'var(--fg-muted))',
               }}
             >
               {t.toUpperCase()}
@@ -265,7 +265,7 @@ export function MCPServerConfig({ servers, onAdd, onRemove, style }: MCPServerCo
           onClick={handleAdd}
           disabled={!canAdd}
           style={{
-            background: canAdd ? 'var(--accent, #5cd4c0)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+            background: canAdd ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,

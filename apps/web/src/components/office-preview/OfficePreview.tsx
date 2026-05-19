@@ -17,8 +17,8 @@
 
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth.js';
-import { useUIStateStore } from '../../stores/uiState.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { useUIStateStore } from '../../stores/ui/uiState.js';
 
 const DocxPreview = lazy(() => import('./DocxPreview.js'));
 const XlsxPreview = lazy(() => import('./XlsxPreview.js'));
@@ -117,7 +117,7 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
         justifyContent: 'center',
         gap: 14,
         padding: 32,
-        background: 'var(--surface)',
+        background: 'var(--bg-overlay)',
         textAlign: 'center',
       }}
     >
@@ -127,7 +127,7 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
           width: 64,
           height: 64,
           borderRadius: 16,
-          background: 'color-mix(in oklch, var(--accent) 14%, var(--surface))',
+          background: 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))',
           color: 'var(--accent)',
           display: 'flex',
           alignItems: 'center',
@@ -143,7 +143,7 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
       <div
         style={{
           fontSize: 11,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontFamily: 'var(--font-mono, monospace)',
           maxWidth: 420,
           wordBreak: 'break-all',
@@ -151,7 +151,7 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
       >
         {filename}
       </div>
-      <div style={{ maxWidth: 420, fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
+      <div style={{ maxWidth: 420, fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.6 }}>
         {tip}
       </div>
     </div>
@@ -166,7 +166,7 @@ function LoadingState() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: 'var(--text-3)',
+        color: 'var(--fg-muted)',
         fontSize: 12,
       }}
     >

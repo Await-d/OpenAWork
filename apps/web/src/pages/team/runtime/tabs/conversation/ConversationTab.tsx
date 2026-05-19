@@ -74,7 +74,7 @@ export function ConversationTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
       {/* ── Header bar ──────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>团队对话</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>团队对话</span>
         <span
           style={{
             padding: '1px 8px',
@@ -125,7 +125,7 @@ export function ConversationTab({
                       ? `color-mix(in oklch, ${meta.color} 14%, transparent)`
                       : 'color-mix(in oklch, var(--accent) 14%, transparent)'
                     : 'transparent',
-                  color: isActive ? (meta?.color ?? 'var(--accent)') : 'var(--text-3)',
+                  color: isActive ? (meta?.color ?? 'var(--accent)') : 'var(--fg-muted)',
                   fontSize: 10,
                   fontWeight: isActive ? 700 : 500,
                   cursor: 'pointer',
@@ -133,7 +133,7 @@ export function ConversationTab({
                 }}
               >
                 {meta && (
-                  <Icon name={meta.icon} size={9} color={isActive ? meta.color : 'var(--text-3)'} />
+                  <Icon name={meta.icon} size={9} color={isActive ? meta.color : 'var(--fg-muted)'} />
                 )}
                 {opt.label}
               </button>
@@ -153,15 +153,15 @@ export function ConversationTab({
             padding: '10px 12px',
             borderRadius: 10,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--card-bg)',
+            background: 'var(--bg-overlay)',
             boxShadow: 'var(--shadow-sm)',
           }}
         >
           <div style={{ display: 'grid', gap: 3 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
               当前对话会话
             </span>
-            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </span>
           </div>
@@ -206,7 +206,7 @@ export function ConversationTab({
                 padding: '32px 16px',
                 textAlign: 'center',
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 borderRadius: 10,
                 border: '1px dashed var(--border-subtle)',
               }}
@@ -234,8 +234,8 @@ export function ConversationTab({
                   cursor: 'pointer',
                   border: '1px solid var(--border-subtle)',
                   background: isSelected
-                    ? `color-mix(in oklch, ${meta.color} 5%, var(--card-bg))`
-                    : 'var(--card-bg)',
+                    ? `color-mix(in oklch, ${meta.color} 5%, var(--bg-overlay))`
+                    : 'var(--bg-overlay)',
                   boxShadow: isSelected ? 'var(--shadow-md)' : 'var(--shadow-sm)',
                   overflow: 'hidden',
                   ['--tint' as string]: meta.color,
@@ -268,7 +268,7 @@ export function ConversationTab({
                         borderRadius: 8,
                         display: 'grid',
                         placeItems: 'center',
-                        background: `color-mix(in oklch, ${card.roleAccent} 14%, var(--surface))`,
+                        background: `color-mix(in oklch, ${card.roleAccent} 14%, var(--bg-overlay))`,
                         color: card.roleAccent,
                         fontSize: 12,
                         fontWeight: 800,
@@ -292,7 +292,7 @@ export function ConversationTab({
                           style={{
                             fontSize: 13,
                             fontWeight: 700,
-                            color: 'var(--text)',
+                            color: 'var(--fg-strong)',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
@@ -326,8 +326,8 @@ export function ConversationTab({
                         >
                           {card.role}
                         </span>
-                        <span style={{ color: 'var(--border)', fontSize: 8 }}>·</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{card.meta}</span>
+                        <span style={{ color: 'var(--border-default)', fontSize: 8 }}>·</span>
+                        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{card.meta}</span>
                       </div>
                     </div>
                   </div>
@@ -336,7 +336,7 @@ export function ConversationTab({
                   <div
                     style={{
                       fontSize: 12,
-                      color: 'var(--text-2)',
+                      color: 'var(--fg-default)',
                       lineHeight: 1.6,
                       padding: '0 0 0 42px',
                     }}
@@ -356,7 +356,7 @@ export function ConversationTab({
                     <span
                       style={{
                         fontSize: 10,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         fontVariantNumeric: 'tabular-nums',
                       }}
                     >
@@ -406,7 +406,7 @@ export function ConversationTab({
                       }}
                       className="team-hover-surface-bg"
                     >
-                      <ChevronDownIcon size={12} color="var(--text-3)" />
+                      <ChevronDownIcon size={12} color="var(--fg-muted)" />
                     </button>
                   </div>
 
@@ -430,7 +430,7 @@ export function ConversationTab({
                             borderRadius: '8px 8px 2px 8px',
                             background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
                             fontSize: 12,
-                            color: 'var(--text-2)',
+                            color: 'var(--fg-default)',
                             borderLeft: `2px solid var(--accent)`,
                             lineHeight: 1.5,
                           }}
@@ -467,8 +467,8 @@ export function ConversationTab({
                           padding: '7px 12px',
                           borderRadius: 7,
                           border: '1px solid var(--border-subtle)',
-                          background: 'var(--surface)',
-                          color: 'var(--text)',
+                          background: 'var(--bg-overlay)',
+                          color: 'var(--fg-strong)',
                           fontSize: 12,
                           outline: 'none',
                         }}
@@ -482,7 +482,7 @@ export function ConversationTab({
                           borderRadius: 7,
                           border: 'none',
                           background: 'var(--accent)',
-                          color: 'var(--accent-text)',
+                          color: 'var(--fg-on-accent)',
                           cursor: messageInput.trim() && !busy ? 'pointer' : 'not-allowed',
                           opacity: messageInput.trim() && !busy ? 1 : 0.5,
                           display: 'inline-flex',
@@ -493,7 +493,7 @@ export function ConversationTab({
                           transition: 'opacity 0.15s',
                         }}
                       >
-                        <SendIcon size={11} color="var(--accent-text)" />
+                        <SendIcon size={11} color="var(--fg-on-accent)" />
                         {busy ? '发送中…' : '发送'}
                       </button>
                     </div>
@@ -511,7 +511,7 @@ export function ConversationTab({
             style={{
               borderRadius: 10,
               border: '1px solid var(--border-subtle)',
-              background: 'var(--card-bg)',
+              background: 'var(--bg-overlay)',
               boxShadow: 'var(--shadow-sm)',
               display: 'flex',
               flexDirection: 'column',
@@ -532,7 +532,7 @@ export function ConversationTab({
                 style={{
                   fontSize: 10,
                   fontWeight: 700,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
                 }}
@@ -542,10 +542,10 @@ export function ConversationTab({
               <span
                 style={{
                   fontSize: 9,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   padding: '0 5px',
                   borderRadius: 999,
-                  background: 'var(--surface)',
+                  background: 'var(--bg-overlay)',
                 }}
               >
                 {roleChips.length}
@@ -569,7 +569,7 @@ export function ConversationTab({
                       borderRadius: 8,
                       background: isActive
                         ? `color-mix(in oklch, ${chip.accent} 8%, transparent)`
-                        : 'var(--surface)',
+                        : 'var(--bg-overlay)',
                       border: `1px solid ${isActive ? `color-mix(in oklch, ${chip.accent} 25%, transparent)` : 'transparent'}`,
                     }}
                   >
@@ -581,7 +581,7 @@ export function ConversationTab({
                         display: 'grid',
                         placeItems: 'center',
                         background: `linear-gradient(135deg, ${chip.accent}, color-mix(in oklch, ${chip.accent} 70%, #000))`,
-                        color: 'var(--fg-on-accent, #ffffff)',
+                        color: 'var(--fg-on-accent))',
                         fontSize: 10,
                         fontWeight: 800,
                         flexShrink: 0,
@@ -599,10 +599,10 @@ export function ConversationTab({
                         flex: 1,
                       }}
                     >
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)' }}>
                         {chip.role}
                       </span>
-                      <span style={{ fontSize: 9, color: 'var(--text-3)' }}>{chip.provider}</span>
+                      <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>{chip.provider}</span>
                     </div>
                     <span
                       style={{
@@ -625,7 +625,7 @@ export function ConversationTab({
             style={{
               borderRadius: 10,
               border: '1px solid var(--border-subtle)',
-              background: 'var(--card-bg)',
+              background: 'var(--bg-overlay)',
               boxShadow: 'var(--shadow-sm)',
               padding: '10px 12px',
               display: 'grid',
@@ -669,7 +669,7 @@ export function ConversationTab({
                 <span style={{ fontSize: 16, fontWeight: 800, color: stat.color, lineHeight: 1 }}>
                   {stat.count}
                 </span>
-                <span style={{ fontSize: 9, color: 'var(--text-3)', fontWeight: 500 }}>
+                <span style={{ fontSize: 9, color: 'var(--fg-muted)', fontWeight: 500 }}>
                   {stat.label}
                 </span>
               </div>

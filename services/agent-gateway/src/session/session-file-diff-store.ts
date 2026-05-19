@@ -5,7 +5,7 @@ import type {
   FileDiffContent,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 import {
   captureBeforeWriteBackup,
   readSessionFileBackupContent,

@@ -43,7 +43,7 @@ const HEADER_STYLE: CSSProperties = {
   gap: 10,
   flexWrap: 'wrap',
   paddingBottom: 8,
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 28%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 28%, transparent)',
 };
 
 const HEADER_TEXT_GROUP_STYLE: CSSProperties = {
@@ -57,13 +57,13 @@ const HEADER_TEXT_GROUP_STYLE: CSSProperties = {
 const TITLE_STYLE: CSSProperties = {
   fontSize: 14,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   lineHeight: 1.25,
 };
 
 const SUBTITLE_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
 };
 
@@ -158,12 +158,12 @@ const SECTION_HEADER_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const SECTION_HINT_STYLE: CSSProperties = {
   fontSize: 10,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const SECTION_ACTIONS_STYLE: CSSProperties = {
@@ -176,7 +176,7 @@ const SECTION_ACTIONS_STYLE: CSSProperties = {
 const CARD_PADDING_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 30%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
   background: 'transparent',
 };
 

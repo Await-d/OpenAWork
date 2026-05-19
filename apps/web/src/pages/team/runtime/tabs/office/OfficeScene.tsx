@@ -143,13 +143,13 @@ export function OfficeSidebar({
         }}
       >
         <div style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>场景信息</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>场景信息</span>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-2)' }}>在线角色</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>在线角色</span>
             <span
               style={{
                 fontSize: 11,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 fontWeight: 700,
                 fontVariantNumeric: 'tabular-nums',
               }}
@@ -158,11 +158,11 @@ export function OfficeSidebar({
             </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-2)' }}>已暂停</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>已暂停</span>
             <span
               style={{
                 fontSize: 11,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 fontWeight: 700,
                 fontVariantNumeric: 'tabular-nums',
               }}
@@ -177,15 +177,15 @@ export function OfficeSidebar({
             style={{
               padding: '10px 12px',
               borderRadius: 10,
-              background: 'color-mix(in oklch, var(--surface) 94%, var(--bg))',
-              border: '1px solid var(--border)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 94%, var(--bg-base))',
+              border: '1px solid var(--border-default)',
               boxShadow: 'var(--shadow-sm)',
               display: 'grid',
               gap: 6,
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--fg-strong)' }}>
                 {selectedAgent.label}
               </span>
               <button
@@ -200,7 +200,7 @@ export function OfficeSidebar({
                   alignItems: 'center',
                 }}
               >
-                <XIcon size={11} color="var(--text-3)" />
+                <XIcon size={11} color="var(--fg-muted)" />
               </button>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -216,12 +216,12 @@ export function OfficeSidebar({
                       : `0 0 4px ${selectedAgentDotColor}`,
                 }}
               />
-              <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+              <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
                 {selectedAgentStatusLabel}
               </span>
             </div>
             {selectedAgent.note && (
-              <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
                 {selectedAgent.note}
               </span>
             )}
@@ -238,17 +238,17 @@ export function OfficeSidebar({
                     padding: '3px 8px',
                     borderRadius: 6,
                     border: isSessionPaused
-                      ? '1px solid color-mix(in oklch, var(--border) 70%, transparent)'
+                      ? '1px solid color-mix(in oklch, var(--border-default) 70%, transparent)'
                       : agentPaused.has(selectedAgent.id)
                         ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
                         : '1px solid color-mix(in oklch, var(--warning) 40%, transparent)',
                     background: isSessionPaused
-                      ? 'color-mix(in oklch, var(--surface) 88%, var(--bg))'
+                      ? 'color-mix(in oklch, var(--bg-overlay) 88%, var(--bg-base))'
                       : agentPaused.has(selectedAgent.id)
-                        ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
-                        : 'color-mix(in oklch, var(--warning) 10%, var(--bg))',
+                        ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
+                        : 'color-mix(in oklch, var(--warning) 10%, var(--bg-base))',
                     color: isSessionPaused
-                      ? 'var(--text-3)'
+                      ? 'var(--fg-muted)'
                       : agentPaused.has(selectedAgent.id)
                         ? 'var(--success)'
                         : 'var(--warning)',
@@ -271,7 +271,7 @@ export function OfficeSidebar({
                 </button>
               </div>
             ) : (
-              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>运行状态由共享会话驱动</span>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>运行状态由共享会话驱动</span>
             )}
             <div
               style={{
@@ -282,7 +282,7 @@ export function OfficeSidebar({
               }}
             >
               <span
-                style={{ fontSize: 9, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}
+                style={{ fontSize: 9, color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}
               >
                 位置: ({selectedAgent.x}%, {selectedAgent.y}%)
               </span>
@@ -315,8 +315,8 @@ export function OfficeSidebar({
             style={{
               padding: '10px 12px',
               borderRadius: 10,
-              border: '1px dashed var(--border)',
-              color: 'var(--text-3)',
+              border: '1px dashed var(--border-default)',
+              color: 'var(--fg-muted)',
               fontSize: 11,
               lineHeight: 1.5,
             }}

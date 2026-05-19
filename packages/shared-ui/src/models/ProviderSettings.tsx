@@ -39,7 +39,7 @@ function ProviderLogo({ type, size = 28 }: { type: string; size?: number }) {
         width: size,
         height: size,
         borderRadius: Math.round(size * 0.28),
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         overflow: 'hidden',
         flexShrink: 0,
@@ -64,7 +64,7 @@ function ProviderLogo({ type, size = 28 }: { type: string; size?: number }) {
           style={{
             fontSize: Math.round(size * 0.45),
             fontWeight: 700,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textTransform: 'uppercase',
           }}
         >
@@ -168,15 +168,15 @@ export interface ProviderSettingsProps {
 
 const labelStyle: CSSProperties = {
   fontSize: 12,
-  color: 'var(--fg-muted, #7b8a9e)',
+  color: 'var(--fg-muted))',
   marginBottom: 4,
 };
 
 const inputStyle: CSSProperties = {
-  background: 'var(--color-surface-raised, #0f172a)',
+  background: 'var(--bg-raised)',
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   borderRadius: 6,
-  color: 'var(--fg-default, #c8d1e0)',
+  color: 'var(--fg-default))',
   fontSize: 12,
   padding: '0.35rem 0.6rem',
   width: '100%',
@@ -210,12 +210,12 @@ function CapabilityPill({
 }) {
   const palette =
     tone === 'accent'
-      ? { bg: 'rgba(59, 130, 246, 0.10)', color: 'var(--fg-default, #c8d1e0)' }
+      ? { bg: 'rgba(59, 130, 246, 0.10)', color: 'var(--fg-default))' }
       : tone === 'violet'
-        ? { bg: 'rgba(139, 92, 246, 0.12)', color: 'var(--fg-default, #c8d1e0)' }
+        ? { bg: 'rgba(139, 92, 246, 0.12)', color: 'var(--fg-default))' }
         : tone === 'emerald'
-          ? { bg: 'rgba(16, 185, 129, 0.12)', color: 'var(--fg-default, #c8d1e0)' }
-          : { bg: 'var(--color-surface-raised, #0f172a)', color: 'var(--fg-muted, #7b8a9e)' };
+          ? { bg: 'rgba(16, 185, 129, 0.12)', color: 'var(--fg-default))' }
+          : { bg: 'var(--bg-raised)', color: 'var(--fg-muted))' };
 
   return (
     <span
@@ -252,8 +252,8 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
   }
 
   const formWrap: CSSProperties = {
-    background: 'var(--color-surface-raised, #0f172a)',
-    border: '1px solid var(--accent, #5cd4c0)',
+    background: 'var(--bg-raised)',
+    border: '1px solid var(--accent))',
     borderRadius: 8,
     padding: '1rem 1.25rem',
     display: 'flex',
@@ -270,7 +270,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
         style={{
           fontSize: 12,
           fontWeight: 600,
-          color: 'var(--accent, #5cd4c0)',
+          color: 'var(--accent))',
           marginBottom: 4,
         }}
       >
@@ -373,7 +373,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
             background: 'transparent',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
-            color: 'var(--fg-default, #c8d1e0)',
+            color: 'var(--fg-default))',
             padding: '0.3rem 0.8rem',
             fontSize: 12,
             cursor: 'pointer',
@@ -385,7 +385,7 @@ function InlineProviderForm({ initial, isNew, onSubmit, onCancel }: InlineFormPr
           type="button"
           onClick={() => onSubmit(form)}
           style={{
-            background: 'var(--accent, #5cd4c0)',
+            background: 'var(--accent))',
             border: 'none',
             borderRadius: 6,
             color: color.fgOnAccent,
@@ -478,7 +478,7 @@ export function ProviderSettings({
     return (
       <div
         style={{
-          borderTop: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+          borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
           paddingTop: 12,
           display: 'flex',
           flexDirection: 'column',
@@ -495,7 +495,7 @@ export function ProviderSettings({
         >
           <div>
             <div style={{ fontSize: 11, fontWeight: 600 }}>默认思考</div>
-            <div style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)', marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}>
               新会话会继承这里的默认值；若模型本身固定带思考，请求时会自动安全降级。
             </div>
           </div>
@@ -509,12 +509,12 @@ export function ProviderSettings({
           )}
         </div>
         {!supportsThinking ? (
-          <div style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)', lineHeight: 1.45 }}>
+          <div style={{ fontSize: 11, color: 'var(--fg-muted))', lineHeight: 1.45 }}>
             当前模型不支持思考配置，这里的默认值不会被实际请求使用。
           </div>
         ) : null}
         {supportsThinking && !canConfigureThinking ? (
-          <div style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)', lineHeight: 1.45 }}>
+          <div style={{ fontSize: 11, color: 'var(--fg-muted))', lineHeight: 1.45 }}>
             这个模型的思考能力由模型本身决定，当前网关不会单独下发开关或力度参数。
           </div>
         ) : null}
@@ -532,11 +532,11 @@ export function ProviderSettings({
               cursor: controlEnabled ? 'pointer' : 'not-allowed',
               opacity: controlEnabled ? 1 : 0.45,
               color: !current.enabled
-                ? 'var(--accent, #5cd4c0)'
-                : 'var(--fg-default, #c8d1e0)',
+                ? 'var(--accent))'
+                : 'var(--fg-default))',
               background: !current.enabled
-                ? 'var(--color-accent-muted, rgba(99, 102, 241, 0.12))'
-                : 'var(--color-surface-raised, #0f172a)',
+                ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
+                : 'var(--bg-raised)',
             }}
           >
             关闭思考
@@ -558,11 +558,11 @@ export function ProviderSettings({
                   cursor: controlEnabled ? 'pointer' : 'not-allowed',
                   opacity: controlEnabled ? 1 : 0.45,
                   color: activeLevel
-                    ? 'var(--accent, #5cd4c0)'
-                    : 'var(--fg-default, #c8d1e0)',
+                    ? 'var(--accent))'
+                    : 'var(--fg-default))',
                   background: activeLevel
-                    ? 'var(--color-accent-muted, rgba(99, 102, 241, 0.12))'
-                    : 'var(--color-surface-raised, #0f172a)',
+                    ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
+                    : 'var(--bg-raised)',
                   textTransform: 'uppercase',
                 }}
                 title={describeReasoningEffort(level)}
@@ -653,7 +653,7 @@ export function ProviderSettings({
             border: 'none',
             borderBottom:
               index < total - 1
-                ? '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))'
+                ? '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))'
                 : 'none',
             padding: '0.58rem 0.15rem',
             display: 'flex',
@@ -662,9 +662,9 @@ export function ProviderSettings({
             textAlign: 'left',
             cursor: 'pointer',
             background: isActive
-              ? 'var(--color-accent-muted, rgba(99, 102, 241, 0.12))'
+              ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
               : 'transparent',
-            color: 'var(--fg-default, #c8d1e0)',
+            color: 'var(--fg-default))',
           }}
         >
           <span
@@ -672,7 +672,7 @@ export function ProviderSettings({
               width: 16,
               display: 'flex',
               justifyContent: 'center',
-              color: isActive ? 'var(--accent, #5cd4c0)' : 'var(--fg-muted, #7b8a9e)',
+              color: isActive ? 'var(--accent))' : 'var(--fg-muted))',
               flexShrink: 0,
             }}
           >
@@ -698,7 +698,7 @@ export function ProviderSettings({
                 flexShrink: 0,
                 maxWidth: '42%',
                 fontSize: 10.5,
-                color: 'var(--fg-muted, #7b8a9e)',
+                color: 'var(--fg-muted))',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -718,7 +718,7 @@ export function ProviderSettings({
           <div
             style={{
               padding: '0.8rem 0',
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               fontSize: 12,
             }}
           >
@@ -735,7 +735,7 @@ export function ProviderSettings({
               alignItems: 'center',
               gap: 5,
               padding: '5px 0 3px',
-              borderTop: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+              borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
             }}
           >
             <div
@@ -743,8 +743,8 @@ export function ProviderSettings({
                 width: 15,
                 height: 15,
                 borderRadius: 4,
-                background: 'var(--bg-overlay, #121721)',
-                border: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+                background: 'var(--bg-overlay))',
+                border: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
                 overflow: 'hidden',
                 display: 'flex',
                 alignItems: 'center',
@@ -767,7 +767,7 @@ export function ProviderSettings({
               style={{
                 fontSize: 9,
                 fontWeight: 700,
-                color: 'var(--fg-muted, #7b8a9e)',
+                color: 'var(--fg-muted))',
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
               }}
@@ -797,7 +797,7 @@ export function ProviderSettings({
           display: 'flex',
           flexDirection: 'column',
           gap: 10,
-          background: 'var(--bg-overlay, #121721)',
+          background: 'var(--bg-overlay))',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 12,
           padding: '0.85rem 1rem',
@@ -827,7 +827,7 @@ export function ProviderSettings({
               style={{
                 fontSize: 12,
                 fontWeight: 600,
-                color: 'var(--fg-default, #c8d1e0)',
+                color: 'var(--fg-default))',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -877,11 +877,11 @@ export function ProviderSettings({
                     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                     borderRadius: 999,
                     background: isActiveProvider
-                      ? 'var(--color-accent-muted, rgba(99, 102, 241, 0.12))'
+                      ? 'var(--accent-muted, rgba(99, 102, 241, 0.12))'
                       : 'transparent',
                     color: isActiveProvider
-                      ? 'var(--accent, #5cd4c0)'
-                      : 'var(--color-text-secondary, var(--fg-muted, #7b8a9e))',
+                      ? 'var(--accent))'
+                      : 'var(--fg-default)',
                     padding: '0.28rem 0.65rem',
                     fontSize: 11,
                     fontWeight: 600,
@@ -903,8 +903,8 @@ export function ProviderSettings({
             gap: 7,
             height: 30,
             borderRadius: 8,
-            border: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
-            background: 'var(--color-surface-raised, var(--bg-overlay, #121721))',
+            border: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            background: 'var(--bg-raised)',
             padding: '0 9px',
           }}
         >
@@ -918,7 +918,7 @@ export function ProviderSettings({
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
-            style={{ color: 'var(--fg-muted, #7b8a9e)', flexShrink: 0 }}
+            style={{ color: 'var(--fg-muted))', flexShrink: 0 }}
           >
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.3-4.3" />
@@ -938,7 +938,7 @@ export function ProviderSettings({
               background: 'transparent',
               border: 'none',
               outline: 'none',
-              color: 'var(--fg-default, #c8d1e0)',
+              color: 'var(--fg-default))',
               fontSize: 11,
             }}
           />
@@ -952,7 +952,7 @@ export function ProviderSettings({
             flexDirection: 'column',
             gap: 0,
             paddingRight: 2,
-            borderTop: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
           }}
         >
           {showingSearchResults ? (
@@ -961,7 +961,7 @@ export function ProviderSettings({
             <div
               style={{
                 padding: '0.8rem 0',
-                color: 'var(--fg-muted, #7b8a9e)',
+                color: 'var(--fg-muted))',
                 fontSize: 12,
               }}
             >
@@ -1011,24 +1011,24 @@ export function ProviderSettings({
     const chipInactive: CSSProperties = {
       ...chipBase,
       background: 'transparent',
-      color: 'var(--fg-muted, #7b8a9e)',
+      color: 'var(--fg-muted))',
     };
     const chipActive: CSSProperties = {
       ...chipBase,
-      background: 'color-mix(in oklch, var(--accent, #5cd4c0) 14%, transparent)',
-      color: 'var(--accent, #5cd4c0)',
+      background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
+      color: 'var(--accent))',
       borderColor:
-        'color-mix(in oklch, var(--accent, #5cd4c0) 40%, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+        'color-mix(in oklch, var(--accent) 40%, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
       fontWeight: 600,
     };
 
     const selectFieldStyle: CSSProperties = {
       appearance: 'none',
       WebkitAppearance: 'none',
-      background: 'var(--bg-overlay, #121721)',
+      background: 'var(--bg-overlay))',
       border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
       borderRadius: 8,
-      color: 'var(--fg-default, #c8d1e0)',
+      color: 'var(--fg-default))',
       fontSize: 12,
       padding: '6px 28px 6px 10px',
       width: '100%',
@@ -1040,10 +1040,10 @@ export function ProviderSettings({
     };
 
     const fieldInputStyle: CSSProperties = {
-      background: 'var(--bg-overlay, #121721)',
+      background: 'var(--bg-overlay))',
       border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
       borderRadius: 8,
-      color: 'var(--fg-default, #c8d1e0)',
+      color: 'var(--fg-default))',
       fontSize: 12,
       padding: '6px 10px',
       width: '100%',
@@ -1053,7 +1053,7 @@ export function ProviderSettings({
     return (
       <div
         style={{
-          borderTop: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+          borderTop: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
           paddingTop: 12,
           display: 'grid',
           gap: 12,
@@ -1071,7 +1071,7 @@ export function ProviderSettings({
               <span
                 style={{
                   fontSize: 10,
-                  color: 'var(--fg-muted, #7b8a9e)',
+                  color: 'var(--fg-muted))',
                   fontWeight: 600,
                   minWidth: 24,
                 }}
@@ -1097,7 +1097,7 @@ export function ProviderSettings({
               ))}
               {group.tier === '2k' && (
                 <span
-                  style={{ fontSize: 9, color: 'var(--fg-muted, #7b8a9e)', fontStyle: 'italic' }}
+                  style={{ fontSize: 9, color: 'var(--fg-muted))', fontStyle: 'italic' }}
                 >
                   ~4MP
                 </span>
@@ -1107,11 +1107,11 @@ export function ProviderSettings({
                   style={{
                     fontSize: 9,
                     fontWeight: 600,
-                    color: 'var(--color-danger, var(--danger, #f06b7e))',
+                    color: 'var(--danger))',
                     borderRadius: 4,
                     padding: '1px 5px',
                     background:
-                      'color-mix(in oklch, var(--color-danger, var(--danger, #f06b7e)) 10%, transparent)',
+                      'color-mix(in oklch, var(--danger) 10%, transparent)',
                   }}
                 >
                   ~8MP · 实验性
@@ -1142,7 +1142,7 @@ export function ProviderSettings({
               />
             )}
             {isCustomSize && !sizeValidation.valid && (
-              <span style={{ fontSize: 10, color: 'var(--color-danger, var(--danger, #f06b7e))' }}>
+              <span style={{ fontSize: 10, color: 'var(--danger))' }}>
                 {sizeValidation.message}
               </span>
             )}
@@ -1152,7 +1152,7 @@ export function ProviderSettings({
         {/* Quality / Format / Background */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>质量</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>质量</span>
             <select
               value={imageDefaults.quality}
               onChange={(event) =>
@@ -1168,7 +1168,7 @@ export function ProviderSettings({
             </select>
           </label>
           <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>格式</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>格式</span>
             <select
               value={imageDefaults.outputFormat}
               onChange={(event) =>
@@ -1184,7 +1184,7 @@ export function ProviderSettings({
             </select>
           </label>
           <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>背景</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>背景</span>
             <select
               value={imageDefaults.background}
               onChange={(event) =>
@@ -1210,7 +1210,7 @@ export function ProviderSettings({
         flexDirection: 'column',
         gap: 24,
         fontFamily: 'system-ui, sans-serif',
-        color: 'var(--fg-default, #c8d1e0)',
+        color: 'var(--fg-default))',
         ...style,
       }}
     >
@@ -1219,7 +1219,7 @@ export function ProviderSettings({
           style={{
             marginBottom: 12,
             paddingBottom: 10,
-            borderBottom: '1px solid var(--color-border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
+            borderBottom: '1px solid var(--border-subtle, var(--border-default, hsla(215, 18%, 50%, 0.12)))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -1231,13 +1231,13 @@ export function ProviderSettings({
             style={{
               fontSize: 12,
               fontWeight: 600,
-              color: 'var(--fg-default, #c8d1e0)',
+              color: 'var(--fg-default))',
             }}
           >
             默认模型
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
               {hasUnsavedDefaultChanges ? '有未保存更改' : '已保存'}
             </span>
             <button
@@ -1251,12 +1251,12 @@ export function ProviderSettings({
                 borderRadius: 8,
                 background:
                   hasUnsavedDefaultChanges && !isSavingDefaultChanges
-                    ? 'var(--accent, #5cd4c0)'
-                    : 'var(--color-surface-raised, #0f172a)',
+                    ? 'var(--accent))'
+                    : 'var(--bg-raised)',
                 color:
                   hasUnsavedDefaultChanges && !isSavingDefaultChanges
                     ? color.fgOnAccent
-                    : 'var(--fg-muted, #7b8a9e)',
+                    : 'var(--fg-muted))',
                 padding: '0.34rem 0.75rem',
                 fontSize: 11,
                 fontWeight: 600,
@@ -1298,7 +1298,7 @@ export function ProviderSettings({
 
       <section
         style={{
-          background: 'var(--bg-overlay, #121721)',
+          background: 'var(--bg-overlay))',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 12,
           overflow: 'hidden',
@@ -1321,7 +1321,7 @@ export function ProviderSettings({
               setEditingId(null);
             }}
             style={{
-              background: 'var(--accent, #5cd4c0)',
+              background: 'var(--accent))',
               color: color.fgOnAccent,
               border: 'none',
               borderRadius: 6,
@@ -1340,7 +1340,7 @@ export function ProviderSettings({
             style={{
               padding: '1.25rem',
               textAlign: 'center',
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               fontSize: 12,
             }}
           >
@@ -1364,7 +1364,7 @@ export function ProviderSettings({
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 12 }}>{provider.name}</div>
                     <div
-                      style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)', marginTop: 2 }}
+                      style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 2 }}
                     >
                       {provider.type} &nbsp;·&nbsp; {provider.defaultModels.length} 个模型
                       {provider.baseUrl ? (
@@ -1389,7 +1389,7 @@ export function ProviderSettings({
                         background: 'transparent',
                         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                         borderRadius: 6,
-                        color: 'var(--fg-default, #c8d1e0)',
+                        color: 'var(--fg-default))',
                         padding: '0.25rem 0.65rem',
                         fontSize: 11,
                         cursor: 'pointer',
@@ -1402,7 +1402,7 @@ export function ProviderSettings({
                       type="button"
                       onClick={() => onToggleProvider?.(provider.id)}
                       style={{
-                        background: provider.enabled ? 'var(--accent, #5cd4c0)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                        background: provider.enabled ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
                         border: 'none',
                         borderRadius: 12,
                         width: 40,

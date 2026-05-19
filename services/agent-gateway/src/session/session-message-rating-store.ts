@@ -1,4 +1,4 @@
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 
 export type SessionMessageRatingValue = 'up' | 'down';
 

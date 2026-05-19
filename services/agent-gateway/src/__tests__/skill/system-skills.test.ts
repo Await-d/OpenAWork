@@ -18,7 +18,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as SystemSkillsModule from '../../skill/system-skills.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -84,7 +84,7 @@ async function writeSkillMd(
 let tempRoot: string;
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
   await dbModule.migrate();
   systemSkills = await import('../../skill/system-skills.js');

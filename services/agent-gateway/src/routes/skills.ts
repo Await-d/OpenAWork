@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { db, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../db.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { db, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import {
   SkillRegistryClientImpl,
   RegistrySourceManager,
@@ -9,7 +9,7 @@ import {
 } from '@openAwork/skill-registry';
 import type { RegistrySource, SkillEntry } from '@openAwork/skill-registry';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 
 interface InstalledSkillRow {
   skill_id: string;

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import authPlugin from '../auth.js';
-import { closeDb, connectDb, migrate, sqliteRun } from '../db.js';
-import requestWorkflowPlugin from '../request-workflow.js';
+import authPlugin from '../infra/auth.js';
+import { closeDb, connectDb, migrate, sqliteRun } from '../infra/db.js';
+import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { permissionsRoutes } from '../routes/permissions.js';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 

@@ -6,7 +6,7 @@ import {
   readPersistedCompactionMemory,
   type CompactionTrigger,
 } from '../compaction/compaction-metadata.js';
-import { sqliteRun } from '../db.js';
+import { sqliteRun } from '../infra/db.js';
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import {

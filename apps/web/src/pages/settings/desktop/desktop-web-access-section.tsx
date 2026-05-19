@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { logger } from '../../../utils/logger.js';
+import { logger } from '../../../utils/log/logger.js';
 import {
   authenticateDesktopGateway,
   DEFAULT_GATEWAY_PORT,
@@ -60,14 +60,14 @@ const ROW_STYLE: React.CSSProperties = {
   border: '1px solid var(--border-subtle)',
   borderRadius: 10,
   padding: '10px 12px',
-  background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+  background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
 };
 
 const SECONDARY_BTN: React.CSSProperties = {
   ...BP,
   background: 'transparent',
-  border: '1px solid var(--border)',
-  color: 'var(--text-2)',
+  border: '1px solid var(--border-default)',
+  color: 'var(--fg-default)',
 };
 
 function ToggleSwitch({
@@ -96,7 +96,7 @@ function ToggleSwitch({
         border: 'none',
         padding: 0,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--border)',
+        background: checked ? 'var(--accent)' : 'var(--border-default)',
         flexShrink: 0,
         opacity: disabled ? 0.5 : 1,
       }}
@@ -109,7 +109,7 @@ function ToggleSwitch({
           width: 20,
           height: 20,
           borderRadius: '50%',
-          background: 'var(--surface)',
+          background: 'var(--bg-overlay)',
           boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
           transition: 'left 180ms ease',
         }}
@@ -452,7 +452,7 @@ export function DesktopWebAccessSection({
   return (
     <section style={SS}>
       <h3 style={ST}>Web 端访问</h3>
-      <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
         启用后，桌面端会在本机启动一个本地网关 sidecar；
         其他设备（手机、平板、另一台电脑等）可通过浏览器访问下方 URL 进入 Web 端。
         <strong>「同局域网设备可访问」会把 sidecar bind 到 0.0.0.0</strong>
@@ -503,7 +503,7 @@ export function DesktopWebAccessSection({
             border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
             background: 'color-mix(in srgb, var(--accent) 6%, transparent)',
             fontSize: 11,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             lineHeight: 1.6,
           }}
         >
@@ -527,7 +527,7 @@ export function DesktopWebAccessSection({
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>
             ⚠ Admin 账号仍在使用默认密码
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.6 }}>
             账号 <code style={{ fontFamily: 'monospace' }}>{passwordStatus.email}</code>{' '}
             的密码当前为出厂默认值（<code style={{ fontFamily: 'monospace' }}>admin123456</code>
             ）。在改密前 sidecar 仅 bind 到 127.0.0.1，不会暴露到
@@ -567,7 +567,7 @@ export function DesktopWebAccessSection({
             >
               {pwdSubmitting ? '提交中…' : '设置新密码'}
             </button>
-            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
               改完所有现有令牌会失效；桌面端会自动重新认证。
             </span>
           </div>
@@ -608,7 +608,7 @@ export function DesktopWebAccessSection({
 
       <div style={ROW_STYLE}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
             {webAccessEnabled ? '已启用 Web 端访问' : '当前未启用 Web 端访问'}
           </div>
           <div
@@ -616,7 +616,7 @@ export function DesktopWebAccessSection({
               marginTop: 3,
               fontSize: 11,
               lineHeight: 1.5,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             {webAccessEnabled
@@ -633,7 +633,7 @@ export function DesktopWebAccessSection({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>暴露范围</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>暴露范围</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <ExposeOption
             active={!webExposeLan}
@@ -657,7 +657,7 @@ export function DesktopWebAccessSection({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>监听端口</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>监听端口</span>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             style={{ ...IS, maxWidth: 140 }}
@@ -678,14 +678,14 @@ export function DesktopWebAccessSection({
             {busy === 'port' ? '应用中…' : '应用'}
           </button>
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
           应用后会停止再启动 sidecar 并自动重新认证；范围 1024 – 65535。
         </div>
       </div>
 
       {webAccessEnabled ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
             可用访问地址
           </span>
           {webExposeLan && lanError ? (
@@ -701,7 +701,7 @@ export function DesktopWebAccessSection({
             </div>
           ) : null}
           {webExposeLan && !lanError && lanAddresses.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
               未发现局域网 IPv4 网卡，可能未连接到任何网络。
             </div>
           ) : null}
@@ -722,8 +722,8 @@ export function DesktopWebAccessSection({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
+                  background: 'var(--bg-overlay)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   padding: '6px 10px',
                 }}
@@ -782,20 +782,20 @@ function ExposeOption({
         cursor: disabled ? 'not-allowed' : 'pointer',
         borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
         background: active
-          ? 'color-mix(in srgb, var(--accent) 8%, var(--surface))'
+          ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
           : ROW_STYLE.background,
         textAlign: 'left',
         opacity: disabled ? 0.6 : 1,
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{label}</div>
         <div
           style={{
             marginTop: 3,
             fontSize: 11,
             lineHeight: 1.5,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
           }}
         >
           {description}
@@ -807,7 +807,7 @@ function ExposeOption({
           width: 18,
           height: 18,
           borderRadius: '50%',
-          border: `2px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+          border: `2px solid ${active ? 'var(--accent)' : 'var(--border-default)'}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',

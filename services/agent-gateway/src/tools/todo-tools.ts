@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { db, sqliteAll, sqliteRun } from '../db.js';
+import { db, sqliteAll, sqliteRun } from '../infra/db.js';
 
 const todoStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'cancelled']);
 const todoPrioritySchema = z.enum(['high', 'medium', 'low']);

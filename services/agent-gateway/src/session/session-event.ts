@@ -18,7 +18,7 @@
  * remaining variant-specific fields (no duplication of `id`/`type`/`timestamp`).
  */
 
-import { makeOrderedEventId } from '../ordered-id.js';
+import { makeOrderedEventId } from '../infra/ordered-id.js';
 
 // ─── Types shared across variants ───
 

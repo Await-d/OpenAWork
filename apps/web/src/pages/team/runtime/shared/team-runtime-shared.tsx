@@ -7,11 +7,11 @@ import type {
 } from '../data/team-runtime-types.js';
 import type { IconKey } from './TeamIcons.js';
 
-export const SHELL_BACKGROUND = 'var(--bg)';
+export const SHELL_BACKGROUND = 'var(--bg-base)';
 
 export const SURFACE_STYLE: CSSProperties = {
-  border: '1px solid var(--border)',
-  background: 'var(--card-bg)',
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-overlay)',
   boxShadow: 'var(--shadow-sm)',
 };
 
@@ -45,8 +45,8 @@ export const PRIORITY_META: Record<
     label: '中',
   },
   low: {
-    color: 'var(--text-3)',
-    bg: 'color-mix(in oklch, var(--text-3) 14%, transparent)',
+    color: 'var(--fg-muted)',
+    bg: 'color-mix(in oklch, var(--fg-muted) 14%, transparent)',
     label: '低',
   },
 };
@@ -95,5 +95,5 @@ export const REVIEW_TYPE_META: Record<
 export const TREND_META: Record<string, { color: string; icon: IconKey }> = {
   up: { color: 'var(--success)', icon: 'trend-up' },
   down: { color: 'var(--danger)', icon: 'trend-down' },
-  stable: { color: 'var(--text-3)', icon: 'trend-stable' },
+  stable: { color: 'var(--fg-muted)', icon: 'trend-stable' },
 };

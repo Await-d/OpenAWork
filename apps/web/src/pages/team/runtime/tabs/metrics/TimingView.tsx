@@ -33,13 +33,13 @@ const LAYER_LABELS: Record<TeamRoleLayer, string> = {
 const LAYER_ORDER: TeamRoleLayer[] = ['reception', 'pm1', 'pm2', 'executor', 'reviewer'];
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
-  idle: 'var(--text-3)',
-  pending: 'var(--warning, var(--warning, #f0b429))',
-  claimed: 'var(--aux, var(--aux, #8b9cf5))',
-  running: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  completed: 'var(--text-3)',
-  failed: 'var(--danger, #d4574e)',
-  cancelled: 'var(--text-3)',
+  idle: 'var(--fg-muted)',
+  pending: 'var(--warning))',
+  claimed: 'var(--aux))',
+  running: 'var(--success))',
+  completed: 'var(--fg-muted)',
+  failed: 'var(--danger))',
+  cancelled: 'var(--fg-muted)',
 };
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -56,7 +56,7 @@ const SECTION_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -72,8 +72,8 @@ const STAT_CARD_STYLE: CSSProperties = {
   gap: 4,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 function formatMs(ms: number): string {
@@ -176,8 +176,8 @@ export function TimingView() {
               placeItems: 'center',
               padding: 32,
               borderRadius: 12,
-              border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-              color: 'var(--text-3)',
+              border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+              color: 'var(--fg-muted)',
               fontSize: 13,
               gap: 6,
             }}
@@ -223,13 +223,13 @@ export function TimingView() {
                   style={{
                     fontSize: 12,
                     fontWeight: 700,
-                    color: 'var(--text)',
+                    color: 'var(--fg-strong)',
                   }}
                 >
                   {LAYER_LABELS[stat.layer]}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>样本 {stat.count}</span>
-                <div style={{ display: 'flex', gap: 10, fontSize: 11, color: 'var(--text-2)' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>样本 {stat.count}</span>
+                <div style={{ display: 'flex', gap: 10, fontSize: 11, color: 'var(--fg-default)' }}>
                   <KV k="P50" v={formatMs(stat.p50)} />
                   <KV k="P95" v={formatMs(stat.p95)} />
                   <KV k="Max" v={formatMs(stat.max)} />
@@ -280,16 +280,16 @@ function StatCard({
 }) {
   const valueColor =
     accent === 'success'
-      ? 'var(--success, var(--success, var(--success, #3dd49a)))'
+      ? 'var(--success))'
       : accent === 'warning'
-        ? 'var(--warning, var(--warning, #f0b429))'
+        ? 'var(--warning))'
         : accent === 'danger'
-          ? 'var(--danger, #d4574e)'
-          : 'var(--text)';
+          ? 'var(--danger))'
+          : 'var(--fg-strong)';
   return (
     <div style={STAT_CARD_STYLE}>
       <span style={{ fontSize: 18, fontWeight: 800, color: valueColor }}>{value}</span>
-      <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
     </div>
   );
 }
@@ -297,8 +297,8 @@ function StatCard({
 function KV({ k, v }: { k: string; v: string }) {
   return (
     <span>
-      <span style={{ color: 'var(--text-3)' }}>{k}: </span>
-      <strong style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{v}</strong>
+      <span style={{ color: 'var(--fg-muted)' }}>{k}: </span>
+      <strong style={{ color: 'var(--fg-strong)', fontVariantNumeric: 'tabular-nums' }}>{v}</strong>
     </span>
   );
 }
@@ -313,8 +313,8 @@ function RunningRow({ entry, dur }: { entry: HandoffEntry; dur: number }) {
         gap: 8,
         padding: '6px 10px',
         borderRadius: 8,
-        border: '1px solid color-mix(in srgb, var(--border) 45%, transparent)',
-        background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+        border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
         fontSize: 12,
       }}
     >
@@ -328,16 +328,16 @@ function RunningRow({ entry, dur }: { entry: HandoffEntry; dur: number }) {
           flexShrink: 0,
         }}
       />
-      <span style={{ minWidth: 130, color: 'var(--text-2)', fontWeight: 600 }}>
+      <span style={{ minWidth: 130, color: 'var(--fg-default)', fontWeight: 600 }}>
         {LAYER_LABELS[entry.fromRoleLayer]} → {LAYER_LABELS[entry.toRoleLayer]}
       </span>
       <span
         style={{
           padding: '1px 8px',
           borderRadius: 999,
-          background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-          color: 'var(--text-2)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+          color: 'var(--fg-default)',
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -348,7 +348,7 @@ function RunningRow({ entry, dur }: { entry: HandoffEntry; dur: number }) {
       <span style={{ flex: 1 }} />
       <span
         style={{
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           fontWeight: 700,
           fontVariantNumeric: 'tabular-nums',
         }}
@@ -381,10 +381,10 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
         const widthPct = Math.max(2, (dur / maxDur) * 100);
         const color =
           entry.state === 'completed'
-            ? 'var(--success, var(--success, var(--success, #3dd49a)))'
+            ? 'var(--success))'
             : entry.state === 'failed'
-              ? 'var(--danger, #d4574e)'
-              : 'var(--text-3)';
+              ? 'var(--danger))'
+              : 'var(--fg-muted)';
         return (
           <div
             key={entry.id}
@@ -396,7 +396,7 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
             }}
             title={`${entry.id}\n${formatMs(dur)}\n${new Date(start).toLocaleString()} → ${new Date(end).toLocaleString()}`}
           >
-            <span style={{ minWidth: 130, color: 'var(--text-3)', flexShrink: 0 }}>
+            <span style={{ minWidth: 130, color: 'var(--fg-muted)', flexShrink: 0 }}>
               {LAYER_LABELS[entry.fromRoleLayer]} → {LAYER_LABELS[entry.toRoleLayer]}
             </span>
             <span
@@ -404,7 +404,7 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
                 flex: 1,
                 height: 14,
                 borderRadius: 4,
-                background: 'color-mix(in srgb, var(--bg-2) 70%, transparent)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 70%, transparent)',
                 position: 'relative',
                 overflow: 'hidden',
               }}
@@ -426,7 +426,7 @@ function CompletedGantt({ entries }: { entries: HandoffEntry[] }) {
               style={{
                 minWidth: 64,
                 textAlign: 'right',
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 fontVariantNumeric: 'tabular-nums',
                 flexShrink: 0,
               }}

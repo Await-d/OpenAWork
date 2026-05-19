@@ -12,9 +12,9 @@ interface UpstreamRetrySectionProps {
 const OPTION_BUTTON: React.CSSProperties = {
   minWidth: 40,
   borderRadius: 999,
-  border: '1px solid var(--border)',
-  background: 'var(--surface)',
-  color: 'var(--text-2)',
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-default)',
   padding: '7px 12px',
   fontSize: 12,
   fontWeight: 600,
@@ -39,7 +39,7 @@ export function UpstreamRetrySection({
           <p
             style={{
               margin: '4px 0 0',
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
               fontSize: 13,
               lineHeight: 1.6,
             }}
@@ -61,7 +61,7 @@ export function UpstreamRetrySection({
           }}
         >
           当前值
-          <span style={{ color: 'var(--text)', fontWeight: 700 }}>{savedMaxRetries}</span>
+          <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>{savedMaxRetries}</span>
         </div>
       </div>
 
@@ -77,9 +77,9 @@ export function UpstreamRetrySection({
               style={{
                 ...OPTION_BUTTON,
                 background: selected
-                  ? 'color-mix(in srgb, var(--accent) 16%, var(--surface))'
+                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
                   : OPTION_BUTTON.background,
-                borderColor: selected ? 'var(--accent)' : 'var(--border)',
+                borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
                 color: selected ? 'var(--accent)' : OPTION_BUTTON.color,
                 boxShadow: selected
                   ? 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent)'
@@ -101,7 +101,7 @@ export function UpstreamRetrySection({
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.5 }}>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.5 }}>
           0 次表示遇到上游错误后立即停止；3 次表示首次失败后最多再尝试 3 次。
         </span>
         <button

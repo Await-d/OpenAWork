@@ -5,7 +5,7 @@ import {
   type WorkflowNodeRecord,
   type WorkflowTemplateRecord,
 } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 
 function createDefaultDraft() {
   const nodes: WorkflowNodeRecord[] = [

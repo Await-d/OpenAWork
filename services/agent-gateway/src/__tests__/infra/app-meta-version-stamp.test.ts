@@ -11,7 +11,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 
 // 必须在 import db.js 之前完成，否则 module 顶层的 `currentDbPath`
 // 会落到磁盘上的真实 openAwork.db。
@@ -21,7 +21,7 @@ process.env['OPENAWORK_APP_VERSION'] = '1.0.0';
 let dbModule: typeof DbModule;
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
   await dbModule.migrate();
 });

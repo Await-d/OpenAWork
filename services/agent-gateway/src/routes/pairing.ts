@@ -2,8 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { PairingManagerImpl } from '@openAwork/pairing';
 import { z } from 'zod';
-import { hasValidDesktopAuthToken, issueTokenPair, type JwtPayload } from '../auth.js';
-import { sqliteGet } from '../db.js';
+import { hasValidDesktopAuthToken, issueTokenPair, type JwtPayload } from '../infra/auth.js';
+import { sqliteGet } from '../infra/db.js';
 
 const pairingRequestSchema = z.object({
   token: z.string().min(1),

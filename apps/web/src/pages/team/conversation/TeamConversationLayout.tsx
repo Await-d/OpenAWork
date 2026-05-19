@@ -27,20 +27,20 @@ import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type { CommandDescriptor } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
-import { ChatMessageGroupList } from '../../../components/chat/chat-message-group-list.js';
-import type { ChatRenderEntry, ChatRenderGroup } from '../../../components/chat/chat-message-group-list.js';
-import { ChatRemoteStreamPlaceholder } from '../../../components/chat/chat-remote-stream-placeholder.js';
-import { ChatSearchOverlay } from '../../../components/chat/chat-search-overlay.js';
-import type { useChatSearch } from '../../../components/chat/chat-search-overlay.js';
-import { ChatSessionSkeleton } from '../../../components/chat/chat-session-skeleton.js';
-import { InlineQuestionPanel } from '../../../components/chat/InlineQuestionPanel.js';
-import { UnifiedComposer } from '../../../components/chat/UnifiedComposer.js';
+import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
+import type { ChatRenderEntry, ChatRenderGroup } from '../../../components/chat/message/chat-message-group-list.js';
+import { ChatRemoteStreamPlaceholder } from '../../../components/chat/session/chat-remote-stream-placeholder.js';
+import { ChatSearchOverlay } from '../../../components/chat/search/chat-search-overlay.js';
+import type { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
+import { ChatSessionSkeleton } from '../../../components/chat/session/chat-session-skeleton.js';
+import { InlineQuestionPanel } from '../../../components/chat/misc/InlineQuestionPanel.js';
+import { UnifiedComposer } from '../../../components/chat/composer/UnifiedComposer.js';
 import type {
   UnifiedComposerFeatures,
   UnifiedComposerSubmitPayload,
-} from '../../../components/chat/UnifiedComposer.js';
-import { WelcomeScreen } from '../../../components/chat/ChatPageSections.js';
-import type { DialogueMode } from '../../chat-page/dialogue-mode.js';
+} from '../../../components/chat/composer/UnifiedComposer.js';
+import { WelcomeScreen } from '../../../components/chat/session/ChatPageSections.js';
+import type { DialogueMode } from '../../chat-page/mode/dialogue-mode.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
 import type {
   ChatSettingsProvider,
@@ -50,7 +50,7 @@ import {
   CHAT_SCROLL_BOTTOM_PADDING,
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
 } from '../../../components/conversation-runtime/scroll/scroll-constants.js';
-import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/ChatImageGenerationControls.js';
+import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/image/ChatImageGenerationControls.js';
 import HistoryEditDialog from '../../chat-page/conversation/views/history-edit-dialog.js';
 import RetryModeDialog from '../../chat-page/conversation/views/retry-mode-dialog.js';
 import { ChatScrollBottomButton } from '../../../components/conversation-runtime/views/scroll-bottom-button.js';
@@ -341,9 +341,9 @@ const LOAD_EARLIER_BTN_STYLE: CSSProperties = {
   minHeight: 32,
   padding: '0 14px',
   borderRadius: 999,
-  border: '1px solid var(--border)',
-  background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
-  color: 'var(--text-2)',
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+  color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
@@ -700,9 +700,9 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
               padding: '10px 16px',
               fontSize: 12,
               fontWeight: 500,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
               background:
-                'color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--surface) 80%, var(--bg)))',
+                'color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base)))',
               borderTop: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
               flexShrink: 0,
             }}

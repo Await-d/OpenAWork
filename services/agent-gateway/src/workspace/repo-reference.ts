@@ -33,7 +33,7 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolveGatewayReposDir } from '../storage-paths.js';
+import { resolveGatewayReposDir } from '../infra/storage-paths.js';
 
 export interface RepositoryReference {
   /** Lower-cased host, or the literal `'file'` for local checkouts. */

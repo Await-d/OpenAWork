@@ -45,14 +45,14 @@ function RoleChip({
           display: 'grid',
           placeItems: 'center',
           background: item.accent,
-          color: 'oklch(0.98 0 0)',
+          color: 'var(--fg-strong)',
           fontSize: 9,
           fontWeight: 800,
         }}
       >
         {item.badge}
       </span>
-      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{item.role}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{item.role}</span>
       {item.leader ? (
         <span
           style={{
@@ -61,7 +61,7 @@ function RoleChip({
             padding: '0 5px',
             borderRadius: 999,
             background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
-            color: '#ffd458',
+            color: 'var(--warning))',
             fontSize: 9,
             fontWeight: 700,
           }}
@@ -84,7 +84,7 @@ function RoleChip({
       >
         <CheckIcon size={8} color="var(--success)" /> {item.status}
       </span>
-      <span style={{ color: 'var(--text-3)', fontSize: 10 }}>{item.provider}</span>
+      <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>{item.provider}</span>
     </button>
   );
 }
@@ -139,7 +139,7 @@ export function TopTeamHeader({
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 cursor: 'pointer',
                 fontSize: 12,
                 padding: 0,
@@ -147,7 +147,7 @@ export function TopTeamHeader({
               }}
               title="展开侧边栏"
             >
-              <ExpandRightIcon size={12} color="var(--text-3)" />
+              <ExpandRightIcon size={12} color="var(--fg-muted)" />
             </button>
           )}
           <span
@@ -169,7 +169,7 @@ export function TopTeamHeader({
             style={{
               fontSize: 18,
               fontWeight: 800,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               letterSpacing: '-0.02em',
             }}
           >
@@ -182,7 +182,7 @@ export function TopTeamHeader({
               background: isPaused
                 ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
                 : 'color-mix(in oklch, var(--success) 15%, transparent)',
-              color: isPaused ? '#ffd458' : 'var(--success)',
+              color: isPaused ? 'var(--warning))' : 'var(--success)',
               fontSize: 10,
               fontWeight: 700,
               display: 'inline-flex',
@@ -195,7 +195,7 @@ export function TopTeamHeader({
                 width: 5,
                 height: 5,
                 borderRadius: '50%',
-                background: isPaused ? '#ffd458' : 'var(--success)',
+                background: isPaused ? 'var(--warning))' : 'var(--success)',
                 boxShadow: isPaused ? 'none' : '0 0 4px var(--success)',
               }}
             />
@@ -205,9 +205,9 @@ export function TopTeamHeader({
             style={{
               padding: '1px 6px',
               borderRadius: 999,
-              background: 'var(--surface)',
+              background: 'var(--bg-overlay)',
               fontSize: 10,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             {topSummary.memberCount}
@@ -245,8 +245,8 @@ export function TopTeamHeader({
                 borderRadius: 999,
                 border: 'none',
                 background: isPaused
-                  ? 'linear-gradient(135deg, color-mix(in oklch, var(--success) 22%, var(--bg)) 0%, color-mix(in oklch, var(--success) 8%, var(--bg)) 100%)'
-                  : 'linear-gradient(135deg, color-mix(in oklch, var(--danger) 22%, var(--bg)) 0%, color-mix(in oklch, var(--danger) 8%, var(--bg)) 100%)',
+                  ? 'linear-gradient(135deg, color-mix(in oklch, var(--success) 22%, var(--bg-base) 0%, color-mix(in oklch, var(--success) 8%, var(--bg-base) 100%)'
+                  : 'linear-gradient(135deg, color-mix(in oklch, var(--danger) 22%, var(--bg-base) 0%, color-mix(in oklch, var(--danger) 8%, var(--bg-base) 100%)',
                 color: isPaused ? 'var(--success)' : 'var(--danger)',
                 fontSize: 12,
                 fontWeight: 800,
@@ -289,8 +289,8 @@ export function TopTeamHeader({
                 padding: '0 12px',
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
-                background: 'var(--surface)',
-                color: 'var(--text-3)',
+                background: 'var(--bg-overlay)',
+                color: 'var(--fg-muted)',
                 fontSize: 11,
                 fontWeight: 700,
                 display: 'inline-flex',
@@ -323,7 +323,7 @@ export function TopTeamHeader({
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
           {topSummary.description}
         </span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -356,7 +356,7 @@ export function TopTeamHeader({
                 padding: '0 10px',
                 borderRadius: 999,
                 background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                color: 'var(--text-2)',
+                color: 'var(--fg-default)',
                 fontSize: 11,
                 fontWeight: 700,
               }}

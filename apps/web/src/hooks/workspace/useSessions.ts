@@ -1,11 +1,11 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useAuthStore } from '../../stores/auth.js';
-import { useUIStateStore } from '../../stores/uiState.js';
-import { readPersistedActiveStreamSessionId } from '../useGatewayClient.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { readPersistedActiveStreamSessionId } from '../gateway/useGatewayClient.js';
 import { createSessionsClient, withTokenRefresh, HttpError } from '@openAwork/web-client';
 import type { TokenStore } from '@openAwork/web-client';
-import { toast } from '../../components/common/ToastNotification.js';
+import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { exportSession } from '../../utils/session/session-transfer.js';
 import {
   buildWorkspaceSessionCollections,
@@ -26,7 +26,7 @@ import {
   loadSavedChatSessionDefaults,
 } from '../../utils/chat/chat-session-defaults.js';
 import { extractParentSessionId, hasTeamWorkspace } from '../../utils/session/session-metadata.js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '../../utils/log/logger.js';
 
 export interface Session {
   id: string;

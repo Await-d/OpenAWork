@@ -3,8 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { WorkflowLogger } from '@openAwork/logger';
 import { LSPManager } from '@openAwork/lsp-client';
 import { z } from 'zod';
-import { requireAuth } from '../auth.js';
-import { getRequestWorkflow, startRequestWorkflow } from '../request-workflow.js';
+import { requireAuth } from '../infra/auth.js';
+import { getRequestWorkflow, startRequestWorkflow } from '../runtime/request-workflow.js';
 
 const lspManager = new LSPManager({ autoInstall: true });
 

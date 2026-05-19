@@ -47,10 +47,10 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
           <div id="buddy-status-hero-title" style={ST}>
             Buddy 伴侣
           </div>
-          <div style={{ marginTop: 6, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+          <div style={{ marginTop: 6, fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>
             在聊天工作台里保留一个低打扰陪跑层
           </div>
-          <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.7, color: 'var(--text-2)' }}>
+          <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.7, color: 'var(--fg-default)' }}>
             这里控制 companion 的主开关、注入策略和交互强度。关闭后，Chat 页不再显示
             Buddy，模型侧也不会继续注入 companion 上下文。
           </div>
@@ -59,9 +59,9 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
           style={{
             minWidth: 180,
             borderRadius: 12,
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-default)',
             padding: '12px 14px',
-            background: 'color-mix(in oklch, var(--surface) 94%, var(--bg) 6%)',
+            background: 'color-mix(in oklch, var(--bg-overlay) 94%, var(--bg-base) 6%)',
           }}
         >
           <div
@@ -70,7 +70,7 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
               fontWeight: 700,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             当前状态
@@ -85,7 +85,7 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
               flexWrap: 'wrap',
             }}
           >
-            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
+            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>
               {statusLabel}
             </span>
             <span
@@ -97,11 +97,11 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
                 borderRadius: 999,
                 background:
                   syncStatus === 'error'
-                    ? 'color-mix(in oklch, var(--danger) 14%, var(--surface))'
+                    ? 'color-mix(in oklch, var(--danger) 14%, var(--bg-overlay))'
                     : syncStatus === 'saving'
-                      ? 'color-mix(in oklch, var(--accent) 14%, var(--surface))'
-                      : 'color-mix(in oklch, var(--surface-hover) 80%, var(--surface))',
-                color: syncStatus === 'error' ? 'var(--danger)' : 'var(--text-2)',
+                      ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
+                      : 'color-mix(in oklch, var(--bg-hover) 80%, var(--bg-overlay))',
+                color: syncStatus === 'error' ? 'var(--danger)' : 'var(--fg-default)',
                 fontSize: 10,
                 fontWeight: 700,
               }}
@@ -109,19 +109,19 @@ export function CompanionStatusHero({ buddy }: CompanionStatusHeroProps) {
               {syncStatusLabel}
             </span>
           </div>
-          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
             主控制会在你切换开关后的约 0.5 秒内自动同步；Agent 绑定需要在下方手动保存。
           </div>
-          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-3)' }}>
+          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--fg-muted)' }}>
             Companion prompt 与 Chat 页舞台都会跟随这里的状态变化。
           </div>
           {profile ? (
-            <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--text-2)' }}>
+            <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
               {profile.name} · {profile.species}
             </div>
           ) : null}
           {activeBinding?.behaviorTone ? (
-            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-muted)' }}>
               当前绑定风格：{activeBinding.behaviorTone}
             </div>
           ) : null}

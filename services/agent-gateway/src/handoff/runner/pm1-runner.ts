@@ -57,7 +57,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
 
   const { setSubstate } = await import('../store/substate-store.js');
   const { runSessionInBackground } = await import('../../routes/stream-runtime.js');
-  const { sqliteRun } = await import('../../db.js');
+  const { sqliteRun } = await import('../../infra/db.js');
 
   // 设置 substate
   setSubstate({

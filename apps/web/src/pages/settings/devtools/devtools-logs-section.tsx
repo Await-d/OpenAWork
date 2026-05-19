@@ -1,6 +1,6 @@
 import React from 'react';
 import { DeveloperModePanel, LogViewer, type DevEvent } from '@openAwork/shared-ui';
-import type { DevtoolsSourceState, SettingsDevLogRecord } from '../settings-types.js';
+import type { DevtoolsSourceState, SettingsDevLogRecord } from '../state/settings-types.js';
 import {
   buildLogKey,
   InlineFailureNotice,
@@ -66,8 +66,8 @@ export function DevtoolsLogsSection({
           justifyContent: 'space-between',
           padding: '6px 10px',
           borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'color-mix(in srgb, var(--surface) 85%, var(--bg))',
+          border: '1px solid var(--border-default)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
           borderBottom: '2px solid var(--accent)',
         }}
       >
@@ -76,7 +76,7 @@ export function DevtoolsLogsSection({
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
             }}
@@ -84,12 +84,12 @@ export function DevtoolsLogsSection({
             日志工作台
           </span>
           <span
-            style={{ fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}
+            style={{ fontSize: 11, color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}
           >
             全部 {devLogs.length}
           </span>
           <span
-            style={{ fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}
+            style={{ fontSize: 11, color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}
           >
             可见 {filteredLogs.length}
           </span>
@@ -101,7 +101,7 @@ export function DevtoolsLogsSection({
                   ? 'var(--danger)'
                   : showOnlyErrorLogs
                     ? 'var(--danger)'
-                    : 'var(--text-3)',
+                    : 'var(--fg-muted)',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
@@ -113,12 +113,12 @@ export function DevtoolsLogsSection({
                 borderRadius: 999,
                 padding: '2px 8px',
                 background: showOnlyErrorLogs
-                  ? 'color-mix(in srgb, var(--danger) 12%, var(--surface))'
-                  : 'color-mix(in srgb, var(--accent) 12%, var(--surface))',
+                  ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
+                  : 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))',
                 border: `1px solid ${
                   showOnlyErrorLogs
-                    ? 'color-mix(in srgb, var(--danger) 30%, var(--border))'
-                    : 'color-mix(in srgb, var(--accent) 30%, var(--border))'
+                    ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))'
+                    : 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'
                 }`,
                 fontSize: 11,
                 fontWeight: 700,
@@ -130,7 +130,7 @@ export function DevtoolsLogsSection({
             </span>
           ) : null}
           {selectedLog?.requestId ? (
-            <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'monospace' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-default)', fontFamily: 'monospace' }}>
               当前请求：{selectedLog.requestId}
             </span>
           ) : null}
@@ -147,7 +147,7 @@ export function DevtoolsLogsSection({
             style={{
               width: 1,
               height: 20,
-              background: 'var(--border)',
+              background: 'var(--border-default)',
               flexShrink: 0,
               marginRight: 2,
             }}
@@ -160,8 +160,8 @@ export function DevtoolsLogsSection({
               borderRadius: 8,
               border: '1px solid var(--accent)',
               padding: '6px 10px',
-              background: selectedLog ? 'var(--accent)' : 'var(--surface)',
-              color: selectedLog ? 'var(--accent-text)' : 'var(--text)',
+              background: selectedLog ? 'var(--accent)' : 'var(--bg-overlay)',
+              color: selectedLog ? 'var(--fg-on-accent)' : 'var(--fg-strong)',
               fontSize: 11,
               cursor: selectedLog ? 'pointer' : 'not-allowed',
               opacity: selectedLog ? 1 : 0.45,
@@ -176,10 +176,10 @@ export function DevtoolsLogsSection({
             disabled={filteredLogs.length === 0}
             style={{
               borderRadius: 8,
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-default)',
               padding: '6px 10px',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
-              color: 'var(--text)',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              color: 'var(--fg-strong)',
               fontSize: 11,
               cursor: filteredLogs.length > 0 ? 'pointer' : 'not-allowed',
               opacity: filteredLogs.length > 0 ? 1 : 0.45,
@@ -203,8 +203,8 @@ export function DevtoolsLogsSection({
           <div
             style={{
               borderRadius: 8,
-              border: `1px solid ${logQuery ? 'var(--danger)' : 'var(--border)'}`,
-              background: 'color-mix(in srgb, var(--surface) 85%, var(--bg))',
+              border: `1px solid ${logQuery ? 'var(--danger)' : 'var(--border-default)'}`,
+              background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
               padding: '8px 10px',
               display: 'flex',
               gap: 8,
@@ -223,11 +223,11 @@ export function DevtoolsLogsSection({
               style={{
                 flex: 1,
                 minWidth: 180,
-                background: 'var(--surface)',
-                border: `1px solid ${logQuery ? 'var(--danger)' : 'var(--border)'}`,
+                background: 'var(--bg-overlay)',
+                border: `1px solid ${logQuery ? 'var(--danger)' : 'var(--border-default)'}`,
                 borderRadius: 6,
                 padding: '6px 10px',
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 fontSize: 12,
               }}
             />
@@ -236,12 +236,12 @@ export function DevtoolsLogsSection({
               onClick={() => setShowOnlyErrorLogs((prev) => !prev)}
               style={{
                 borderRadius: 6,
-                border: `1px solid ${showOnlyErrorLogs ? 'color-mix(in srgb, var(--danger) 40%, var(--border))' : 'var(--border)'}`,
+                border: `1px solid ${showOnlyErrorLogs ? 'color-mix(in srgb, var(--danger) 40%, var(--border-default))' : 'var(--border-default)'}`,
                 padding: '6px 10px',
                 background: showOnlyErrorLogs
-                  ? 'color-mix(in srgb, var(--danger) 10%, var(--surface))'
-                  : 'var(--surface)',
-                color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--text)',
+                  ? 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))'
+                  : 'var(--bg-overlay)',
+                color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--fg-strong)',
                 fontSize: 11,
                 fontWeight: showOnlyErrorLogs ? 700 : 400,
                 cursor: 'pointer',
@@ -254,10 +254,10 @@ export function DevtoolsLogsSection({
               style={{
                 borderRadius: 999,
                 padding: '3px 8px',
-                border: '1px solid var(--border)',
-                background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                border: '1px solid var(--border-default)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                 fontSize: 11,
-                color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--text-3)',
+                color: showOnlyErrorLogs ? 'var(--danger)' : 'var(--fg-muted)',
                 fontVariantNumeric: 'tabular-nums',
                 whiteSpace: 'nowrap',
               }}
@@ -269,17 +269,17 @@ export function DevtoolsLogsSection({
           <div
             style={{
               borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'color-mix(in srgb, var(--surface) 85%, var(--bg))',
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
             }}
           >
             <div
               style={{
                 padding: '6px 10px',
-                borderBottom: '1px solid var(--border)',
+                borderBottom: '1px solid var(--border-default)',
                 fontSize: 10,
                 fontWeight: 700,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.08em',
               }}
@@ -297,8 +297,8 @@ export function DevtoolsLogsSection({
           <div
             style={{
               borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
               display: 'flex',
               flexDirection: 'column',
             }}
@@ -306,10 +306,10 @@ export function DevtoolsLogsSection({
             <div
               style={{
                 padding: '6px 10px',
-                borderBottom: '1px solid var(--border)',
+                borderBottom: '1px solid var(--border-default)',
                 fontSize: 10,
                 fontWeight: 700,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.08em',
               }}
@@ -345,22 +345,22 @@ export function DevtoolsLogsSection({
                         borderRadius: 6,
                         border: `1px solid ${
                           isActive && isError
-                            ? 'color-mix(in srgb, var(--danger) 50%, var(--border))'
+                            ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))'
                             : isActive
-                              ? 'color-mix(in srgb, var(--accent) 40%, var(--border))'
+                              ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default))'
                               : isError
-                                ? 'color-mix(in srgb, var(--danger) 20%, var(--border))'
-                                : 'var(--border)'
+                                ? 'color-mix(in srgb, var(--danger) 20%, var(--border-default))'
+                                : 'var(--border-default)'
                         }`,
                         background:
                           isActive && isError
-                            ? 'color-mix(in srgb, var(--danger) 10%, var(--surface))'
+                            ? 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))'
                             : isActive
-                              ? 'color-mix(in srgb, var(--accent) 8%, var(--surface))'
+                              ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
                               : isError
-                                ? 'color-mix(in srgb, var(--danger) 5%, var(--surface))'
-                                : 'var(--surface)',
-                        color: 'var(--text)',
+                                ? 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))'
+                                : 'var(--bg-overlay)',
+                        color: 'var(--fg-strong)',
                         padding: '6px 8px',
                         display: 'flex',
                         flexDirection: 'column',
@@ -382,7 +382,7 @@ export function DevtoolsLogsSection({
                           style={{
                             fontSize: 12,
                             fontWeight: isError ? 700 : 400,
-                            color: isError ? 'var(--danger)' : 'var(--text)',
+                            color: isError ? 'var(--danger)' : 'var(--fg-strong)',
                             display: '-webkit-box',
                             WebkitLineClamp: 2,
                             WebkitBoxOrient: 'vertical',
@@ -419,7 +419,7 @@ export function DevtoolsLogsSection({
                           <span
                             style={{
                               fontSize: 10,
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               fontFamily: 'monospace',
                               fontVariantNumeric: 'tabular-nums',
                             }}
@@ -432,10 +432,10 @@ export function DevtoolsLogsSection({
                             style={{
                               borderRadius: 4,
                               padding: '1px 5px',
-                              border: '1px solid var(--border)',
-                              background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+                              border: '1px solid var(--border-default)',
+                              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                               fontSize: 10,
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               fontFamily: 'monospace',
                               maxWidth: 120,
                               overflow: 'hidden',
@@ -450,7 +450,7 @@ export function DevtoolsLogsSection({
                           <span
                             style={{
                               fontSize: 10,
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               fontVariantNumeric: 'tabular-nums',
                             }}
                           >
@@ -463,7 +463,7 @@ export function DevtoolsLogsSection({
                 })
               ) : (
                 <div style={{ padding: '24px 12px', textAlign: 'center' }}>
-                  <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>
+                  <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>
                     {devLogs.length > 0 ? '筛选后没有匹配日志。' : '暂无日志数据。'}
                   </p>
                   {devLogs.length > 0 && (logQuery || showOnlyErrorLogs) ? (
@@ -504,8 +504,8 @@ export function DevtoolsLogsSection({
           <div
             style={{
               borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
               display: 'flex',
               flexDirection: 'column',
             }}
@@ -513,7 +513,7 @@ export function DevtoolsLogsSection({
             <div
               style={{
                 padding: '8px 10px',
-                borderBottom: '1px solid var(--border)',
+                borderBottom: '1px solid var(--border-default)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
@@ -526,7 +526,7 @@ export function DevtoolsLogsSection({
                   style={{
                     fontSize: 10,
                     fontWeight: 700,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.08em',
                   }}
@@ -551,7 +551,7 @@ export function DevtoolsLogsSection({
                     >
                       {selectedLog.level}
                     </span>
-                    <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
                       {selectedLog.source ?? 'settings'}
                     </span>
                     {selectedLog.requestId ? (
@@ -559,10 +559,10 @@ export function DevtoolsLogsSection({
                         style={{
                           borderRadius: 4,
                           padding: '2px 6px',
-                          border: '1px solid var(--border)',
-                          background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+                          border: '1px solid var(--border-default)',
+                          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                           fontSize: 10,
-                          color: 'var(--text-2)',
+                          color: 'var(--fg-default)',
                           fontFamily: 'monospace',
                         }}
                       >
@@ -573,7 +573,7 @@ export function DevtoolsLogsSection({
                       <span
                         style={{
                           fontSize: 10,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontVariantNumeric: 'tabular-nums',
                         }}
                       >
@@ -590,10 +590,10 @@ export function DevtoolsLogsSection({
                   disabled={!selectedLog}
                   style={{
                     borderRadius: 4,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--border-default)',
                     padding: '4px 8px',
-                    background: 'var(--surface)',
-                    color: 'var(--text)',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--fg-strong)',
                     fontSize: 11,
                     cursor: selectedLog ? 'pointer' : 'not-allowed',
                     opacity: selectedLog ? 1 : 0.4,
@@ -607,10 +607,10 @@ export function DevtoolsLogsSection({
                   disabled={!selectedLog}
                   style={{
                     borderRadius: 4,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--border-default)',
                     padding: '4px 8px',
-                    background: 'var(--surface)',
-                    color: 'var(--text)',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--fg-strong)',
                     fontSize: 11,
                     cursor: selectedLog ? 'pointer' : 'not-allowed',
                     opacity: selectedLog ? 1 : 0.4,
@@ -629,7 +629,7 @@ export function DevtoolsLogsSection({
                     style={{
                       fontSize: 10,
                       fontWeight: 700,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.06em',
                       marginBottom: 4,
@@ -642,12 +642,12 @@ export function DevtoolsLogsSection({
                       margin: 0,
                       padding: '8px 10px',
                       borderRadius: 4,
-                      border: '1px solid var(--border)',
-                      background: 'color-mix(in srgb, var(--bg) 60%, var(--surface))',
+                      border: '1px solid var(--border-default)',
+                      background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       lineHeight: 1.5,
-                      color: 'var(--text-2)',
+                      color: 'var(--fg-default)',
                       overflowX: 'auto',
                       maxHeight: 320,
                       overflowY: 'auto',
@@ -665,7 +665,7 @@ export function DevtoolsLogsSection({
                     style={{
                       fontSize: 10,
                       fontWeight: 700,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.06em',
                       marginBottom: 4,
@@ -678,12 +678,12 @@ export function DevtoolsLogsSection({
                       margin: 0,
                       padding: '8px 10px',
                       borderRadius: 4,
-                      border: '1px solid var(--border)',
-                      background: 'color-mix(in srgb, var(--bg) 60%, var(--surface))',
+                      border: '1px solid var(--border-default)',
+                      background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       lineHeight: 1.5,
-                      color: 'var(--text-2)',
+                      color: 'var(--fg-default)',
                       overflowX: 'auto',
                       maxHeight: 320,
                       overflowY: 'auto',
@@ -699,7 +699,7 @@ export function DevtoolsLogsSection({
               </div>
             ) : (
               <div style={{ padding: '32px 12px', textAlign: 'center' }}>
-                <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>暂无选中日志</p>
+                <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>暂无选中日志</p>
               </div>
             )}
           </div>

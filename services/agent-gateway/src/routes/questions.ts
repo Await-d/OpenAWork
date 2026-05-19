@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { createQuestionRepliedEvent } from '../session/session-question-events.js';

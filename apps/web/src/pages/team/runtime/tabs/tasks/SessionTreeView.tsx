@@ -17,8 +17,8 @@ const TREE_CONTAINER_STYLE: CSSProperties = {
   gap: 6,
   padding: 12,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
 };
 
 const TREE_DEPTH_INDENT = 14;
@@ -29,7 +29,7 @@ const NODE_STYLE: CSSProperties = {
   gap: 8,
   padding: '6px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
   fontSize: 12,
 };
 
@@ -103,7 +103,7 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
   if (orderedNodes.length === 0) {
     return (
       <div style={TREE_CONTAINER_STYLE}>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           暂无活跃的团队 session 树。创建 handoff 后这里会显示五层结构。
         </span>
       </div>
@@ -115,7 +115,7 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
       <span
         style={{
           fontSize: 11,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
         }}
@@ -137,14 +137,14 @@ export function SessionTreeView({ onSelectSession }: SessionTreeViewProps) {
         >
           <span style={{ fontSize: 14 }}>{STATE_ICONS[node.state] ?? '?'}</span>
           <span style={{ fontWeight: 700 }}>{LAYER_LABELS[node.roleLayer]}</span>
-          <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
             {node.sessionId.slice(0, 8)}…
           </span>
           <span
             style={{
               marginLeft: 'auto',
               fontSize: 10,
-              color: node.state === 'running' ? 'var(--success, var(--success, var(--success, #3dd49a)))' : 'var(--text-3)',
+              color: node.state === 'running' ? 'var(--success))' : 'var(--fg-muted)',
             }}
           >
             {node.state}

@@ -4,12 +4,12 @@ import {
 } from '../message/message-v2-adapter.js';
 import type { MessageContent } from '@openAwork/shared';
 import { readFileSync } from 'node:fs';
-import { resolveGatewayArtifactsIndexPath } from '../storage-paths.js';
+import { resolveGatewayArtifactsIndexPath } from '../infra/storage-paths.js';
 import type { RunArtifact } from '@openAwork/artifacts';
 import { maybeAutoTitle } from './session-title.js';
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import { generateSessionTitleLlm, isFirstUserMessage } from './session-title-llm.js';
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { isTaskParentAutoResumeClientRequestId } from '../task/task-parent-auto-resume.js';
 import { appendSessionEvent } from './session-entry-store.js';

@@ -6,7 +6,7 @@
   border-collapse: collapse;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: var(--bg-overlay, #121721);
+  color: var(--bg-overlay);
 }
 
 .xlsx-preview-table table td,
@@ -22,7 +22,7 @@
 
 .xlsx-preview-table table tr:first-child td,
 .xlsx-preview-table table tr:first-child th {
-  background: var(--bg-overlay, #121721);
+  background: var(--bg-overlay);
   font-weight: 600;
 }
 
@@ -62,7 +62,7 @@
   vertical-align: top;
 }
 .docx-preview-content table th {
-  background: var(--bg-overlay, #121721);
+  background: var(--bg-overlay);
 }
 .docx-preview-content img {
   max-width: 100%;
@@ -84,7 +84,7 @@
 }
 .docx-preview-content code {
   font-family: ui-monospace, SFMono-Regular, monospace;
-  background: var(--bg-overlay, #121721);
+  background: var(--bg-overlay);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.92em;

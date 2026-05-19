@@ -30,12 +30,12 @@ function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
         border: '1px solid var(--border-subtle)',
         borderRadius: 10,
         padding: '10px 12px',
-        background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+        background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
-        <div style={{ marginTop: 3, fontSize: 11, lineHeight: 1.5, color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{label}</div>
+        <div style={{ marginTop: 3, fontSize: 11, lineHeight: 1.5, color: 'var(--fg-muted)' }}>
           {description}
         </div>
       </div>
@@ -52,7 +52,7 @@ function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
           border: 'none',
           padding: 0,
           cursor: 'pointer',
-          background: checked ? 'var(--accent)' : 'var(--border)',
+          background: checked ? 'var(--accent)' : 'var(--border-default)',
           flexShrink: 0,
         }}
       >
@@ -64,7 +64,7 @@ function ToggleRow({ checked, description, label, onToggle }: ToggleRowProps) {
             width: 20,
             height: 20,
             borderRadius: '50%',
-            background: 'var(--surface)',
+            background: 'var(--bg-overlay)',
             boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
             transition: 'left 180ms ease',
           }}
@@ -158,7 +158,7 @@ export function CompanionMainControlsSection({ buddy }: CompanionMainControlsSec
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)', flex: '1 1 240px' }}>
+        <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)', flex: '1 1 240px' }}>
           想清空一次性的实验性调整？把 Buddy 偏好恢复成出厂默认。Agent 绑定不会被动到。
         </div>
         <button
@@ -167,9 +167,9 @@ export function CompanionMainControlsSection({ buddy }: CompanionMainControlsSec
             height: 30,
             padding: '0 12px',
             borderRadius: 999,
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-default)',
             background: 'transparent',
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             fontSize: 12,
             fontWeight: 700,
             cursor: 'pointer',

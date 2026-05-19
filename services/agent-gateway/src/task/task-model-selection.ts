@@ -1,4 +1,4 @@
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import type { ReferenceModelEntry } from './task-model-reference-snapshot.js';
 
 interface UserSettingRow {

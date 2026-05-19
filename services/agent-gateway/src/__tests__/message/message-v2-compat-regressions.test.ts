@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   upsertSearchDocument: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: mocks.sqliteAll,
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,

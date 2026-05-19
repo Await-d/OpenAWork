@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { requireAuth } from '../auth.js';
-import { sqliteGet } from '../db.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteGet } from '../infra/db.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
 import { filterEnabledGatewayToolsForSession } from '../session/session-tool-visibility.js';
 import {

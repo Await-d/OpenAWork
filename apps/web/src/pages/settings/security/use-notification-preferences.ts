@@ -4,7 +4,7 @@ import {
   type NotificationPreferenceEventType,
   type NotificationPreferenceRecord,
 } from '@openAwork/web-client';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import { requestNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
 
 export interface NotificationPreferenceItemDescriptor {

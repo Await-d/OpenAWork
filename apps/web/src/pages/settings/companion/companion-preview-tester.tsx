@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { useBuddyVoicePreferences } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
 import { pickVoiceForVariant, SUPPORTS_TTS } from './companion-voice-preview.js';
 
@@ -105,7 +105,7 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
       <div id="buddy-preview-tester-title" style={ST}>
         试聊预览
       </div>
-      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         发一句话，让当前 Persona 用它的口吻回你一条。这里走的是 companion chat
         路由，不会写到任何会话里；用于在保存设置前感受 Buddy 风格。
       </div>
@@ -144,7 +144,7 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
       </div>
 
       {!accessToken ? (
-        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>未登录无法试聊。先连接到一个 gateway。</div>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>未登录无法试聊。先连接到一个 gateway。</div>
       ) : null}
 
       {error ? (
@@ -162,13 +162,13 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
                 borderRadius: 12,
                 border: '1px solid var(--border-subtle)',
                 padding: '10px 12px',
-                background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+                background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
                 display: 'grid',
                 gap: 6,
               }}
             >
-              <div style={{ fontSize: 11, color: 'var(--text-3)' }}>你：{turn.message}</div>
-              <div style={{ fontSize: 12, color: 'var(--text)' }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>你：{turn.message}</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
                 <strong>{turn.profileName}：</strong>
                 {turn.reply || '（无内容）'}
               </div>
@@ -183,7 +183,7 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
               borderRadius: 999,
               border: '1px solid var(--border-subtle)',
               background: 'transparent',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontSize: 11,
               cursor: 'pointer',
             }}

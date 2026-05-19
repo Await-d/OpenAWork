@@ -35,11 +35,11 @@ export function AuditLogExportButton({ sessionId, onExport, style }: AuditLogExp
         value={format}
         onChange={(e) => setFormat(e.target.value as 'json' | 'markdown')}
         style={{
-          background: 'var(--bg-base, #080b12)',
+          background: 'var(--bg-base))',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 6,
           padding: '0.35rem 0.5rem',
-          color: 'var(--fg-strong, #f1f4f8)',
+          color: 'var(--fg-strong))',
           fontSize: 12,
           cursor: 'pointer',
         }}
@@ -52,11 +52,11 @@ export function AuditLogExportButton({ sessionId, onExport, style }: AuditLogExp
         onClick={() => void handleExport()}
         disabled={loading}
         style={{
-          background: 'var(--bg-overlay, #121721)',
+          background: 'var(--bg-overlay))',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 6,
           padding: '0.35rem 0.75rem',
-          color: 'var(--fg-muted, #7b8a9e)',
+          color: 'var(--fg-muted))',
           fontSize: 12,
           cursor: loading ? 'not-allowed' : 'pointer',
           opacity: loading ? 0.6 : 1,

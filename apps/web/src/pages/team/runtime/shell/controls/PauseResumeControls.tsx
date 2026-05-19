@@ -11,8 +11,8 @@ const DIALOG_STYLE: CSSProperties = {
   gap: 12,
   padding: 16,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   boxShadow: 'var(--shadow-md)',
 };
 
@@ -24,8 +24,8 @@ const BUTTON_PRIMARY: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
-  color: 'var(--text)',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 700,
@@ -33,16 +33,16 @@ const BUTTON_PRIMARY: CSSProperties = {
 
 const BUTTON_DANGER: CSSProperties = {
   ...BUTTON_PRIMARY,
-  border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--danger, #d4574e) 12%, var(--surface))',
-  color: 'var(--danger, #d4574e)',
+  border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
+  color: 'var(--danger))',
 };
 
 const BUTTON_SECONDARY: CSSProperties = {
   ...BUTTON_PRIMARY,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-  color: 'var(--text-2)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  color: 'var(--fg-default)',
 };
 
 // ─── PauseConfirmDialog ─────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ export function PauseConfirmDialog({
   return (
     <div role="dialog" aria-label="确认暂停" style={DIALOG_STYLE}>
       <strong style={{ fontSize: 14 }}>确认暂停全部？</strong>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         当前有 {activeCount} 个活跃任务。暂停后所有正在运行的 LLM 调用会在当前轮次完成后停止，
         不会丢失已产出的内容。恢复后从断点继续。
       </span>
@@ -99,7 +99,7 @@ export function ResumeStaleDialog({
   return (
     <div role="dialog" aria-label="恢复过期任务" style={DIALOG_STYLE}>
       <strong style={{ fontSize: 14 }}>检测到 {staleCount} 个过期任务</strong>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         这些任务可能因为 gateway 重启或网络中断而停滞。是否恢复执行？
       </span>
       <div style={{ display: 'flex', gap: 8 }}>

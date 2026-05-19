@@ -20,12 +20,12 @@ export interface PlanHistoryPanelProps {
 }
 
 const STATUS_COLOR: Record<HistoricalPlan['status'], string> = {
-  pending: 'var(--fg-muted, #7b8a9e)',
+  pending: 'var(--fg-muted))',
   running: color.contrast,
   paused: color.warning,
   completed: color.success,
   failed: color.danger,
-  skipped: 'var(--fg-muted, #7b8a9e)',
+  skipped: 'var(--fg-muted))',
 };
 
 export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelProps) {
@@ -36,7 +36,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         display: 'flex',
@@ -51,7 +51,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
           padding: '0.6rem 1rem',
           fontSize: 11,
           fontWeight: 700,
-          color: 'var(--fg-muted, #7b8a9e)',
+          color: 'var(--fg-muted))',
           textTransform: 'uppercase',
           letterSpacing: 0.8,
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
@@ -60,7 +60,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
         计划历史
       </div>
       {plans.length === 0 && (
-        <div style={{ padding: '1rem', fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' }}>
+        <div style={{ padding: '1rem', fontSize: 12, color: 'var(--fg-muted))' }}>
           暂无历史计划。
         </div>
       )}
@@ -86,7 +86,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
               textAlign: 'left',
             }}
           >
-            <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)', marginRight: 2 }}>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted))', marginRight: 2 }}>
               {expanded[plan.id] ? '▾' : '▸'}
             </span>
             <span
@@ -94,7 +94,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
                 flex: 1,
                 fontSize: 12,
                 fontWeight: 500,
-                color: 'var(--fg-strong, #f1f4f8)',
+                color: 'var(--fg-strong))',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -112,7 +112,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
             >
               {plan.status}
             </span>
-            <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)' }}>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>
               {new Date(plan.createdAt).toLocaleDateString()}
             </span>
             {onReplay && (
@@ -127,8 +127,8 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
                   padding: '2px 8px',
                   borderRadius: 4,
                   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-                  background: 'var(--bg-base, #080b12)',
-                  color: 'var(--fg-strong, #f1f4f8)',
+                  background: 'var(--bg-base))',
+                  color: 'var(--fg-strong))',
                   cursor: 'pointer',
                 }}
               >
@@ -140,7 +140,7 @@ export function PlanHistoryPanel({ plans, onReplay, style }: PlanHistoryPanelPro
             <div style={{ padding: '0 1rem 0.75rem 2.5rem' }}>
               {plan.goal && (
                 <div
-                  style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)', marginBottom: 6 }}
+                  style={{ fontSize: 11, color: 'var(--fg-muted))', marginBottom: 6 }}
                 >
                   {plan.goal}
                 </div>

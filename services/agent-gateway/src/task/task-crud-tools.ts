@@ -1,7 +1,7 @@
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { WORKSPACE_ROOT } from '../db.js';
+import { WORKSPACE_ROOT } from '../infra/db.js';
 
 const taskOwnershipSchema = z.object({
   principalKind: z.enum(['user', 'agent', 'system', 'service', 'session', 'tool']),

@@ -22,8 +22,8 @@
 
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import WorkspacePickerModal from '../../../../../components/common/WorkspacePickerModal.js';
-import { useAuthStore } from '../../../../../stores/auth.js';
+import WorkspacePickerModal from '../../../../../components/common/modal/WorkspacePickerModal.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { XIcon } from '../../shared/TeamIcons.js';
 
@@ -39,7 +39,7 @@ const OVERLAY_STYLE: CSSProperties = {
   zIndex: 800,
   display: 'grid',
   placeItems: 'center',
-  background: 'oklch(0 0 0 / 0.6)',
+  background: 'rgba(0, 0, 0, 0.6)',
   backdropFilter: 'blur(4px)',
   padding: 16,
 };
@@ -51,17 +51,17 @@ const MODAL_STYLE: CSSProperties = {
   maxHeight: '90vh',
   overflow: 'hidden',
   borderRadius: 18,
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  boxShadow: '0 24px 64px oklch(0 0 0 / 0.4)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
+  boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
   display: 'grid',
   gridTemplateColumns: '260px 1fr',
 };
 
 const HERO_PANE_STYLE: CSSProperties = {
   background:
-    'linear-gradient(160deg, color-mix(in srgb, var(--accent) 90%, var(--surface)) 0%, color-mix(in srgb, var(--accent) 55%, var(--surface)) 100%)',
-  color: 'var(--fg-on-accent, #ffffff)',
+    'linear-gradient(160deg, color-mix(in srgb, var(--accent) 90%, var(--bg-overlay) 0%, color-mix(in srgb, var(--accent) 55%, var(--bg-overlay) 100%)',
+  color: 'var(--fg-on-accent))',
   padding: 24,
   display: 'flex',
   flexDirection: 'column',
@@ -172,12 +172,12 @@ const FIELD_STYLE: CSSProperties = {
 const LABEL_STYLE: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
 };
 
@@ -185,9 +185,9 @@ const INPUT_STYLE: CSSProperties = {
   width: '100%',
   padding: '9px 12px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-2) 70%, var(--bg))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
   transition: 'border-color 120ms ease',
@@ -195,7 +195,7 @@ const INPUT_STYLE: CSSProperties = {
 
 const INPUT_ERROR_STYLE: CSSProperties = {
   ...INPUT_STYLE,
-  borderColor: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+  borderColor: 'var(--error)',
 };
 
 const TEXTAREA_STYLE: CSSProperties = {
@@ -216,7 +216,7 @@ const PRIMARY_BUTTON_STYLE: CSSProperties = {
   borderRadius: 8,
   border: 'none',
   background: 'var(--accent)',
-  color: 'var(--accent-text, #fff)',
+  color: 'var(--fg-on-accent)',
   fontSize: 13,
   fontWeight: 700,
   cursor: 'pointer',
@@ -228,25 +228,25 @@ const PRIMARY_BUTTON_STYLE: CSSProperties = {
 const SECONDARY_BUTTON_STYLE: CSSProperties = {
   padding: '9px 18px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 13,
   cursor: 'pointer',
 };
 
 const ERROR_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
-  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 10%, transparent)',
+  color: 'var(--error)',
+  background: 'color-mix(in srgb, var(--error) 10%, transparent)',
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 30%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)',
 };
 
 const FIELD_ERROR_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+  color: 'var(--error)',
   display: 'flex',
   alignItems: 'center',
   gap: 4,
@@ -255,12 +255,12 @@ const FIELD_ERROR_STYLE: CSSProperties = {
 const HEADER_TITLE_STYLE: CSSProperties = {
   fontSize: 17,
   fontWeight: 800,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const HEADER_DESC_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
   marginTop: 4,
 };
@@ -450,7 +450,7 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   padding: 4,
                   cursor: 'pointer',
                   display: 'inline-flex',
@@ -458,13 +458,13 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
                   flexShrink: 0,
                 }}
               >
-                <XIcon size={14} color="var(--text-3)" />
+                <XIcon size={14} color="var(--fg-muted)" />
               </button>
             </div>
 
             <div style={FIELD_STYLE}>
               <label htmlFor="new-ws-name" style={LABEL_STYLE}>
-                名称 <span style={{ color: 'var(--error, var(--danger, var(--danger, #f06b7e)))' }}>*</span>
+                名称 <span style={{ color: 'var(--error)' }}>*</span>
               </label>
               <input
                 id="new-ws-name"

@@ -48,9 +48,9 @@ const TRIGGER_BUTTON_STYLE: CSSProperties = {
   gap: 4,
   padding: '2px 8px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, transparent)',
-  color: 'var(--text-2)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  color: 'var(--fg-default)',
   fontSize: 12,
   fontWeight: 500,
   cursor: 'pointer',
@@ -69,7 +69,7 @@ const TRIGGER_BUTTON_DISABLED_STYLE: CSSProperties = {
 
 const STATIC_LABEL_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -84,8 +84,8 @@ const POPOVER_STYLE: CSSProperties = {
   maxWidth: 360,
   maxHeight: 420,
   overflowY: 'auto',
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 10,
   boxShadow: '0 12px 32px color-mix(in srgb, #000 22%, transparent)',
   zIndex: 100,
@@ -98,7 +98,7 @@ const POPOVER_HEADER_STYLE: CSSProperties = {
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const ROW_BASE_STYLE: CSSProperties = {
@@ -109,7 +109,7 @@ const ROW_BASE_STYLE: CSSProperties = {
   padding: '8px 12px',
   border: 'none',
   background: 'transparent',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   textAlign: 'left',
   cursor: 'pointer',
@@ -138,7 +138,7 @@ const ACTIONS_BTN_STYLE: CSSProperties = {
   border: 'none',
   borderRadius: 4,
   background: 'transparent',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   cursor: 'pointer',
 };
 
@@ -147,8 +147,8 @@ const SUBMENU_STYLE: CSSProperties = {
   right: 0,
   top: 'calc(100% + 2px)',
   minWidth: 160,
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 8,
   boxShadow: '0 8px 24px color-mix(in srgb, #000 22%, transparent)',
   padding: '4px 0',
@@ -163,7 +163,7 @@ const SUBMENU_ITEM_STYLE: CSSProperties = {
   padding: '7px 12px',
   border: 'none',
   background: 'transparent',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   textAlign: 'left',
   cursor: 'pointer',
@@ -175,8 +175,8 @@ const RENAME_INPUT_STYLE: CSSProperties = {
   padding: '4px 8px',
   border: '1px solid var(--accent)',
   borderRadius: 6,
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
 };
@@ -403,11 +403,11 @@ export function WorkspaceSwitcher({
                       aria-label="工作区新名称"
                     />
                     {renameError ? (
-                      <span style={{ fontSize: 10, color: 'var(--error, var(--danger, var(--danger, #f06b7e)))' }}>
+                      <span style={{ fontSize: 10, color: 'var(--error)' }}>
                         {renameError}
                       </span>
                     ) : (
-                      <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
                         Enter 保存 / Esc 取消
                       </span>
                     )}
@@ -424,7 +424,7 @@ export function WorkspaceSwitcher({
                       padding: 0,
                       border: 'none',
                       background: 'transparent',
-                      color: active ? 'var(--accent)' : 'var(--text)',
+                      color: active ? 'var(--accent)' : 'var(--fg-strong)',
                       fontWeight: active ? 600 : 400,
                       cursor: 'pointer',
                       textAlign: 'left',
@@ -448,7 +448,7 @@ export function WorkspaceSwitcher({
                       <span
                         style={{
                           fontSize: 10,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -532,7 +532,7 @@ export function WorkspaceSwitcher({
                             data-tone="danger"
                             style={{
                               ...SUBMENU_ITEM_STYLE,
-                              color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+                              color: 'var(--error)',
                             }}
                           >
                             <svg
@@ -568,7 +568,7 @@ export function WorkspaceSwitcher({
                   role="separator"
                   style={{
                     height: 1,
-                    background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+                    background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
                     margin: '4px 0',
                   }}
                 />

@@ -37,12 +37,12 @@ export function ChatScrollBottomButton({
         maxWidth: 'calc(100% - 28px)',
         borderRadius: 999,
         border: hasPendingFollowContent
-          ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border))'
-          : '1px solid var(--border)',
+          ? '1px solid color-mix(in oklch, var(--accent) 55%, var(--border-default))'
+          : '1px solid var(--border-default)',
         background: hasPendingFollowContent
-          ? 'color-mix(in oklch, var(--surface) 82%, var(--accent) 18%)'
-          : 'color-mix(in oklch, var(--surface) 90%, transparent)',
-        color: hasPendingFollowContent ? 'var(--text)' : 'var(--text-2)',
+          ? 'color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%)'
+          : 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+        color: hasPendingFollowContent ? 'var(--fg-strong)' : 'var(--fg-default)',
         boxShadow: 'var(--shadow-md)',
         backdropFilter: 'blur(10px)',
         cursor: 'pointer',

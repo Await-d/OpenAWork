@@ -26,7 +26,7 @@ function UIForm({ payload }: { payload: Record<string, unknown> }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {(payload.title as string) && (
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong, #f1f4f8)' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong))' }}>
           {payload.title as string}
         </div>
       )}
@@ -34,7 +34,7 @@ function UIForm({ payload }: { payload: Record<string, unknown> }) {
         <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <label
             htmlFor={`gen-${f.name}`}
-            style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted, #7b8a9e)' }}
+            style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted))' }}
           >
             {f.label}
           </label>
@@ -45,10 +45,10 @@ function UIForm({ payload }: { payload: Record<string, unknown> }) {
             onChange={(e) => setVals((p) => ({ ...p, [f.name]: e.target.value }))}
             style={{
               padding: '0.35rem 0.6rem',
-              background: 'var(--bg-base, #080b12)',
+              background: 'var(--bg-base))',
               border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
               borderRadius: 5,
-              color: 'var(--fg-strong, #f1f4f8)',
+              color: 'var(--fg-strong))',
               fontSize: 12,
             }}
           />
@@ -59,7 +59,7 @@ function UIForm({ payload }: { payload: Record<string, unknown> }) {
         style={{
           alignSelf: 'flex-start',
           padding: '5px 16px',
-          background: 'var(--accent, #5cd4c0)',
+          background: 'var(--accent))',
           border: 'none',
           borderRadius: 5,
           color: color.fgOnAccent,
@@ -90,7 +90,7 @@ function UITable({ payload }: { payload: Record<string, unknown> }) {
                   textAlign: 'left',
                   fontWeight: 700,
                   fontSize: 11,
-                  color: 'var(--fg-muted, #7b8a9e)',
+                  color: 'var(--fg-muted))',
                   textTransform: 'uppercase',
                 }}
               >
@@ -113,7 +113,7 @@ function UITable({ payload }: { payload: Record<string, unknown> }) {
                 {cols.map((c) => (
                   <td
                     key={c}
-                    style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-strong, #f1f4f8)' }}
+                    style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-strong))' }}
                   >
                     {row[c] !== null && row[c] !== undefined
                       ? typeof row[c] === 'object'
@@ -141,7 +141,7 @@ function UIChart({ payload }: { payload: Record<string, unknown> }) {
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: 'var(--fg-strong, #f1f4f8)',
+            color: 'var(--fg-strong))',
             marginBottom: 4,
           }}
         >
@@ -154,7 +154,7 @@ function UIChart({ payload }: { payload: Record<string, unknown> }) {
             style={{
               width: 80,
               fontSize: 11,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               textAlign: 'right',
               flexShrink: 0,
             }}
@@ -165,7 +165,7 @@ function UIChart({ payload }: { payload: Record<string, unknown> }) {
             style={{
               flex: 1,
               height: 18,
-              background: 'var(--bg-base, #080b12)',
+              background: 'var(--bg-base))',
               borderRadius: 4,
               overflow: 'hidden',
             }}
@@ -174,7 +174,7 @@ function UIChart({ payload }: { payload: Record<string, unknown> }) {
               style={{
                 height: '100%',
                 width: `${(item.value / max) * 100}%`,
-                background: 'var(--accent, #5cd4c0)',
+                background: 'var(--accent))',
                 borderRadius: 4,
                 transition: 'width 0.3s ease',
               }}
@@ -184,7 +184,7 @@ function UIChart({ payload }: { payload: Record<string, unknown> }) {
             style={{
               width: 40,
               fontSize: 11,
-              color: 'var(--fg-strong, #f1f4f8)',
+              color: 'var(--fg-strong))',
               textAlign: 'right',
             }}
           >
@@ -200,7 +200,7 @@ function UIApproval({ payload }: { payload: Record<string, unknown> }) {
   const [decided, setDecided] = useState<'approved' | 'rejected' | null>(null);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 12, color: 'var(--fg-strong, #f1f4f8)' }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-strong))' }}>
         {(payload.message as string) ?? '批准此操作？'}
       </div>
       {!decided ? (
@@ -213,7 +213,7 @@ function UIApproval({ payload }: { payload: Record<string, unknown> }) {
               background: color.success,
               border: 'none',
               borderRadius: 5,
-              color: 'var(--bg-base, #080b12)',
+              color: 'var(--bg-base))',
               fontSize: 12,
               fontWeight: 700,
               cursor: 'pointer',
@@ -267,19 +267,19 @@ function UICodeDiff({ payload }: { payload: Record<string, unknown> }) {
     fontFamily: 'monospace',
     fontSize: 11,
     padding: '0.5rem',
-    background: 'var(--bg-base, #080b12)',
+    background: 'var(--bg-base))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 5,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-all',
-    color: 'var(--fg-strong, #f1f4f8)',
+    color: 'var(--fg-strong))',
     overflow: 'auto',
     maxHeight: 240,
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {(payload.filename as string) && (
-        <div style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
           {payload.filename as string}
         </div>
       )}
@@ -300,14 +300,14 @@ function UIStatus({ payload }: { payload: Record<string, unknown> }) {
         ? color.contrast
         : tone === 'error'
           ? color.danger
-          : 'var(--aux, #8b9cf5)';
+          : 'var(--aux))';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: toneColor }}>
         {(payload.title as string) ?? '状态更新'}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--fg-strong, #f1f4f8)', whiteSpace: 'pre-wrap' }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-strong))', whiteSpace: 'pre-wrap' }}>
         {(payload.message as string) ?? ''}
       </div>
     </div>
@@ -318,11 +318,11 @@ function UICompaction({ payload }: { payload: Record<string, unknown> }) {
   const trigger = payload['trigger'] === 'automatic' ? '自动压缩' : '手动压缩';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--aux, #8b9cf5)' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--aux))' }}>
         {(payload['title'] as string) ?? '会话已压缩'}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>{trigger}</div>
-      <div style={{ fontSize: 12, color: 'var(--fg-strong, #f1f4f8)', whiteSpace: 'pre-wrap' }}>
+      <div style={{ fontSize: 11, color: 'var(--fg-muted))' }}>{trigger}</div>
+      <div style={{ fontSize: 12, color: 'var(--fg-strong))', whiteSpace: 'pre-wrap' }}>
         {(payload['summary'] as string) ?? ''}
       </div>
     </div>
@@ -364,7 +364,7 @@ function UIToolCall({ payload }: { payload: Record<string, unknown> }) {
 
 export function GenerativeUIRenderer({ message }: GenerativeUIRendererProps) {
   const wrapper: React.CSSProperties = {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 10,
     padding: '1rem',

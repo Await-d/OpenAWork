@@ -6,7 +6,7 @@ import {
   upsertWorkspacePermanentPermission,
   writeWorkspacePermissionConfig,
 } from '@openAwork/agent-core';
-import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../db.js';
+import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
 import {
   extractSessionWorkingDirectory,
   parseSessionMetadataJson,

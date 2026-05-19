@@ -21,15 +21,15 @@
   padding: 2px 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 .tool-call-inline[data-tool-status='running'] {
-  color: var(--text-2);
+  color: var(--fg-default);
 }
 
 .tool-call-inline[data-tool-status='paused'] {
-  color: color-mix(in oklch, var(--warning) 82%, var(--text) 18%);
+  color: color-mix(in oklch, var(--warning) 82%, var(--fg-strong) 18%);
 }
 
 .tool-call-inline[data-tool-status='failed'] {
@@ -44,7 +44,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-3);
+  color: var(--fg-muted);
   transition: color 0.15s ease;
 }
 
@@ -53,7 +53,7 @@
 }
 
 .tool-icon[data-state='completed'] {
-  color: var(--success, var(--success, var(--success, #3dd49a)));
+  color: var(--success);
 }
 
 .tool-icon[data-state='running'] {
@@ -104,7 +104,7 @@
   font-weight: 600;
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: var(--text-2);
+  color: var(--fg-default);
 }
 
 .tool-call-inline-summary {
@@ -118,7 +118,7 @@
 .tool-call-inline-chevron {
   flex-shrink: 0;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin-left: 2px;
 }
 
@@ -162,7 +162,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 /* ── Grouped consecutive tool-call pill (read/grep/glob runs) ── */
@@ -190,7 +190,7 @@
 }
 
 .tool-call-grouped-header:hover {
-  background: color-mix(in oklch, var(--surface-2) 40%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 40%, transparent);
   border-radius: 3px;
 }
 
@@ -199,7 +199,7 @@
   font-weight: 600;
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: var(--text-2);
+  color: var(--fg-default);
 }
 
 /* Count chip — soft accent pill so the eye registers "this is a run
@@ -213,7 +213,7 @@
   padding: 0 6px;
   border-radius: 999px;
   background: color-mix(in oklch, var(--accent) 12%, transparent);
-  color: color-mix(in oklch, var(--accent) 78%, var(--text) 22%);
+  color: color-mix(in oklch, var(--accent) 78%, var(--fg-strong) 22%);
   font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -238,13 +238,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 .tool-call-grouped-chevron {
   flex-shrink: 0;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin-left: 2px;
 }
 
@@ -258,7 +258,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-left: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+  border-left: 1px solid color-mix(in oklch, var(--border-default) 50%, transparent);
   margin-left: 6px;
 }
 
@@ -287,7 +287,7 @@
 }
 
 .tool-call-block-header:hover {
-  background: color-mix(in oklch, var(--surface-2) 40%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 40%, transparent);
   border-radius: 3px;
 }
 
@@ -307,7 +307,7 @@
   flex-shrink: 0;
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--fg-muted);
   letter-spacing: 0.02em;
 }
 
@@ -318,7 +318,7 @@
 .tool-call-block-chevron {
   flex-shrink: 0;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin-left: auto;
 }
 
@@ -370,13 +370,13 @@
 .tool-call-block-diff {
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+  border-top: 1px dashed color-mix(in oklch, var(--border-default) 60%, transparent);
 }
 
 .tool-call-block-output {
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+  border-top: 1px dashed color-mix(in oklch, var(--border-default) 60%, transparent);
 }
 
 /* ── Collapsed summary (shown in header when not expanded) ── */
@@ -389,7 +389,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 /* ── Running hint ── */
@@ -423,7 +423,7 @@
   flex-shrink: 0;
   font-size: 10px;
   font-weight: 500;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
 }
@@ -433,7 +433,7 @@
  * text colour. `slow` (>=10s) goes amber so a 30s grep doesn't blend in
  * with a 200ms read in a long session. */
 .tool-call-block-elapsed[data-duration-tier='normal'] {
-  color: var(--text-2);
+  color: var(--fg-default);
 }
 
 .tool-call-block-elapsed[data-duration-tier='slow'] {

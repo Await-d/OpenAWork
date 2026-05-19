@@ -35,7 +35,7 @@ export function AttachmentBar({ attachments, onRemove, onAdd, style }: Attachmen
         gap: 6,
         flexWrap: 'wrap',
         padding: '0.4rem 0.6rem',
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 8,
         ...style,
@@ -49,11 +49,11 @@ export function AttachmentBar({ attachments, onRemove, onAdd, style }: Attachmen
             alignItems: 'center',
             gap: 4,
             padding: '2px 8px',
-            background: 'var(--bg-base, #080b12)',
+            background: 'var(--bg-base))',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 20,
             fontSize: 11,
-            color: 'var(--fg-strong, #f1f4f8)',
+            color: 'var(--fg-strong))',
           }}
         >
           <span>{TYPE_ICON[a.type]}</span>
@@ -67,7 +67,7 @@ export function AttachmentBar({ attachments, onRemove, onAdd, style }: Attachmen
           >
             {a.name}
           </span>
-          <span style={{ color: 'var(--fg-muted, #7b8a9e)' }}>{fmtSize(a.sizeBytes)}</span>
+          <span style={{ color: 'var(--fg-muted))' }}>{fmtSize(a.sizeBytes)}</span>
           {onRemove && (
             <button
               type="button"
@@ -76,7 +76,7 @@ export function AttachmentBar({ attachments, onRemove, onAdd, style }: Attachmen
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: 'var(--fg-muted, #7b8a9e)',
+                color: 'var(--fg-muted))',
                 fontSize: 12,
                 lineHeight: 1,
                 padding: 0,
@@ -101,7 +101,7 @@ export function AttachmentBar({ attachments, onRemove, onAdd, style }: Attachmen
             border: '1px dashed var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 20,
             fontSize: 11,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             cursor: 'pointer',
           }}
         >

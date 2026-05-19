@@ -69,15 +69,15 @@ const CHIP_STYLE: React.CSSProperties = {
 
 const PILL_NEUTRAL: React.CSSProperties = {
   ...CHIP_STYLE,
-  background: 'var(--surface-2)',
-  color: 'var(--text-2)',
+  background: 'var(--bg-surface)',
+  color: 'var(--fg-default)',
 };
 
 function ChipRow({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-      <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
       {items.map((item) => (
         <span key={item} style={CHIP_STYLE}>
           {item}
@@ -105,19 +105,19 @@ export function RepoOverviewPreview({ data }: { data: RepoOverviewOutputShape })
         padding: '8px 10px',
         border: '1px solid var(--border-subtle)',
         borderRadius: 6,
-        background: 'var(--surface)',
+        background: 'var(--bg-overlay)',
         fontSize: 12,
         lineHeight: 1.5,
       }}
     >
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {data.repository ? (
-          <span style={{ fontWeight: 700, color: 'var(--text)' }}>{data.repository}</span>
+          <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>{data.repository}</span>
         ) : (
           <span
             style={{
               fontWeight: 700,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               fontFamily: 'var(--mono)',
               wordBreak: 'break-all',
             }}
@@ -134,12 +134,12 @@ export function RepoOverviewPreview({ data }: { data: RepoOverviewOutputShape })
           when `repository` is set so users see both the human-readable
           name and the absolute cache location. */}
       {data.repository && (
-        <div style={{ color: 'var(--text-2)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
+        <div style={{ color: 'var(--fg-default)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
           {data.path}
         </div>
       )}
       {(data.branch || data.head) && (
-        <div style={{ display: 'flex', gap: 12, color: 'var(--text-3)', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, color: 'var(--fg-muted)', flexWrap: 'wrap' }}>
           {data.branch && (
             <span>
               分支：<code>{data.branch}</code>
@@ -157,14 +157,14 @@ export function RepoOverviewPreview({ data }: { data: RepoOverviewOutputShape })
 
       {visibleStructure.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>结构</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 600 }}>结构</span>
           <pre
             style={{
               margin: 0,
               padding: '6px 8px',
               borderRadius: 4,
-              background: 'var(--surface-2)',
-              color: 'var(--text-2)',
+              background: 'var(--bg-surface)',
+              color: 'var(--fg-default)',
               fontFamily: 'var(--mono)',
               fontSize: 11,
               lineHeight: 1.5,

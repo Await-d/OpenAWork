@@ -127,10 +127,10 @@ export default function HistoryEditDialog({
         style={{
           width: 'min(560px, 100%)',
           borderRadius: 18,
-          border: dragging ? '2px dashed var(--accent)' : '1px solid var(--border)',
+          border: dragging ? '2px dashed var(--accent)' : '1px solid var(--border-default)',
           background: dragging
-            ? 'color-mix(in oklch, var(--accent) 6%, var(--surface))'
-            : 'var(--surface)',
+            ? 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay))'
+            : 'var(--bg-overlay)',
           boxShadow: 'var(--shadow-xl)',
           padding: '20px 20px 18px',
           display: 'flex',
@@ -166,8 +166,8 @@ export default function HistoryEditDialog({
           </div>
         )}
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>编辑历史消息</div>
-          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--text-2)' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>编辑历史消息</div>
+          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
             这是历史消息。你可以编辑后重新发送（截断后续消息），在末尾追加，或从这里新建子会话。
           </div>
         </div>
@@ -176,12 +176,12 @@ export default function HistoryEditDialog({
           <div
             style={{
               borderRadius: 12,
-              border: '1px solid color-mix(in oklch, var(--warning, var(--warning, var(--warning, #f0b429))) 35%, var(--border))',
-              background: 'color-mix(in oklch, var(--warning, var(--warning, var(--warning, #f0b429))) 12%, transparent)',
+              border: '1px solid color-mix(in oklch, var(--warning) 35%, var(--border-default))',
+              background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
               padding: '10px 12px',
               fontSize: 12,
               lineHeight: 1.6,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
             }}
           >
             检测到这条历史消息带有代码标识。为了避免后续上下文污染，建议从这里新建会话继续。
@@ -215,7 +215,7 @@ export default function HistoryEditDialog({
                         objectFit: 'cover',
                         borderRadius: 8,
                         border: '1px solid var(--border-subtle)',
-                        background: 'var(--surface)',
+                        background: 'var(--bg-overlay)',
                       }}
                     />
                   ) : (
@@ -227,9 +227,9 @@ export default function HistoryEditDialog({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         fontSize: 10,
-                        background: 'var(--surface)',
+                        background: 'var(--bg-overlay)',
                       }}
                     >
                       图片已附加
@@ -246,9 +246,9 @@ export default function HistoryEditDialog({
                       width: 20,
                       height: 20,
                       borderRadius: '50%',
-                      border: '1px solid var(--border)',
-                      background: 'var(--surface)',
-                      color: 'var(--text-2)',
+                      border: '1px solid var(--border-default)',
+                      background: 'var(--bg-overlay)',
+                      color: 'var(--fg-default)',
                       cursor: 'pointer',
                       fontSize: 12,
                       lineHeight: 1,
@@ -263,7 +263,7 @@ export default function HistoryEditDialog({
                   <span
                     style={{
                       fontSize: 10,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       lineHeight: 1.3,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -289,11 +289,11 @@ export default function HistoryEditDialog({
             minHeight: 180,
             borderRadius: 12,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-2)',
+            background: 'var(--bg-overlay)',
             padding: '10px 12px',
             fontSize: 12,
             lineHeight: 1.6,
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             resize: 'vertical',
             outline: 'none',
             fontFamily: 'inherit',
@@ -337,9 +337,9 @@ const secondaryButtonStyle: React.CSSProperties = {
   height: 34,
   padding: '0 14px',
   borderRadius: 10,
-  border: '1px solid var(--border)',
-  background: 'var(--surface)',
-  color: 'var(--text-2)',
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-default)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 600,
@@ -351,7 +351,7 @@ const primaryButtonStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--accent)',
   background: 'var(--accent)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 600,

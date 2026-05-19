@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 interface SearchableSessionMessageRow {
   created_at_ms: number;

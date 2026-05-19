@@ -7,7 +7,7 @@ import { ChromeBadge } from '../../shell/team-runtime-shell-primitives.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE, MSG_TYPE_META } from '../../shared/team-runtime-shared.js';
 import { Icon, DirectIcon, SendIcon, XIcon } from '../../shared/TeamIcons.js';
-import MarkdownMessageContent from '../../../../../components/chat/markdown-message-content.js';
+import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 
 export function MessagesTab({
   selectedTeam = null,
@@ -72,7 +72,7 @@ export function MessagesTab({
     <div style={{ display: 'grid', gap: 10 }}>
       {/* Header */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>消息总线</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>消息总线</span>
         <span
           style={{
             padding: '1px 6px',
@@ -85,7 +85,7 @@ export function MessagesTab({
         >
           P2P
         </span>
-        <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{filteredCards.length} 条</span>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{filteredCards.length} 条</span>
         <span style={{ flex: 1 }} />
         {/* Type filters */}
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -129,7 +129,7 @@ export function MessagesTab({
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 9,
                 cursor: 'pointer',
                 padding: '2px 5px',
@@ -152,15 +152,15 @@ export function MessagesTab({
             padding: '10px 12px',
             borderRadius: 10,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--card-bg)',
+            background: 'var(--bg-overlay)',
             boxShadow: 'var(--shadow-sm)',
           }}
         >
           <div style={{ display: 'grid', gap: 3 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
               当前消息会话
             </span>
-            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </span>
           </div>
@@ -247,7 +247,7 @@ export function MessagesTab({
                     >
                       {card.from}
                     </span>
-                    <DirectIcon size={9} color="var(--text-3)" />
+                    <DirectIcon size={9} color="var(--fg-muted)" />
                     <span
                       style={{
                         display: 'inline-flex',
@@ -272,8 +272,8 @@ export function MessagesTab({
                         background:
                           card.route === 'broadcast'
                             ? 'color-mix(in oklch, var(--accent) 15%, transparent)'
-                            : 'color-mix(in oklch, var(--text-3) 10%, transparent)',
-                        color: card.route === 'broadcast' ? 'var(--accent)' : 'var(--text-3)',
+                            : 'color-mix(in oklch, var(--fg-muted) 10%, transparent)',
+                        color: card.route === 'broadcast' ? 'var(--accent)' : 'var(--fg-muted)',
                         fontSize: 9,
                         fontWeight: 700,
                       }}
@@ -295,7 +295,7 @@ export function MessagesTab({
                     <span
                       style={{
                         fontSize: 9,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         fontVariantNumeric: 'tabular-nums',
                       }}
                     >
@@ -306,7 +306,7 @@ export function MessagesTab({
                 <div
                   style={{
                     fontSize: 12,
-                    color: 'var(--text-2)',
+                    color: 'var(--fg-default)',
                     lineHeight: 1.55,
                   }}
                 >
@@ -330,7 +330,7 @@ export function MessagesTab({
                           borderRadius: 6,
                           background: 'color-mix(in oklch, var(--success) 8%, transparent)',
                           fontSize: 11,
-                          color: 'var(--text-2)',
+                          color: 'var(--fg-default)',
                           borderLeft: '2px solid var(--success)',
                         }}
                       >
@@ -367,9 +367,9 @@ export function MessagesTab({
                         flex: 1,
                         padding: '6px 10px',
                         borderRadius: 6,
-                        border: '1px solid var(--border)',
-                        background: 'var(--surface)',
-                        color: 'var(--text)',
+                        border: '1px solid var(--border-default)',
+                        background: 'var(--bg-overlay)',
+                        color: 'var(--fg-strong)',
                         fontSize: 11,
                         outline: 'none',
                       }}
@@ -383,7 +383,7 @@ export function MessagesTab({
                         borderRadius: 6,
                         border: 'none',
                         background: 'var(--accent)',
-                        color: 'var(--bg)',
+                        color: 'var(--bg-base)',
                         cursor: replyInput.trim() && !busy ? 'pointer' : 'not-allowed',
                         opacity: replyInput.trim() && !busy ? 1 : 0.5,
                         fontSize: 10,
@@ -394,7 +394,7 @@ export function MessagesTab({
                         transition: 'opacity 0.15s',
                       }}
                     >
-                      <SendIcon size={9} color="var(--bg)" />
+                      <SendIcon size={9} color="var(--bg-base)" />
                     </button>
                     <button
                       type="button"
@@ -410,7 +410,7 @@ export function MessagesTab({
                         display: 'inline-flex',
                       }}
                     >
-                      <XIcon size={10} color="var(--text-3)" />
+                      <XIcon size={10} color="var(--fg-muted)" />
                     </button>
                   </div>
                 ) : (
@@ -423,7 +423,7 @@ export function MessagesTab({
                       border: '1px solid var(--border-subtle)',
                       borderRadius: 6,
                       padding: '2px 8px',
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       fontSize: 10,
                       cursor: 'pointer',
                       display: 'inline-flex',
@@ -432,7 +432,7 @@ export function MessagesTab({
                       justifySelf: 'start',
                     }}
                   >
-                    <SendIcon size={9} color="var(--text-3)" /> 回复
+                    <SendIcon size={9} color="var(--fg-muted)" /> 回复
                   </button>
                 )}
               </div>
@@ -455,7 +455,7 @@ export function MessagesTab({
               style={{
                 fontSize: 11,
                 fontWeight: 700,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
               }}
@@ -473,9 +473,9 @@ export function MessagesTab({
               style={{
                 padding: '7px 10px',
                 borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                color: 'var(--text)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-overlay)',
+                color: 'var(--fg-strong)',
                 fontSize: 11,
                 outline: 'none',
               }}
@@ -489,7 +489,7 @@ export function MessagesTab({
                 borderRadius: 8,
                 border: 'none',
                 background: 'var(--accent)',
-                color: 'var(--bg)',
+                color: 'var(--bg-base)',
                 cursor: broadcastInput.trim() && !busy ? 'pointer' : 'not-allowed',
                 opacity: broadcastInput.trim() && !busy ? 1 : 0.5,
                 display: 'inline-flex',
@@ -500,7 +500,7 @@ export function MessagesTab({
                 transition: 'opacity 0.15s',
               }}
             >
-              <SendIcon size={10} color="var(--bg)" /> {busy ? '发送中…' : '广播'}
+              <SendIcon size={10} color="var(--bg-base)" /> {busy ? '发送中…' : '广播'}
             </button>
           </div>
 
@@ -519,7 +519,7 @@ export function MessagesTab({
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
                 }}
@@ -535,7 +535,7 @@ export function MessagesTab({
                     display: 'grid',
                     gap: 3,
                     borderLeft: '3px solid var(--accent)',
-                    background: 'color-mix(in oklch, var(--accent) 4%, var(--surface))',
+                    background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))',
                   }}
                 >
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -551,9 +551,9 @@ export function MessagesTab({
                     >
                       广播
                     </span>
-                    <span style={{ fontSize: 8, color: 'var(--text-3)' }}>刚刚</span>
+                    <span style={{ fontSize: 8, color: 'var(--fg-muted)' }}>刚刚</span>
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
                     <MarkdownMessageContent content={msg} />
                   </span>
                 </div>

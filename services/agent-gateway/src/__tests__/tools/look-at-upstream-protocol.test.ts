@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   validateWorkspacePath: vi.fn((p: string) => p),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,
   WORKSPACE_ROOT: '/tmp/workspace',

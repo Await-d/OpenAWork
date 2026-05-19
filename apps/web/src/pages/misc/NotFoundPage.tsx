@@ -7,7 +7,7 @@ export default function NotFoundPage() {
     <div
       style={{
         height: '100dvh',
-        background: 'var(--bg)',
+        background: 'var(--bg-base)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -28,12 +28,12 @@ export default function NotFoundPage() {
           <rect width="48" height="48" rx="12" fill="var(--accent)" />
           <path
             d="M14 24L24 14L34 24L24 34L14 24Z"
-            stroke="var(--accent-text)"
+            stroke="var(--fg-on-accent)"
             strokeWidth="2.5"
             strokeLinejoin="round"
             fill="none"
           />
-          <circle cx="24" cy="24" r="3" fill="var(--accent-text)" />
+          <circle cx="24" cy="24" r="3" fill="var(--fg-on-accent)" />
         </svg>
         <span
           style={{
@@ -41,7 +41,7 @@ export default function NotFoundPage() {
             fontWeight: 600,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
           }}
         >
           OpenAWork
@@ -55,16 +55,16 @@ export default function NotFoundPage() {
             fontWeight: 700,
             lineHeight: 1,
             letterSpacing: '-0.04em',
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             opacity: 0.15,
           }}
         >
           404
         </div>
-        <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>
+        <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--fg-strong)' }}>
           页面不存在
         </p>
-        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-3)', textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: '13px', color: 'var(--fg-muted)', textAlign: 'center' }}>
           你访问的路径不存在，可能已被移除或地址有误。
         </p>
       </div>
@@ -79,9 +79,9 @@ export default function NotFoundPage() {
             borderRadius: '8px',
             fontSize: '13px',
             fontWeight: 500,
-            background: 'var(--surface-2)',
-            color: 'var(--text-2)',
-            border: '1px solid var(--border)',
+            background: 'var(--bg-surface)',
+            color: 'var(--fg-default)',
+            border: '1px solid var(--border-default)',
             cursor: 'pointer',
             transition: 'background 150ms ease',
           }}

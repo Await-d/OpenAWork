@@ -4,8 +4,8 @@ import App from './App.js';
 import './index.css';
 import './styles/loaders.css';
 import './styles/ui-hovers.css';
-import { installMonacoAsyncErrorFilter } from './components/file-editor/MonacoErrorBoundary.js';
-import { installExtensionNoiseFilter } from './lib/extension-noise-filter.js';
+import { installMonacoAsyncErrorFilter } from './components/file-editor/editor/MonacoErrorBoundary.js';
+import { installExtensionNoiseFilter } from './lib/filter/extension-noise-filter.js';
 import { installMonacoI18n } from './lib/monaco/monaco-i18n.js';
 
 // Configure Monaco to load from local bundle instead of CDN.

@@ -85,8 +85,8 @@ export default function WorkspacePickerModal({
     >
       <div
         style={{
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
           borderRadius: 12,
           padding: '24px 28px',
           width: 360,
@@ -96,7 +96,7 @@ export default function WorkspacePickerModal({
           boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
         }}
       >
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>选择工作区目录</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--fg-strong)' }}>选择工作区目录</div>
         <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
           选择要绑定到当前会话的本地文件夹，AI 将可以读取该目录的文件内容。
         </div>
@@ -119,7 +119,7 @@ export default function WorkspacePickerModal({
             onClick={onClose}
             style={{
               background: 'transparent',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-default)',
               borderRadius: 8,
               padding: '8px 16px',
               fontSize: 13,

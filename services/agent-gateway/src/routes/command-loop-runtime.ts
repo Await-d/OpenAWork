@@ -10,7 +10,7 @@ import {
   appendSessionMessageV2 as appendSessionMessage,
   listSessionMessagesV2 as listSessionMessages,
 } from '../message/message-v2-adapter.js';
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 
 const execFileAsync = promisify(execFile);
 const activeLoopExecutions = new Map<string, ActiveLoopRuntime>();

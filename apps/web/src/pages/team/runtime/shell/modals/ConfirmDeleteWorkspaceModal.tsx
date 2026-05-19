@@ -29,7 +29,7 @@ const OVERLAY_STYLE: CSSProperties = {
   zIndex: 800,
   display: 'grid',
   placeItems: 'center',
-  background: 'oklch(0 0 0 / 0.6)',
+  background: 'rgba(0, 0, 0, 0.6)',
   backdropFilter: 'blur(4px)',
 };
 
@@ -38,9 +38,9 @@ const MODAL_STYLE: CSSProperties = {
   width: 480,
   maxWidth: '92vw',
   borderRadius: 16,
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  boxShadow: '0 24px 64px oklch(0 0 0 / 0.4)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
+  boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
   padding: 22,
   display: 'grid',
   gap: 16,
@@ -58,21 +58,21 @@ const ICON_BADGE_STYLE: CSSProperties = {
   borderRadius: 12,
   display: 'grid',
   placeItems: 'center',
-  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 14%, transparent)',
-  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
+  background: 'color-mix(in srgb, var(--error) 14%, transparent)',
+  color: 'var(--error)',
   flexShrink: 0,
 };
 
 const TITLE_STYLE: CSSProperties = {
   fontSize: 16,
   fontWeight: 800,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   marginBottom: 4,
 };
 
 const SUBTITLE_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
 };
 
@@ -81,8 +81,8 @@ const META_BOX_STYLE: CSSProperties = {
   gap: 8,
   padding: 12,
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-2) 60%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
   fontSize: 12,
 };
 
@@ -94,11 +94,11 @@ const META_ROW_STYLE: CSSProperties = {
 };
 
 const META_LABEL_STYLE: CSSProperties = {
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const META_VALUE_STYLE: CSSProperties = {
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   fontWeight: 600,
   textAlign: 'right',
   overflow: 'hidden',
@@ -109,12 +109,12 @@ const META_VALUE_STYLE: CSSProperties = {
 
 const NOTICE_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   lineHeight: 1.6,
   padding: 10,
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 10%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 30%, transparent)',
+  background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
 };
 
 const FIELD_STYLE: CSSProperties = {
@@ -125,16 +125,16 @@ const FIELD_STYLE: CSSProperties = {
 const LABEL_STYLE: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const INPUT_STYLE: CSSProperties = {
   width: '100%',
   padding: '8px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-2) 70%, var(--bg))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
 };
@@ -149,9 +149,9 @@ const ACTIONS_ROW_STYLE: CSSProperties = {
 const SECONDARY_BUTTON_STYLE: CSSProperties = {
   padding: '8px 18px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 13,
   cursor: 'pointer',
 };
@@ -160,8 +160,8 @@ const DANGER_BUTTON_STYLE: CSSProperties = {
   padding: '8px 18px',
   borderRadius: 8,
   border: 'none',
-  background: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
-  color: 'var(--fg-on-accent, #ffffff)',
+  background: 'var(--error)',
+  color: 'var(--fg-on-accent))',
   fontSize: 13,
   fontWeight: 700,
   cursor: 'pointer',
@@ -169,11 +169,11 @@ const DANGER_BUTTON_STYLE: CSSProperties = {
 
 const ERROR_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
-  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 10%, transparent)',
+  color: 'var(--error)',
+  background: 'color-mix(in srgb, var(--error) 10%, transparent)',
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 30%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)',
 };
 
 export function ConfirmDeleteWorkspaceModal({
@@ -253,14 +253,14 @@ export function ConfirmDeleteWorkspaceModal({
             right: 12,
             background: 'none',
             border: 'none',
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             padding: 4,
             cursor: 'pointer',
             display: 'inline-flex',
             borderRadius: 4,
           }}
         >
-          <XIcon size={14} color="var(--text-3)" />
+          <XIcon size={14} color="var(--fg-muted)" />
         </button>
 
         <div style={HERO_STYLE}>
@@ -322,7 +322,7 @@ export function ConfirmDeleteWorkspaceModal({
         </div>
 
         <div style={NOTICE_STYLE}>
-          <strong style={{ color: 'var(--warning, var(--warning, #f0b429))' }}>注意：</strong>
+          <strong style={{ color: 'var(--warning))' }}>注意：</strong>
           删除工作区后，所有关联的会话历史记录将保留（不会级联删除），但无法继续在此工作区中创建新的协作运行。
         </div>
 
@@ -332,7 +332,7 @@ export function ConfirmDeleteWorkspaceModal({
             <span
               style={{
                 fontFamily: 'ui-monospace, monospace',
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
                 padding: '1px 6px',
                 borderRadius: 4,

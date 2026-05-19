@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => ({
   sqliteRunMock: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOT: '/home/await/project/OpenAWork',
   WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],

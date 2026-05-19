@@ -75,7 +75,7 @@ const QUIET_BUTTON: CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--border-subtle)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 12,
   fontWeight: 700,
   cursor: 'pointer',
@@ -87,7 +87,7 @@ const FIELD_GROUP: CSSProperties = {
   borderRadius: 14,
   border: '1px solid var(--border-subtle)',
   padding: '14px 16px',
-  background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+  background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
 };
 
 const SUMMARY_PILL: CSSProperties = {
@@ -309,7 +309,7 @@ export function BuddyAgentBindingPanel({
   return (
     <section style={SS}>
       <div style={ST}>Agent 绑定</div>
-      <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-2)' }}>
+      <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--fg-default)' }}>
         为某个 Agent 指定专属 Buddy。聊天时 Buddy 会跟着当前 effective agent
         自动切换；未绑定时仍回退到默认 companion。
       </div>
@@ -319,7 +319,7 @@ export function BuddyAgentBindingPanel({
           borderRadius: 14,
           border: '1px solid var(--border-subtle)',
           padding: '14px 16px',
-          background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+          background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
           display: 'grid',
           gap: 10,
         }}
@@ -334,10 +334,10 @@ export function BuddyAgentBindingPanel({
           }}
         >
           <div style={{ minWidth: 0, flex: '1 1 260px' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--fg-strong)' }}>
               当前编辑对象：{selectedAgentLabel || '未选择'}
             </div>
-            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.7, color: 'var(--text-2)' }}>
+            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.7, color: 'var(--fg-default)' }}>
               上方主控制会自动同步；这里的 Agent 绑定是手动保存模型，适合批量改完一次提交。
             </div>
           </div>
@@ -345,9 +345,9 @@ export function BuddyAgentBindingPanel({
             style={{
               ...SUMMARY_PILL,
               background: selectedBinding
-                ? 'color-mix(in oklch, var(--accent) 14%, var(--surface))'
-                : 'color-mix(in oklch, var(--surface-hover) 82%, var(--surface))',
-              color: selectedBinding ? 'var(--accent)' : 'var(--text-2)',
+                ? 'color-mix(in oklch, var(--accent) 14%, var(--bg-overlay))'
+                : 'color-mix(in oklch, var(--bg-hover) 82%, var(--bg-overlay))',
+              color: selectedBinding ? 'var(--accent)' : 'var(--fg-default)',
             }}
           >
             {selectedBinding ? '已绑定专属 Persona' : '默认回退中'}
@@ -362,13 +362,13 @@ export function BuddyAgentBindingPanel({
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
             已绑定 {bindingCount} 个 Agent
             {bindingCount > 0
               ? '；可以用下方快捷入口直接跳转到已有绑定。'
               : '；尚未创建任何专属 Buddy。'}
           </div>
-          <div aria-live="polite" style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <div aria-live="polite" style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             设置同步：{syncStatusLabel}
           </div>
         </div>
@@ -390,7 +390,7 @@ export function BuddyAgentBindingPanel({
                     padding: '0 10px',
                     borderColor: selected ? 'var(--accent)' : 'var(--border-subtle)',
                     background: selected
-                      ? 'color-mix(in oklch, var(--accent) 12%, var(--surface))'
+                      ? 'color-mix(in oklch, var(--accent) 12%, var(--bg-overlay))'
                       : QUIET_BUTTON.background,
                     color: selected ? 'var(--accent)' : QUIET_BUTTON.color,
                     opacity: submitting ? 0.65 : 1,
@@ -406,14 +406,14 @@ export function BuddyAgentBindingPanel({
       </div>
 
       {agentLoading ? (
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>正在读取 Agent 列表…</div>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在读取 Agent 列表…</div>
       ) : null}
       {agentError ? <div style={{ fontSize: 12, color: 'var(--danger)' }}>{agentError}</div> : null}
 
       {agentOptions.length > 0 ? (
         <>
           <label style={{ display: 'grid', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>选择 Agent</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>选择 Agent</span>
             <select
               aria-label="Buddy 绑定 Agent"
               disabled={submitting}
@@ -431,8 +431,8 @@ export function BuddyAgentBindingPanel({
 
           <div style={FIELD_GROUP}>
             <div style={{ display: 'grid', gap: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>外观绑定</div>
-              <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>外观绑定</div>
+              <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
                 这些字段决定当前 Agent 在 Chat 页看到的是谁、叫什么、呈现什么气质。
               </div>
             </div>
@@ -444,7 +444,7 @@ export function BuddyAgentBindingPanel({
               }}
             >
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   绑定物种
                 </span>
                 <select
@@ -462,7 +462,7 @@ export function BuddyAgentBindingPanel({
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   绑定主题
                 </span>
                 <select
@@ -480,7 +480,7 @@ export function BuddyAgentBindingPanel({
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   Buddy 名称
                 </span>
                 <input
@@ -499,8 +499,8 @@ export function BuddyAgentBindingPanel({
 
           <div style={FIELD_GROUP}>
             <div style={{ display: 'grid', gap: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>行为覆盖</div>
-              <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>行为覆盖</div>
+              <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
                 用来控制这个 Agent 下的陪跑风格；留空时会继续继承上方全局主控制。
               </div>
             </div>
@@ -512,7 +512,7 @@ export function BuddyAgentBindingPanel({
               }}
             >
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   行为语气
                 </span>
                 <select
@@ -530,7 +530,7 @@ export function BuddyAgentBindingPanel({
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   注入模式覆盖
                 </span>
                 <select
@@ -550,7 +550,7 @@ export function BuddyAgentBindingPanel({
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   输出简洁度覆盖
                 </span>
                 <select
@@ -571,8 +571,8 @@ export function BuddyAgentBindingPanel({
 
           <div style={FIELD_GROUP}>
             <div style={{ display: 'grid', gap: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>语音覆盖</div>
-              <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>语音覆盖</div>
+              <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
                 只覆盖这个 Agent 的播报方式；不填时会继承当前账号的 Buddy 语音偏好。
               </div>
             </div>
@@ -584,7 +584,7 @@ export function BuddyAgentBindingPanel({
               }}
             >
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   播报模式覆盖
                 </span>
                 <select
@@ -604,7 +604,7 @@ export function BuddyAgentBindingPanel({
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   语音变体覆盖
                 </span>
                 <select
@@ -624,7 +624,7 @@ export function BuddyAgentBindingPanel({
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                   语速覆盖
                 </span>
                 <input
@@ -658,7 +658,7 @@ export function BuddyAgentBindingPanel({
                 ) : null}
               </label>
             </div>
-            <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+            <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
               语速可填 0.50–2.00；留空表示完全继承全局设置。
             </div>
           </div>
@@ -673,21 +673,21 @@ export function BuddyAgentBindingPanel({
               borderRadius: 12,
               border: '1px solid var(--border-subtle)',
               padding: '12px 14px',
-              background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
             }}
           >
             <div style={{ minWidth: 0, flex: '1 1 260px' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
                 当前绑定：{selectedAgentLabel || '未选择'}
               </div>
-              <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.6, color: 'var(--text-2)' }}>
+              <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.6, color: 'var(--fg-default)' }}>
                 {selectedBinding
                   ? `${selectedBinding.displayName ?? '未自定义名称'} · ${spriteDisplayLabel(selectedBinding.species)} · ${selectedBinding.themeVariant ?? 'default'} 主题 · ${selectedBinding.behaviorTone ?? 'focused'} 风格`
                   : '这个 Agent 目前还没有专属 Buddy，聊天时会回退到默认 companion。'}
               </div>
               {selectedBinding ? (
                 <div
-                  style={{ marginTop: 4, fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}
+                  style={{ marginTop: 4, fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}
                 >
                   语音覆盖：{selectedBinding.voiceOutputMode ?? '继承全局'} ·{' '}
                   {selectedBinding.voiceVariant ?? '继承全局'} ·{' '}
@@ -696,11 +696,11 @@ export function BuddyAgentBindingPanel({
                     : '继承全局'}
                 </div>
               ) : null}
-              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
+              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-muted)' }}>
                 设置同步：{syncStatusLabel}
               </div>
               {previewProfile ? (
-                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-3)' }}>
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--fg-muted)' }}>
                   当前预览：{previewProfile.name} · {previewProfile.species}
                 </div>
               ) : null}
@@ -808,14 +808,14 @@ export function BuddyAgentBindingPanel({
             aria-live="polite"
             style={{
               fontSize: 12,
-              color: submitError ? 'var(--danger)' : isDirty ? 'var(--accent)' : 'var(--text-3)',
+              color: submitError ? 'var(--danger)' : isDirty ? 'var(--accent)' : 'var(--fg-muted)',
             }}
           >
             {actionStatusText}
           </div>
         </>
       ) : !agentLoading && !agentError ? (
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           当前没有可绑定的 Agent。请先在 Agents 页面启用或创建 Agent。
         </div>
       ) : null}

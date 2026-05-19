@@ -88,22 +88,22 @@ interface TerminalInlineToken {
 }
 
 const ANSI_BASIC_COLOR_MAP: Record<number, string> = {
-  30: 'var(--fg-muted, #7b8a9e)',
+  30: 'var(--fg-muted))',
   31: color.danger,
-  32: 'var(--success, #3dd49a)',
+  32: 'var(--success))',
   33: color.contrast,
-  34: 'var(--aux, #8b9cf5)',
-  35: 'var(--aux-hover, #a8b5fc)',
+  34: 'var(--aux))',
+  35: 'var(--aux-hover)',
   36: color.accent,
   37: color.fgDefault,
-  90: 'var(--fg-muted, #7b8a9e)',
+  90: 'var(--fg-muted))',
   91: color.complementHover,
-  92: 'var(--success, #3dd49a)',
+  92: 'var(--success))',
   93: color.contrast,
   94: color.aux,
   95: color.auxHover,
-  96: 'var(--accent, #5cd4c0)',
-  97: 'var(--fg-strong, #f1f4f8)',
+  96: 'var(--accent))',
+  97: 'var(--fg-strong))',
 };
 
 function resolveAnsiColor(code: number): string | undefined {
@@ -114,8 +114,8 @@ function resolveAnsi256Color(index: number): string {
   if (index < 16) {
     const basic = [
       color.bgBase,
-      'var(--danger, #f06b7e)',
-      'var(--success, #3dd49a)',
+      'var(--danger))',
+      'var(--success))',
       color.contrast,
       color.aux,
       color.auxHover,
@@ -123,14 +123,14 @@ function resolveAnsi256Color(index: number): string {
       color.fgStrong,
       color.fgMuted,
       color.danger,
-      'var(--success, #3dd49a)',
+      'var(--success))',
       color.contrast,
-      'var(--aux, #8b9cf5)',
-      'var(--aux-hover, #a8b5fc)',
-      'var(--accent, #5cd4c0)',
+      'var(--aux))',
+      'var(--aux-hover)',
+      'var(--accent))',
       color.fgOnAccent,
     ];
-    return basic[index] ?? 'var(--fg-strong, #f1f4f8)';
+    return basic[index] ?? 'var(--fg-strong))';
   }
 
   if (index >= 232) {

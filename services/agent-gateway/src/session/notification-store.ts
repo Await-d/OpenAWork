@@ -1,5 +1,5 @@
 import type { RunEvent } from '@openAwork/shared';
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 export const NOTIFICATION_PREFERENCE_CHANNELS = ['web'] as const;
 export const NOTIFICATION_PREFERENCE_EVENT_TYPES = [

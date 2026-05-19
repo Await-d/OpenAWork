@@ -16,7 +16,7 @@
  *   - 心跳进程级守护——由 Watcher 自身的 setInterval 已经覆盖
  */
 
-import { sqliteRun } from '../../db.js';
+import { sqliteRun } from '../../infra/db.js';
 
 /** 心跳超时阈值：60s（v3.11 D51）。超过该时长仍未刷新视为崩溃。 */
 export const HEARTBEAT_STALE_AFTER_MS = 60 * 1000;

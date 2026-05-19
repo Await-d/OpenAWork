@@ -19,7 +19,7 @@
 
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { WORKSPACE_ROOT } from '../db.js';
+import { WORKSPACE_ROOT } from '../infra/db.js';
 
 export const MAX_OUTPUT_LINES = 2000;
 export const MAX_OUTPUT_BYTES = 50 * 1024; // 50 KB

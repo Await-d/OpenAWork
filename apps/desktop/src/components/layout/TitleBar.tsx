@@ -17,7 +17,7 @@ export default function TitleBar() {
       style={{
         background: 'hsl(var(--background) / 0.8)',
         backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid hsl(var(--border) / 0.5)',
+        borderBottom: '1px solid hsl(var(--border-default) / 0.5)',
       }}
     >
       <span

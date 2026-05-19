@@ -73,14 +73,14 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
               padding: '0.25rem 0.6rem',
               fontSize: 11,
               fontWeight: 600,
-              border: '1px solid var(--color-border, var(--border))',
+              border: '1px solid var(--border-default)',
               borderRadius: 4,
               cursor: 'pointer',
-              background: mode === m ? 'var(--color-accent, var(--accent))' : 'transparent',
+              background: mode === m ? 'var(--accent)' : 'transparent',
               color:
                 mode === m
-                  ? 'var(--color-accent-text, var(--accent-text, #fff))'
-                  : 'var(--color-muted, var(--text-3))',
+                  ? 'var(--fg-on-accent)'
+                  : 'var(--fg-muted)',
             }}
           >
             {MODE_LABELS[m]}
@@ -92,11 +92,11 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
           placeholder={`搜索 ${MODE_LABELS[mode]}…`}
           style={{
             flex: 1,
-            background: 'var(--color-bg, var(--bg-2))',
-            border: '1px solid var(--color-border, var(--border))',
+            background: 'var(--bg-base, var(--bg-overlay))',
+            border: '1px solid var(--border-default)',
             borderRadius: 6,
             padding: '0.3rem 0.6rem',
-            color: 'var(--color-text, var(--text))',
+            color: 'var(--fg-strong)',
             fontSize: 12,
             outline: 'none',
           }}
@@ -105,7 +105,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
 
       {loading && (
         <div
-          style={{ fontSize: 12, color: 'var(--color-muted, var(--text-3))', padding: '0.25rem 0' }}
+          style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '0.25rem 0' }}
         >
           搜索中…
         </div>
@@ -114,12 +114,12 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
       {!loading && results.length > 0 && (
         <div
           style={{
-            border: '1px solid var(--color-border, var(--border))',
+            border: '1px solid var(--border-default)',
             borderRadius: 6,
             overflow: 'hidden',
             maxHeight: 240,
             overflowY: 'auto',
-            background: 'var(--color-surface, var(--surface))',
+            background: 'var(--bg-overlay)',
           }}
         >
           {results.map((r, i) => (
@@ -134,7 +134,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
                 padding: '0.4rem 0.75rem',
                 background: 'transparent',
                 border: 'none',
-                borderTop: i > 0 ? '1px solid var(--color-border, var(--border-subtle))' : 'none',
+                borderTop: i > 0 ? '1px solid var(--border-default, var(--border-subtle))' : 'none',
                 cursor: 'pointer',
                 width: '100%',
                 textAlign: 'left',
@@ -145,9 +145,9 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
                   <span
                     style={{
                       fontSize: 10,
-                      color: 'var(--color-accent, var(--accent))',
+                      color: 'var(--accent)',
                       background:
-                        'var(--accent-muted, color-mix(in srgb, var(--color-accent, var(--accent)) 12%, transparent))',
+                        'var(--accent-muted, color-mix(in srgb, var(--accent) 12%, transparent))',
                       padding: '1px 4px',
                       borderRadius: 3,
                     }}
@@ -159,7 +159,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
                   style={{
                     fontSize: 12,
                     fontFamily: 'monospace',
-                    color: 'var(--color-text, var(--text))',
+                    color: 'var(--fg-strong)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -171,7 +171,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
                   <span
                     style={{
                       fontSize: 10,
-                      color: 'var(--color-muted, var(--text-3))',
+                      color: 'var(--fg-muted)',
                       flexShrink: 0,
                     }}
                   >
@@ -182,7 +182,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
               <div
                 style={{
                   fontSize: 10,
-                  color: 'var(--color-muted, var(--text-3))',
+                  color: 'var(--fg-muted)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -196,7 +196,7 @@ export function FileSearch({ onSearch, onResultClick, style }: FileSearchProps) 
       )}
 
       {!loading && query.trim() && results.length === 0 && (
-        <div style={{ fontSize: 12, color: 'var(--color-muted, var(--text-3))' }}>暂无结果</div>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>暂无结果</div>
       )}
     </div>
   );

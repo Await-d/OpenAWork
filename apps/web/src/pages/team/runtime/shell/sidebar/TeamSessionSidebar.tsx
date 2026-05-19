@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
-import { useAuthStore } from '../../../../../stores/auth.js';
-import WorkspacePickerModal from '../../../../../components/common/WorkspacePickerModal.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
+import WorkspacePickerModal from '../../../../../components/common/modal/WorkspacePickerModal.js';
 import {
   PlusIcon,
   TemplateIcon,
@@ -19,7 +19,7 @@ import {
 const STATUS_META: Record<string, { color: string; label: string; pulse?: boolean }> = {
   running: { color: 'var(--success)', label: '运行中', pulse: true },
   paused: { color: 'var(--warning)', label: '已暂停' },
-  completed: { color: 'var(--text-3)', label: '已完成' },
+  completed: { color: 'var(--fg-muted)', label: '已完成' },
   failed: { color: 'var(--danger)', label: '失败' },
 };
 
@@ -94,7 +94,7 @@ function SidebarSessionRow({
                 minWidth: 0,
                 fontSize: 12,
                 fontWeight: isSelected ? 600 : 400,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -116,7 +116,7 @@ function SidebarSessionRow({
               style={{
                 flex: 1,
                 fontSize: 10,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -148,7 +148,7 @@ function SidebarSessionRow({
                   onTogglePause(team.id);
                 }}
                 style={{
-                  background: 'var(--surface)',
+                  background: 'var(--bg-overlay)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: 4,
                   cursor: 'pointer',
@@ -174,7 +174,7 @@ function SidebarSessionRow({
                 onDelete(team.id);
               }}
               style={{
-                background: 'var(--surface)',
+                background: 'var(--bg-overlay)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 4,
                 cursor: 'pointer',
@@ -234,7 +234,7 @@ export function SessionSidebar({
     async (path: string, depth = 1) => {
       if (!accessToken || !gatewayUrl) return [];
       return createWorkspaceClient(gatewayUrl).fetchTree(accessToken, path, { depth }) as Promise<
-        import('../../../../../components/common/WorkspacePickerModal.js').FileTreeNode[]
+        import('../../../../../components/common/modal/WorkspacePickerModal.js').FileTreeNode[]
       >;
     },
     [accessToken, gatewayUrl],
@@ -319,7 +319,7 @@ export function SessionSidebar({
           display: 'flex',
           flexDirection: 'column',
           borderRight: '1px solid var(--border-subtle)',
-          background: 'var(--bg)',
+          background: 'var(--bg-base)',
           overflow: 'hidden',
         }}
       >
@@ -350,7 +350,7 @@ export function SessionSidebar({
               borderRadius: 7,
               background: 'var(--accent)',
               border: 'none',
-              color: 'var(--accent-text)',
+              color: 'var(--fg-on-accent)',
               cursor: canCreateSession ? 'pointer' : 'not-allowed',
               fontSize: 12,
               fontWeight: 600,
@@ -361,7 +361,7 @@ export function SessionSidebar({
               transition: 'opacity 0.15s, filter 0.15s',
             }}
           >
-            <PlusIcon size={12} color="var(--accent-text)" />
+            <PlusIcon size={12} color="var(--fg-on-accent)" />
             新建会话
           </button>
           <button
@@ -376,14 +376,14 @@ export function SessionSidebar({
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: 7,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               background: 'transparent',
               border: '1px solid transparent',
               cursor: 'pointer',
               flexShrink: 0,
             }}
           >
-            <FolderIcon size={12} color="var(--text-3)" />
+            <FolderIcon size={12} color="var(--fg-muted)" />
           </button>
           <button
             type="button"
@@ -397,14 +397,14 @@ export function SessionSidebar({
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: 7,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               background: 'transparent',
               border: '1px solid transparent',
               cursor: 'pointer',
               flexShrink: 0,
             }}
           >
-            <CollapseLeftIcon size={12} color="var(--text-3)" />
+            <CollapseLeftIcon size={12} color="var(--fg-muted)" />
           </button>
         </div>
 
@@ -420,14 +420,14 @@ export function SessionSidebar({
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              background: 'var(--surface)',
+              background: 'var(--bg-overlay)',
               border: '1px solid var(--border-subtle)',
               borderRadius: 7,
               padding: '0 8px',
               transition: 'border-color 0.15s, box-shadow 0.15s',
             }}
           >
-            <span style={{ color: 'var(--text-3)', fontSize: 12, flexShrink: 0 }}>⌕</span>
+            <span style={{ color: 'var(--fg-muted)', fontSize: 12, flexShrink: 0 }}>⌕</span>
             <input
               type="text"
               placeholder="搜索会话…"
@@ -439,7 +439,7 @@ export function SessionSidebar({
                 border: 'none',
                 padding: '5px 0',
                 fontSize: 11,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 outline: 'none',
                 minWidth: 0,
               }}
@@ -463,7 +463,7 @@ export function SessionSidebar({
                   border: 'none',
                   cursor: 'pointer',
                   padding: 0,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   fontSize: 11,
                   lineHeight: 1,
                   display: 'flex',
@@ -508,10 +508,10 @@ export function SessionSidebar({
                   textAlign: 'center',
                 }}
               >
-                <span style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.5 }}>
                   尚未创建团队工作空间
                 </span>
-                <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
                   创建工作空间后即可开始团队协作
                 </span>
                 <button
@@ -525,14 +525,14 @@ export function SessionSidebar({
                     borderRadius: 6,
                     background: 'var(--accent)',
                     border: 'none',
-                    color: 'var(--accent-text)',
+                    color: 'var(--fg-on-accent)',
                     cursor: 'pointer',
                     fontSize: 11,
                     fontWeight: 600,
                     transition: 'opacity 0.15s',
                   }}
                 >
-                  <PlusIcon size={11} color="var(--accent-text)" />
+                  <PlusIcon size={11} color="var(--fg-on-accent)" />
                   创建工作空间
                 </button>
               </div>
@@ -564,7 +564,7 @@ export function SessionSidebar({
                 style={{
                   fontSize: 10,
                   fontWeight: 700,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                 }}
@@ -581,7 +581,7 @@ export function SessionSidebar({
               <span
                 style={{
                   fontSize: 9,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 {totalSessionCount}
@@ -594,7 +594,7 @@ export function SessionSidebar({
                   padding: '16px 8px',
                   textAlign: 'center',
                   fontSize: 11,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 暂无匹配会话
@@ -620,7 +620,7 @@ export function SessionSidebar({
                       border: 'none',
                       background: 'transparent',
                       cursor: 'pointer',
-                      color: 'var(--text-2)',
+                      color: 'var(--fg-default)',
                       textAlign: 'left',
                       width: '100%',
                     }}
@@ -634,9 +634,9 @@ export function SessionSidebar({
                         alignItems: 'center',
                       }}
                     >
-                      <ChevronRightIcon size={8} color="var(--text-3)" />
+                      <ChevronRightIcon size={8} color="var(--fg-muted)" />
                     </span>
-                    <FolderIcon size={11} color="var(--text-3)" />
+                    <FolderIcon size={11} color="var(--fg-muted)" />
                     <span
                       style={{
                         flex: 1,
@@ -653,11 +653,11 @@ export function SessionSidebar({
                     <span
                       style={{
                         fontSize: 9,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         flexShrink: 0,
                         padding: '0 5px',
                         borderRadius: 999,
-                        background: 'var(--surface)',
+                        background: 'var(--bg-overlay)',
                         lineHeight: '16px',
                       }}
                     >
@@ -702,12 +702,12 @@ export function SessionSidebar({
                   padding: '4px 4px 2px',
                 }}
               >
-                <FolderIcon size={10} color="var(--text-3)" />
+                <FolderIcon size={10} color="var(--fg-muted)" />
                 <span
                   style={{
                     fontSize: 10,
                     fontWeight: 700,
-                    color: 'var(--text-2)',
+                    color: 'var(--fg-default)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em',
                   }}
@@ -724,7 +724,7 @@ export function SessionSidebar({
                 <span
                   style={{
                     fontSize: 9,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                   }}
                 >
                   {bridgeSection.items.length}
@@ -737,7 +737,7 @@ export function SessionSidebar({
                   style={{
                     padding: '7px 9px',
                     borderRadius: 7,
-                    background: 'var(--surface)',
+                    background: 'var(--bg-overlay)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 4,
@@ -745,11 +745,11 @@ export function SessionSidebar({
                   }}
                 >
                   <span
-                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}
+                    style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)', lineHeight: 1.3 }}
                   >
                     {item.title}
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                  <span style={{ fontSize: 10, color: 'var(--fg-default)', lineHeight: 1.5 }}>
                     {item.description}
                   </span>
                 </div>
@@ -780,12 +780,12 @@ export function SessionSidebar({
                 padding: '4px 4px 2px',
               }}
             >
-              <TemplateIcon size={10} color="var(--text-3)" />
+              <TemplateIcon size={10} color="var(--fg-muted)" />
               <span
                 style={{
                   fontSize: 10,
                   fontWeight: 700,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                 }}
@@ -818,7 +818,7 @@ export function SessionSidebar({
               <span
                 style={{
                   fontSize: 9,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 {templateCount}
@@ -830,7 +830,7 @@ export function SessionSidebar({
                 style={{
                   padding: '8px 8px',
                   fontSize: 10,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   textAlign: 'center',
                 }}
               >
@@ -858,7 +858,7 @@ export function SessionSidebar({
                   padding: '10px 10px',
                   borderRadius: 7,
                   border: '1px dashed var(--border-subtle)',
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   fontSize: 10,
                   lineHeight: 1.5,
                   textAlign: 'center',
@@ -870,7 +870,7 @@ export function SessionSidebar({
             {sidebarSections.map((section) => (
               <div key={section.id} style={{ display: 'grid', gap: 5 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px' }}>
-                  <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-2)' }}>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--fg-default)' }}>
                     {section.title}
                   </span>
                   <span
@@ -889,7 +889,7 @@ export function SessionSidebar({
                       appearance: 'none',
                       padding: '7px 9px',
                       borderRadius: 7,
-                      background: 'var(--surface)',
+                      background: 'var(--bg-overlay)',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 4,
@@ -906,7 +906,7 @@ export function SessionSidebar({
                       style={{
                         fontSize: 11,
                         fontWeight: 600,
-                        color: 'var(--text)',
+                        color: 'var(--fg-strong)',
                         lineHeight: 1.3,
                       }}
                     >
@@ -933,12 +933,12 @@ export function SessionSidebar({
                                       : 'var(--surface-3)',
                               color:
                                 badge.tone === 'accent'
-                                  ? 'var(--chart-5, var(--chart-5, #c4b5fd))'
+                                  ? 'var(--chart-5))'
                                   : badge.tone === 'success'
-                                    ? 'var(--success, var(--success, #3dd49a))'
+                                    ? 'var(--success))'
                                     : badge.tone === 'warning'
-                                      ? 'var(--warning, var(--warning, #f0b429))'
-                                      : 'var(--text-2)',
+                                      ? 'var(--warning))'
+                                      : 'var(--fg-default)',
                               fontSize: 8,
                               fontWeight: 700,
                             }}
@@ -969,12 +969,12 @@ export function SessionSidebar({
                       ))}
                     </div>
                     {item.description && (
-                      <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                      <span style={{ fontSize: 9, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
                         {item.description}
                       </span>
                     )}
                     {item.metaLine ? (
-                      <span style={{ fontSize: 9, color: 'var(--text-3)', lineHeight: 1.45 }}>
+                      <span style={{ fontSize: 9, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
                         {item.metaLine}
                       </span>
                     ) : null}
@@ -994,10 +994,10 @@ export function SessionSidebar({
             justifyContent: 'space-between',
             alignItems: 'center',
             flexShrink: 0,
-            background: 'color-mix(in oklch, var(--bg) 95%, var(--surface))',
+            background: 'color-mix(in oklch, var(--bg-base) 95%, var(--bg-overlay))',
           }}
         >
-          <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
             活跃 <strong style={{ color: 'var(--success)' }}>{runningTeams.length}</strong>
             {' / '}共 {totalSessionCount}
           </span>

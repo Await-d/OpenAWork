@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import { getImageProviderConfig, parseStoredImageGenerationDefaults } from '../provider/provider-config.js';
 import { resolveModelRouteFromProvider } from '../provider/model-router.js';
 import { resolveImageGenerationDefaults } from '../image-generation/image-generation-schema.js';

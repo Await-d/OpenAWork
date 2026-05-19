@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
-import authPlugin from '../auth.js';
-import { closeDb, connectDb, migrate, sqliteRun } from '../db.js';
-import requestWorkflowPlugin from '../request-workflow.js';
+import authPlugin from '../infra/auth.js';
+import { closeDb, connectDb, migrate, sqliteRun } from '../infra/db.js';
+import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { sessionsRoutes } from '../routes/sessions.js';
 import { streamRoutes } from '../routes/stream-routes-plugin.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';

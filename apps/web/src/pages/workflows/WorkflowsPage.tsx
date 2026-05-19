@@ -46,7 +46,7 @@ export default function WorkflowsPage() {
               padding: 22,
               borderRadius: 24,
               background:
-                'radial-gradient(circle at top left, rgba(99, 102, 241, 0.24), transparent 36%), linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, rgba(17, 24, 39, 0.34)) 0%, var(--surface) 100%)',
+                'radial-gradient(circle at top left, rgba(99, 102, 241, 0.24), transparent 36%), linear-gradient(135deg, color-mix(in srgb, var(--bg-overlay) 94%, rgba(17, 24, 39, 0.34)) 0%, var(--bg-overlay) 100%)',
             }}
           >
             <div style={{ display: 'grid', gap: 8 }}>
@@ -72,7 +72,7 @@ export default function WorkflowsPage() {
                 把模板库、画布和流程沉淀拉回主界面。
               </span>
               <span
-                style={{ maxWidth: 860, fontSize: 14, lineHeight: 1.8, color: 'var(--text-2)' }}
+                style={{ maxWidth: 860, fontSize: 14, lineHeight: 1.8, color: 'var(--fg-default)' }}
               >
                 现在你可以直接在产品内查看已有流程模板、可视化预览节点关系、补新的步骤并另存为团队可复用剧本，不再需要把
                 workflow 能力藏在后端接口和共享组件里。
@@ -87,7 +87,7 @@ export default function WorkflowsPage() {
                     feedback.tone === 'success'
                       ? 'rgba(34, 197, 94, 0.35)'
                       : 'rgba(244, 63, 94, 0.35)',
-                  color: feedback.tone === 'success' ? 'var(--success, var(--success, #3dd49a))' : 'var(--danger-muted)',
+                  color: feedback.tone === 'success' ? 'var(--success))' : 'var(--danger-muted)',
                 }}
               >
                 {feedback.message}
@@ -124,7 +124,7 @@ export default function WorkflowsPage() {
               >
                 <div style={{ display: 'grid', gap: 4 }}>
                   <span style={{ fontSize: 18, fontWeight: 700 }}>模板库</span>
-                  <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                     {loading ? '正在同步模板…' : `已加载 ${templates.length} 个工作流模板`}
                   </span>
                 </div>
@@ -165,7 +165,7 @@ export default function WorkflowsPage() {
                     <span style={{ fontSize: 18, fontWeight: 700 }}>
                       {selectedTemplate ? selectedTemplate.name : '未命名工作流草稿'}
                     </span>
-                    <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                       {selectedTemplate?.description ??
                         '当前是可编辑草稿，你可以继续加节点并另存成模板。'}
                     </span>
@@ -198,7 +198,7 @@ export default function WorkflowsPage() {
               <div className="content-card" style={{ display: 'grid', gap: 14, padding: 18 }}>
                 <div style={{ display: 'grid', gap: 4 }}>
                   <span style={{ fontSize: 18, fontWeight: 700 }}>节点检查器</span>
-                  <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                     选中画布上的节点后，可以直接修改标题和类型，快速把草稿推向可复用模板。
                   </span>
                 </div>
@@ -227,7 +227,7 @@ export default function WorkflowsPage() {
                     </select>
                   </div>
                 ) : (
-                  <div style={{ color: 'var(--text-3)' }}>先在画布里选择一个节点。</div>
+                  <div style={{ color: 'var(--fg-muted)' }}>先在画布里选择一个节点。</div>
                 )}
               </div>
             </div>

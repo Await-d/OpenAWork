@@ -77,7 +77,7 @@ jobs:
 
       - name: Bump version (patch — rolls 0.2.1→0.2.2→…→0.2.9→0.3.0 via normalization)
         if: steps.changes.outputs.has_changes == 'true'
-        run: node scripts/release-version.mjs --bump patch
+        run: node scripts/release/release-version.mjs --bump patch
 
       - name: Format bumped version files
         if: steps.changes.outputs.has_changes == 'true'
@@ -124,7 +124,7 @@ jobs:
 
           echo "Using summary: $SUMMARY"
 
-          node scripts/release-notes.mjs write \
+          node scripts/release/release-notes.mjs write \
             --version "${{ steps.version.outputs.version }}" \
             --target "desktop-preview" \
             --summary "$SUMMARY" \

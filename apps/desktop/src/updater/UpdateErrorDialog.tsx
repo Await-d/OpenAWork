@@ -92,7 +92,7 @@ export function UpdateErrorDialog({ kind, message, onRetry, onDismiss }: UpdateE
             style={{
               padding: '6px 14px',
               background: 'transparent',
-              border: '1px solid hsl(var(--border))',
+              border: '1px solid hsl(var(--border-default))',
               borderRadius: 6,
               color: 'hsl(var(--muted-foreground))',
               cursor: 'pointer',

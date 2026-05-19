@@ -16,9 +16,9 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteGet } from '../db.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteGet } from '../infra/db.js';
 import {
   closePersistentTerminal,
   isPersistentTerminal,

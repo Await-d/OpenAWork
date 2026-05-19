@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   runUpstreamGenerate: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,
   WORKSPACE_ROOT: '/workspace',

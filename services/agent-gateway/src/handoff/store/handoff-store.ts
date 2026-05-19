@@ -33,7 +33,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet, sqliteRun } from '../../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import { assertCanHandoffTo } from '../capability/layer-capabilities.js';
 
 export type HandoffState = 'pending' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';

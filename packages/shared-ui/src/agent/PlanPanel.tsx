@@ -24,11 +24,11 @@ const statusIcon: Record<PlanTask['status'], string> = {
 };
 
 const statusColor: Record<PlanTask['status'], string> = {
-  pending: 'var(--fg-muted, #7b8a9e)',
+  pending: 'var(--fg-muted))',
   in_progress: color.contrast,
   done: color.success,
   failed: color.danger,
-  cancelled: 'var(--warning, #f0b429)',
+  cancelled: 'var(--warning))',
 };
 
 export function PlanPanel({ tasks, style }: PlanPanelProps) {
@@ -41,7 +41,7 @@ export function PlanPanel({ tasks, style }: PlanPanelProps) {
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 8,
         padding: '0.75rem 1rem',
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         display: 'flex',
         flexDirection: 'column',
         gap: 6,
@@ -79,8 +79,8 @@ export function PlanPanel({ tasks, style }: PlanPanelProps) {
             style={{
               color:
                 task.status === 'done' || task.status === 'cancelled'
-                  ? 'var(--fg-muted, #7b8a9e)'
-                  : 'var(--fg-strong, #f1f4f8)',
+                  ? 'var(--fg-muted))'
+                  : 'var(--fg-strong))',
               textDecoration:
                 task.status === 'done' || task.status === 'cancelled' ? 'line-through' : 'none',
             }}

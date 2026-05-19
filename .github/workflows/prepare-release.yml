@@ -89,7 +89,7 @@ jobs:
       - name: Preview next version
         id: next_version
         run: |
-          NEXT_VERSION=$(node -e "const { execSync } = require('node:child_process'); const result = JSON.parse(execSync('node scripts/release-version.mjs --bump ${{ inputs.bump }} --dry-run --json', { encoding: 'utf8' })); process.stdout.write(result.nextVersion);")
+          NEXT_VERSION=$(node -e "const { execSync } = require('node:child_process'); const result = JSON.parse(execSync('node scripts/release/release-version.mjs --bump ${{ inputs.bump }} --dry-run --json', { encoding: 'utf8' })); process.stdout.write(result.nextVersion);")
           echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Validate release notes draft
@@ -98,14 +98,14 @@ jobs:
           RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_TARGET: ${{ inputs.release_target }}
         run: |
-          node scripts/release-notes.mjs write \
+          node scripts/release/release-notes.mjs write \
             --version "$NEXT_VERSION" \
             --target "$RELEASE_TARGET" \
             --summary "$RELEASE_NOTES" \
             --dry-run
 
       - name: Bump synchronized versions
-        run: node scripts/release-version.mjs --bump "${{ inputs.bump }}"
+        run: node scripts/release/release-version.mjs --bump "${{ inputs.bump }}"
 
       - name: Format bumped version files
         run: |
@@ -128,7 +128,7 @@ jobs:
           RELEASE_TARGET: ${{ inputs.release_target }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          node scripts/release-notes.mjs write \
+          node scripts/release/release-notes.mjs write \
             --version "$VERSION" \
             --target "$RELEASE_TARGET" \
             --summary "$RELEASE_NOTES" \

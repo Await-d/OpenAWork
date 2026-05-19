@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Effect } from 'effect';
-import { connectDb, db, migrate, sqliteRun } from '../db.js';
+import { connectDb, db, migrate, sqliteRun } from '../infra/db.js';
 import { insertMessage, insertPart, transitionToolToRunning } from '../message/message-store-v2.js';
 import {
   appendSessionEvent,

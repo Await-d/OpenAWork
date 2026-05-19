@@ -45,10 +45,10 @@ function PriceCell({ value, onSave }: { value: number | undefined; onSave: (v: n
         }}
         style={{
           width: 80,
-          background: 'var(--bg-base, #080b12)',
-          border: '1px solid var(--accent, #5cd4c0)',
+          background: 'var(--bg-base))',
+          border: '1px solid var(--accent))',
           borderRadius: 4,
-          color: 'var(--fg-strong, #f1f4f8)',
+          color: 'var(--fg-strong))',
           fontSize: 12,
           padding: '2px 6px',
         }}
@@ -66,7 +66,7 @@ function PriceCell({ value, onSave }: { value: number | undefined; onSave: (v: n
         background: 'none',
         border: '1px solid transparent',
         borderRadius: 4,
-        color: 'var(--fg-strong, #f1f4f8)',
+        color: 'var(--fg-strong))',
         fontSize: 12,
         padding: '2px 6px',
         cursor: 'pointer',
@@ -98,7 +98,7 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
@@ -116,7 +116,7 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
                   textAlign: 'left',
                   fontWeight: 700,
                   fontSize: 11,
-                  color: 'var(--fg-muted, #7b8a9e)',
+                  color: 'var(--fg-muted))',
                   textTransform: 'uppercase',
                   letterSpacing: 0.6,
                 }}
@@ -140,13 +140,13 @@ export function ModelPriceConfig({ models, onUpdate, style }: ModelPriceConfigPr
                 <td
                   style={{
                     padding: '0.4rem 0.75rem',
-                    color: 'var(--fg-strong, #f1f4f8)',
+                    color: 'var(--fg-strong))',
                     fontWeight: 500,
                   }}
                 >
                   {m.displayName}
                 </td>
-                <td style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-muted, #7b8a9e)' }}>
+                <td style={{ padding: '0.4rem 0.75rem', color: 'var(--fg-muted))' }}>
                   {m.provider}
                 </td>
                 <td style={{ padding: '0.4rem 0.75rem' }}>

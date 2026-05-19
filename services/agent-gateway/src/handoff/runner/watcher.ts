@@ -292,7 +292,7 @@ export class HandoffWatcher {
           if (input.handoff.toRoleLayer === 'pm1') {
             try {
               const { createHandoff } = await import('../store/handoff-store.js');
-              const { sqliteGet } = await import('../../db.js');
+              const { sqliteGet } = await import('../../infra/db.js');
 
               // Fix #3: 验证 toSessionId 确实存在且属于同一用户，避免 FK 约束失败
               const sessionExists = sqliteGet<{ id: string }>(
@@ -353,7 +353,7 @@ export class HandoffWatcher {
             input.handoff.toRoleLayer === 'reviewer'
           ) {
             try {
-              const { sqliteAll, sqliteGet } = await import('../../db.js');
+              const { sqliteAll, sqliteGet } = await import('../../infra/db.js');
               const { appendSessionMessageV2 } = await import('../../message/message-v2-adapter.js');
               const { setSubstate } = await import('../store/substate-store.js');
               const { resolveAuxiliaryLlmConfig } = await import('../../provider/auxiliary-llm-config.js');
@@ -491,7 +491,7 @@ export class HandoffWatcher {
                     });
                     // 注：实际重新派发需要重新调 pm2-runner 的 dispatch 逻辑。
                     // 当前通过 retry_count+1 + 退回 pending 让 watcher 重新 claim 来实现。
-                    const { sqliteRun: dbRun } = await import('../../db.js');
+                    const { sqliteRun: dbRun } = await import('../../infra/db.js');
                     dbRun(
                       `UPDATE handoff_records
                          SET state = 'pending', claim_token = NULL, claimed_at = NULL,

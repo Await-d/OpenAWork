@@ -8,7 +8,7 @@
  * - Event sourcing via SyncEvent + Projector for all state mutations
  */
 
-import { makeOrderedMessageId, makeOrderedPartId } from '../ordered-id.js';
+import { makeOrderedMessageId, makeOrderedPartId } from '../infra/ordered-id.js';
 
 // ─── IDs ───
 

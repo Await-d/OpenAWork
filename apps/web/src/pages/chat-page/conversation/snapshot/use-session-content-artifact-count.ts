@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createArtifactsClient } from '@openAwork/web-client';
-import type { SessionArtifactsResponse } from '../../../artifacts/artifact-workspace-types.js';
+import type { SessionArtifactsResponse } from '../../../artifacts/workspace/artifact-workspace-types.js';
 
 interface UseSessionContentArtifactCountOptions {
   currentSessionId: string | null;

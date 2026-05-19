@@ -25,21 +25,21 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useChatSearch } from '../../../components/chat/chat-search-overlay.js';
-import { renderChatMessageContentWithOptions } from '../../../components/chat/ChatPageSections.js';
-import { LatestAssistantMessageContext } from '../../../components/chat/collapsible-assistant-content.js';
+import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
+import { renderChatMessageContentWithOptions } from '../../../components/chat/session/ChatPageSections.js';
+import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
 import type {
   ChatRenderEntry,
   ChatRenderGroup,
-} from '../../../components/chat/chat-message-group-list.js';
+} from '../../../components/chat/message/chat-message-group-list.js';
 import { groupChatRenderEntries } from '../../../components/conversation-runtime/messages/group-render-entries.js';
-import type { UnifiedComposerSubmitPayload } from '../../../components/chat/UnifiedComposer.js';
-import { useAuthStore } from '../../../stores/auth.js';
+import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useChatKeyboardShortcuts } from '../../../hooks/chat/useChatKeyboardShortcuts.js';
 import { useComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
-import { useMessageMultiSelect } from '../../../components/chat/message-multi-select.js';
-import { copyExportToClipboard } from '../../../components/chat/message-export.js';
-import { PromptTemplatePanel } from '../../../components/chat/prompt-template-panel.js';
+import { useMessageMultiSelect } from '../../../components/chat/message/message-multi-select.js';
+import { copyExportToClipboard } from '../../../components/chat/message/message-export.js';
+import { PromptTemplatePanel } from '../../../components/chat/misc/prompt-template-panel.js';
 import { TeamConversationLayout } from './TeamConversationLayout.js';
 import { TeamSubstateProgressBar } from './extras/TeamSubstateProgressBar.js';
 import { TeamSessionEmptyState } from './extras/TeamSessionEmptyState.js';

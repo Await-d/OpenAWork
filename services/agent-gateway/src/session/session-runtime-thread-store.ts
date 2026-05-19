@@ -1,4 +1,4 @@
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 
 export const SESSION_RUNTIME_THREAD_HEARTBEAT_MS = 5_000;
 export const SESSION_RUNTIME_THREAD_STALE_AFTER_MS = 20_000;

@@ -12,11 +12,11 @@ import {
   formatHandoffMarkdown,
 } from '@openAwork/agent-core';
 import { z } from 'zod';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
 import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction/compaction-policy.js';
 import { collectDeadCodeDiagnostics, formatDeadCodeCandidates } from '../tools/dead-code-diagnostics.js';
-import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../db.js';
+import { WORKSPACE_ROOT, sqliteGet, sqliteRun } from '../infra/db.js';
 import { resolveCompactionRoute, type ModelRouteConfig } from '../provider/model-router.js';
 import { getCompactionProviderConfig, getProviderConfigForSelection } from '../provider/provider-config.js';
 import {
@@ -24,7 +24,7 @@ import {
   listSessionMessagesV2,
 } from '../message/message-v2-adapter.js';
 import { executeSessionCompaction } from '../session/session-compaction.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { stringifyToolResultOutput } from '../tools/tool-result-contract.js';
 import { parseUlwVerifyDecision } from './command-helpers.js';
 import { buildCommandDescriptors } from './command-descriptors.js';

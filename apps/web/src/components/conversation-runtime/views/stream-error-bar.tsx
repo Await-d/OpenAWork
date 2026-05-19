@@ -14,7 +14,7 @@ export function ChatStreamErrorBar({ streamError, onDismiss }: ChatStreamErrorBa
     <div
       style={{
         padding: '0 10px 6px',
-        background: 'var(--bg)',
+        background: 'var(--bg-base)',
         flexShrink: 0,
       }}
     >

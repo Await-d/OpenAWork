@@ -69,7 +69,7 @@ function DesktopBootstrapScreen({
           flexDirection: 'column',
           gap: 14,
           padding: 24,
-          border: '1px solid hsl(var(--border))',
+          border: '1px solid hsl(var(--border-default))',
           borderRadius: 18,
           background: 'hsl(var(--card))',
           boxShadow: '0 24px 80px hsl(220 40% 2% / 0.42)',
@@ -117,7 +117,7 @@ function DesktopBootstrapScreen({
               onClick={onReconfigure}
               style={{
                 flex: 1,
-                border: '1px solid hsl(var(--border))',
+                border: '1px solid hsl(var(--border-default))',
                 borderRadius: 10,
                 padding: '0.75rem 0.9rem',
                 background: 'transparent',

@@ -19,14 +19,14 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../../../../stores/auth.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import {
   FileTreeView,
   type FileTreeContextTarget,
-} from '../../../../../components/layout/SidebarHelpers.js';
-import FileTreeContextMenu from '../../../../../components/layout/FileTreeContextMenu.js';
-import type { FileTreeNode } from '../../../../../components/common/WorkspacePickerModal.js';
-import { getFileTreeRelativePath } from '../../../../../components/layout/file-tree-actions.js';
+} from '../../../../../components/layout/sidebar/SidebarHelpers.js';
+import FileTreeContextMenu from '../../../../../components/layout/file-tree/FileTreeContextMenu.js';
+import type { FileTreeNode } from '../../../../../components/common/modal/WorkspacePickerModal.js';
+import { getFileTreeRelativePath } from '../../../../../components/layout/file-tree/file-tree-actions.js';
 import {
   TeamSessionListSidebar,
   type TeamSessionListSidebarProps,
@@ -53,7 +53,7 @@ const PRIMARY_BTN_STYLE: CSSProperties = {
   gap: 6,
   borderRadius: '8px 0 0 8px',
   background: 'var(--accent)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 600,
@@ -78,7 +78,7 @@ const PRIMARY_SPLIT_BTN_STYLE: CSSProperties = {
   borderRadius: '0 8px 8px 0',
   background: 'var(--accent)',
   borderLeft: '1px solid oklch(from var(--accent) calc(l - 0.08) c h / 0.5)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   cursor: 'pointer',
   flexShrink: 0,
   border: 'none',
@@ -88,7 +88,7 @@ const TAB_BAR_STYLE: CSSProperties = {
   display: 'flex',
   padding: '0 8px 6px',
   flexShrink: 0,
-  borderBottom: '1px solid var(--border)',
+  borderBottom: '1px solid var(--border-default)',
   gap: 4,
 };
 
@@ -102,9 +102,9 @@ function tabButtonStyle(active: boolean): CSSProperties {
     justifyContent: 'center',
     gap: 5,
     borderRadius: 7,
-    border: active ? '1px solid var(--border)' : '1px solid transparent',
-    background: active ? 'var(--surface)' : 'transparent',
-    color: active ? 'var(--text)' : 'var(--text-3)',
+    border: active ? '1px solid var(--border-default)' : '1px solid transparent',
+    background: active ? 'var(--bg-overlay)' : 'transparent',
+    color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
     fontSize: 12,
     fontWeight: active ? 600 : 400,
     cursor: 'pointer',
@@ -124,12 +124,12 @@ const SEARCH_BAR_STYLE: CSSProperties = {
 
 const SEARCH_INPUT_STYLE: CSSProperties = {
   width: '100%',
-  background: 'var(--surface)',
+  background: 'var(--bg-overlay)',
   border: '1px solid var(--border-subtle)',
   borderRadius: 6,
   padding: '4px 8px',
   fontSize: 11,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   outline: 'none',
   boxSizing: 'border-box',
 };
@@ -425,11 +425,11 @@ export function TeamSidebarWithFileTree({
       ) : (
         <div style={FILE_TREE_CONTAINER_STYLE}>
           {treeLoading ? (
-            <div style={{ padding: '16px', color: 'var(--text-3)', fontSize: 11 }}>
+            <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
               加载文件目录…
             </div>
           ) : treeNodes.length === 0 ? (
-            <div style={{ padding: '16px', color: 'var(--text-3)', fontSize: 11 }}>
+            <div style={{ padding: '16px', color: 'var(--fg-muted)', fontSize: 11 }}>
               {workspacePath ? '目录为空' : '无工作区路径'}
             </div>
           ) : (

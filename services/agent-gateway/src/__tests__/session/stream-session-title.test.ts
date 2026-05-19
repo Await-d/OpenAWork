@@ -26,11 +26,11 @@ vi.mock('../../session/session-title-llm.js', () => ({
   isFirstUserMessage: vi.fn(() => false),
 }));
 
-vi.mock('../../storage-paths.js', () => ({
+vi.mock('../../infra/storage-paths.js', () => ({
   resolveGatewayArtifactsIndexPath: vi.fn(() => '/tmp/openawork-artifacts.json'),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: [],
   sqliteGet: mocks.sqliteGet,

@@ -20,16 +20,16 @@
     color 150ms ease;
 }
 .ui-hover-surface:hover:not(:disabled):not([aria-pressed='true']):not([data-active='true']) {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: var(--bg-hover);
+  color: var(--fg-strong);
 }
 
-/* 透明按钮 hover 出 var(--surface) 实色（折叠/快捷按钮等） */
+/* 透明按钮 hover 出 var(--bg-overlay) 实色（折叠/快捷按钮等） */
 .ui-hover-surface-bg {
   transition: background 150ms ease;
 }
 .ui-hover-surface-bg:hover:not(:disabled) {
-  background: var(--surface);
+  background: var(--bg-overlay);
 }
 
 /* 提亮 + 边框出现（弹出按钮、setting 行） */
@@ -40,7 +40,7 @@
     color 150ms ease;
 }
 .ui-hover-surface-bordered:hover:not(:disabled) {
-  background: var(--surface);
+  background: var(--bg-overlay);
   border-color: var(--border-subtle);
 }
 
@@ -54,7 +54,7 @@
 .ui-hover-accent-soft:hover:not(:disabled):not([aria-pressed='true']):not([data-active='true']) {
   background: color-mix(in oklch, var(--accent) 8%, transparent);
   border-color: var(--border-subtle);
-  color: var(--text);
+  color: var(--fg-strong);
 }
 
 /* 仅文字色变化（链接 / icon-only 按钮） */
@@ -62,7 +62,7 @@
   transition: color 150ms ease;
 }
 .ui-hover-color:hover:not(:disabled) {
-  color: var(--text-2);
+  color: var(--fg-default);
 }
 .ui-hover-color[data-tone='accent']:hover:not(:disabled) {
   color: var(--accent);
@@ -75,8 +75,8 @@
     color 150ms ease;
 }
 .ui-hover-text-bg:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: var(--bg-hover);
+  color: var(--fg-strong);
 }
 
 /* 链接下划线（hover 时显现） */
@@ -103,7 +103,7 @@
     color 150ms ease;
 }
 .ui-hover-icon-pop:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--surface) 70%, var(--bg-2) 30%);
+  background: color-mix(in oklch, var(--bg-overlay) 70%, var(--bg-overlay) 30%);
   opacity: 1;
 }
 .ui-hover-icon-pop[data-tone='danger']:hover:not(:disabled) {
@@ -129,13 +129,13 @@
  * 注意：节点 inline style 已经控制了「expanded / active」时的底色，
  * 这里只覆盖 hover 时的临时态，不与状态色冲突。 */
 .file-tree-node:hover:not([data-highlighted='true']):not(:disabled) {
-  background: color-mix(in oklch, var(--text) 5%, transparent);
+  background: color-mix(in oklch, var(--fg-strong) 5%, transparent);
 }
 .file-tree-file:hover:not([data-active='true']):not([data-highlighted='true']):not(:disabled) {
-  background: color-mix(in oklch, var(--text) 6%, transparent);
+  background: color-mix(in oklch, var(--fg-strong) 6%, transparent);
 }
 
-/* list-row：var(--bg-2) 底色行 hover 出更亮的 var(--bg-1) + 实边 */
+/* list-row：var(--bg-overlay) 底色行 hover 出更亮的 var(--bg-1) + 实边 */
 .ui-hover-list-row {
   transition:
     background 150ms ease,
@@ -143,5 +143,5 @@
 }
 .ui-hover-list-row:hover:not(:disabled) {
   background: var(--bg-1);
-  border-color: var(--border);
+  border-color: var(--border-default);
 }

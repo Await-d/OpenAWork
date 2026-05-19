@@ -8,7 +8,7 @@ import type {
   RolePreset,
   UpdateManagedAgentInput,
 } from '@openAwork/shared';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import {
   AgentsEditorPanel,
   AgentsFilters,
@@ -406,7 +406,7 @@ export default function AgentsPage() {
                 padding: '14px 16px',
               }}
             >
-              <div style={{ color: 'var(--danger, var(--danger, #f06b7e))', fontSize: 13 }}>{error}</div>
+              <div style={{ color: 'var(--danger))', fontSize: 13 }}>{error}</div>
             </section>
           )}
 

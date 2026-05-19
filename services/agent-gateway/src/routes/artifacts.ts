@@ -5,10 +5,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ArtifactManagerImpl } from '@openAwork/artifacts';
 import type { ArtifactMetadata, ArtifactVersionActor } from '@openAwork/artifacts';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteGet } from '../db.js';
-import { resolveGatewayArtifactsDir, resolveGatewayArtifactsIndexPath } from '../storage-paths.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteGet } from '../infra/db.js';
+import { resolveGatewayArtifactsDir, resolveGatewayArtifactsIndexPath } from '../infra/storage-paths.js';
 import {
   createArtifact,
   getArtifactById,

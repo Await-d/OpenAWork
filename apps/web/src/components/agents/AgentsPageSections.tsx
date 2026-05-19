@@ -162,14 +162,14 @@ export function parseAliases(value: string): string[] {
 const PANEL: React.CSSProperties = {
   borderRadius: 22,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface)',
+  background: 'var(--bg-overlay)',
   boxShadow: 'var(--shadow-md)',
 };
 
 const HEADER_PANEL: React.CSSProperties = {
   ...PANEL,
   background:
-    'linear-gradient(180deg, color-mix(in oklab, var(--header-bg) 84%, var(--surface) 16%), var(--surface))',
+    'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 84%, var(--bg-overlay) 16%), var(--bg-overlay))',
 };
 
 const HERO_PANEL: React.CSSProperties = {
@@ -189,8 +189,8 @@ function AgentAvatar({ label, origin }: { label: string; origin: ManagedAgentRec
         background:
           origin === 'custom'
             ? 'linear-gradient(180deg, var(--accent) 0%, var(--accent-hover) 100%)'
-            : 'linear-gradient(180deg, var(--surface) 0%, var(--bg-2) 100%)',
-        color: origin === 'custom' ? 'var(--accent-text)' : 'var(--text)',
+            : 'linear-gradient(180deg, var(--bg-overlay) 0%, var(--bg-overlay) 100%)',
+        color: origin === 'custom' ? 'var(--fg-on-accent)' : 'var(--fg-strong)',
         border: '1px solid var(--border-subtle)',
         display: 'flex',
         alignItems: 'center',
@@ -214,20 +214,20 @@ function Tag({
 }) {
   const styles: Record<typeof tone, React.CSSProperties> = {
     default: {
-      background: 'color-mix(in oklab, var(--surface) 80%, var(--bg-2) 20%)',
-      color: 'var(--text-2)',
+      background: 'color-mix(in oklab, var(--bg-overlay) 80%, var(--bg-overlay) 20%)',
+      color: 'var(--fg-default)',
     },
     accent: {
       background: 'rgba(99, 102, 241, 0.16)',
-      color: 'var(--chart-5, var(--chart-5, #c4b5fd))',
+      color: 'var(--chart-5))',
     },
     warning: {
       background: 'rgba(251, 191, 36, 0.14)',
-      color: 'var(--warning, var(--warning, #f0b429))',
+      color: 'var(--warning))',
     },
     success: {
       background: 'rgba(16, 185, 129, 0.16)',
-      color: 'var(--success, var(--success, #3dd49a))',
+      color: 'var(--success))',
     },
   };
 
@@ -252,8 +252,8 @@ function fieldStyle(): React.CSSProperties {
     width: '100%',
     borderRadius: 14,
     border: '1px solid var(--border-subtle)',
-    background: 'color-mix(in oklab, var(--surface) 86%, var(--bg-2) 14%)',
-    color: 'var(--text)',
+    background: 'color-mix(in oklab, var(--bg-overlay) 86%, var(--bg-overlay) 14%)',
+    color: 'var(--fg-strong)',
     padding: '11px 12px',
     fontSize: 13,
     outline: 'none',
@@ -267,7 +267,7 @@ function labelStyle(): React.CSSProperties {
     gap: 8,
     fontSize: 12,
     fontWeight: 600,
-    color: 'var(--text-2)',
+    color: 'var(--fg-default)',
   };
 }
 
@@ -277,7 +277,7 @@ function stateStyle(): React.CSSProperties {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: 'var(--text-3)',
+    color: 'var(--fg-muted)',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 1.7,
@@ -292,7 +292,7 @@ function primaryButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled
       ? 'rgba(99, 102, 241, 0.35)'
       : 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
-    color: 'var(--fg-on-accent, #ffffff)',
+    color: 'var(--fg-on-accent))',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -305,8 +305,8 @@ function secondaryButtonStyle(disabled = false): React.CSSProperties {
   return {
     border: '1px solid var(--border-subtle)',
     borderRadius: 14,
-    background: 'color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%)',
-    color: disabled ? 'var(--text-3)' : 'var(--text-2)',
+    background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+    color: disabled ? 'var(--fg-muted)' : 'var(--fg-default)',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 600,
@@ -320,7 +320,7 @@ function dangerButtonStyle(disabled = false): React.CSSProperties {
     border: '1px solid rgba(248, 113, 113, 0.35)',
     borderRadius: 14,
     background: disabled ? 'rgba(127, 29, 29, 0.06)' : 'rgba(127, 29, 29, 0.12)',
-    color: disabled ? 'rgba(252, 165, 165, 0.65)' : 'var(--danger, var(--danger, #f06b7e))',
+    color: disabled ? 'rgba(252, 165, 165, 0.65)' : 'var(--danger))',
     padding: '11px 16px',
     fontSize: 13,
     fontWeight: 700,
@@ -336,11 +336,11 @@ function StatCard({ label, value }: { label: string; value: string }) {
         ...PANEL,
         padding: '14px 16px',
         background:
-          'linear-gradient(180deg, color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%), var(--surface))',
+          'linear-gradient(180deg, color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%), var(--bg-overlay))',
       }}
     >
-      <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--fg-strong)' }}>{value}</div>
     </div>
   );
 }
@@ -378,7 +378,7 @@ export function AgentsHero({
       >
         <div style={{ display: 'grid', gap: 8, maxWidth: 680 }}>
           <span className="page-title">Agent 管理</span>
-          <div style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.7 }}>
+          <div style={{ color: 'var(--fg-default)', fontSize: 14, lineHeight: 1.7 }}>
             统一查看全部 Agent
             的定义、状态与能力来源，并执行新增、编辑、禁用、移除与恢复默认等实体管理操作。
           </div>
@@ -454,8 +454,8 @@ export function AgentsFilters({
         }}
       >
         <div style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>智能体目录</div>
-          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>智能体目录</div>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             按类型、角色和启用状态筛选当前可管理实体。
           </div>
         </div>
@@ -546,8 +546,8 @@ export function AgentsListPanel({
                     ? '1px solid color-mix(in oklch, var(--accent) 56%, var(--fg-on-accent) 18%)'
                     : '1px solid var(--border-subtle)',
                   background: active
-                    ? 'color-mix(in oklab, var(--accent-muted) 70%, var(--surface) 30%)'
-                    : 'var(--surface)',
+                    ? 'color-mix(in oklab, var(--accent-muted) 70%, var(--bg-overlay) 30%)'
+                    : 'var(--bg-overlay)',
                   padding: '14px 16px',
                   cursor: saving ? 'not-allowed' : 'pointer',
                   display: 'grid',
@@ -568,7 +568,7 @@ export function AgentsListPanel({
                     <div
                       style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
                     >
-                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg-strong)' }}>
                         {agent.label}
                       </span>
                       <Tag>{agent.id}</Tag>
@@ -581,7 +581,7 @@ export function AgentsListPanel({
                       )}
                       {agent.hasOverrides && <Tag tone="accent">已修改</Tag>}
                     </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 13, color: 'var(--fg-default)', lineHeight: 1.6 }}>
                       {localizeAgentDescription(agent) || '暂无描述'}
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -610,8 +610,8 @@ export function AgentsListPanel({
 function PanelTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div style={{ display: 'grid', gap: 6 }}>
-      <h2 style={{ margin: 0, fontSize: 22, color: 'var(--text)' }}>{title}</h2>
-      <p style={{ margin: 0, color: 'var(--text-2)', lineHeight: 1.7 }}>{subtitle}</p>
+      <h2 style={{ margin: 0, fontSize: 22, color: 'var(--fg-strong)' }}>{title}</h2>
+      <p style={{ margin: 0, color: 'var(--fg-default)', lineHeight: 1.7 }}>{subtitle}</p>
     </div>
   );
 }
@@ -626,11 +626,11 @@ function InfoRow({ label, value }: { label: string; value: string }) {
         alignItems: 'start',
         padding: '10px 12px',
         borderRadius: 14,
-        background: 'color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%)',
+        background: 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
       }}
     >
-      <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>{value}</span>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 13, color: 'var(--fg-strong)', lineHeight: 1.6 }}>{value}</span>
     </div>
   );
 }
@@ -655,8 +655,8 @@ function ToggleRow({
         borderRadius: 14,
         background: checked
           ? 'rgba(99, 102, 241, 0.08)'
-          : 'color-mix(in oklab, var(--surface) 88%, var(--bg-2) 12%)',
-        color: 'var(--text)',
+          : 'color-mix(in oklab, var(--bg-overlay) 88%, var(--bg-overlay) 12%)',
+        color: 'var(--fg-strong)',
         padding: '12px 14px',
         display: 'flex',
         alignItems: 'center',
@@ -667,7 +667,7 @@ function ToggleRow({
     >
       <span style={{ display: 'grid', gap: 4, textAlign: 'left' }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>{label}</span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{hint}</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{hint}</span>
       </span>
       <span
         aria-hidden="true"
@@ -675,7 +675,7 @@ function ToggleRow({
           width: 44,
           height: 24,
           borderRadius: 999,
-          background: checked ? 'var(--accent, var(--accent, #5cd4c0))' : 'rgba(148, 163, 184, 0.25)',
+          background: checked ? 'var(--accent))' : 'rgba(148, 163, 184, 0.25)',
           display: 'inline-flex',
           alignItems: 'center',
           padding: 3,
@@ -687,7 +687,7 @@ function ToggleRow({
             width: 18,
             height: 18,
             borderRadius: '50%',
-            background: 'var(--fg-on-accent, #ffffff)',
+            background: 'var(--fg-on-accent))',
             boxShadow: '0 2px 6px rgba(15, 23, 42, 0.28)',
           }}
         />
@@ -712,10 +712,10 @@ function AgentForm({
           style={{
             borderRadius: 14,
             border: '1px solid color-mix(in oklab, var(--accent) 28%, var(--border-subtle) 72%)',
-            background: 'color-mix(in oklab, var(--accent-muted) 22%, var(--surface) 78%)',
+            background: 'color-mix(in oklab, var(--accent-muted) 22%, var(--bg-overlay) 78%)',
             padding: '12px 14px',
             fontSize: 12,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             lineHeight: 1.7,
           }}
         >
@@ -808,15 +808,15 @@ function AgentForm({
           borderRadius: 18,
           border: '1px solid color-mix(in oklab, var(--accent) 24%, var(--border-subtle) 76%)',
           background:
-            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--surface) 68%), var(--surface))',
+            'linear-gradient(180deg, color-mix(in oklab, var(--accent-muted) 32%, var(--bg-overlay) 68%), var(--bg-overlay))',
           padding: 14,
           display: 'grid',
           gap: 12,
         }}
       >
         <div style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>默认模型路由</div>
-          <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>默认模型路由</div>
+          <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.7 }}>
             为这个角色指定默认模型、variant 与 fallback 链。留空时，系统会回退到参考默认值。
           </div>
         </div>
@@ -869,12 +869,12 @@ function AgentForm({
       <label style={labelStyle()}>
         系统提示词
         {!state.systemPrompt && !isBuiltin && (
-          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
             当前内置智能体未提供独立提示词时，这里会保持为空。
           </span>
         )}
         {isBuiltin ? (
-          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
             内置 Agent 的系统提示词由系统维护，用户不可修改。
           </span>
         ) : null}
@@ -1011,7 +1011,7 @@ export function AgentsEditorPanel({
             state={editorState}
             setState={setEditorState}
           />
-          {saveMessage && <div style={{ color: 'var(--success, var(--success, #3dd49a))', fontSize: 13 }}>{saveMessage}</div>}
+          {saveMessage && <div style={{ color: 'var(--success))', fontSize: 13 }}>{saveMessage}</div>}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"

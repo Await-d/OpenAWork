@@ -78,7 +78,7 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontSize: 12,
         }}
       >
@@ -113,7 +113,7 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--surface)',
+        background: 'var(--bg-overlay)',
       }}
     >
       {state.sheets.length > 1 && (
@@ -139,7 +139,7 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
                 borderRadius: 5,
                 border: '1px solid var(--border-subtle)',
                 background: activeSheet === i ? 'var(--accent)' : 'transparent',
-                color: activeSheet === i ? 'var(--accent-text)' : 'var(--text-2)',
+                color: activeSheet === i ? 'var(--fg-on-accent)' : 'var(--fg-default)',
                 fontSize: 11,
                 fontWeight: activeSheet === i ? 700 : 500,
                 cursor: 'pointer',
@@ -162,11 +162,11 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
         <div
           className="xlsx-preview-table"
           style={{
-            background: 'var(--fg-on-accent, #ffffff)',
+            background: 'var(--fg-on-accent))',
             border: '1px solid var(--border-subtle)',
             borderRadius: 6,
             padding: 8,
-            color: 'var(--bg-overlay, #121721)',
+            color: 'var(--bg-overlay))',
             fontSize: 12,
             fontFamily: 'var(--font-mono, monospace)',
             overflow: 'auto',

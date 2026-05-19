@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet, sqliteRun } from '../../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import type { HandoffRoleLayer } from './handoff-store.js';
 import { assertCanReceiveInbound } from '../capability/layer-capabilities.js';
 

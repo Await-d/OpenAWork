@@ -44,13 +44,13 @@ const DEFAULT_AUTO_COMPACT_TARGET_RATIO = 0.6;
 const cellStyle: CSSProperties = {
   padding: '0.6rem 0.75rem',
   fontSize: 12,
-  color: 'var(--fg-default, #c8d1e0)',
+  color: 'var(--fg-default))',
   verticalAlign: 'middle',
 };
 
 const mutedStyle: CSSProperties = {
   ...cellStyle,
-  color: 'var(--fg-muted, #7b8a9e)',
+  color: 'var(--fg-muted))',
 };
 
 function formatContext(count: number | undefined): string {
@@ -140,8 +140,8 @@ function CapabilityDot({ label }: { label: string }) {
         padding: '0 6px',
         borderRadius: 999,
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-        background: 'var(--color-surface-raised, #0f172a)',
-        color: 'var(--fg-muted, #7b8a9e)',
+        background: 'var(--bg-raised)',
+        color: 'var(--fg-muted))',
         fontSize: 10,
         fontWeight: 600,
       }}
@@ -163,12 +163,12 @@ function InlineNotice({
       ? {
           background: 'rgba(245, 158, 11, 0.12)',
           border: 'rgba(245, 158, 11, 0.25)',
-          color: 'var(--fg-default, #c8d1e0)',
+          color: 'var(--fg-default))',
         }
       : {
           background: 'rgba(59, 130, 246, 0.1)',
           border: 'rgba(59, 130, 246, 0.22)',
-          color: 'var(--fg-default, #c8d1e0)',
+          color: 'var(--fg-default))',
         };
 
   return (
@@ -240,7 +240,7 @@ function ModelRatioInput({
         minWidth: 92,
       }}
     >
-      <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)' }}>{fallbackLabel}</span>
+      <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>{fallbackLabel}</span>
       <input
         aria-label={ariaLabel}
         type="number"
@@ -254,10 +254,10 @@ function ModelRatioInput({
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={handleKeyDown}
         style={{
-          background: 'var(--color-surface-raised, #0f172a)',
+          background: 'var(--bg-raised)',
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           borderRadius: 6,
-          color: 'var(--fg-default, #c8d1e0)',
+          color: 'var(--fg-default))',
           fontSize: 12,
           padding: '0.35rem 0.55rem',
           width: '100%',
@@ -275,7 +275,7 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
       onClick={onToggle}
       title={enabled ? '禁用模型' : '启用模型'}
       style={{
-        background: enabled ? 'var(--accent, #5cd4c0)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
+        background: enabled ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
         border: 'none',
         borderRadius: 12,
         width: 40,
@@ -327,10 +327,10 @@ export function ModelManager({
   }
 
   const inputBase: CSSProperties = {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 6,
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
     fontSize: 12,
     padding: '0.35rem 0.6rem',
     outline: 'none',
@@ -339,7 +339,7 @@ export function ModelManager({
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         overflow: 'hidden',
@@ -354,7 +354,7 @@ export function ModelManager({
         }}
       >
         <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' }}
+          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
         >
           {provider.name} — 模型
         </h2>
@@ -390,7 +390,7 @@ export function ModelManager({
           style={{
             padding: '2rem',
             textAlign: 'center',
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             fontSize: 12,
           }}
         >
@@ -441,7 +441,7 @@ export function ModelManager({
                   <td style={cellStyle}>
                     <div style={{ fontWeight: 500 }}>{model.label}</div>
                     <div
-                      style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)', marginTop: 1 }}
+                      style={{ fontSize: 11, color: 'var(--fg-muted))', marginTop: 1 }}
                     >
                       {model.id}
                     </div>
@@ -507,7 +507,7 @@ export function ModelManager({
                             style={{
                               marginTop: 6,
                               fontSize: 10,
-                              color: 'var(--fg-muted, #7b8a9e)',
+                              color: 'var(--fg-muted))',
                               lineHeight: 1.45,
                             }}
                           >
@@ -530,7 +530,7 @@ export function ModelManager({
                           alignItems: 'center',
                           gap: 6,
                           fontSize: 11,
-                          color: 'var(--fg-muted, #7b8a9e)',
+                          color: 'var(--fg-muted))',
                           cursor: onUpdateModel ? 'pointer' : 'default',
                         }}
                       >
@@ -561,7 +561,7 @@ export function ModelManager({
                       disabled={!onRemoveModel}
                       style={{
                         background: 'transparent',
-                        border: '1px solid var(--fg-subtle, #4d5b6e)',
+                        border: '1px solid var(--fg-subtle))',
                         borderRadius: 6,
                         color: color.danger,
                         padding: '0.2rem 0.5rem',
@@ -611,7 +611,7 @@ export function ModelManager({
           style={{
             background:
               onAddModel && newId.trim() && newLabel.trim()
-                ? 'var(--accent, #5cd4c0)'
+                ? 'var(--accent))'
                 : 'var(--border-default, hsla(215, 18%, 50%, 0.12))',
             color: color.fgOnAccent,
             border: 'none',

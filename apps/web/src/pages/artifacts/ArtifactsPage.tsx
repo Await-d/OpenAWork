@@ -1,10 +1,10 @@
 import { tokens } from '@openAwork/shared-ui';
 import { useSearchParams } from 'react-router';
-import { useAuthStore } from '../../stores/auth.js';
-import { ArtifactRecordList } from './artifact-record-list.js';
-import { ArtifactSessionRail } from './artifact-session-rail.js';
-import { ArtifactWorkbench } from './artifact-workbench.js';
-import { useArtifactsWorkspace } from './use-artifacts-workspace.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { ArtifactRecordList } from './views/artifact-record-list.js';
+import { ArtifactSessionRail } from './views/artifact-session-rail.js';
+import { ArtifactWorkbench } from './workspace/artifact-workbench.js';
+import { useArtifactsWorkspace } from './workspace/use-artifacts-workspace.js';
 
 export default function ArtifactsPage() {
   const token = useAuthStore((s) => s.accessToken);
@@ -36,7 +36,7 @@ export default function ArtifactsPage() {
       <div className="page-header">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="page-title">产物工作区</span>
-          <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
             直接浏览会话内的内容型 artifact，支持保存版本、回滚与实时预览。
           </span>
         </div>
@@ -44,7 +44,7 @@ export default function ArtifactsPage() {
 
       <div
         className="page-content"
-        style={{ padding: 0, overflow: 'hidden', background: 'var(--bg)' }}
+        style={{ padding: 0, overflow: 'hidden', background: 'var(--bg-base)' }}
       >
         <div
           style={{
@@ -109,14 +109,14 @@ export default function ArtifactsPage() {
                   padding: '10px 14px',
                   borderRadius: tokens.radius.lg,
                   border: `1px solid ${tokens.color.borderSubtle}`,
-                  background: 'color-mix(in oklch, var(--surface) 76%, transparent)',
+                  background: 'color-mix(in oklch, var(--bg-overlay) 76%, transparent)',
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-                  <strong style={{ color: 'var(--text)', fontSize: 13 }}>
+                  <strong style={{ color: 'var(--fg-strong)', fontSize: 13 }}>
                     当前会话：{selectedSession.title ?? '未命名会话'}
                   </strong>
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                     {selectedSession.id.slice(0, 8)}… · {sessionArtifacts.length} 个内容型 artifact
                   </span>
                 </div>

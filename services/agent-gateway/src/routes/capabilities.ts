@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { CapabilityDescriptor } from '@openAwork/shared';
 import { formatCanonicalRole } from '@openAwork/shared';
-import { requireAuth } from '../auth.js';
-import { sqliteGet } from '../db.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteGet } from '../infra/db.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildCommandDescriptors } from './command-descriptors.js';
 import { buildGatewayToolDefinitions, getVisibleToolName } from '../tools/tool-definitions.js';
 import { BUILTIN_SKILLS } from '@openAwork/skills';

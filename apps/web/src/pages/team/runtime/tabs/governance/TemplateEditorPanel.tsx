@@ -107,7 +107,7 @@ function TemplateEditor({
     <div style={{ display: 'grid', gap: 14, padding: '16px 20px', overflow: 'auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{title}</span>
+        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>{title}</span>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button
             type="button"
@@ -119,8 +119,8 @@ function TemplateEditor({
                 : '1px solid var(--border-subtle)',
               background: jsonMode
                 ? 'color-mix(in oklch, var(--warning) 8%, transparent)'
-                : 'var(--surface-2)',
-              color: jsonMode ? 'var(--warning)' : 'var(--text-3)',
+                : 'var(--bg-surface)',
+              color: jsonMode ? 'var(--warning)' : 'var(--fg-muted)',
               borderRadius: 6,
               padding: '3px 8px',
               fontSize: 10,
@@ -141,12 +141,12 @@ function TemplateEditor({
               appearance: 'none',
               border: 'none',
               background: 'transparent',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               cursor: 'pointer',
               display: 'inline-flex',
             }}
           >
-            <XIcon size={14} color="var(--text-3)" />
+            <XIcon size={14} color="var(--fg-muted)" />
           </button>
         </div>
       </div>
@@ -171,7 +171,7 @@ function TemplateEditor({
             }}
           />
           {jsonError && <span style={{ fontSize: 9, color: 'var(--danger)' }}>{jsonError}</span>}
-          <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
             直接编辑 JSON 数据，点击「应用 JSON」将修改应用到表单
           </span>
         </div>
@@ -276,7 +276,7 @@ function TemplateEditor({
               onChange={(e) => update('isRecommendedDefault', e.target.checked)}
               style={{ accentColor: 'var(--accent)' }}
             />
-            <span style={{ fontSize: 11, color: 'var(--text-2)' }}>标记为推荐起步模板</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>标记为推荐起步模板</span>
           </label>
 
           {/* Core roles with per-role provider/model/variant */}
@@ -300,7 +300,7 @@ function TemplateEditor({
                     padding: '8px 12px',
                     borderRadius: 8,
                     border: `1px solid color-mix(in oklch, ${color} 25%, transparent)`,
-                    background: `color-mix(in oklch, ${color} 4%, var(--bg))`,
+                    background: `color-mix(in oklch, ${color} 4%, var(--bg-base))`,
                   }}
                 >
                   <div
@@ -313,10 +313,10 @@ function TemplateEditor({
                   >
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
                     <div style={{ display: 'grid', gap: 2 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
                         {roleLabel}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--text-2)' }}>
+                      <span style={{ fontSize: 10, color: 'var(--fg-default)' }}>
                         {roleCard.selectedAgent?.label ??
                           FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole]}
                       </span>
@@ -324,10 +324,10 @@ function TemplateEditor({
                     <span
                       style={{
                         fontSize: 9,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         padding: '2px 6px',
                         borderRadius: 4,
-                        background: 'var(--surface-2)',
+                        background: 'var(--bg-surface)',
                       }}
                     >
                       固定
@@ -348,7 +348,7 @@ function TemplateEditor({
                         style={{
                           fontSize: 8,
                           fontWeight: 700,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           textTransform: 'uppercase' as const,
                         }}
                       >
@@ -378,7 +378,7 @@ function TemplateEditor({
                         style={{
                           fontSize: 8,
                           fontWeight: 700,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           textTransform: 'uppercase' as const,
                         }}
                       >
@@ -399,7 +399,7 @@ function TemplateEditor({
                         style={{
                           fontSize: 8,
                           fontWeight: 700,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           textTransform: 'uppercase' as const,
                         }}
                       >
@@ -442,13 +442,13 @@ function TemplateEditor({
                   key={agentId}
                   type="button"
                   onClick={() => toggleAgent(agentId)}
-                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), 'var(--warning, var(--warning, #f0b429))')}
+                  style={pillButtonStyle(state.optionalAgentIds.has(agentId), 'var(--warning))')}
                 >
                   {label}
                 </button>
               ))}
             </div>
-            <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
               增援角色会在核心流水线之外提供额外能力
             </span>
           </div>
@@ -498,8 +498,8 @@ function TemplateEditor({
                 padding: '6px 12px',
                 borderRadius: 8,
                 border: '1px solid var(--border-subtle)',
-                background: 'var(--surface-2)',
-                color: 'var(--text-2)',
+                background: 'var(--bg-surface)',
+                color: 'var(--fg-default)',
                 fontSize: 11,
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -516,9 +516,9 @@ function TemplateEditor({
             style={{
               padding: '7px 14px',
               borderRadius: 8,
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-default)',
               background: 'transparent',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
@@ -534,7 +534,7 @@ function TemplateEditor({
               padding: '7px 16px',
               borderRadius: 8,
               border: '1px solid color-mix(in oklch, var(--success) 48%, transparent)',
-              background: 'color-mix(in oklch, var(--success) 12%, var(--bg))',
+              background: 'color-mix(in oklch, var(--success) 12%, var(--bg-base))',
               color: 'var(--success)',
               fontSize: 12,
               fontWeight: 700,

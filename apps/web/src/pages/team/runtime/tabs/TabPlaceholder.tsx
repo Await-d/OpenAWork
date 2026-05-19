@@ -52,14 +52,14 @@ const CARD_STYLE: CSSProperties = {
   borderRadius: 16,
   border: '1px dashed color-mix(in srgb, var(--accent) 36%, transparent)',
   background:
-    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%, color-mix(in srgb, var(--surface) 90%, var(--bg)) 100%)',
+    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base) 100%)',
 };
 
 const STATUS_META: Record<TabPlaceholderStatus, { label: string; color: string; bg: string }> = {
   planned: {
     label: '规划中',
-    color: 'var(--text-2)',
-    bg: 'color-mix(in srgb, var(--text-3) 18%, transparent)',
+    color: 'var(--fg-default)',
+    bg: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
   },
   'in-progress': {
     label: '迭代中',
@@ -68,8 +68,8 @@ const STATUS_META: Record<TabPlaceholderStatus, { label: string; color: string; 
   },
   'data-pending': {
     label: '待数据接入',
-    color: 'var(--warning, #f0b429)',
-    bg: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 22%, transparent)',
+    color: 'var(--warning))',
+    bg: 'color-mix(in srgb, var(--warning) 22%, transparent)',
   },
 };
 
@@ -91,7 +91,7 @@ export function TabPlaceholder({
           <span style={{ fontSize: 26 }} aria-hidden>
             {emoji}
           </span>
-          <strong style={{ fontSize: 18, color: 'var(--text)' }}>{title}</strong>
+          <strong style={{ fontSize: 18, color: 'var(--fg-strong)' }}>{title}</strong>
           <span
             style={{
               marginLeft: 'auto',
@@ -109,7 +109,7 @@ export function TabPlaceholder({
         </div>
 
         {subtitle ? (
-          <span style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6 }}>{subtitle}</span>
+          <span style={{ fontSize: 13, color: 'var(--fg-default)', lineHeight: 1.6 }}>{subtitle}</span>
         ) : null}
 
         {bullets && bullets.length > 0 ? (
@@ -130,7 +130,7 @@ export function TabPlaceholder({
                   alignItems: 'flex-start',
                   gap: 8,
                   fontSize: 12,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                   lineHeight: 1.55,
                 }}
               >
@@ -157,16 +157,16 @@ export function TabPlaceholder({
             style={{
               padding: '8px 12px',
               borderRadius: 8,
-              background: 'color-mix(in srgb, var(--bg-2) 70%, var(--bg))',
-              border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+              border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontFamily:
                 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
             }}
           >
-            <span style={{ color: 'var(--text-3)', marginRight: 6 }}>数据源:</span>
-            <code style={{ color: 'var(--text-2)' }}>{dataSource}</code>
+            <span style={{ color: 'var(--fg-muted)', marginRight: 6 }}>数据源:</span>
+            <code style={{ color: 'var(--fg-default)' }}>{dataSource}</code>
           </div>
         ) : null}
 

@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as SkillSelectionModule from '../../skill/skill-selection.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -125,7 +125,7 @@ function resetTables(): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   selection = await import('../../skill/skill-selection.js');
   await dbModule.connectDb();
   await dbModule.migrate();

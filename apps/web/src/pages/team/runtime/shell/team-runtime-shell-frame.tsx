@@ -1,8 +1,8 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import type { SharedSessionSummaryRecord } from '@openAwork/web-client';
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
-import type { TeamActionFeedback } from '../../use-team-collaboration.js';
-import { TeamSectionHeader } from '../../team-page-sections.js';
+import type { TeamActionFeedback } from '../../hooks/use-team-collaboration.js';
+import { TeamSectionHeader } from '../../views/team-page-sections.js';
 import type { TeamRuntimeMetric, TeamWorkspaceCardSummary } from '../data/team-runtime-model.js';
 import { formatWorkspaceLabel, getSharedSessionStateLabel } from '../data/team-runtime-model.js';
 import {
@@ -22,9 +22,9 @@ const APP_FRAME_STYLE: CSSProperties = {
   minHeight: 'max(760px, calc(100dvh - 96px))',
   borderRadius: 28,
   overflow: 'hidden',
-  border: '1px solid color-mix(in srgb, var(--border) 82%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
   background:
-    'linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, var(--bg)) 0%, color-mix(in srgb, var(--bg-2) 92%, var(--bg)) 100%)',
+    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 100%)',
   boxShadow: 'var(--shadow-lg)',
 };
 
@@ -33,7 +33,7 @@ const PANEL_STYLE: CSSProperties = {
   gap: 0,
   minWidth: 0,
   minHeight: 0,
-  background: 'color-mix(in srgb, var(--surface) 86%, var(--bg))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const PANEL_SECTION_STYLE: CSSProperties = {
@@ -46,9 +46,9 @@ const PANEL_HEADER_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
   padding: '14px 14px 12px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
   background:
-    'linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, var(--bg)) 0%, color-mix(in srgb, var(--surface) 82%, var(--bg)) 100%)',
+    'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base) 100%)',
 };
 
 const ACTIVITY_BUTTON_BASE_STYLE: CSSProperties = {
@@ -72,11 +72,11 @@ const PANE_CONTROL_BUTTON_STYLE: CSSProperties = {
   minHeight: 30,
   padding: '0 10px',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   cursor: 'pointer',
 };
 
@@ -224,9 +224,9 @@ function RuntimeRailCounter({ label, value }: { label: string; value: string }) 
         gap: 2,
         minHeight: 34,
         borderRadius: 10,
-        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-        background: 'color-mix(in srgb, var(--surface) 74%, var(--bg))',
-        color: 'var(--text-3)',
+        border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 74%, var(--bg-base))',
+        color: 'var(--fg-muted)',
       }}
     >
       <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1 }}>{value}</span>
@@ -259,9 +259,9 @@ function RuntimeActivityRail({
         ...PANEL_STYLE,
         gridTemplateRows: 'auto 1fr auto',
         width: 56,
-        borderRight: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+        borderRight: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
         background:
-          'linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 94%, var(--bg)) 0%, color-mix(in srgb, var(--surface) 88%, var(--bg)) 100%)',
+          'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 100%)',
       }}
     >
       <div
@@ -269,7 +269,7 @@ function RuntimeActivityRail({
           display: 'grid',
           gap: 10,
           padding: '12px 8px 10px',
-          borderBottom: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+          borderBottom: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
           justifyItems: 'center',
         }}
       >
@@ -282,7 +282,7 @@ function RuntimeActivityRail({
           }}
         >
           <div style={{ display: 'flex', gap: 4 }}>
-            {['var(--danger, var(--danger, #f06b7e))', 'var(--warning, var(--warning, #f0b429))', 'var(--success, var(--success, #3dd49a))'].map((color) => (
+            {['var(--danger))', 'var(--warning))', 'var(--success))'].map((color) => (
               <span
                 key={color}
                 style={{
@@ -301,7 +301,7 @@ function RuntimeActivityRail({
               fontWeight: 700,
               letterSpacing: '0.18em',
               textTransform: 'uppercase',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             RT
@@ -321,12 +321,12 @@ function RuntimeActivityRail({
               onClick={() => onActiveTabChange(tab.key)}
               style={{
                 ...ACTIVITY_BUTTON_BASE_STYLE,
-                color: isActive ? 'var(--accent)' : 'var(--text-3)',
+                color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
                 borderColor: isActive
                   ? 'color-mix(in srgb, var(--accent) 36%, transparent)'
                   : 'transparent',
                 background: isActive
-                  ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
+                  ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
                   : 'transparent',
               }}
             >
@@ -355,7 +355,7 @@ function RuntimeActivityRail({
           display: 'grid',
           gap: 8,
           padding: 8,
-          borderTop: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+          borderTop: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
         }}
       >
         <RuntimeRailCounter label="运行" value={String(selectedWorkspaceRunningCount)} />
@@ -409,7 +409,7 @@ function RuntimeSidebar({
       aria-label="Team Runtime 导航侧栏"
       style={{
         ...PANEL_STYLE,
-        borderRight: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+        borderRight: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
       }}
     >
       <div style={PANEL_HEADER_STYLE}>
@@ -425,7 +425,7 @@ function RuntimeSidebar({
           Team Runtime
         </span>
         <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.03em' }}>工作台导航</span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>{countsLine}</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>{countsLine}</span>
       </div>
 
       <div style={{ display: 'grid', gap: 0, minHeight: 0, overflowY: 'auto' }}>
@@ -440,15 +440,15 @@ function RuntimeSidebar({
         <section
           style={{
             ...PANEL_SECTION_STYLE,
-            borderTop: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+            borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
           }}
         >
           <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
               Workspace navigator
             </span>
             <span style={{ fontSize: 15, fontWeight: 800 }}>工作区切片</span>
-            <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
               这里承担 SpectrAI 左侧 Sidebar 的工作区入口角色，持续决定中间主面板的观察范围。
             </span>
           </div>
@@ -467,10 +467,10 @@ function RuntimeSidebar({
                     textAlign: 'left',
                     borderColor: isActive
                       ? 'color-mix(in srgb, var(--accent) 38%, transparent)'
-                      : 'color-mix(in srgb, var(--border) 72%, transparent)',
+                      : 'color-mix(in srgb, var(--border-default) 72%, transparent)',
                     background: isActive
-                      ? 'color-mix(in srgb, var(--accent) 13%, var(--surface))'
-                      : 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+                      ? 'color-mix(in srgb, var(--accent) 13%, var(--bg-overlay))'
+                      : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
                     cursor: 'pointer',
                   }}
                 >
@@ -484,12 +484,12 @@ function RuntimeSidebar({
                   >
                     <span style={{ fontSize: 13, fontWeight: 700 }}>{workspace.label}</span>
                     <span
-                      style={{ fontSize: 10, color: isActive ? 'var(--accent)' : 'var(--text-3)' }}
+                      style={{ fontSize: 10, color: isActive ? 'var(--accent)' : 'var(--fg-muted)' }}
                     >
                       {workspace.runningCount} run
                     </span>
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
                     {workspace.description}
                   </span>
                 </button>
@@ -501,11 +501,11 @@ function RuntimeSidebar({
         <section
           style={{
             ...PANEL_SECTION_STYLE,
-            borderTop: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+            borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
           }}
         >
           <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
               Shared runs
             </span>
             <span style={{ fontSize: 15, fontWeight: 800 }}>快速定位共享运行</span>
@@ -531,17 +531,17 @@ function RuntimeSidebar({
                       textAlign: 'left',
                       borderColor: isSelected
                         ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
-                        : 'color-mix(in srgb, var(--border) 72%, transparent)',
+                        : 'color-mix(in srgb, var(--border-default) 72%, transparent)',
                       background: isSelected
-                        ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
-                        : 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+                        ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+                        : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
                       cursor: 'pointer',
                     }}
                   >
                     <span style={{ fontSize: 12, fontWeight: 700 }}>
                       {sharedSession.title ?? sharedSession.sessionId}
                     </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                       {formatWorkspaceLabel(sharedSession.workspacePath)} ·{' '}
                       {getSharedSessionStateLabel(sharedSession.stateStatus)}
                     </span>
@@ -555,11 +555,11 @@ function RuntimeSidebar({
         <section
           style={{
             ...PANEL_SECTION_STYLE,
-            borderTop: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+            borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
           }}
         >
           <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
               Workflow handoff
             </span>
             <span style={{ fontSize: 15, fontWeight: 800 }}>
@@ -569,7 +569,7 @@ function RuntimeSidebar({
           {workflowLaunch ? (
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
-                <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
+                <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.6 }}>
                   {workflowLaunch.templateDescription || '当前模板没有描述。'} ·{' '}
                   {workflowLaunch.nodeCount} 个节点
                 </span>
@@ -594,11 +594,11 @@ function RuntimeSidebar({
         <section
           style={{
             ...PANEL_SECTION_STYLE,
-            borderTop: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+            borderTop: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
           }}
         >
           <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
               Workspace brief
             </span>
             <span style={{ fontSize: 15, fontWeight: 800 }}>当前摘要</span>
@@ -606,7 +606,7 @@ function RuntimeSidebar({
           <div style={{ display: 'grid', gap: 8 }}>
             {workspaceOverviewLines.map((line) => (
               <div key={line} style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
-                <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65 }}>
+                <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.65 }}>
                   {line}
                 </span>
               </div>
@@ -640,7 +640,7 @@ function RuntimeMainPanel({
   tabs: Array<{ key: string; label: string; summary: string }>;
 }) {
   return (
-    <main aria-label="Team Runtime 主面板" style={{ ...PANEL_STYLE, background: 'var(--bg)' }}>
+    <main aria-label="Team Runtime 主面板" style={{ ...PANEL_STYLE, background: 'var(--bg-base)' }}>
       <div style={PANEL_HEADER_STYLE}>
         <div
           style={{
@@ -652,13 +652,13 @@ function RuntimeMainPanel({
           }}
         >
           <div style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
               Main panel
             </span>
             <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>
               {activeTabLabel}
             </span>
-            <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
               {activeTabSummary}
             </span>
           </div>
@@ -699,11 +699,11 @@ function RuntimeMainPanel({
                   borderRadius: 999,
                   border: isActive
                     ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
-                    : '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                    : '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                   background: isActive
-                    ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
-                    : 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
-                  color: isActive ? 'var(--text)' : 'var(--text-3)',
+                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+                    : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+                  color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   cursor: 'pointer',
                 }}
               >
@@ -727,7 +727,7 @@ function RuntimeMainPanel({
           overflow: 'auto',
           padding: 16,
           background:
-            'linear-gradient(180deg, color-mix(in srgb, var(--bg) 94%, var(--surface)) 0%, color-mix(in srgb, var(--bg) 100%, var(--surface)) 100%)',
+            'linear-gradient(180deg, color-mix(in srgb, var(--bg-base) 94%, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-base) 100%, var(--bg-overlay) 100%)',
         }}
       >
         {mainContent}
@@ -785,15 +785,15 @@ function RuntimeDetailRail({
       aria-label="Team Runtime 细节轨"
       style={{
         ...PANEL_STYLE,
-        borderLeft: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+        borderLeft: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
       }}
     >
       <div style={PANEL_HEADER_STYLE}>
-        <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
           Detail rail
         </span>
         <span style={{ fontSize: 15, fontWeight: 800 }}>细节轨</span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
           右侧保持单一 detail host，通过切换不同面板持续盯住当前运行对象。
         </span>
       </div>
@@ -818,11 +818,11 @@ function RuntimeDetailRail({
                   borderRadius: 999,
                   border: isActive
                     ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
-                    : '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                    : '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                   background: isActive
-                    ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
-                    : 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
-                  color: isActive ? 'var(--text)' : 'var(--text-3)',
+                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
+                    : 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
+                  color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   cursor: 'pointer',
                   fontSize: 11,
                   fontWeight: 700,
@@ -845,13 +845,13 @@ function RuntimeDetailRail({
               <div style={{ display: 'grid', gap: 10 }}>
                 <div style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
                   <span style={{ fontSize: 16, fontWeight: 800 }}>{selectedRunSummary.title}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                     工作区：{selectedRunSummary.workspaceLabel}
                   </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                     状态：{selectedRunSummary.stateLabel}
                   </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                     共享者：{selectedRunSummary.sharedByEmail}
                   </span>
                 </div>
@@ -870,7 +870,7 @@ function RuntimeDetailRail({
                     { label: '待回答', value: selectedRunSummary.pendingQuestionCount },
                   ].map((item) => (
                     <div key={item.label} style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.label}</span>
+                      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{item.label}</span>
                       <span style={{ fontSize: 18, fontWeight: 800 }}>{item.value}</span>
                     </div>
                   ))}
@@ -979,10 +979,10 @@ function RuntimeStatusBar({
         alignItems: 'center',
         flexWrap: 'wrap',
         padding: '10px 14px',
-        borderTop: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+        borderTop: '1px solid color-mix(in srgb, var(--border-default) 76%, transparent)',
         borderRadius: 0,
         background:
-          'linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, var(--bg)) 0%, color-mix(in srgb, var(--surface) 82%, var(--bg)) 100%)',
+          'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base) 100%)',
       }}
     >
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -992,14 +992,14 @@ function RuntimeStatusBar({
               width: 8,
               height: 8,
               borderRadius: '50%',
-              background: (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-3)',
+              background: (statusBarSummary?.activeCount ?? 0) > 0 ? 'var(--success))' : 'var(--fg-muted)',
               boxShadow:
                 (statusBarSummary?.activeCount ?? 0) > 0 ? '0 0 12px rgba(34,197,94,0.55)' : 'none',
             }}
           />
           <span>
             活跃 {statusBarSummary?.activeCount ?? filteredSharedSessions.length}
-            <span style={{ margin: '0 4px', color: 'var(--text-3)' }}>/</span>共{' '}
+            <span style={{ margin: '0 4px', color: 'var(--fg-muted)' }}>/</span>共{' '}
             {statusBarSummary?.totalCount ?? filteredSharedSessions.length}
           </span>
         </span>
@@ -1030,11 +1030,11 @@ function RuntimeStatusBar({
                 width: 30,
                 height: 26,
                 borderRadius: 8,
-                border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
                 background: active
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--surface))'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
                   : 'transparent',
-                color: active ? 'var(--accent)' : 'var(--text-3)',
+                color: active ? 'var(--accent)' : 'var(--fg-muted)',
                 cursor: 'pointer',
               }}
             >
@@ -1051,20 +1051,20 @@ function RuntimeStatusBar({
       >
         {statusBarSummary ? (
           <>
-            <span style={{ color: 'var(--text-3)' }}>
-              总 <strong style={{ color: 'var(--text)' }}>{statusBarSummary.totalCount}</strong>
+            <span style={{ color: 'var(--fg-muted)' }}>
+              总 <strong style={{ color: 'var(--fg-strong)' }}>{statusBarSummary.totalCount}</strong>
             </span>
-            <span style={{ color: 'var(--text-3)' }}>
-              运行 <strong style={{ color: 'var(--success, var(--success, #3dd49a))' }}>{statusBarSummary.runningCount}</strong>
+            <span style={{ color: 'var(--fg-muted)' }}>
+              运行 <strong style={{ color: 'var(--success))' }}>{statusBarSummary.runningCount}</strong>
             </span>
-            <span style={{ color: 'var(--text-3)' }}>
-              等待 <strong style={{ color: 'var(--warning, var(--warning, #f0b429))' }}>{statusBarSummary.waitingCount}</strong>
+            <span style={{ color: 'var(--fg-muted)' }}>
+              等待 <strong style={{ color: 'var(--warning))' }}>{statusBarSummary.waitingCount}</strong>
             </span>
-            <span style={{ color: 'var(--text-3)' }}>
-              异常 <strong style={{ color: 'var(--danger, var(--danger, #f06b7e))' }}>{statusBarSummary.errorCount}</strong>
+            <span style={{ color: 'var(--fg-muted)' }}>
+              异常 <strong style={{ color: 'var(--danger))' }}>{statusBarSummary.errorCount}</strong>
             </span>
             <span style={{ color: 'var(--accent)' }}>{statusBarSummary.todayTokens}</span>
-            <span style={{ color: 'var(--text-3)' }}>{statusBarSummary.runtimeLabel}</span>
+            <span style={{ color: 'var(--fg-muted)' }}>{statusBarSummary.runtimeLabel}</span>
           </>
         ) : (
           <>
@@ -1072,7 +1072,7 @@ function RuntimeStatusBar({
             <ChromeBadge>当前区块 {activeTabLabel}</ChromeBadge>
             <ChromeBadge>布局 {layoutModeLabel}</ChromeBadge>
             <ChromeBadge>{filteredSharedSessions.length} 个共享运行</ChromeBadge>
-            <span style={{ color: 'var(--text-3)' }}>
+            <span style={{ color: 'var(--fg-muted)' }}>
               {selectedRunSummary
                 ? `当前焦点：${selectedRunSummary.title}`
                 : '当前尚未选中共享运行'}
@@ -1170,9 +1170,9 @@ export function TeamRuntimeShellFrame({
                 display: 'grid',
                 gap: 10,
                 padding: '12px 16px',
-                borderBottom: '1px solid color-mix(in srgb, var(--border) 78%, transparent)',
+                borderBottom: '1px solid color-mix(in srgb, var(--border-default) 78%, transparent)',
                 background:
-                  'linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, var(--bg)) 0%, color-mix(in srgb, var(--surface) 88%, var(--bg)) 100%)',
+                  'linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base) 0%, color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base) 100%)',
               }}
             >
               <div
@@ -1194,7 +1194,7 @@ export function TeamRuntimeShellFrame({
                   }}
                 >
                   <div aria-hidden="true" style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                    {['var(--danger, var(--danger, #f06b7e))', 'var(--warning, var(--warning, #f0b429))', 'var(--success, var(--success, #3dd49a))'].map((color) => (
+                    {['var(--danger))', 'var(--warning))', 'var(--success))'].map((color) => (
                       <span
                         key={color}
                         style={{ width: 10, height: 10, borderRadius: '50%', background: color }}
@@ -1222,7 +1222,7 @@ export function TeamRuntimeShellFrame({
                     <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>
                       团队运行工作台
                     </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
                       {countsLine} · 当前焦点：{selectedRunSummary?.title ?? '未选中共享运行'}
                     </span>
                   </div>
@@ -1276,12 +1276,12 @@ export function TeamRuntimeShellFrame({
                     ...TEAM_RUNTIME_INSET_PANEL_STYLE,
                     borderColor:
                       feedback.tone === 'success'
-                        ? 'color-mix(in srgb, var(--success) 42%, var(--border))'
-                        : 'color-mix(in srgb, var(--danger) 42%, var(--border))',
+                        ? 'color-mix(in srgb, var(--success) 42%, var(--border-default))'
+                        : 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
                     background:
                       feedback.tone === 'success'
-                        ? 'color-mix(in srgb, var(--success) 10%, var(--surface))'
-                        : 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
+                        ? 'color-mix(in srgb, var(--success) 10%, var(--bg-overlay))'
+                        : 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
                     color: feedback.tone === 'success' ? 'var(--success)' : 'var(--danger)',
                   }}
                 >
@@ -1293,8 +1293,8 @@ export function TeamRuntimeShellFrame({
                 <div
                   style={{
                     ...TEAM_RUNTIME_INSET_PANEL_STYLE,
-                    borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border))',
-                    background: 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
+                    borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+                    background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
                     color: 'var(--danger)',
                   }}
                 >
@@ -1346,8 +1346,8 @@ export function TeamRuntimeShellFrame({
                         bottom: 16,
                         width: 14,
                         borderRadius: 999,
-                        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-                        background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                        border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                         cursor: 'col-resize',
                         zIndex: 2,
                       }}
@@ -1409,8 +1409,8 @@ export function TeamRuntimeShellFrame({
                         bottom: 16,
                         width: 14,
                         borderRadius: 999,
-                        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-                        background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                        border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                         cursor: 'col-resize',
                         zIndex: 2,
                       }}

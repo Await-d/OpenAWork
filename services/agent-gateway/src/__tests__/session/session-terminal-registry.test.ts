@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as RegistryModule from '../../session/session-terminal-registry.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -41,7 +41,7 @@ function seedUserAndSession(): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   registry = await import('../../session/session-terminal-registry.js');
   await dbModule.connectDb();
   await dbModule.migrate();

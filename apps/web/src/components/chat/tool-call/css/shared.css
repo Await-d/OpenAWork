@@ -13,7 +13,7 @@
 
 .tool-call-block-params {
   margin-top: 6px;
-  border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+  border-top: 1px dashed color-mix(in oklch, var(--border-default) 60%, transparent);
   padding-top: 6px;
 }
 
@@ -23,7 +23,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-3);
+  color: var(--fg-muted);
   list-style: none;
   user-select: none;
   padding: 2px 0;
@@ -61,7 +61,7 @@
   border: none;
   border-radius: 3px;
   background: transparent;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-size: 11px;
   cursor: pointer;
   opacity: 0;
@@ -72,7 +72,7 @@
 }
 
 .tool-call-copy-btn:hover {
-  background: color-mix(in oklch, var(--surface-2) 60%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
   color: var(--text-1);
 }
 
@@ -103,9 +103,9 @@
 }
 
 .tool-search-badge-empty {
-  color: var(--text-3);
-  background: color-mix(in oklch, var(--surface-2) 40%, transparent);
-  border-color: color-mix(in oklch, var(--border) 40%, transparent);
+  color: var(--fg-muted);
+  background: color-mix(in oklch, var(--bg-surface) 40%, transparent);
+  border-color: color-mix(in oklch, var(--border-default) 40%, transparent);
 }
 
 .tool-search-badge-error {
@@ -126,13 +126,13 @@
 
 .tool-output-label {
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .tool-output-meta {
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-size: 10px;
 }
 
@@ -142,8 +142,8 @@
   font-size: 11px;
   line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--text-2);
-  background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+  color: var(--fg-default);
+  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -157,7 +157,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-size: 10px;
   cursor: pointer;
   transition: color 0.15s;
@@ -187,15 +187,15 @@
   font-size: 10px;
   letter-spacing: 0.02em;
   color: var(--fg-on-accent);
-  background: color-mix(in oklch, var(--accent) 60%, var(--text-3) 40%);
+  background: color-mix(in oklch, var(--accent) 60%, var(--fg-muted) 40%);
 }
 
 .tool-call-block-web-status[data-status-ok='true'] {
-  background: color-mix(in oklch, var(--success, var(--success, #3dd49a)) 60%, var(--text-3) 40%);
+  background: color-mix(in oklch, var(--success) 60%, var(--fg-muted) 40%);
 }
 
 .tool-call-block-web-url {
-  color: var(--text-3);
+  color: var(--fg-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -204,7 +204,7 @@
 }
 
 .tool-call-block-web-lines {
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-size: 10px;
   margin-left: auto;
 }
@@ -219,11 +219,11 @@
 .tool-call-block-search-item {
   padding: 4px 8px;
   border-radius: 4px;
-  background: color-mix(in oklch, var(--surface-2) 30%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 30%, transparent);
 }
 
 .tool-call-block-search-item:hover {
-  background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
 }
 
 .tool-call-block-search-title {
@@ -264,7 +264,7 @@
 
 .tool-call-block-search-snippet {
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   line-height: 1.5;
   margin-top: 2px;
   display: -webkit-box;
@@ -278,8 +278,8 @@
   padding: 6px 8px;
   font-size: 12px;
   line-height: 1.65;
-  color: var(--text-2);
-  background: color-mix(in oklch, var(--surface-2) 30%, transparent);
+  color: var(--fg-default);
+  background: color-mix(in oklch, var(--bg-surface) 30%, transparent);
   border-radius: 4px;
   max-height: 320px;
   overflow-y: auto;
@@ -319,14 +319,14 @@
   font-size: 11px;
   padding: 1px 4px;
   border-radius: 3px;
-  background: color-mix(in oklch, var(--surface-2) 60%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
 }
 
 .tool-call-block-web-markdown pre {
   margin: 4px 0;
   padding: 6px 8px;
   border-radius: 4px;
-  background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
   font-size: 11px;
   overflow-x: auto;
 }
@@ -336,8 +336,8 @@
   padding: 6px 8px;
   font-size: 12px;
   line-height: 1.65;
-  color: var(--text-2);
-  background: color-mix(in oklch, var(--surface-2) 50%, transparent);
+  color: var(--fg-default);
+  background: color-mix(in oklch, var(--bg-surface) 50%, transparent);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;

@@ -47,7 +47,7 @@ const PROGRESS_TRACK_STYLE: CSSProperties = {
   width: 100,
   height: 4,
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--border) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
   overflow: 'hidden',
 };
 
@@ -63,19 +63,19 @@ const PROGRESS_FILL_STYLE: CSSProperties = {
 
 const ESTIMATE_LABEL_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontWeight: 400,
   flexShrink: 0,
   whiteSpace: 'nowrap',
 };
 
 const LAYER_COLORS: Record<TeamRoleLayer, string> = {
-  user: 'var(--text-3)',
-  reception: 'var(--accent, var(--accent, #5cd4c0))',
-  pm1: 'var(--chart-5, var(--chart-5, #c4b5fd))',
-  pm2: 'var(--chart-5, var(--chart-5, #c4b5fd))',
-  executor: 'var(--success, var(--success, #3dd49a))',
-  reviewer: 'var(--warning, var(--warning, #f0b429))',
+  user: 'var(--fg-muted)',
+  reception: 'var(--accent))',
+  pm1: 'var(--chart-5))',
+  pm2: 'var(--chart-5))',
+  executor: 'var(--success))',
+  reviewer: 'var(--warning))',
 };
 
 export interface TeamStatusBarProps {
@@ -151,7 +151,7 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
   if (handoffs.size === 0) {
     return (
       <div style={MINIMIZED_BAR_STYLE} role="status" aria-label="团队运行状态（待命中）">
-        <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>● AI 团队待命中</span>
+        <span style={{ color: 'var(--fg-muted)', fontWeight: 400 }}>● AI 团队待命中</span>
       </div>
     );
   }
@@ -169,7 +169,7 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
               }}
             />
           </div>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
             {stats.completed}/{stats.total}
           </span>
         </div>
@@ -177,17 +177,17 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
 
       {/* 任务计数 */}
       {stats.running > 0 ? (
-        <span style={{ color: 'var(--success, var(--success, var(--success, #3dd49a)))', flexShrink: 0, whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--success))', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ● {stats.running} 运行中
         </span>
       ) : null}
       {stats.pending > 0 ? (
-        <span style={{ color: 'var(--text-3)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--fg-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ◌ {stats.pending} 等待
         </span>
       ) : null}
       {stats.failed > 0 ? (
-        <span style={{ color: 'var(--danger, #d4574e)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--danger))', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ✗ {stats.failed}
         </span>
       ) : null}
@@ -236,8 +236,8 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
             marginLeft: 'auto',
             padding: '2px 10px',
             borderRadius: 6,
-            border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-            color: 'var(--text-2)',
+            border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+            color: 'var(--fg-default)',
             fontSize: 11,
             cursor: 'pointer',
             flexShrink: 0,
@@ -256,8 +256,8 @@ export function TeamStatusBar({ onPauseAll, onResumeAll, paused }: TeamStatusBar
             marginLeft: 'auto',
             padding: '2px 10px',
             borderRadius: 6,
-            border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 40%, transparent)',
-            color: 'var(--success, var(--success, var(--success, #3dd49a)))',
+            border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)',
+            color: 'var(--success))',
             fontSize: 11,
             cursor: 'pointer',
             flexShrink: 0,

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { toast } from '../../components/common/ToastNotification.js';
+import { toast } from '../../components/common/feedback/ToastNotification.js';
 
 function formatDate(input: string): string {
   if (!input) return '—';
@@ -53,10 +53,10 @@ function InfoCardRow({ row }: { row: InfoRow }) {
         borderTop: '1px solid var(--border-subtle)',
       }}
     >
-      <span style={{ color: 'var(--text-3)', fontSize: 12 }}>{row.label}</span>
+      <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>{row.label}</span>
       <span
         style={{
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           fontSize: 13,
           fontFamily: row.mono
             ? 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)'
@@ -160,7 +160,7 @@ export default function AboutPage() {
         minWidth: 0,
         overflowY: 'auto',
         padding: '32px 40px 56px',
-        background: 'var(--bg)',
+        background: 'var(--bg-base)',
       }}
     >
       <div
@@ -199,7 +199,7 @@ export default function AboutPage() {
               <rect width="32" height="32" rx="8" fill="url(#aboutLogoBg)" />
               <path
                 d="M 16,3 C 26,3 29,12 16,16"
-                stroke="var(--accent-text)"
+                stroke="var(--fg-on-accent)"
                 strokeWidth="2.6"
                 strokeLinecap="round"
                 fill="none"
@@ -207,7 +207,7 @@ export default function AboutPage() {
               />
               <path
                 d="M 16,3 C 26,3 29,12 16,16"
-                stroke="var(--accent-text)"
+                stroke="var(--fg-on-accent)"
                 strokeWidth="2.6"
                 strokeLinecap="round"
                 fill="none"
@@ -215,13 +215,13 @@ export default function AboutPage() {
               />
               <path
                 d="M 16,3 C 26,3 29,12 16,16"
-                stroke="var(--accent-text)"
+                stroke="var(--fg-on-accent)"
                 strokeWidth="2.6"
                 strokeLinecap="round"
                 fill="none"
                 transform="rotate(240, 16, 16)"
               />
-              <circle cx="16" cy="16" r="2.8" fill="var(--accent-text)" />
+              <circle cx="16" cy="16" r="2.8" fill="var(--fg-on-accent)" />
             </svg>
           </span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
@@ -231,12 +231,12 @@ export default function AboutPage() {
                 fontSize: 26,
                 fontWeight: 700,
                 letterSpacing: '-0.02em',
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
               }}
             >
               OpenAWork
             </h1>
-            <span style={{ color: 'var(--text-3)', fontSize: 13 }}>
+            <span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>
               AI Agent Workspace · 版本 {version}
             </span>
           </div>
@@ -253,9 +253,9 @@ export default function AboutPage() {
               height: 32,
               padding: '0 12px',
               borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--text-2)',
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-overlay)',
+              color: 'var(--fg-default)',
               fontSize: 12,
               fontWeight: 600,
               cursor: copying ? 'wait' : 'pointer',
@@ -284,9 +284,9 @@ export default function AboutPage() {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-default)',
             borderRadius: 14,
-            background: 'var(--surface)',
+            background: 'var(--bg-overlay)',
             padding: '4px 18px 10px',
             boxShadow: '0 4px 18px -14px color-mix(in oklch, black 80%, transparent)',
           }}
@@ -304,7 +304,7 @@ export default function AboutPage() {
                 margin: 0,
                 fontSize: 14,
                 fontWeight: 700,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 letterSpacing: '-0.01em',
               }}
             >
@@ -321,9 +321,9 @@ export default function AboutPage() {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-default)',
             borderRadius: 14,
-            background: 'var(--surface)',
+            background: 'var(--bg-overlay)',
             padding: '4px 18px 16px',
             boxShadow: '0 4px 18px -14px color-mix(in oklch, black 80%, transparent)',
           }}
@@ -344,13 +344,13 @@ export default function AboutPage() {
                   margin: 0,
                   fontSize: 14,
                   fontWeight: 700,
-                  color: 'var(--text)',
+                  color: 'var(--fg-strong)',
                   letterSpacing: '-0.01em',
                 }}
               >
                 最近更新
               </h2>
-              <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+              <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
                 源自构建时刻冻结的 git log,共 {commits.length} 条
               </span>
             </div>
@@ -372,7 +372,7 @@ export default function AboutPage() {
           </div>
 
           {commits.length === 0 ? (
-            <p style={{ color: 'var(--text-3)', fontSize: 12, padding: '12px 0' }}>
+            <p style={{ color: 'var(--fg-muted)', fontSize: 12, padding: '12px 0' }}>
               当前构建未携带 git 提交信息。
             </p>
           ) : (
@@ -397,7 +397,7 @@ export default function AboutPage() {
                   bottom: 12,
                   width: 1,
                   background:
-                    'linear-gradient(180deg, color-mix(in oklch, var(--accent) 60%, transparent), color-mix(in oklch, var(--border) 80%, transparent))',
+                    'linear-gradient(180deg, color-mix(in oklch, var(--accent) 60%, transparent), color-mix(in oklch, var(--border-default) 80%, transparent))',
                 }}
               />
               {commits.map((commit, idx) => {
@@ -422,11 +422,11 @@ export default function AboutPage() {
                         height: 11,
                         marginTop: 4,
                         borderRadius: '50%',
-                        background: idx === 0 ? 'var(--accent)' : 'var(--surface)',
+                        background: idx === 0 ? 'var(--accent)' : 'var(--bg-overlay)',
                         border:
                           idx === 0
                             ? '2px solid color-mix(in oklch, var(--accent) 80%, transparent)'
-                            : '2px solid color-mix(in oklch, var(--border) 90%, transparent)',
+                            : '2px solid color-mix(in oklch, var(--border-default) 90%, transparent)',
                         boxShadow:
                           idx === 0
                             ? '0 0 0 4px color-mix(in oklch, var(--accent) 20%, transparent)'
@@ -437,7 +437,7 @@ export default function AboutPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
                       <span
                         style={{
-                          color: 'var(--text)',
+                          color: 'var(--fg-strong)',
                           fontSize: 13,
                           fontWeight: 500,
                           overflow: 'hidden',
@@ -456,7 +456,7 @@ export default function AboutPage() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 8,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontSize: 11,
                         }}
                       >
@@ -468,13 +468,13 @@ export default function AboutPage() {
                             className="ui-hover-color"
                             data-tone="accent"
                             style={{
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               textDecoration: 'none',
                               fontFamily:
                                 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
                               padding: '0 5px',
                               borderRadius: 4,
-                              background: 'var(--bg-2)',
+                              background: 'var(--bg-overlay)',
                               border: '1px solid var(--border-subtle)',
                             }}
                           >
@@ -487,7 +487,7 @@ export default function AboutPage() {
                                 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
                               padding: '0 5px',
                               borderRadius: 4,
-                              background: 'var(--bg-2)',
+                              background: 'var(--bg-overlay)',
                               border: '1px solid var(--border-subtle)',
                             }}
                           >
@@ -499,7 +499,7 @@ export default function AboutPage() {
                     </div>
                     <span
                       style={{
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         fontSize: 11,
                         whiteSpace: 'nowrap',
                       }}
@@ -516,7 +516,7 @@ export default function AboutPage() {
 
         <footer
           style={{
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             fontSize: 11,
             textAlign: 'center',
             paddingTop: 4,

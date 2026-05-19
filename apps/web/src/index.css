@@ -22,36 +22,36 @@
   --fg-on-complement: #1f0508;
 
   /* 主强调色: 靛青 */
-  --accent: var(--accent, #5cd4c0);
-  --accent-hover: var(--accent-hover, #72e0ce);
-  --accent-active: var(--accent-active, #4ac4b0);
+  --accent: #5cd4c0;
+  --accent-hover: #72e0ce;
+  --accent-active: #4ac4b0;
   --accent-muted: rgba(92, 212, 192, 0.14);
   --accent-subtle: rgba(92, 212, 192, 0.07);
   --accent-border: rgba(92, 212, 192, 0.30);
 
   /* 对比色: 琥珀 */
-  --contrast: var(--warning, #f0b429);
+  --contrast: #f0b429;
   --contrast-hover: #f5c84d;
   --contrast-muted: rgba(240, 180, 41, 0.14);
   --contrast-subtle: rgba(240, 180, 41, 0.07);
   --contrast-border: rgba(240, 180, 41, 0.30);
 
   /* 互补色: 珊瑚 */
-  --complement: var(--danger, #f06b7e);
+  --complement: #f06b7e;
   --complement-hover: #f5919f;
   --complement-muted: rgba(240, 107, 126, 0.14);
   --complement-subtle: rgba(240, 107, 126, 0.07);
   --complement-border: rgba(240, 107, 126, 0.30);
 
   /* 辅助色: 靛蓝 */
-  --aux: var(--aux, #8b9cf5);
-  --aux-hover: var(--aux-hover, #a8b5fc);
+  --aux: #8b9cf5;
+  --aux-hover: #a8b5fc;
   --aux-muted: rgba(139, 156, 245, 0.14);
   --aux-subtle: rgba(139, 156, 245, 0.07);
   --aux-border: rgba(139, 156, 245, 0.30);
 
   /* 语义色 */
-  --success: var(--success, #3dd49a);
+  --success: #3dd49a;
   --success-muted: rgba(61, 212, 154, 0.14);
   --success-border: rgba(61, 212, 154, 0.30);
   --warning: var(--contrast);
@@ -86,52 +86,22 @@
   --dur-emphasis: 350ms;
 
   /* 图表配色 */
-  --chart-1: var(--accent, #5cd4c0);
-  --chart-2: var(--warning, #f0b429);
-  --chart-3: var(--aux, #8b9cf5);
-  --chart-4: var(--danger, #f06b7e);
-  --chart-5: var(--chart-5, #c4b5fd);
-  --chart-6: var(--success, var(--success, #3dd49a));
-  --chart-7: var(--chart-7, #67e8f9);
-  --chart-8: var(--complement, #f06b7e);
+  --chart-1: #5cd4c0;
+  --chart-2: #f0b429;
+  --chart-3: #8b9cf5;
+  --chart-4: #f06b7e;
+  --chart-5: #c4b5fd;
+  --chart-6: #86efac;
+  --chart-7: #67e8f9;
+  --chart-8: #fda4af;
 
   /* 语法高亮 */
-  --hl-keyword: var(--aux, #8b9cf5);
-  --hl-function: var(--accent, #5cd4c0);
-  --hl-type: var(--warning, #f0b429);
-  --hl-string: var(--success, var(--success, #3dd49a));
-  --hl-number: var(--complement, #f06b7e);
+  --hl-keyword: #8b9cf5;
+  --hl-function: #5cd4c0;
+  --hl-type: #f0b429;
+  --hl-string: #86efac;
+  --hl-number: #fda4af;
   --hl-comment: #4d5b6e;
-
-  /* ── 向后兼容映射 ── */
-  --nav-rail-bg: var(--bg-raised);
-  --header-bg: var(--bg-overlay);
-  --card-bg: var(--bg-overlay);
-  --card-border: var(--border-default);
-  --bg: var(--bg-base);
-  --bg-2: var(--bg-raised);
-  --bg-3: var(--bg-overlay);
-  --bg-glass: rgba(18, 23, 33, 0.75);
-  --bg-glass-border: var(--border-default);
-  --surface: var(--bg-overlay);
-  --surface-2: var(--bg-surface);
-  --surface-hover: var(--bg-hover);
-  --border: var(--border-default);
-  --text: var(--fg-strong);
-  --text-2: var(--fg-default);
-  --text-3: var(--fg-muted);
-  --accent-text: var(--fg-on-accent);
-  --color-bg: var(--bg-base);
-  --color-surface: var(--bg-overlay);
-  --color-surface-raised: var(--bg-raised);
-  --color-border: var(--border-default);
-  --color-text: var(--fg-strong);
-  --color-muted: var(--fg-muted);
-  --color-fg: var(--fg-strong);
-  --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
-  --color-accent-text: var(--fg-on-accent);
-  --color-warning: var(--warning);
 
   /* Tool-call 语义色 */
   --tc-path: var(--aux);
@@ -157,11 +127,18 @@
   --tc-ext-rb: var(--complement);
   --tc-ext-sh: var(--success);
 
-  color-scheme: dark;
-}
-
-:root {
+  /* 杂项 */
   --provider-logo-filter: invert(1) brightness(2);
+
+  /* 布局 */
+  --sidebar-width: 260px;
+  --right-sidebar-width: 260px;
+  --rail-width: 48px;
+  --rail-expanded: 0;
+  --layout-padding: 4px 4px 6px;
+  --content-max-width: 900px;
+
+  color-scheme: dark;
 }
 
 :root.light {
@@ -171,7 +148,7 @@
 :root.light {
   /* ═══ Aurora 亮色主题 — 极光雾气配色 ═══ */
   --bg-base: #f4f6ff;
-  --bg-raised: var(--fg-on-accent);
+  --bg-raised: #ffffff;
   --bg-overlay: #eef1ff;
   --bg-surface: #e4e8fa;
   --bg-elevated: #d8defa;
@@ -181,13 +158,13 @@
   --fg-strong: #161a3a;
   --fg-default: #43497a;
   --fg-muted: #7c83a9;
-  --fg-subtle: var(--fg-subtle, #4d5b6e);
-  --fg-on-accent: var(--fg-on-accent);
-  --fg-on-contrast: var(--fg-on-accent);
-  --fg-on-complement: var(--fg-on-accent);
+  --fg-subtle: #a8aec8;
+  --fg-on-accent: #ffffff;
+  --fg-on-contrast: #ffffff;
+  --fg-on-complement: #ffffff;
 
   /* 主强调色: 靛紫 */
-  --accent: var(--accent, #5cd4c0);
+  --accent: #6471f0;
   --accent-hover: #515fe8;
   --accent-active: #4452d8;
   --accent-muted: rgba(100, 113, 240, 0.12);
@@ -195,28 +172,28 @@
   --accent-border: rgba(100, 113, 240, 0.30);
 
   /* 对比色: 紫粉 */
-  --contrast: var(--chart-5, var(--chart-5, #c4b5fd));
+  --contrast: #a06bff;
   --contrast-hover: #8e55f5;
   --contrast-muted: rgba(160, 107, 255, 0.12);
   --contrast-subtle: rgba(160, 107, 255, 0.06);
   --contrast-border: rgba(160, 107, 255, 0.30);
 
   /* 互补色: 玫瑰 */
-  --complement: var(--danger, #f06b7e);
+  --complement: #e0497a;
   --complement-hover: #d13668;
   --complement-muted: rgba(224, 73, 122, 0.10);
   --complement-subtle: rgba(224, 73, 122, 0.05);
   --complement-border: rgba(224, 73, 122, 0.28);
 
   /* 辅助色: 天蓝 */
-  --aux: var(--aux, #8b9cf5);
+  --aux: #3aa0ff;
   --aux-hover: #2a8def;
   --aux-muted: rgba(58, 160, 255, 0.12);
   --aux-subtle: rgba(58, 160, 255, 0.06);
   --aux-border: rgba(58, 160, 255, 0.30);
 
   /* 语义色 */
-  --success: var(--success, #3dd49a);
+  --success: #16a37a;
   --success-muted: rgba(22, 163, 122, 0.10);
   --success-border: rgba(22, 163, 122, 0.28);
   --warning: var(--contrast);
@@ -243,41 +220,24 @@
   --shadow-glow: 0 0 20px -4px rgba(124, 92, 255, 0.25);
 
   /* 图表配色 — 极光色系 */
-  --chart-1: var(--accent, #5cd4c0);
-  --chart-2: var(--chart-5, var(--chart-5, #c4b5fd));
-  --chart-3: var(--aux, #8b9cf5);
-  --chart-4: var(--danger, #f06b7e);
-  --chart-5: var(--chart-5, var(--chart-5, #c4b5fd));
-  --chart-6: var(--success, #3dd49a);
-  --chart-7: var(--chart-7, #67e8f9);
-  --chart-8: var(--chart-8, #fda4af);
+  --chart-1: #6471f0;
+  --chart-2: #a06bff;
+  --chart-3: #3aa0ff;
+  --chart-4: #e0497a;
+  --chart-5: #c084fc;
+  --chart-6: #16a37a;
+  --chart-7: #0891b2;
+  --chart-8: #f0abfc;
 
   /* 语法高亮 */
-  --hl-keyword: var(--accent, #5cd4c0);
-  --hl-function: var(--chart-5, var(--chart-5, #c4b5fd));
-  --hl-type: var(--aux, #8b9cf5);
-  --hl-string: var(--success, #3dd49a);
-  --hl-number: var(--danger, #f06b7e);
-  --hl-comment: var(--fg-subtle, #4d5b6e);
+  --hl-keyword: #6471f0;
+  --hl-function: #a06bff;
+  --hl-type: #3aa0ff;
+  --hl-string: #16a37a;
+  --hl-number: #e0497a;
+  --hl-comment: #a8aec8;
 
-  /* 向后兼容 */
-  --nav-rail-bg: rgba(255, 255, 255, 0.85);
-  --header-bg: rgba(255, 255, 255, 0.75);
-  --card-bg: var(--bg-raised);
-  --card-border: var(--border-default);
-  --bg: var(--bg-base);
-  --bg-2: var(--bg-overlay);
-  --bg-3: var(--bg-surface);
-  --bg-glass: rgba(255, 255, 255, 0.70);
-  --bg-glass-border: var(--border-default);
-  --surface: var(--bg-raised);
-  --surface-2: var(--bg-overlay);
-  --surface-hover: var(--bg-hover);
-  --border: var(--border-default);
-  --text: var(--fg-strong);
-  --text-2: var(--fg-default);
-  --text-3: var(--fg-muted);
-  --accent-text: var(--fg-on-accent);
+
 
   /* Tool-call 语义色(亮色) */
   --tc-path: var(--aux);
@@ -321,8 +281,8 @@ body,
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-base);
+  color: var(--fg-strong);
   font-family:
     Inter,
     system-ui,
@@ -366,11 +326,11 @@ textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--border-default);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-3);
+  background: var(--fg-muted);
 }
 
 @keyframes pulse {
@@ -525,15 +485,6 @@ textarea {
   }
 }
 
-:root {
-  --sidebar-width: 260px;
-  --right-sidebar-width: 260px;
-  --rail-width: 48px;
-  --rail-expanded: 0;
-  --layout-padding: 4px 4px 6px;
-  --content-max-width: 900px;
-}
-
 @media (min-width: 1440px) {
   :root {
     --sidebar-width: 300px;
@@ -586,7 +537,7 @@ textarea {
   z-index: -1;
 }
 .nav-rail-btn:hover {
-  color: var(--text) !important;
+  color: var(--fg-strong) !important;
 }
 .nav-rail-btn:hover::before {
   opacity: 1;
@@ -615,7 +566,7 @@ textarea {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
-  color: var(--text-3);
+  color: var(--fg-muted);
   transition:
     color 200ms ease,
     transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -644,8 +595,8 @@ textarea {
   isolation: isolate;
   background: linear-gradient(
     135deg,
-    color-mix(in oklch, var(--accent) 18%, var(--surface) 50%),
-    color-mix(in oklch, var(--accent) 8%, var(--surface) 80%)
+    color-mix(in oklch, var(--accent) 18%, var(--bg-overlay) 50%),
+    color-mix(in oklch, var(--accent) 8%, var(--bg-overlay) 80%)
   ) !important;
   box-shadow:
     inset 0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
@@ -732,7 +683,7 @@ textarea {
       color-mix(in oklch, var(--accent) 12%, transparent) 0%,
       transparent 70%
     ),
-    var(--nav-rail-bg);
+    var(--bg-raised);
 }
 
 .layout-nav-rail .nav-rail-divider {
@@ -741,8 +692,8 @@ textarea {
   background: linear-gradient(
     90deg,
     transparent,
-    color-mix(in oklch, var(--border) 90%, transparent) 30%,
-    color-mix(in oklch, var(--border) 90%, transparent) 70%,
+    color-mix(in oklch, var(--border-default) 90%, transparent) 30%,
+    color-mix(in oklch, var(--border-default) 90%, transparent) 70%,
     transparent
   );
   flex-shrink: 0;
@@ -753,7 +704,7 @@ textarea {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: color-mix(in oklch, var(--text-3) 75%, transparent);
+  color: color-mix(in oklch, var(--fg-muted) 75%, transparent);
   padding: 8px 10px 3px;
   user-select: none;
 }
@@ -771,7 +722,7 @@ textarea {
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: color-mix(in oklch, var(--border) 70%, transparent);
+  background: color-mix(in oklch, var(--border-default) 70%, transparent);
   transform: translate(-50%, -50%);
 }
 
@@ -830,16 +781,16 @@ textarea {
   animation: nav-rail-status-pulse 2.4s ease-in-out infinite;
 }
 .nav-rail-status-dot[data-status='offline'] {
-  background: var(--text-3);
+  background: var(--fg-muted);
   animation: none;
 }
 .nav-rail-status-dot[data-status='warning'] {
-  background: var(--warning, var(--warning, var(--warning, #f0b429)));
+  background: var(--warning);
 }
 
 .nav-rail-scroll {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--border) 60%, transparent) transparent;
+  scrollbar-color: color-mix(in oklch, var(--border-default) 60%, transparent) transparent;
 }
 .nav-rail-scroll::-webkit-scrollbar {
   width: 4px;
@@ -848,11 +799,11 @@ textarea {
   background: transparent;
 }
 .nav-rail-scroll::-webkit-scrollbar-thumb {
-  background: color-mix(in oklch, var(--border) 60%, transparent);
+  background: color-mix(in oklch, var(--border-default) 60%, transparent);
   border-radius: 999px;
 }
 .nav-rail-scroll::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--border) 90%, transparent);
+  background: color-mix(in oklch, var(--border-default) 90%, transparent);
 }
 
 .nav-rail-label {
@@ -880,7 +831,7 @@ textarea {
   overflow: hidden;
 }
 .session-item:hover {
-  background: var(--surface-hover) !important;
+  background: var(--bg-hover) !important;
 }
 .session-item:focus-within {
   outline: 2px solid color-mix(in oklch, var(--accent) 72%, var(--fg-on-accent) 8%);
@@ -990,8 +941,8 @@ textarea {
     color 150ms ease;
 }
 .icon-btn:hover {
-  background: var(--surface-hover) !important;
-  color: var(--text-2) !important;
+  background: var(--bg-hover) !important;
+  color: var(--fg-default) !important;
 }
 
 .icon-btn-accent {
@@ -1012,8 +963,8 @@ textarea {
   touch-action: manipulation;
 }
 .toolbar-btn:hover {
-  background: var(--surface-hover) !important;
-  color: var(--text-2) !important;
+  background: var(--bg-hover) !important;
+  color: var(--fg-default) !important;
 }
 .toolbar-btn:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--accent) 78%, var(--fg-on-accent) 8%);
@@ -1027,8 +978,8 @@ textarea {
   cursor: pointer;
 }
 .mode-pill-btn:hover:not([data-active='true']) {
-  background: var(--surface-hover) !important;
-  color: var(--text) !important;
+  background: var(--bg-hover) !important;
+  color: var(--fg-strong) !important;
 }
 
 .collapse-btn {
@@ -1038,8 +989,8 @@ textarea {
   cursor: pointer;
 }
 .collapse-btn:hover {
-  background: var(--surface-hover) !important;
-  color: var(--text-2) !important;
+  background: var(--bg-hover) !important;
+  color: var(--fg-default) !important;
 }
 
 @media (min-width: 2560px) {
@@ -1077,7 +1028,7 @@ textarea {
   padding: 0 16px;
   gap: 8px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--header-bg);
+  background: var(--bg-overlay);
 }
 .page-content {
   flex: 1;
@@ -1086,8 +1037,8 @@ textarea {
   animation: fade-in 150ms ease;
 }
 .content-card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
   padding: 16px 20px;
 }
@@ -1096,7 +1047,7 @@ textarea {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin-bottom: 10px;
   display: block;
 }
@@ -1156,8 +1107,8 @@ textarea {
         to bottom,
         transparent 0,
         transparent 2px,
-        color-mix(in oklch, var(--border) 100%, transparent) 2px,
-        color-mix(in oklch, var(--border) 100%, transparent) 4px
+        color-mix(in oklch, var(--border-default) 100%, transparent) 2px,
+        color-mix(in oklch, var(--border-default) 100%, transparent) 4px
       );
   pointer-events: none;
   opacity: 1;
@@ -1173,7 +1124,7 @@ textarea {
   width: calc((100% - 24px) * (var(--ctx-bar-pct, 0%) / 100%));
   max-width: calc(100% - 24px);
   height: 2px;
-  background: var(--ctx-bar-color, var(--accent));
+  background: var(--ctx-bar-color);
   border-radius: 999px;
   pointer-events: none;
   transition:
@@ -1214,7 +1165,7 @@ textarea {
 .page-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--fg-strong);
   letter-spacing: -0.01em;
 }
 .btn-accent {
@@ -1227,7 +1178,7 @@ textarea {
   font-size: 12px;
   font-weight: 500;
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--fg-on-accent);
   cursor: pointer;
   border: none;
   transition: background 150ms ease;
@@ -1241,18 +1192,18 @@ textarea {
 }
 .toolbar-btn.active {
   background: var(--accent) !important;
-  color: var(--accent-text) !important;
+  color: var(--fg-on-accent) !important;
 }
 .page-subtitle {
   font-size: 12px;
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 .empty-state {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 1;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-size: 12px;
 }
 .spinner {
@@ -1347,7 +1298,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  background: var(--bg-base);
   overflow: hidden;
   padding: 24px;
 }
@@ -1384,8 +1335,8 @@ textarea {
   z-index: 1;
   width: 100%;
   max-width: 420px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
   border-radius: 20px;
   padding: 40px 36px 32px;
   box-shadow: var(--shadow-lg);
@@ -1394,10 +1345,34 @@ textarea {
 
 @supports (backdrop-filter: blur(1px)) {
   .login-card {
-    background: var(--bg-glass);
     backdrop-filter: blur(40px) saturate(1.3);
-    border-color: var(--bg-glass-border);
+    border-color: var(--border-default);
   }
+}
+
+/* 亮色主题下登录卡片用白雾玻璃 */
+:root.light .login-card {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-lg);
+}
+:root.light .login-glow--primary {
+  background: var(--accent);
+  opacity: 0.12;
+}
+:root.light .login-glow--secondary {
+  background: var(--contrast);
+  opacity: 0.08;
+}
+:root.light .login-input {
+  background: var(--bg-raised);
+  border-color: var(--border-default);
+}
+:root.light .login-input:hover {
+  background: var(--bg-overlay);
+}
+:root.light .login-btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
 }
 
 .login-brand {
@@ -1425,7 +1400,7 @@ textarea {
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.04em;
-  color: var(--text);
+  color: var(--fg-strong);
   margin: 0;
 }
 
@@ -1434,7 +1409,7 @@ textarea {
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin: 0;
 }
 
@@ -1447,13 +1422,13 @@ textarea {
   font-size: 16px;
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: var(--text);
+  color: var(--fg-strong);
   margin: 0 0 4px;
 }
 
 .login-heading p {
   font-size: 12.5px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin: 0;
 }
 
@@ -1467,17 +1442,17 @@ textarea {
 .login-label {
   font-size: 12px;
   font-weight: 550;
-  color: var(--text-2);
+  color: var(--fg-default);
   letter-spacing: 0.02em;
 }
 
 .login-input {
   width: 100%;
   padding: 10px 14px;
-  background: var(--bg-2);
-  border: 1.5px solid var(--border);
+  background: var(--bg-overlay);
+  border: 1.5px solid var(--border-default);
   border-radius: 10px;
-  color: var(--text);
+  color: var(--fg-strong);
   font-size: 13px;
   font-family: inherit;
   outline: none;
@@ -1488,19 +1463,19 @@ textarea {
 }
 
 .login-input::placeholder {
-  color: var(--text-3);
+  color: var(--fg-muted);
   opacity: 0.7;
 }
 
 .login-input:hover {
-  border-color: var(--border);
-  background: var(--bg-3);
+  border-color: var(--border-default);
+  background: var(--bg-surface);
 }
 
 .login-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-muted);
-  background: var(--bg-2);
+  background: var(--bg-overlay);
 }
 
 .login-error {
@@ -1522,7 +1497,7 @@ textarea {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   cursor: pointer;
   padding: 4px 0;
   margin-bottom: 4px;
@@ -1542,7 +1517,7 @@ textarea {
 
 .login-advanced-hint {
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin: 6px 0 0;
 }
 
@@ -1564,9 +1539,9 @@ textarea {
   align-content: start;
   min-height: 150px;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-default);
   border-radius: 14px;
-  background: color-mix(in oklch, var(--surface) 82%, var(--bg-2));
+  background: color-mix(in oklch, var(--bg-overlay) 82%, var(--bg-overlay));
   transition:
     border-color 150ms ease,
     background 150ms ease,
@@ -1575,21 +1550,21 @@ textarea {
 
 .login-server-card--active {
   border-color: var(--accent);
-  background: color-mix(in oklch, var(--accent-muted) 70%, var(--surface));
+  background: color-mix(in oklch, var(--accent-muted) 70%, var(--bg-overlay));
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
 }
 
 .login-server-card-title {
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--fg-strong);
   margin-bottom: 4px;
 }
 
 .login-server-card-copy {
   font-size: 11px;
   line-height: 1.45;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin: 0;
 }
 
@@ -1600,7 +1575,7 @@ textarea {
   border-radius: 9px;
   padding: 8px 10px;
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--fg-on-accent);
   font-size: 11.5px;
   font-weight: 650;
   font-family: inherit;
@@ -1612,9 +1587,9 @@ textarea {
 }
 
 .login-server-action--secondary {
-  background: var(--bg-3);
-  color: var(--text);
-  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--fg-strong);
+  border: 1px solid var(--border-default);
 }
 
 .login-server-action:hover:not(:disabled) {
@@ -1653,7 +1628,7 @@ textarea {
   cursor: pointer;
   overflow: hidden;
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  color: var(--accent-text);
+  color: var(--fg-on-accent);
   box-shadow:
     0 2px 12px color-mix(in oklch, var(--accent) 30%, transparent),
     inset 0 1px 0 oklch(1 0 0 / 0.1);
@@ -1704,7 +1679,7 @@ textarea {
 .login-footer {
   text-align: center;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   margin-top: 20px;
   letter-spacing: 0.01em;
 }
@@ -1716,9 +1691,9 @@ textarea {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-2);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  color: var(--fg-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1731,8 +1706,8 @@ textarea {
 }
 
 .login-theme-btn:hover {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: var(--bg-hover);
+  color: var(--fg-strong);
 }
 
 @media (max-width: 480px) {
@@ -2030,7 +2005,7 @@ body.theme-transitioning *::after {
 
 /* 亮色主题下品牌渐变 — 给 logo / brand 标记一种极光感 */
 :root.light [data-brand-mark] {
-  background: linear-gradient(135deg, var(--aux, #8b9cf5), var(--chart-5, var(--chart-5, #c4b5fd)));
+  background: linear-gradient(135deg, var(--aux), var(--chart-5));
   color: var(--fg-on-accent);
 }
 
@@ -2264,7 +2239,7 @@ body.theme-transitioning *::after {
   content: '';
   position: absolute; left: -2px; top: 8px; bottom: 8px;
   width: 2px; border-radius: 2px;
-  background: linear-gradient(180deg, var(--aux, #8b9cf5), var(--chart-5, var(--chart-5, #c4b5fd)));
+  background: linear-gradient(180deg, var(--aux), var(--chart-5));
   box-shadow: 0 0 8px rgba(100, 113, 240, 0.3);
 }
 

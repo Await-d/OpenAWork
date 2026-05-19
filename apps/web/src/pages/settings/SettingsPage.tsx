@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, useParams } from 'react-router';
-import { useAuthStore } from '../../stores/auth.js';
-import { logger } from '../../utils/logger.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { logger } from '../../utils/log/logger.js';
 import type {
   ChannelSettingsEntry,
   ChannelTypeDescriptor,
-} from '../../components/common/ChannelSubscriptionSettings.js';
+} from '../../components/common/display/ChannelSubscriptionSettings.js';
 import { validateImageGenerationSize } from '@openAwork/shared';
 import {
   createChannelsClient,
@@ -19,7 +19,7 @@ import {
   buildDevEventsFromLogs,
   createInitialDevtoolsSourceStates,
   extractPrimaryMessage,
-} from './settings-derived.js';
+} from './state/settings-derived.js';
 import { normalizeSettingsModelPrices } from './usage/usage-data.js';
 import {
   addProviderModel,
@@ -84,7 +84,7 @@ import type {
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
   ThinkingDefaultsRef,
-} from './settings-types.js';
+} from './state/settings-types.js';
 
 function SettingsNavIcon({ id }: { id: string }) {
   const icons: Record<string, React.ReactNode> = {
@@ -1385,7 +1385,7 @@ export default function SettingsPage() {
                 borderRight: '1px solid var(--border-subtle)',
                 display: 'flex',
                 flexDirection: 'column',
-                background: 'var(--nav-rail-bg)',
+                background: 'var(--bg-raised)',
                 minHeight: 0,
               }}
             >
@@ -1409,7 +1409,7 @@ export default function SettingsPage() {
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     marginTop: 3,
                   }}
                 >
@@ -1433,7 +1433,7 @@ export default function SettingsPage() {
                       style={{
                         fontSize: 10,
                         fontWeight: 600,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         letterSpacing: '0.07em',
                         textTransform: 'uppercase',
                         padding: '4px 10px 3px',
@@ -1467,7 +1467,7 @@ export default function SettingsPage() {
                             fontSize: 12,
                             fontWeight: isActive ? 600 : 400,
                             background: isActive ? 'var(--accent-muted)' : 'transparent',
-                            color: isActive ? 'var(--accent)' : 'var(--text-2)',
+                            color: isActive ? 'var(--accent)' : 'var(--fg-default)',
                             boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
                             textDecoration: 'none',
                             border: 'none',

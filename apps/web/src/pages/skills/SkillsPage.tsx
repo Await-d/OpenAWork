@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createSkillsClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { SkillDetailPage, InstallProgressUI } from '@openAwork/shared-ui';
 import type {
   MarketSkill,
@@ -16,7 +16,7 @@ import {
   SkillsToolbar,
   sharedUiThemeVars,
 } from '../../components/skills/SkillsPageSections.js';
-import { DEFAULT_PREINSTALLED_SKILL_IDS } from './skills-shared-constants.js';
+import { DEFAULT_PREINSTALLED_SKILL_IDS } from './shared/skills-shared-constants.js';
 
 type ActiveTab = 'market' | 'local' | 'installed';
 
@@ -668,7 +668,7 @@ export default function SkillsPage() {
     return (
       <div className="page-root" style={{ overflowY: 'auto' }}>
         {detailLoading || !selectedDetail ? (
-          <div style={{ padding: '2rem', color: 'var(--color-muted, var(--fg-muted, #7b8a9e))', fontSize: 14 }}>
+          <div style={{ padding: '2rem', color: 'var(--fg-muted)', fontSize: 14 }}>
             加载中...
           </div>
         ) : (
@@ -698,7 +698,7 @@ export default function SkillsPage() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'oklch(0 0 0 / 0.55)',
+            background: 'rgba(0, 0, 0, 0.55)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

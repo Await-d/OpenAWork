@@ -7,7 +7,7 @@ import type {
   CompanionVoiceOutputMode,
   CompanionVoiceVariant,
 } from '@openAwork/shared';
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 
 interface UserSettingRow {
   value: string;

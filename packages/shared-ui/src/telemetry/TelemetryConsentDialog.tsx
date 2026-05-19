@@ -19,7 +19,7 @@ const s: Record<string, CSSProperties> = {
     zIndex: 1000,
   },
   dialog: {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 14,
     padding: '1.75rem',
@@ -45,12 +45,12 @@ const s: Record<string, CSSProperties> = {
     margin: '0 0 0.5rem',
     fontSize: 17,
     fontWeight: 700,
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
   },
   body: {
     margin: '0 0 1.25rem',
     fontSize: 12,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     lineHeight: 1.6,
   },
   bodyText: {
@@ -65,7 +65,7 @@ const s: Record<string, CSSProperties> = {
   },
   listItem: {
     fontSize: 12,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     lineHeight: 1.5,
   },
   divider: {
@@ -78,7 +78,7 @@ const s: Record<string, CSSProperties> = {
     gap: 8,
   },
   btnPrimary: {
-    background: 'var(--accent, #5cd4c0)',
+    background: 'var(--accent))',
     color: color.fgOnAccent,
     border: '1px solid rgba(99,102,241,0.5)',
     borderRadius: 8,
@@ -90,7 +90,7 @@ const s: Record<string, CSSProperties> = {
   },
   btnSecondary: {
     background: 'transparent',
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 8,
     padding: '0.55rem 1rem',
@@ -102,7 +102,7 @@ const s: Record<string, CSSProperties> = {
   hint: {
     marginTop: '0.75rem',
     fontSize: 11,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     textAlign: 'center' as const,
     lineHeight: 1.5,
   },

@@ -21,8 +21,8 @@ export interface DiagnosticCardProps {
 const SEVERITY_COLOR: Record<DiagnosticSeverity, string> = {
   error: color.danger,
   warning: color.contrast,
-  information: 'var(--aux, #8b9cf5)',
-  hint: 'var(--fg-muted, #7b8a9e)',
+  information: 'var(--aux))',
+  hint: 'var(--fg-muted))',
 };
 
 const SEVERITY_ICON: Record<DiagnosticSeverity, string> = {
@@ -62,7 +62,7 @@ export function DiagnosticCard({ filePath, diagnostics, onGoToLine, style }: Dia
           style={{
             fontSize: 11,
             fontFamily: 'monospace',
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -109,13 +109,13 @@ export function DiagnosticCard({ filePath, diagnostics, onGoToLine, style }: Dia
               <span
                 style={{
                   fontSize: 12,
-                  color: 'var(--fg-strong, #f1f4f8)',
+                  color: 'var(--fg-strong))',
                   wordBreak: 'break-word',
                 }}
               >
                 {d.message}
               </span>
-              <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)', marginLeft: 6 }}>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted))', marginLeft: 6 }}>
                 L{d.line}:{d.col}
                 {d.source ? ` (${d.source})` : ''}
               </span>

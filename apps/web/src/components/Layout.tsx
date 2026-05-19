@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import NavRail from './layout/NavRail.js';
-import WorkspacePickerModal from './common/WorkspacePickerModal.js';
-import { CachedRouteOutlet } from './common/CachedRouteOutlet.js';
-import QuestionPromptCard from './common/QuestionPromptCard.js';
-import { useUIStateStore } from '../stores/uiState.js';
+import NavRail from './layout/nav/NavRail.js';
+import WorkspacePickerModal from './common/modal/WorkspacePickerModal.js';
+import { CachedRouteOutlet } from './common/routing/CachedRouteOutlet.js';
+import QuestionPromptCard from './common/display/QuestionPromptCard.js';
+import { useUIStateStore } from '../stores/ui/uiState.js';
 import { useNavigate, useLocation } from 'react-router';
-import { useAuthStore } from '../stores/auth.js';
+import { useAuthStore } from '../stores/auth/auth.js';
 import { CommandPalette, PermissionPrompt, PermissionConfirmDialog } from '@openAwork/shared-ui';
 import type { CommandItem, PermissionDecision, PermissionItem } from '@openAwork/shared-ui';
-import type { FileTreeNode } from './common/WorkspacePickerModal.js';
-import { useCommandRegistry } from '../hooks/useCommandRegistry.js';
+import type { FileTreeNode } from './common/modal/WorkspacePickerModal.js';
+import { useCommandRegistry } from '../hooks/command/useCommandRegistry.js';
 import { preloadRouteModuleByPath } from '../routes/preloadable-route-modules.js';
 import { createQuestionsClient, createSessionsClient } from '@openAwork/web-client';
 import type { PendingQuestionRequest, SessionSearchResult } from '@openAwork/web-client';
@@ -24,7 +24,7 @@ import {
   toSessionPendingPermissionStateFromRequest,
   type SessionPendingPermissionState,
 } from '../utils/permission/pending-permission-state.js';
-import { toast } from './common/ToastNotification.js';
+import { toast } from './common/feedback/ToastNotification.js';
 import { getRecoveryPendingInteractions } from './conversation-runtime/session/recovery-read-model.js';
 import { replyPermissionRequest } from '../utils/permission/permission-reply.js';
 
@@ -795,7 +795,7 @@ export default function Layout({ theme = 'dark', onToggleTheme, onOpenFile }: La
           flexDirection: 'column',
           height: '100dvh',
           overflow: 'hidden',
-          background: 'var(--bg)',
+          background: 'var(--bg-base)',
         }}
       >
         <div

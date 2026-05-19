@@ -2,8 +2,8 @@ import { promises as fsp, type Dirent, type Stats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
   WORKSPACE_ACCESS_MODE,
@@ -11,8 +11,8 @@ import {
   WORKSPACE_BROWSER_ROOT,
   WORKSPACE_ROOT,
   WORKSPACE_ROOTS,
-} from '../db.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+} from '../infra/db.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
   validateWorkspacePath,
   validateWorkspaceRelativePath,

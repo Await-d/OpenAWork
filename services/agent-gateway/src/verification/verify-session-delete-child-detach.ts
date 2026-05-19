@@ -21,10 +21,10 @@ async function main(): Promise<void> {
         dbModule,
       ] = await Promise.all([
         import('fastify'),
-        import('../auth.js'),
-        import('../request-workflow.js'),
+        import('../infra/auth.js'),
+        import('../runtime/request-workflow.js'),
         import('../routes/sessions.js'),
-        import('../db.js'),
+        import('../infra/db.js'),
       ]);
 
       await dbModule.connectDb();

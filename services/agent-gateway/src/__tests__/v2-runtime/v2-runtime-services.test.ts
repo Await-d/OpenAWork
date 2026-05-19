@@ -7,7 +7,7 @@ import { Effect, Layer } from 'effect';
 // here — they are completely unused for the BusService test cases since
 // only `publishBusEvent` / `subscribeBusEvents` (pure in-process maps)
 // are exercised.
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(),

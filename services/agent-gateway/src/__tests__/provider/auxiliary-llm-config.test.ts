@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   getActiveChatProviderConfig: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteGet: mocks.sqliteGet,
 }));
 

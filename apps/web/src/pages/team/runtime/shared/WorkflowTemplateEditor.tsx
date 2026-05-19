@@ -12,8 +12,8 @@ const EDITOR_STYLE: CSSProperties = {
   gap: 12,
   padding: 16,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 86%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const TEXTAREA_STYLE: CSSProperties = {
@@ -21,9 +21,9 @@ const TEXTAREA_STYLE: CSSProperties = {
   minHeight: 300,
   padding: 10,
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  color: 'var(--fg-strong)',
   fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
   fontSize: 12,
   lineHeight: 1.5,
@@ -70,7 +70,7 @@ export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplate
     <div style={EDITOR_STYLE}>
       <header style={{ display: 'grid', gap: 4 }}>
         <strong style={{ fontSize: 14 }}>Workflow 模板编辑器</strong>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           编辑 workflow 的 JSON 定义。保存后立即生效。
         </span>
       </header>
@@ -88,10 +88,10 @@ export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplate
       />
 
       {error ? (
-        <span style={{ fontSize: 12, color: 'var(--danger, #d4574e)' }}>{error}</span>
+        <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span>
       ) : null}
       {saved ? (
-        <span style={{ fontSize: 12, color: 'var(--success, var(--success, var(--success, #3dd49a)))' }}>已保存</span>
+        <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span>
       ) : null}
 
       <button
@@ -103,8 +103,8 @@ export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplate
           padding: '6px 14px',
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-          background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
-          color: 'var(--text)',
+          background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+          color: 'var(--fg-strong)',
           fontSize: 12,
           fontWeight: 700,
           cursor: 'pointer',

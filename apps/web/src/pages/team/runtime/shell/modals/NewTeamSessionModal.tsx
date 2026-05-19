@@ -211,7 +211,7 @@ const OVERLAY_STYLE: CSSProperties = {
   zIndex: 800,
   display: 'grid',
   placeItems: 'center',
-  background: 'oklch(0 0 0 / 0.6)',
+  background: 'rgba(0, 0, 0, 0.6)',
   backdropFilter: 'blur(4px)',
   padding: 16,
 };
@@ -223,21 +223,21 @@ const MODAL_STYLE: CSSProperties = {
   maxHeight: '92vh',
   overflow: 'hidden',
   borderRadius: 18,
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  boxShadow: '0 24px 64px oklch(0 0 0 / 0.4)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
+  boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
   display: 'grid',
   gridTemplateColumns: '240px 1fr',
 };
 
 const STEPPER_PANE_STYLE: CSSProperties = {
   background:
-    'linear-gradient(170deg, color-mix(in srgb, var(--accent) 18%, var(--surface)) 0%, color-mix(in srgb, var(--accent) 6%, var(--bg-2)) 100%)',
+    'linear-gradient(170deg, color-mix(in srgb, var(--accent) 18%, var(--bg-overlay) 0%, color-mix(in srgb, var(--accent) 6%, var(--bg-overlay) 100%)',
   padding: '22px 18px',
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  borderRight: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  borderRight: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
 const STEPPER_HEADER_STYLE: CSSProperties = {
@@ -268,7 +268,7 @@ const STEP_ITEM_BASE_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
   fontSize: 12,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   position: 'relative',
   transition: 'background 120ms ease, color 120ms ease',
   cursor: 'default',
@@ -277,12 +277,12 @@ const STEP_ITEM_BASE_STYLE: CSSProperties = {
 const STEP_ITEM_ACTIVE_STYLE: CSSProperties = {
   ...STEP_ITEM_BASE_STYLE,
   background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const STEP_ITEM_DONE_STYLE: CSSProperties = {
   ...STEP_ITEM_BASE_STYLE,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const STEP_INDEX_BASE_STYLE: CSSProperties = {
@@ -293,8 +293,8 @@ const STEP_INDEX_BASE_STYLE: CSSProperties = {
   placeItems: 'center',
   fontSize: 11,
   fontWeight: 700,
-  background: 'color-mix(in srgb, var(--text-3) 18%, transparent)',
-  color: 'var(--text-3)',
+  background: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
+  color: 'var(--fg-muted)',
   flexShrink: 0,
   border: '1.5px solid transparent',
 };
@@ -302,15 +302,15 @@ const STEP_INDEX_BASE_STYLE: CSSProperties = {
 const STEP_INDEX_ACTIVE_STYLE: CSSProperties = {
   ...STEP_INDEX_BASE_STYLE,
   background: 'var(--accent)',
-  color: 'var(--accent-text, #fff)',
+  color: 'var(--fg-on-accent)',
   boxShadow: '0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent)',
 };
 
 const STEP_INDEX_DONE_STYLE: CSSProperties = {
   ...STEP_INDEX_BASE_STYLE,
-  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 18%, transparent)',
-  color: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  borderColor: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--success) 18%, transparent)',
+  color: 'var(--success))',
+  borderColor: 'color-mix(in srgb, var(--success) 50%, transparent)',
 };
 
 const FORM_PANE_STYLE: CSSProperties = {
@@ -322,7 +322,7 @@ const FORM_PANE_STYLE: CSSProperties = {
 
 const FORM_HEADER_STYLE: CSSProperties = {
   padding: '20px 24px 14px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'flex-start',
@@ -340,13 +340,13 @@ const FORM_BODY_STYLE: CSSProperties = {
 
 const FORM_FOOTER_STYLE: CSSProperties = {
   padding: '12px 24px',
-  borderTop: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  borderTop: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 10,
   flexShrink: 0,
-  background: 'color-mix(in srgb, var(--bg-2) 30%, var(--surface))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 30%, var(--bg-overlay))',
 };
 
 const FIELD_STYLE: CSSProperties = {
@@ -357,12 +357,12 @@ const FIELD_STYLE: CSSProperties = {
 const LABEL_STYLE: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
 };
 
@@ -370,9 +370,9 @@ const INPUT_STYLE: CSSProperties = {
   width: '100%',
   padding: '9px 12px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-2) 70%, var(--bg))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
+  color: 'var(--fg-strong)',
   fontSize: 13,
   fontFamily: 'inherit',
 };
@@ -383,7 +383,7 @@ const SOURCE_TAB_BAR_STYLE: CSSProperties = {
   gap: 8,
   padding: 4,
   borderRadius: 10,
-  background: 'color-mix(in srgb, var(--bg-2) 60%, var(--bg))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
 };
 
 const SOURCE_TAB_BTN_BASE_STYLE: CSSProperties = {
@@ -395,7 +395,7 @@ const SOURCE_TAB_BTN_BASE_STYLE: CSSProperties = {
   border: 'none',
   borderRadius: 8,
   background: 'transparent',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
@@ -404,8 +404,8 @@ const SOURCE_TAB_BTN_BASE_STYLE: CSSProperties = {
 
 const SOURCE_TAB_BTN_ACTIVE_STYLE: CSSProperties = {
   ...SOURCE_TAB_BTN_BASE_STYLE,
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
   boxShadow: '0 1px 4px color-mix(in srgb, #000 10%, transparent)',
 };
 
@@ -414,8 +414,8 @@ const CARD_BASE_STYLE: CSSProperties = {
   gap: 8,
   padding: '14px 16px',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'var(--surface)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'var(--bg-overlay)',
   textAlign: 'left',
   cursor: 'pointer',
   transition: 'border-color 120ms ease, background 120ms ease, transform 120ms ease',
@@ -425,14 +425,14 @@ const CARD_BASE_STYLE: CSSProperties = {
 const CARD_SELECTED_STYLE: CSSProperties = {
   ...CARD_BASE_STYLE,
   borderColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
   boxShadow: '0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent)',
 };
 
 const CARD_TITLE_STYLE: CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   display: 'flex',
   alignItems: 'center',
   gap: 8,
@@ -440,7 +440,7 @@ const CARD_TITLE_STYLE: CSSProperties = {
 
 const CARD_DESC_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
 };
 
@@ -463,7 +463,7 @@ const ROLE_CARD_STYLE: CSSProperties = {
   padding: '12px 14px',
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 6%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
 };
 
 const ROLE_AVATAR_STYLE: CSSProperties = {
@@ -474,7 +474,7 @@ const ROLE_AVATAR_STYLE: CSSProperties = {
   placeItems: 'center',
   fontSize: 14,
   fontWeight: 800,
-  color: 'var(--fg-on-accent, #ffffff)',
+  color: 'var(--fg-on-accent))',
   flexShrink: 0,
 };
 
@@ -484,9 +484,9 @@ const AGENT_CHIP_BASE_STYLE: CSSProperties = {
   gap: 6,
   padding: '7px 12px',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'var(--surface)',
-  color: 'var(--text-2)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-default)',
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
@@ -496,7 +496,7 @@ const AGENT_CHIP_BASE_STYLE: CSSProperties = {
 const AGENT_CHIP_SELECTED_STYLE: CSSProperties = {
   ...AGENT_CHIP_BASE_STYLE,
   borderColor: 'var(--accent)',
-  background: 'color-mix(in srgb, var(--accent) 12%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))',
   color: 'var(--accent)',
 };
 
@@ -505,8 +505,8 @@ const REVIEW_CARD_STYLE: CSSProperties = {
   gap: 10,
   padding: '16px 18px',
   borderRadius: 14,
-  background: 'color-mix(in srgb, var(--bg-2) 30%, var(--surface))',
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 30%, var(--bg-overlay))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
 const REVIEW_ROW_STYLE: CSSProperties = {
@@ -519,12 +519,12 @@ const REVIEW_ROW_STYLE: CSSProperties = {
 };
 
 const REVIEW_LABEL_STYLE: CSSProperties = {
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontWeight: 600,
 };
 
 const REVIEW_VALUE_STYLE: CSSProperties = {
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   display: 'flex',
   flexWrap: 'wrap',
   gap: 6,
@@ -536,7 +536,7 @@ const SECTION_HEADER_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 8,
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontWeight: 700,
   marginTop: 4,
 };
@@ -544,7 +544,7 @@ const SECTION_HEADER_STYLE: CSSProperties = {
 const SECTION_HEADER_RULE_STYLE: CSSProperties = {
   flex: 1,
   height: 1,
-  background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
 };
 
 const PRIMARY_BTN_STYLE: CSSProperties = {
@@ -555,7 +555,7 @@ const PRIMARY_BTN_STYLE: CSSProperties = {
   borderRadius: 8,
   border: 'none',
   background: 'var(--accent)',
-  color: 'var(--accent-text, #fff)',
+  color: 'var(--fg-on-accent)',
   fontSize: 13,
   fontWeight: 700,
   cursor: 'pointer',
@@ -564,9 +564,9 @@ const PRIMARY_BTN_STYLE: CSSProperties = {
 const SECONDARY_BTN_STYLE: CSSProperties = {
   padding: '8px 14px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 12,
   cursor: 'pointer',
 };
@@ -583,15 +583,15 @@ function getInitial(label: string | undefined | null): string {
 function colorForRole(role: string): string {
   switch (role) {
     case 'planner':
-      return 'var(--accent, var(--accent, #5cd4c0))'; // indigo
+      return 'var(--accent))'; // indigo
     case 'researcher':
-      return 'var(--chart-7, var(--chart-7, #67e8f9))'; // sky
+      return 'var(--chart-7))'; // sky
     case 'executor':
-      return 'var(--success, var(--success, #3dd49a))'; // green
+      return 'var(--success))'; // green
     case 'reviewer':
-      return 'var(--warning, var(--warning, #f0b429))'; // amber
+      return 'var(--warning))'; // amber
     default:
-      return 'var(--fg-muted, #7b8a9e)'; // gray
+      return 'var(--fg-muted))'; // gray
   }
 }
 
@@ -626,43 +626,43 @@ const OPTIONAL_GROUP_META: Record<string, Omit<OptionalAgentGroup, 'key'>> = {
   leader: {
     label: '领导层',
     description: '统筹全局，可作为团队代理人下发任务',
-    color: 'var(--chart-5, var(--chart-5, #c4b5fd))',
+    color: 'var(--chart-5))',
     hint: '会出现在「领导」层级，介入跨子流程的协调与拍板。',
   },
   general: {
     label: '通用助手',
     description: '通用型 agent，灵活补位',
-    color: 'var(--chart-7, var(--chart-7, #67e8f9))',
+    color: 'var(--chart-7))',
     hint: '会出现在主对话流，按需被引用作为辅助回答与协作。',
   },
   planner: {
     label: '规划补位',
     description: '在 planner 层提供额外协作思路',
-    color: 'var(--accent, var(--accent, #5cd4c0))',
+    color: 'var(--accent))',
     hint: '与核心 planner 并行，作为额外的拆解视角参与「规划」层。',
   },
   researcher: {
     label: '研究补位',
     description: '在 researcher 层补充信息源',
-    color: 'var(--chart-7, var(--chart-7, #67e8f9))',
+    color: 'var(--chart-7))',
     hint: '与核心 researcher 并行，作为额外检索通道参与「研究」层。',
   },
   executor: {
     label: '执行补位',
     description: '在 executor 层提供额外执行能力',
-    color: 'var(--success, var(--success, #3dd49a))',
+    color: 'var(--success))',
     hint: '与核心 executor 并行，作为额外执行节点参与「执行」层。',
   },
   reviewer: {
     label: '评审补位',
     description: '在 reviewer 层加强审查',
-    color: 'var(--warning, var(--warning, #f0b429))',
+    color: 'var(--warning))',
     hint: '与核心 reviewer 并行，作为额外评审视角参与「评审」层。',
   },
   unknown: {
     label: '未分层',
     description: '未声明 canonical role 的 agent',
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     hint: '未声明 canonical role，默认作为通用辅助 agent 加入。',
   },
 };
@@ -689,18 +689,18 @@ function badgeToneStyle(tone?: string): CSSProperties {
       };
     case 'success':
       return {
-        background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 18%, transparent)',
-        color: 'var(--success, var(--success, var(--success, #3dd49a)))',
+        background: 'color-mix(in srgb, var(--success) 18%, transparent)',
+        color: 'var(--success))',
       };
     case 'warning':
       return {
-        background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 22%, transparent)',
-        color: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
+        background: 'color-mix(in srgb, var(--warning) 22%, transparent)',
+        color: 'var(--warning))',
       };
     default:
       return {
-        background: 'color-mix(in srgb, var(--text-3) 14%, transparent)',
-        color: 'var(--text-2)',
+        background: 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
+        color: 'var(--fg-default)',
       };
   }
 }
@@ -803,14 +803,14 @@ export function NewTeamSessionModal({
               style={{
                 fontSize: 17,
                 fontWeight: 800,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 lineHeight: 1.3,
               }}
             >
               新建团队会话
             </strong>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
-              工作区：<strong style={{ color: 'var(--text-2)' }}>{workspaceLabel}</strong>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+              工作区：<strong style={{ color: 'var(--fg-default)' }}>{workspaceLabel}</strong>
             </span>
           </div>
 
@@ -834,7 +834,7 @@ export function NewTeamSessionModal({
                     {done ? (
                       <CheckIcon
                         size={14}
-                        color={active ? 'var(--accent-text, #fff)' : 'var(--success, var(--success, var(--success, #3dd49a)))'}
+                        color={active ? 'var(--fg-on-accent)' : 'var(--success))'}
                       />
                     ) : (
                       s.index
@@ -845,7 +845,7 @@ export function NewTeamSessionModal({
                       style={{
                         fontSize: 12,
                         fontWeight: 700,
-                        color: active ? 'var(--text)' : 'inherit',
+                        color: active ? 'var(--fg-strong)' : 'inherit',
                       }}
                     >
                       {s.title}
@@ -853,7 +853,7 @@ export function NewTeamSessionModal({
                     <span
                       style={{
                         fontSize: 10,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         lineHeight: 1.4,
                       }}
                     >
@@ -875,7 +875,7 @@ export function NewTeamSessionModal({
                 style={{
                   fontSize: 16,
                   fontWeight: 800,
-                  color: 'var(--text)',
+                  color: 'var(--fg-strong)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
@@ -887,7 +887,7 @@ export function NewTeamSessionModal({
               <div
                 style={{
                   fontSize: 12,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   marginTop: 4,
                   lineHeight: 1.5,
                 }}
@@ -908,7 +908,7 @@ export function NewTeamSessionModal({
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 padding: 4,
                 cursor: 'pointer',
                 display: 'inline-flex',
@@ -916,7 +916,7 @@ export function NewTeamSessionModal({
                 flexShrink: 0,
               }}
             >
-              <XIcon size={14} color="var(--text-3)" />
+              <XIcon size={14} color="var(--fg-muted)" />
             </button>
           </div>
 
@@ -994,7 +994,7 @@ export function NewTeamSessionModal({
                     <div style={CARD_DESC_STYLE}>
                       使用系统预置的 4 个核心角色（planner / researcher / executor /
                       reviewer），随后可按需追加额外 agent 成员。会话标题可留空，提交时会自动以
-                      <strong style={{ color: 'var(--text-2)' }}>「团队会话 + 时间戳」</strong>
+                      <strong style={{ color: 'var(--fg-default)' }}>「团队会话 + 时间戳」</strong>
                       命名。
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1025,11 +1025,11 @@ export function NewTeamSessionModal({
                         gap: 8,
                         padding: '10px 12px',
                         borderRadius: 10,
-                        background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 10%, transparent)',
+                        background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
                         border:
-                          '1px solid color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 30%, transparent)',
+                          '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
                         fontSize: 11,
-                        color: 'var(--text-2)',
+                        color: 'var(--fg-default)',
                         lineHeight: 1.6,
                       }}
                     >
@@ -1039,7 +1039,7 @@ export function NewTeamSessionModal({
                         height="14"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="var(--warning, var(--warning, var(--warning, #f0b429)))"
+                        stroke="var(--warning))"
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1050,7 +1050,7 @@ export function NewTeamSessionModal({
                         <line x1="12" y1="17" x2="12.01" y2="17" />
                       </svg>
                       <span>
-                        <strong style={{ color: 'var(--warning, var(--warning, #f0b429))' }}>实验性功能：</strong>
+                        <strong style={{ color: 'var(--warning))' }}>实验性功能：</strong>
                         已保存模板沿用旧版数据结构，与新版会话契约可能不完全兼容；新版的模板体系仍在设计中。建议优先选择「空白会话」开始。
                       </span>
                     </div>
@@ -1060,7 +1060,7 @@ export function NewTeamSessionModal({
                         style={{
                           padding: 24,
                           textAlign: 'center',
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontSize: 12,
                         }}
                       >
@@ -1072,8 +1072,8 @@ export function NewTeamSessionModal({
                           padding: '32px 24px',
                           textAlign: 'center',
                           borderRadius: 12,
-                          border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-                          color: 'var(--text-3)',
+                          border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+                          color: 'var(--fg-muted)',
                           fontSize: 12,
                           display: 'grid',
                           gap: 8,
@@ -1143,7 +1143,7 @@ export function NewTeamSessionModal({
                                   <div
                                     style={{
                                       fontSize: 11,
-                                      color: 'var(--text-3)',
+                                      color: 'var(--fg-muted)',
                                       lineHeight: 1.5,
                                     }}
                                   >
@@ -1220,7 +1220,7 @@ export function NewTeamSessionModal({
                   </div>
                   <span style={HINT_STYLE}>
                     留空将自动以
-                    <strong style={{ color: 'var(--text-2)' }}>「团队会话 + 当前时间戳」</strong>
+                    <strong style={{ color: 'var(--fg-default)' }}>「团队会话 + 当前时间戳」</strong>
                     作为标题，可随时在会话列表里重命名。
                   </span>
                 </div>
@@ -1257,7 +1257,7 @@ export function NewTeamSessionModal({
                               style={{
                                 fontSize: 13,
                                 fontWeight: 700,
-                                color: 'var(--text)',
+                                color: 'var(--fg-strong)',
                               }}
                             >
                               {card?.roleLabel ?? role}
@@ -1266,7 +1266,7 @@ export function NewTeamSessionModal({
                               style={{
                                 fontSize: 10,
                                 fontFamily: 'ui-monospace, monospace',
-                                color: 'var(--text-3)',
+                                color: 'var(--fg-muted)',
                               }}
                             >
                               {role}
@@ -1275,7 +1275,7 @@ export function NewTeamSessionModal({
                           <span
                             style={{
                               fontSize: 12,
-                              color: 'var(--text-2)',
+                              color: 'var(--fg-default)',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
@@ -1286,7 +1286,7 @@ export function NewTeamSessionModal({
                           <span
                             style={{
                               fontSize: 11,
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               lineHeight: 1.4,
                             }}
                           >
@@ -1319,8 +1319,8 @@ export function NewTeamSessionModal({
                       padding: '28px 24px',
                       textAlign: 'center',
                       borderRadius: 12,
-                      border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-                      color: 'var(--text-3)',
+                      border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+                      color: 'var(--fg-muted)',
                       fontSize: 12,
                       display: 'grid',
                       gap: 8,
@@ -1345,9 +1345,9 @@ export function NewTeamSessionModal({
                       }}
                     >
                       <span style={HINT_STYLE}>
-                        额外成员按 <strong style={{ color: 'var(--text-2)' }}>层级</strong>
+                        额外成员按 <strong style={{ color: 'var(--fg-default)' }}>层级</strong>
                         分组展示。每个 agent 加入后，会以其声明的层级参与协作，与核心角色
-                        <strong style={{ color: 'var(--text-2)' }}>并行</strong>而非替代。
+                        <strong style={{ color: 'var(--fg-default)' }}>并行</strong>而非替代。
                       </span>
                       <span
                         style={{
@@ -1400,7 +1400,7 @@ export function NewTeamSessionModal({
                                 gap: 10,
                                 padding: '12px 14px',
                                 borderRadius: 12,
-                                background: 'color-mix(in srgb, var(--accent) 6%, var(--surface))',
+                                background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
                                 border:
                                   '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                               }}
@@ -1507,11 +1507,11 @@ export function NewTeamSessionModal({
                                               gap: 6,
                                               padding: '5px 6px 5px 10px',
                                               borderRadius: 999,
-                                              background: 'var(--surface)',
+                                              background: 'var(--bg-overlay)',
                                               border:
                                                 '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
                                               fontSize: 11,
-                                              color: 'var(--text)',
+                                              color: 'var(--fg-strong)',
                                               fontWeight: 600,
                                             }}
                                           >
@@ -1539,7 +1539,7 @@ export function NewTeamSessionModal({
                                                 border: 'none',
                                                 borderRadius: '50%',
                                                 background: 'transparent',
-                                                color: 'var(--text-3)',
+                                                color: 'var(--fg-muted)',
                                                 cursor: 'pointer',
                                                 padding: 0,
                                               }}
@@ -1581,7 +1581,7 @@ export function NewTeamSessionModal({
                           alignItems: 'center',
                           gap: 8,
                           fontSize: 11,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontWeight: 700,
                           textTransform: 'uppercase',
                           letterSpacing: '0.04em',
@@ -1592,7 +1592,7 @@ export function NewTeamSessionModal({
                           style={{
                             flex: 1,
                             height: 1,
-                            background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+                            background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
                           }}
                         />
                         <span style={{ textTransform: 'none', fontSize: 10, fontWeight: 400 }}>
@@ -1656,7 +1656,7 @@ export function NewTeamSessionModal({
                                     style={{
                                       fontSize: 12,
                                       fontWeight: 700,
-                                      color: 'var(--text)',
+                                      color: 'var(--fg-strong)',
                                       display: 'flex',
                                       alignItems: 'center',
                                       gap: 6,
@@ -1667,7 +1667,7 @@ export function NewTeamSessionModal({
                                       style={{
                                         fontSize: 10,
                                         fontFamily: 'ui-monospace, monospace',
-                                        color: 'var(--text-3)',
+                                        color: 'var(--fg-muted)',
                                         fontWeight: 400,
                                       }}
                                     >
@@ -1677,7 +1677,7 @@ export function NewTeamSessionModal({
                                   <span
                                     style={{
                                       fontSize: 10,
-                                      color: 'var(--text-3)',
+                                      color: 'var(--fg-muted)',
                                       lineHeight: 1.4,
                                     }}
                                   >
@@ -1695,8 +1695,8 @@ export function NewTeamSessionModal({
                                         background:
                                           selectedInLayer > 0
                                             ? `color-mix(in srgb, ${meta.color} 22%, transparent)`
-                                            : 'color-mix(in srgb, var(--text-3) 14%, transparent)',
-                                        color: selectedInLayer > 0 ? meta.color : 'var(--text-3)',
+                                            : 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
+                                        color: selectedInLayer > 0 ? meta.color : 'var(--fg-muted)',
                                         fontSize: 10,
                                         fontVariantNumeric: 'tabular-nums',
                                         flexShrink: 0,
@@ -1782,7 +1782,7 @@ export function NewTeamSessionModal({
                         >
                           已保存模板
                         </span>
-                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                           ID：{creation.draft.source.templateId}
                         </span>
                       </>
@@ -1795,7 +1795,7 @@ export function NewTeamSessionModal({
                     {creation.draft.title.trim() || (
                       <span
                         style={{
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontStyle: 'italic',
                           fontWeight: 400,
                         }}
@@ -1846,7 +1846,7 @@ export function NewTeamSessionModal({
                   <span style={REVIEW_LABEL_STYLE}>额外成员</span>
                   <span style={REVIEW_VALUE_STYLE}>
                     {creation.draft.optionalAgentIds.length === 0 ? (
-                      <span style={{ color: 'var(--text-3)' }}>未选择</span>
+                      <span style={{ color: 'var(--fg-muted)' }}>未选择</span>
                     ) : (
                       creation.draft.optionalAgentIds.map((id) => {
                         const agent = agentById.get(id);
@@ -1858,10 +1858,10 @@ export function NewTeamSessionModal({
                             key={id}
                             style={{
                               ...BADGE_BASE_STYLE,
-                              background: 'color-mix(in srgb, var(--bg-2) 60%, var(--surface))',
-                              color: 'var(--text-2)',
+                              background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-overlay))',
+                              color: 'var(--fg-default)',
                               border:
-                                '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+                                '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                               gap: 5,
                             }}
                             title={`${agent?.label ?? id} · ${groupMeta.label} (${groupMeta.key})`}
@@ -1900,11 +1900,11 @@ export function NewTeamSessionModal({
                 role="alert"
                 style={{
                   fontSize: 12,
-                  color: 'var(--error, var(--danger, var(--danger, #f06b7e)))',
-                  background: 'color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 10%, transparent)',
+                  color: 'var(--error)',
+                  background: 'color-mix(in srgb, var(--error) 10%, transparent)',
                   padding: '8px 10px',
                   borderRadius: 6,
-                  border: '1px solid color-mix(in srgb, var(--error, var(--danger, var(--danger, #f06b7e))) 30%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)',
                 }}
               >
                 {roleBindings.error}
@@ -1914,7 +1914,7 @@ export function NewTeamSessionModal({
 
           {/* ─── 操作栏 ─── */}
           <div style={FORM_FOOTER_STYLE}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               步骤 {stepIndex + 1} / {STEPS.length}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -1942,7 +1942,7 @@ export function NewTeamSessionModal({
                   }}
                 >
                   下一步
-                  <ChevronRightIcon size={11} color="var(--accent-text, #fff)" />
+                  <ChevronRightIcon size={11} color="var(--fg-on-accent)" />
                 </button>
               ) : (
                 <button
@@ -1959,7 +1959,7 @@ export function NewTeamSessionModal({
                     '创建中…'
                   ) : (
                     <>
-                      <CheckIcon size={12} color="var(--accent-text, #fff)" />
+                      <CheckIcon size={12} color="var(--fg-on-accent)" />
                       确认创建
                     </>
                   )}

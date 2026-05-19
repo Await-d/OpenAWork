@@ -43,19 +43,19 @@ const FILTER_BAR_STYLE: CSSProperties = {
 const FILTER_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const FILTER_BTN_ACTIVE_STYLE: CSSProperties = {
   ...FILTER_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const ROW_STYLE: CSSProperties = {
@@ -63,8 +63,8 @@ const ROW_STYLE: CSSProperties = {
   gap: 4,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 export function AuditView() {
@@ -124,8 +124,8 @@ export function AuditView() {
               placeItems: 'center',
               padding: 32,
               borderRadius: 12,
-              border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-              color: 'var(--text-3)',
+              border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+              color: 'var(--fg-muted)',
               fontSize: 13,
               gap: 6,
             }}
@@ -133,7 +133,7 @@ export function AuditView() {
             <span style={{ fontSize: 26 }} aria-hidden>
               📜
             </span>
-            <strong style={{ color: 'var(--text-2)' }}>暂无审计记录</strong>
+            <strong style={{ color: 'var(--fg-default)' }}>暂无审计记录</strong>
             <span>共享、评论、权限变更等操作发生后会自动出现在这里。</span>
           </div>
         </div>
@@ -170,9 +170,9 @@ export function AuditView() {
             style={{
               padding: '4px 10px',
               borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-              background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-              color: 'var(--text)',
+              border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+              color: 'var(--fg-strong)',
               fontSize: 11,
               minWidth: 140,
             }}
@@ -185,7 +185,7 @@ export function AuditView() {
 
         <div style={{ display: 'grid', gap: 6 }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: 16, color: 'var(--text-3)', fontSize: 12 }}>
+            <div style={{ padding: 16, color: 'var(--fg-muted)', fontSize: 12 }}>
               当前过滤条件下无记录。
             </div>
           ) : (
@@ -203,7 +203,7 @@ export function AuditView() {
                     style={{
                       padding: '1px 8px',
                       borderRadius: 999,
-                      background: 'color-mix(in srgb, var(--accent) 14%, var(--surface))',
+                      background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
                       color: 'var(--accent)',
                       fontSize: 10,
                       fontWeight: 800,
@@ -215,9 +215,9 @@ export function AuditView() {
                     style={{
                       padding: '1px 8px',
                       borderRadius: 999,
-                      background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
-                      border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-                      color: 'var(--text-2)',
+                      background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+                      border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                      color: 'var(--fg-default)',
                       fontSize: 10,
                       fontWeight: 700,
                     }}
@@ -225,18 +225,18 @@ export function AuditView() {
                     {ENTITY_LABELS[log.entityType] ?? log.entityType}
                   </span>
                   {log.actorEmail ? (
-                    <span style={{ color: 'var(--text-3)' }}>by {log.actorEmail}</span>
+                    <span style={{ color: 'var(--fg-muted)' }}>by {log.actorEmail}</span>
                   ) : null}
                   <span style={{ flex: 1 }} />
-                  <span style={{ color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}>
                     {new Date(log.createdAt).toLocaleString()}
                   </span>
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
+                <span style={{ fontSize: 12, color: 'var(--fg-strong)', lineHeight: 1.5 }}>
                   {log.summary}
                 </span>
                 {log.detail ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
                     {log.detail}
                   </span>
                 ) : null}

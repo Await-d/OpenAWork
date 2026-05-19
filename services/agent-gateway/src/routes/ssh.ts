@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireAuth } from '../auth.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { requireAuth } from '../infra/auth.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import * as agentCore from '@openAwork/agent-core';
 
 type SSHConnection = {

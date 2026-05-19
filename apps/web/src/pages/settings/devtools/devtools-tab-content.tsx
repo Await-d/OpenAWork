@@ -5,7 +5,7 @@ import type {
   DevtoolsSourceState,
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
-} from '../settings-types.js';
+} from '../state/settings-types.js';
 import {
   buildDiagnosticClipboardPayload,
   buildDiagnosticClipboardRecord,
@@ -616,15 +616,15 @@ export function DevtoolsTabContent({
 
       <section ref={overviewSectionRef} style={SS}>
         <h3 style={ST}>数据源概览</h3>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', maxWidth: 760 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-muted)', maxWidth: 760 }}>
           哪个数据源失败，再往下钻日志、诊断和远程连接细节。
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {[
             { label: '正常', value: healthyCount, color: 'var(--accent)' },
-            { label: '载入中', value: loadingCount, color: 'var(--text-2)' },
-            { label: '空数据', value: emptyCount, color: 'var(--text-2)' },
-            { label: '未接入', value: unavailableCount, color: 'var(--warning, var(--warning, var(--warning, #f0b429)))' },
+            { label: '载入中', value: loadingCount, color: 'var(--fg-default)' },
+            { label: '空数据', value: emptyCount, color: 'var(--fg-default)' },
+            { label: '未接入', value: unavailableCount, color: 'var(--warning))' },
             { label: '失败', value: errorSources.length, color: 'var(--danger)' },
           ].map((item) => (
             <div
@@ -632,8 +632,8 @@ export function DevtoolsTabContent({
               style={{
                 borderRadius: 999,
                 padding: '3px 8px',
-                background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
-                border: '1px solid var(--border)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+                border: '1px solid var(--border-default)',
                 fontSize: 11,
                 color: item.color,
                 fontWeight: 600,
@@ -646,10 +646,10 @@ export function DevtoolsTabContent({
             style={{
               borderRadius: 999,
               padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
-              border: '1px solid var(--border)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+              border: '1px solid var(--border-default)',
               fontSize: 11,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
               fontWeight: 600,
             }}
           >
@@ -659,10 +659,10 @@ export function DevtoolsTabContent({
             style={{
               borderRadius: 999,
               padding: '3px 8px',
-              background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
-              border: '1px solid var(--border)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
+              border: '1px solid var(--border-default)',
               fontSize: 11,
-              color: workerErrors > 0 ? 'var(--danger)' : 'var(--text-2)',
+              color: workerErrors > 0 ? 'var(--danger)' : 'var(--fg-default)',
               fontWeight: 600,
             }}
           >

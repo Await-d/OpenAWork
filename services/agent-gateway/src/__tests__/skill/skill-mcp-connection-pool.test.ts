@@ -19,7 +19,7 @@ vi.mock('@openAwork/mcp-client', () => ({
   },
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(() => undefined),

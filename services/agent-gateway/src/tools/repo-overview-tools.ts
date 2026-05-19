@@ -26,7 +26,7 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 
 import { parseRepositoryReference, repositoryCachePath } from '../workspace/repo-reference.js';
-import { resolveGatewayReposDir } from '../storage-paths.js';
+import { resolveGatewayReposDir } from '../infra/storage-paths.js';
 import { defaultGitRunner, type GitRunner } from './repo-clone-tools.js';
 
 const STRUCTURE_LIMIT = 200;

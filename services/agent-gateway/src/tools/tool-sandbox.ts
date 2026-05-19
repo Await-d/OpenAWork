@@ -21,7 +21,7 @@ import {
   executeApplyPatch,
 } from './apply-patch-tools.js';
 import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
-import { writeAuditLog } from '../audit-log.js';
+import { writeAuditLog } from '../infra/audit-log.js';
 import {
   backgroundCancelToolDefinition,
   backgroundOutputToolDefinition,
@@ -44,7 +44,7 @@ import {
 import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { dispatchClaudeCodeTool } from '../claude-code/claude-code-tool-dispatch.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
-import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
 import {
   buildBackgroundCancelAllMessage,
   buildBackgroundCancelSingleMessage,
@@ -79,7 +79,7 @@ import {
   lspSymbolsToolDefinition,
 } from './lsp-tools.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
-import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../plugin-host.js';
+import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../runtime/plugin-host.js';
 import {
   callMcpToolForSession,
   getConfiguredMcpServerForSession,

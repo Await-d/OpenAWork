@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { createAgentsClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 
 export interface BuddyAgentOption {
   id: string;

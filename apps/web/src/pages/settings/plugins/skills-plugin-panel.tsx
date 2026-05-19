@@ -31,9 +31,9 @@ import {
   InstalledSkillsManager,
   type MarketInstalledSkill as InstalledSkill,
 } from '@openAwork/shared-ui';
-import { useAuthStore } from '../../../stores/auth.js';
-import { logger } from '../../../utils/logger.js';
-import { DEFAULT_PREINSTALLED_SKILL_IDS } from '../../skills/skills-shared-constants.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
+import { logger } from '../../../utils/log/logger.js';
+import { DEFAULT_PREINSTALLED_SKILL_IDS } from '../../skills/shared/skills-shared-constants.js';
 import { sharedUiThemeVars } from '../../../components/skills/SkillsPageSections.js';
 
 interface InstalledSkillDto {
@@ -60,7 +60,7 @@ const PANEL_HEADER: CSSProperties = {
 
 const NOTICE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.55,
 };
 
@@ -193,7 +193,7 @@ export function SkillsPluginPanel(): React.ReactElement {
   }, []);
 
   if (!loaded) {
-    return <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 12 }}>加载中…</div>;
+    return <div style={{ padding: 20, color: 'var(--fg-muted)', fontSize: 12 }}>加载中…</div>;
   }
 
   return (
@@ -206,7 +206,7 @@ export function SkillsPluginPanel(): React.ReactElement {
     // intrinsic width of the child, not 0.
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div style={PANEL_HEADER}>
-        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.55 }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.55 }}>
           管理已安装的 Agent 技能，控制每条技能是否对当前账号启用。
         </div>
         <Link to="/skills" style={LINK_STYLE}>
@@ -240,9 +240,9 @@ export function SkillsPluginPanel(): React.ReactElement {
 
       {(busy || statusMessage || error) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, ...NOTICE }}>
-          {busy && <span style={{ color: 'var(--text-2)' }}>处理中…</span>}
+          {busy && <span style={{ color: 'var(--fg-default)' }}>处理中…</span>}
           {statusMessage && <span style={{ color: 'var(--accent)' }}>{statusMessage}</span>}
-          {error && <span style={{ color: 'var(--danger, var(--danger, #f06b7e))' }}>{error}</span>}
+          {error && <span style={{ color: 'var(--danger))' }}>{error}</span>}
         </div>
       )}
 

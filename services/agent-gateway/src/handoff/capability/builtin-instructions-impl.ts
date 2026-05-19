@@ -15,7 +15,7 @@ import { registerInstruction, type InstructionContext, type InstructionResult } 
 import { createHandoff } from '../store/handoff-store.js';
 import { submitInboundMessage } from '../store/inbound-store.js';
 import { setSubstate } from '../store/substate-store.js';
-import { sqliteRun, sqliteGet } from '../../db.js';
+import { sqliteRun, sqliteGet } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
 

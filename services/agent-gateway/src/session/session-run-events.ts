@@ -1,6 +1,6 @@
 import type { RunEvent, ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { buildAssistantEventMessageContent } from './assistant-event-message.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildNotificationFromRunEvent } from './notification-store.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { appendSessionEvent, translateRunEventToSessionEvent } from './session-entry-store.js';

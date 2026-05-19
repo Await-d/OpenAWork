@@ -70,8 +70,8 @@ function InlineField({
                 padding: '4px 8px',
                 borderRadius: 6,
                 border: '1px solid var(--border-subtle)',
-                background: 'var(--bg)',
-                color: 'var(--text)',
+                background: 'var(--bg-base)',
+                color: 'var(--fg-strong)',
                 fontSize: 11,
                 flex: 1,
               }}
@@ -95,8 +95,8 @@ function InlineField({
                 padding: '4px 8px',
                 borderRadius: 6,
                 border: '1px solid var(--accent)',
-                background: 'var(--bg)',
-                color: 'var(--text)',
+                background: 'var(--bg-base)',
+                color: 'var(--fg-strong)',
                 fontSize: 11,
                 flex: 1,
                 outline: 'none',
@@ -127,8 +127,8 @@ function InlineField({
             style={{
               appearance: 'none',
               border: 'none',
-              background: 'var(--surface-2)',
-              color: 'var(--text-3)',
+              background: 'var(--bg-surface)',
+              color: 'var(--fg-muted)',
               borderRadius: 4,
               padding: '2px 6px',
               fontSize: 9,
@@ -149,8 +149,8 @@ function InlineField({
       title="点击编辑"
     >
       <span style={fieldLabelStyle}>{label}</span>
-      <span style={{ fontSize: 11, color: 'var(--text-2)' }}>{value || '—'}</span>
-      <span style={{ fontSize: 8, color: 'var(--text-3)', opacity: 0.6 }}>✎</span>
+      <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>{value || '—'}</span>
+      <span style={{ fontSize: 8, color: 'var(--fg-muted)', opacity: 0.6 }}>✎</span>
     </div>
   );
 }
@@ -209,7 +209,7 @@ function TemplateDetailView({
     <div style={{ display: 'grid', gap: 14, padding: '16px 20px', overflow: 'auto' }}>
       {/* Header with actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{template.name}</span>
+        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>{template.name}</span>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             type="button"
@@ -218,8 +218,8 @@ function TemplateDetailView({
               padding: '4px 10px',
               borderRadius: 6,
               border: '1px solid var(--border-subtle)',
-              background: 'var(--surface-2)',
-              color: 'var(--text-2)',
+              background: 'var(--bg-surface)',
+              color: 'var(--fg-default)',
               fontSize: 10,
               fontWeight: 600,
               cursor: 'pointer',
@@ -327,7 +327,7 @@ function TemplateDetailView({
               padding: '3px 8px',
               borderRadius: 6,
               background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
-              color: 'var(--chart-5, var(--chart-5, #c4b5fd))',
+              color: 'var(--chart-5))',
               fontSize: 10,
               fontWeight: 700,
             }}
@@ -356,15 +356,15 @@ function TemplateDetailView({
                 padding: '8px 12px',
                 borderRadius: 8,
                 border: `1px solid color-mix(in oklch, ${color} 20%, transparent)`,
-                background: `color-mix(in oklch, ${color} 4%, var(--bg))`,
+                background: `color-mix(in oklch, ${color} 4%, var(--bg-base))`,
               }}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                 {roleLabel}
               </span>
               {providerLabel && (
-                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{providerLabel}</span>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{providerLabel}</span>
               )}
             </div>
           );
@@ -377,7 +377,7 @@ function TemplateDetailView({
           <span style={fieldLabelStyle}>额外增援</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {optionalAgents.map((label) => (
-              <span key={label} style={pillButtonStyle(true, 'var(--warning, var(--warning, #f0b429))')}>
+              <span key={label} style={pillButtonStyle(true, 'var(--warning))')}>
                 {label}
               </span>
             ))}
@@ -400,15 +400,15 @@ function TemplateDetailView({
                   alignItems: 'center',
                   gap: 2,
                   fontSize: 9,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 {i > 0 && <span style={{ margin: '0 2px' }}>→</span>}
-                <span style={{ color: 'var(--text-2)' }}>
+                <span style={{ color: 'var(--fg-default)' }}>
                   {sourceNode?.label.split(' · ')[0] ?? edge.source}
                 </span>
                 <span>→</span>
-                <span style={{ color: 'var(--text-2)' }}>
+                <span style={{ color: 'var(--fg-default)' }}>
                   {targetNode?.label.split(' · ')[0] ?? edge.target}
                 </span>
               </span>
@@ -423,7 +423,7 @@ function TemplateDetailView({
           display: 'flex',
           gap: 12,
           fontSize: 9,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           paddingTop: 4,
           borderTop: '1px solid var(--border-subtle)',
         }}

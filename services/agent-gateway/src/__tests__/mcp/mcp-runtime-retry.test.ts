@@ -71,7 +71,7 @@ const poolMock = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ROOT: '/home/await',
   WORKSPACE_ROOTS: ['/home/await'],
   WORKSPACE_ACCESS_RESTRICTED: false,

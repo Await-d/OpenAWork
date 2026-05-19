@@ -13,9 +13,9 @@ function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 
     return {
       badge: '等待处理',
       description: '当前会话已暂停，处理权限或问题后会继续同步最新结果。',
-      dotColor: 'var(--warning, var(--warning, #f0b429))',
-      panelBackground: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
-      panelBorder: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 26%, var(--border))',
+      dotColor: 'var(--warning))',
+      panelBackground: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
+      panelBorder: '1px solid color-mix(in srgb, var(--warning) 26%, var(--border-default))',
     };
   }
 
@@ -23,8 +23,8 @@ function getSessionRunStateMeta(status: Extract<SessionStateStatus, 'running' | 
     badge: '持续运行中',
     description: '你切回当前会话后，页面会继续自动同步最新消息和状态。',
     dotColor: 'var(--accent)',
-    panelBackground: 'color-mix(in oklch, var(--surface) 86%, var(--accent) 14%)',
-    panelBorder: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border))',
+    panelBackground: 'color-mix(in oklch, var(--bg-overlay) 86%, var(--accent) 14%)',
+    panelBorder: '1px solid color-mix(in oklch, var(--accent) 30%, var(--border-default))',
   };
 }
 
@@ -63,16 +63,16 @@ function getStopCapabilityTone(capability: StopCapability): {
 } {
   if (capability === 'best_effort') {
     return {
-      background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 12%, transparent)',
-      border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 28%, var(--border))',
-      color: 'var(--warning, var(--warning, #f0b429))',
+      background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))',
+      color: 'var(--warning))',
     };
   }
 
   if (capability === 'precise') {
     return {
       background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-      border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))',
+      border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-default))',
       color: 'var(--accent)',
     };
   }
@@ -80,7 +80,7 @@ function getStopCapabilityTone(capability: StopCapability): {
   return {
     background: 'transparent',
     border: '1px solid var(--border-subtle)',
-    color: 'var(--text-3)',
+    color: 'var(--fg-muted)',
   };
 }
 
@@ -145,7 +145,7 @@ export function SessionRunStateBar({
       data-testid="chat-session-runtime-status"
       style={{
         padding: '0 10px 4px',
-        background: 'var(--bg)',
+        background: 'var(--bg-base)',
         flexShrink: 0,
       }}
     >
@@ -183,7 +183,7 @@ export function SessionRunStateBar({
             style={{
               fontSize: 11,
               fontWeight: 600,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               whiteSpace: 'nowrap',
             }}
           >
@@ -204,7 +204,7 @@ export function SessionRunStateBar({
             <span
               style={{
                 fontSize: 10,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -222,8 +222,8 @@ export function SessionRunStateBar({
                 padding: '0 7px',
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--surface) 82%, transparent)',
-                color: 'var(--text-2)',
+                background: 'color-mix(in oklch, var(--bg-overlay) 82%, transparent)',
+                color: 'var(--fg-default)',
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -235,15 +235,15 @@ export function SessionRunStateBar({
           <StatusBadge
             background={
               status === 'paused'
-                ? 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 12%, transparent)'
+                ? 'color-mix(in srgb, var(--warning) 12%, transparent)'
                 : 'color-mix(in oklch, var(--accent) 10%, transparent)'
             }
             border={
               status === 'paused'
-                ? '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 28%, var(--border))'
-                : '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))'
+                ? '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))'
+                : '1px solid color-mix(in oklch, var(--accent) 22%, var(--border-default))'
             }
-            color={status === 'paused' ? 'var(--warning, var(--warning, #f0b429))' : 'var(--accent)'}
+            color={status === 'paused' ? 'var(--warning))' : 'var(--accent)'}
             label={meta.badge}
           />
         </div>
@@ -271,7 +271,7 @@ export function SessionRunStatePlaceholder({
         alignItems: 'center',
         gap: 8,
         minHeight: 28,
-        color: 'var(--text-2)',
+        color: 'var(--fg-default)',
         animation: 'fade-in 180ms ease-out',
       }}
     >
@@ -294,7 +294,7 @@ export function SessionRunStatePlaceholder({
           fontSize: 12,
           fontWeight: 600,
           letterSpacing: '0.01em',
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
         }}
       >
         会话{meta.badge}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeSqliteBindParams,
   normalizeUnknownSqliteBindParams,
-} from '../../sqlite-bind-params.js';
+} from '../../infra/sqlite-bind-params.js';
 
 describe('sqlite bind params', () => {
   it('normalizes boolean and undefined values before node:sqlite binding', () => {

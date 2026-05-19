@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 
 interface SharedSessionCommentRow {
   author_email: string;

@@ -17,7 +17,7 @@
 import type {
   ChatRenderEntry,
   ChatRenderGroup,
-} from '../../chat/chat-message-group-list.js';
+} from '../../chat/message/chat-message-group-list.js';
 
 export function groupChatRenderEntries(entries: ChatRenderEntry[]): ChatRenderGroup[] {
   const groups: ChatRenderGroup[] = [];

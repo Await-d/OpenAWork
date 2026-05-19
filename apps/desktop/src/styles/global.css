@@ -86,7 +86,7 @@ textarea::placeholder {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: hsl(var(--border-default));
   border-radius: 9999px;
 }
 
@@ -96,7 +96,7 @@ textarea::placeholder {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-color: hsl(var(--border-default)) transparent;
 }
 
 .cursor-blink {

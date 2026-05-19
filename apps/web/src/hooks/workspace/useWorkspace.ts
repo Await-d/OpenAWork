@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createSessionsClient, createWorkspaceClient, type Session } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth.js';
-import { useUIStateStore } from '../../stores/uiState.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { useUIStateStore } from '../../stores/ui/uiState.js';
 
 export interface FileTreeNode {
   path: string;

@@ -18,8 +18,8 @@ export interface LogViewerProps {
 }
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
-  debug: 'var(--fg-muted, #7b8a9e)',
-  info: 'var(--accent, #5cd4c0)',
+  debug: 'var(--fg-muted))',
+  info: 'var(--accent))',
   warn: color.contrast,
   error: color.danger,
 };
@@ -58,7 +58,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         fontFamily: 'system-ui, sans-serif',
@@ -82,7 +82,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: 'var(--fg-default, #c8d1e0)',
+            color: 'var(--fg-default))',
             marginRight: 4,
           }}
         >
@@ -94,7 +94,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
           style={{
             ...btnBase,
             background: activeLevel === null ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : 'transparent',
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
           }}
         >
           全部
@@ -122,7 +122,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
           style={{
             ...btnBase,
             background: 'transparent',
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
           }}
         >
           导出
@@ -143,7 +143,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
               padding: '2rem',
               textAlign: 'center',
               fontSize: 12,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
             }}
           >
             暂无日志条目。
@@ -163,7 +163,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
                 style={{
                   fontSize: 10,
                   fontFamily: 'monospace',
-                  color: 'var(--fg-muted, #7b8a9e)',
+                  color: 'var(--fg-muted))',
                   flexShrink: 0,
                   minWidth: 88,
                 }}
@@ -186,7 +186,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
                 <span
                   style={{
                     fontSize: 11,
-                    color: 'var(--fg-muted, #7b8a9e)',
+                    color: 'var(--fg-muted))',
                     fontFamily: 'monospace',
                     flexShrink: 0,
                   }}
@@ -197,7 +197,7 @@ export function LogViewer({ logs, onExport, style }: LogViewerProps) {
               <span
                 style={{
                   fontSize: 12,
-                  color: 'var(--fg-default, #c8d1e0)',
+                  color: 'var(--fg-default))',
                   fontFamily: 'monospace',
                   wordBreak: 'break-all',
                 }}

@@ -46,7 +46,7 @@ export function extractRepoCloneFromOutput(output: unknown): RepoCloneOutputShap
 }
 
 const STATUS_LABEL: Record<RepoCloneOutputShape['status'], { label: string; tone: string }> = {
-  cached: { label: '使用缓存', tone: 'var(--text-2)' },
+  cached: { label: '使用缓存', tone: 'var(--fg-default)' },
   cloned: { label: '首次克隆', tone: 'var(--accent)' },
   refreshed: { label: '已刷新', tone: 'var(--accent)' },
 };
@@ -62,13 +62,13 @@ export function RepoClonePreview({ data }: { data: RepoCloneOutputShape }) {
         padding: '8px 10px',
         border: '1px solid var(--border-subtle)',
         borderRadius: 6,
-        background: 'var(--surface)',
+        background: 'var(--bg-overlay)',
         fontSize: 12,
         lineHeight: 1.5,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{data.repository}</span>
+        <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>{data.repository}</span>
         <span
           style={{
             fontSize: 11,
@@ -82,15 +82,15 @@ export function RepoClonePreview({ data }: { data: RepoCloneOutputShape }) {
           {status.label}
         </span>
         {data.branch && (
-          <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
             分支：<code>{data.branch}</code>
           </span>
         )}
       </div>
-      <div style={{ color: 'var(--text-2)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
+      <div style={{ color: 'var(--fg-default)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
         {data.localPath}
       </div>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: 'var(--text-3)' }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: 'var(--fg-muted)' }}>
         <span>host: {data.host}</span>
         <span style={{ fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
           remote: {data.remote}

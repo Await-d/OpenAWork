@@ -30,13 +30,13 @@ const LAYER_META: Record<TeamRoleLayer, { name: string; sub: string; icon: strin
 };
 
 const STATE_COLORS: Record<HandoffState | 'idle', string> = {
-  idle: 'var(--text-3)',
-  pending: 'var(--warning, var(--warning, #f0b429))',
-  claimed: 'var(--aux, var(--aux, #8b9cf5))',
-  running: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  completed: 'var(--text-3)',
-  failed: 'var(--danger, #d4574e)',
-  cancelled: 'var(--text-3)',
+  idle: 'var(--fg-muted)',
+  pending: 'var(--warning))',
+  claimed: 'var(--aux))',
+  running: 'var(--success))',
+  completed: 'var(--fg-muted)',
+  failed: 'var(--danger))',
+  cancelled: 'var(--fg-muted)',
 };
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -48,7 +48,7 @@ const CONTAINER_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -61,8 +61,8 @@ const FLOW_GRID_STYLE: CSSProperties = {
   padding: '20px 12px',
   borderRadius: 14,
   background:
-    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, var(--surface)) 0%, color-mix(in srgb, var(--surface) 90%, var(--bg)) 100%)',
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
+    'linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base) 100%)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
   overflow: 'auto',
 };
 
@@ -77,22 +77,22 @@ const NODE_STYLE: CSSProperties = {
   minHeight: 120,
   padding: '12px 8px',
   borderRadius: 14,
-  background: 'color-mix(in srgb, var(--surface) 95%, var(--bg))',
-  border: '2px solid color-mix(in srgb, var(--border) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 95%, var(--bg-base))',
+  border: '2px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
   flexShrink: 0,
   transition: 'all 200ms ease',
 };
 
 const NODE_ACTIVE_STYLE: CSSProperties = {
   ...NODE_STYLE,
-  borderColor: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  boxShadow: '0 0 0 4px color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 18%, transparent)',
+  borderColor: 'var(--success))',
+  boxShadow: '0 0 0 4px color-mix(in srgb, var(--success) 18%, transparent)',
 };
 
 const NODE_FAILED_STYLE: CSSProperties = {
   ...NODE_STYLE,
-  borderColor: 'var(--danger, #d4574e)',
-  boxShadow: '0 0 0 4px color-mix(in srgb, var(--danger, #d4574e) 18%, transparent)',
+  borderColor: 'var(--danger))',
+  boxShadow: '0 0 0 4px color-mix(in srgb, var(--danger) 18%, transparent)',
 };
 
 const EDGE_STYLE: CSSProperties = {
@@ -207,8 +207,8 @@ export function TopologyView() {
               placeItems: 'center',
               padding: 24,
               borderRadius: 12,
-              border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-              color: 'var(--text-3)',
+              border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+              color: 'var(--fg-muted)',
               fontSize: 12,
               gap: 6,
             }}
@@ -247,11 +247,11 @@ function Node({ data }: { data: NodeData }) {
       <span style={{ fontSize: 22 }} aria-hidden>
         {meta.icon}
       </span>
-      <strong style={{ fontSize: 13, color: 'var(--text)' }}>{meta.name}</strong>
+      <strong style={{ fontSize: 13, color: 'var(--fg-strong)' }}>{meta.name}</strong>
       <span
         style={{
           fontSize: 9,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontWeight: 700,
           letterSpacing: '0.06em',
         }}
@@ -264,7 +264,7 @@ function Node({ data }: { data: NodeData }) {
           gap: 4,
           alignItems: 'center',
           fontSize: 10,
-          color: 'var(--text-2)',
+          color: 'var(--fg-default)',
           fontWeight: 700,
         }}
       >
@@ -278,8 +278,8 @@ function Node({ data }: { data: NodeData }) {
             right: -8,
             padding: '1px 7px',
             borderRadius: 999,
-            background: 'var(--success, var(--success, var(--success, #3dd49a)))',
-            color: 'white',
+            background: 'var(--success))',
+            color: 'var(--fg-on-accent)',
             fontSize: 10,
             fontWeight: 800,
           }}
@@ -295,8 +295,8 @@ function Node({ data }: { data: NodeData }) {
             right: -8,
             padding: '1px 7px',
             borderRadius: 999,
-            background: 'var(--danger, #d4574e)',
-            color: 'white',
+            background: 'var(--danger))',
+            color: 'var(--fg-on-accent)',
             fontSize: 10,
             fontWeight: 800,
           }}
@@ -312,10 +312,10 @@ function Edge({ data }: { data: EdgeData }) {
   const active = data.runningCount > 0 || data.pendingCount > 0;
   const failed = data.failedCount > 0;
   const color = failed
-    ? 'var(--danger, #d4574e)'
+    ? 'var(--danger))'
     : active
-      ? 'var(--success, var(--success, var(--success, #3dd49a)))'
-      : 'color-mix(in srgb, var(--border) 70%, transparent)';
+      ? 'var(--success))'
+      : 'color-mix(in srgb, var(--border-default) 70%, transparent)';
   return (
     <div style={EDGE_STYLE}>
       <svg width="100%" height={24} viewBox="0 0 100 24" preserveAspectRatio="none">
@@ -337,9 +337,9 @@ function Edge({ data }: { data: EdgeData }) {
             top: -16,
             padding: '0 6px',
             borderRadius: 999,
-            background: 'color-mix(in srgb, var(--surface) 95%, var(--bg))',
+            background: 'color-mix(in srgb, var(--bg-overlay) 95%, var(--bg-base))',
             border: `1px solid ${color}`,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             fontSize: 9,
             fontWeight: 700,
             fontVariantNumeric: 'tabular-nums',
@@ -361,9 +361,9 @@ function EdgeRow({ data }: { data: EdgeData }) {
           gap: 10,
           padding: '6px 12px',
           borderRadius: 8,
-          border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
           fontSize: 12,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
         }}
       >
         <span style={{ minWidth: 130, fontWeight: 600 }}>
@@ -380,12 +380,12 @@ function EdgeRow({ data }: { data: EdgeData }) {
         gap: 10,
         padding: '8px 12px',
         borderRadius: 8,
-        border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-        background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+        border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
         fontSize: 12,
       }}
     >
-      <span style={{ minWidth: 130, color: 'var(--text)', fontWeight: 700 }}>
+      <span style={{ minWidth: 130, color: 'var(--fg-strong)', fontWeight: 700 }}>
         {LAYER_META[data.fromLayer].name} → {LAYER_META[data.toLayer].name}
       </span>
       <PillStat label="待领取" value={data.pendingCount} color={STATE_COLORS.pending} />
@@ -393,7 +393,7 @@ function EdgeRow({ data }: { data: EdgeData }) {
       <PillStat label="完成" value={data.completedCount} color={STATE_COLORS.completed} />
       <PillStat label="失败" value={data.failedCount} color={STATE_COLORS.failed} />
       <span style={{ flex: 1 }} />
-      <span style={{ color: 'var(--text-3)' }}>合计 {data.totalCount}</span>
+      <span style={{ color: 'var(--fg-muted)' }}>合计 {data.totalCount}</span>
     </div>
   );
 }
@@ -407,15 +407,15 @@ function PillStat({ label, value, color }: { label: string; value: number; color
         gap: 4,
         padding: '1px 8px',
         borderRadius: 999,
-        background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
         border: `1px solid ${color}`,
-        color: 'var(--text-2)',
+        color: 'var(--fg-default)',
         fontSize: 10,
         fontWeight: 700,
         fontVariantNumeric: 'tabular-nums',
       }}
     >
-      <span style={{ color: 'var(--text-3)' }}>{label}</span>
+      <span style={{ color: 'var(--fg-muted)' }}>{label}</span>
       <strong style={{ color }}>{value}</strong>
     </span>
   );

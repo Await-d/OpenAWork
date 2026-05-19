@@ -27,10 +27,10 @@ export interface AgentVizPanelProps {
 }
 
 const EVENT_COLOR: Record<AgentVizEventType, string> = {
-  agent_started: 'var(--aux, #8b9cf5)',
-  agent_thinking: 'var(--aux, #8b9cf5)',
+  agent_started: 'var(--aux))',
+  agent_thinking: 'var(--aux))',
   tool_call: clr.contrast,
-  tool_search: 'var(--accent, #5cd4c0)',
+  tool_search: 'var(--accent))',
   tool_done: clr.success,
   agent_done: clr.success,
   agent_error: clr.danger,
@@ -68,7 +68,7 @@ export function AgentVizPanel({ events = [], title = 'Agent 活动' }: AgentVizP
           style={{
             marginLeft: 8,
             fontSize: 11,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             fontWeight: 400,
           }}
         >
@@ -79,7 +79,7 @@ export function AgentVizPanel({ events = [], title = 'Agent 活动' }: AgentVizP
         {events.length === 0 && (
           <div
             style={{
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               fontSize: 12,
               textAlign: 'center',
               padding: '20px 0',
@@ -139,11 +139,11 @@ export function AgentVizPanel({ events = [], title = 'Agent 活动' }: AgentVizP
                   <span style={{ fontSize: 12, fontWeight: 500, color }}>
                     {ev.agentName ?? ev.agentId}
                   </span>
-                  <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
                     {new Date(ev.ts).toISOString().slice(11, 19)}
                   </span>
                   {ev.durationMs !== undefined && (
-                    <span style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)' }}>
+                    <span style={{ fontSize: 10, color: 'var(--fg-muted))' }}>
                       {ev.durationMs}ms
                     </span>
                   )}
@@ -151,7 +151,7 @@ export function AgentVizPanel({ events = [], title = 'Agent 活动' }: AgentVizP
                 <div
                   style={{
                     fontSize: 12,
-                    color: 'var(--color-fg, #e2e8f0)',
+                    color: 'var(--fg-strong)',
                     marginTop: 2,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',

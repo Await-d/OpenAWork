@@ -11,8 +11,8 @@ const CARD_STYLE: CSSProperties = {
   gap: 8,
   padding: 12,
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
 };
 
 const BADGE_STYLE: CSSProperties = {
@@ -25,9 +25,9 @@ const BADGE_STYLE: CSSProperties = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  executor: 'var(--success, var(--success, #3dd49a))',
-  tester: 'var(--aux, var(--aux, #8b9cf5))',
-  reviewer: 'var(--warning, var(--warning, #f0b429))',
+  executor: 'var(--success))',
+  tester: 'var(--aux))',
+  reviewer: 'var(--warning))',
 };
 
 export interface DispatchPackageViewProps {
@@ -43,7 +43,7 @@ export interface DispatchPackageViewProps {
 export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
   if (packages.length === 0) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--text-3)', padding: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 12 }}>
         暂无派发包。PM2 完成任务拆分后这里会展示每个 dispatch_package 的内容。
       </div>
     );
@@ -54,7 +54,7 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
       <span
         style={{
           fontSize: 11,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
         }}
@@ -62,7 +62,7 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
         Dispatch Packages（{packages.length}）
       </span>
       {packages.map((pkg) => {
-        const color = ROLE_COLORS[pkg.role] ?? 'var(--text-3)';
+        const color = ROLE_COLORS[pkg.role] ?? 'var(--fg-muted)';
         return (
           <div key={pkg.taskMarkers.taskId} style={CARD_STYLE}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -79,8 +79,8 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
               <span
                 style={{
                   ...BADGE_STYLE,
-                  color: 'var(--text-3)',
-                  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+                  color: 'var(--fg-muted)',
+                  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
                 }}
               >
                 {pkg.taskMarkers.taskId}
@@ -89,9 +89,9 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                 <span
                   style={{
                     ...BADGE_STYLE,
-                    color: 'var(--aux, var(--aux, #8b9cf5))',
-                    border: '1px solid var(--aux, var(--aux, #8b9cf5))40',
-                    background: 'var(--aux, var(--aux, #8b9cf5))10',
+                    color: 'var(--aux))',
+                    border: '1px solid var(--aux))40',
+                    background: 'var(--aux))10',
                   }}
                 >
                   [P]
@@ -101,9 +101,9 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                 <span
                   style={{
                     ...BADGE_STYLE,
-                    color: 'var(--success, var(--success, #3dd49a))',
-                    border: '1px solid var(--success, var(--success, #3dd49a))40',
-                    background: 'var(--success, var(--success, #3dd49a))10',
+                    color: 'var(--success))',
+                    border: '1px solid var(--success))40',
+                    background: 'var(--success))10',
                   }}
                 >
                   [{pkg.taskMarkers.story}]
@@ -117,10 +117,10 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
                   key={t}
                   style={{
                     fontSize: 10,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     padding: '1px 4px',
                     borderRadius: 3,
-                    background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
+                    background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                   }}
                 >
                   {t}
@@ -128,7 +128,7 @@ export function DispatchPackageView({ packages }: DispatchPackageViewProps) {
               ))}
             </div>
             {pkg.dependsOn.length > 0 ? (
-              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+              <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
                 依赖：{pkg.dependsOn.join(', ')}
               </span>
             ) : null}

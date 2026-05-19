@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { makeOrderedMessageId } from '../ordered-id.js';
+import { makeOrderedMessageId } from '../infra/ordered-id.js';
 import { promises as fsp } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -10,9 +10,9 @@ import {
   HashAnchoredEditorImpl,
 } from '@openAwork/agent-core';
 import { z } from 'zod';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
   hydrateLegacySessionMessagesForSearch,
@@ -31,7 +31,7 @@ import {
   getSessionFileBackup,
   readSessionFileBackupContent,
 } from '../session/session-file-backup-store.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
@@ -78,7 +78,7 @@ import {
   listSessionFileDiffsWithText,
   persistSessionFileDiffs,
 } from '../session/session-file-diff-store.js';
-import { isSqliteMalformedError } from '../sqlite-error-utils.js';
+import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import {
   compareSessionSnapshots,
   createRequestSnapshotRef,

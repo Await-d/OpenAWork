@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useAuthStore } from '../../../../stores/auth.js';
+import { useAuthStore } from '../../../../stores/auth/auth.js';
 import { connectTeamEvents, disconnectTeamEvents } from '../../../../stores/team/team-events.js';
 import type {
   SharedSessionDetailRecord,
@@ -22,7 +22,7 @@ import {
   type LeaderDispatchArtifact,
   type TeamRosterMember,
 } from '../data/team-leader-flow.js';
-import type { TeamActionFeedback } from '../../use-team-collaboration.js';
+import type { TeamActionFeedback } from '../../hooks/use-team-collaboration.js';
 import {
   TeamAuditPanel,
   TeamMembersPanel,
@@ -32,7 +32,7 @@ import {
   TeamTasksPanel,
   TeamSectionHeader,
   getTaskStatusMeta,
-} from '../../team-page-sections.js';
+} from '../../views/team-page-sections.js';
 import {
   ALL_WORKSPACES_KEY,
   formatChangeSourceKind,
@@ -181,10 +181,10 @@ function EmptyState({ description, title }: { description: string; title: string
         display: 'grid',
         gap: 8,
         padding: 18,
-        color: 'var(--text-3)',
+        color: 'var(--fg-muted)',
       }}
     >
-      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{title}</span>
+      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg-strong)' }}>{title}</span>
       <span style={{ fontSize: 13, lineHeight: 1.7 }}>{description}</span>
     </div>
   );
@@ -205,9 +205,9 @@ function RuntimeMetricGrid({ metrics }: { metrics: TeamRuntimeMetric[] }) {
           className="content-card"
           style={{ display: 'grid', gap: 4, padding: 14 }}
         >
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{metric.label}</span>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{metric.label}</span>
           <span style={{ fontSize: 24, fontWeight: 800 }}>{metric.value}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{metric.hint}</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{metric.hint}</span>
         </div>
       ))}
     </div>
@@ -264,7 +264,7 @@ function SessionTreeNodeCard({
                 padding: '4px 10px',
                 borderRadius: 999,
                 background: 'rgba(91, 140, 255, 0.12)',
-                color: 'var(--text-2)',
+                color: 'var(--fg-default)',
                 fontSize: 11,
                 fontWeight: 700,
               }}
@@ -273,7 +273,7 @@ function SessionTreeNodeCard({
             </span>
           ) : null}
         </div>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           {node.children.length > 0 ? `${node.children.length} 个子会话` : '叶子会话'} · 最近更新{' '}
           {new Date(node.session.updated_at).toLocaleString('zh-CN', {
             month: '2-digit',
@@ -436,7 +436,7 @@ export function TeamRuntimeShell({
                 padding: 18,
                 borderRadius: 24,
                 background:
-                  'radial-gradient(circle at top left, rgba(91, 140, 255, 0.18), transparent 34%), linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, rgba(15, 23, 42, 0.22)) 0%, var(--surface) 100%)',
+                  'radial-gradient(circle at top left, rgba(91, 140, 255, 0.18), transparent 34%), linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 96%, rgba(15, 23, 42, 0.22)) 0%, var(--bg-overlay) 100%)',
               }}
             >
               <TeamSectionHeader
@@ -465,7 +465,7 @@ export function TeamRuntimeShell({
                       <span style={{ fontSize: 18, fontWeight: 800 }}>
                         从模板“{workflowLaunch.templateName}”发起 Team 任务
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.7 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.7 }}>
                         {workflowLaunch.templateDescription || '当前模板没有描述。'} · 节点数：
                         {workflowLaunch.nodeCount}
                       </span>
@@ -481,7 +481,7 @@ export function TeamRuntimeShell({
                       >
                         {busy ? '发起中…' : '在当前 Team 中发起'}
                       </button>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                         当前会先创建一条团队任务，作为模板执行的最小入口。
                       </span>
                     </div>
@@ -491,7 +491,7 @@ export function TeamRuntimeShell({
                   <div
                     key={line}
                     className="content-card"
-                    style={{ padding: 14, color: 'var(--text-2)' }}
+                    style={{ padding: 14, color: 'var(--fg-default)' }}
                   >
                     {line}
                   </div>
@@ -501,7 +501,7 @@ export function TeamRuntimeShell({
                     className="content-card"
                     style={{
                       padding: 14,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       borderColor: 'color-mix(in srgb, var(--warning) 30%, transparent)',
                     }}
                   >
@@ -549,7 +549,7 @@ export function TeamRuntimeShell({
                           <span style={{ fontSize: 14, fontWeight: 700 }}>{task.title}</span>
                           <span style={statusMeta.style}>{statusMeta.label}</span>
                         </div>
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                           负责人：
                           {task.assigneeId
                             ? (memberNameMap.get(task.assigneeId) ?? '未知成员')
@@ -581,9 +581,9 @@ export function TeamRuntimeShell({
                     >
                       <span style={{ fontSize: 13, fontWeight: 700 }}>{log.summary}</span>
                       {log.detail ? (
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{log.detail}</span>
+                        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{log.detail}</span>
                       ) : null}
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                         {new Date(log.createdAt).toLocaleString('zh-CN')}
                       </span>
                     </div>
@@ -635,7 +635,7 @@ export function TeamRuntimeShell({
                           <span style={{ fontSize: 13, fontWeight: 700 }}>
                             {group.workspaceLabel}
                           </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                             {group.sessions.length} 个会话
                           </span>
                         </div>
@@ -695,7 +695,7 @@ export function TeamRuntimeShell({
                 description="优先展示当前共享运行的 task projection；团队级任务区保留在下方，作为协作兜底。"
               />
               {runtimeTasksLoading ? (
-                <div className="content-card" style={{ padding: 14, color: 'var(--text-3)' }}>
+                <div className="content-card" style={{ padding: 14, color: 'var(--fg-muted)' }}>
                   正在加载当前共享运行的任务投影…
                 </div>
               ) : effectiveSelectedSharedSession && effectiveRuntimeTaskRecords.length > 0 ? (
@@ -726,7 +726,7 @@ export function TeamRuntimeShell({
                           <span style={{ fontSize: 14, fontWeight: 700 }}>{task.title}</span>
                           <span style={statusMeta.style}>{statusMeta.label}</span>
                         </div>
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                           {runtimeTask?.assignedAgent
                             ? `Agent：${runtimeTask.assignedAgent} · `
                             : ''}
@@ -735,7 +735,7 @@ export function TeamRuntimeShell({
                           {runtimeTask?.unmetDependencyCount ?? 0}
                         </span>
                         {task.result ? (
-                          <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.7 }}>
+                          <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.7 }}>
                             {task.result}
                           </span>
                         ) : null}
@@ -792,7 +792,7 @@ export function TeamRuntimeShell({
                           <span style={{ fontSize: 14, fontWeight: 700 }}>{task.title}</span>
                           <span style={statusMeta.style}>{statusMeta.label}</span>
                         </div>
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                           {task.assignedAgent ? `Agent：${task.assignedAgent} · ` : ''}
                           工作区：{formatWorkspaceLabel(task.workspacePath)} · 子任务：
                           {task.subtaskCount}
@@ -842,7 +842,7 @@ export function TeamRuntimeShell({
                 <div className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
                   <span style={{ fontSize: 13, fontWeight: 700 }}>工作区会话清单</span>
                   {filteredSessions.length === 0 ? (
-                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                       当前工作区没有基础会话记录。
                     </span>
                   ) : (
@@ -851,7 +851,7 @@ export function TeamRuntimeShell({
                         <span style={{ fontSize: 13, fontWeight: 600 }}>
                           {session.title ?? session.id}
                         </span>
-                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                           {formatWorkspaceLabel(session.workspacePath)}
                         </span>
                       </div>
@@ -861,14 +861,14 @@ export function TeamRuntimeShell({
                 <div className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
                   <span style={{ fontSize: 13, fontWeight: 700 }}>共享记录摘要</span>
                   {filteredSessionShares.length === 0 ? (
-                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                       当前工作区还没有团队级共享记录。
                     </span>
                   ) : (
                     filteredSessionShares.slice(0, 4).map((share) => (
                       <div key={share.id} style={{ display: 'grid', gap: 2 }}>
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{share.sessionLabel}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                           共享给 {share.memberName} · {share.permission}
                         </span>
                       </div>
@@ -877,7 +877,7 @@ export function TeamRuntimeShell({
                 </div>
               </div>
             </section>
-            <div className="content-card" style={{ padding: 14, color: 'var(--text-3)' }}>
+            <div className="content-card" style={{ padding: 14, color: 'var(--fg-muted)' }}>
               下方仍保留旧的“共享会话”操作面板，作为团队级操作入口；它不是完整的工作区 read
               model，只承担当前切片的共享管理动作。
             </div>
@@ -958,7 +958,7 @@ export function TeamRuntimeShell({
                       >
                         <div style={{ display: 'grid', gap: 4 }}>
                           <span style={{ fontSize: 15, fontWeight: 700 }}>{card.title}</span>
-                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                             {card.workspaceLabel}
                           </span>
                         </div>
@@ -969,7 +969,7 @@ export function TeamRuntimeShell({
                             padding: '4px 10px',
                             borderRadius: 999,
                             background: 'rgba(91, 140, 255, 0.12)',
-                            color: 'var(--text-2)',
+                            color: 'var(--fg-default)',
                             fontSize: 11,
                             fontWeight: 700,
                           }}
@@ -977,10 +977,10 @@ export function TeamRuntimeShell({
                           {card.stateLabel}
                         </span>
                       </div>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                         共享来源：{card.sharedByEmail}
                       </span>
-                      <span style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text)' }}>
+                      <span style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--fg-strong)' }}>
                         {card.latestOutput ??
                           '当前卡片尚未载入详细输出；选中对应共享会话后可查看最新助手结果。'}
                       </span>
@@ -997,16 +997,16 @@ export function TeamRuntimeShell({
                               padding: '4px 10px',
                               borderRadius: 999,
                               border:
-                                '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+                                '1px solid color-mix(in srgb, var(--border-default) 80%, transparent)',
                               fontSize: 11,
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                             }}
                           >
                             {tag}
                           </span>
                         ))}
                       </div>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                         {card.helperText}
                       </span>
                     </div>
@@ -1037,25 +1037,25 @@ export function TeamRuntimeShell({
                   <div className="content-card" style={{ display: 'grid', gap: 12, padding: 14 }}>
                     <span style={{ fontSize: 13, fontWeight: 700 }}>当前共享运行变更摘要</span>
                     <div style={{ display: 'grid', gap: 6 }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                         变更文件：{fileChangesSummary.totalFileDiffs} · 快照：
                         {fileChangesSummary.snapshotCount}
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                         新增：{fileChangesSummary.totalAdditions} · 删除：
                         {fileChangesSummary.totalDeletions}
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                         最近快照：
                         {fileChangesSummary.latestSnapshotAt
                           ? new Date(fileChangesSummary.latestSnapshotAt).toLocaleString('zh-CN')
                           : '未生成'}
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                         快照类型：
                         {formatSnapshotScopeKind(fileChangesSummary.latestSnapshotScopeKind)}
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                         保障等级：{fileChangesSummary.weakestGuaranteeLevel ?? '未标记'}
                       </span>
                     </div>
@@ -1073,16 +1073,16 @@ export function TeamRuntimeShell({
                               padding: '4px 10px',
                               borderRadius: 999,
                               border:
-                                '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+                                '1px solid color-mix(in srgb, var(--border-default) 80%, transparent)',
                               fontSize: 11,
-                              color: 'var(--text-2)',
+                              color: 'var(--fg-default)',
                             }}
                           >
                             {formatChangeSourceKind(sourceKind)}
                           </span>
                         ))
                       ) : (
-                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                           当前共享运行还没有来源类型摘要。
                         </span>
                       )}
@@ -1098,7 +1098,7 @@ export function TeamRuntimeShell({
               <section className="content-card" style={{ display: 'grid', gap: 10, padding: 14 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>工作区共享运行清单</span>
                 {filteredSharedSessions.length === 0 ? (
-                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
                     当前工作区没有共享运行可用于变更投影。
                   </span>
                 ) : (
@@ -1129,11 +1129,11 @@ export function TeamRuntimeShell({
                           <span style={{ fontSize: 13, fontWeight: 700 }}>
                             {sharedSession.title ?? sharedSession.sessionId}
                           </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                             {getSharedSessionStateLabel(sharedSession.stateStatus)}
                           </span>
                         </div>
-                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                           {isSelected
                             ? '当前已接入详细变更摘要，可结合上方快照与来源类型继续排查。'
                             : '当前只显示运行级概览；切到该共享会话后可查看详细变更摘要。'}
@@ -1275,7 +1275,7 @@ export function TeamRuntimeShell({
         <div style={{ maxWidth: 'min(1880px, 100%)', margin: '0 auto', padding: '16px' }}>
           <div
             className="content-card"
-            style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}
+            style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)' }}
           >
             Team Runtime 面板加载中…
           </div>

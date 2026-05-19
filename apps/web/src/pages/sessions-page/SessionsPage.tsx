@@ -7,11 +7,11 @@ import {
   withTokenRefresh,
 } from '@openAwork/web-client';
 import type { TokenStore } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth.js';
-import { useUIStateStore } from '../../stores/uiState.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { exportSession, importSession } from '../../utils/session/session-transfer.js';
-import { logger } from '../../utils/logger.js';
-import { toast } from '../../components/common/ToastNotification.js';
+import { logger } from '../../utils/log/logger.js';
+import { toast } from '../../components/common/feedback/ToastNotification.js';
 import {
   buildWorkspaceSessionCollections,
   getWorkspaceGroupKey,
@@ -27,13 +27,13 @@ import {
   buildSavedChatSessionMetadata,
   loadSavedChatSessionDefaults,
 } from '../../utils/chat/chat-session-defaults.js';
-import WorkspacePickerModal from '../../components/common/WorkspacePickerModal.js';
-import WorkspaceGroupMenu from '../../components/layout/WorkspaceGroupMenu.js';
-import { WorkspaceDeleteConfirmDialog } from '../../components/layout/WorkspaceDeleteConfirmDialog.js';
+import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
+import WorkspaceGroupMenu from '../../components/layout/workspace/WorkspaceGroupMenu.js';
+import { WorkspaceDeleteConfirmDialog } from '../../components/layout/workspace/WorkspaceDeleteConfirmDialog.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
-import { DetailPanel } from './detail-panel.js';
-import { SessionCard, SESSION_CARD_ACTION_BUTTON_STYLE } from './session-card.js';
-import type { SessionRow } from './session-page-types.js';
+import { DetailPanel } from './views/detail-panel.js';
+import { SessionCard, SESSION_CARD_ACTION_BUTTON_STYLE } from './views/session-card.js';
+import type { SessionRow } from './state/session-page-types.js';
 
 function resolveDeletedSessionIds(
   result: { deletedSessionIds?: string[] } | void,
@@ -53,8 +53,8 @@ function SkeletonCard() {
   return (
     <div
       style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
+        background: 'var(--bg-overlay)',
+        border: '1px solid var(--border-default)',
         borderRadius: 10,
         padding: '0.75rem 0.875rem',
         display: 'flex',
@@ -268,7 +268,7 @@ export default function SessionsPage() {
   const fetchTree = useCallback(
     async (path: string, depth = 1) =>
       createWorkspaceClient(gatewayUrl).fetchTree(token ?? '', path, { depth }) as Promise<
-        import('../../components/common/WorkspacePickerModal.js').FileTreeNode[]
+        import('../../components/common/modal/WorkspacePickerModal.js').FileTreeNode[]
       >,
     [token, gatewayUrl],
   );
@@ -594,11 +594,11 @@ export default function SessionsPage() {
           style={{
             width: 320,
             flexShrink: 0,
-            borderRight: '1px solid var(--border)',
+            borderRight: '1px solid var(--border-default)',
             display: 'flex',
             flexDirection: 'column',
             overflowY: 'auto',
-            background: 'var(--bg)',
+            background: 'var(--bg-base)',
           }}
         >
           <ul
@@ -700,13 +700,13 @@ export default function SessionsPage() {
                             flex: 1,
                           }}
                         >
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-default)' }}>
                             {group.workspaceLabel}
                           </span>
                           <span
                             style={{
                               fontSize: 11,
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
@@ -725,11 +725,11 @@ export default function SessionsPage() {
                           style={{
                             flexShrink: 0,
                             background: 'transparent',
-                            border: '1px solid var(--border)',
+                            border: '1px solid var(--border-default)',
                             borderRadius: 6,
                             padding: '2px 8px',
                             fontSize: 11,
-                            color: 'var(--text-3)',
+                            color: 'var(--fg-muted)',
                             cursor: 'pointer',
                             whiteSpace: 'nowrap',
                           }}
@@ -765,7 +765,7 @@ export default function SessionsPage() {
                         style={{
                           padding: '8px 10px 8px 8px',
                           borderRadius: 6,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontSize: 11,
                           lineHeight: 1.5,
                         }}
@@ -895,12 +895,12 @@ function TopBar({
         alignItems: 'center',
         gap: 10,
         padding: '0.75rem 1.25rem',
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--bg)',
+        borderBottom: '1px solid var(--border-default)',
+        background: 'var(--bg-base)',
         flexShrink: 0,
       }}
     >
-      <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', margin: 0, flexShrink: 0 }}>
+      <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)', margin: 0, flexShrink: 0 }}>
         会话
       </h2>
       <span
@@ -923,12 +923,12 @@ function TopBar({
         onChange={(e) => onSearchChange(e.target.value)}
         style={{
           flex: 1,
-          background: 'var(--surface)',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 7,
           padding: '5px 10px',
           fontSize: 12,
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           outline: 'none',
           minWidth: 0,
         }}
@@ -937,9 +937,9 @@ function TopBar({
         type="button"
         onClick={onImport}
         style={{
-          background: 'var(--surface)',
-          color: 'var(--text-2)',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-overlay)',
+          color: 'var(--fg-default)',
+          border: '1px solid var(--border-default)',
           borderRadius: 7,
           padding: '5px 12px',
           fontSize: 12,
@@ -955,7 +955,7 @@ function TopBar({
           onClick={onNew}
           style={{
             background: 'var(--accent)',
-            color: 'var(--accent-text)',
+            color: 'var(--fg-on-accent)',
             border: 'none',
             borderRadius: '7px 0 0 7px',
             padding: '5px 14px',
@@ -972,7 +972,7 @@ function TopBar({
           title="选择工作区后新建会话"
           style={{
             background: 'var(--accent)',
-            color: 'var(--accent-text)',
+            color: 'var(--fg-on-accent)',
             border: 'none',
             borderLeft: '1px solid oklch(from var(--accent) calc(l - 0.1) c h)',
             borderRadius: '0 7px 7px 0',
@@ -1011,7 +1011,7 @@ function EmptyList({ onNew }: { onNew: () => void }) {
         alignItems: 'center',
         gap: 12,
         padding: '3rem 1rem',
-        color: 'var(--text-3)',
+        color: 'var(--fg-muted)',
         textAlign: 'center',
       }}
     >
@@ -1033,7 +1033,7 @@ function EmptyList({ onNew }: { onNew: () => void }) {
         onClick={onNew}
         style={{
           background: 'var(--accent)',
-          color: 'var(--accent-text)',
+          color: 'var(--fg-on-accent)',
           border: 'none',
           borderRadius: 7,
           padding: '6px 16px',
@@ -1058,8 +1058,8 @@ function EmptyDetail() {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 16,
-        color: 'var(--text-3)',
-        background: 'var(--bg-2)',
+        color: 'var(--fg-muted)',
+        background: 'var(--bg-overlay)',
       }}
     >
       <svg
@@ -1080,7 +1080,7 @@ function EmptyDetail() {
         <circle cx="32" cy="21" r="2" fill="currentColor" />
       </svg>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)', marginBottom: 6 }}>
           选择一个会话
         </div>
         <div style={{ fontSize: 12 }}>在左侧点击会话以查看详情和操作</div>

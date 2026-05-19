@@ -23,8 +23,8 @@ const HEADER_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '8px 16px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 20%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 3%, var(--surface))',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 20%, transparent)',
+  background: 'color-mix(in srgb, var(--accent) 3%, var(--bg-overlay))',
   flexShrink: 0,
   flexWrap: 'wrap',
   minHeight: 36,
@@ -58,25 +58,25 @@ const ROLE_CHIP_STYLE: CSSProperties = {
   borderRadius: 6,
   fontSize: 10,
   fontWeight: 600,
-  background: 'color-mix(in srgb, var(--surface) 80%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  color: 'var(--text-2)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  color: 'var(--fg-default)',
 };
 
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
 };
 
 function colorForRole(role: string): string {
   switch (role) {
-    case 'planner': return 'var(--accent, var(--accent, #5cd4c0))';
-    case 'researcher': return 'var(--chart-7, var(--chart-7, #67e8f9))';
-    case 'executor': return 'var(--success, var(--success, #3dd49a))';
-    case 'reviewer': return 'var(--warning, var(--warning, #f0b429))';
-    case 'leader': return 'var(--chart-5, var(--chart-5, #c4b5fd))';
-    default: return 'var(--fg-muted, #7b8a9e)';
+    case 'planner': return 'var(--accent))';
+    case 'researcher': return 'var(--chart-7))';
+    case 'executor': return 'var(--success))';
+    case 'reviewer': return 'var(--warning))';
+    case 'leader': return 'var(--chart-5))';
+    default: return 'var(--fg-muted))';
   }
 }
 
@@ -103,11 +103,11 @@ function substateLabel(substate: string | null | undefined): string {
 function roleLayerLabel(roleLayer: string | null | undefined): { text: string; color: string } {
   switch (roleLayer) {
     case 'reception': return { text: '接待层 (b)', color: 'var(--accent)' };
-    case 'pm1': return { text: '规划层 (c)', color: 'var(--accent, var(--accent, #5cd4c0))' };
-    case 'pm2': return { text: '主管层 (d)', color: 'var(--chart-5, var(--chart-5, #c4b5fd))' };
-    case 'executor': return { text: '执行层 (e)', color: 'var(--success, var(--success, #3dd49a))' };
-    case 'reviewer': return { text: '评审层 (g)', color: 'var(--warning, var(--warning, #f0b429))' };
-    default: return { text: '团队会话', color: 'var(--text-2)' };
+    case 'pm1': return { text: '规划层 (c)', color: 'var(--accent))' };
+    case 'pm2': return { text: '主管层 (d)', color: 'var(--chart-5))' };
+    case 'executor': return { text: '执行层 (e)', color: 'var(--success))' };
+    case 'reviewer': return { text: '评审层 (g)', color: 'var(--warning))' };
+    default: return { text: '团队会话', color: 'var(--fg-default)' };
   }
 }
 

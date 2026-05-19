@@ -24,7 +24,7 @@ import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { createPlatformAdapter, resolveSkillsPaths } from '@openAwork/platform-adapter';
 import type { SkillManifest } from '@openAwork/skill-types';
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 export const SYSTEM_SOURCE_ID_PREFIX = 'local-system:';
 

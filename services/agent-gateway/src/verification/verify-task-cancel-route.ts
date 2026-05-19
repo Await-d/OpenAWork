@@ -65,10 +65,10 @@ async function main(): Promise<void> {
             { listSessionMessagesV2: listSessionMessages },
           ] = await Promise.all([
             import('fastify'),
-            import('../auth.js'),
-            import('../request-workflow.js'),
+            import('../infra/auth.js'),
+            import('../runtime/request-workflow.js'),
             import('../routes/sessions.js'),
-            import('../db.js'),
+            import('../infra/db.js'),
             import('../tools/tool-sandbox.js'),
             import('../message/message-v2-adapter.js'),
           ]);

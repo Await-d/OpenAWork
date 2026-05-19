@@ -23,15 +23,15 @@ const STATUS_ICON: Record<InstallStepStatus, string> = {
 };
 
 const STATUS_COLOR: Record<InstallStepStatus, string> = {
-  pending: 'var(--fg-subtle, #4d5b6e)',
-  running: 'var(--accent, #5cd4c0)',
+  pending: 'var(--fg-subtle))',
+  running: 'var(--accent))',
   done: color.success,
   error: color.danger,
 };
 
 const s: Record<string, CSSProperties> = {
   root: {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 12,
     padding: '1.5rem',
@@ -42,9 +42,9 @@ const s: Record<string, CSSProperties> = {
     margin: '0 0 0.25rem',
     fontSize: 12,
     fontWeight: 600,
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
   },
-  subtitle: { margin: '0 0 1.5rem', fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' },
+  subtitle: { margin: '0 0 1.5rem', fontSize: 12, color: 'var(--fg-muted))' },
   steps: { display: 'flex', flexDirection: 'column' as const, gap: 0 },
   stepRow: { display: 'flex', alignItems: 'flex-start', gap: 12, padding: '0.6rem 0' },
   icon: {
@@ -54,10 +54,10 @@ const s: Record<string, CSSProperties> = {
     textAlign: 'center' as const,
     lineHeight: 1.4,
   },
-  label: { fontSize: 12, color: 'var(--fg-default, #c8d1e0)', fontWeight: 500, lineHeight: 1.4 },
+  label: { fontSize: 12, color: 'var(--fg-default))', fontWeight: 500, lineHeight: 1.4 },
   msg: {
     fontSize: 11,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     marginTop: 2,
     fontFamily: 'monospace',
   },
@@ -92,14 +92,14 @@ export function InstallProgressUI({ skillName, steps, onCancel }: InstallProgres
             style={{
               height: '100%',
               width: `${pct}%`,
-              background: hasError ? color.danger : 'var(--accent, #5cd4c0)',
+              background: hasError ? color.danger : 'var(--accent))',
               borderRadius: 2,
               transition: 'width 0.3s ease',
             }}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>{pct}%</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>{pct}%</span>
         </div>
       </div>
 
@@ -118,8 +118,8 @@ export function InstallProgressUI({ skillName, steps, onCancel }: InstallProgres
                     ...s.label,
                     color:
                       step.status === 'running'
-                        ? 'var(--accent, #5cd4c0)'
-                        : 'var(--fg-default, #c8d1e0)',
+                        ? 'var(--accent))'
+                        : 'var(--fg-default))',
                   }}
                 >
                   {step.label}

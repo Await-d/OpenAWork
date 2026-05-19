@@ -1,4 +1,4 @@
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 const ACTIVE_VIEWER_WINDOW_MS = 90_000;
 

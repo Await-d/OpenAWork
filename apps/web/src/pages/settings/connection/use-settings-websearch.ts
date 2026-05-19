@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
-import { logger } from '../../../utils/logger.js';
+import { logger } from '../../../utils/log/logger.js';
 
 export type WebsearchProvider =
   | 'duckduckgo'

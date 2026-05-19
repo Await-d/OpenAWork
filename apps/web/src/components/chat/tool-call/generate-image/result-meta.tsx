@@ -36,7 +36,7 @@ export function GenerateImageResultMeta({ result }: { result: GenerateImageResul
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -53,7 +53,7 @@ export function GenerateImageResultMeta({ result }: { result: GenerateImageResul
             alignItems: 'center',
             gap: 6,
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             lineHeight: 1.4,
             paddingLeft: 2,
           }}
@@ -63,7 +63,7 @@ export function GenerateImageResultMeta({ result }: { result: GenerateImageResul
             style={{
               fontSize: 10,
               fontFamily: 'var(--font-mono, monospace)',
-              background: 'color-mix(in oklch, var(--text-3) 8%, transparent)',
+              background: 'color-mix(in oklch, var(--fg-muted) 8%, transparent)',
               padding: '1px 6px',
               borderRadius: 4,
               overflow: 'hidden',
@@ -80,7 +80,7 @@ export function GenerateImageResultMeta({ result }: { result: GenerateImageResul
         <div
           style={{
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             lineHeight: 1.5,
             paddingLeft: 2,
             display: '-webkit-box',

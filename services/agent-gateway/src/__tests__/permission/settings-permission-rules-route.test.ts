@@ -29,27 +29,27 @@ const { TEST_WORKSPACE } = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ROOT: TEST_WORKSPACE,
   sqliteAll: vi.fn(() => [] as unknown[]),
   sqliteGet: vi.fn(() => null),
   sqliteRun: vi.fn(),
 }));
 
-vi.mock('../../auth.js', () => ({
+vi.mock('../../infra/auth.js', () => ({
   requireAuth: async (request: { user?: unknown }) => {
     request.user = { sub: 'test-user', email: 'test@openAwork.local' };
   },
 }));
 
-vi.mock('../../request-workflow.js', () => ({
+vi.mock('../../runtime/request-workflow.js', () => ({
   startRequestWorkflow: () => ({
     step: { succeed: vi.fn(), fail: vi.fn() },
     child: () => ({ succeed: vi.fn(), fail: vi.fn() }),
   }),
 }));
 
-vi.mock('../../request-workflow-log-store.js', () => ({
+vi.mock('../../runtime/request-workflow-log-store.js', () => ({
   listRequestWorkflowLogs: vi.fn(() => []),
 }));
 

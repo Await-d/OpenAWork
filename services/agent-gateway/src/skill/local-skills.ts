@@ -2,7 +2,7 @@ import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { SkillInstaller } from '@openAwork/skill-registry';
 import type { InstalledSkillRecord } from '@openAwork/skill-registry';
-import { WORKSPACE_ROOTS } from '../db.js';
+import { WORKSPACE_ROOTS } from '../infra/db.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 
 export const LOCAL_WORKSPACE_SOURCE_ID = 'local-workspace';

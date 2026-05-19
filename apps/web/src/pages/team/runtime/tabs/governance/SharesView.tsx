@@ -20,9 +20,9 @@ const PERMISSION_LABELS: Record<TeamSessionShareRecord['permission'], string> = 
 };
 
 const PERMISSION_COLORS: Record<TeamSessionShareRecord['permission'], string> = {
-  view: 'var(--text-3)',
-  comment: 'var(--aux, var(--aux, #8b9cf5))',
-  operate: 'var(--success, var(--success, var(--success, #3dd49a)))',
+  view: 'var(--fg-muted)',
+  comment: 'var(--aux))',
+  operate: 'var(--success))',
 };
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -34,7 +34,7 @@ const CONTAINER_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -44,26 +44,26 @@ const ROW_STYLE: CSSProperties = {
   gap: 4,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 const TAB_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const TAB_BTN_ACTIVE_STYLE: CSSProperties = {
   ...TAB_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 type ShareTab = 'outgoing' | 'incoming';
@@ -95,8 +95,8 @@ export function SharesView() {
               placeItems: 'center',
               padding: 32,
               borderRadius: 12,
-              border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-              color: 'var(--text-3)',
+              border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+              color: 'var(--fg-muted)',
               fontSize: 13,
               gap: 6,
             }}
@@ -104,7 +104,7 @@ export function SharesView() {
             <span style={{ fontSize: 26 }} aria-hidden>
               🤝
             </span>
-            <strong style={{ color: 'var(--text-2)' }}>暂无共享记录</strong>
+            <strong style={{ color: 'var(--fg-default)' }}>暂无共享记录</strong>
             <span>当你或别人共享会话时，会出现在这里。</span>
           </div>
         </div>
@@ -136,7 +136,7 @@ export function SharesView() {
           <div style={{ display: 'grid', gap: 10 }}>
             <span style={SECTION_TITLE_STYLE}>我共享出去的会话</span>
             {totalOutgoing === 0 ? (
-              <div style={{ padding: 16, color: 'var(--text-3)', fontSize: 12 }}>
+              <div style={{ padding: 16, color: 'var(--fg-muted)', fontSize: 12 }}>
                 你还没有共享任何会话。
               </div>
             ) : (
@@ -152,14 +152,14 @@ export function SharesView() {
                         fontSize: 12,
                       }}
                     >
-                      <strong style={{ color: 'var(--text)' }}>{head.sessionLabel}</strong>
+                      <strong style={{ color: 'var(--fg-strong)' }}>{head.sessionLabel}</strong>
                       {head.workspacePath ? (
-                        <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+                        <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
                           · {head.workspacePath}
                         </span>
                       ) : null}
                       <span style={{ flex: 1 }} />
-                      <span style={{ color: 'var(--text-3)', fontSize: 10 }}>
+                      <span style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
                         共 {shares.length} 个成员
                       </span>
                     </div>
@@ -173,12 +173,12 @@ export function SharesView() {
                             gap: 6,
                             padding: '2px 10px',
                             borderRadius: 999,
-                            background: 'color-mix(in srgb, var(--bg-2) 80%, transparent)',
-                            border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+                            background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+                            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                             fontSize: 11,
                           }}
                         >
-                          <span style={{ color: 'var(--text-2)' }}>{share.memberName}</span>
+                          <span style={{ color: 'var(--fg-default)' }}>{share.memberName}</span>
                           <span
                             style={{
                               color: PERMISSION_COLORS[share.permission],
@@ -199,7 +199,7 @@ export function SharesView() {
           <div style={{ display: 'grid', gap: 10 }}>
             <span style={SECTION_TITLE_STYLE}>别人共享给我的会话</span>
             {totalIncoming === 0 ? (
-              <div style={{ padding: 16, color: 'var(--text-3)', fontSize: 12 }}>
+              <div style={{ padding: 16, color: 'var(--fg-muted)', fontSize: 12 }}>
                 暂无别人共享给你的会话。
               </div>
             ) : (
@@ -213,7 +213,7 @@ export function SharesView() {
                       fontSize: 12,
                     }}
                   >
-                    <strong style={{ color: 'var(--text)' }}>
+                    <strong style={{ color: 'var(--fg-strong)' }}>
                       {session.title ?? `会话 ${session.sessionId.slice(0, 8)}`}
                     </strong>
                     <span style={{ flex: 1 }} />
@@ -221,9 +221,9 @@ export function SharesView() {
                       style={{
                         padding: '1px 8px',
                         borderRadius: 999,
-                        background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
-                        border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-                        color: 'var(--text-2)',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+                        border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+                        color: 'var(--fg-default)',
                         fontSize: 10,
                         fontWeight: 700,
                         textTransform: 'uppercase',
@@ -233,7 +233,7 @@ export function SharesView() {
                     </span>
                   </div>
                   {session.workspacePath ? (
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                       {session.workspacePath}
                     </span>
                   ) : null}

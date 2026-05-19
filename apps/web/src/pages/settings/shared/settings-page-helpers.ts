@@ -8,7 +8,7 @@ import type {
   ReasoningEffortRef,
   ThinkingDefaultsRef,
   ThinkingModeRef,
-} from '../settings-types.js';
+} from '../state/settings-types.js';
 
 export const TABS = [
   { id: 'connection', label: '连接与模型' },

@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { CreateManagedAgentInput, UpdateManagedAgentInput } from '@openAwork/shared';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
 import {
   createManagedAgentForUser,
   listManagedAgentsForUser,
@@ -11,7 +11,7 @@ import {
   resetManagedAgentForUser,
   updateManagedAgentForUser,
 } from '../agent/agent-catalog.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 
 const canonicalRoleSchema = z
   .object({

@@ -64,7 +64,7 @@ jobs:
             TARGET="mobile-production"
           fi
 
-          node scripts/release-notes.mjs enrich \
+          node scripts/release/release-notes.mjs enrich \
             --body-file release-notes.md \
             --target "$TARGET" \
             --output-file release-notes.md
@@ -78,7 +78,7 @@ jobs:
           else
             VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('apps/mobile/package.json', 'utf8')).version")
           fi
-          NOTES_JSON=$(node scripts/release-notes.mjs inspect --body-file release-notes.md)
+          NOTES_JSON=$(node scripts/release/release-notes.mjs inspect --body-file release-notes.md)
           SUMMARY_LINE=$(node -e "const data = JSON.parse(process.argv[1]); process.stdout.write(data.summaryLine);" "$NOTES_JSON")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "summary_line=$SUMMARY_LINE" >> "$GITHUB_OUTPUT"
@@ -283,7 +283,7 @@ jobs:
           if [[ "${GITHUB_REF_NAME}" == mobile-v* ]] || [[ "${{ inputs.profile }}" == "production" ]]; then
             CHANNEL=production
           fi
-          node scripts/release-result-summary.mjs print \
+          node scripts/release/release-result-summary.mjs print \
             --target mobile \
             --base-file temp/release-notes/release-notes.md \
             --input-file temp/eas-build-results/eas-build-results.json \
@@ -338,7 +338,7 @@ jobs:
           writeFileSync('desktop-release-body.md', `${baseBody}\n`, 'utf8');
           NODE
 
-          node scripts/release-result-summary.mjs print \
+          node scripts/release/release-result-summary.mjs print \
             --target desktop \
             --base-file desktop-release-body.md \
             --input-file desktop-release.json \
@@ -346,7 +346,7 @@ jobs:
             --channel "$DESKTOP_CHANNEL" \
             --output-file desktop-release-summary.md >/dev/null
 
-          node scripts/release-aggregate-summary.mjs print \
+          node scripts/release/release-aggregate-summary.mjs print \
             --base-file desktop-release-body.md \
             --desktop-file desktop-release-summary.md \
             --mobile-file mobile-release-summary.md \

@@ -6,7 +6,7 @@
  * in isolation (no SQLite driver dependency).
  */
 
-import { db, sqliteRun } from '../db.js';
+import { db, sqliteRun } from '../infra/db.js';
 import { SESSION_DELETE_RECOVERY_STATEMENTS } from './session-delete-recovery-statements.js';
 
 export {

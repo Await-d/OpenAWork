@@ -69,7 +69,7 @@ export function ImagePreview({
         <div
           style={{
             fontSize: 11,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             textAlign: 'center',
           }}
         >

@@ -9,16 +9,16 @@ export function useFileEditorContext() {
   return useContext(FileEditorContext);
 }
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
-import { UnlockOverlay } from './components/common/UnlockOverlay.js';
+import { UnlockOverlay } from './components/common/modal/UnlockOverlay.js';
 import { tauriInvoke } from './pages/settings/shared/settings-page-helpers.js';
-import { useAuthStore } from './stores/auth.js';
+import { useAuthStore } from './stores/auth/auth.js';
 import LoginPage from './pages/misc/LoginPage.js';
 import Layout from './components/Layout.js';
 import OnboardingModal from './components/onboarding/OnboardingModal.js';
-import PageTransitionLoader from './components/common/PageTransitionLoader.js';
-import { ToastContainer } from './components/common/ToastNotification.js';
-import UpdateBanner from './components/common/UpdateBanner.js';
-import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion.js';
+import PageTransitionLoader from './components/common/feedback/PageTransitionLoader.js';
+import { ToastContainer } from './components/common/feedback/ToastNotification.js';
+import UpdateBanner from './components/common/feedback/UpdateBanner.js';
+import { usePrefersReducedMotion } from './hooks/ui/usePrefersReducedMotion.js';
 import { PRELOADABLE_ROUTE_MODULES } from './routes/preloadable-route-modules.js';
 import { TelemetryConsentModal } from '@openAwork/shared-ui';
 import {
@@ -147,7 +147,7 @@ function DesktopGatewayRecovery({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'var(--bg)',
+        background: 'var(--bg-base)',
         padding: 24,
       }}
     >
@@ -158,14 +158,14 @@ function DesktopGatewayRecovery({
           flexDirection: 'column',
           gap: 14,
           padding: 24,
-          border: '1px solid var(--border)',
+          border: '1px solid var(--border-default)',
           borderRadius: 16,
-          background: 'var(--surface)',
-          boxShadow: '0 24px 80px oklch(0 0 0 / 0.34)',
+          background: 'var(--bg-overlay)',
+          boxShadow: '0 24px 80px rgba(0, 0, 0, 0.34)',
         }}
       >
-        <strong style={{ color: 'var(--text)', fontSize: 18 }}>无法建立桌面默认身份</strong>
-        <p style={{ color: 'var(--text-3)', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+        <strong style={{ color: 'var(--fg-strong)', fontSize: 18 }}>无法建立桌面默认身份</strong>
+        <p style={{ color: 'var(--fg-muted)', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
           桌面端不需要账号登录，但需要先连接到可用 Gateway。请重试连接，或重新选择本地/远程网关。
         </p>
         <p style={{ color: 'var(--danger)', fontSize: 12, lineHeight: 1.5, margin: 0 }}>{error}</p>
@@ -179,7 +179,7 @@ function DesktopGatewayRecovery({
               borderRadius: 10,
               padding: '0.75rem 0.9rem',
               background: 'var(--accent)',
-              color: 'var(--accent-text)',
+              color: 'var(--fg-on-accent)',
               cursor: 'pointer',
               fontWeight: 700,
             }}
@@ -191,11 +191,11 @@ function DesktopGatewayRecovery({
             onClick={onReconfigure}
             style={{
               flex: 1,
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-default)',
               borderRadius: 10,
               padding: '0.75rem 0.9rem',
               background: 'transparent',
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               cursor: 'pointer',
               fontWeight: 700,
             }}

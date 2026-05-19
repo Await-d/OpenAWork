@@ -16,7 +16,7 @@ import type { HandoffTaskRunner } from './watcher.js';
 import { createHandoff, type HandoffRecord } from '../store/handoff-store.js';
 import { publishHandoffEvent } from '../bus/team-events-bus.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
-import { sqliteGet } from '../../db.js';
+import { sqliteGet } from '../../infra/db.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { buildDispatchPackages, parseAllTasks } from '../capability/dispatch-package.js';
 import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
@@ -240,7 +240,7 @@ export function createPm2Runner(): HandoffTaskRunner {
     setD(SUBSTATES_D.AWAITING_EG);
 
     // 8. 写入 d 层 handoff 的 result_json（记录派发了哪些子 handoff）
-    const { sqliteRun } = await import('../../db.js');
+    const { sqliteRun } = await import('../../infra/db.js');
     sqliteRun(
       `UPDATE handoff_records SET result_json = ?, updated_at = datetime('now') WHERE id = ?`,
       [

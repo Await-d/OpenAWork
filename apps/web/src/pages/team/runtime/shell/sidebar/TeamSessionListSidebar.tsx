@@ -61,7 +61,7 @@ const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
-  background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
   overflow: 'hidden',
 };
 
@@ -71,7 +71,7 @@ const HEADER_STYLE: CSSProperties = {
   justifyContent: 'space-between',
   gap: 6,
   padding: '8px 10px 8px 14px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
 const SCROLL_STYLE: CSSProperties = {
@@ -86,7 +86,7 @@ const GROUP_LABEL_STYLE: CSSProperties = {
   padding: '6px 14px 4px',
   fontSize: 10,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -96,7 +96,7 @@ const TIME_BUCKET_LABEL_STYLE: CSSProperties = {
   padding: '6px 14px 2px',
   fontSize: 10,
   fontWeight: 600,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   letterSpacing: '0.04em',
   opacity: 0.85,
 };
@@ -114,7 +114,7 @@ const ITEM_STYLE: CSSProperties = {
   width: 'auto',
   textAlign: 'left' as const,
   fontSize: 12,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   cursor: 'pointer',
   borderRadius: 10,
   transition: 'all 120ms ease',
@@ -124,10 +124,10 @@ const ITEM_STYLE: CSSProperties = {
 
 const ITEM_ACTIVE_STYLE: CSSProperties = {
   ...ITEM_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
   boxShadow: '0 1px 3px color-mix(in srgb, var(--accent) 20%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const STATUS_DOT_BASE: CSSProperties = {
@@ -146,8 +146,8 @@ const META_BADGE_STYLE: CSSProperties = {
   padding: '0 6px',
   minHeight: 16,
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--text-3) 14%, transparent)',
-  color: 'var(--text-2)',
+  background: 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
+  color: 'var(--fg-default)',
   fontSize: 9,
   fontWeight: 700,
   letterSpacing: '0.02em',
@@ -161,9 +161,9 @@ const COLLAPSE_BTN_STYLE: CSSProperties = {
   width: 24,
   height: 24,
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 12,
   cursor: 'pointer',
 };
@@ -177,7 +177,7 @@ const QUICK_BTN_STYLE: CSSProperties = {
   borderRadius: 4,
   border: 'none',
   background: 'transparent',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   cursor: 'pointer',
   flexShrink: 0,
   transition: 'background 120ms ease, color 120ms ease',
@@ -186,15 +186,15 @@ const QUICK_BTN_STYLE: CSSProperties = {
 function dotColor(status: AgentTeamsSidebarTeam['status']): string {
   switch (status) {
     case 'running':
-      return 'var(--success, var(--success, var(--success, #3dd49a)))';
+      return 'var(--success))';
     case 'paused':
-      return 'var(--warning, var(--warning, #f0b429))';
+      return 'var(--warning))';
     case 'completed':
-      return 'var(--text-3)';
+      return 'var(--fg-muted)';
     case 'failed':
-      return 'var(--danger, #d4574e)';
+      return 'var(--danger))';
     default:
-      return 'color-mix(in srgb, var(--border) 80%, transparent)';
+      return 'color-mix(in srgb, var(--border-default) 80%, transparent)';
   }
 }
 
@@ -217,9 +217,9 @@ const SEARCH_INPUT_STYLE: CSSProperties = {
   width: '100%',
   padding: '6px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg) 60%, var(--surface))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
 };
@@ -232,7 +232,7 @@ const CREATE_BTN_STYLE: CSSProperties = {
   padding: '6px 12px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 14%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))',
   color: 'var(--accent)',
   fontSize: 11,
   fontWeight: 700,
@@ -247,9 +247,9 @@ const CONTEXT_MENU_STYLE: CSSProperties = {
   minWidth: 140,
   padding: '4px 0',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'var(--surface)',
-  boxShadow: '0 8px 24px oklch(0 0 0 / 0.3)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'var(--bg-overlay)',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
 };
 
 const CONTEXT_MENU_ITEM_STYLE: CSSProperties = {
@@ -260,14 +260,14 @@ const CONTEXT_MENU_ITEM_STYLE: CSSProperties = {
   background: 'transparent',
   textAlign: 'left',
   fontSize: 12,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   cursor: 'pointer',
 };
 
 const CONTEXT_MENU_SEPARATOR_STYLE: CSSProperties = {
   height: 1,
   margin: '4px 8px',
-  background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
 const CONFIRM_OVERLAY_STYLE: CSSProperties = {
@@ -276,7 +276,7 @@ const CONFIRM_OVERLAY_STYLE: CSSProperties = {
   zIndex: 9995,
   display: 'grid',
   placeItems: 'center',
-  background: 'oklch(0 0 0 / 0.5)',
+  background: 'rgba(0, 0, 0, 0.5)',
   backdropFilter: 'blur(2px)',
 };
 
@@ -285,9 +285,9 @@ const CONFIRM_DIALOG_STYLE: CSSProperties = {
   width: 320,
   padding: 20,
   borderRadius: 14,
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  boxShadow: '0 16px 48px oklch(0 0 0 / 0.35)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
+  boxShadow: '0 16px 48px rgba(0, 0, 0, 0.35)',
   display: 'grid',
   gap: 14,
 };
@@ -303,9 +303,9 @@ const WORKSPACE_SELECT_STYLE: CSSProperties = {
   width: '100%',
   padding: '7px 10px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--bg) 60%, var(--surface))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-base) 60%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
   cursor: 'pointer',
@@ -357,7 +357,7 @@ const SKELETON_ITEM_STYLE: CSSProperties = {
 const SKELETON_BAR_STYLE: CSSProperties = {
   borderRadius: 4,
   background:
-    'linear-gradient(90deg, color-mix(in srgb, var(--border) 30%, transparent) 0%, color-mix(in srgb, var(--border) 60%, transparent) 50%, color-mix(in srgb, var(--border) 30%, transparent) 100%)',
+    'linear-gradient(90deg, color-mix(in srgb, var(--border-default) 30%, transparent) 0%, color-mix(in srgb, var(--border-default) 60%, transparent) 50%, color-mix(in srgb, var(--border-default) 30%, transparent) 100%)',
   backgroundSize: '200% 100%',
   animation: 'team-v2-shimmer 1.4s ease-in-out infinite',
 };
@@ -568,9 +568,9 @@ export function TeamSessionListSidebar({
                     borderRadius: 999,
                     border: active
                       ? '2px solid color-mix(in srgb, var(--accent) 60%, transparent)'
-                      : '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+                      : '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                     background: active
-                      ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
+                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
                       : 'transparent',
                     cursor: 'pointer',
                     display: 'grid',
@@ -611,7 +611,7 @@ export function TeamSessionListSidebar({
             style={{
               fontSize: 13,
               fontWeight: 700,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               whiteSpace: 'nowrap',
             }}
           >
@@ -632,10 +632,10 @@ export function TeamSessionListSidebar({
                   gap: 4,
                   padding: '1px 7px',
                   borderRadius: 999,
-                  background: 'color-mix(in srgb, var(--text-3) 14%, transparent)',
+                  background: 'color-mix(in srgb, var(--fg-muted) 14%, transparent)',
                   fontSize: 10,
                   fontWeight: 700,
-                  color: 'var(--text-2)',
+                  color: 'var(--fg-default)',
                   fontVariantNumeric: 'tabular-nums',
                 }}
                 title={`共 ${total} 个会话，${running} 个运行中`}
@@ -647,9 +647,9 @@ export function TeamSessionListSidebar({
                       width: 6,
                       height: 6,
                       borderRadius: '50%',
-                      background: 'var(--success, var(--success, var(--success, #3dd49a)))',
+                      background: 'var(--success))',
                       boxShadow:
-                        '0 0 0 2px color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 30%, transparent)',
+                        '0 0 0 2px color-mix(in srgb, var(--success) 30%, transparent)',
                     }}
                   />
                 ) : null}
@@ -747,7 +747,7 @@ export function TeamSessionListSidebar({
                 left: 10,
                 top: '50%',
                 transform: 'translateY(-50%)',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 pointerEvents: 'none',
               }}
             >
@@ -781,7 +781,7 @@ export function TeamSessionListSidebar({
                   justifyContent: 'center',
                   border: 'none',
                   background: 'transparent',
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   cursor: 'pointer',
                   borderRadius: 4,
                 }}
@@ -837,7 +837,7 @@ export function TeamSessionListSidebar({
               justifyContent: 'center',
               padding: '40px 20px',
               gap: 12,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               textAlign: 'center',
             }}
           >
@@ -848,17 +848,17 @@ export function TeamSessionListSidebar({
                 borderRadius: 12,
                 display: 'grid',
                 placeItems: 'center',
-                background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
+                background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
                 fontSize: 24,
               }}
             >
               {searchQuery.trim() ? '🔍' : '💬'}
             </div>
             <div style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 600 }}>
+              <span style={{ fontSize: 13, color: 'var(--fg-default)', fontWeight: 600 }}>
                 {searchQuery.trim() ? '没有匹配的会话' : '还没有会话'}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
                 {searchQuery.trim()
                   ? '试试其他关键词'
                   : onSubmitDraft
@@ -995,7 +995,7 @@ export function TeamSessionListSidebar({
                 }}
                 className="team-menu-item"
                 data-tone="danger"
-                style={{ ...CONTEXT_MENU_ITEM_STYLE, color: 'var(--danger, #d4574e)' }}
+                style={{ ...CONTEXT_MENU_ITEM_STYLE, color: 'var(--danger))' }}
                 onClick={handleDeleteClick}
               >
                 🔴 删除会话
@@ -1008,8 +1008,8 @@ export function TeamSessionListSidebar({
       {deleteConfirm ? (
         <div style={CONFIRM_OVERLAY_STYLE}>
           <div role="alertdialog" aria-label="确认删除会话" style={CONFIRM_DIALOG_STYLE}>
-            <strong style={{ fontSize: 14, color: 'var(--text)' }}>删除会话</strong>
-            <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
+            <strong style={{ fontSize: 14, color: 'var(--fg-strong)' }}>删除会话</strong>
+            <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.6 }}>
               确定要删除「{deleteConfirm.title}」吗？删除后不可恢复。
             </span>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -1019,9 +1019,9 @@ export function TeamSessionListSidebar({
                 style={{
                   padding: '6px 14px',
                   borderRadius: 8,
-                  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-                  background: 'var(--surface)',
-                  color: 'var(--text-2)',
+                  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+                  background: 'var(--bg-overlay)',
+                  color: 'var(--fg-default)',
                   fontSize: 12,
                   cursor: 'pointer',
                 }}
@@ -1035,8 +1035,8 @@ export function TeamSessionListSidebar({
                   padding: '6px 14px',
                   borderRadius: 8,
                   border: 'none',
-                  background: 'var(--danger, #d4574e)',
-                  color: 'var(--fg-on-accent, #ffffff)',
+                  background: 'var(--danger))',
+                  color: 'var(--fg-on-accent))',
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',

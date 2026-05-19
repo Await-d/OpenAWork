@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteGet, sqliteRun } from '../../db.js';
+import { sqliteGet, sqliteRun } from '../../infra/db.js';
 import type { HandoffRoleLayer } from '../store/handoff-store.js';
 
 export interface CreateTeamSessionInput {

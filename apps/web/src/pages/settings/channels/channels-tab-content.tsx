@@ -7,9 +7,9 @@ import type {
   ChannelProviderOption,
   ChannelSettingsEntry,
   ChannelTargetEntry,
-} from '../../../components/common/ChannelSubscriptionSettings.js';
-import { ChannelSubscriptionSettings } from '../../../components/common/ChannelSubscriptionSettings.js';
-import { logger } from '../../../utils/logger.js';
+} from '../../../components/common/display/ChannelSubscriptionSettings.js';
+import { ChannelSubscriptionSettings } from '../../../components/common/display/ChannelSubscriptionSettings.js';
+import { logger } from '../../../utils/log/logger.js';
 import { SS, UV } from '../shared/settings-section-styles.js';
 
 interface ChannelsTabContentProps {

@@ -33,15 +33,15 @@ export interface SkillMarketHomeProps {
 
 const s: Record<string, CSSProperties> = {
   root: {
-    background: 'var(--bg-base, #080b12)',
+    background: 'var(--bg-base))',
     minHeight: '100%',
     fontFamily: 'system-ui, sans-serif',
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
     padding: '1.5rem',
   },
   header: { marginBottom: '1.5rem' },
-  title: { margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--fg-default, #c8d1e0)' },
-  subtitle: { margin: '0.25rem 0 0', fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' },
+  title: { margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--fg-default))' },
+  subtitle: { margin: '0.25rem 0 0', fontSize: 12, color: 'var(--fg-muted))' },
   tabs: { display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: '1.5rem' },
   grid: {
     display: 'grid',
@@ -49,7 +49,7 @@ const s: Record<string, CSSProperties> = {
     gap: '1rem',
   },
   card: {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 10,
     padding: '1rem',
@@ -58,21 +58,21 @@ const s: Record<string, CSSProperties> = {
     gap: 8,
     cursor: 'pointer',
   },
-  cardName: { fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' },
-  cardDesc: { fontSize: 12, color: 'var(--fg-muted, #7b8a9e)', lineHeight: 1.5, flexGrow: 1 },
+  cardName: { fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' },
+  cardDesc: { fontSize: 12, color: 'var(--fg-muted))', lineHeight: 1.5, flexGrow: 1 },
   tag: {
     fontSize: 10,
     padding: '1px 5px',
     borderRadius: 3,
     background: 'rgba(99,102,241,0.15)',
-    color: 'var(--accent, #5cd4c0)',
+    color: 'var(--accent))',
     fontWeight: 500,
   },
   section: { marginBottom: '1.5rem' },
   sectionTitle: {
     fontSize: 12,
     fontWeight: 600,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     textTransform: 'uppercase' as const,
     letterSpacing: 0.8,
     marginBottom: '0.75rem',
@@ -87,7 +87,7 @@ const s: Record<string, CSSProperties> = {
     paddingTop: '1rem',
     borderTop: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   },
-  pageMeta: { fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' },
+  pageMeta: { fontSize: 12, color: 'var(--fg-muted))' },
   pager: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const },
 };
 
@@ -98,16 +98,16 @@ function tabBtn(active: boolean): CSSProperties {
     borderRadius: 6,
     cursor: 'pointer',
     fontWeight: 500,
-    border: `1px solid ${active ? 'var(--accent, #5cd4c0)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
+    border: `1px solid ${active ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
     background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-    color: active ? 'var(--accent, #5cd4c0)' : 'var(--fg-muted, #7b8a9e)',
+    color: active ? 'var(--accent))' : 'var(--fg-muted))',
   };
 }
 
 function installBtn(): CSSProperties {
   return {
     background: 'rgba(99,102,241,0.15)',
-    color: 'var(--accent, #5cd4c0)',
+    color: 'var(--accent))',
     border: '1px solid rgba(99,102,241,0.3)',
     borderRadius: 6,
     padding: '0.3rem 0.75rem',
@@ -124,9 +124,9 @@ function pagerBtn(active: boolean, disabled = false): CSSProperties {
     height: 34,
     padding: '0 0.8rem',
     borderRadius: 8,
-    border: `1px solid ${active ? 'var(--accent, #5cd4c0)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
+    border: `1px solid ${active ? 'var(--accent))' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
     background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-    color: active ? 'var(--accent, #5cd4c0)' : 'var(--fg-default, #c8d1e0)',
+    color: active ? 'var(--accent))' : 'var(--fg-default))',
     fontSize: 12,
     fontWeight: active ? 700 : 600,
     cursor: disabled ? 'not-allowed' : 'pointer',
@@ -196,7 +196,7 @@ export function SkillMarketHome({
           minHeight: 200,
         }}
       >
-        <span style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' }}>加载中...</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted))' }}>加载中...</span>
       </div>
     );
   }
@@ -234,11 +234,11 @@ export function SkillMarketHome({
           placeholder="搜索技能..."
           style={{
             flex: 1,
-            background: 'var(--bg-overlay, #121721)',
+            background: 'var(--bg-overlay))',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 7,
             padding: '0.4rem 0.75rem',
-            color: 'var(--fg-default, #c8d1e0)',
+            color: 'var(--fg-default))',
             fontSize: 12,
             outline: 'none',
           }}
@@ -249,7 +249,7 @@ export function SkillMarketHome({
           style={{
             padding: '0.4rem 1rem',
             borderRadius: 7,
-            background: 'var(--accent, #5cd4c0)',
+            background: 'var(--accent))',
             color: color.fgOnAccent,
             fontSize: 12,
             fontWeight: 600,
@@ -290,7 +290,7 @@ export function SkillMarketHome({
           <SkillCard key={sk.id} skill={sk} onInstall={onInstall} onSelect={onSelect} />
         ))}
         {filtered.length === 0 && (
-          <div style={{ color: 'var(--fg-muted, #7b8a9e)', fontSize: 12 }}>
+          <div style={{ color: 'var(--fg-muted))', fontSize: 12 }}>
             该分类下暂无技能。
           </div>
         )}
@@ -386,7 +386,7 @@ function SkillCard({
           marginTop: 4,
         }}
       >
-        <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>
           {(skill.downloads ?? 0).toLocaleString()} 次安装
         </span>
         <button

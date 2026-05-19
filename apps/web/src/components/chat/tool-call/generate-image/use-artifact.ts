@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createArtifactsClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../../../stores/auth.js';
+import { useAuthStore } from '../../../../stores/auth/auth.js';
 
 /**
  * Encapsulates the asynchronous artifact fetch for a `generate_image` tool

@@ -30,7 +30,7 @@ import type { resolveModelRoute } from '../provider/model-router.js';
 import type { SessionStreamContext } from './stream.js';
 import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
 import type { getEnabledTools } from './stream.js';
-import { writeAuditLog } from '../audit-log.js';
+import { writeAuditLog } from '../infra/audit-log.js';
 import {
   appendReasoningChunk,
   buildReasoningBlockKey,

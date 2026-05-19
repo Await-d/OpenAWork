@@ -2,19 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { createSettingsClient, createUsageClient } from '@openAwork/web-client';
 import { UsageDashboard, CostOverview, ModelCostDisplay } from '@openAwork/shared-ui';
 import type { MonthlyRecord, CostBreakdownItem } from '@openAwork/shared-ui';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 
 const sharedUiThemeVars = {
-  '--color-surface': 'var(--surface)',
-  '--color-border': 'var(--border)',
-  '--color-text': 'var(--text)',
-  '--color-muted': 'var(--text-3)',
+  '--color-surface': 'var(--bg-overlay)',
+  '--color-border': 'var(--border-default)',
+  '--color-text': 'var(--fg-strong)',
+  '--color-muted': 'var(--fg-muted)',
   '--color-accent': 'var(--accent)',
-  '--color-bg': 'var(--bg)',
-  '--color-background': 'var(--bg)',
-  '--color-foreground': 'var(--text)',
+  '--color-bg': 'var(--bg-base)',
+  '--color-background': 'var(--bg-base)',
+  '--color-foreground': 'var(--fg-strong)',
   '--color-primary': 'var(--accent)',
-  '--color-primary-foreground': 'var(--accent-text)',
+  '--color-primary-foreground': 'var(--fg-on-accent)',
 } as React.CSSProperties;
 
 interface ModelPriceEntry {

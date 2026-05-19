@@ -72,7 +72,7 @@ export function QRCodeScanner({ onScan, onError, style }: QRCodeScannerProps) {
         flexDirection: 'column',
         gap: 16,
         padding: '1.5rem',
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         ...style,
@@ -85,7 +85,7 @@ export function QRCodeScanner({ onScan, onError, style }: QRCodeScannerProps) {
         }}
         disabled={scanning}
         style={{
-          background: 'var(--accent, #5cd4c0)',
+          background: 'var(--accent))',
           color: color.fgOnAccent,
           border: 'none',
           borderRadius: 8,
@@ -101,7 +101,7 @@ export function QRCodeScanner({ onScan, onError, style }: QRCodeScannerProps) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ flex: 1, height: 1, background: 'var(--border-default, hsla(215, 18%, 50%, 0.12))' }} />
-        <span style={{ fontSize: 11, color: 'var(--fg-muted, #7b8a9e)' }}>或手动输入</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted))' }}>或手动输入</span>
         <div style={{ flex: 1, height: 1, background: 'var(--border-default, hsla(215, 18%, 50%, 0.12))' }} />
       </div>
 
@@ -112,11 +112,11 @@ export function QRCodeScanner({ onScan, onError, style }: QRCodeScannerProps) {
           placeholder="粘贴 QR 数据 JSON…"
           style={{
             flex: 1,
-            background: 'var(--bg-base, #080b12)',
+            background: 'var(--bg-base))',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 6,
             padding: '0.5rem 0.75rem',
-            color: 'var(--fg-strong, #f1f4f8)',
+            color: 'var(--fg-strong))',
             fontSize: 12,
             outline: 'none',
           }}
@@ -126,7 +126,7 @@ export function QRCodeScanner({ onScan, onError, style }: QRCodeScannerProps) {
           onClick={handleManualSubmit}
           disabled={!manualInput.trim()}
           style={{
-            background: 'var(--accent, #5cd4c0)',
+            background: 'var(--accent))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,

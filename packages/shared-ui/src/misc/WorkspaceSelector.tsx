@@ -27,20 +27,20 @@ export function WorkspaceSelector({
     flexDirection: 'column',
     gap: '8px',
     padding: '12px',
-    background: 'var(--color-surface)',
-    border: '1px solid var(--color-border)',
+    background: 'var(--bg-overlay)',
+    border: '1px solid var(--border-default)',
     borderRadius: '6px',
-    color: 'var(--color-text)',
+    color: 'var(--fg-strong)',
     ...style,
   };
 
   const inputStyle: React.CSSProperties = {
     flex: 1,
     padding: '6px 10px',
-    background: 'var(--color-surface)',
-    border: '1px solid var(--color-border)',
+    background: 'var(--bg-overlay)',
+    border: '1px solid var(--border-default)',
     borderRadius: '4px',
-    color: 'var(--color-text)',
+    color: 'var(--fg-strong)',
     fontFamily: 'inherit',
     fontSize: '14px',
     outline: 'none',
@@ -48,10 +48,10 @@ export function WorkspaceSelector({
 
   const btnStyle = (primary?: boolean): React.CSSProperties => ({
     padding: '6px 14px',
-    border: primary ? 'none' : '1px solid var(--color-border)',
+    border: primary ? 'none' : '1px solid var(--border-default)',
     borderRadius: '4px',
-    background: primary ? 'var(--color-accent)' : 'transparent',
-    color: primary ? color.fgOnAccent : 'var(--color-text)',
+    background: primary ? 'var(--accent)' : 'transparent',
+    color: primary ? color.fgOnAccent : 'var(--fg-strong)',
     cursor: loading ? 'not-allowed' : 'pointer',
     opacity: loading ? 0.6 : 1,
     fontSize: '13px',
@@ -81,7 +81,7 @@ export function WorkspaceSelector({
           style={{
             fontFamily: 'monospace',
             fontSize: '13px',
-            color: 'var(--color-text)',
+            color: 'var(--fg-strong)',
             wordBreak: 'break-all',
           }}
         >

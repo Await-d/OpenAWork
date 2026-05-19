@@ -37,7 +37,7 @@ const CONTAINER_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -53,8 +53,8 @@ const STAT_CARD_STYLE: CSSProperties = {
   gap: 4,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 const ROW_STYLE: CSSProperties = {
@@ -63,21 +63,21 @@ const ROW_STYLE: CSSProperties = {
   gap: 10,
   padding: '8px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   fontSize: 12,
 };
 
 const FAILED_ROW_STYLE: CSSProperties = {
   ...ROW_STYLE,
-  borderColor: 'color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, var(--surface))',
+  borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
 };
 
 const STUCK_ROW_STYLE: CSSProperties = {
   ...ROW_STYLE,
-  borderColor: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
+  borderColor: 'color-mix(in srgb, var(--warning) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -85,8 +85,8 @@ const EMPTY_STYLE: CSSProperties = {
   placeItems: 'center',
   padding: 32,
   borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-  color: 'var(--text-3)',
+  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+  color: 'var(--fg-muted)',
   fontSize: 13,
   gap: 6,
 };
@@ -214,7 +214,7 @@ export function HealthView({ onCancelHandoff }: HealthViewProps) {
             <span style={{ fontSize: 26 }} aria-hidden>
               ✅
             </span>
-            <strong style={{ color: 'var(--text-2)' }}>团队运行正常</strong>
+            <strong style={{ color: 'var(--fg-default)' }}>团队运行正常</strong>
             <span>无失败 handoff，无超时卡住的任务。</span>
           </div>
         ) : null}
@@ -231,8 +231,8 @@ export function HealthView({ onCancelHandoff }: HealthViewProps) {
                     style={{
                       padding: '2px 10px',
                       borderRadius: 999,
-                      background: 'color-mix(in srgb, var(--danger, #d4574e) 14%, transparent)',
-                      color: 'var(--danger, #d4574e)',
+                      background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+                      color: 'var(--danger))',
                       fontSize: 11,
                       fontWeight: 700,
                     }}
@@ -285,16 +285,16 @@ function HealthStat({
 }) {
   const color =
     tone === 'success'
-      ? 'var(--success, var(--success, var(--success, #3dd49a)))'
+      ? 'var(--success))'
       : tone === 'warning'
-        ? 'var(--warning, var(--warning, #f0b429))'
+        ? 'var(--warning))'
         : tone === 'danger'
-          ? 'var(--danger, #d4574e)'
-          : 'var(--text)';
+          ? 'var(--danger))'
+          : 'var(--fg-strong)';
   return (
     <div style={STAT_CARD_STYLE}>
       <span style={{ fontSize: 18, fontWeight: 800, color }}>{value}</span>
-      <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}>{label}</span>
     </div>
   );
 }
@@ -306,7 +306,7 @@ function FailedRow({ entry }: { entry: HandoffEntry }) {
       <span aria-hidden style={{ fontSize: 14 }}>
         ⚠️
       </span>
-      <span style={{ minWidth: 130, color: 'var(--text)', fontWeight: 700 }}>
+      <span style={{ minWidth: 130, color: 'var(--fg-strong)', fontWeight: 700 }}>
         {LAYER_LABELS[entry.fromRoleLayer]} → {LAYER_LABELS[entry.toRoleLayer]}
       </span>
       <span
@@ -316,7 +316,7 @@ function FailedRow({ entry }: { entry: HandoffEntry }) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontFamily: 'ui-monospace, SFMono-Regular, monospace',
           fontSize: 10,
         }}
@@ -324,7 +324,7 @@ function FailedRow({ entry }: { entry: HandoffEntry }) {
       >
         {entry.id}
       </span>
-      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{dateStr}</span>
+      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{dateStr}</span>
     </div>
   );
 }
@@ -343,15 +343,15 @@ function StuckRow({
       <span aria-hidden style={{ fontSize: 14 }}>
         ⏳
       </span>
-      <span style={{ minWidth: 130, color: 'var(--text)', fontWeight: 700 }}>
+      <span style={{ minWidth: 130, color: 'var(--fg-strong)', fontWeight: 700 }}>
         {LAYER_LABELS[entry.fromRoleLayer]} → {LAYER_LABELS[entry.toRoleLayer]}
       </span>
       <span
         style={{
           padding: '1px 8px',
           borderRadius: 999,
-          background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 14%, transparent)',
-          color: 'var(--warning, #f0b429)',
+          background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
+          color: 'var(--warning))',
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -360,7 +360,7 @@ function StuckRow({
         {entry.state}
       </span>
       <span style={{ flex: 1 }} />
-      <span style={{ color: 'var(--text)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ color: 'var(--fg-strong)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
         已等待 {formatMs(waitedMs)}
       </span>
       {onCancel ? (
@@ -370,9 +370,9 @@ function StuckRow({
           style={{
             padding: '2px 10px',
             borderRadius: 6,
-            border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-            background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, transparent)',
-            color: 'var(--danger, #d4574e)',
+            border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+            background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+            color: 'var(--danger))',
             fontSize: 11,
             fontWeight: 700,
             cursor: 'pointer',

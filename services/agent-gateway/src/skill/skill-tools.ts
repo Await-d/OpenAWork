@@ -2,7 +2,7 @@ import type { ToolDefinition } from '@openAwork/agent-core';
 import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { z } from 'zod';
-import { sqliteAll, sqliteGet } from '../db.js';
+import { sqliteAll, sqliteGet } from '../infra/db.js';
 import type { EffectiveSkill } from './skill-selection.js';
 
 const skillInputSchema = z

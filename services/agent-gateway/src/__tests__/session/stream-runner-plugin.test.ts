@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MockLanguageModelV3 as MockLanguageModelV2 } from 'ai/test';
 import type { StreamChunk } from '@openAwork/shared';
 import { runUpstreamStream, type V2LanguageModel } from '../../v2-runtime/upstream/index.js';
-import { _registerPluginForTest, _resetPluginsForTest } from '../../plugin-host.js';
+import { _registerPluginForTest, _resetPluginsForTest } from '../../runtime/plugin-host.js';
 
 function buildMockModel(onDoStream?: (options: unknown) => void): V2LanguageModel {
   return new MockLanguageModelV2({

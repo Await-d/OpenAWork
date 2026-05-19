@@ -19,7 +19,7 @@
  *     poison the whole batch.
  */
 
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 const SKILL_UPDATE_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const SKILL_UPDATE_FETCH_TIMEOUT_MS = 8 * 1000;

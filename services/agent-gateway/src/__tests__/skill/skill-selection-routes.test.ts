@@ -6,9 +6,9 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
-import type * as AuthModule from '../../auth.js';
-import type * as RequestWorkflowModule from '../../request-workflow.js';
+import type * as DbModule from '../../infra/db.js';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SkillSelectionRoutesModule from '../../routes/skill-selection.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -88,9 +88,9 @@ function resetState(): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
-  authPlugin = (await import('../../auth.js')).default;
-  requestWorkflowPlugin = (await import('../../request-workflow.js')).default;
+  dbModule = await import('../../infra/db.js');
+  authPlugin = (await import('../../infra/auth.js')).default;
+  requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   skillSelectionRoutes = (await import('../../routes/skill-selection.js')).skillSelectionRoutes;
   await dbModule.connectDb();
   await dbModule.migrate();

@@ -19,7 +19,7 @@
  */
 
 import type { HandoffRoleLayer } from '../store/handoff-store.js';
-import { sqliteRun } from '../../db.js';
+import { sqliteRun } from '../../infra/db.js';
 
 // ─── Capability Types ──────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as InboundStoreModule from '../../handoff/store/inbound-store.js';
 import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
 import type * as OrchestratorModule from '../../handoff/runner/reception-orchestrator.js';
@@ -70,7 +70,7 @@ function seedReceptionSession(): void {
 // ─── Setup / Teardown ────────────────────────────────────────────────────────
 
 beforeAll(async () => {
-  db = await import('../../db.js');
+  db = await import('../../infra/db.js');
   await db.migrate();
   inboundStore = await import('../../handoff/store/inbound-store.js');
   handoffStore = await import('../../handoff/store/handoff-store.js');

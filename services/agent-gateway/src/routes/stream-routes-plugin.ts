@@ -4,10 +4,10 @@ import type { WebSocket } from '@fastify/websocket';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteGet } from '../db.js';
-import { writeAuditLog } from '../audit-log.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteGet } from '../infra/db.js';
+import { writeAuditLog } from '../infra/audit-log.js';
 import {
   handleStreamRequest,
   loadSessionContext,

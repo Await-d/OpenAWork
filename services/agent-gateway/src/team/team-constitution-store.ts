@@ -10,7 +10,7 @@
  * expectedVersion；只有相等才更新，否则返回 409。
  */
 
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 
 interface ConstitutionRow {
   id: string;

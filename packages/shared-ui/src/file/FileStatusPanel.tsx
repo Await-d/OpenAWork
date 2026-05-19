@@ -20,7 +20,7 @@ export interface FileStatusPanelProps {
 
 const STATUS_COLOR: Record<FileChangeStatus, string> = {
   added: color.success,
-  modified: 'var(--aux, #8b9cf5)',
+  modified: 'var(--aux))',
   deleted: color.danger,
   renamed: color.contrast,
 };
@@ -38,7 +38,7 @@ export function FileStatusPanel({ changes, onFileClick, style }: FileStatusPanel
       <div
         style={{
           padding: '0.75rem 1rem',
-          color: 'var(--fg-muted, #7b8a9e)',
+          color: 'var(--fg-muted))',
           fontSize: 12,
           ...style,
         }}
@@ -60,11 +60,11 @@ export function FileStatusPanel({ changes, onFileClick, style }: FileStatusPanel
       <div
         style={{
           padding: '0.4rem 0.75rem',
-          background: 'var(--bg-overlay, #121721)',
+          background: 'var(--bg-overlay))',
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           fontSize: 11,
           fontWeight: 600,
-          color: 'var(--fg-muted, #7b8a9e)',
+          color: 'var(--fg-muted))',
           textTransform: 'uppercase',
           letterSpacing: 0.5,
         }}
@@ -104,7 +104,7 @@ export function FileStatusPanel({ changes, onFileClick, style }: FileStatusPanel
             style={{
               fontSize: 12,
               fontFamily: 'monospace',
-              color: 'var(--fg-strong, #f1f4f8)',
+              color: 'var(--fg-strong))',
               flex: 1,
               overflow: 'hidden',
               textOverflow: 'ellipsis',

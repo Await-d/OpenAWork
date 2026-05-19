@@ -14,9 +14,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as DbModule from '../../db.js';
-import type * as AuthModule from '../../auth.js';
-import type * as RequestWorkflowModule from '../../request-workflow.js';
+import type * as DbModule from '../../infra/db.js';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SkillRecommendModule from '../../routes/skill-recommend.js';
 import type * as UpstreamActual from '../../v2-runtime/upstream/index.js';
 
@@ -98,9 +98,9 @@ function resetState(): void {
 let workspaceDir: string;
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
-  authPlugin = (await import('../../auth.js')).default;
-  requestWorkflowPlugin = (await import('../../request-workflow.js')).default;
+  dbModule = await import('../../infra/db.js');
+  authPlugin = (await import('../../infra/auth.js')).default;
+  requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   skillRecommendRoutes = (await import('../../routes/skill-recommend.js')).skillRecommendRoutes;
   await dbModule.connectDb();
   await dbModule.migrate();

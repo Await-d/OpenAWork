@@ -16,7 +16,7 @@ import { CompanionTerminalSprite } from './companion-terminal-sprite.js';
 import { useBuddyVoicePreferences } from './use-buddy-voice-preferences.js';
 import { useBuddyVoiceOutput } from './use-buddy-voice-output.js';
 import { useBuddyInteractionMemory } from './use-buddy-interaction-memory.js';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 
 export interface CompanionStageProps extends CompanionActivitySnapshot {
   agentId?: string;
@@ -68,7 +68,7 @@ function CompanionModeButton({
         borderRadius: 999,
         border: '1px solid var(--border-subtle)',
         background: disabled ? 'transparent' : active ? 'var(--accent-muted)' : 'transparent',
-        color: disabled ? 'var(--text-3)' : active ? 'var(--accent)' : 'var(--text-3)',
+        color: disabled ? 'var(--fg-muted)' : active ? 'var(--accent)' : 'var(--fg-muted)',
         fontSize: 7.5,
         fontWeight: active ? 700 : 600,
         whiteSpace: 'nowrap',
@@ -89,7 +89,7 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
         flex: '1 1 140px',
         borderRadius: 7,
         border: '1px solid var(--border-subtle)',
-        background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
+        background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
         padding: '4px 5px',
         display: 'flex',
         alignItems: 'flex-start',
@@ -103,7 +103,7 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
           fontSize: 7.5,
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontWeight: 700,
           flexShrink: 0,
         }}
@@ -114,7 +114,7 @@ function CompanionMetaCard({ label, value }: { label: string; value: React.React
         style={{
           fontSize: 9,
           lineHeight: 1.32,
-          color: 'var(--text-2)',
+          color: 'var(--fg-default)',
           wordBreak: 'break-word',
           minWidth: 0,
           flex: '1 1 90px',
@@ -135,7 +135,7 @@ function CompanionSyncBadge({ label, state }: { label: string; state: CompanionS
         ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
         : state === 'error'
           ? 'color-mix(in oklch, var(--danger) 14%, transparent)'
-          : 'var(--bg-2)';
+          : 'var(--bg-overlay)';
   const color =
     state === 'synced'
       ? 'var(--success)'
@@ -143,7 +143,7 @@ function CompanionSyncBadge({ label, state }: { label: string; state: CompanionS
         ? 'var(--warning)'
         : state === 'error'
           ? 'var(--danger)'
-          : 'var(--text-3)';
+          : 'var(--fg-muted)';
 
   return (
     <output
@@ -239,7 +239,7 @@ function CompanionOutputRow({
         ? 'var(--success)'
         : entry.tone === 'active'
           ? 'var(--accent)'
-          : 'var(--text-3)';
+          : 'var(--fg-muted)';
 
   return (
     <div
@@ -250,8 +250,8 @@ function CompanionOutputRow({
         borderRadius: 8,
         border: '1px solid var(--border-subtle)',
         background: isLatest
-          ? 'color-mix(in oklch, var(--surface-hover) 72%, transparent)'
-          : 'color-mix(in oklch, var(--surface) 90%, transparent)',
+          ? 'color-mix(in oklch, var(--bg-hover) 72%, transparent)'
+          : 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
         padding: '5px 6px',
       }}
     >
@@ -263,7 +263,7 @@ function CompanionOutputRow({
           width: 13,
           height: 13,
           borderRadius: 999,
-          color: isLatest ? 'var(--accent)' : 'var(--text-3)',
+          color: isLatest ? 'var(--accent)' : 'var(--fg-muted)',
           fontSize: 8,
           fontWeight: 800,
           flexShrink: 0,
@@ -289,7 +289,7 @@ function CompanionOutputRow({
           >
             {entry.badge}
           </span>
-          <span style={{ fontSize: 8, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 8, color: 'var(--fg-muted)' }}>
             {isLatest ? '刚刚' : '前一条'}
           </span>
         </div>
@@ -297,7 +297,7 @@ function CompanionOutputRow({
           style={{
             fontSize: 9.5,
             lineHeight: 1.4,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             wordBreak: 'break-word',
           }}
         >
@@ -741,7 +741,7 @@ export function CompanionStage({
           borderRadius: 999,
           border: '1px solid var(--border-subtle)',
           background: 'transparent',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontSize: 9,
           fontWeight: 600,
           cursor: 'pointer',
@@ -854,8 +854,8 @@ export function CompanionStage({
                   maxHeight: 'min(520px, calc(100vh - 96px))',
                   overflowY: 'auto',
                   borderRadius: 12,
-                  border: '1px solid var(--bg-glass-border)',
-                  background: 'var(--surface)',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-overlay)',
                   boxShadow: '0 12px 32px -12px rgba(0,0,0,0.32)',
                   zIndex: 999,
                 }}
@@ -910,7 +910,7 @@ export function CompanionStage({
                             flexWrap: 'wrap',
                           }}
                         >
-                          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text)' }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-strong)' }}>
                             {profile.name}
                           </span>
                           <span
@@ -954,8 +954,8 @@ export function CompanionStage({
                                 padding: '0 4px',
                                 borderRadius: 999,
                                 border: '1px solid var(--border-subtle)',
-                                background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
-                                color: 'var(--text-2)',
+                                background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
+                                color: 'var(--fg-default)',
                                 fontSize: 7.5,
                                 fontWeight: 700,
                               }}
@@ -980,8 +980,8 @@ export function CompanionStage({
                               alignItems: 'center',
                               padding: '0 3px',
                               borderRadius: 999,
-                              background: 'var(--bg-2)',
-                              color: 'var(--text-2)',
+                              background: 'var(--bg-overlay)',
+                              color: 'var(--fg-default)',
                               fontSize: 7.5,
                               fontWeight: 700,
                             }}
@@ -995,8 +995,8 @@ export function CompanionStage({
                               alignItems: 'center',
                               padding: '0 3px',
                               borderRadius: 999,
-                              background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-                              color: 'var(--text-2)',
+                              background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+                              color: 'var(--fg-default)',
                               fontSize: 7.5,
                               fontWeight: 700,
                             }}
@@ -1106,11 +1106,11 @@ export function CompanionStage({
                         borderRadius: 8,
                         border: '1px solid var(--border-subtle)',
                         padding: '4px 5px 4px',
-                        background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+                        background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
                       }}
                     >
                       <div style={{ minWidth: 0, flex: '1 1 220px' }}>
-                        <div style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--text)' }}>
+                        <div style={{ fontSize: 9.5, fontWeight: 800, color: 'var(--fg-strong)' }}>
                           {profile.name} · {profile.species}
                         </div>
                         <div
@@ -1118,7 +1118,7 @@ export function CompanionStage({
                             marginTop: 1,
                             fontSize: 9,
                             lineHeight: 1.28,
-                            color: 'var(--text-2)',
+                            color: 'var(--fg-default)',
                             wordBreak: 'break-word',
                             display: '-webkit-box',
                             WebkitLineClamp: 1,
@@ -1140,14 +1140,14 @@ export function CompanionStage({
                                 padding: '0 4px',
                                 borderRadius: 999,
                                 background:
-                                  'color-mix(in oklch, var(--surface-hover) 88%, transparent)',
-                                color: 'var(--text-2)',
+                                  'color-mix(in oklch, var(--bg-hover) 88%, transparent)',
+                                color: 'var(--fg-default)',
                                 fontSize: 7.5,
                                 fontWeight: 700,
                               }}
                             >
                               <span>{stat.label}</span>
-                              <span style={{ color: 'var(--text)' }}>{stat.value}</span>
+                              <span style={{ color: 'var(--fg-strong)' }}>{stat.value}</span>
                             </span>
                           ))}
                         </div>
@@ -1163,8 +1163,8 @@ export function CompanionStage({
                               padding: '0 3px',
                               borderRadius: 999,
                               background:
-                                'color-mix(in oklch, var(--surface-hover) 86%, transparent)',
-                              color: 'var(--text-2)',
+                                'color-mix(in oklch, var(--bg-hover) 86%, transparent)',
+                              color: 'var(--fg-default)',
                               fontSize: 7.5,
                               fontWeight: 700,
                             }}
@@ -1194,8 +1194,8 @@ export function CompanionStage({
                                   height: 15,
                                   padding: '0 3px',
                                   borderRadius: 999,
-                                  background: 'var(--bg-2)',
-                                  color: 'var(--text-2)',
+                                  background: 'var(--bg-overlay)',
+                                  color: 'var(--fg-default)',
                                   fontSize: 7.5,
                                   fontWeight: 700,
                                 }}
@@ -1237,7 +1237,7 @@ export function CompanionStage({
                         gap: 4,
                         borderRadius: 8,
                         border: '1px solid var(--border-subtle)',
-                        background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+                        background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
                         padding: '4px 5px 4px',
                       }}
                     >
@@ -1256,13 +1256,13 @@ export function CompanionStage({
                               fontSize: 8,
                               letterSpacing: '0.04em',
                               textTransform: 'uppercase',
-                              color: 'var(--text-3)',
+                              color: 'var(--fg-muted)',
                               fontWeight: 700,
                             }}
                           >
                             最近会话输出
                           </div>
-                          <div style={{ marginTop: 1, fontSize: 8.5, color: 'var(--text-2)' }}>
+                          <div style={{ marginTop: 1, fontSize: 8.5, color: 'var(--fg-default)' }}>
                             短句出声后退回边缘。
                           </div>
                         </div>
@@ -1273,8 +1273,8 @@ export function CompanionStage({
                             alignItems: 'center',
                             padding: '0 4px',
                             borderRadius: 999,
-                            background: 'var(--bg-2)',
-                            color: 'var(--text-3)',
+                            background: 'var(--bg-overlay)',
+                            color: 'var(--fg-muted)',
                             fontSize: 8,
                             fontWeight: 700,
                           }}

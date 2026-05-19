@@ -17,7 +17,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { createTeamInboundClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../../../../stores/auth.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
 
 const INDICATOR_STYLE: CSSProperties = {
   display: 'flex',
@@ -25,8 +25,8 @@ const INDICATOR_STYLE: CSSProperties = {
   gap: 12,
   padding: '14px 16px',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
 };
 
 const HEADER_ROW_STYLE: CSSProperties = {
@@ -38,7 +38,7 @@ const HEADER_ROW_STYLE: CSSProperties = {
 
 const REASON_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   lineHeight: 1.55,
   whiteSpace: 'pre-wrap',
 };
@@ -58,7 +58,7 @@ const ACTIONS_ROW_STYLE: CSSProperties = {
   gap: 8,
   flexWrap: 'wrap',
   paddingTop: 8,
-  borderTop: '1px dashed color-mix(in srgb, var(--border) 45%, transparent)',
+  borderTop: '1px dashed color-mix(in srgb, var(--border-default) 45%, transparent)',
 };
 
 const PRIMARY_BTN_STYLE: CSSProperties = {
@@ -69,7 +69,7 @@ const PRIMARY_BTN_STYLE: CSSProperties = {
   borderRadius: 6,
   border: 'none',
   background: 'var(--accent)',
-  color: 'var(--bg)',
+  color: 'var(--bg-base)',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
@@ -81,9 +81,9 @@ const SECONDARY_BTN_STYLE: CSSProperties = {
   gap: 4,
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
@@ -91,8 +91,8 @@ const SECONDARY_BTN_STYLE: CSSProperties = {
 
 const DANGER_BTN_STYLE: CSSProperties = {
   ...SECONDARY_BTN_STYLE,
-  borderColor: 'color-mix(in srgb, var(--danger, #d4574e) 36%, transparent)',
-  color: 'var(--danger, #d4574e)',
+  borderColor: 'color-mix(in srgb, var(--danger) 36%, transparent)',
+  color: 'var(--danger))',
 };
 
 export type FailureAction = 'redispatch' | 'return-to-c' | 'escalate-to-user';
@@ -104,19 +104,19 @@ const ACTION_META: Record<
   redispatch: {
     icon: '🔄',
     label: '重派给 executor / reviewer',
-    color: 'var(--warning, var(--warning, #f0b429))',
+    color: 'var(--warning))',
     description: '实现型失败 → 重新派发到执行层（沿用现有 spec / plan / tasks）',
   },
   'return-to-c': {
     icon: '↩️',
     label: '退回 PM1 重新规划',
-    color: 'var(--chart-5, var(--chart-5, #c4b5fd))',
+    color: 'var(--chart-5))',
     description: '规划型失败 → 退回 c 层重写 spec / plan / tasks',
   },
   'escalate-to-user': {
     icon: '⬆️',
     label: '已升级给你决策',
-    color: 'var(--danger, #d4574e)',
+    color: 'var(--danger))',
     description: '多轮重试仍未通过 → 团队等待你介入（编辑宪法 / 修改原始需求 / 直接回答）',
   },
 };
@@ -205,7 +205,7 @@ export function FailureFlowIndicator({
           <strong style={{ fontSize: 13, color: meta.color, letterSpacing: '0.005em' }}>
             {meta.label}
           </strong>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
             升级轮次 {escalationRound}
             {pm2HandoffId ? ` · #${pm2HandoffId.slice(0, 8)}` : ''}
           </span>

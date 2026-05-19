@@ -89,7 +89,7 @@ export function PermissionPrompt({
   onNavigateToSession,
   style,
 }: PermissionPromptProps) {
-  const riskColor = RISK_COLORS[riskLevel] ?? 'var(--fg-muted, #7b8a9e)';
+  const riskColor = RISK_COLORS[riskLevel] ?? 'var(--fg-muted))';
   const decisionOptions = getPermissionDecisionOptions(riskLevel);
   const activeDecision = pendingDecision
     ? (decisionOptions.find((option) => option.decision === pendingDecision) ?? null)
@@ -151,7 +151,7 @@ export function PermissionPrompt({
         border: `1px solid ${riskLevel === 'high' ? 'rgba(248,113,113,0.45)' : 'var(--border-default, hsla(215, 18%, 50%, 0.12))'}`,
         borderRadius: 12,
         padding: 14,
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
@@ -167,7 +167,7 @@ export function PermissionPrompt({
             alignItems: 'center',
             gap: 6,
             fontSize: 11,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             lineHeight: 1.4,
           }}
         >
@@ -184,7 +184,7 @@ export function PermissionPrompt({
                 border: 'none',
                 padding: 0,
                 cursor: 'pointer',
-                color: 'var(--accent, #5cd4c0)',
+                color: 'var(--accent))',
                 fontWeight: 600,
                 fontSize: 11,
                 maxWidth: 240,
@@ -200,7 +200,7 @@ export function PermissionPrompt({
             <span
               style={{
                 fontWeight: 600,
-                color: 'var(--fg-strong, #f1f4f8)',
+                color: 'var(--fg-strong))',
                 maxWidth: 240,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -234,7 +234,7 @@ export function PermissionPrompt({
             fontFamily: 'var(--font-mono, monospace)',
             fontSize: 13,
             fontWeight: 700,
-            color: 'var(--accent, #5cd4c0)',
+            color: 'var(--accent))',
             letterSpacing: '-0.01em',
           }}
         >
@@ -260,7 +260,7 @@ export function PermissionPrompt({
       <div
         style={{
           fontSize: 12,
-          color: 'var(--fg-strong, #f1f4f8)',
+          color: 'var(--fg-strong))',
           lineHeight: 1.55,
         }}
       >
@@ -277,7 +277,7 @@ export function PermissionPrompt({
             background: 'rgba(15,23,42,0.45)',
             border: '1px solid rgba(148,163,184,0.18)',
             borderRadius: 6,
-            color: 'var(--fg-strong, #f1f4f8)',
+            color: 'var(--fg-strong))',
             wordBreak: 'break-all',
             whiteSpace: 'pre-wrap',
           }}
@@ -299,7 +299,7 @@ export function PermissionPrompt({
                   borderRadius: 999,
                   background: 'rgba(99,102,241,0.12)',
                   border: '1px solid rgba(99,102,241,0.3)',
-                  color: 'var(--accent, #5cd4c0)',
+                  color: 'var(--accent))',
                 }}
               >
                 {pattern}
@@ -320,7 +320,7 @@ export function PermissionPrompt({
             borderRadius: 8,
             border: errorMessage ? '1px solid rgba(248,113,113,0.28)' : `1px solid ${riskColor}33`,
             background: errorMessage ? 'rgba(127, 29, 29, 0.22)' : `${riskColor}12`,
-            color: errorMessage ? '#fecaca' : 'var(--fg-strong, #f1f4f8)',
+            color: errorMessage ? '#fecaca' : 'var(--fg-strong))',
             fontSize: 11,
             lineHeight: 1.5,
           }}
@@ -374,7 +374,7 @@ export function PermissionPrompt({
         <div
           style={{
             fontSize: 10,
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             lineHeight: 1.5,
             letterSpacing: 0.1,
           }}
@@ -395,7 +395,7 @@ function PromptSection({ label, children }: { label: string; children: ReactNode
           fontWeight: 700,
           letterSpacing: 0.5,
           textTransform: 'uppercase',
-          color: 'var(--fg-muted, #7b8a9e)',
+          color: 'var(--fg-muted))',
         }}
       >
         {label}
@@ -441,17 +441,17 @@ function btnStyle(
 ): CSSProperties {
   const base: Record<typeof tone, { fg: string; bg: string; border: string }> = {
     primary: {
-      fg: 'var(--bg-overlay, #121721)',
-      bg: 'var(--accent, #5cd4c0)',
+      fg: 'var(--bg-overlay))',
+      bg: 'var(--accent))',
       border: color.aux,
     },
     secondary: {
-      fg: 'var(--fg-strong, #f1f4f8)',
+      fg: 'var(--fg-strong))',
       bg: 'rgba(99,102,241,0.14)',
       border: 'rgba(99,102,241,0.36)',
     },
     subtle: {
-      fg: 'var(--fg-muted, #7b8a9e)',
+      fg: 'var(--fg-muted))',
       bg: 'transparent',
       border: 'rgba(148,163,184,0.28)',
     },
@@ -491,6 +491,6 @@ const kbdStyle: CSSProperties = {
   borderRadius: 4,
   background: 'rgba(148,163,184,0.12)',
   border: '1px solid rgba(148,163,184,0.28)',
-  color: 'var(--fg-strong, #f1f4f8)',
+  color: 'var(--fg-strong))',
   marginRight: 2,
 };

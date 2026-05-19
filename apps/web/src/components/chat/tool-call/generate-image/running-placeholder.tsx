@@ -1,4 +1,4 @@
-import { ToolIcon } from '../../tool-icon';
+import { ToolIcon } from '../display/tool-icon';
 
 /**
  * Animated "正在生成图片…" placeholder shown while the tool itself is still
@@ -50,7 +50,7 @@ export function GenerateImageRunningPlaceholder({
           borderRadius: 12,
           border: '1px dashed var(--border-subtle)',
           background:
-            'linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, var(--surface)) 0%, var(--surface) 60%, color-mix(in oklch, var(--accent) 4%, var(--surface)) 100%)',
+            'linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, var(--bg-overlay) 0%, var(--bg-overlay) 60%, color-mix(in oklch, var(--accent) 4%, var(--bg-overlay) 100%)',
           position: 'relative',
           overflow: 'hidden',
           display: 'flex',
@@ -80,7 +80,7 @@ export function GenerateImageRunningPlaceholder({
             flexDirection: 'column',
             alignItems: 'center',
             gap: 6,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             animation: 'omo-image-gen-pulse 1.8s ease-in-out infinite',
             padding: '0 16px',
             textAlign: 'center',
@@ -91,7 +91,7 @@ export function GenerateImageRunningPlaceholder({
             style={{
               fontSize: 12,
               fontWeight: 600,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
             }}
           >
             正在生成图片…
@@ -100,7 +100,7 @@ export function GenerateImageRunningPlaceholder({
             <div
               style={{
                 fontSize: 11,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 lineHeight: 1.5,
                 maxWidth: '100%',
                 display: '-webkit-box',

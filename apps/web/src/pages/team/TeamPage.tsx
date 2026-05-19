@@ -24,9 +24,9 @@ import { SessionTreeView } from './runtime/tabs/tasks/SessionTreeView.js';
 import { TeamArtifactSection } from './runtime/tabs/tasks/TeamArtifactSection.js';
 import { SessionSidebar } from './runtime/shell/sidebar/TeamSessionSidebar.js';
 import { TeamStatusBar } from './runtime/shell/header/TeamStatusBar.js';
-import { useTeamWorkspaceSnapshotState } from './use-team-workspace-snapshot-state.js';
-import { useTeamWorkspaceState } from './use-team-workspace-state.js';
-import { useAuthStore } from '../../stores/auth.js';
+import { useTeamWorkspaceSnapshotState } from './hooks/use-team-workspace-snapshot-state.js';
+import { useTeamWorkspaceState } from './hooks/use-team-workspace-state.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { connectTeamEvents, disconnectTeamEvents, useHandoffStore } from '../../stores/team/team-events.js';
 import type { TeamSessionCreationDraft } from './runtime/data/team-session-creation.types.js';
 
@@ -365,7 +365,7 @@ function TeamPageLayout({
               minHeight: 0,
               overflow: 'auto',
               background:
-                'linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 96%, var(--bg)) 100%)',
+                'linear-gradient(180deg, var(--bg-overlay) 0%, color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base) 100%)',
             }}
           >
             {mainContent}

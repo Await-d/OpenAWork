@@ -46,7 +46,7 @@ export interface MCPServerListProps {
 const STATUS_COLOR: Record<MCPServerStatus['status'], string> = {
   connected: clr.success,
   connecting: clr.contrast,
-  disconnected: 'var(--fg-muted, #7b8a9e)',
+  disconnected: 'var(--fg-muted))',
   error: clr.danger,
 };
 
@@ -61,7 +61,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 12,
         overflow: 'hidden',
@@ -76,7 +76,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
         }}
       >
         <h2
-          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default, #c8d1e0)' }}
+          style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default))' }}
         >
           MCP 服务器
         </h2>
@@ -87,7 +87,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
           style={{
             padding: '2rem',
             textAlign: 'center',
-            color: 'var(--fg-muted, #7b8a9e)',
+            color: 'var(--fg-muted))',
             fontSize: 12,
           }}
         >
@@ -130,7 +130,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                       gap: 6,
                       fontSize: 12,
                       fontWeight: 600,
-                      color: 'var(--fg-default, #c8d1e0)',
+                      color: 'var(--fg-default))',
                       overflow: 'hidden',
                     }}
                   >
@@ -174,7 +174,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                   >
                     {STATUS_LABEL[server.status]}
                     {server.authType && (
-                      <span style={{ color: 'var(--fg-muted, #7b8a9e)' }}>
+                      <span style={{ color: 'var(--fg-muted))' }}>
                         · {server.authType}
                       </span>
                     )}
@@ -188,7 +188,7 @@ export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
                     padding: '2px 8px',
                     borderRadius: 10,
                     background: 'rgba(99,102,241,0.15)',
-                    color: 'var(--accent, #5cd4c0)',
+                    color: 'var(--accent))',
                     border: '1px solid rgba(99,102,241,0.25)',
                     flexShrink: 0,
                     whiteSpace: 'nowrap',
@@ -256,7 +256,7 @@ function RetryControl({ server, onClick }: RetryControlProps) {
           borderRadius: 8,
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
           background: isPending ? 'rgba(148,163,184,0.15)' : 'rgba(99,102,241,0.15)',
-          color: isPending ? 'var(--fg-muted, #7b8a9e)' : 'var(--accent, #5cd4c0)',
+          color: isPending ? 'var(--fg-muted))' : 'var(--accent))',
           cursor: isPending ? 'not-allowed' : 'pointer',
           whiteSpace: 'nowrap',
         }}

@@ -7,12 +7,12 @@ interface CompanionFeatureBannerProps {
   buddy: BuddyState;
 }
 
-const FEATURE_OFF_BG = 'color-mix(in oklch, var(--surface-hover) 80%, var(--surface))';
-const SYNC_ERROR_BG = 'color-mix(in oklch, var(--danger) 14%, var(--surface))';
+const FEATURE_OFF_BG = 'color-mix(in oklch, var(--bg-hover) 80%, var(--bg-overlay))';
+const SYNC_ERROR_BG = 'color-mix(in oklch, var(--danger) 14%, var(--bg-overlay))';
 
 const BANNER_BASE = {
   borderRadius: 12,
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-default)',
   padding: '10px 14px',
   display: 'flex',
   alignItems: 'center',
@@ -57,7 +57,7 @@ export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
         <div
           aria-live="polite"
           role="status"
-          style={{ ...BANNER_BASE, background: FEATURE_OFF_BG, color: 'var(--text-2)' }}
+          style={{ ...BANNER_BASE, background: FEATURE_OFF_BG, color: 'var(--fg-default)' }}
         >
           <span style={{ fontSize: 12, fontWeight: 700 }}>Buddy 伴侣已关闭</span>
           <span style={{ fontSize: 11, lineHeight: 1.6, flex: '1 1 240px', minWidth: 0 }}>
@@ -80,7 +80,7 @@ export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
               lineHeight: 1.6,
               flex: '1 1 240px',
               minWidth: 0,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
             }}
           >
             刚才读取或保存 companion 配置时遇到问题。当前编辑仍在本地生效；点右侧重试会重新和远端同步。
@@ -96,7 +96,7 @@ export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
               padding: '0 12px',
               borderRadius: 999,
               border: '1px solid var(--danger)',
-              background: 'var(--surface)',
+              background: 'var(--bg-overlay)',
               color: 'var(--danger)',
               fontSize: 12,
               fontWeight: 700,

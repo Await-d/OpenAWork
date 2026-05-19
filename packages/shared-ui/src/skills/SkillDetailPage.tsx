@@ -19,10 +19,10 @@ export interface SkillDetailPageProps {
 
 const s: Record<string, CSSProperties> = {
   root: {
-    background: 'var(--bg-base, #080b12)',
+    background: 'var(--bg-base))',
     minHeight: '100%',
     fontFamily: 'system-ui, sans-serif',
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
     maxWidth: 860,
   },
   topBar: {
@@ -33,7 +33,7 @@ const s: Record<string, CSSProperties> = {
   backBtn: {
     background: 'transparent',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     fontSize: 12,
     cursor: 'pointer',
     padding: '0.35rem 0.75rem',
@@ -70,7 +70,7 @@ const s: Record<string, CSSProperties> = {
     margin: 0,
     fontSize: 20,
     fontWeight: 700,
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
     lineHeight: 1.2,
     display: 'flex',
     alignItems: 'center',
@@ -89,7 +89,7 @@ const s: Record<string, CSSProperties> = {
   desc: {
     margin: '0.35rem 0 0',
     fontSize: 13,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     lineHeight: 1.6,
   },
   metaRow: {
@@ -98,7 +98,7 @@ const s: Record<string, CSSProperties> = {
     flexWrap: 'wrap' as const,
     marginTop: '0.75rem',
     fontSize: 12,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
   },
   metaItem: {
     display: 'flex',
@@ -116,12 +116,12 @@ const s: Record<string, CSSProperties> = {
     padding: '2px 7px',
     borderRadius: 4,
     background: 'rgba(99,102,241,0.12)',
-    color: 'var(--accent, #5cd4c0)',
+    color: 'var(--accent))',
     fontWeight: 500,
     border: '1px solid rgba(99,102,241,0.2)',
   },
   installBtn: {
-    background: 'var(--accent, #5cd4c0)',
+    background: 'var(--accent))',
     color: color.fgOnAccent,
     border: 'none',
     borderRadius: 8,
@@ -154,20 +154,20 @@ const s: Record<string, CSSProperties> = {
   sectionTitle: {
     fontSize: 11,
     fontWeight: 700,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     textTransform: 'uppercase' as const,
     letterSpacing: 1,
     marginBottom: '0.6rem',
   },
   card: {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 10,
     padding: '1rem',
   },
   readme: {
     fontSize: 13,
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
     lineHeight: 1.75,
     whiteSpace: 'pre-wrap' as const,
   },
@@ -193,7 +193,7 @@ const s: Record<string, CSSProperties> = {
     gap: '0.75rem',
   },
   infoCell: {
-    background: 'var(--bg-overlay, #121721)',
+    background: 'var(--bg-overlay))',
     border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
     borderRadius: 8,
     padding: '0.65rem 0.85rem',
@@ -201,7 +201,7 @@ const s: Record<string, CSSProperties> = {
   infoCellLabel: {
     fontSize: 10,
     fontWeight: 700,
-    color: 'var(--fg-muted, #7b8a9e)',
+    color: 'var(--fg-muted))',
     textTransform: 'uppercase' as const,
     letterSpacing: 0.8,
     marginBottom: 3,
@@ -209,7 +209,7 @@ const s: Record<string, CSSProperties> = {
   infoCellValue: {
     fontSize: 13,
     fontWeight: 600,
-    color: 'var(--fg-default, #c8d1e0)',
+    color: 'var(--fg-default))',
   },
 };
 
@@ -337,7 +337,7 @@ export function SkillDetailPage({
                     style={{
                       fontFamily: 'monospace',
                       fontSize: 12,
-                      color: 'var(--fg-muted, #7b8a9e)',
+                      color: 'var(--fg-muted))',
                     }}
                   >
                     {perm}

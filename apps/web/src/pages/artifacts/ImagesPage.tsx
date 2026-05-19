@@ -7,9 +7,9 @@ import {
   createWorkflowsClient,
 } from '@openAwork/web-client';
 import type { ArtifactRecord } from '@openAwork/artifacts';
-import { useAuthStore } from '../../stores/auth.js';
-import { ChatImageGenerationControls } from '../../components/chat/ChatImageGenerationControls.js';
-import { useChatImageGeneration } from '../chat-page/use-chat-image-generation.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { ChatImageGenerationControls } from '../../components/chat/image/ChatImageGenerationControls.js';
+import { useChatImageGeneration } from '../chat-page/hooks/use-chat-image-generation.js';
 import {
   toImageEditReferenceArtifacts,
   type ImageEditReferenceArtifact,
@@ -19,7 +19,7 @@ import {
   loadSavedChatSessionDefaults,
   type ChatSettingsProvider,
 } from '../../utils/chat/chat-session-defaults.js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '../../utils/log/logger.js';
 
 interface SessionArtifactsResponse {
   contentArtifacts?: ArtifactRecord[];
@@ -32,8 +32,8 @@ const containerStyle: CSSProperties = {
   width: '100%',
   flex: 1,
   minHeight: 0,
-  background: 'var(--bg)',
-  color: 'var(--text)',
+  background: 'var(--bg-base)',
+  color: 'var(--fg-strong)',
 };
 
 const headerStyle: CSSProperties = {
@@ -59,7 +59,7 @@ const sidebarStyle: CSSProperties = {
   width: 320,
   minWidth: 320,
   borderRight: '1px solid var(--border-subtle)',
-  background: 'var(--surface)',
+  background: 'var(--bg-overlay)',
   minHeight: 0,
 };
 
@@ -77,7 +77,7 @@ const mainAreaStyle: CSSProperties = {
   flexDirection: 'column',
   flex: 1,
   minWidth: 0,
-  background: 'var(--bg)',
+  background: 'var(--bg-base)',
   position: 'relative',
 };
 
@@ -90,7 +90,7 @@ const canvasContainerStyle: CSSProperties = {
   padding: 32,
   overflow: 'hidden',
   position: 'relative',
-  background: 'var(--bg)',
+  background: 'var(--bg-base)',
 };
 
 const historyStripStyle: CSSProperties = {
@@ -99,7 +99,7 @@ const historyStripStyle: CSSProperties = {
   gap: 8,
   padding: '12px 24px',
   borderTop: '1px solid var(--border-subtle)',
-  background: 'var(--surface)',
+  background: 'var(--bg-overlay)',
   zIndex: 10,
 };
 
@@ -109,8 +109,8 @@ const promptAreaStyle: CSSProperties = {
   resize: 'vertical',
   borderRadius: 12,
   border: '1px solid var(--border-subtle)',
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
   padding: '12px 14px',
   fontSize: 14,
   lineHeight: 1.6,
@@ -122,7 +122,7 @@ const primaryButtonStyle: CSSProperties = {
   borderRadius: 10,
   padding: '0.7rem 1.1rem',
   background: 'var(--accent)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   cursor: 'pointer',
   fontWeight: 600,
   fontSize: 13,
@@ -133,7 +133,7 @@ const secondaryButtonStyle: CSSProperties = {
   borderRadius: 8,
   padding: '0.5rem 0.9rem',
   background: 'transparent',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontWeight: 500,
   fontSize: 12,
@@ -142,7 +142,7 @@ const secondaryButtonStyle: CSSProperties = {
 const sectionLabelStyle: CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: 0.4,
 };
@@ -486,10 +486,10 @@ export default function ImagesPage() {
     <div style={containerStyle}>
       <header style={headerStyle}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, color: 'var(--text)' }}>
+          <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, color: 'var(--fg-strong)' }}>
             图片工作台
           </h1>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             {imagePluginLoaded && !imagePluginEnabled
               ? '图片生成插件未启用，请前往 设置 → 插件 中开启。'
               : hasConfiguredImageModel
@@ -552,7 +552,7 @@ export default function ImagesPage() {
                         borderRadius: 6,
                         padding: '2px 8px',
                         background: 'transparent',
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         cursor: 'pointer',
                         fontSize: 11,
                         display: 'flex',
@@ -590,7 +590,7 @@ export default function ImagesPage() {
                         ? 'transparent'
                         : 'color-mix(in oklch, var(--accent) 12%, transparent)',
                       color: optimizing
-                        ? 'var(--text-3)'
+                        ? 'var(--fg-muted)'
                         : 'color-mix(in oklch, var(--accent) 80%, var(--fg-on-accent) 20%)',
                       cursor: optimizing || prompt.trim().length === 0 ? 'not-allowed' : 'pointer',
                       fontSize: 11,
@@ -659,12 +659,12 @@ export default function ImagesPage() {
                     height: 120,
                     borderRadius: 10,
                     border: '1px dashed var(--border-subtle)',
-                    background: 'var(--bg)',
+                    background: 'var(--bg-base)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     overflow: 'hidden',
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     fontSize: 11,
                     textAlign: 'center',
                     position: 'relative',
@@ -720,7 +720,7 @@ export default function ImagesPage() {
                 style={{
                   padding: '0.6rem 0.8rem',
                   borderRadius: 8,
-                  background: 'var(--danger-muted, oklch(0.95 0.04 25))',
+                  background: 'var(--danger-muted, var(--fg-strong))',
                   color: 'var(--danger)',
                   fontSize: 12,
                 }}
@@ -734,7 +734,7 @@ export default function ImagesPage() {
             style={{
               padding: '16px 20px',
               borderTop: '1px solid var(--border-subtle)',
-              background: 'var(--surface)',
+              background: 'var(--bg-overlay)',
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
@@ -751,7 +751,7 @@ export default function ImagesPage() {
                 fontSize: 14,
                 opacity: submitDisabled ? 0.55 : 1,
                 cursor: submitDisabled ? 'not-allowed' : 'pointer',
-                boxShadow: submitDisabled ? 'none' : '0 2px 8px oklch(0.5 0.15 260 / 0.25)',
+                boxShadow: submitDisabled ? 'none' : '0 2px 8px var(--accent-muted)',
               }}
             >
               {imageGenerationBusy
@@ -761,7 +761,7 @@ export default function ImagesPage() {
                   : '生成图片'}
             </button>
             {creatingSession && (
-              <span style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)', textAlign: 'center' }}>
                 正在初始化工作台会话…
               </span>
             )}
@@ -794,7 +794,7 @@ export default function ImagesPage() {
                       flexDirection: 'column',
                       gap: 8,
                       padding: 16,
-                      background: 'var(--surface)',
+                      background: 'var(--bg-overlay)',
                       borderRadius: 12,
                       border: '1px solid var(--border-subtle)',
                       boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
@@ -809,7 +809,7 @@ export default function ImagesPage() {
                         alignItems: 'center',
                       }}
                     >
-                      <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 600 }}>
                         {`${latestResult.size} · ${latestResult.quality.toUpperCase()} · ${latestResult.outputFormat.toUpperCase()}`}
                       </span>
                       <div style={{ display: 'flex', gap: 8 }}>
@@ -840,7 +840,7 @@ export default function ImagesPage() {
                     <div
                       style={{
                         fontSize: 13,
-                        color: 'var(--text)',
+                        color: 'var(--fg-strong)',
                         lineHeight: 1.5,
                         maxHeight: 60,
                         overflowY: 'auto',
@@ -853,7 +853,7 @@ export default function ImagesPage() {
                         <div
                           style={{
                             fontSize: 12,
-                            color: 'var(--text-3)',
+                            color: 'var(--fg-muted)',
                             lineHeight: 1.4,
                             borderTop: '1px dashed var(--border-subtle)',
                             paddingTop: 8,
@@ -868,8 +868,8 @@ export default function ImagesPage() {
                 <span
                   style={{
                     fontSize: 14,
-                    color: 'var(--text-3)',
-                    background: 'var(--surface)',
+                    color: 'var(--fg-muted)',
+                    background: 'var(--bg-overlay)',
                     padding: '8px 16px',
                     borderRadius: 20,
                   }}
@@ -884,9 +884,9 @@ export default function ImagesPage() {
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: 12,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   fontSize: 14,
-                  background: 'var(--surface)',
+                  background: 'var(--bg-overlay)',
                   padding: '24px 32px',
                   borderRadius: 16,
                   boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
@@ -911,7 +911,7 @@ export default function ImagesPage() {
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: 12,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   textAlign: 'center',
                   maxWidth: 320,
                   opacity: 0.6,
@@ -932,7 +932,7 @@ export default function ImagesPage() {
                   <circle cx="8.5" cy="10" r="1.5" />
                   <path d="M21 15l-5-5L5 21" />
                 </svg>
-                <strong style={{ fontSize: 15, color: 'var(--text-2)', fontWeight: 500 }}>
+                <strong style={{ fontSize: 15, color: 'var(--fg-default)', fontWeight: 500 }}>
                   在左侧填写提示词开始生成
                 </strong>
                 <span style={{ fontSize: 13, lineHeight: 1.6 }}>
@@ -966,7 +966,7 @@ export default function ImagesPage() {
               <div
                 style={{
                   fontSize: 12,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   lineHeight: 1.6,
                   padding: '8px 0 2px',
                   width: '100%',
@@ -999,7 +999,7 @@ export default function ImagesPage() {
                           : '1px solid var(--border-subtle)',
                         borderRadius: 8,
                         padding: 0,
-                        background: 'var(--bg)',
+                        background: 'var(--bg-base)',
                         cursor: 'pointer',
                         display: 'flex',
                         flexDirection: 'column',
@@ -1010,7 +1010,7 @@ export default function ImagesPage() {
                         style={{
                           width: '100%',
                           aspectRatio: '1 / 1',
-                          background: 'var(--surface)',
+                          background: 'var(--bg-overlay)',
                         }}
                       >
                         {artifact.imageUrl && (
@@ -1025,7 +1025,7 @@ export default function ImagesPage() {
                         style={{
                           padding: '6px 8px',
                           fontSize: 11,
-                          color: 'var(--text-2)',
+                          color: 'var(--fg-default)',
                           textAlign: 'left',
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',

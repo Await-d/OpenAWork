@@ -6,7 +6,7 @@ import type {
   PendingQuestionRequest,
 } from '@openAwork/web-client';
 import type { ChatMessage, ReasoningEffort } from '../../../../components/conversation-runtime/messages/support.js';
-import type { DialogueMode } from '../../dialogue-mode.js';
+import type { DialogueMode } from '../../mode/dialogue-mode.js';
 import type { SessionStateStatus, SessionTodoItem } from '../../../../components/conversation-runtime/session/session-runtime.js';
 import { parseSessionModeMetadata } from '../../../../components/conversation-runtime/messages/support.js';
 import {
@@ -15,8 +15,8 @@ import {
 } from '../../../../components/conversation-runtime/session/recovery-read-model.js';
 import { flattenSessionTodoLanes } from '../../../../components/conversation-runtime/session/session-runtime.js';
 import { createSessionsClient } from '@openAwork/web-client';
-import { buildChatRightPanelStateFromRunEvents } from '../../chat-stream-state.js';
-import type { ChatRenderEntry, ChatRenderGroup } from '../../../../components/chat/chat-message-group-list.js';
+import { buildChatRightPanelStateFromRunEvents } from '../../state/chat-stream-state.js';
+import type { ChatRenderEntry, ChatRenderGroup } from '../../../../components/chat/message/chat-message-group-list.js';
 
 export interface PreparedSessionRecoveryState {
   messageRatings: Record<string, SessionMessageRatingRecord>;

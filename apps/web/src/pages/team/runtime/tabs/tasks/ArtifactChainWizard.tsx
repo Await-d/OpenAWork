@@ -24,8 +24,8 @@ const WIZARD_STYLE: CSSProperties = {
   gap: 16,
   padding: 16,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 86%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const STEP_BAR_STYLE: CSSProperties = {
@@ -73,7 +73,7 @@ export function ArtifactChainWizard({
         <span
           style={{
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
           }}
@@ -94,18 +94,18 @@ export function ArtifactChainWizard({
               style={{
                 ...STEP_BUTTON_STYLE,
                 background: isActive
-                  ? 'color-mix(in srgb, var(--accent) 16%, var(--surface))'
+                  ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
                   : isPast
-                    ? 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 8%, var(--surface))'
+                    ? 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay))'
                     : 'transparent',
                 borderColor: isActive
                   ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
                   : 'transparent',
                 color: isActive
-                  ? 'var(--text)'
+                  ? 'var(--fg-strong)'
                   : isPast
-                    ? 'var(--success, var(--success, var(--success, #3dd49a)))'
-                    : 'var(--text-3)',
+                    ? 'var(--success))'
+                    : 'var(--fg-muted)',
               }}
               onClick={() => onStepChange?.(step)}
             >
@@ -123,7 +123,7 @@ export function ArtifactChainWizard({
         <div style={{ display: 'grid', gap: 8 }}>
           <strong style={{ fontSize: 13 }}>待澄清项（{clarifications.length}）</strong>
           {clarifications.length === 0 ? (
-            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               无待澄清项，可直接进入 Plan 生成。
             </span>
           ) : (
@@ -133,8 +133,8 @@ export function ArtifactChainWizard({
                 style={{
                   padding: '8px 12px',
                   borderRadius: 8,
-                  border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 30%, transparent)',
-                  background: 'color-mix(in srgb, var(--danger, #d4574e) 6%, var(--surface))',
+                  border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
+                  background: 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay))',
                   fontSize: 12,
                 }}
               >
@@ -158,11 +158,11 @@ export function ArtifactChainWizard({
                     padding: '4px 10px',
                     borderRadius: 6,
                     fontSize: 11,
-                    border: `1px solid ${w.status === 'conflict' ? 'color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)' : 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 40%, transparent)'}`,
+                    border: `1px solid ${w.status === 'conflict' ? 'color-mix(in srgb, var(--danger) 40%, transparent)' : 'color-mix(in srgb, var(--warning) 40%, transparent)'}`,
                     background:
                       w.status === 'conflict'
-                        ? 'color-mix(in srgb, var(--danger, #d4574e) 6%, var(--surface))'
-                        : 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 6%, var(--surface))',
+                        ? 'color-mix(in srgb, var(--danger) 6%, var(--bg-overlay))'
+                        : 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay))',
                   }}
                 >
                   {w.status === 'conflict' ? '❌' : '⚠️'} {w.clause}：{w.note}
@@ -178,7 +178,7 @@ export function ArtifactChainWizard({
       ) : null}
 
       {!specContent && !planContent && !tasksContent ? (
-        <span style={{ fontSize: 12, color: 'var(--text-3)', padding: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 12 }}>
           等待 PM1 生成产物链…创建 b→c handoff 后这里会逐步展示 spec / plan / tasks。
         </span>
       ) : null}

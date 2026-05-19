@@ -10,7 +10,7 @@
  */
 
 import type { Message, MessageContent, MessageRole } from '@openAwork/shared';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   type AssistantMessage,
   type AssistantErrorObject,
@@ -58,7 +58,7 @@ import {
   stringifyToolResultOutput,
   type StoredToolResult,
 } from '../tools/tool-result-contract.js';
-import { matchesRequestScope } from '../request-lineage.js';
+import { matchesRequestScope } from '../runtime/request-lineage.js';
 import { buildCompactionMarkerContent } from '../compaction/compaction-marker.js';
 import { upsertSessionMessageSearchDocument } from '../session/session-search-store.js';
 import { buildFallbackToolResultContentFromToolPart } from '../tools/tool-state-read-model.js';

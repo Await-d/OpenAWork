@@ -6,15 +6,15 @@
  */
 
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { useAuthStore } from '../../../../stores/auth.js';
+import { useAuthStore } from '../../../../stores/auth/auth.js';
 
 const PANEL_STYLE: CSSProperties = {
   display: 'grid',
   gap: 12,
   padding: 16,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 86%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 86%, var(--bg-base))',
 };
 
 const BUTTON_PRIMARY: CSSProperties = {
@@ -25,8 +25,8 @@ const BUTTON_PRIMARY: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
-  color: 'var(--text)',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 700,
@@ -87,7 +87,7 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
         <span
           style={{
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
           }}
@@ -98,7 +98,7 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
       </header>
 
       {loading ? (
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>加载中…</span>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>加载中…</span>
       ) : (
         <div style={{ display: 'grid', gap: 8 }}>
           {workflows.map((wf) => {
@@ -115,19 +115,19 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                   borderRadius: 8,
                   border: isSelected
                     ? '1px solid color-mix(in srgb, var(--accent) 50%, transparent)'
-                    : '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+                    : '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
                   background: isSelected
-                    ? 'color-mix(in srgb, var(--accent) 10%, var(--surface))'
-                    : 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
+                    ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
+                    : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}
               >
                 <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                   <strong style={{ fontSize: 13 }}>{wf.name}</strong>
-                  <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{wf.source}</span>
+                  <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{wf.source}</span>
                 </div>
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{wf.description}</span>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{wf.description}</span>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {wf.steps.map((s) => (
                     <span
@@ -136,8 +136,8 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
                         fontSize: 10,
                         padding: '1px 5px',
                         borderRadius: 3,
-                        background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-                        border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+                        background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+                        border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                       }}
                     >
                       {s.label}
@@ -218,7 +218,7 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
         <span
           style={{
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
           }}
@@ -239,12 +239,12 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
           minHeight: 300,
           padding: 10,
           borderRadius: 8,
-          border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-          background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
+          border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
           fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
           fontSize: 11,
           lineHeight: 1.5,
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           resize: 'vertical',
         }}
         spellCheck={false}
@@ -255,10 +255,10 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
           保存
         </button>
         {saved ? (
-          <span style={{ fontSize: 12, color: 'var(--success, var(--success, var(--success, #3dd49a)))' }}>已保存</span>
+          <span style={{ fontSize: 12, color: 'var(--success))' }}>已保存</span>
         ) : null}
         {error ? (
-          <span style={{ fontSize: 12, color: 'var(--danger, #d4574e)' }}>{error}</span>
+          <span style={{ fontSize: 12, color: 'var(--danger))' }}>{error}</span>
         ) : null}
       </div>
     </div>
@@ -276,7 +276,7 @@ export function AdapterConfigPanel() {
         <span
           style={{
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
           }}
@@ -284,7 +284,7 @@ export function AdapterConfigPanel() {
           Role Adapter 配置
         </span>
         <strong style={{ fontSize: 14 }}>角色适配器</strong>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           每个角色层的 adapter 决定使用哪个 agent 实现、哪个 LLM provider、以及额外的 prompt 注入。
         </span>
       </header>
@@ -299,12 +299,12 @@ export function AdapterConfigPanel() {
               alignItems: 'center',
               padding: '8px 12px',
               borderRadius: 8,
-              border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
+              border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
             }}
           >
             <strong style={{ fontSize: 12, minWidth: 80 }}>{layer}</strong>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               内置 adapter（Phase E MVP 不支持自定义，后续版本开放）
             </span>
           </div>

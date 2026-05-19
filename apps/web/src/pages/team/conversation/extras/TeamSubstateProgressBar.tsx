@@ -38,8 +38,8 @@ const CONTAINER_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 10,
   padding: '5px 12px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
   fontSize: 12,
   flexShrink: 0,
 };
@@ -51,8 +51,8 @@ const LAYER_BADGE_STYLE: CSSProperties = {
   padding: '2px 8px',
   borderRadius: 999,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
-  color: 'var(--text)',
+  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   fontSize: 11,
   fontWeight: 700,
   flexShrink: 0,
@@ -62,13 +62,13 @@ const PROGRESS_TRACK_STYLE: CSSProperties = {
   flex: 1,
   height: 4,
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 50%, transparent)',
   overflow: 'hidden',
   minWidth: 60,
 };
 
 const STATE_LABEL_STYLE: CSSProperties = {
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   flexShrink: 0,
   fontVariantNumeric: 'tabular-nums',
 };
@@ -76,10 +76,10 @@ const STATE_LABEL_STYLE: CSSProperties = {
 function progressFillStyle(percent: number, status: 'running' | 'paused' | 'idle'): CSSProperties {
   const accentColor =
     status === 'paused'
-      ? 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 60%, var(--surface))'
+      ? 'color-mix(in srgb, var(--warning) 60%, var(--bg-overlay))'
       : status === 'running'
         ? 'var(--accent)'
-        : 'color-mix(in srgb, var(--text-3) 30%, var(--surface))';
+        : 'color-mix(in srgb, var(--fg-muted) 30%, var(--bg-overlay))';
   return {
     width: `${percent}%`,
     height: '100%',

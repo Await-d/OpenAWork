@@ -15,11 +15,11 @@ async function main(): Promise<void> {
       const [{ default: Fastify }, { default: authPlugin }, { sessionsRoutes }, dbModule] =
         await Promise.all([
           import('fastify'),
-          import('../auth.js'),
+          import('../infra/auth.js'),
           import('../routes/sessions.js'),
-          import('../db.js'),
+          import('../infra/db.js'),
         ]);
-      const { default: requestWorkflowPlugin } = await import('../request-workflow.js');
+      const { default: requestWorkflowPlugin } = await import('../runtime/request-workflow.js');
 
       await dbModule.connectDb();
       await dbModule.migrate();

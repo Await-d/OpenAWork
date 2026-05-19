@@ -24,7 +24,7 @@ interface NodeSqliteDatabase {
 
 import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema.js';
-import { normalizeUnknownSqliteBindParams } from '../../sqlite-bind-params.js';
+import { normalizeUnknownSqliteBindParams } from '../../infra/sqlite-bind-params.js';
 
 export type DrizzleHandle = SqliteRemoteDatabase<typeof schema>;
 

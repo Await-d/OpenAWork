@@ -1,36 +1,36 @@
 import type { CSSProperties } from 'react';
 
 export const UV: CSSProperties = {
-  '--color-surface': 'var(--surface)',
-  '--color-surface-raised': 'var(--bg-2)',
-  '--color-border': 'var(--border)',
+  '--color-surface': 'var(--bg-overlay)',
+  '--color-surface-raised': 'var(--bg-overlay)',
+  '--color-border': 'var(--border-default)',
   '--color-border-subtle': 'var(--border-subtle)',
-  '--color-text': 'var(--text)',
-  '--color-text-secondary': 'var(--text-2)',
-  '--color-muted': 'var(--text-3)',
+  '--color-text': 'var(--fg-strong)',
+  '--color-text-secondary': 'var(--fg-default)',
+  '--color-muted': 'var(--fg-muted)',
   '--color-accent': 'var(--accent)',
   '--color-accent-muted': 'var(--accent-muted)',
-  '--color-bg': 'var(--bg)',
-  '--color-background': 'var(--bg)',
-  '--color-foreground': 'var(--text)',
+  '--color-bg': 'var(--bg-base)',
+  '--color-background': 'var(--bg-base)',
+  '--color-foreground': 'var(--fg-strong)',
   '--color-primary': 'var(--accent)',
-  '--color-primary-foreground': 'var(--accent-text)',
+  '--color-primary-foreground': 'var(--fg-on-accent)',
 } as CSSProperties;
 
 export const IS: CSSProperties = {
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 8,
   padding: '8px 12px',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
 };
 
 export const SS: CSSProperties = {
   marginBottom: '1rem',
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 12,
   padding: '1rem',
   display: 'flex',
@@ -43,12 +43,12 @@ export const ST: CSSProperties = {
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 export const BP: CSSProperties = {
   background: 'var(--accent)',
-  color: 'var(--accent-text)',
+  color: 'var(--fg-on-accent)',
   border: 'none',
   borderRadius: 8,
   padding: '8px 16px',

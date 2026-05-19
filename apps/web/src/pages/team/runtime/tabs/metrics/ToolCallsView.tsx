@@ -23,7 +23,7 @@ const CONTAINER_STYLE: CSSProperties = {
 const SECTION_TITLE_STYLE: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -33,8 +33,8 @@ const ROW_STYLE: CSSProperties = {
   gap: 6,
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -42,8 +42,8 @@ const EMPTY_STYLE: CSSProperties = {
   placeItems: 'center',
   padding: 32,
   borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-  color: 'var(--text-3)',
+  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+  color: 'var(--fg-muted)',
   fontSize: 13,
   gap: 6,
   textAlign: 'center',
@@ -97,7 +97,7 @@ export function ToolCallsView() {
             <span style={{ fontSize: 26 }} aria-hidden>
               🛠️
             </span>
-            <strong style={{ color: 'var(--text-2)' }}>暂无工具调用数据</strong>
+            <strong style={{ color: 'var(--fg-default)' }}>暂无工具调用数据</strong>
             <span style={{ maxWidth: 420 }}>
               工具调用从 chat 流的 tool-call 事件聚合而来。
               <br />
@@ -126,7 +126,7 @@ export function ToolCallsView() {
             <div style={{ display: 'grid', gap: 6 }}>
               {Array.from(byAgent.entries()).map(([agentId, toolMap]) => (
                 <div key={agentId} style={ROW_STYLE}>
-                  <strong style={{ fontSize: 12, color: 'var(--text)' }}>{agentId}</strong>
+                  <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>{agentId}</strong>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {Array.from(toolMap.entries())
                       .sort((a, b) => b[1] - a[1])
@@ -136,13 +136,13 @@ export function ToolCallsView() {
                           style={{
                             padding: '2px 10px',
                             borderRadius: 999,
-                            background: 'color-mix(in srgb, var(--bg-2) 80%, transparent)',
-                            border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+                            background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+                            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
                             fontSize: 11,
-                            color: 'var(--text-2)',
+                            color: 'var(--fg-default)',
                           }}
                         >
-                          {toolName} <strong style={{ color: 'var(--text)' }}>{count}</strong>
+                          {toolName} <strong style={{ color: 'var(--fg-strong)' }}>{count}</strong>
                         </span>
                       ))}
                   </div>
@@ -160,10 +160,10 @@ function ToolRow({ tool }: { tool: ToolStatsDerived }) {
   const failurePct = Math.round(tool.failureRate * 100);
   const failureColor =
     failurePct > 30
-      ? 'var(--danger, #d4574e)'
+      ? 'var(--danger))'
       : failurePct > 10
-        ? 'var(--warning, var(--warning, #f0b429))'
-        : 'var(--success, var(--success, var(--success, #3dd49a)))';
+        ? 'var(--warning))'
+        : 'var(--success))';
   return (
     <div style={ROW_STYLE}>
       <div
@@ -177,18 +177,18 @@ function ToolRow({ tool }: { tool: ToolStatsDerived }) {
         <strong
           style={{
             minWidth: 160,
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             fontFamily: 'ui-monospace, SFMono-Regular, monospace',
           }}
         >
           {tool.toolName}
         </strong>
-        <span style={{ color: 'var(--text-3)' }}>{tool.invocations} 次</span>
+        <span style={{ color: 'var(--fg-muted)' }}>{tool.invocations} 次</span>
         <span style={{ color: failureColor, fontWeight: 700 }}>
           失败 {tool.failures} ({failurePct}%)
         </span>
         <span style={{ flex: 1 }} />
-        <span style={{ color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ color: 'var(--fg-default)', fontVariantNumeric: 'tabular-nums' }}>
           avg {formatMs(tool.avgMs)} · p50 {formatMs(tool.p50)} · p95 {formatMs(tool.p95)}
         </span>
       </div>
@@ -203,8 +203,8 @@ function ToolRow({ tool }: { tool: ToolStatsDerived }) {
                 style={{
                   padding: '1px 8px',
                   borderRadius: 999,
-                  background: 'color-mix(in srgb, var(--danger, #d4574e) 12%, transparent)',
-                  color: 'var(--danger, #d4574e)',
+                  background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+                  color: 'var(--danger))',
                   fontSize: 10,
                   fontWeight: 700,
                 }}

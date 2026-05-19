@@ -9,7 +9,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as OrchestratorModule from '../../handoff/runner/reception-orchestrator.js';
 import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
 
@@ -39,7 +39,7 @@ function seedReception(): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
   orchestrator = await import('../../handoff/runner/reception-orchestrator.js');
   handoffStore = await import('../../handoff/store/handoff-store.js');

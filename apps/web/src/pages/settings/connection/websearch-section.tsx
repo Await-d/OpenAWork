@@ -61,9 +61,9 @@ const ROLLOUT_MODES: ReadonlyArray<{ id: WebsearchRolloutMode; label: string; hi
 const PILL_BUTTON: React.CSSProperties = {
   minWidth: 56,
   borderRadius: 999,
-  border: '1px solid var(--border)',
-  background: 'var(--surface)',
-  color: 'var(--text-2)',
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-default)',
   padding: '6px 12px',
   fontSize: 12,
   fontWeight: 600,
@@ -75,11 +75,11 @@ const INPUT_STYLE: React.CSSProperties = {
   flex: '1 1 160px',
   minWidth: 120,
   padding: '6px 8px',
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-default)',
   borderRadius: 6,
   fontSize: 12,
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
 };
 
 function shallowEqualPolicy(a: WebsearchPolicy, b: WebsearchPolicy): boolean {
@@ -158,7 +158,7 @@ export function WebsearchSection({
           <p
             style={{
               margin: '4px 0 0',
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
               fontSize: 13,
               lineHeight: 1.6,
             }}
@@ -181,7 +181,7 @@ export function WebsearchSection({
           }}
         >
           已保存
-          <span style={{ color: 'var(--text)', fontWeight: 700 }}>
+          <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>
             {savedPolicy.providers.length} 个 / {savedPolicy.rolloutMode}
           </span>
         </div>
@@ -189,7 +189,7 @@ export function WebsearchSection({
 
       {/* Rollout mode picker */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>Rollout 模式</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>Rollout 模式</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {ROLLOUT_MODES.map((mode) => {
             const selected = mode.id === policy.rolloutMode;
@@ -203,9 +203,9 @@ export function WebsearchSection({
                 style={{
                   ...PILL_BUTTON,
                   background: selected
-                    ? 'color-mix(in srgb, var(--accent) 16%, var(--surface))'
+                    ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))'
                     : PILL_BUTTON.background,
-                  borderColor: selected ? 'var(--accent)' : 'var(--border)',
+                  borderColor: selected ? 'var(--accent)' : 'var(--border-default)',
                   color: selected ? 'var(--accent)' : PILL_BUTTON.color,
                 }}
               >
@@ -214,23 +214,23 @@ export function WebsearchSection({
             );
           })}
         </div>
-        <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           {ROLLOUT_MODES.find((m) => m.id === policy.rolloutMode)?.hint ?? ''}
         </span>
       </div>
 
       {/* Configured provider list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
           已配置 provider（{policy.providers.length} / 8）
         </div>
         {policy.providers.length === 0 && (
           <div
             style={{
               padding: '10px 12px',
-              border: '1px dashed var(--border)',
+              border: '1px dashed var(--border-default)',
               borderRadius: 6,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontSize: 12,
               lineHeight: 1.5,
             }}
@@ -251,14 +251,14 @@ export function WebsearchSection({
                 padding: 8,
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 6,
-                background: 'var(--surface)',
+                background: 'var(--bg-overlay)',
               }}
             >
               <span
                 style={{
                   fontSize: 12,
                   fontWeight: 700,
-                  color: 'var(--text)',
+                  color: 'var(--fg-strong)',
                   minWidth: 96,
                 }}
               >
@@ -329,7 +329,7 @@ export function WebsearchSection({
                     ...PILL_BUTTON,
                     minWidth: 32,
                     padding: '4px 8px',
-                    color: 'var(--danger, #c33)',
+                    color: 'var(--danger))',
                   }}
                 >
                   ×
@@ -361,7 +361,7 @@ export function WebsearchSection({
 
       {/* Optional merge timeout */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ fontSize: 12, color: 'var(--text-2)' }}>
+        <label style={{ fontSize: 12, color: 'var(--fg-default)' }}>
           合并模式超时 (ms)，仅 <code>merge</code> 生效；范围 1000–120000：
         </label>
         <input
@@ -390,7 +390,7 @@ export function WebsearchSection({
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.5 }}>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.5 }}>
           LLM 在调用 websearch 时显式指定 provider 仍会被尊重；多 provider rollout 仅在 LLM
           未指定时生效。
         </span>

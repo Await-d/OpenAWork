@@ -33,7 +33,7 @@ const mocks = vi.hoisted(() => ({
   sqliteRunMock: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOT: '/home/await/project/OpenAWork',
   WORKSPACE_ROOTS: ['/home/await/project/OpenAWork'],
@@ -50,7 +50,7 @@ vi.mock('../../mcp/mcp-runtime.js', () => ({
 }));
 
 import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
-import { _registerPluginForTest, _resetPluginsForTest } from '../../plugin-host.js';
+import { _registerPluginForTest, _resetPluginsForTest } from '../../runtime/plugin-host.js';
 
 describe('tool-sandbox plugin hook integration (PR-D-Plugin)', () => {
   beforeEach(() => {

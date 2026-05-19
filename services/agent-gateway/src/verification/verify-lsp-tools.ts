@@ -6,8 +6,8 @@ import { pathToFileURL } from 'node:url';
 import Fastify from 'fastify';
 import { ALL_LSP_TOOL_NAMES } from '@openAwork/agent-core';
 import type { DiagnosticSummary } from '@openAwork/lsp-client';
-import authPlugin from '../auth.js';
-import { closeDb, connectDb, migrate, sqliteRun } from '../db.js';
+import authPlugin from '../infra/auth.js';
+import { closeDb, connectDb, migrate, sqliteRun } from '../infra/db.js';
 import {
   lspCallHierarchyToolDefinition,
   lspFindReferencesToolDefinition,
@@ -19,7 +19,7 @@ import {
   lspSymbolsToolDefinition,
 } from '../tools/lsp-tools.js';
 import { lspManager } from '../lsp/router.js';
-import requestWorkflowPlugin from '../request-workflow.js';
+import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { capabilitiesRoutes } from '../routes/capabilities.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
 import {

@@ -19,7 +19,7 @@ import {
   dispatchToolExecuteAfter,
   dispatchToolExecuteBefore,
   ensurePluginsLoaded,
-} from '../../plugin-host.js';
+} from '../../runtime/plugin-host.js';
 
 describe('plugin-host', () => {
   beforeEach(() => {

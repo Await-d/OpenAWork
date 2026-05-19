@@ -16,7 +16,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet, sqliteRun } from '../../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
 import { type HandoffRecord } from '../store/handoff-store.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 

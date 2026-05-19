@@ -4,7 +4,7 @@ import { basename, extname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { RequestOverrides } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { appendSessionMessageV2 as appendSessionMessage } from '../message/message-v2-adapter.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { getProviderConfigForSelection } from '../provider/provider-config.js';

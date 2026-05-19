@@ -11,7 +11,7 @@ import {
   type MCPServerEntry,
   type MCPServerStatus,
 } from '@openAwork/shared-ui';
-import type { ProviderEditData, ThinkingDefaultsRef, ThinkingModeRef } from '../settings-types.js';
+import type { ProviderEditData, ThinkingDefaultsRef, ThinkingModeRef } from '../state/settings-types.js';
 import { BP, IS, SS, ST, UV } from '../shared/settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
 import { WebsearchSection } from './websearch-section.js';
@@ -131,10 +131,10 @@ export function ConnectionTabContent({
               gap: 12,
               padding: '10px 12px',
               borderRadius: 10,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-overlay)',
               fontSize: 12,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             <span>当前桌面网关模式</span>
@@ -143,7 +143,7 @@ export function ConnectionTabContent({
             </strong>
           </div>
         ) : null}
-        <label htmlFor="gw-url" style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>
+        <label htmlFor="gw-url" style={{ fontSize: 12, color: 'var(--fg-strong)', fontWeight: 500 }}>
           网关地址
         </label>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -169,7 +169,7 @@ export function ConnectionTabContent({
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 6,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
               }}
             >
@@ -188,7 +188,7 @@ export function ConnectionTabContent({
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 6,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
               }}
             >
@@ -223,7 +223,7 @@ export function ConnectionTabContent({
         <h3 style={{ ...ST, marginBottom: 12 }}>模型与提供商</h3>
         <div style={{ ...SS, marginBottom: 12 }}>
           <div style={{ display: 'grid', gap: 6, maxWidth: 520 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
               新建会话会默认继承这里的工具配置档；进入具体会话后，仍可在聊天顶部继续临时切换。
             </span>
           </div>

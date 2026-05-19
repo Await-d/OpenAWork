@@ -20,7 +20,7 @@ import { startDesktopGateway, stopDesktopGateway } from '../utils/tauri-gateway.
 
 const inputStyle: React.CSSProperties = {
   background: 'hsl(var(--muted) / 0.6)',
-  border: '1px solid hsl(var(--border))',
+  border: '1px solid hsl(var(--border-default))',
   borderRadius: 10,
   padding: '10px 12px',
   color: 'hsl(var(--foreground))',
@@ -53,7 +53,7 @@ const primaryButtonStyle: React.CSSProperties = {
 const secondaryButtonStyle: React.CSSProperties = {
   background: 'hsl(var(--muted) / 0.35)',
   color: 'hsl(var(--foreground) / 0.82)',
-  border: '1px solid hsl(var(--border))',
+  border: '1px solid hsl(var(--border-default))',
   borderRadius: 10,
   padding: '0.75rem 0.9rem',
   fontSize: 13,
@@ -65,7 +65,7 @@ const secondaryButtonStyle: React.CSSProperties = {
 const quietButtonStyle: React.CSSProperties = {
   background: 'transparent',
   color: 'hsl(var(--muted-foreground))',
-  border: '1px solid hsl(var(--border))',
+  border: '1px solid hsl(var(--border-default))',
   borderRadius: 10,
   padding: '0.7rem 0.9rem',
   fontSize: 13,
@@ -257,7 +257,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
       <div
         style={{
           background: 'linear-gradient(180deg, hsl(var(--card) / 0.98), hsl(var(--card) / 0.9))',
-          border: '1px solid hsl(var(--border))',
+          border: '1px solid hsl(var(--border-default))',
           borderRadius: 22,
           padding: step === 'mode' ? '2rem' : '1.75rem',
           width:
@@ -361,7 +361,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
                 gap: 16,
                 minHeight: 260,
                 padding: 18,
-                border: '1px solid hsl(var(--border))',
+                border: '1px solid hsl(var(--border-default))',
                 borderRadius: 18,
                 background: 'hsl(var(--muted) / 0.18)',
               }}

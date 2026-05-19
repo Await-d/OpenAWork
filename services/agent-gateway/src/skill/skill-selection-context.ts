@@ -6,7 +6,7 @@
  * yet, the workspacePath directly).
  */
 
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import { resolveEffectiveSkills, type EffectiveSkill } from './skill-selection.js';
 import {
   extractSessionWorkingDirectory,

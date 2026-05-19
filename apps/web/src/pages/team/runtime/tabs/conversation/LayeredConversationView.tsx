@@ -36,13 +36,13 @@ const LAYER_LABELS: Record<TeamRoleLayer, string> = {
 const LAYER_ORDER: TeamRoleLayer[] = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'];
 
 const STATE_COLORS: Record<string, string> = {
-  idle: 'var(--text-3)',
-  pending: 'var(--warning, var(--warning, #f0b429))',
-  claimed: 'var(--aux, var(--aux, #8b9cf5))',
-  running: 'var(--success, var(--success, var(--success, #3dd49a)))',
-  completed: 'var(--text-3)',
-  failed: 'var(--danger, #d4574e)',
-  cancelled: 'var(--text-3)',
+  idle: 'var(--fg-muted)',
+  pending: 'var(--warning))',
+  claimed: 'var(--aux))',
+  running: 'var(--success))',
+  completed: 'var(--fg-muted)',
+  failed: 'var(--danger))',
+  cancelled: 'var(--fg-muted)',
 };
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -57,8 +57,8 @@ const HEADER_STYLE: CSSProperties = {
   gap: 10,
   padding: '6px 10px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
   flexShrink: 0,
 };
 
@@ -81,7 +81,7 @@ const TAB_BTN_STYLE: CSSProperties = {
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const SPLIT_STYLE: CSSProperties = {
@@ -99,7 +99,7 @@ const TIMELINE_PANEL_STYLE: CSSProperties = {
   flexDirection: 'column',
   gap: 8,
   padding: 4,
-  borderRight: '1px solid color-mix(in srgb, var(--border) 30%, transparent)',
+  borderRight: '1px solid color-mix(in srgb, var(--border-default) 30%, transparent)',
   paddingRight: 12,
 };
 
@@ -108,8 +108,8 @@ const SESSION_PANE_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 60%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 60%, var(--bg-base))',
   overflow: 'hidden',
 };
 
@@ -119,8 +119,8 @@ const EMPTY_STYLE: CSSProperties = {
   placeItems: 'center',
   padding: 24,
   borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-  color: 'var(--text-3)',
+  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+  color: 'var(--fg-muted)',
   fontSize: 12,
   textAlign: 'center',
   gap: 6,
@@ -193,7 +193,7 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
             <span style={{ fontSize: 26 }} aria-hidden>
               🪜
             </span>
-            <strong style={{ color: 'var(--text-2)' }}>暂无层级对话数据</strong>
+            <strong style={{ color: 'var(--fg-default)' }}>暂无层级对话数据</strong>
             <span>当团队启动后，每层的会话和 handoff 会出现在这里。</span>
           </div>
         </div>
@@ -208,8 +208,8 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
     >
       <div style={CONTAINER_STYLE}>
         <div style={HEADER_STYLE}>
-          <strong style={{ fontSize: 12, color: 'var(--text)' }}>层级对话</strong>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          <strong style={{ fontSize: 12, color: 'var(--fg-strong)' }}>层级对话</strong>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
             {totalNodes} 个 session · {totalHandoffs} 个 handoff
           </span>
           <div style={{ flex: 1 }} />
@@ -220,9 +220,9 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
               style={{
                 padding: '4px 10px',
                 borderRadius: 6,
-                border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
                 background: 'transparent',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 11,
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -282,7 +282,7 @@ export function LayeredConversationView({ onSelectSessionDrawer }: LayeredConver
                 <span style={{ fontSize: 26 }} aria-hidden>
                   💬
                 </span>
-                <strong style={{ color: 'var(--text-2)' }}>选择左侧 handoff 查看会话内容</strong>
+                <strong style={{ color: 'var(--fg-default)' }}>选择左侧 handoff 查看会话内容</strong>
                 <span>右侧将以 chat 视图渲染对应 session 的执行流。</span>
               </div>
             )}
@@ -311,10 +311,10 @@ function LayerTabBtn({
       style={{
         ...TAB_BTN_STYLE,
         background: active
-          ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
+          ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
           : 'transparent',
         borderColor: active ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'transparent',
-        color: active ? 'var(--text)' : 'var(--text-3)',
+        color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
       }}
     >
       {label}
@@ -331,7 +331,7 @@ function HandoffRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const color = STATE_COLORS[entry.state] ?? 'var(--text-3)';
+  const color = STATE_COLORS[entry.state] ?? 'var(--fg-muted)';
   const dateStr = new Date(entry.updatedAt).toLocaleTimeString();
   const clickable = Boolean(entry.sessionId);
 
@@ -351,10 +351,10 @@ function HandoffRow({
         borderRadius: 10,
         border: selected
           ? '1px solid color-mix(in srgb, var(--accent) 60%, transparent)'
-          : '1px solid color-mix(in srgb, var(--border) 45%, transparent)',
+          : '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
         background: selected
-          ? 'color-mix(in srgb, var(--accent) 12%, var(--surface))'
-          : 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+          : 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
         fontSize: 12,
         cursor: clickable ? 'pointer' : 'default',
         opacity: clickable ? 1 : 0.55,
@@ -381,7 +381,7 @@ function HandoffRow({
       <span
         style={{
           minWidth: 110,
-          color: 'var(--text-2)',
+          color: 'var(--fg-default)',
           fontWeight: 600,
         }}
       >
@@ -391,9 +391,9 @@ function HandoffRow({
         style={{
           padding: '1px 8px',
           borderRadius: 999,
-          background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-          color: 'var(--text-2)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 60%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+          color: 'var(--fg-default)',
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -410,7 +410,7 @@ function HandoffRow({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
           fontSize: 10,
         }}
@@ -418,7 +418,7 @@ function HandoffRow({
       >
         {entry.sessionId ?? entry.id}
       </span>
-      <span style={{ color: 'var(--text-3)', fontSize: 10, flexShrink: 0 }}>{dateStr}</span>
+      <span style={{ color: 'var(--fg-muted)', fontSize: 10, flexShrink: 0 }}>{dateStr}</span>
     </button>
   );
 }

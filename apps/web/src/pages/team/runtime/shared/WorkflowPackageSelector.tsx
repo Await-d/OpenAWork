@@ -16,8 +16,8 @@ const CARD_STYLE: CSSProperties = {
   gap: 6,
   padding: 12,
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
   cursor: 'pointer',
   transition: 'border-color 150ms ease, background 150ms ease',
 };
@@ -46,7 +46,7 @@ export function WorkflowPackageSelector({
       <span
         style={{
           fontSize: 11,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
         }}
@@ -64,9 +64,9 @@ export function WorkflowPackageSelector({
               ...CARD_STYLE,
               borderColor: isSelected
                 ? 'color-mix(in srgb, var(--accent) 60%, transparent)'
-                : 'color-mix(in srgb, var(--border) 72%, transparent)',
+                : 'color-mix(in srgb, var(--border-default) 72%, transparent)',
               background: isSelected
-                ? 'color-mix(in srgb, var(--accent) 8%, var(--surface))'
+                ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))'
                 : CARD_STYLE.background,
             }}
             onClick={() => onSelect(pkg.id)}
@@ -79,16 +79,16 @@ export function WorkflowPackageSelector({
               <span
                 style={{
                   fontSize: 10,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   padding: '1px 6px',
                   borderRadius: 4,
-                  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
                 }}
               >
                 {pkg.source}
               </span>
             </div>
-            <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{pkg.description}</span>
+            <span style={{ fontSize: 12, color: 'var(--fg-default)' }}>{pkg.description}</span>
             {pkg.tags.length > 0 ? (
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {pkg.tags.map((tag) => (
@@ -96,10 +96,10 @@ export function WorkflowPackageSelector({
                     key={tag}
                     style={{
                       fontSize: 10,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       padding: '1px 4px',
                       borderRadius: 3,
-                      background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
+                      background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
                     }}
                   >
                     {tag}

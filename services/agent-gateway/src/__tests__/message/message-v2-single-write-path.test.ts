@@ -68,7 +68,7 @@ function findPart(id: string): PartRow | undefined {
   return partRows.find((row) => row.id === id);
 }
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteRun: (...args: unknown[]) => {
     const [sql, params] = args as [string, unknown[]];
     if (sql.includes('INSERT') && sql.includes('message_v2')) {

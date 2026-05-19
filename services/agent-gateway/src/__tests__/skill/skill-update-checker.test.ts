@@ -8,7 +8,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as UpdateCheckerModule from '../../skill/skill-update-checker.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -62,7 +62,7 @@ function readCheck(
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
   await dbModule.migrate();
   updateChecker = await import('../../skill/skill-update-checker.js');

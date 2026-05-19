@@ -1,4 +1,4 @@
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 
 const leadCn = /^(请帮我|请|帮我|麻烦你|麻烦|我想|我想要|我需要|需要你|帮忙)/;
 const tailCn = /(的问题|这个问题|一下|一下子|吧)$/;

@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import type { FileBackupRef } from '@openAwork/shared';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import { resolveGatewayFileBackupsDir } from '../storage-paths.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { resolveGatewayFileBackupsDir } from '../infra/storage-paths.js';
 
 export type SessionFileBackupContentTier = 'text' | 'notebook' | 'binary';
 export type SessionFileBackupFailurePolicy = 'block' | 'degrade';

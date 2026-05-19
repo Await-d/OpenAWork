@@ -116,9 +116,9 @@ export function renderMiddleTabContent(args: MiddleTabRenderArgs): ReactNode {
               right: 12,
               padding: '6px 10px',
               borderRadius: 8,
-              border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-              background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
-              color: 'var(--text)',
+              border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+              color: 'var(--fg-strong)',
               fontSize: 11,
               fontWeight: 700,
               cursor: 'pointer',
@@ -288,7 +288,7 @@ function HandoffCancelInline({
         style={{
           fontSize: 10,
           fontWeight: 700,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
         }}
@@ -304,8 +304,8 @@ function HandoffCancelInline({
             gap: 8,
             padding: '6px 10px',
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-            background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+            background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
             fontSize: 12,
           }}
         >
@@ -314,7 +314,7 @@ function HandoffCancelInline({
               width: 6,
               height: 6,
               borderRadius: 999,
-              background: entry.state === 'running' ? 'var(--success, var(--success, var(--success, #3dd49a)))' : 'var(--warning, var(--warning, #f0b429))',
+              background: entry.state === 'running' ? 'var(--success))' : 'var(--warning))',
               flexShrink: 0,
             }}
           />
@@ -325,7 +325,7 @@ function HandoffCancelInline({
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
             }}
           >
             {entry.fromRoleLayer} → {entry.toRoleLayer}
@@ -336,9 +336,9 @@ function HandoffCancelInline({
             style={{
               padding: '2px 8px',
               borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, transparent)',
-              color: 'var(--danger, #d4574e)',
+              border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+              background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+              color: 'var(--danger))',
               fontSize: 10,
               fontWeight: 700,
               cursor: 'pointer',

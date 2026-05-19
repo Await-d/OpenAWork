@@ -42,9 +42,9 @@ const SEGMENT_BAR_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   padding: '8px 12px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 32%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 32%, transparent)',
   flexShrink: 0,
-  background: 'var(--bg)',
+  background: 'var(--bg-base)',
 };
 
 const SEGMENT_BTN_STYLE: CSSProperties = {
@@ -52,9 +52,9 @@ const SEGMENT_BTN_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '4px 12px',
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
   background: 'transparent',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
@@ -66,7 +66,7 @@ const SEGMENT_BTN_ACTIVE_STYLE: CSSProperties = {
   ...SEGMENT_BTN_STYLE,
   background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
   borderColor: 'color-mix(in srgb, var(--accent) 50%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 export interface ReviewMergedTabProps {
@@ -152,10 +152,10 @@ export function ReviewMergedTab({ selectedTeam, selectedTeamId }: ReviewMergedTa
                 borderRadius: '50%',
                 background:
                   review.overallVerdict === 'pass'
-                    ? 'var(--success, var(--success, var(--success, #3dd49a)))'
+                    ? 'var(--success))'
                     : review.overallVerdict === 'implementation-failure'
-                      ? 'var(--danger, #d4574e)'
-                      : 'var(--warning, var(--warning, #f0b429))',
+                      ? 'var(--danger))'
+                      : 'var(--warning))',
               }}
             />
           ) : null}
@@ -229,17 +229,17 @@ function ReportSegment({
 }) {
   if (!hasSession) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         左侧选中一个团队会话后，PM2 完成双重 review 时会把报告写在这里。
       </div>
     );
   }
   if (loading) {
-    return <div style={{ fontSize: 12, color: 'var(--text-3)' }}>正在加载评审报告…</div>;
+    return <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在加载评审报告…</div>;
   }
   if (error) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--danger, #d4574e)' }}>评审报告拉取失败：{error}</div>
+      <div style={{ fontSize: 12, color: 'var(--danger))' }}>评审报告拉取失败：{error}</div>
     );
   }
   return (

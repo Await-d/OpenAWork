@@ -9,8 +9,8 @@ import type {
   ArtifactVersionRecord,
 } from '@openAwork/artifacts';
 import { computeArtifactLineDiff, detectArtifactContentType } from '@openAwork/artifacts';
-import { db, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
-import type { SqliteBindableValue } from '../sqlite-bind-params.js';
+import { db, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import type { SqliteBindableValue } from '../infra/sqlite-bind-params.js';
 
 interface ArtifactRow {
   id: string;

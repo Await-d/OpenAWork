@@ -10,7 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as BgModule from '../../tools/run-background-bash-tools.js';
 import type * as RegistryModule from '../../session/session-terminal-registry.js';
 
@@ -47,7 +47,7 @@ function seed(): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   bg = await import('../../tools/run-background-bash-tools.js');
   registry = await import('../../session/session-terminal-registry.js');
   await dbModule.connectDb();

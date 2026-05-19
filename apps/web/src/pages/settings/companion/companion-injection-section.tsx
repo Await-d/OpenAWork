@@ -23,7 +23,7 @@ export function CompanionInjectionSection({ buddy }: CompanionInjectionSectionPr
         注入策略
       </div>
       <label style={{ display: 'grid', gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
           模型提示注入模式
         </span>
         <select
@@ -46,7 +46,7 @@ export function CompanionInjectionSection({ buddy }: CompanionInjectionSectionPr
           <option value="always">始终注入 companion 上下文</option>
         </select>
       </label>
-      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         推荐保留为「仅 /buddy 显式点名时注入」。这样 Buddy
         在工作台里常驻可见，但只有你明确叫它时才会进入本轮模型上下文。
       </div>

@@ -1,5 +1,5 @@
 import { isAbsolute, join, resolve } from 'node:path';
-import { WORKSPACE_ACCESS_RESTRICTED, WORKSPACE_ROOTS } from '../db.js';
+import { WORKSPACE_ACCESS_RESTRICTED, WORKSPACE_ROOTS } from '../infra/db.js';
 
 export const WORKSPACE_ROOT_PATHS = WORKSPACE_ROOTS.map((root) => resolve(root));
 

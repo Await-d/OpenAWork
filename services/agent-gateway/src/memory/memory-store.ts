@@ -14,7 +14,7 @@ import {
   parseMemorySettings,
   deduplicateMemories,
 } from '@openAwork/agent-core';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { scanMemoryWriteContent } from './memory-security-scanner.js';
 
 interface MemoryRow {

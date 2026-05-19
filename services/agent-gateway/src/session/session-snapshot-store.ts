@@ -4,7 +4,7 @@ import type {
   FileChangeSourceKind,
   FileDiffContent,
 } from '@openAwork/shared';
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 interface SessionSnapshotRow {
   client_request_id: string;

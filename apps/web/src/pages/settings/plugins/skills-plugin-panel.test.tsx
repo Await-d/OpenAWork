@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {

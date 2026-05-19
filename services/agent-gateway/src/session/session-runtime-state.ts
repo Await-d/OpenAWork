@@ -1,5 +1,5 @@
 import type { RunEvent, SessionContextRecord } from '@openAwork/shared';
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { getAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
 import {
   clearSessionRuntimeThread,

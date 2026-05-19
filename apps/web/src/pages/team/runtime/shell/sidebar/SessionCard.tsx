@@ -21,7 +21,7 @@ import {
   BaseSessionRow,
   DeleteIcon,
   type BaseSessionRowAction,
-} from '../../../../../components/layout/BaseSessionRow.js';
+} from '../../../../../components/layout/sidebar/BaseSessionRow.js';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -45,10 +45,10 @@ const STATUS_LABEL: Record<AgentTeamsSidebarTeam['status'], string> = {
 };
 
 const STATUS_COLOR: Record<AgentTeamsSidebarTeam['status'], string> = {
-  running: 'var(--success, var(--success, #3dd49a))',
-  paused: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
-  completed: 'var(--text-3)',
-  failed: 'var(--danger, #d4574e)',
+  running: 'var(--success))',
+  paused: 'var(--warning))',
+  completed: 'var(--fg-muted)',
+  failed: 'var(--danger))',
 };
 
 const ICON_BOX_STYLE: CSSProperties = {
@@ -80,7 +80,7 @@ const PROGRESS_TRACK_STYLE: CSSProperties = {
   width: '100%',
   height: 2,
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--border) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--border-default) 40%, transparent)',
   overflow: 'hidden',
 };
 
@@ -97,7 +97,7 @@ const TASK_LINE_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   fontSize: 11,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   lineHeight: 1.4,
   minWidth: 0,
 };
@@ -126,22 +126,22 @@ const AGENT_CHIP_STYLE: CSSProperties = {
   borderRadius: '50%',
   fontSize: 9,
   fontWeight: 700,
-  color: 'var(--fg-on-accent, #ffffff)',
+  color: 'var(--fg-on-accent))',
   letterSpacing: '0.01em',
   flexShrink: 0,
-  border: '1.5px solid var(--surface)',
+  border: '1.5px solid var(--bg-overlay)',
   marginLeft: -4,
 };
 
 const AGENT_PALETTE = [
-  'var(--aux, var(--aux, #8b9cf5))',
-  'var(--chart-5, var(--chart-5, #c4b5fd))',
-  'var(--complement, #f06b7e)',
-  'var(--warning, var(--warning, #f0b429))',
-  'var(--success, var(--success, #3dd49a))',
-  'var(--chart-7, #67e8f9)',
-  'var(--danger, var(--danger, #f06b7e))',
-  'var(--chart-5, var(--chart-5, #c4b5fd))',
+  'var(--aux))',
+  'var(--chart-5))',
+  'var(--complement))',
+  'var(--warning))',
+  'var(--success))',
+  'var(--chart-7))',
+  'var(--danger))',
+  'var(--chart-5))',
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -250,8 +250,8 @@ export function SessionCard({
         ...ICON_BOX_STYLE,
         background: active
           ? 'color-mix(in oklch, var(--accent) 18%, transparent)'
-          : 'color-mix(in oklch, var(--text-3) 10%, transparent)',
-        color: active ? 'var(--accent)' : 'var(--text-2)',
+          : 'color-mix(in oklch, var(--fg-muted) 10%, transparent)',
+        color: active ? 'var(--accent)' : 'var(--fg-default)',
       }}
     >
       {isDerived ? (
@@ -296,7 +296,7 @@ export function SessionCard({
           height: 7,
           borderRadius: '50%',
           background: dot,
-          border: '2px solid var(--surface)',
+          border: '2px solid var(--bg-overlay)',
           boxShadow: session.status === 'running' ? `0 0 5px ${dot}` : undefined,
           animation: session.status === 'running' ? 'pulse 1.5s ease-in-out infinite' : undefined,
         }}
@@ -340,7 +340,7 @@ export function SessionCard({
       </span>
 
       {taskTotal > 0 ? (
-        <Chip color="var(--text-2)" title={`已完成 ${taskCompleted} / 共 ${taskTotal}`}>
+        <Chip color="var(--fg-default)" title={`已完成 ${taskCompleted} / 共 ${taskTotal}`}>
           <svg
             width="9"
             height="9"
@@ -360,14 +360,14 @@ export function SessionCard({
       ) : null}
 
       {taskRunning > 0 ? (
-        <Chip color="var(--success, var(--success, #3dd49a))" title={`${taskRunning} 个任务运行中`}>
+        <Chip color="var(--success))" title={`${taskRunning} 个任务运行中`}>
           <span
             aria-hidden
             style={{
               width: 5,
               height: 5,
               borderRadius: '50%',
-              background: 'var(--success, var(--success, #3dd49a))',
+              background: 'var(--success))',
               animation: 'pulse 1.5s ease-in-out infinite',
             }}
           />
@@ -376,7 +376,7 @@ export function SessionCard({
       ) : null}
 
       {taskFailed > 0 ? (
-        <Chip color="var(--danger, #d4574e)" title={`${taskFailed} 个任务失败`}>
+        <Chip color="var(--danger))" title={`${taskFailed} 个任务失败`}>
           <span aria-hidden style={{ fontWeight: 800, lineHeight: 1 }}>
             !
           </span>
@@ -385,7 +385,7 @@ export function SessionCard({
       ) : null}
 
       {childCount > 0 ? (
-        <Chip color="var(--text-3)" title={`${childCount} 个子会话`}>
+        <Chip color="var(--fg-muted)" title={`${childCount} 个子会话`}>
           <span aria-hidden>↳</span>
           {childCount}
         </Chip>
@@ -430,7 +430,7 @@ export function SessionCard({
         <div style={TASK_LINE_STYLE}>
           <span
             aria-hidden
-            style={{ flexShrink: 0, color: currentTask ? 'var(--success, var(--success, #3dd49a))' : 'var(--text-3)' }}
+            style={{ flexShrink: 0, color: currentTask ? 'var(--success))' : 'var(--fg-muted)' }}
           >
             {currentTask ? '▶' : '💬'}
           </span>
@@ -454,8 +454,8 @@ export function SessionCard({
             <span
               style={{
                 ...AGENT_CHIP_STYLE,
-                background: 'var(--surface-2, color-mix(in srgb, var(--text-3) 16%, transparent))',
-                color: 'var(--text-2)',
+                background: 'var(--surface-2, color-mix(in srgb, var(--fg-muted) 16%, transparent))',
+                color: 'var(--fg-default)',
               }}
             >
               +{overflowAgents}
@@ -466,7 +466,7 @@ export function SessionCard({
               style={{
                 marginLeft: 'auto',
                 fontSize: 10,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontVariantNumeric: 'tabular-nums',
               }}
               title={`累计运行 ${formatDuration(session.durationMs)}`}
@@ -479,7 +479,7 @@ export function SessionCard({
         <span
           style={{
             fontSize: 10,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             fontVariantNumeric: 'tabular-nums',
             alignSelf: 'flex-end',
           }}

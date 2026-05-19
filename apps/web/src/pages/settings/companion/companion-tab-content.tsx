@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useBuddyVoicePreferences } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
 import { BuddyAgentBindingPanel } from './buddy-agent-binding-panel.js';
 import { CompanionDefaultPersonaSection } from './companion-default-persona-section.js';

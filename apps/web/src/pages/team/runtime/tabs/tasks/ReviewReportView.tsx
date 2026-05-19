@@ -9,19 +9,19 @@ import { ArtifactPreview } from './ArtifactPreview.js';
 
 const VERDICT_STYLES: Record<string, CSSProperties> = {
   pass: {
-    color: 'var(--success, var(--success, var(--success, #3dd49a)))',
-    border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 8%, var(--surface))',
+    color: 'var(--success))',
+    border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--success) 8%, var(--bg-overlay))',
   },
   'implementation-failure': {
-    color: 'var(--danger, #d4574e)',
-    border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, var(--surface))',
+    color: 'var(--danger))',
+    border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
   },
   'planning-failure': {
-    color: 'var(--warning, var(--warning, #f0b429))',
-    border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 40%, transparent)',
-    background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
+    color: 'var(--warning))',
+    border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
+    background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
   },
 };
 
@@ -40,7 +40,7 @@ export function ReviewReportView({
 }: ReviewReportViewProps) {
   if (!reportMarkdown) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--text-3)', padding: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: 12 }}>
         等待 PM2 完成双重 review…所有 executor/reviewer 任务完成后会自动触发。
       </div>
     );

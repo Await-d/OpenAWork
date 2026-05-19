@@ -5,7 +5,7 @@ import { Effect } from 'effect';
 // pulls in BusService → sync-event → db.ts) does not trip the
 // node:sqlite resolution in vitest.
 import { vi } from 'vitest';
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: vi.fn(() => []),
   sqliteGet: vi.fn(() => undefined),
   sqliteRun: vi.fn(),

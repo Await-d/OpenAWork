@@ -26,7 +26,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { JwtPayload } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
 import {
   subscribeOAuthRedirects,
   subscribeToolCatalogChanges,

@@ -32,20 +32,20 @@ function resolveSpriteColor(
   if (tone === 'active') {
     return accentColor;
   }
-  return 'var(--text-2)';
+  return 'var(--fg-default)';
 }
 
 function resolveBubbleBackground(tone: CompanionUtteranceSeed['tone'] | null): string {
   if (tone === 'notice') {
-    return 'linear-gradient(135deg, color-mix(in oklch, var(--warning) 12%, transparent), color-mix(in oklch, var(--surface) 92%, transparent))';
+    return 'linear-gradient(135deg, color-mix(in oklch, var(--warning) 12%, transparent), color-mix(in oklch, var(--bg-overlay) 92%, transparent))';
   }
   if (tone === 'intro') {
-    return 'linear-gradient(135deg, color-mix(in oklch, var(--success) 10%, transparent), color-mix(in oklch, var(--surface) 92%, transparent))';
+    return 'linear-gradient(135deg, color-mix(in oklch, var(--success) 10%, transparent), color-mix(in oklch, var(--bg-overlay) 92%, transparent))';
   }
   if (tone === 'active') {
-    return 'linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), color-mix(in oklch, var(--surface) 92%, transparent))';
+    return 'linear-gradient(135deg, color-mix(in oklch, var(--accent) 10%, transparent), color-mix(in oklch, var(--bg-overlay) 92%, transparent))';
   }
-  return 'color-mix(in oklch, var(--surface) 92%, transparent)';
+  return 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)';
 }
 
 export function CompanionTerminalSprite({
@@ -138,7 +138,7 @@ export function CompanionTerminalSprite({
             maxWidth: 240,
             padding: '4px 6px',
             borderRadius: 9,
-            border: '1px solid color-mix(in oklch, var(--border) 68%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--border-default) 68%, transparent)',
             background: resolveBubbleBackground(liveOutput.tone),
             opacity: fading ? 0.52 : 1,
             transition: prefersReducedMotion
@@ -175,7 +175,7 @@ export function CompanionTerminalSprite({
               style={{
                 fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
                 fontSize: 8.5,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
               }}
             >
               {profile.rarityStars}
@@ -185,7 +185,7 @@ export function CompanionTerminalSprite({
             style={{
               fontSize: 10,
               lineHeight: 1.38,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
               wordBreak: 'break-word',
             }}
           >
@@ -235,17 +235,17 @@ export function CompanionTerminalSprite({
             marginTop: 1,
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
             fontSize: 7.5,
-            color: liveOutput ? spriteColor : 'var(--text-2)',
+            color: liveOutput ? spriteColor : 'var(--fg-default)',
           }}
         >
           <span>{profile.name}</span>
-          <span style={{ color: 'var(--text-3)' }}>{profile.rarityStars}</span>
+          <span style={{ color: 'var(--fg-muted)' }}>{profile.rarityStars}</span>
         </div>
         <div
           style={{
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
             fontSize: 7,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
           }}
         >
           {face}

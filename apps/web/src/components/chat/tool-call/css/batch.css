@@ -13,19 +13,19 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border-default) 70%, transparent);
   border-radius: 6px;
   padding: 6px 8px;
-  background: color-mix(in oklch, var(--surface) 85%, transparent);
+  background: color-mix(in oklch, var(--bg-overlay) 85%, transparent);
 }
 
 .tool-call-batch[data-tool-status='failed'] {
-  border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
-  background: color-mix(in oklch, var(--danger) 4%, var(--surface));
+  border-color: color-mix(in oklch, var(--danger) 35%, var(--border-default));
+  background: color-mix(in oklch, var(--danger) 4%, var(--bg-overlay));
 }
 
 .tool-call-batch[data-tool-status='running'] {
-  border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+  border-color: color-mix(in oklch, var(--accent) 35%, var(--border-default));
 }
 
 .tool-call-batch-header {
@@ -45,7 +45,7 @@
 .tool-call-batch-progress {
   flex: 1;
   font-size: 10.5px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -62,7 +62,7 @@
 .tool-call-batch-elapsed {
   flex-shrink: 0;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -122,7 +122,7 @@
 }
 
 .tool-call-batch-child[data-batch-sub-status='completed'] .tool-call-batch-child-status {
-  color: var(--success, var(--success, var(--success, #3dd49a)));
+  color: var(--success);
 }
 
 .tool-call-batch-child[data-batch-sub-status='failed'] .tool-call-batch-child-status {
@@ -130,7 +130,7 @@
 }
 
 .tool-call-batch-child[data-batch-sub-status='skipped'] .tool-call-batch-child-status {
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 .tool-call-batch-spinner {
@@ -162,7 +162,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-2);
+  color: var(--fg-default);
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
@@ -170,7 +170,7 @@
 .tool-call-batch-child-duration {
   flex-shrink: 0;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -179,7 +179,7 @@
   width: 12px;
   text-align: center;
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 /* Expanded panel: indent + left rail to make nested ToolCallDisplay
@@ -187,7 +187,7 @@
 .tool-call-batch-child-detail {
   margin: 4px 0 6px 14px;
   padding-left: 8px;
-  border-left: 2px solid color-mix(in oklch, var(--border) 50%, transparent);
+  border-left: 2px solid color-mix(in oklch, var(--border-default) 50%, transparent);
 }
 
 /* ── ToolApprovalActions (shared by inline / block / batch cards) ── */
@@ -208,9 +208,9 @@
 
 .tool-call-approval-button {
   appearance: none;
-  border: 1px solid color-mix(in oklch, var(--border) 82%, transparent);
-  background: color-mix(in oklch, var(--surface) 90%, transparent);
-  color: var(--text-2);
+  border: 1px solid color-mix(in oklch, var(--border-default) 82%, transparent);
+  background: color-mix(in oklch, var(--bg-overlay) 90%, transparent);
+  color: var(--fg-default);
   border-radius: 999px;
   padding: 4px 10px;
   font-size: 11px;
@@ -240,14 +240,14 @@
 }
 
 .tool-call-approval-button[data-variant='primary'] {
-  border-color: color-mix(in oklch, var(--accent) 48%, var(--border) 52%);
-  background: color-mix(in oklch, var(--accent) 16%, var(--surface) 84%);
+  border-color: color-mix(in oklch, var(--accent) 48%, var(--border-default) 52%);
+  background: color-mix(in oklch, var(--accent) 16%, var(--bg-overlay) 84%);
   color: color-mix(in oklch, var(--accent) 82%, var(--fg-on-accent) 18%);
 }
 
 .tool-call-approval-button[data-variant='danger'] {
-  border-color: color-mix(in oklch, var(--danger) 40%, var(--border) 60%);
-  background: color-mix(in oklch, var(--danger) 12%, var(--surface) 88%);
+  border-color: color-mix(in oklch, var(--danger) 40%, var(--border-default) 60%);
+  background: color-mix(in oklch, var(--danger) 12%, var(--bg-overlay) 88%);
   color: color-mix(in oklch, var(--danger) 82%, var(--fg-on-accent) 18%);
 }
 
@@ -263,11 +263,11 @@
 }
 
 .tool-call-approval-note[data-tone='warning'] {
-  color: color-mix(in oklch, var(--warning) 82%, var(--text) 18%);
+  color: color-mix(in oklch, var(--warning) 82%, var(--fg-strong) 18%);
 }
 
 .tool-call-approval-note[data-tone='muted'] {
-  color: var(--text-3);
+  color: var(--fg-muted);
 }
 
 .tool-call-approval-note[data-tone='danger'] {

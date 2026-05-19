@@ -104,7 +104,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
         zIndex: 9999,
         display: 'grid',
         placeItems: 'center',
-        background: 'oklch(0 0 0 / 0.6)',
+        background: 'rgba(0, 0, 0, 0.6)',
         backdropFilter: 'blur(4px)',
       }}
     >
@@ -121,9 +121,9 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
           maxHeight: '90vh',
           overflow: 'auto',
           borderRadius: 12,
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          boxShadow: '0 24px 64px oklch(0 0 0 / 0.4)',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
+          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
           padding: 20,
           display: 'grid',
           gap: 14,
@@ -146,17 +146,17 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
             >
               <CheckIcon size={22} color="var(--success)" />
             </span>
-            <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--fg-strong)' }}>
               模板创建成功
             </span>
-            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
               「{templateName}」已加入模板库
             </span>
           </div>
         ) : (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--fg-strong)' }}>
                 新建团队模板
               </span>
               <button
@@ -165,13 +165,13 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   padding: 0,
                   cursor: 'pointer',
                   display: 'inline-flex',
                 }}
               >
-                <XIcon size={14} color="var(--text-3)" />
+                <XIcon size={14} color="var(--fg-muted)" />
               </button>
             </div>
 
@@ -181,7 +181,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                 }}
@@ -198,9 +198,9 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                   borderRadius: 10,
                   border: templateName.trim()
                     ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
-                    : '1px solid var(--border)',
-                  background: 'var(--bg)',
-                  color: 'var(--text)',
+                    : '1px solid var(--border-default)',
+                  background: 'var(--bg-base)',
+                  color: 'var(--fg-strong)',
                   fontSize: 13,
                   outline: 'none',
                   transition: 'border-color 0.15s',
@@ -218,7 +218,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                 }}
@@ -235,11 +235,11 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                         display: 'grid',
                         gap: 6,
                         fontSize: 12,
-                        color: 'var(--text-2)',
+                        color: 'var(--fg-default)',
                         padding: '10px 12px',
                         borderRadius: 10,
                         border: '1px solid color-mix(in oklch, var(--success) 40%, transparent)',
-                        background: 'color-mix(in oklch, var(--success) 8%, var(--bg))',
+                        background: 'color-mix(in oklch, var(--success) 8%, var(--bg-base))',
                       }}
                     >
                       <div
@@ -250,7 +250,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                         }}
                       >
                         <span style={{ fontWeight: 700 }}>{roleCard.roleLabel}</span>
-                        <span style={{ color: 'var(--text)', fontSize: 11 }}>
+                        <span style={{ color: 'var(--fg-strong)', fontSize: 11 }}>
                           {roleCard.selectedAgent?.label ??
                             FIXED_TEAM_CORE_ROLE_BINDINGS[roleCard.role as TeamCoreRole]}
                         </span>
@@ -275,9 +275,9 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                                   ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
                                   : '1px solid var(--border-subtle)',
                                 background: active
-                                  ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
-                                  : 'var(--surface-2)',
-                                color: active ? 'var(--success)' : 'var(--text-3)',
+                                  ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
+                                  : 'var(--bg-surface)',
+                                color: active ? 'var(--success)' : 'var(--fg-muted)',
                                 fontSize: 10,
                                 fontWeight: 600,
                                 cursor: 'pointer',
@@ -292,7 +292,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                       {currentProvider && (
                         <>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: 9, color: 'var(--text-3)', minWidth: 32 }}>
+                            <span style={{ fontSize: 9, color: 'var(--fg-muted)', minWidth: 32 }}>
                               模型
                             </span>
                             <input
@@ -315,15 +315,15 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                                 padding: '3px 8px',
                                 borderRadius: 6,
                                 border: '1px solid var(--border-subtle)',
-                                background: 'var(--bg)',
-                                color: 'var(--text)',
+                                background: 'var(--bg-base)',
+                                color: 'var(--fg-strong)',
                                 fontSize: 10,
                                 outline: 'none',
                               }}
                             />
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: 9, color: 'var(--text-3)', minWidth: 32 }}>
+                            <span style={{ fontSize: 9, color: 'var(--fg-muted)', minWidth: 32 }}>
                               思考
                             </span>
                             <div style={{ display: 'flex', gap: 3 }}>
@@ -353,9 +353,9 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                                         ? '1px solid color-mix(in oklch, var(--accent) 60%, transparent)'
                                         : '1px solid var(--border-subtle)',
                                       background: active
-                                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg))'
-                                        : 'var(--surface-2)',
-                                      color: active ? 'var(--accent)' : 'var(--text-3)',
+                                        ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-base))'
+                                        : 'var(--bg-surface)',
+                                      color: active ? 'var(--accent)' : 'var(--fg-muted)',
                                       fontSize: 9,
                                       fontWeight: 600,
                                       cursor: 'pointer',
@@ -386,7 +386,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                 }}
@@ -408,9 +408,9 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                           ? '1px solid color-mix(in oklch, var(--success) 60%, transparent)'
                           : '1px solid var(--border-subtle)',
                         background: active
-                          ? 'color-mix(in oklch, var(--success) 10%, var(--bg))'
-                          : 'var(--surface-2)',
-                        color: active ? 'var(--success)' : 'var(--text-3)',
+                          ? 'color-mix(in oklch, var(--success) 10%, var(--bg-base))'
+                          : 'var(--bg-surface)',
+                        color: active ? 'var(--success)' : 'var(--fg-muted)',
                         fontSize: 11,
                         fontWeight: 600,
                         cursor: 'pointer',
@@ -447,9 +447,9 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                 style={{
                   padding: '6px 16px',
                   borderRadius: 8,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--border-default)',
                   background: 'transparent',
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   fontSize: 12,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -466,7 +466,7 @@ export function NewTeamTemplateModal({ onClose }: { onClose: () => void }) {
                   padding: '6px 16px',
                   borderRadius: 8,
                   border: '1px solid color-mix(in oklch, var(--success) 48%, transparent)',
-                  background: 'color-mix(in oklch, var(--success) 12%, var(--bg))',
+                  background: 'color-mix(in oklch, var(--success) 12%, var(--bg-base))',
                   color: 'var(--success)',
                   fontSize: 12,
                   fontWeight: 700,

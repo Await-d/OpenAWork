@@ -3,7 +3,7 @@ import type {
   DevtoolsSourceState,
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
-} from '../settings-types.js';
+} from '../state/settings-types.js';
 import {
   buildDiagnosticKey,
   DiagnosticDetailsPanel,
@@ -48,8 +48,8 @@ interface DiagnosticFileSummary {
 
 const PANEL_SURFACE_STYLE: React.CSSProperties = {
   borderRadius: 10,
-  border: '1px solid var(--border)',
-  background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
   padding: '10px 12px',
   display: 'flex',
   flexDirection: 'column',
@@ -60,10 +60,10 @@ const PANEL_SURFACE_STYLE: React.CSSProperties = {
 const META_BADGE_STYLE: React.CSSProperties = {
   borderRadius: 999,
   padding: '5px 10px',
-  border: '1px solid var(--border)',
-  background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
   fontSize: 11,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontWeight: 700,
   fontVariantNumeric: 'tabular-nums',
 };
@@ -149,10 +149,10 @@ export function DevtoolsDiagnosticsSection({
               onChange={(event) => onSetDateFilter(event.target.value || null)}
               style={{
                 borderRadius: 8,
-                border: dateFilter ? '1px solid var(--danger)' : '1px solid var(--border)',
+                border: dateFilter ? '1px solid var(--danger)' : '1px solid var(--border-default)',
                 padding: '6px 10px',
-                background: 'var(--surface)',
-                color: 'var(--text)',
+                background: 'var(--bg-overlay)',
+                color: 'var(--fg-strong)',
                 fontSize: 12,
                 cursor: 'pointer',
               }}
@@ -171,10 +171,10 @@ export function DevtoolsDiagnosticsSection({
               style={{
                 borderRadius: 999,
                 padding: '5px 10px',
-                border: '1px solid var(--border)',
-                background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                border: '1px solid var(--border-default)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                 fontSize: 11,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontFamily: 'monospace',
               }}
             >
@@ -191,9 +191,9 @@ export function DevtoolsDiagnosticsSection({
               }}
               style={{
                 borderRadius: 8,
-                border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border))',
+                border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
                 padding: '6px 12px',
-                background: 'color-mix(in srgb, var(--danger) 8%, var(--surface))',
+                background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
                 color: 'var(--danger)',
                 fontSize: 12,
                 fontWeight: 700,
@@ -246,10 +246,10 @@ export function DevtoolsDiagnosticsSection({
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
                     {diagnosticQuery ? '搜索条件（筛选中）' : '错误浏览器'}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                  <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
                     先缩小范围，再从左侧列表锁定具体错误，右侧详情会保持稳定宽度，不会被不同长度的卡片撑乱。
                   </div>
                 </div>
@@ -260,10 +260,10 @@ export function DevtoolsDiagnosticsSection({
                     style={{
                       alignSelf: 'flex-start',
                       borderRadius: 999,
-                      border: '1px solid var(--border)',
+                      border: '1px solid var(--border-default)',
                       padding: '6px 10px',
-                      background: 'var(--surface)',
-                      color: 'var(--text)',
+                      background: 'var(--bg-overlay)',
+                      color: 'var(--fg-strong)',
                       fontSize: 11,
                       cursor: 'pointer',
                     }}
@@ -283,11 +283,11 @@ export function DevtoolsDiagnosticsSection({
                   placeholder="搜索 message / requestId / tool…"
                   style={{
                     flex: 1,
-                    background: 'var(--surface)',
-                    border: diagnosticQuery ? '1px solid var(--danger)' : '1px solid var(--border)',
+                    background: 'var(--bg-overlay)',
+                    border: diagnosticQuery ? '1px solid var(--danger)' : '1px solid var(--border-default)',
                     borderRadius: 6,
                     padding: '7px 32px 7px 10px',
-                    color: 'var(--text)',
+                    color: 'var(--fg-strong)',
                     fontSize: 12,
                     outline: 'none',
                   }}
@@ -305,7 +305,7 @@ export function DevtoolsDiagnosticsSection({
                       background: 'none',
                       border: 'none',
                       cursor: 'pointer',
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       fontSize: 14,
                       lineHeight: 1,
                       padding: '2px 4px',
@@ -321,15 +321,15 @@ export function DevtoolsDiagnosticsSection({
                 <span
                   style={{
                     ...META_BADGE_STYLE,
-                    color: filteredDiagnostics.length > 0 ? 'var(--danger)' : 'var(--text-2)',
+                    color: filteredDiagnostics.length > 0 ? 'var(--danger)' : 'var(--fg-default)',
                     borderColor:
                       filteredDiagnostics.length > 0
-                        ? 'color-mix(in srgb, var(--danger) 30%, var(--border))'
-                        : 'var(--border)',
+                        ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))'
+                        : 'var(--border-default)',
                     background:
                       filteredDiagnostics.length > 0
-                        ? 'color-mix(in srgb, var(--danger) 8%, var(--surface))'
-                        : 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                        ? 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))'
+                        : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                   }}
                 >
                   可见错误 {filteredDiagnostics.length}
@@ -347,13 +347,13 @@ export function DevtoolsDiagnosticsSection({
                   alignItems: 'center',
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>
                   按文件聚合
                 </div>
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
@@ -388,11 +388,11 @@ export function DevtoolsDiagnosticsSection({
                       }}
                       style={{
                         borderRadius: 6,
-                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 50%, var(--border))' : 'color-mix(in srgb, var(--danger) 20%, var(--border))'}`,
+                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))' : 'color-mix(in srgb, var(--danger) 20%, var(--border-default))'}`,
                         background: isActive
-                          ? 'color-mix(in srgb, var(--danger) 12%, var(--surface))'
-                          : 'var(--surface)',
-                        color: 'var(--text)',
+                          ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
+                          : 'var(--bg-overlay)',
+                        color: 'var(--fg-strong)',
                         padding: '8px 10px',
                         display: 'flex',
                         flexDirection: 'column',
@@ -414,7 +414,7 @@ export function DevtoolsDiagnosticsSection({
                           style={{
                             fontSize: 12,
                             fontWeight: 700,
-                            color: isActive ? 'var(--danger)' : 'var(--text)',
+                            color: isActive ? 'var(--danger)' : 'var(--fg-strong)',
                             minWidth: 0,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -444,7 +444,7 @@ export function DevtoolsDiagnosticsSection({
                       <span
                         style={{
                           fontSize: 10,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontFamily: 'monospace',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -468,11 +468,11 @@ export function DevtoolsDiagnosticsSection({
                   alignItems: 'center',
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>错误列表</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>错误列表</div>
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
@@ -500,11 +500,11 @@ export function DevtoolsDiagnosticsSection({
                       onClick={() => onSelectDiagnostic(key)}
                       style={{
                         borderRadius: 14,
-                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 42%, var(--border))' : 'var(--border)'}`,
+                        border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 42%, var(--border-default))' : 'var(--border-default)'}`,
                         background: isActive
-                          ? 'linear-gradient(135deg, color-mix(in srgb, var(--danger) 11%, var(--surface)), color-mix(in srgb, var(--surface) 96%, var(--bg)))'
-                          : 'color-mix(in srgb, var(--surface) 96%, var(--bg))',
-                        color: 'var(--text)',
+                          ? 'linear-gradient(135deg, color-mix(in srgb, var(--danger) 11%, var(--bg-overlay)), color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base)))'
+                          : 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
+                        color: 'var(--fg-strong)',
                         padding: '12px 14px',
                         display: 'flex',
                         flexDirection: 'column',
@@ -526,7 +526,7 @@ export function DevtoolsDiagnosticsSection({
                           style={{
                             fontSize: 12,
                             fontWeight: 700,
-                            color: isActive ? 'var(--danger)' : 'var(--text)',
+                            color: isActive ? 'var(--danger)' : 'var(--fg-strong)',
                             display: '-webkit-box',
                             WebkitLineClamp: 2,
                             WebkitBoxOrient: 'vertical',
@@ -557,7 +557,7 @@ export function DevtoolsDiagnosticsSection({
                           gap: 8,
                           flexWrap: 'wrap',
                           fontSize: 11,
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                         }}
                       >
                         <span>{formatDiagnosticLocation(diagnostic)}</span>
@@ -593,10 +593,10 @@ export function DevtoolsDiagnosticsSection({
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>
                     错误详情
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                  <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
                     详情区固定在右侧，输入、输出和关联日志都围绕当前错误展开，避免在不同大小的卡片之间来回跳转。
                   </div>
                 </div>
@@ -617,7 +617,7 @@ export function DevtoolsDiagnosticsSection({
 
               {relatedLogs.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-muted)' }}>
                     关联日志
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -628,10 +628,10 @@ export function DevtoolsDiagnosticsSection({
                         onClick={onScrollToLogs}
                         style={{
                           borderRadius: 999,
-                          border: '1px solid var(--border)',
+                          border: '1px solid var(--border-default)',
                           padding: '6px 10px',
-                          background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
-                          color: log.level === 'error' ? 'var(--danger)' : 'var(--text)',
+                          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+                          color: log.level === 'error' ? 'var(--danger)' : 'var(--fg-strong)',
                           fontSize: 11,
                           cursor: 'pointer',
                         }}
@@ -645,11 +645,11 @@ export function DevtoolsDiagnosticsSection({
                 <div
                   style={{
                     borderRadius: 12,
-                    border: '1px dashed var(--border)',
+                    border: '1px dashed var(--border-default)',
                     padding: '12px 14px',
                     fontSize: 12,
-                    color: 'var(--text-3)',
-                    background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+                    color: 'var(--fg-muted)',
+                    background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
                   }}
                 >
                   这条错误暂时没有匹配到关联日志，可以直接复制输入和输出 payload 继续排查。
@@ -663,10 +663,10 @@ export function DevtoolsDiagnosticsSection({
                   disabled={!selectedDiagnostic}
                   style={{
                     borderRadius: 10,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--border-default)',
                     padding: '8px 12px',
-                    background: 'var(--surface)',
-                    color: 'var(--text)',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--fg-strong)',
                     fontSize: 12,
                     cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
                     opacity: selectedDiagnostic ? 1 : 0.45,
@@ -680,10 +680,10 @@ export function DevtoolsDiagnosticsSection({
                   disabled={!selectedDiagnostic}
                   style={{
                     borderRadius: 10,
-                    border: '1px solid var(--border)',
+                    border: '1px solid var(--border-default)',
                     padding: '8px 12px',
-                    background: 'var(--surface)',
-                    color: 'var(--text)',
+                    background: 'var(--bg-overlay)',
+                    color: 'var(--fg-strong)',
                     fontSize: 12,
                     cursor: selectedDiagnostic ? 'pointer' : 'not-allowed',
                     opacity: selectedDiagnostic ? 1 : 0.45,
@@ -701,8 +701,8 @@ export function DevtoolsDiagnosticsSection({
         <div
           style={{
             borderRadius: 12,
-            border: '1px solid color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 30%, var(--border))',
-            background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 8%, var(--surface))',
+            border: '1px solid color-mix(in srgb, var(--warning) 30%, var(--border-default))',
+            background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
             padding: '16px 18px',
             display: 'flex',
             alignItems: 'center',
@@ -711,10 +711,10 @@ export function DevtoolsDiagnosticsSection({
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)', marginBottom: 4 }}>
               当前筛选条件无匹配结果
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+            <div style={{ fontSize: 12, color: 'var(--fg-default)' }}>
               共有 {diagnostics.length} 条诊断记录，但当前搜索词未命中任何条目。
             </div>
           </div>
@@ -723,10 +723,10 @@ export function DevtoolsDiagnosticsSection({
             onClick={() => onSetDiagnosticQuery('')}
             style={{
               borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 40%, var(--border))',
+              border: '1px solid color-mix(in srgb, var(--warning) 40%, var(--border-default))',
               padding: '8px 14px',
-              background: 'var(--surface)',
-              color: 'var(--text)',
+              background: 'var(--bg-overlay)',
+              color: 'var(--fg-strong)',
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
@@ -737,7 +737,7 @@ export function DevtoolsDiagnosticsSection({
           </button>
         </div>
       ) : (
-        <p style={{ fontSize: 12, color: 'var(--text-3)' }}>最近没有采集到新的异常。</p>
+        <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>最近没有采集到新的异常。</p>
       )}
     </section>
   );

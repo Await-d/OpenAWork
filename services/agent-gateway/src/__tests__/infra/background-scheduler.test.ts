@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BackgroundScheduler } from '../../background-scheduler.js';
+import { BackgroundScheduler } from '../../runtime/background-scheduler.js';
 
 describe('BackgroundScheduler', () => {
   let scheduler: BackgroundScheduler;

@@ -22,7 +22,7 @@ import {
   useClarificationStore,
   type ClarificationItem,
 } from '../../../../../stores/team/team-events.js';
-import { useAuthStore } from '../../../../../stores/auth.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import { createTeamInboundClient } from '@openAwork/web-client';
 
 const PANEL_STYLE: CSSProperties = {
@@ -31,8 +31,8 @@ const PANEL_STYLE: CSSProperties = {
   gap: 10,
   padding: '14px 16px',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 36%, transparent)',
-  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 6%, var(--surface))',
+  border: '1px solid color-mix(in srgb, var(--warning) 36%, transparent)',
+  background: 'color-mix(in srgb, var(--warning) 6%, var(--bg-overlay))',
 };
 
 const HEADER_STYLE: CSSProperties = {
@@ -44,13 +44,13 @@ const HEADER_STYLE: CSSProperties = {
 const TITLE_STYLE: CSSProperties = {
   fontSize: 13,
   fontWeight: 800,
-  color: 'var(--warning, #f0b429)',
+  color: 'var(--warning))',
   letterSpacing: '0.005em',
 };
 
 const HINT_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const CARD_STYLE: CSSProperties = {
@@ -59,22 +59,22 @@ const CARD_STYLE: CSSProperties = {
   gap: 8,
   padding: '12px 14px',
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  background: 'var(--card-bg, color-mix(in srgb, var(--surface) 92%, transparent))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'var(--card-bg, color-mix(in srgb, var(--bg-overlay) 92%, transparent))',
 };
 
 const QUESTION_STYLE: CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   lineHeight: 1.5,
 };
 
 const CONTEXT_STYLE: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontFamily: 'var(--mono-font, ui-monospace, "SFMono-Regular", monospace)',
-  background: 'color-mix(in srgb, var(--text-3) 8%, transparent)',
+  background: 'color-mix(in srgb, var(--fg-muted) 8%, transparent)',
   padding: '6px 10px',
   borderRadius: 6,
   whiteSpace: 'pre-wrap',
@@ -86,9 +86,9 @@ const TEXTAREA_STYLE: CSSProperties = {
   minHeight: 60,
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   resize: 'vertical',
   fontFamily: 'inherit',
@@ -105,7 +105,7 @@ const PRIMARY_BTN_STYLE: CSSProperties = {
   borderRadius: 6,
   border: 'none',
   background: 'var(--accent)',
-  color: 'var(--bg)',
+  color: 'var(--bg-base)',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
@@ -114,9 +114,9 @@ const PRIMARY_BTN_STYLE: CSSProperties = {
 const SECONDARY_BTN_STYLE: CSSProperties = {
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
@@ -128,8 +128,8 @@ const ANSWERED_LIST_STYLE: CSSProperties = {
   gap: 6,
   padding: '8px 12px',
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 5%, var(--surface))',
-  border: '1px solid color-mix(in srgb, var(--success, var(--success, var(--success, #3dd49a))) 30%, transparent)',
+  background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay))',
+  border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
 };
 
 interface ClarificationsPanelProps {
@@ -224,7 +224,7 @@ export function ClarificationsPanel({
             style={{
               fontSize: 10,
               fontWeight: 700,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
             }}
@@ -309,11 +309,11 @@ function PendingCard({
 function AnsweredRow({ item }: { item: ClarificationItem }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>
+      <span style={{ fontSize: 11, color: 'var(--fg-default)', fontWeight: 600 }}>
         ✓ {item.question}
       </span>
       {item.answer ? (
-        <span style={{ fontSize: 11, color: 'var(--text-3)', paddingLeft: 14 }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)', paddingLeft: 14 }}>
           → {item.answer}
         </span>
       ) : null}

@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useAuthStore } from '../../../../../stores/auth.js';
+import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import { useHandoffStore, useLayerStore } from '../../../../../stores/team/team-events.js';
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
 import { DispatchPackageView } from './DispatchPackageView.js';

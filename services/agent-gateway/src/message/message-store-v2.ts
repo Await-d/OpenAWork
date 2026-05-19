@@ -9,7 +9,7 @@
  * - Idempotent upsert via ON CONFLICT DO UPDATE
  */
 
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   type MessageID,
   type PartID,

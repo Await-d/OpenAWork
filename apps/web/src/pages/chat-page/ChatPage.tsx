@@ -36,9 +36,9 @@ import React, {
 } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useFileEditorContext } from '../../App.js';
-import { usePageActivation } from '../../components/common/CachedRouteOutlet.js';
+import { usePageActivation } from '../../components/common/routing/CachedRouteOutlet.js';
 
-import { ChatImageGenerationResultStrip } from '../../components/chat/ChatImageGenerationResultStrip.js';
+import { ChatImageGenerationResultStrip } from '../../components/chat/image/ChatImageGenerationResultStrip.js';
 import {
   ModelPicker,
   ModelSettingsPopover,
@@ -46,33 +46,33 @@ import {
   renderStreamingChatMessageContentWithOptions,
   sharedUiThemeVars,
   WelcomeScreen,
-} from '../../components/chat/ChatPageSections.js';
-import { UnifiedComposer } from '../../components/chat/UnifiedComposer.js';
-import { ChatTopBar } from '../../components/chat/ChatTopBar.js';
-import { SessionTerminalsChip } from '../../components/chat/SessionTerminalsChip.js';
-import { LatestAssistantMessageContext } from '../../components/chat/collapsible-assistant-content.js';
-import { QuickTerminalToggle } from '../../components/chat/QuickTerminalToggle.js';
-import { QuickTerminalPanel } from '../../components/chat/QuickTerminalPanel.js';
+} from '../../components/chat/session/ChatPageSections.js';
+import { UnifiedComposer } from '../../components/chat/composer/UnifiedComposer.js';
+import { ChatTopBar } from '../../components/chat/session/ChatTopBar.js';
+import { SessionTerminalsChip } from '../../components/chat/terminal/SessionTerminalsChip.js';
+import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
+import { QuickTerminalToggle } from '../../components/chat/terminal/QuickTerminalToggle.js';
+import { QuickTerminalPanel } from '../../components/chat/terminal/QuickTerminalPanel.js';
 import {
   ChatMessageGroupList,
   type ChatRenderEntry,
   type ChatRenderGroup,
-} from '../../components/chat/chat-message-group-list.js';
-import { ChatRemoteStreamPlaceholder } from '../../components/chat/chat-remote-stream-placeholder.js';
-import { ChatSearchOverlay, useChatSearch } from '../../components/chat/chat-search-overlay.js';
-import { ChatSessionSkeleton } from '../../components/chat/chat-session-skeleton.js';
+} from '../../components/chat/message/chat-message-group-list.js';
+import { ChatRemoteStreamPlaceholder } from '../../components/chat/session/chat-remote-stream-placeholder.js';
+import { ChatSearchOverlay, useChatSearch } from '../../components/chat/search/chat-search-overlay.js';
+import { ChatSessionSkeleton } from '../../components/chat/session/chat-session-skeleton.js';
 import { CompanionStage } from '../../components/chat/companion/companion-stage.js';
-import { InlineQuestionPanel } from '../../components/chat/InlineQuestionPanel.js';
-import { toast } from '../../components/common/ToastNotification.js';
-import WorkspacePickerModal from '../../components/common/WorkspacePickerModal.js';
-import { useCommandRegistry } from '../../hooks/useCommandRegistry.js';
+import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
+import { toast } from '../../components/common/feedback/ToastNotification.js';
+import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
+import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
-import { useFileEditor } from '../../hooks/useFileEditor.js';
-import { useGatewayClient } from '../../hooks/useGatewayClient.js';
-import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion.js';
+import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
+import { useGatewayClient } from '../../hooks/gateway/useGatewayClient.js';
+import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import { useWorkspace } from '../../hooks/workspace/useWorkspace.js';
-import { useAuthStore } from '../../stores/auth.js';
-import { useUIStateStore } from '../../stores/uiState.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
+import { useUIStateStore } from '../../stores/ui/uiState.js';
 import {
   type ChatSettingsProvider,
   loadSavedChatSessionDefaults,
@@ -81,7 +81,7 @@ import {
   COMPOSER_REFERENCE_EVENT_NAME,
   isComposerReferenceEvent,
 } from '../../utils/chat/composer-reference-events.js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '../../utils/log/logger.js';
 import {
   getPermissionReplyStatusCode,
   getPermissionReplySuccessMessage,
@@ -106,7 +106,7 @@ import {
   buildUploadedAttachmentSummaryLine,
   uploadChatAttachments,
 } from '../../components/conversation-runtime/attachments/attachment-upload.js';
-import { ChatEditorPane } from './chat-editor-pane.js';
+import { ChatEditorPane } from './panels/chat-editor-pane.js';
 import {
   buildQueuedComposerScopeKey,
   buildRightPanelStateFromSessionSnapshot,
@@ -123,9 +123,9 @@ import {
   SESSION_SWITCH_DEFER_THRESHOLD,
   type SessionsClientWithActiveStop,
 } from './conversation/render/chat-page-utils.js';
-import { ChatRightPanel } from './chat-right-panel.js';
-import { SessionSidebar } from '../../components/layout/SessionSidebar.js';
-import type { RightPanelTabId } from './right-panel-tabs.js';
+import { ChatRightPanel } from './panels/chat-right-panel.js';
+import { SessionSidebar } from '../../components/layout/sidebar/SessionSidebar.js';
+import type { RightPanelTabId } from './panels/right-panel-tabs.js';
 import { ChatScrollBottomButton } from '../../components/conversation-runtime/views/scroll-bottom-button.js';
 import { ChatStreamErrorBar } from '../../components/conversation-runtime/views/stream-error-bar.js';
 import HistoryEditDialog from './conversation/views/history-edit-dialog.js';
@@ -175,12 +175,12 @@ import {
   markStreamingThinkingChunkEnded,
   type StreamingThinkingBlock,
 } from '../../components/conversation-runtime/stream/streaming-thinking.js';
-import { buildSubAgentRunItems, SubAgentRunList } from './sub-agent-run-list.js';
-import { SubSessionDetailPanel } from './sub-session-detail-panel.js';
+import { buildSubAgentRunItems, SubAgentRunList } from './panels/sub-agent-run-list.js';
+import { SubSessionDetailPanel } from './panels/sub-session-detail-panel.js';
 import {
   buildUserHistoryJumpItems,
   UserHistoryJumpList,
-} from './user-history-jump-list.js';
+} from './history/user-history-jump-list.js';
 import {
   type AssistantTraceToolCall,
   applyPermissionDecisionToLocalAssistantMessages,
@@ -220,16 +220,16 @@ import {
 } from '../../components/conversation-runtime/messages/transcript-visibility.js';
 import { useAssistantMessageProcessing } from './conversation/snapshot/use-assistant-message-processing.js';
 import { useChatDataLoaders } from './conversation/data/use-chat-data-loaders.js';
-import type { SessionImageGenerationResponse } from './use-chat-image-generation.js';
-import { useChatImageGeneration } from './use-chat-image-generation.js';
+import type { SessionImageGenerationResponse } from './hooks/use-chat-image-generation.js';
+import { useChatImageGeneration } from './hooks/use-chat-image-generation.js';
 import {
   type HistoryEditPrompt,
   type RetryPrompt,
   useChatMessageActions,
-} from './use-chat-message-actions.js';
+} from './hooks/use-chat-message-actions.js';
 import { useChatRenderData } from './conversation/render/use-chat-render-data.js';
-import { useChatUiActions } from './use-chat-ui-actions.js';
-import { readSplitPos, writeSplitPos } from './split-pos-storage.js';
+import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
+import { readSplitPos, writeSplitPos } from './state/split-pos-storage.js';
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
@@ -242,7 +242,7 @@ import {
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
-import { type SessionArtifactsResponse } from '../artifacts/artifact-workspace-types.js';
+import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
 import {
   type SessionViewStreamingSnapshot,
   useSessionViewCache,
@@ -259,24 +259,24 @@ import {
   createInitialChatRightPanelState,
   getToolCallCards,
   startChatRightPanelRun,
-} from './chat-stream-state.js';
-import { type DialogueMode, getDefaultAgentForDialogueMode } from './dialogue-mode.js';
+} from './state/chat-stream-state.js';
+import { type DialogueMode, getDefaultAgentForDialogueMode } from './mode/dialogue-mode.js';
 import {
   CommandPalette,
   useCommandPalette,
   type CommandPaletteItem,
-} from '../../components/chat/command-palette.js';
-import { PromptTemplatePanel } from '../../components/chat/prompt-template-panel.js';
+} from '../../components/chat/misc/command-palette.js';
+import { PromptTemplatePanel } from '../../components/chat/misc/prompt-template-panel.js';
 import {
   useMessageMultiSelect,
   MultiSelectToolbar,
-} from '../../components/chat/message-multi-select.js';
+} from '../../components/chat/message/message-multi-select.js';
 import {
   exportMessages,
   downloadExport,
   copyExportToClipboard,
-} from '../../components/chat/message-export.js';
-import { useBookmarkStore } from '../../stores/bookmarks.js';
+} from '../../components/chat/message/message-export.js';
+import { useBookmarkStore } from '../../stores/chat/bookmarks.js';
 import { useChatKeyboardShortcuts } from '../../hooks/chat/useChatKeyboardShortcuts.js';
 import { ChatConversationView } from './conversation/ChatConversationView.js';
 
@@ -5489,7 +5489,7 @@ export default function ChatPage() {
             : undefined,
           opacity: shouldOverlaySidebar ? (leftSidebarOpen ? 1 : 0) : 1,
           boxShadow: shouldOverlaySidebar && leftSidebarOpen ? 'var(--shadow-lg)' : 'none',
-          background: shouldOverlaySidebar ? 'var(--surface)' : undefined,
+          background: shouldOverlaySidebar ? 'var(--bg-overlay)' : undefined,
         }}
       >
         <div
@@ -5523,7 +5523,7 @@ export default function ChatPage() {
             position: 'absolute',
             inset: 0,
             zIndex: 30,
-            background: 'oklch(0 0 0 / 0.42)',
+            background: 'rgba(0, 0, 0, 0.42)',
             backdropFilter: 'blur(1px)',
           }}
         />
@@ -5537,7 +5537,7 @@ export default function ChatPage() {
             flex: 1,
             minWidth: 0,
             overflow: 'hidden',
-            background: 'var(--bg)',
+            background: 'var(--bg-base)',
             // CSS variable — drag handler 在拖动期间直接更新这个值,
             // 避免每帧通过 React state 触发整页 rerender + persist 落盘。
             ['--split-pos' as string]: `${splitPos}%`,

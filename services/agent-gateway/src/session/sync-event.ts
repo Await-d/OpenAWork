@@ -8,7 +8,7 @@
  * - Idempotent: duplicate event IDs are ignored
  */
 
-import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll } from '../db.js';
+import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll } from '../infra/db.js';
 import { randomUUID } from 'node:crypto';
 
 // ─── BusEvent (Real-time Publish) ───

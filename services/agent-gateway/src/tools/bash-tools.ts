@@ -56,7 +56,7 @@ import {
   TRUNCATION_DIR,
   truncateBashOutput,
 } from './bash-output-truncator.js';
-import { WORKSPACE_ROOT } from '../db.js';
+import { WORKSPACE_ROOT } from '../infra/db.js';
 import {
   appendTerminalOutput,
   markTerminalExited,

@@ -9,7 +9,7 @@ import type {
   UpdateManagedAgentInput,
 } from '@openAwork/shared';
 import { REFERENCE_AGENT_ROLE_METADATA } from '@openAwork/shared';
-import { sqliteGet, sqliteRun } from '../db.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { BUILTIN_AGENT_REFERENCE_SNAPSHOT } from './agent-reference-snapshot.js';
 import { getReferenceAgentModelCandidates } from '../task/task-model-reference-snapshot.js';
 

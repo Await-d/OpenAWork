@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const recordedSql: Array<{ sql: string; params: unknown[] }> = [];
 const seqByAggregate = new Map<string, number>();
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteRun: (sql: string, params: unknown[]) => {
     recordedSql.push({ sql, params });
   },

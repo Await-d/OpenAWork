@@ -31,7 +31,7 @@ const callCompactionLlmMock = vi.hoisted(() =>
   })),
 );
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteRun: sqliteRunMock,
   // unused but referenced by indirect imports
   sqliteAll: vi.fn(() => []),

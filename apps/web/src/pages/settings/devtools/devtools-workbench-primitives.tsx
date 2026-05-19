@@ -3,7 +3,7 @@ import type {
   DevtoolsSourceState,
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
-} from '../settings-types.js';
+} from '../state/settings-types.js';
 
 type SourceTone = {
   background: string;
@@ -16,38 +16,38 @@ function getSourceTone(status: DevtoolsSourceState['status']): SourceTone {
   switch (status) {
     case 'healthy':
       return {
-        background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
-        border: 'color-mix(in srgb, var(--accent) 35%, var(--border))',
+        background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
+        border: 'color-mix(in srgb, var(--accent) 35%, var(--border-default))',
         text: 'var(--accent)',
         badgeBackground: 'color-mix(in srgb, var(--accent) 18%, transparent)',
       };
     case 'error':
       return {
-        background: 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
-        border: 'color-mix(in srgb, var(--danger) 42%, var(--border))',
+        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
+        border: 'color-mix(in srgb, var(--danger) 42%, var(--border-default))',
         text: 'var(--danger)',
         badgeBackground: 'color-mix(in srgb, var(--danger) 16%, transparent)',
       };
     case 'empty':
       return {
-        background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
-        border: 'var(--border)',
-        text: 'var(--text-2)',
-        badgeBackground: 'color-mix(in srgb, var(--text-3) 18%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+        border: 'var(--border-default)',
+        text: 'var(--fg-default)',
+        badgeBackground: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
       };
     case 'unavailable':
       return {
-        background: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 10%, var(--surface))',
-        border: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 30%, var(--border))',
-        text: 'var(--warning, var(--warning, var(--warning, #f0b429)))',
-        badgeBackground: 'color-mix(in srgb, var(--warning, var(--warning, var(--warning, #f0b429))) 16%, transparent)',
+        background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-overlay))',
+        border: 'color-mix(in srgb, var(--warning) 30%, var(--border-default))',
+        text: 'var(--warning))',
+        badgeBackground: 'color-mix(in srgb, var(--warning) 16%, transparent)',
       };
     default:
       return {
-        background: 'color-mix(in srgb, var(--surface) 85%, var(--bg))',
-        border: 'var(--border)',
-        text: 'var(--text-2)',
-        badgeBackground: 'color-mix(in srgb, var(--text-3) 18%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 85%, var(--bg-base))',
+        border: 'var(--border-default)',
+        text: 'var(--fg-default)',
+        badgeBackground: 'color-mix(in srgb, var(--fg-muted) 18%, transparent)',
       };
   }
 }
@@ -84,8 +84,8 @@ export function InlineFailureNotice({ title, message }: { title: string; message
   return (
     <div
       style={{
-        border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border))',
-        background: 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
+        border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
         borderRadius: 8,
         padding: '8px 10px',
         display: 'flex',
@@ -94,7 +94,7 @@ export function InlineFailureNotice({ title, message }: { title: string; message
       }}
     >
       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>{title}</div>
-      <div style={{ fontSize: 12, color: 'var(--text-2)', wordBreak: 'break-word' }}>{message}</div>
+      <div style={{ fontSize: 12, color: 'var(--fg-default)', wordBreak: 'break-word' }}>{message}</div>
     </div>
   );
 }
@@ -126,7 +126,7 @@ export function SourceOverviewCard({
             style={{
               fontSize: 11,
               fontWeight: 600,
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -137,7 +137,7 @@ export function SourceOverviewCard({
           <div
             style={{
               fontSize: 10,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontFamily: 'monospace',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -167,11 +167,11 @@ export function SourceOverviewCard({
               disabled={source.status === 'loading'}
               aria-label={`刷新${source.label}`}
               style={{
-                border: '1px solid var(--border)',
+                border: '1px solid var(--border-default)',
                 borderRadius: 6,
                 padding: '2px 7px',
-                background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
-                color: 'var(--text)',
+                background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+                color: 'var(--fg-strong)',
                 fontSize: 10,
                 cursor: source.status === 'loading' ? 'not-allowed' : 'pointer',
                 opacity: source.status === 'loading' ? 0.55 : 1,
@@ -182,9 +182,9 @@ export function SourceOverviewCard({
           ) : null}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.4 }}>{source.detail}</div>
+      <div style={{ fontSize: 11, color: 'var(--fg-default)', lineHeight: 1.4 }}>{source.detail}</div>
       <div
-        style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 10, color: 'var(--text-3)' }}
+        style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 10, color: 'var(--fg-muted)' }}
       >
         <span>更新：{formatUpdatedAt(source.updatedAt)}</span>
         {source.count !== null ? <span>{source.count} 条</span> : null}
@@ -286,11 +286,11 @@ export function DiagnosticDetailsPanel({
       <div
         style={{
           borderRadius: 8,
-          border: '1px dashed var(--border)',
+          border: '1px dashed var(--border-default)',
           padding: '10px 12px',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontSize: 11,
-          background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         }}
       >
         选择一条诊断记录后，这里会显示完整报错上下文。
@@ -302,8 +302,8 @@ export function DiagnosticDetailsPanel({
     <div
       style={{
         borderRadius: 10,
-        border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border))',
-        background: 'color-mix(in srgb, var(--danger) 7%, var(--surface))',
+        border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -312,7 +312,7 @@ export function DiagnosticDetailsPanel({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
             {diagnostic.message}
           </div>
           <div
@@ -321,7 +321,7 @@ export function DiagnosticDetailsPanel({
               gap: 10,
               flexWrap: 'wrap',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             <span>工具：{diagnostic.toolName ?? diagnostic.filePath}</span>
@@ -362,8 +362,8 @@ export function DiagnosticDetailsPanel({
             key={entry.label}
             style={{
               borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
               padding: '8px 10px',
               display: 'flex',
               flexDirection: 'column',
@@ -371,14 +371,14 @@ export function DiagnosticDetailsPanel({
               minWidth: 0,
             }}
           >
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>
               {entry.label}
             </div>
             <pre
               style={{
                 margin: 0,
                 fontSize: 11,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 fontFamily: 'monospace',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
@@ -475,11 +475,11 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
       <div
         style={{
           borderRadius: 8,
-          border: '1px dashed var(--border)',
+          border: '1px dashed var(--border-default)',
           padding: '10px 12px',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontSize: 11,
-          background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         }}
       >
         选择一条日志后，这里会显示结构化执行详情。
@@ -491,11 +491,11 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
     <div
       style={{
         borderRadius: 10,
-        border: `1px solid ${log.level === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border))' : 'var(--border)'}`,
+        border: `1px solid ${log.level === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))' : 'var(--border-default)'}`,
         background:
           log.level === 'error'
-            ? 'color-mix(in srgb, var(--danger) 7%, var(--surface))'
-            : 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+            ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
+            : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -504,14 +504,14 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{log.message}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>{log.message}</div>
           <div
             style={{
               display: 'flex',
               gap: 10,
               flexWrap: 'wrap',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             <span>来源：{log.source ?? 'settings'}</span>
@@ -553,8 +553,8 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
             key={entry.label}
             style={{
               borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
               padding: '8px 10px',
               display: 'flex',
               flexDirection: 'column',
@@ -562,14 +562,14 @@ export function LogDetailsPanel({ log }: { log: SettingsDevLogRecord | null }) {
               minWidth: 0,
             }}
           >
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)' }}>
               {entry.label}
             </div>
             <pre
               style={{
                 margin: 0,
                 fontSize: 11,
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
                 fontFamily: 'monospace',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
@@ -632,11 +632,11 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
       <div
         style={{
           borderRadius: 8,
-          border: '1px dashed var(--border)',
+          border: '1px dashed var(--border-default)',
           padding: '10px 12px',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontSize: 11,
-          background: 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
+          background: 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
         }}
       >
         选择一个 Worker 后，这里会显示状态详情与复制上下文。
@@ -648,11 +648,11 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
     <div
       style={{
         borderRadius: 10,
-        border: `1px solid ${worker.status === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border))' : 'var(--border)'}`,
+        border: `1px solid ${worker.status === 'error' ? 'color-mix(in srgb, var(--danger) 30%, var(--border-default))' : 'var(--border-default)'}`,
         background:
           worker.status === 'error'
-            ? 'color-mix(in srgb, var(--danger) 7%, var(--surface))'
-            : 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
+            ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
+            : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -661,14 +661,14 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{worker.name}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>{worker.name}</div>
           <div
             style={{
               display: 'flex',
               gap: 10,
               flexWrap: 'wrap',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             <span>ID：{worker.id}</span>
@@ -697,11 +697,11 @@ export function WorkerDetailsPanel({ worker }: { worker: WorkerEntry | null }) {
       <div
         style={{
           borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'color-mix(in srgb, var(--surface) 94%, var(--bg))',
+          border: '1px solid var(--border-default)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
           padding: '8px 10px',
           fontSize: 11,
-          color: 'var(--text-2)',
+          color: 'var(--fg-default)',
           lineHeight: 1.5,
         }}
       >

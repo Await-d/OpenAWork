@@ -7,13 +7,13 @@ const mocks = vi.hoisted(() => ({
   sqliteRun: vi.fn(),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   redis: { setex: mocks.setex },
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,
 }));
 
-import authPlugin from '../../auth.js';
+import authPlugin from '../../infra/auth.js';
 import { pairingRoutes } from '../../routes/pairing.js';
 
 describe('pairing login route', () => {

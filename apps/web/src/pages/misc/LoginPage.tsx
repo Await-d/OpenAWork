@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Navigate } from 'react-router';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { login } from '@openAwork/web-client';
 import {
@@ -363,7 +363,7 @@ function AppIcon({ size }: { size: number }) {
     >
       <path
         d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
-        stroke="white"
+        stroke="currentColor"
         strokeWidth="2.45"
         strokeLinecap="round"
         fill="none"
@@ -372,7 +372,7 @@ function AppIcon({ size }: { size: number }) {
       />
       <path
         d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
-        stroke="white"
+        stroke="currentColor"
         strokeWidth="2.45"
         strokeLinecap="round"
         fill="none"
@@ -381,14 +381,14 @@ function AppIcon({ size }: { size: number }) {
       />
       <path
         d="M 14,2.6 C 22.75,2.6 25.4,10.5 14,14"
-        stroke="white"
+        stroke="currentColor"
         strokeWidth="2.45"
         strokeLinecap="round"
         fill="none"
         opacity="0.92"
         transform="rotate(240, 14, 14)"
       />
-      <circle cx="14" cy="14" r="2.2" fill="white" />
+      <circle cx="14" cy="14" r="2.2" fill="currentColor" />
     </svg>
   );
 }

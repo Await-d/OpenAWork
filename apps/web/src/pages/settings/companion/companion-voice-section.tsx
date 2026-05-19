@@ -49,7 +49,7 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
       <div id="buddy-voice-section-title" style={ST}>
         全局语音偏好
       </div>
-      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         这里设置的是没有专属 Agent 绑定时 Buddy 的默认播报方式。Agent 绑定面板里的语音覆盖优先生效。
       </div>
 
@@ -64,7 +64,7 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
         }}
       >
         <label style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>播报模式</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>播报模式</span>
           <select
             aria-label="Buddy 播报模式"
             disabled={!voiceOutputEnabled}
@@ -81,7 +81,7 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
         </label>
 
         <label style={{ display: 'grid', gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>语音变体</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>语音变体</span>
           <select
             aria-label="Buddy 语音变体"
             disabled={!voiceOutputEnabled}
@@ -98,7 +98,7 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
         </label>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <span id={RATE_LABEL_ID} style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+          <span id={RATE_LABEL_ID} style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
             语速
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -132,7 +132,7 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
           <output
             aria-live="polite"
             id={RATE_OUTPUT_ID}
-            style={{ fontSize: 11, color: 'var(--text-3)' }}
+            style={{ fontSize: 11, color: 'var(--fg-muted)' }}
           >
             当前 {voiceRate.toFixed(2)}x · 范围 0.50–2.00
           </output>
@@ -150,10 +150,10 @@ export function CompanionVoiceSection({ buddy }: CompanionVoiceSectionProps) {
           borderRadius: 12,
           border: '1px solid var(--border-subtle)',
           padding: '10px 12px',
-          background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+          background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
         }}
       >
-        <div style={{ minWidth: 0, flex: '1 1 240px', fontSize: 11, color: 'var(--text-2)' }}>
+        <div style={{ minWidth: 0, flex: '1 1 240px', fontSize: 11, color: 'var(--fg-default)' }}>
           {previewHint}
         </div>
         <button

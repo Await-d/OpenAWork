@@ -48,15 +48,15 @@ const PANEL_INSET_STYLE: CSSProperties = {
   gap: 8,
   padding: 12,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
 };
 
 const SECTION_HEADER_STYLE: CSSProperties = {
   display: 'grid',
   gap: 4,
   paddingBottom: 8,
-  borderBottom: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
+  borderBottom: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
 };
 
 const TEXTAREA_STYLE: CSSProperties = {
@@ -64,9 +64,9 @@ const TEXTAREA_STYLE: CSSProperties = {
   minHeight: 220,
   padding: 10,
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--bg-2) 80%, var(--bg))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  color: 'var(--fg-strong)',
   fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
   fontSize: 12,
   lineHeight: 1.5,
@@ -81,8 +81,8 @@ const PRIMARY_BUTTON_STYLE: CSSProperties = {
   padding: '0 14px',
   borderRadius: 8,
   border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
-  color: 'var(--text)',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
+  color: 'var(--fg-strong)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 700,
@@ -95,9 +95,9 @@ const SECONDARY_BUTTON_STYLE: CSSProperties = {
   minHeight: 30,
   padding: '0 12px',
   borderRadius: 8,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-  color: 'var(--text-2)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  color: 'var(--fg-default)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 600,
@@ -105,20 +105,20 @@ const SECONDARY_BUTTON_STYLE: CSSProperties = {
 
 const TINY_LABEL_STYLE: CSSProperties = {
   fontSize: 10,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };
 
 const ERROR_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--danger, #d4574e)',
+  color: 'var(--danger))',
   paddingTop: 4,
 };
 
 const SUCCESS_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--success, #4caf50)',
+  color: 'var(--success))',
   paddingTop: 4,
 };
 
@@ -146,7 +146,7 @@ export function TeamRuntimeSettingsPanel({
         <header style={SECTION_HEADER_STYLE}>
           <span style={TINY_LABEL_STYLE}>Team settings</span>
           <span style={{ fontSize: 14, fontWeight: 800 }}>团队设置</span>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             登录后才可编辑团队宪法 / 用户记忆 / 角色 SOUL。
           </span>
         </header>
@@ -159,7 +159,7 @@ export function TeamRuntimeSettingsPanel({
       <header style={SECTION_HEADER_STYLE}>
         <span style={TINY_LABEL_STYLE}>Team settings</span>
         <span style={{ fontSize: 14, fontWeight: 800 }}>团队设置</span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
           编辑保存后立即生效；如要让正在进行的会话也使用新内容，可以点
           <strong>「ForceApply 应用更新」</strong>触发缓存刷新。
         </span>
@@ -176,7 +176,7 @@ export function TeamRuntimeSettingsPanel({
       ) : (
         <div style={PANEL_INSET_STYLE}>
           <strong style={{ fontSize: 12 }}>团队宪法</strong>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             选择一个具体的 team workspace 后才能编辑它的宪法。
           </span>
         </div>
@@ -257,11 +257,11 @@ function ForceApplySection({
     <div style={PANEL_INSET_STYLE}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <strong style={{ fontSize: 13 }}>ForceApply 应用更新</strong>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           {used}/{max}（24 小时窗口）
         </span>
       </header>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         编辑宪法 / 记忆 / SOUL 后通常不需要 ForceApply——下一次新对话会自动读取。
         但如果当前正在进行的会话已经命中了旧 prompt 缓存，点这里可以让缓存破裂、强制重新拼装。
       </span>
@@ -278,7 +278,7 @@ function ForceApplySection({
           刷新状态
         </button>
         {state?.lastAppliedAt ? (
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>上次：{state.lastAppliedAt}</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>上次：{state.lastAppliedAt}</span>
         ) : null}
       </div>
 
@@ -288,11 +288,11 @@ function ForceApplySection({
           aria-label="ForceApply 确认对话框"
           style={{
             ...PANEL_INSET_STYLE,
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
           }}
         >
           <strong style={{ fontSize: 12 }}>确认触发 ForceApply？</strong>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             会让当前用户的所有进行中会话在下一轮调用时丢弃旧 prompt cache。 24 小时内最多 5 次。
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -415,11 +415,11 @@ function ConstitutionSection({
         }}
       >
         <strong style={{ fontSize: 13 }}>团队宪法</strong>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           v{record?.version ?? 0} · {charCount.toLocaleString()} 字符
         </span>
       </header>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         长期约束的明文锚点。会被注入到每个 session 的 system prompt（7 层栈第 3 层）。
       </span>
 
@@ -474,7 +474,7 @@ function ConstitutionSection({
             fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
             fontSize: 12,
             lineHeight: 1.5,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
           }}
         >
           {draft || '（空白）'}
@@ -544,7 +544,7 @@ function UserMemorySection({
   return (
     <div style={PANEL_INSET_STYLE}>
       <strong style={{ fontSize: 13 }}>个人长期记忆</strong>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         只属于当前用户，跨工作区一致。会被注入到每个 session 的 system prompt（7 层栈第 6 层）。
       </span>
       <textarea
@@ -635,7 +635,7 @@ function PersonasSection({
   return (
     <div style={PANEL_INSET_STYLE}>
       <strong style={{ fontSize: 13 }}>角色 SOUL（5 层）</strong>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         每层 SOUL 是该角色 agent 的人格定义（5 维度 frontmatter + Markdown 正文）。
         默认值由系统提供，自定义后会覆盖默认值。
       </span>
@@ -650,14 +650,14 @@ function PersonasSection({
               style={{
                 ...SECONDARY_BUTTON_STYLE,
                 background: active
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--surface))'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
                   : SECONDARY_BUTTON_STYLE.background,
                 borderColor: active
                   ? 'color-mix(in srgb, var(--accent) 50%, transparent)'
                   : SECONDARY_BUTTON_STYLE.border?.toString().includes('1px')
-                    ? 'color-mix(in srgb, var(--border) 72%, transparent)'
+                    ? 'color-mix(in srgb, var(--border-default) 72%, transparent)'
                     : undefined,
-                color: active ? 'var(--text)' : 'var(--text-2)',
+                color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
               }}
               onClick={() => setActiveLayer(layer)}
             >
@@ -667,7 +667,7 @@ function PersonasSection({
         })}
       </div>
 
-      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
         {isDefault ? '当前使用默认 SOUL' : '当前使用自定义 SOUL'} · {ROLE_LAYER_LABEL[activeLayer]}
       </span>
 
@@ -736,7 +736,7 @@ function InstructionStackPreviewSection({
   return (
     <div style={PANEL_INSET_STYLE}>
       <strong style={{ fontSize: 13 }}>7 层指令栈预览</strong>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         用于核对当前 user_memory / SOUL / 宪法 等会注入哪些内容到 system prompt。
       </span>
 
@@ -750,7 +750,7 @@ function InstructionStackPreviewSection({
               ...SECONDARY_BUTTON_STYLE,
               background:
                 layer === previewLayer
-                  ? 'color-mix(in srgb, var(--accent) 18%, var(--surface))'
+                  ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-overlay))'
                   : SECONDARY_BUTTON_STYLE.background,
             }}
             onClick={() => setPreviewLayer(layer)}
@@ -786,17 +786,17 @@ function InstructionStackPreviewSection({
                   ...PANEL_INSET_STYLE,
                   padding: '6px 10px',
                   fontSize: 11,
-                  color: present ? 'var(--text)' : 'var(--text-3)',
+                  color: present ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   borderColor: present
-                    ? 'color-mix(in srgb, var(--success, #4caf50) 35%, transparent)'
-                    : 'color-mix(in srgb, var(--border) 60%, transparent)',
+                    ? 'color-mix(in srgb, var(--success) 35%, transparent)'
+                    : 'color-mix(in srgb, var(--border-default) 60%, transparent)',
                 }}
               >
                 {layer}：{present ? '已注入' : '未提供'}
               </span>
             ))}
           </div>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
             估算 tokens：{preview.estimatedTokens.toLocaleString()}
             {preview.oversize ? ' · ⚠ 超过软上限 24K' : ''}
           </span>
@@ -809,7 +809,7 @@ function InstructionStackPreviewSection({
               fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
               fontSize: 11,
               lineHeight: 1.4,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
             }}
           >
             {preview.stableBlock}
@@ -840,17 +840,17 @@ export function MemoryWriteBadge({ field, threat, reason, sample }: MemoryWriteB
       role="alert"
       style={{
         ...PANEL_INSET_STYLE,
-        borderColor: 'color-mix(in srgb, var(--danger, #d4574e) 60%, transparent)',
-        background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, var(--surface))',
+        borderColor: 'color-mix(in srgb, var(--danger) 60%, transparent)',
+        background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
       }}
     >
       <strong style={{ fontSize: 12 }}>记忆写入被安全扫描拒绝</strong>
-      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
         字段：<code>{field}</code> · 威胁：<code>{threat}</code>
       </span>
       <span style={{ fontSize: 12 }}>{reason}</span>
       {sample ? (
-        <code style={{ fontSize: 11, color: 'var(--text-3)' }}>触发片段：{sample}</code>
+        <code style={{ fontSize: 11, color: 'var(--fg-muted)' }}>触发片段：{sample}</code>
       ) : null}
     </div>
   );
@@ -866,7 +866,7 @@ function TemplateManagementEntry() {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <strong style={{ fontSize: 13 }}>模板管理</strong>
       </header>
-      <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
         创建、编辑团队会话模板，方便快速复用已有配置。
       </span>
       <div>

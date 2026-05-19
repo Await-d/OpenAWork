@@ -44,7 +44,7 @@ export function CompanionDefaultPersonaSection({
       </div>
 
       <label style={{ display: 'grid', gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
           默认主题
         </span>
         <select
@@ -60,7 +60,7 @@ export function CompanionDefaultPersonaSection({
           ))}
         </select>
       </label>
-      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--text-3)' }}>
+      <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
         全局物种与名称由账号自动派生，不在这里手动编辑。如果想为某个 Agent
         指定专属物种或自定义名称，请在下方「Agent 绑定」面板里设置。
       </div>
@@ -83,19 +83,19 @@ export function CompanionDefaultPersonaSection({
             borderRadius: 14,
             border: '1px solid var(--border-subtle)',
             padding: '14px 16px',
-            background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+            background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
             display: 'grid',
             gap: 8,
           }}
         >
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--fg-strong)' }}>
             {syncStatus === 'loading'
               ? '正在读取 Persona 预览…'
               : syncStatus === 'error'
                 ? '暂时拿不到 Persona 预览'
                 : '当前还没有可展示的 Persona'}
           </div>
-          <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--text-2)' }}>
+          <div style={{ fontSize: 12, lineHeight: 1.7, color: 'var(--fg-default)' }}>
             {syncStatus === 'loading'
               ? '正在同步远端 companion 设置，预览会在读取完成后自动出现。'
               : syncStatus === 'error'

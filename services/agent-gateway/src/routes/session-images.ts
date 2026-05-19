@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { ArtifactManagerImpl } from '@openAwork/artifacts';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
 import { createArtifact, getArtifactById } from '../session/artifact-content-store.js';
-import { sqliteGet } from '../db.js';
+import { sqliteGet } from '../infra/db.js';
 import {
   imageGenerationRequestSchema,
   resolveImageGenerationDefaults,
@@ -17,7 +17,7 @@ import {
 } from '../image-generation/openai-image-generation.js';
 import { resolveModelRouteFromProvider } from '../provider/model-router.js';
 import { getImageProviderConfig, parseStoredImageGenerationDefaults } from '../provider/provider-config.js';
-import { resolveGatewayArtifactsIndexPath } from '../storage-paths.js';
+import { resolveGatewayArtifactsIndexPath } from '../infra/storage-paths.js';
 
 interface UserSettingRow {
   value: string;

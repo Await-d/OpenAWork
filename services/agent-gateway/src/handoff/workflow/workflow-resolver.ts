@@ -7,7 +7,7 @@
  * Adapter：每个角色层有一个 adapter 负责 resolve 具体的 agent 实现。
  */
 
-import { sqliteAll, sqliteGet } from '../../db.js';
+import { sqliteAll, sqliteGet } from '../../infra/db.js';
 import {
   teamWorkflowSchema,
   validateWorkflowConsistency,

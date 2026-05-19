@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   shouldExitPlanModeFromAnswers: vi.fn(() => false),
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteAll: mocks.sqliteAll,
   sqliteGet: mocks.sqliteGet,
   sqliteRun: mocks.sqliteRun,
@@ -60,13 +60,13 @@ vi.mock('../../routes/stream-runtime.js', () => ({
   resumeAnsweredQuestionRequest: mocks.resumeAnsweredQuestionRequest,
 }));
 
-vi.mock('../../auth.js', () => ({
+vi.mock('../../infra/auth.js', () => ({
   requireAuth: async (request: { user?: unknown }) => {
     request.user = { sub: 'test-user', email: 'test@openAwork.local' };
   },
 }));
 
-vi.mock('../../request-workflow.js', () => ({
+vi.mock('../../runtime/request-workflow.js', () => ({
   startRequestWorkflow: () => ({
     step: { succeed: vi.fn(), fail: vi.fn() },
     child: () => ({ succeed: vi.fn(), fail: vi.fn() }),

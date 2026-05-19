@@ -14,11 +14,11 @@ export {
   batchSubInputSummary,
   batchSubVisualState,
   buildPartialBashOutput,
-} from './batch-tool-call-card.js';
-export { BlockToolCall } from './block-tool-call.js';
-export { GenerateImageToolCard } from './generate-image-tool-card.js';
-export { GroupedToolCallPill } from './grouped-tool-call-pill.js';
-export { InlineToolCall } from './inline-tool-call.js';
+} from './cards/batch-tool-call-card.js';
+export { BlockToolCall } from './display/block-tool-call.js';
+export { GenerateImageToolCard } from './cards/generate-image-tool-card.js';
+export { GroupedToolCallPill } from './cards/grouped-tool-call-pill.js';
+export { InlineToolCall } from './display/inline-tool-call.js';
 export {
   type DiagnosticItem,
   DiagnosticsPreview,
@@ -114,6 +114,6 @@ export {
   type WebSummary,
 } from './shared/web-helpers.js';
 // Routers
-export { ToolCallDisplay } from './tool-call-display.js';
-export { ToolInputPreview } from './tool-input-preview.js';
-export { ToolOutputPreview } from './tool-output-preview.js';
+export { ToolCallDisplay } from './display/tool-call-display.js';
+export { ToolInputPreview } from './io/tool-input-preview.js';
+export { ToolOutputPreview } from './io/tool-output-preview.js';

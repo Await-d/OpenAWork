@@ -24,12 +24,12 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { SkillManifest } from '@openAwork/skill-types';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../db.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { getProviderConfigForSelection } from '../provider/provider-config.js';
 import { resolveModelRoute, resolveModelRouteFromProvider } from '../provider/model-router.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { DEFAULT_WORKSPACE_PATH_KEY, normalizeWorkspacePathForWrite } from '../skill/skill-selection.js';
 import {
   recommendByHeuristic,

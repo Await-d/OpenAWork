@@ -12,8 +12,8 @@ const ROW_STYLE: CSSProperties = {
   minHeight: 38,
   padding: '0 16px',
   borderTop: '1px solid var(--border-subtle)',
-  borderBottom: '1px solid var(--border)',
-  background: 'var(--bg)',
+  borderBottom: '1px solid var(--border-default)',
+  background: 'var(--bg-base)',
 };
 
 const TAB_LIST_STYLE: CSSProperties = {
@@ -38,7 +38,7 @@ const POPUP_BTN_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontSize: 11,
   background: 'none',
   border: '1px solid transparent',
@@ -72,16 +72,16 @@ export function TabRow({
                   ? '1px solid color-mix(in oklch, var(--accent) 40%, transparent)'
                   : '1px solid transparent',
                 background: active
-                  ? 'color-mix(in oklch, var(--accent) 10%, var(--surface))'
+                  ? 'color-mix(in oklch, var(--accent) 10%, var(--bg-overlay))'
                   : 'transparent',
-                color: active ? 'var(--text)' : 'var(--text-3)',
+                color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
                 fontWeight: active ? 700 : 500,
               }}
             >
               <Icon
                 name={tab.icon as IconKey}
                 size={12}
-                color={active ? 'var(--accent)' : 'var(--text-3)'}
+                color={active ? 'var(--accent)' : 'var(--fg-muted)'}
                 style={{ opacity: active ? 1 : 0.7 }}
               />
               <span>{tab.label}</span>
@@ -92,8 +92,8 @@ export function TabRow({
                     height: 16,
                     padding: '0 5px',
                     borderRadius: 999,
-                    background: active ? 'var(--accent)' : 'var(--surface-2)',
-                    color: active ? 'oklch(0.98 0 0)' : 'var(--text)',
+                    background: active ? 'var(--accent)' : 'var(--bg-surface)',
+                    color: active ? 'var(--fg-strong)' : 'var(--fg-strong)',
                     fontSize: 9,
                     fontWeight: 800,
                     display: 'grid',
@@ -124,7 +124,7 @@ export function TabRow({
           );
           if (w) {
             w.document.write(
-              `<!DOCTYPE html><html><head><meta charset="utf-8"><title>团队工作空间 · 弹出窗口</title><style>body{background:oklch(0.13 0.014 50);color:oklch(0.95 0.008 70);font-family:Inter,"PingFang SC",sans-serif;margin:0;padding:16px;overflow:auto}h2{font-size:18px;font-weight:800;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1)}.content-clone{opacity:0.85;pointer-events:none}</style></head><body><h2>团队工作空间 · 弹出窗口</h2><div class="content-clone">${content}</div></body></html>`,
+              `<!DOCTYPE html><html><head><meta charset="utf-8"><title>团队工作空间 · 弹出窗口</title><style>body{background:var(--bg-raised);color:var(--fg-strong);font-family:Inter,"PingFang SC",sans-serif;margin:0;padding:16px;overflow:auto}h2{font-size:18px;font-weight:800;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1)}.content-clone{opacity:0.85;pointer-events:none}</style></head><body><h2>团队工作空间 · 弹出窗口</h2><div class="content-clone">${content}</div></body></html>`,
             );
             w.document.close();
           }
@@ -132,7 +132,7 @@ export function TabRow({
         className="team-hover-surface-bordered"
         style={POPUP_BTN_STYLE}
       >
-        <Icon name="expand-right" size={11} color="var(--text-3)" />
+        <Icon name="expand-right" size={11} color="var(--fg-muted)" />
         <span>弹出</span>
       </button>
     </div>

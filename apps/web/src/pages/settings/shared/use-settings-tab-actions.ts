@@ -5,7 +5,7 @@ import {
   createGitHubClient,
   createSettingsClient,
 } from '@openAwork/web-client';
-import type { SettingsDiagnosticRecord } from '../settings-types.js';
+import type { SettingsDiagnosticRecord } from '../state/settings-types.js';
 
 interface SettingsTabActionsParams {
   gatewayUrl: string;

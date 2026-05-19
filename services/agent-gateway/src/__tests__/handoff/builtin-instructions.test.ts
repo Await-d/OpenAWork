@@ -14,7 +14,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as Builtin from '../../handoff/capability/builtin-instructions.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -42,7 +42,7 @@ function seedSession(roleLayer: string): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
   builtin = await import('../../handoff/capability/builtin-instructions.js');
   // 加载实现，让 registry 被填充

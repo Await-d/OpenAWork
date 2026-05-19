@@ -12,9 +12,9 @@ import type {
 } from '@openAwork/web-client';
 import { createTeamClient } from '@openAwork/web-client';
 import type { CreateTeamSessionInput } from '@openAwork/web-client';
-import { useAuthStore } from '../../../../stores/auth.js';
-import { useTeamCollaboration } from '../../use-team-collaboration.js';
-import type { TeamActionFeedback } from '../../use-team-collaboration.js';
+import { useAuthStore } from '../../../../stores/auth/auth.js';
+import { useTeamCollaboration } from '../../hooks/use-team-collaboration.js';
+import type { TeamActionFeedback } from '../../hooks/use-team-collaboration.js';
 import { getSharedSessionStateLabel } from './team-runtime-model.js';
 import { AGENT_TEAMS_EVENT_CONFIG } from './team-runtime-ui-config.js';
 import {
@@ -145,7 +145,7 @@ const TeamRuntimeReferenceDataContext = createContext<TeamRuntimeReferenceViewDa
 
 const ROLE_SLOT_CONFIG = [
   {
-    accent: 'var(--warning, #f0b429)',
+    accent: 'var(--warning))',
     badge: '团',
     fallbackLabel: '团队负责人',
     fallbackProvider: 'Planner',
@@ -153,7 +153,7 @@ const ROLE_SLOT_CONFIG = [
     leader: true,
   },
   {
-    accent: 'var(--accent, var(--accent, #5cd4c0))',
+    accent: 'var(--accent))',
     badge: '研',
     fallbackLabel: '研究员A',
     fallbackProvider: 'Researcher',
@@ -161,7 +161,7 @@ const ROLE_SLOT_CONFIG = [
     leader: false,
   },
   {
-    accent: 'var(--complement, #f06b7e)',
+    accent: 'var(--complement))',
     badge: '执',
     fallbackLabel: '执行者',
     fallbackProvider: 'Executor',
@@ -169,7 +169,7 @@ const ROLE_SLOT_CONFIG = [
     leader: false,
   },
   {
-    accent: 'var(--danger, #f06b7e)',
+    accent: 'var(--danger))',
     badge: '审',
     fallbackLabel: '批评者',
     fallbackProvider: 'Reviewer',

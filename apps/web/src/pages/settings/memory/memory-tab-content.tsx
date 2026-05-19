@@ -43,8 +43,8 @@ const BADGE: React.CSSProperties = {
 
 const CARD: React.CSSProperties = {
   borderRadius: 12,
-  border: '1px solid var(--border)',
-  background: 'color-mix(in srgb, var(--surface) 94%, var(--bg))',
+  border: '1px solid var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
   padding: '14px 16px',
   display: 'flex',
   flexDirection: 'column',
@@ -71,14 +71,14 @@ const STAT_CELL: React.CSSProperties = {
 const STAT_NUM: React.CSSProperties = {
   fontSize: 20,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   lineHeight: 1.2,
   fontVariantNumeric: 'tabular-nums',
 };
 
 const STAT_LABEL: React.CSSProperties = {
   fontSize: 10,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
   fontWeight: 500,
@@ -86,8 +86,8 @@ const STAT_LABEL: React.CSSProperties = {
 
 const ERROR_BOX: React.CSSProperties = {
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border))',
-  background: 'color-mix(in srgb, var(--danger) 8%, var(--surface))',
+  border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+  background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
   padding: '14px 16px',
   display: 'flex',
   flexDirection: 'column',
@@ -96,8 +96,8 @@ const ERROR_BOX: React.CSSProperties = {
 
 const EMPTY_BOX: React.CSSProperties = {
   borderRadius: 10,
-  border: '1px dashed var(--border)',
-  background: 'color-mix(in srgb, var(--surface) 96%, var(--bg))',
+  border: '1px dashed var(--border-default)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
   padding: '32px 20px',
   display: 'flex',
   flexDirection: 'column',
@@ -124,19 +124,19 @@ const TOGGLE_KNOB: React.CSSProperties = {
   width: 16,
   height: 16,
   borderRadius: '50%',
-  background: 'white',
+  background: 'var(--bg-raised)',
   transition: 'left 200ms ease',
   boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
 };
 
 const BTN_GHOST: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-default)',
   borderRadius: 8,
   padding: '5px 10px',
   fontSize: 11,
   fontWeight: 500,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   cursor: 'pointer',
   transition: 'background 150ms ease, border-color 150ms ease',
   whiteSpace: 'nowrap',
@@ -144,7 +144,7 @@ const BTN_GHOST: React.CSSProperties = {
 
 const BTN_DANGER: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border))',
+  border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
   borderRadius: 8,
   padding: '4px 8px',
   fontSize: 10,
@@ -189,7 +189,7 @@ function LoadingPulse() {
             height: 56,
             borderRadius: 10,
             background:
-              'linear-gradient(90deg, var(--surface) 25%, color-mix(in srgb, var(--surface) 80%, var(--accent)) 50%, var(--surface) 75%)',
+              'linear-gradient(90deg, var(--bg-overlay) 25%, color-mix(in srgb, var(--bg-overlay) 80%, var(--accent) 50%, var(--bg-overlay) 75%)',
             backgroundSize: '200% 100%',
             animation: `memoryShimmer 1.6s ease-in-out infinite`,
             animationDelay: `${String(i * 120)}ms`,
@@ -208,13 +208,13 @@ function StatsBar({ stats, status }: { stats: MemoryStats | null; status: Memory
         style={{
           height: 64,
           borderRadius: 10,
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: 11,
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
         }}
       >
         {status === 'loading' ? '统计加载中…' : '暂无统计数据'}
@@ -234,8 +234,8 @@ function StatsBar({ stats, status }: { stats: MemoryStats | null; status: Memory
       style={{
         display: 'flex',
         borderRadius: 10,
-        border: '1px solid var(--border)',
-        background: 'var(--surface)',
+        border: '1px solid var(--border-default)',
+        background: 'var(--bg-overlay)',
         overflow: 'hidden',
       }}
     >
@@ -268,20 +268,20 @@ function ActionFeedbackBar({
 
   const colorMap = {
     pending: {
-      bg: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
+      bg: 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))',
       color: 'var(--accent)',
     },
     success: {
-      bg: 'color-mix(in srgb, var(--success) 10%, var(--surface))',
+      bg: 'color-mix(in srgb, var(--success) 10%, var(--bg-overlay))',
       color: 'var(--success)',
     },
     error: {
-      bg: 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
+      bg: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
       color: 'var(--danger)',
     },
     idle: {
       bg: 'transparent',
-      color: 'var(--text-3)',
+      color: 'var(--fg-muted)',
     },
   } as const;
   const scheme = colorMap[feedback.status];
@@ -395,8 +395,8 @@ function MemoryCard({
         <span
           style={{
             ...BADGE,
-            color: 'var(--text-2)',
-            background: 'color-mix(in srgb, var(--text-3) 10%, transparent)',
+            color: 'var(--fg-default)',
+            background: 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
           }}
         >
           {SOURCE_LABELS[entry.source]}
@@ -404,10 +404,10 @@ function MemoryCard({
         <span
           style={{
             ...BADGE,
-            color: entry.enabled ? 'var(--success)' : 'var(--text-3)',
+            color: entry.enabled ? 'var(--success)' : 'var(--fg-muted)',
             background: entry.enabled
               ? 'color-mix(in srgb, var(--success) 12%, transparent)'
-              : 'color-mix(in srgb, var(--text-3) 10%, transparent)',
+              : 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
           }}
         >
           {entry.enabled ? '已启用' : '已停用'}
@@ -415,8 +415,8 @@ function MemoryCard({
         <span
           style={{
             ...BADGE,
-            color: 'var(--text-3)',
-            background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+            color: 'var(--fg-muted)',
+            background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
           }}
         >
           置信度 {formatConfidence(entry.confidence)}
@@ -424,8 +424,8 @@ function MemoryCard({
         <span
           style={{
             ...BADGE,
-            color: 'var(--text-3)',
-            background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+            color: 'var(--fg-muted)',
+            background: 'color-mix(in srgb, var(--border-default) 60%, transparent)',
           }}
         >
           优先级 {String(entry.priority)}
@@ -434,7 +434,7 @@ function MemoryCard({
           style={{
             marginLeft: 'auto',
             fontSize: 10,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
             whiteSpace: 'nowrap',
           }}
         >
@@ -443,18 +443,18 @@ function MemoryCard({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase' }}>键</div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{entry.key}</div>
+        <div style={{ fontSize: 10, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>键</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>{entry.key}</div>
       </div>
 
       {entry.workspaceRoot && (
         <div
           style={{
             fontSize: 11,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             padding: '8px 10px',
             borderRadius: 8,
-            background: 'color-mix(in srgb, var(--surface) 75%, var(--bg))',
+            background: 'color-mix(in srgb, var(--bg-overlay) 75%, var(--bg-base))',
             border: '1px solid var(--border-subtle)',
             wordBreak: 'break-word',
           }}
@@ -504,7 +504,7 @@ function MemoryCard({
         <p
           style={{
             fontSize: 12,
-            color: 'var(--text)',
+            color: 'var(--fg-strong)',
             margin: 0,
             lineHeight: 1.6,
             whiteSpace: 'pre-wrap',
@@ -524,7 +524,7 @@ function MemoryCard({
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
           更新时间 {formatDate(entry.updatedAt)}
         </span>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -579,8 +579,8 @@ function ToggleRow({
       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
     >
       <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{title}</div>
-        <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>{description}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>{title}</div>
+        <div style={{ fontSize: 10, color: 'var(--fg-muted)', marginTop: 2 }}>{description}</div>
       </div>
       <button
         type="button"
@@ -589,7 +589,7 @@ function ToggleRow({
         aria-label={ariaLabel}
         style={{
           ...TOGGLE_TRACK,
-          background: checked ? 'var(--accent)' : 'var(--border)',
+          background: checked ? 'var(--accent)' : 'var(--border-default)',
         }}
         onClick={onToggle}
       >
@@ -614,7 +614,7 @@ function SettingsPanel({
   updateSettings: (patch: Partial<MemorySettings>) => Promise<void>;
 }) {
   if (settingsStatus === 'loading') {
-    return <div style={{ fontSize: 11, color: 'var(--text-3)', padding: 8 }}>设置加载中…</div>;
+    return <div style={{ fontSize: 11, color: 'var(--fg-muted)', padding: 8 }}>设置加载中…</div>;
   }
 
   if (settingsStatus === 'error') {
@@ -645,7 +645,7 @@ function SettingsPanel({
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 160 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-2)' }}>
+          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--fg-default)' }}>
             最大注入预算
           </span>
           <input
@@ -665,7 +665,7 @@ function SettingsPanel({
         </label>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 160 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-2)' }}>最低置信度</span>
+          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--fg-default)' }}>最低置信度</span>
           <input
             type="number"
             min={0}
@@ -779,7 +779,7 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>
               记忆加载失败
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', wordBreak: 'break-word' }}>
+            <div style={{ fontSize: 12, color: 'var(--fg-default)', wordBreak: 'break-word' }}>
               {loadError}
             </div>
             <button
@@ -808,10 +808,10 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
             >
               ✦
             </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-strong)' }}>
               {searchQuery ? '未找到匹配的记忆' : '还没有记忆'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', maxWidth: 260 }}>
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)', maxWidth: 260 }}>
               {searchQuery
                 ? '尝试调整搜索关键词，或清除搜索查看所有记忆'
                 : 'Agent 会自动提取关键记忆，你也可以手动触发一次提取。'}

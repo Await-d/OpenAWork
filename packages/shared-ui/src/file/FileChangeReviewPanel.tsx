@@ -40,15 +40,15 @@ export function FileChangeReviewPanel({
         flexDirection: 'column',
         gap: 12,
         padding: '1rem 1.25rem',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
+        background: 'var(--bg-overlay)',
+        border: '1px solid var(--border-default)',
         borderRadius: 10,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>文件改动审阅</span>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-strong)' }}>文件改动审阅</span>
+          <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
             查看差异并决定接受或还原单个变更
           </span>
         </div>
@@ -66,7 +66,7 @@ export function FileChangeReviewPanel({
               gap: 8,
             }}
           >
-            <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text)' }}>
+            <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--fg-strong)' }}>
               {selectedChange.path}
             </span>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -94,13 +94,13 @@ export function FileChangeReviewPanel({
                 minHeight: 140,
                 maxHeight: 320,
                 overflow: 'auto',
-                background: 'var(--bg-2)',
+                background: 'var(--bg-overlay)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 8,
                 fontSize: 12,
                 fontFamily: 'monospace',
                 whiteSpace: 'pre-wrap',
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
               }}
             >
               正在加载 diff…
@@ -115,13 +115,13 @@ export function FileChangeReviewPanel({
                 minHeight: 140,
                 maxHeight: 320,
                 overflow: 'auto',
-                background: 'var(--bg-2)',
+                background: 'var(--bg-overlay)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 8,
                 fontSize: 12,
                 fontFamily: 'monospace',
                 whiteSpace: 'pre-wrap',
-                color: 'var(--text)',
+                color: 'var(--fg-strong)',
               }}
             >
               暂无 diff。

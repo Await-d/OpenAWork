@@ -6,15 +6,15 @@
  */
 
 import { useMemo, type CSSProperties } from 'react';
-import MarkdownMessageContent from '../../../../../components/chat/markdown-message-content.js';
+import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   display: 'grid',
   gap: 12,
   padding: 16,
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 82%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 82%, var(--bg-base))',
   overflow: 'auto',
   maxHeight: 600,
 };
@@ -26,9 +26,9 @@ const BADGE_STYLES: Record<string, CSSProperties> = {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: 700,
-    background: 'color-mix(in srgb, var(--danger, #d4574e) 12%, var(--surface))',
-    color: 'var(--danger, #d4574e)',
-    border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 30%, transparent)',
+    background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
+    color: 'var(--danger))',
+    border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
   },
   parallel: {
     display: 'inline-flex',
@@ -36,9 +36,9 @@ const BADGE_STYLES: Record<string, CSSProperties> = {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: 700,
-    background: 'color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 12%, var(--surface))',
-    color: 'var(--aux, var(--aux, #8b9cf5))',
-    border: '1px solid color-mix(in srgb, var(--aux, var(--aux, #8b9cf5)) 30%, transparent)',
+    background: 'color-mix(in srgb, var(--aux) 12%, var(--bg-overlay))',
+    color: 'var(--aux))',
+    border: '1px solid color-mix(in srgb, var(--aux) 30%, transparent)',
   },
   story: {
     display: 'inline-flex',
@@ -46,9 +46,9 @@ const BADGE_STYLES: Record<string, CSSProperties> = {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: 700,
-    background: 'color-mix(in srgb, var(--success, var(--success, #3dd49a)) 12%, var(--surface))',
-    color: 'var(--success, var(--success, #3dd49a))',
-    border: '1px solid color-mix(in srgb, var(--success, var(--success, #3dd49a)) 30%, transparent)',
+    background: 'color-mix(in srgb, var(--success) 12%, var(--bg-overlay))',
+    color: 'var(--success))',
+    border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
   },
 };
 
@@ -98,7 +98,7 @@ export function ArtifactPreview({ title, content, phase, version }: ArtifactPrev
     <div style={CONTAINER_STYLE}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <strong style={{ fontSize: 14 }}>{title}</strong>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           {phase ? `${phase} ` : ''}v{version ?? 1}
           {clarificationCount > 0 ? ` · ${clarificationCount} 待澄清` : ''}
         </span>
@@ -107,7 +107,7 @@ export function ArtifactPreview({ title, content, phase, version }: ArtifactPrev
         style={{
           display: 'grid',
           gap: 8,
-          color: 'var(--text)',
+          color: 'var(--fg-strong)',
           margin: 0,
         }}
       >

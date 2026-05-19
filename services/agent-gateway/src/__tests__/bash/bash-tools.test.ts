@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 // cannot resolve the `node:` protocol during transform, so we stub the
 // whole module here. The same pattern is used in
 // `v2-runtime-effect-bridge.test.ts` and `v2-runtime-boot.test.ts`.
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ROOT: tmpdir(),
   WORKSPACE_ROOTS: [tmpdir()],
   WORKSPACE_ACCESS_MODE: 'unrestricted' as const,

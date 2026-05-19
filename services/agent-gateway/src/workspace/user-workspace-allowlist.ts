@@ -21,7 +21,7 @@
  *   - Even a single SQL roundtrip per click adds up over a session.
  */
 
-import { sqliteAll } from '../db.js';
+import { sqliteAll } from '../infra/db.js';
 import { isPathWithinRoot } from './workspace-paths.js';
 
 interface SessionRow {

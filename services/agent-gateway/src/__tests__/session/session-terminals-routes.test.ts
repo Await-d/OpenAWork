@@ -7,9 +7,9 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as DbModule from '../../db.js';
-import type * as AuthModule from '../../auth.js';
-import type * as RequestWorkflowModule from '../../request-workflow.js';
+import type * as DbModule from '../../infra/db.js';
+import type * as AuthModule from '../../infra/auth.js';
+import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SessionTerminalsRoutesModule from '../../routes/session-terminals.js';
 import type * as RegistryModule from '../../session/session-terminal-registry.js';
 
@@ -66,9 +66,9 @@ function resetState(): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
-  authPlugin = (await import('../../auth.js')).default;
-  requestWorkflowPlugin = (await import('../../request-workflow.js')).default;
+  dbModule = await import('../../infra/db.js');
+  authPlugin = (await import('../../infra/auth.js')).default;
+  requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   sessionTerminalsRoutes = (await import('../../routes/session-terminals.js')).sessionTerminalsRoutes;
   registry = await import('../../session/session-terminal-registry.js');
   await dbModule.connectDb();

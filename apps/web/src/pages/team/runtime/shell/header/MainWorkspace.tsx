@@ -27,7 +27,7 @@ const FULLSCREEN_OVERLAY_STYLE: CSSProperties = {
   position: 'fixed',
   inset: 0,
   zIndex: 100,
-  background: 'var(--bg)',
+  background: 'var(--bg-base)',
   display: 'flex',
   flexDirection: 'column',
 };
@@ -40,9 +40,9 @@ const FULLSCREEN_CLOSE_STYLE: CSSProperties = {
   width: 40,
   height: 40,
   borderRadius: 10,
-  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
-  color: 'var(--text)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+  color: 'var(--fg-strong)',
   fontSize: 18,
   fontWeight: 700,
   cursor: 'pointer',
@@ -134,8 +134,8 @@ export function MainWorkspace({
           }}
         >
           <div style={{ display: 'grid', gap: 3 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>当前会话</span>
-            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>当前会话</span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </span>
           </div>
@@ -258,8 +258,8 @@ export function FooterBar({
         alignItems: 'center',
         padding: '0 14px 0 6px',
         borderTop: '1px solid var(--border-subtle)',
-        background: 'var(--bg)',
-        color: 'var(--text-3)',
+        background: 'var(--bg-base)',
+        color: 'var(--fg-muted)',
         fontSize: 11,
       }}
     >
@@ -285,7 +285,7 @@ export function FooterBar({
           alignItems: 'center',
           padding: '2px 4px',
           borderRadius: 6,
-          background: 'var(--surface)',
+          background: 'var(--bg-overlay)',
           border: '1px solid var(--border-subtle)',
         }}
       >
@@ -309,13 +309,13 @@ export function FooterBar({
                 borderRadius: 4,
                 display: 'grid',
                 placeItems: 'center',
-                color: active ? 'var(--text)' : 'var(--text-3)',
-                background: active ? 'var(--surface-2)' : 'transparent',
+                color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
+                background: active ? 'var(--bg-surface)' : 'transparent',
                 cursor: 'pointer',
                 transition: 'background 0.15s',
               }}
             >
-              <ViewIcon size={11} color={active ? 'var(--text)' : 'var(--text-3)'} />
+              <ViewIcon size={11} color={active ? 'var(--fg-strong)' : 'var(--fg-muted)'} />
             </button>
           );
         })}
@@ -324,8 +324,8 @@ export function FooterBar({
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         {footerStats.map((item) => (
           <span key={item.label} style={{ display: 'inline-flex', gap: 3 }}>
-            <span style={{ color: 'var(--text-3)' }}>{item.label}</span>
-            <strong style={{ color: 'var(--text)' }}>{item.value}</strong>
+            <span style={{ color: 'var(--fg-muted)' }}>{item.label}</span>
+            <strong style={{ color: 'var(--fg-strong)' }}>{item.value}</strong>
           </span>
         ))}
         <ChromeBadge>{viewModeLabel}</ChromeBadge>

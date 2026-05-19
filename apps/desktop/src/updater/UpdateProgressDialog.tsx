@@ -211,7 +211,7 @@ ${releaseNotes}`
       <div
         style={{
           background: 'hsl(var(--background))',
-          border: '1px solid hsl(var(--border))',
+          border: '1px solid hsl(var(--border-default))',
           borderRadius: 12,
           padding: '1.5rem',
           width: 380,
@@ -277,7 +277,7 @@ ${releaseNotes}`
             style={{
               padding: '6px 14px',
               background: 'transparent',
-              border: '1px solid hsl(var(--border))',
+              border: '1px solid hsl(var(--border-default))',
               borderRadius: 6,
               color: 'hsl(var(--muted-foreground))',
               cursor: 'pointer',

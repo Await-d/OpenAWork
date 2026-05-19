@@ -1,5 +1,5 @@
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
-import { TeamSectionHeader } from '../../../team-page-sections.js';
+import { TeamSectionHeader } from '../../../views/team-page-sections.js';
 
 interface TeamRuntimeRoleBindingPanelProps {
   cards: Array<{
@@ -34,7 +34,7 @@ export function TeamRuntimeRoleBindingPanel({
         </div>
       ) : null}
       {loading ? (
-        <div className="content-card" style={{ padding: 12, color: 'var(--text-3)' }}>
+        <div className="content-card" style={{ padding: 12, color: 'var(--fg-muted)' }}>
           正在加载 Agent / Capabilities…
         </div>
       ) : (
@@ -47,21 +47,21 @@ export function TeamRuntimeRoleBindingPanel({
             >
               <div style={{ display: 'grid', gap: 2 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{card.roleLabel}</span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{card.role}</span>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{card.role}</span>
               </div>
               <div
                 style={{
                   padding: '10px 12px',
                   borderRadius: 10,
-                  border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
-                  background: 'var(--surface-2)',
-                  color: 'var(--text)',
+                  border: '1px solid color-mix(in srgb, var(--border-default) 80%, transparent)',
+                  background: 'var(--bg-surface)',
+                  color: 'var(--fg-strong)',
                   fontSize: 12,
                 }}
               >
                 {(card.selectedAgent?.label ?? card.selectedAgentId) || '系统预置绑定'}
               </div>
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                 当前 Agent：{card.selectedAgent?.label ?? '未选择'}
                 {card.selectedAgent?.canonicalRole?.coreRole
                   ? ` · ${card.selectedAgent.canonicalRole.coreRole}`
@@ -77,16 +77,16 @@ export function TeamRuntimeRoleBindingPanel({
                         alignItems: 'center',
                         padding: '4px 10px',
                         borderRadius: 999,
-                        border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+                        border: '1px solid color-mix(in srgb, var(--border-default) 80%, transparent)',
                         fontSize: 11,
-                        color: 'var(--text-2)',
+                        color: 'var(--fg-default)',
                       }}
                     >
                       {capability.label}
                     </span>
                   ))
                 ) : (
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>暂无推荐能力</span>
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>暂无推荐能力</span>
                 )}
               </div>
             </div>

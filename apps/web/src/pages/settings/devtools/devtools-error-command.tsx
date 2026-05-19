@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SettingsDiagnosticRecord, SettingsDevLogRecord } from '../settings-types.js';
+import type { SettingsDiagnosticRecord, SettingsDevLogRecord } from '../state/settings-types.js';
 import {
   buildDiagnosticClipboardRecord,
   buildDiagnosticKey,
@@ -25,10 +25,10 @@ export interface ErrorCommandCenterProps {
 
 const BTN_BASE: React.CSSProperties = {
   borderRadius: 8,
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-default)',
   padding: '6px 10px',
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  background: 'var(--bg-overlay)',
+  color: 'var(--fg-strong)',
   fontSize: 11,
   cursor: 'pointer',
 };
@@ -68,8 +68,8 @@ export function ErrorCommandCenter({
     <div
       style={{
         borderRadius: 10,
-        border: '2px solid color-mix(in srgb, var(--danger) 40%, var(--border))',
-        background: 'color-mix(in srgb, var(--danger) 5%, var(--surface))',
+        border: '2px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--danger) 5%, var(--bg-overlay))',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -86,7 +86,7 @@ export function ErrorCommandCenter({
               gap: 10,
               flexWrap: 'wrap',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               marginTop: 4,
             }}
           >
@@ -94,7 +94,7 @@ export function ErrorCommandCenter({
             <span>当前可见：{filteredDiagnostics.length}</span>
             <span
               style={{
-                color: errorLogCount > 0 ? 'var(--danger)' : 'var(--text-3)',
+                color: errorLogCount > 0 ? 'var(--danger)' : 'var(--fg-muted)',
                 fontWeight: errorLogCount > 0 ? 700 : 400,
               }}
             >
@@ -102,7 +102,7 @@ export function ErrorCommandCenter({
             </span>
             <span
               style={{
-                color: workerErrorCount > 0 ? 'var(--danger)' : 'var(--text-3)',
+                color: workerErrorCount > 0 ? 'var(--danger)' : 'var(--fg-muted)',
                 fontWeight: workerErrorCount > 0 ? 700 : 400,
               }}
             >
@@ -131,10 +131,10 @@ export function ErrorCommandCenter({
             borderRadius: 999,
             background: hasErrors
               ? 'color-mix(in srgb, var(--danger) 14%, transparent)'
-              : 'color-mix(in srgb, var(--text-3) 10%, transparent)',
+              : 'color-mix(in srgb, var(--fg-muted) 10%, transparent)',
             fontSize: 11,
             fontWeight: 700,
-            color: hasErrors ? 'var(--danger)' : 'var(--text-3)',
+            color: hasErrors ? 'var(--danger)' : 'var(--fg-muted)',
             flexShrink: 0,
           }}
         >
@@ -143,7 +143,7 @@ export function ErrorCommandCenter({
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: hasErrors ? 'var(--danger)' : 'var(--text-3)',
+              background: hasErrors ? 'var(--danger)' : 'var(--fg-muted)',
               display: 'inline-block',
             }}
           />
@@ -168,11 +168,11 @@ export function ErrorCommandCenter({
                 style={{
                   flexShrink: 0,
                   borderRadius: 8,
-                  border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 60%, var(--border))' : 'color-mix(in srgb, var(--danger) 25%, var(--border))'}`,
+                  border: `1px solid ${isActive ? 'color-mix(in srgb, var(--danger) 60%, var(--border-default))' : 'color-mix(in srgb, var(--danger) 25%, var(--border-default))'}`,
                   background: isActive
-                    ? 'color-mix(in srgb, var(--danger) 14%, var(--surface))'
-                    : 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
-                  color: isActive ? 'var(--danger)' : 'var(--text-2)',
+                    ? 'color-mix(in srgb, var(--danger) 14%, var(--bg-overlay))'
+                    : 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+                  color: isActive ? 'var(--danger)' : 'var(--fg-default)',
                   padding: '4px 8px',
                   fontSize: 10,
                   fontWeight: isActive ? 700 : 400,
@@ -206,8 +206,8 @@ export function ErrorCommandCenter({
           onClick={onCopyVisible}
           disabled={!hasErrors}
           style={btn(hasErrors, {
-            border: '1px solid color-mix(in srgb, var(--danger) 26%, var(--border))',
-            background: 'color-mix(in srgb, var(--danger) 8%, var(--surface))',
+            border: '1px solid color-mix(in srgb, var(--danger) 26%, var(--border-default))',
+            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
           })}
         >
           复制可见错误 {hasErrors ? `(${filteredDiagnostics.length})` : ''}
@@ -217,7 +217,7 @@ export function ErrorCommandCenter({
           onClick={onCopyRelatedContext}
           disabled={!hasSelected}
           style={btn(hasSelected, {
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
           })}
         >
           复制关联上下文
@@ -257,15 +257,15 @@ export function ErrorCommandCenter({
         <div
           style={{
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--danger) 28%, var(--border))',
-            background: 'color-mix(in srgb, var(--surface) 94%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--danger) 28%, var(--border-default))',
+            background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
             padding: '7px 10px',
             display: 'flex',
             flexDirection: 'column',
             gap: 3,
           }}
         >
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-strong)' }}>
             {selectedDiagnostic.message}
           </div>
           <div
@@ -274,7 +274,7 @@ export function ErrorCommandCenter({
               gap: 10,
               flexWrap: 'wrap',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             <span>工具：{selectedDiagnostic.toolName ?? selectedDiagnostic.filePath}</span>

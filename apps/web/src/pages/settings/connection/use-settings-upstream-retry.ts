@@ -1,7 +1,7 @@
 import React from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
-import { logger } from '../../../utils/logger.js';
-import type { UpstreamRetrySettingsRef } from '../settings-types.js';
+import { logger } from '../../../utils/log/logger.js';
+import type { UpstreamRetrySettingsRef } from '../state/settings-types.js';
 
 interface UseSettingsUpstreamRetryInput {
   gatewayUrl: string;

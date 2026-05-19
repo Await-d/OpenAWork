@@ -35,7 +35,7 @@
  * inFlightStreamRequests singletons.
  */
 
-import { sqliteAll } from '../db.js';
+import { sqliteAll } from '../infra/db.js';
 import { stopAllInFlightStreamRequestsForSession } from '../routes/stream-cancellation.js';
 
 export type CancelDescendantReason = 'parent_aborted' | 'ancestor_aborted' | 'user_aborted';

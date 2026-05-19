@@ -12,8 +12,8 @@ import type {
   PermissionRuleEntry,
   PermissionCategoryMeta,
 } from '@openAwork/shared-ui';
-import type { DevtoolsSourceState, SettingsDiagnosticRecord } from '../settings-types.js';
-import { groupDiagnosticsByFile } from '../settings-derived.js';
+import type { DevtoolsSourceState, SettingsDiagnosticRecord } from '../state/settings-types.js';
+import { groupDiagnosticsByFile } from '../state/settings-derived.js';
 import { BP, SS, ST, UV } from '../shared/settings-section-styles.js';
 import { NotificationPreferencePanel } from './notification-preference-panel.js';
 
@@ -98,8 +98,8 @@ export function SecurityTabContent({
             style={{
               ...UV,
               borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border))',
-              background: 'color-mix(in srgb, var(--danger) 10%, var(--surface))',
+              border: '1px solid color-mix(in srgb, var(--danger) 42%, var(--border-default))',
+              background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-overlay))',
               padding: '12px 14px',
               display: 'flex',
               flexDirection: 'column',
@@ -109,7 +109,7 @@ export function SecurityTabContent({
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>
               诊断信息加载失败
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', wordBreak: 'break-word' }}>
+            <div style={{ fontSize: 12, color: 'var(--fg-default)', wordBreak: 'break-word' }}>
               {diagnosticsSource.error}
             </div>
           </div>
@@ -120,7 +120,7 @@ export function SecurityTabContent({
             </div>
           ))
         ) : (
-          <p style={{ fontSize: 12, color: 'var(--text-3)' }}>暂无诊断数据</p>
+          <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>暂无诊断数据</p>
         )}
       </section>
     </>

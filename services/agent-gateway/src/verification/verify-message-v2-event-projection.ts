@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { closeDb, connectDb, migrate, sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { closeDb, connectDb, migrate, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   appendPatchPart,
   appendSessionMessageV2,

@@ -15,7 +15,7 @@ import type {
   CompanionVoiceVariant,
 } from '@openAwork/shared';
 import type { CompanionProfile } from './companion-display-model.js';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 
 const STORAGE_KEY_PREFIX = 'openawork-buddy-voice-output';
 const REMOTE_SAVE_DEBOUNCE_MS = 500;

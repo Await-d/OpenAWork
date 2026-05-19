@@ -57,13 +57,13 @@ jobs:
             TARGET="desktop-stable"
           fi
 
-          node scripts/release-notes.mjs enrich \
+          node scripts/release/release-notes.mjs enrich \
             --body-file release-notes.md \
             --target "$TARGET" \
             --output-file release-notes.md
 
       - name: Validate release notes body
-        run: node scripts/release-notes.mjs inspect --body-file release-notes.md
+        run: node scripts/release/release-notes.mjs inspect --body-file release-notes.md
 
       - name: Resolve desktop release metadata
         id: meta
@@ -500,7 +500,7 @@ jobs:
         env:
           NOTES_FILE: temp/release-notes/release-notes.md
         run: |
-          node scripts/release-result-summary.mjs print \
+          node scripts/release/release-result-summary.mjs print \
             --target desktop \
             --base-file "$NOTES_FILE" \
             --input-file release.json \
@@ -514,7 +514,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${{ needs.resolve-release-notes.outputs.release_tag }}" > release.json
-          node scripts/build-tauri-updater-json.mjs \
+          node scripts/build/build-tauri-updater-json.mjs \
             --input-file release.json \
             --output-file latest.json \
             --notes-file temp/release-notes/release-notes.md \
@@ -530,7 +530,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Generate latest-cn.json with download URLs routed through ghp.ci proxy
-          node scripts/build-tauri-updater-json.mjs \
+          node scripts/build/build-tauri-updater-json.mjs \
             --input-file release.json \
             --output-file latest-cn.json \
             --notes-file temp/release-notes/release-notes.md \
@@ -626,7 +626,7 @@ jobs:
         env:
           NOTES_FILE: temp/release-notes/release-notes.md
         run: |
-          node scripts/release-aggregate-summary.mjs print \
+          node scripts/release/release-aggregate-summary.mjs print \
             --base-file "$NOTES_FILE" \
             --desktop-file release-body-final.md \
             --version "${{ needs.resolve-release-notes.outputs.version }}" \

@@ -34,8 +34,8 @@ export function WorkflowModeToggle({ mode, onChange, disabled, style }: Workflow
             fontWeight: 600,
             border: 'none',
             cursor: disabled ? 'not-allowed' : 'pointer',
-            background: mode === m ? 'var(--accent, #5cd4c0)' : 'transparent',
-            color: mode === m ? color.fgOnAccent : 'var(--fg-muted, #7b8a9e)',
+            background: mode === m ? 'var(--accent))' : 'transparent',
+            color: mode === m ? color.fgOnAccent : 'var(--fg-muted))',
             transition: 'background 0.15s',
           }}
         >

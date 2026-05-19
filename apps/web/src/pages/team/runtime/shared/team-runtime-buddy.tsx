@@ -144,7 +144,7 @@ export function TeamRuntimeBuddy({
         padding: 10,
         borderRadius: 16,
         background:
-          'radial-gradient(circle at top right, rgba(91, 140, 255, 0.16), transparent 32%), linear-gradient(180deg, color-mix(in srgb, var(--surface) 95%, rgba(15, 23, 42, 0.26)) 0%, var(--surface) 100%)',
+          'radial-gradient(circle at top right, rgba(91, 140, 255, 0.16), transparent 32%), linear-gradient(180deg, color-mix(in srgb, var(--bg-overlay) 95%, rgba(15, 23, 42, 0.26)) 0%, var(--bg-overlay) 100%)',
       }}
     >
       <div style={{ display: 'grid', gap: 2 }}>
@@ -162,7 +162,7 @@ export function TeamRuntimeBuddy({
         <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.03em' }}>
           工作区动画代理
         </span>
-        <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
           消费聚合状态摘要，不复述明细。
         </span>
       </div>
@@ -196,10 +196,10 @@ export function TeamRuntimeBuddy({
               alignItems: 'center',
               padding: '3px 7px',
               borderRadius: 999,
-              border: '1px solid color-mix(in srgb, var(--border) 78%, transparent)',
-              background: 'color-mix(in srgb, var(--surface) 88%, rgba(91, 140, 255, 0.08))',
+              border: '1px solid color-mix(in srgb, var(--border-default) 78%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-overlay) 88%, rgba(91, 140, 255, 0.08))',
               fontSize: 9.5,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
             }}
           >
             {tag}
@@ -216,7 +216,7 @@ export function TeamRuntimeBuddy({
                 padding: '4px 10px',
                 borderRadius: 8,
                 border: '1px solid color-mix(in oklch, var(--success) 30%, transparent)',
-                background: 'color-mix(in oklch, var(--success) 10%, var(--surface))',
+                background: 'color-mix(in oklch, var(--success) 10%, var(--bg-overlay))',
                 color: 'color-mix(in oklch, var(--success) 80%, var(--fg-on-accent) 20%)',
                 fontSize: 10,
                 fontWeight: 600,
@@ -235,7 +235,7 @@ export function TeamRuntimeBuddy({
                 padding: '4px 10px',
                 borderRadius: 8,
                 border: '1px solid color-mix(in oklch, var(--warning) 30%, transparent)',
-                background: 'color-mix(in oklch, var(--warning) 10%, var(--surface))',
+                background: 'color-mix(in oklch, var(--warning) 10%, var(--bg-overlay))',
                 color: 'color-mix(in oklch, var(--warning) 80%, var(--fg-on-accent) 20%)',
                 fontSize: 10,
                 fontWeight: 600,
@@ -254,7 +254,7 @@ export function TeamRuntimeBuddy({
                 padding: '4px 10px',
                 borderRadius: 8,
                 border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
-                background: 'color-mix(in oklch, var(--danger) 10%, var(--surface))',
+                background: 'color-mix(in oklch, var(--danger) 10%, var(--bg-overlay))',
                 color: 'color-mix(in oklch, var(--danger) 80%, var(--fg-on-accent) 20%)',
                 fontSize: 10,
                 fontWeight: 600,

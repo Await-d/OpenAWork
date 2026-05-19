@@ -6,10 +6,10 @@ const STATUS_BADGE_STYLE: CSSProperties = {
   minHeight: 24,
   padding: '0 9px',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 76%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base))',
   fontSize: 11,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   whiteSpace: 'nowrap',
 };
 
@@ -18,8 +18,8 @@ export const TEAM_RUNTIME_INSET_PANEL_STYLE: CSSProperties = {
   gap: 8,
   padding: 12,
   borderRadius: 14,
-  border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 78%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 78%, var(--bg-base))',
 };
 
 export function ChromeBadge({ children }: { children: ReactNode }) {
@@ -45,8 +45,8 @@ export function CompactMetricPill({
         minWidth: 116,
         padding: '8px 10px',
         borderRadius: 12,
-        border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
-        background: 'color-mix(in srgb, var(--surface) 76%, var(--bg))',
+        border: '1px solid color-mix(in srgb, var(--border-default) 72%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-overlay) 76%, var(--bg-base))',
       }}
     >
       <div
@@ -58,7 +58,7 @@ export function CompactMetricPill({
         }}
       >
         <div style={{ display: 'grid', gap: 3, minWidth: 0, flex: 1 }}>
-          <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1 }}>{label}</span>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1 }}>{label}</span>
           <span style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.1 }}>{value}</span>
         </div>
         {icon ? (
@@ -79,7 +79,7 @@ export function CompactMetricPill({
         ) : null}
       </div>
       {hint ? (
-        <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.35 }}>{hint}</span>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.35 }}>{hint}</span>
       ) : null}
     </div>
   );
@@ -88,8 +88,8 @@ export function CompactMetricPill({
 export function RailEmptyState({ description, title }: { description: string; title: string }) {
   return (
     <div style={TEAM_RUNTIME_INSET_PANEL_STYLE}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.65 }}>{description}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>{title}</span>
+      <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.65 }}>{description}</span>
     </div>
   );
 }

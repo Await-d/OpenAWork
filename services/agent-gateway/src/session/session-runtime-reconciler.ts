@@ -1,4 +1,4 @@
-import { sqliteAll } from '../db.js';
+import { sqliteAll } from '../infra/db.js';
 import {
   reconcileSessionStateStatus,
   type SessionRuntimeReconciliationResult,

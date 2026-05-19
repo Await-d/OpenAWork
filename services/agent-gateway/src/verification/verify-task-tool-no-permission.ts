@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
-import authPlugin from '../auth.js';
-import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../db.js';
-import requestWorkflowPlugin from '../request-workflow.js';
+import authPlugin from '../infra/auth.js';
+import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
+import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { permissionsRoutes } from '../routes/permissions.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';

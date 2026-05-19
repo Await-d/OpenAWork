@@ -13,7 +13,7 @@
 
 import { MCPClientAdapterImpl } from '@openAwork/mcp-client';
 import type { MCPServerRef, SkillManifest } from '@openAwork/skill-types';
-import { sqliteAll } from '../db.js';
+import { sqliteAll } from '../infra/db.js';
 
 // ---------------------------------------------------------------------------
 // Environment cleaner (ported from oh-my-opencode env-cleaner.ts)

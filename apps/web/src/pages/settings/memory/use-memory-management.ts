@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMemoriesClient } from '@openAwork/web-client';
-import { logger } from '../../../utils/logger.js';
+import { logger } from '../../../utils/log/logger.js';
 import type {
   MemoryActionFeedback,
   MemoryCreateInput,

@@ -1,4 +1,4 @@
-import { sqliteAll, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteRun } from '../infra/db.js';
 
 export type TeamAuditAction =
   | 'share_created'

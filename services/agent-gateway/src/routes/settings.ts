@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { loadAppVersion } from '../app-version.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { loadAppVersion } from '../app/app-version.js';
 import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   COMPACTION_SETTINGS_KEY,
   compactionSettingsSchema,
@@ -19,8 +19,8 @@ import {
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
 } from '../provider/provider-config.js';
-import { startRequestWorkflow } from '../request-workflow.js';
-import { listRequestWorkflowLogs } from '../request-workflow-log-store.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { listRequestWorkflowLogs } from '../runtime/request-workflow-log-store.js';
 import {
   isMcpServerConnectedForUser,
   loadConfiguredMcpServersForUser,
@@ -50,7 +50,7 @@ import {
   writeWorkspacePermissionConfig,
   PERMISSION_CATEGORIES,
 } from '@openAwork/agent-core';
-import { WORKSPACE_ROOT } from '../db.js';
+import { WORKSPACE_ROOT } from '../infra/db.js';
 import { z } from 'zod';
 
 const APP_VERSION = loadAppVersion();

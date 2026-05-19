@@ -423,11 +423,11 @@ export function VoiceRecorder({
             border: '1px solid var(--border-subtle)',
             cursor: !recognitionSupported || starting ? 'not-allowed' : 'pointer',
             background: busy
-              ? 'color-mix(in oklch, var(--danger, #ef4444) 12%, transparent)'
-              : 'var(--surface)',
+              ? 'color-mix(in oklch, var(--danger) 12%, transparent)'
+              : 'var(--bg-overlay)',
             color: busy
-              ? 'color-mix(in oklch, var(--danger, #ef4444) 82%, white 18%)'
-              : 'var(--text-3)',
+              ? 'color-mix(in oklch, var(--danger) 82%, white 18%)'
+              : 'var(--fg-muted)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -473,7 +473,7 @@ export function VoiceRecorder({
           style={{
             fontSize: 11,
             fontWeight: 600,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             fontVariantNumeric: 'tabular-nums',
             minWidth: 36,
           }}
@@ -511,7 +511,7 @@ export function VoiceRecorder({
             style={{
               fontSize: 10,
               fontWeight: 600,
-              color: 'color-mix(in oklch, var(--danger, #ef4444) 70%, white 30%)',
+              color: 'color-mix(in oklch, var(--danger) 70%, white 30%)',
               whiteSpace: 'nowrap',
             }}
           >
@@ -523,7 +523,7 @@ export function VoiceRecorder({
       <div
         style={{
           fontSize: 10,
-          color: unsupportedMessage ? 'var(--text-3)' : 'var(--text-3)',
+          color: unsupportedMessage ? 'var(--fg-muted)' : 'var(--fg-muted)',
           lineHeight: 1.4,
         }}
       >
@@ -534,8 +534,8 @@ export function VoiceRecorder({
         <div
           style={{
             fontSize: 10,
-            color: 'var(--text-3)',
-            background: 'var(--surface)',
+            color: 'var(--fg-muted)',
+            background: 'var(--bg-overlay)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 6,
             padding: '4px 8px',
@@ -550,10 +550,10 @@ export function VoiceRecorder({
         <div
           style={{
             fontSize: 10,
-            color: 'color-mix(in oklch, var(--danger, #ef4444) 80%, white 20%)',
-            background: 'color-mix(in oklch, var(--danger, #ef4444) 8%, transparent)',
+            color: 'color-mix(in oklch, var(--danger) 80%, white 20%)',
+            background: 'color-mix(in oklch, var(--danger) 8%, transparent)',
             border:
-              '1px solid color-mix(in oklch, var(--danger, #ef4444) 20%, var(--border-subtle))',
+              '1px solid color-mix(in oklch, var(--danger) 20%, var(--border-subtle))',
             borderRadius: 6,
             padding: '4px 8px',
             lineHeight: 1.5,
@@ -568,8 +568,8 @@ export function VoiceRecorder({
           style={{
             fontSize: 11,
             lineHeight: 1.6,
-            color: isTranscribing ? 'var(--text-3)' : 'var(--text)',
-            background: 'var(--surface)',
+            color: isTranscribing ? 'var(--fg-muted)' : 'var(--fg-strong)',
+            background: 'var(--bg-overlay)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 8,
             padding: '6px 8px',

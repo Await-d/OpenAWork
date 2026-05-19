@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { createCapabilitiesClient } from '@openAwork/web-client';
 import type {
   ComposerAgentTool,

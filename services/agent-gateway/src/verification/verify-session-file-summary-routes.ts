@@ -32,9 +32,9 @@ async function main(): Promise<void> {
     routes,
   ] = await Promise.all([
     import('fastify'),
-    import('../auth.js'),
-    import('../request-workflow.js'),
-    import('../db.js'),
+    import('../infra/auth.js'),
+    import('../runtime/request-workflow.js'),
+    import('../infra/db.js'),
     import('../session/session-file-diff-store.js'),
     import('../session/session-snapshot-store.js'),
     import('../session/session-file-backup-store.js'),

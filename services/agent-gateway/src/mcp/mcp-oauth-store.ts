@@ -28,7 +28,7 @@
  * `getForUrl` semantics — see `mcp/auth.ts`).
  */
 
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 
 const STORE_KEY = 'mcp_oauth_credentials';
 

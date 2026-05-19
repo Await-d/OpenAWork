@@ -25,7 +25,7 @@ function TeamCard({
       ? 'var(--success)'
       : team.status === 'paused'
         ? 'var(--warning)'
-        : 'var(--text-3)';
+        : 'var(--fg-muted)';
   const statusLabel =
     team.status === 'running' ? '运行中' : team.status === 'paused' ? '已暂停' : '已完成';
   return (
@@ -37,8 +37,8 @@ function TeamCard({
         borderRadius: 10,
         border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
         background: isSelected
-          ? 'color-mix(in oklch, var(--accent) 6%, var(--card-bg))'
-          : 'var(--card-bg)',
+          ? 'color-mix(in oklch, var(--accent) 6%, var(--bg-overlay))'
+          : 'var(--bg-overlay)',
         display: 'grid',
         gap: 5,
         borderLeft: `3px solid ${isSelected ? 'var(--accent)' : statusColor}`,
@@ -62,7 +62,7 @@ function TeamCard({
         <div
           style={{ display: 'flex', justifyContent: 'space-between', gap: 6, alignItems: 'center' }}
         >
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{team.title}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-strong)' }}>{team.title}</span>
           <span
             style={{
               padding: '1px 6px',
@@ -72,7 +72,7 @@ function TeamCard({
                   ? 'color-mix(in oklch, var(--success) 12%, transparent)'
                   : team.status === 'paused'
                     ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
-                    : 'color-mix(in oklch, var(--text-3) 10%, transparent)',
+                    : 'color-mix(in oklch, var(--fg-muted) 10%, transparent)',
               color: statusColor,
               fontSize: 9,
               fontWeight: 700,
@@ -91,7 +91,7 @@ function TeamCard({
               boxShadow: team.status === 'running' ? `0 0 4px ${statusColor}` : 'none',
             }}
           />
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{team.subtitle}</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{team.subtitle}</span>
         </div>
       </button>
       {allowManage && isSelected && (
@@ -106,9 +106,9 @@ function TeamCard({
               style={{
                 padding: '3px 7px',
                 borderRadius: 5,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--border-default)',
                 background: 'transparent',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -225,7 +225,7 @@ export function TeamsTab() {
               display: 'flex',
               gap: 8,
               alignItems: 'center',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontSize: 12,
               fontWeight: 800,
               background: 'none',
@@ -243,9 +243,9 @@ export function TeamsTab() {
                 alignItems: 'center',
               }}
             >
-              <ChevronDownIcon size={11} color="var(--text-3)" />
+              <ChevronDownIcon size={11} color="var(--fg-muted)" />
             </span>
-            <span style={{ color: 'var(--text-2)' }}>运行中</span>
+            <span style={{ color: 'var(--fg-default)' }}>运行中</span>
             <span
               style={{
                 minWidth: 18,
@@ -253,8 +253,8 @@ export function TeamsTab() {
                 borderRadius: 6,
                 display: 'grid',
                 placeItems: 'center',
-                background: 'var(--surface-2)',
-                color: 'var(--text-2)',
+                background: 'var(--bg-surface)',
+                color: 'var(--fg-default)',
                 fontSize: 10,
                 fontWeight: 700,
               }}
@@ -308,7 +308,7 @@ export function TeamsTab() {
               display: 'flex',
               gap: 8,
               alignItems: 'center',
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
               fontSize: 12,
               fontWeight: 800,
               background: 'none',
@@ -326,9 +326,9 @@ export function TeamsTab() {
                 alignItems: 'center',
               }}
             >
-              <ChevronDownIcon size={11} color="var(--text-3)" />
+              <ChevronDownIcon size={11} color="var(--fg-muted)" />
             </span>
-            <span style={{ color: 'var(--text-2)' }}>历史记录</span>
+            <span style={{ color: 'var(--fg-default)' }}>历史记录</span>
             <span
               style={{
                 minWidth: 18,
@@ -336,8 +336,8 @@ export function TeamsTab() {
                 borderRadius: 6,
                 display: 'grid',
                 placeItems: 'center',
-                background: 'var(--surface-2)',
-                color: 'var(--text-2)',
+                background: 'var(--bg-surface)',
+                color: 'var(--fg-default)',
                 fontSize: 10,
                 fontWeight: 700,
               }}

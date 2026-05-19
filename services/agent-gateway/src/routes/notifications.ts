@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
 import {
   listNotificationPreferences,
   listNotifications,
@@ -11,7 +11,7 @@ import {
   NOTIFICATION_PREFERENCE_EVENT_TYPES,
   upsertNotificationPreferences,
 } from '../session/notification-store.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 
 const notificationsQuerySchema = z.object({
   limit: z

@@ -15,7 +15,7 @@ const CARD_STYLE: CSSProperties = {
   padding: 12,
   borderRadius: 12,
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 6%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-overlay))',
   fontSize: 12,
 };
 
@@ -30,8 +30,8 @@ const STAT_CELL_STYLE: CSSProperties = {
   gap: 2,
   padding: '6px 10px',
   borderRadius: 8,
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
 };
 
 export function BuddyCard() {
@@ -47,20 +47,20 @@ export function BuddyCard() {
   return (
     <div style={CARD_STYLE} aria-label="团队 Buddy 卡片">
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <strong style={{ fontSize: 13, color: 'var(--text)' }}>Buddy</strong>
-        <span style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+        <strong style={{ fontSize: 13, color: 'var(--fg-strong)' }}>Buddy</strong>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)', textTransform: 'uppercase' }}>
           团队助理
         </span>
       </header>
 
       <div style={STAT_ROW_STYLE}>
         <div style={STAT_CELL_STYLE}>
-          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>活跃 Agent</span>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>活跃 Agent</span>
           <strong style={{ fontSize: 16 }}>{activeAgents}</strong>
         </div>
         <div style={STAT_CELL_STYLE}>
-          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>运行中</span>
-          <strong style={{ fontSize: 16, color: 'var(--success, var(--success, var(--success, #3dd49a)))' }}>{runningTasks}</strong>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>运行中</span>
+          <strong style={{ fontSize: 16, color: 'var(--success))' }}>{runningTasks}</strong>
         </div>
       </div>
 
@@ -68,12 +68,12 @@ export function BuddyCard() {
         <div
           style={{
             ...STAT_CELL_STYLE,
-            border: '1px solid color-mix(in srgb, var(--danger, #d4574e) 40%, transparent)',
-            background: 'color-mix(in srgb, var(--danger, #d4574e) 8%, var(--surface))',
+            border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)',
+            background: 'color-mix(in srgb, var(--danger) 8%, var(--bg-overlay))',
           }}
         >
-          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>需要关注</span>
-          <strong style={{ fontSize: 14, color: 'var(--danger, #d4574e)' }}>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>需要关注</span>
+          <strong style={{ fontSize: 14, color: 'var(--danger))' }}>
             {failedTasks} 个任务失败
           </strong>
         </div>

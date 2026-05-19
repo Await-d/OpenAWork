@@ -1,4 +1,4 @@
-import type { TeamActionFeedback } from '../../use-team-collaboration.js';
+import type { TeamActionFeedback } from '../../hooks/use-team-collaboration.js';
 import type { TeamRuntimeMetric, TeamWorkspaceCardSummary } from '../data/team-runtime-model.js';
 import type { TeamRuntimeShellFrameProps } from './team-runtime-shell-frame.js';
 

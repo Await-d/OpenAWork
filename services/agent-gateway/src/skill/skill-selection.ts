@@ -29,7 +29,7 @@
 import { resolve } from 'node:path';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import type { SkillManifest } from '@openAwork/skill-types';
-import { sqliteAll, sqliteGet } from '../db.js';
+import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 
 export const DEFAULT_WORKSPACE_PATH_KEY = '__default__';

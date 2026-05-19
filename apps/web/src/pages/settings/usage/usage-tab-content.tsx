@@ -6,8 +6,8 @@ import {
   UsageDashboard,
 } from '@openAwork/shared-ui';
 import type { CostBreakdownItem, ModelPriceEntry, MonthlyRecord } from '@openAwork/shared-ui';
-import type { SettingsDevLogRecord } from '../settings-types.js';
-import { buildAuditExportContent } from '../settings-derived.js';
+import type { SettingsDevLogRecord } from '../state/settings-types.js';
+import { buildAuditExportContent } from '../state/settings-derived.js';
 import { SS, ST, UV } from '../shared/settings-section-styles.js';
 
 interface UsageTabContentProps {
@@ -31,11 +31,11 @@ function UsageErrorNotice({ title, detail }: { title: string; detail: string }) 
         borderRadius: 10,
         border: '1px solid rgba(248, 113, 113, 0.4)',
         background: 'rgba(127, 29, 29, 0.18)',
-        color: 'var(--text-1, var(--fg-strong, #f1f4f8))',
+        color: 'var(--text-1)',
       }}
     >
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 12, color: 'var(--text-2, #cbd5f5)' }}>{detail}</div>
+      <div style={{ fontSize: 12, color: 'var(--fg-default)' }}>{detail}</div>
     </div>
   );
 }
@@ -88,7 +88,7 @@ export function UsageTabContent({
             <ModelPriceConfig models={priceModels} onUpdate={() => undefined} />
           </div>
         ) : (
-          <p style={{ fontSize: 12, color: 'var(--text-3)' }}>暂无模型费用数据</p>
+          <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>暂无模型费用数据</p>
         )}
       </section>
       <section style={SS}>

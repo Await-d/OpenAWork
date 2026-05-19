@@ -18,7 +18,7 @@
  * 限流（D41 C3）：24 小时内最多 5 次 ForceApply。超出返回 429。
  */
 
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 
 interface ForceApplyEventRow {
   id: number;

@@ -15,7 +15,7 @@ const recordedSql: Array<{ sql: string; params: unknown[] }> = [];
 // hits an INSERT … ON CONFLICT … RETURNING seq and expects a row back.
 const seqByAggregate = new Map<string, number>();
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteRun: (sql: string, params: unknown[]) => {
     recordedSql.push({ sql, params });
   },

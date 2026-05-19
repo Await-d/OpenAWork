@@ -115,11 +115,11 @@ function CompanionPreviewCard({
         width: '100%',
         border: highlighted
           ? `1px solid ${rarityVisual.borderColor}`
-          : '1px solid color-mix(in oklch, var(--border) 88%, transparent)',
+          : '1px solid color-mix(in oklch, var(--border-default) 88%, transparent)',
         borderRadius: 14,
         background: hero
-          ? `linear-gradient(180deg, ${profile.accentTint}, color-mix(in oklch, var(--surface) 94%, transparent))`
-          : `linear-gradient(180deg, color-mix(in oklch, ${profile.accentTint} 84%, transparent), color-mix(in oklch, var(--surface) 94%, transparent))`,
+          ? `linear-gradient(180deg, ${profile.accentTint}, color-mix(in oklch, var(--bg-overlay) 94%, transparent))`
+          : `linear-gradient(180deg, color-mix(in oklch, ${profile.accentTint} 84%, transparent), color-mix(in oklch, var(--bg-overlay) 94%, transparent))`,
         padding: hero ? 16 : 14,
         display: 'grid',
         gap: 10,
@@ -143,8 +143,8 @@ function CompanionPreviewCard({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{profile.name}</div>
-          <div style={{ marginTop: 3, fontSize: 11, color: 'var(--text-2)' }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>{profile.name}</div>
+          <div style={{ marginTop: 3, fontSize: 11, color: 'var(--fg-default)' }}>
             {profile.species} · {profile.rarityStars}
           </div>
         </div>
@@ -181,8 +181,8 @@ function CompanionPreviewCard({
               height: 20,
               padding: '0 8px',
               borderRadius: 999,
-              background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
-              color: 'var(--text-2)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 84%, transparent)',
+              color: 'var(--fg-default)',
               fontSize: 10,
               fontWeight: 700,
               flexShrink: 0,
@@ -197,7 +197,7 @@ function CompanionPreviewCard({
         style={{
           borderRadius: 12,
           border: '1px solid color-mix(in oklch, var(--border-subtle) 88%, transparent)',
-          background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
+          background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
           padding: '10px 12px',
           display: 'grid',
           gap: 10,
@@ -207,12 +207,12 @@ function CompanionPreviewCard({
           style={{
             maxWidth: 280,
             borderRadius: 12,
-            border: '1px solid color-mix(in oklch, var(--border) 78%, transparent)',
-            background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--border-default) 78%, transparent)',
+            background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
             padding: '10px 12px',
             fontSize: 11,
             lineHeight: 1.55,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             justifySelf: 'start',
           }}
         >
@@ -255,17 +255,17 @@ function CompanionPreviewCard({
               marginTop: 2,
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
               fontSize: 10,
-              color: 'var(--text-2)',
+              color: 'var(--fg-default)',
             }}
           >
             <span>{profile.name}</span>
-            <span style={{ color: 'var(--text-3)' }}>{profile.rarityStars}</span>
+            <span style={{ color: 'var(--fg-muted)' }}>{profile.rarityStars}</span>
           </div>
           <div
             style={{
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
               fontSize: 9,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             {renderCompanionFace(profile.sprite)}
@@ -283,8 +283,8 @@ function CompanionPreviewCard({
               height: 22,
               padding: '0 8px',
               borderRadius: 999,
-              background: 'color-mix(in oklch, var(--surface) 84%, transparent)',
-              color: 'var(--text-2)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 84%, transparent)',
+              color: 'var(--fg-default)',
               fontSize: 10,
               fontWeight: 700,
             }}
@@ -307,7 +307,7 @@ function CompanionPreviewCard({
             style={{
               borderRadius: 10,
               border: '1px solid color-mix(in oklch, var(--border-subtle) 88%, transparent)',
-              background: 'color-mix(in oklch, var(--surface) 90%, transparent)',
+              background: 'color-mix(in oklch, var(--bg-overlay) 90%, transparent)',
               padding: '8px 9px',
               display: 'grid',
               gap: 6,
@@ -321,10 +321,10 @@ function CompanionPreviewCard({
                 gap: 8,
               }}
             >
-              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-2)' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-default)' }}>
                 {stat.label}
               </span>
-              <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text)' }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-strong)' }}>
                 {stat.value}
               </span>
             </div>
@@ -332,7 +332,7 @@ function CompanionPreviewCard({
               style={{
                 height: 6,
                 borderRadius: 999,
-                background: 'color-mix(in oklch, var(--surface-hover) 88%, transparent)',
+                background: 'color-mix(in oklch, var(--bg-hover) 88%, transparent)',
                 overflow: 'hidden',
               }}
             >
@@ -412,7 +412,7 @@ export function CompanionVisualShowcase({
             fontWeight: 700,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
           }}
         >
           当前 Buddy
@@ -445,18 +445,18 @@ export function CompanionVisualShowcase({
                 fontWeight: 700,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
               }}
             >
               伴侣图鉴
             </div>
-            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: 'var(--text-2)' }}>
+            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
               下方完整展示源仓 companion 物种与 idle / pet 动画。悬停或点击卡片会触发一次 pet
               hearts，但不会切换你当前正在使用的 Persona。
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
               {galleryProfiles.length} 种 companion
             </div>
             <button
@@ -471,8 +471,8 @@ export function CompanionVisualShowcase({
               style={{
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
-                background: 'color-mix(in oklch, var(--surface) 88%, transparent)',
-                color: 'var(--text-2)',
+                background: 'color-mix(in oklch, var(--bg-overlay) 88%, transparent)',
+                color: 'var(--fg-default)',
                 minHeight: 30,
                 padding: '0 10px',
                 fontSize: 11,
@@ -513,10 +513,10 @@ export function CompanionVisualShowcase({
                 borderRadius: 14,
                 border: '1px solid var(--border-subtle)',
                 padding: '12px 14px',
-                background: 'color-mix(in oklch, var(--surface) 92%, transparent)',
+                background: 'color-mix(in oklch, var(--bg-overlay) 92%, transparent)',
                 fontSize: 12,
                 lineHeight: 1.7,
-                color: 'var(--text-2)',
+                color: 'var(--fg-default)',
               }}
             >
               图鉴已收起，适合在移动端或快速调设置时减少滚动；需要时可以随时重新展开查看全部物种。

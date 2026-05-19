@@ -82,12 +82,12 @@ export const PRELOADABLE_ROUTE_MODULES = {
   ),
   team: createPreloadableRouteModule(
     'team',
-    () => import('../pages/team/TeamPageDispatcher.js'),
+    () => import('../pages/team/views/TeamPageDispatcher.js'),
     '团队协作',
   ),
   templates: createPreloadableRouteModule(
     'templates',
-    () => import('../pages/team/TeamTemplatesPage.js'),
+    () => import('../pages/team/views/TeamTemplatesPage.js'),
     '模板管理',
   ),
   workflows: createPreloadableRouteModule(
@@ -98,7 +98,7 @@ export const PRELOADABLE_ROUTE_MODULES = {
   skills: createPreloadableRouteModule('skills', () => import('../pages/skills/SkillsPage.js'), '技能库'),
   skillSelection: createPreloadableRouteModule(
     'skill-selection',
-    () => import('../pages/skills/SkillSelectionPage.js'),
+    () => import('../pages/skills/selection/SkillSelectionPage.js'),
     'Skill 工作区选择集',
   ),
   usage: createPreloadableRouteModule('usage', () => import('../pages/misc/UsagePage.js'), '用量统计'),

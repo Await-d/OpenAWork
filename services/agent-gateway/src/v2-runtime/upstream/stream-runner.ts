@@ -46,7 +46,7 @@ import type { JSONValue, SharedV2ProviderOptions } from '@ai-sdk/provider';
 import type { ModelMessage, StreamTextResult, ToolSet } from 'ai';
 import { streamText, tool as defineTool, jsonSchema } from 'ai';
 import { applyCaching, buildPromptCacheModelInfo } from './cache-breakpoints.js';
-import { dispatchChatParams } from '../../plugin-host.js';
+import { dispatchChatParams } from '../../runtime/plugin-host.js';
 import type { V2LanguageModel } from './provider.js';
 import {
   buildBaseProviderOptions,

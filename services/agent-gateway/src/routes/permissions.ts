@@ -12,15 +12,15 @@ import {
   type PermissionRequestStatus,
   type PermissionRiskLevel,
 } from '../permission/permission-contract.js';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   createPermissionAskedEvent,
   createPermissionRepliedEvent,
 } from '../session/session-permission-events.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { setPersistedSessionStateStatus } from './stream.js';
 import {
   resumeApprovedPermissionRequest,

@@ -79,7 +79,7 @@ export function OverviewTab({
               padding: '10px 12px',
               borderRadius: 12,
               background:
-                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--surface)) 0%, color-mix(in oklch, var(--surface) 90%, var(--bg)) 100%)',
+                'linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, var(--bg-overlay) 0%, color-mix(in oklch, var(--bg-overlay) 90%, var(--bg-base) 100%)',
               border: '1px solid color-mix(in srgb, var(--accent) 24%, transparent)',
             }}
           >
@@ -87,7 +87,7 @@ export function OverviewTab({
               <span
                 style={{
                   fontSize: 10,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   fontWeight: 700,
                   textTransform: 'uppercase',
                   letterSpacing: '0.08em',
@@ -99,7 +99,7 @@ export function OverviewTab({
                 style={{
                   fontSize: 16,
                   fontWeight: 800,
-                  color: 'var(--text)',
+                  color: 'var(--fg-strong)',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -107,17 +107,17 @@ export function OverviewTab({
               >
                 {selectedTeam.title}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{selectedTeam.subtitle}</span>
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{selectedTeam.subtitle}</span>
             </div>
             {(() => {
               const statusColor =
                 selectedTeam.status === 'running'
-                  ? 'var(--success, var(--success, var(--success, #3dd49a)))'
+                  ? 'var(--success))'
                   : selectedTeam.status === 'paused'
-                    ? 'var(--warning, var(--warning, var(--warning, #f0b429)))'
+                    ? 'var(--warning))'
                     : selectedTeam.status === 'failed'
-                      ? 'var(--danger, #d4574e)'
-                      : 'var(--text-3)';
+                      ? 'var(--danger))'
+                      : 'var(--fg-muted)';
               const statusLabel =
                 selectedTeam.status === 'running'
                   ? '运行中'
@@ -198,7 +198,7 @@ export function OverviewTab({
                       display: 'flex',
                       gap: 6,
                       alignItems: 'center',
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       fontSize: 11,
                     }}
                   >
@@ -216,7 +216,7 @@ export function OverviewTab({
                     >
                       <Icon name={card.icon as IconKey} size={11} color="var(--accent)" />
                     </span>
-                    <span style={{ fontWeight: 600, color: 'var(--text-2)' }}>{card.label}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>{card.label}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                     {trend ? (
@@ -250,16 +250,16 @@ export function OverviewTab({
                         transform: isExpanded ? 'rotate(180deg)' : 'none',
                       }}
                     >
-                      <ChevronDownIcon size={10} color="var(--text-3)" />
+                      <ChevronDownIcon size={10} color="var(--fg-muted)" />
                     </button>
                   </div>
                 </div>
                 <span
-                  style={{ fontSize: 26, lineHeight: 1.1, fontWeight: 800, color: 'var(--text)' }}
+                  style={{ fontSize: 26, lineHeight: 1.1, fontWeight: 800, color: 'var(--fg-strong)' }}
                 >
                   {card.value}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
                   {card.note}
                 </span>
                 {isExpanded && (
@@ -274,7 +274,7 @@ export function OverviewTab({
                     <span
                       style={{
                         fontSize: 10,
-                        color: 'var(--text-3)',
+                        color: 'var(--fg-muted)',
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em',
                       }}
@@ -282,8 +282,8 @@ export function OverviewTab({
                       详细指标
                     </span>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
-                        当前值: <strong style={{ color: 'var(--text)' }}>{card.value}</strong>
+                      <span style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+                        当前值: <strong style={{ color: 'var(--fg-strong)' }}>{card.value}</strong>
                       </span>
                       {trend && (
                         <span
@@ -324,7 +324,7 @@ export function OverviewTab({
               gap: 8,
             }}
           >
-            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg-strong)' }}>
               活动类型分布
             </span>
             {Object.entries(activityStats)
@@ -360,11 +360,11 @@ export function OverviewTab({
                     >
                       <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                         <Icon name={config.icon as IconKey} size={10} color={config.color} />
-                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-default)' }}>
                           {config.label}
                         </span>
                       </div>
-                      <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
                         {count} 次 ({pct}%)
                       </span>
                     </div>
@@ -397,9 +397,9 @@ export function OverviewTab({
                 style={{
                   padding: '3px 8px',
                   borderRadius: 6,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--border-default)',
                   background: 'transparent',
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   fontSize: 10,
                   cursor: 'pointer',
                   justifySelf: 'start',
@@ -428,16 +428,16 @@ export function OverviewTab({
                 alignItems: 'center',
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg-strong)' }}>
                 活动时间线
               </span>
               <span
                 style={{
                   fontSize: 10,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   padding: '1px 6px',
                   borderRadius: 999,
-                  background: 'var(--surface-2)',
+                  background: 'var(--bg-surface)',
                 }}
               >
                 {filteredEvents.length} / {timelineEvents.length} 事件
@@ -454,9 +454,9 @@ export function OverviewTab({
                   flex: 1,
                   padding: '6px 10px',
                   borderRadius: 8,
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface)',
-                  color: 'var(--text)',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-overlay)',
+                  color: 'var(--fg-strong)',
                   fontSize: 11,
                   outline: 'none',
                 }}
@@ -500,7 +500,7 @@ export function OverviewTab({
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     fontSize: 9,
                     cursor: 'pointer',
                     padding: '2px 5px',
@@ -533,8 +533,8 @@ export function OverviewTab({
                       padding: '8px 10px',
                       borderRadius: 8,
                       background: isExpanded
-                        ? 'color-mix(in oklch, var(--accent) 4%, var(--surface))'
-                        : 'var(--surface)',
+                        ? 'color-mix(in oklch, var(--accent) 4%, var(--bg-overlay))'
+                        : 'var(--bg-overlay)',
                       alignItems: 'flex-start',
                       cursor: 'pointer',
                       borderLeft: `3px solid ${isExpanded ? config.color : 'transparent'}`,
@@ -552,7 +552,7 @@ export function OverviewTab({
                         <span
                           style={{
                             fontSize: 9,
-                            color: 'var(--text-3)',
+                            color: 'var(--fg-muted)',
                             fontVariantNumeric: 'tabular-nums',
                           }}
                         >
@@ -589,7 +589,7 @@ export function OverviewTab({
                         <span style={{ flex: 1 }} />
                         <ChevronDownIcon
                           size={9}
-                          color="var(--text-3)"
+                          color="var(--fg-muted)"
                           style={{
                             transition: 'transform 0.15s',
                             transform: isExpanded ? 'rotate(180deg)' : 'none',
@@ -599,7 +599,7 @@ export function OverviewTab({
                       <span
                         style={{
                           fontSize: 11,
-                          color: 'var(--text-2)',
+                          color: 'var(--fg-default)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: isExpanded ? 'normal' : 'nowrap',
@@ -618,10 +618,10 @@ export function OverviewTab({
                             marginTop: 2,
                           }}
                         >
-                          <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+                          <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
                             时间: {new Date(event.timestamp).toLocaleString()}
                           </span>
-                          <span style={{ fontSize: 9, color: 'var(--text-3)' }}>
+                          <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>
                             主体: {event.agentName}
                           </span>
                         </div>

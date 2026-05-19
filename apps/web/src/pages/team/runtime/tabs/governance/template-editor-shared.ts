@@ -1,16 +1,16 @@
 import type { WorkflowTemplateScale } from '@openAwork/web-client';
 
 export const ROLE_COLOR_MAP: Record<string, string> = {
-  团队领导: 'var(--warning, #f0b429)',
-  领导: 'var(--warning, #f0b429)',
-  团队负责人: 'var(--warning, #f0b429)',
-  规划: 'var(--warning, #f0b429)',
-  研究员: 'var(--accent, var(--accent, #5cd4c0))',
-  研究: 'var(--accent, var(--accent, #5cd4c0))',
-  执行者: 'var(--aux, var(--aux, #8b9cf5))',
-  执行: 'var(--aux, var(--aux, #8b9cf5))',
-  批评者: 'var(--danger, #f06b7e)',
-  审查: 'var(--danger, #f06b7e)',
+  团队领导: 'var(--warning))',
+  领导: 'var(--warning))',
+  团队负责人: 'var(--warning))',
+  规划: 'var(--warning))',
+  研究员: 'var(--accent))',
+  研究: 'var(--accent))',
+  执行者: 'var(--aux))',
+  执行: 'var(--aux))',
+  批评者: 'var(--danger))',
+  审查: 'var(--danger))',
 };
 
 export const BUILTIN_AGENT_LABELS: Record<string, string> = {
@@ -49,7 +49,7 @@ export const VARIANT_OPTIONS: Array<{ value: string; label: string; hint: string
 export const fieldLabelStyle = {
   fontSize: 10,
   fontWeight: 700 as const,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase' as const,
   letterSpacing: '0.05em',
 };
@@ -60,8 +60,8 @@ export const inputStyle = (valid?: boolean) => ({
   border: valid
     ? '1px solid color-mix(in oklch, var(--success) 40%, transparent)'
     : '1px solid var(--border-subtle)',
-  background: 'var(--bg)',
-  color: 'var(--text)',
+  background: 'var(--bg-base)',
+  color: 'var(--fg-strong)',
   fontSize: 13,
   outline: 'none',
   transition: 'border-color 0.15s',
@@ -75,8 +75,8 @@ export const pillButtonStyle = (active: boolean, color: string) => ({
   border: active
     ? `1px solid color-mix(in oklch, ${color} 50%, transparent)`
     : '1px solid var(--border-subtle)',
-  background: active ? `color-mix(in oklch, ${color} 8%, var(--bg))` : 'var(--surface-2)',
-  color: active ? color : 'var(--text-3)',
+  background: active ? `color-mix(in oklch, ${color} 8%, var(--bg-base))` : 'var(--bg-surface)',
+  color: active ? color : 'var(--fg-muted)',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',

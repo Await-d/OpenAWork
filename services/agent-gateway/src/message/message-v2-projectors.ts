@@ -10,7 +10,7 @@
 
 import { registerProjector } from '../session/sync-event.js';
 import { MessageEvents, SessionEvents, type SessionInfo, type DeepPartial } from '../session/sync-event.js';
-import { sqliteRun, sqliteGet } from '../db.js';
+import { sqliteRun, sqliteGet } from '../infra/db.js';
 import {
   type MessageInfo,
   type MessagePart,

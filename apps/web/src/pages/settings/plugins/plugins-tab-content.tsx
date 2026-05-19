@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { AIProviderRef } from '@openAwork/shared-ui';
-import { useAuthStore } from '../../../stores/auth.js';
+import { useAuthStore } from '../../../stores/auth/auth.js';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -27,8 +27,8 @@ interface PluginsTabContentProps {
 // ── Styles ────────────────────────────────────────────────────
 
 const CARD: CSSProperties = {
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 12,
   padding: '12px 14px',
 };
@@ -36,13 +36,13 @@ const CARD: CSSProperties = {
 const SECTION_TITLE: CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   marginBottom: 4,
 };
 
 const SECTION_DESC: CSSProperties = {
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   lineHeight: 1.5,
   marginBottom: 0,
 };
@@ -50,18 +50,18 @@ const SECTION_DESC: CSSProperties = {
 const LABEL: CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const SELECT_STYLE: CSSProperties = {
   appearance: 'none',
   WebkitAppearance: 'none',
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 8,
   padding: '7px 30px 7px 10px',
   fontSize: 12,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   width: '100%',
   outline: 'none',
   cursor: 'pointer',
@@ -84,16 +84,16 @@ const BADGE_ENABLED: CSSProperties = {
 
 const BADGE_DISABLED: CSSProperties = {
   ...BADGE_ENABLED,
-  color: 'var(--text-3)',
-  background: 'color-mix(in oklch, var(--text-3) 10%, transparent)',
+  color: 'var(--fg-muted)',
+  background: 'color-mix(in oklch, var(--fg-muted) 10%, transparent)',
 };
 
 const PARAM_CHIP: CSSProperties = {
   display: 'inline-block',
   fontSize: 11,
   fontWeight: 500,
-  color: 'var(--text-2)',
-  background: 'color-mix(in oklch, var(--text-2) 8%, transparent)',
+  color: 'var(--fg-default)',
+  background: 'color-mix(in oklch, var(--fg-default) 8%, transparent)',
   borderRadius: 4,
   padding: '2px 8px',
 };
@@ -115,7 +115,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
         border: 'none',
         padding: 0,
         cursor: 'pointer',
-        background: checked ? 'var(--accent)' : 'var(--border)',
+        background: checked ? 'var(--accent)' : 'var(--border-default)',
         flexShrink: 0,
         transition: 'background 180ms ease',
       }}
@@ -128,7 +128,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
           width: 20,
           height: 20,
           borderRadius: '50%',
-          background: 'var(--surface)',
+          background: 'var(--bg-overlay)',
           boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
           transition: 'left 180ms ease',
         }}
@@ -269,7 +269,7 @@ export function PluginsTabContent({
   const selectedPlugin = PLUGINS.find((p) => p.id === selectedPluginId);
 
   if (!loaded) {
-    return <div style={{ padding: 20, color: 'var(--text-3)', fontSize: 12 }}>加载中…</div>;
+    return <div style={{ padding: 20, color: 'var(--fg-muted)', fontSize: 12 }}>加载中…</div>;
   }
 
   return (
@@ -277,8 +277,8 @@ export function PluginsTabContent({
       {/* ── Left: Plugin list ── */}
       <div>
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>插件</div>
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>插件</div>
+          <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>
             配置可选 Tool 插件，默认均为禁用
           </div>
         </div>
@@ -300,7 +300,7 @@ export function PluginsTabContent({
                   cursor: 'pointer',
                   textAlign: 'left',
                   background: isActive ? 'var(--accent-muted)' : 'transparent',
-                  color: isActive ? 'var(--accent)' : 'var(--text-2)',
+                  color: isActive ? 'var(--accent)' : 'var(--fg-default)',
                   transition: 'background 150ms ease',
                 }}
               >
@@ -316,7 +316,7 @@ export function PluginsTabContent({
                     style={{
                       display: 'block',
                       fontSize: 10,
-                      color: 'var(--text-3)',
+                      color: 'var(--fg-muted)',
                       marginTop: 1,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
@@ -345,8 +345,8 @@ export function PluginsTabContent({
           <>
             {/* Header */}
             <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>图片插件</div>
-              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--fg-strong)' }}>图片插件</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>
                 为 Agent 提供专用图片生成 Tool。
               </div>
             </div>
@@ -453,7 +453,7 @@ export function PluginsTabContent({
                     padding: '10px 12px',
                     borderRadius: 8,
                     border: '1px solid var(--border-subtle)',
-                    background: 'color-mix(in oklch, var(--surface) 95%, transparent)',
+                    background: 'color-mix(in oklch, var(--bg-overlay) 95%, transparent)',
                   }}
                 >
                   <div
@@ -466,10 +466,10 @@ export function PluginsTabContent({
                     }}
                   />
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
                       {activeImageProvider.name}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                       {activeImageModel.label || activeImageModel.id}
                     </div>
                   </div>
@@ -491,7 +491,7 @@ export function PluginsTabContent({
                   style={{
                     fontSize: 13,
                     fontWeight: 700,
-                    color: 'var(--text)',
+                    color: 'var(--fg-strong)',
                     fontFamily: 'monospace',
                   }}
                 >
@@ -500,7 +500,7 @@ export function PluginsTabContent({
                 <div
                   style={{
                     fontSize: 11,
-                    color: imgPlugin.enabled ? 'var(--accent)' : 'var(--text-3)',
+                    color: imgPlugin.enabled ? 'var(--accent)' : 'var(--fg-muted)',
                     marginTop: 2,
                   }}
                 >
@@ -511,7 +511,7 @@ export function PluginsTabContent({
                 <div
                   style={{
                     fontSize: 11,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     marginTop: 4,
                   }}
                 >
@@ -535,7 +535,7 @@ export function PluginsTabContent({
             </div>
 
             {saving && (
-              <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-muted)', textAlign: 'right' }}>
                 保存中…
               </div>
             )}

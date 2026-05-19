@@ -74,7 +74,7 @@ const CONTAINER_STYLE: TeamConversationStyle = {
   flex: 1,
   minHeight: 0,
   overflow: 'hidden',
-  // 去掉 background: 'var(--bg)' — 让父级 LEFT_AREA_STYLE 的 background 透出，
+  // 去掉 background: 'var(--bg-base)' — 让父级 LEFT_AREA_STYLE 的 background 透出，
   // 避免双层 bg 叠加导致颜色偏差。
 };
 
@@ -87,8 +87,8 @@ const STATE_PANEL_STYLE: CSSProperties = {
   padding: 'var(--team-space-8)',
   textAlign: 'center',
   borderRadius: 'var(--team-radius-xl)',
-  border: '1px dashed color-mix(in srgb, var(--border) 72%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 70%, var(--bg))',
+  border: '1px dashed color-mix(in srgb, var(--border-default) 72%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
 };
 
 const SPINNER_STYLE: CSSProperties = {
@@ -111,8 +111,8 @@ const PUSH_STRIP_STYLE: CSSProperties = {
   flexDirection: 'column',
   gap: 6,
   padding: '8px 16px',
-  borderTop: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 70%, var(--bg))',
+  borderTop: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, var(--bg-base))',
   flexShrink: 0,
   maxHeight: 240,
   overflowY: 'auto',
@@ -230,7 +230,7 @@ function LoadingState() {
   return (
     <div style={STATE_PANEL_STYLE} role="status" aria-live="polite">
       <span style={SPINNER_STYLE} aria-hidden="true" />
-      <span style={{ fontSize: 'var(--team-font-sm)', color: 'var(--text-2)', fontWeight: 700 }}>
+      <span style={{ fontSize: 'var(--team-font-sm)', color: 'var(--fg-default)', fontWeight: 700 }}>
         正在连接团队...
       </span>
     </div>
@@ -245,13 +245,13 @@ function EmptyState({
   return (
     <div style={STATE_PANEL_STYLE}>
       <div style={{ display: 'grid', gap: 'var(--team-space-3)' }}>
-        <strong style={{ fontSize: 'var(--team-font-lg)', color: 'var(--text)' }}>
+        <strong style={{ fontSize: 'var(--team-font-lg)', color: 'var(--fg-strong)' }}>
           🤖 欢迎使用 AI 开发团队
         </strong>
-        <span style={{ color: 'var(--text-2)', lineHeight: 'var(--team-line-height-relaxed)' }}>
+        <span style={{ color: 'var(--fg-default)', lineHeight: 'var(--team-line-height-relaxed)' }}>
           你的团队已就绪：💬助手 · 📋规划师 · 🎯主管 · ⚡开发者 · 🧪测试员 · 🔍审查员
         </span>
-        <span style={{ fontSize: 'var(--team-font-xxs)', color: 'var(--text-3)' }}>
+        <span style={{ fontSize: 'var(--team-font-xxs)', color: 'var(--fg-muted)' }}>
           创建首个会话后，下方将出现统一对话区。
         </span>
       </div>
@@ -274,8 +274,8 @@ function EmptyState({
               padding: '0 var(--team-space-3)',
               borderRadius: 'var(--team-radius-pill)',
               border: '1px solid color-mix(in srgb, var(--accent) 34%, transparent)',
-              background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
-              color: 'var(--text)',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+              color: 'var(--fg-strong)',
               fontSize: 'var(--team-font-xs)',
               fontWeight: 700,
               cursor: onSelectSuggestion ? 'pointer' : 'not-allowed',
@@ -303,16 +303,16 @@ function ErrorState({
       style={{
         ...STATE_PANEL_STYLE,
         borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-        background: 'color-mix(in srgb, var(--danger) 7%, var(--surface))',
+        background: 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))',
       }}
       role="alert"
     >
       <div style={{ display: 'grid', gap: 'var(--team-space-2)' }}>
-        <strong style={{ fontSize: 'var(--team-font-md)', color: 'var(--text)' }}>
+        <strong style={{ fontSize: 'var(--team-font-md)', color: 'var(--fg-strong)' }}>
           ⚠️ 网络连接已断开
         </strong>
-        <span style={{ color: 'var(--text-2)' }}>当前离线 — 可查看历史记录，无法执行新任务</span>
-        <span style={{ color: 'var(--text-3)', fontSize: 'var(--team-font-xxs)' }}>{error}</span>
+        <span style={{ color: 'var(--fg-default)' }}>当前离线 — 可查看历史记录，无法执行新任务</span>
+        <span style={{ color: 'var(--fg-muted)', fontSize: 'var(--team-font-xxs)' }}>{error}</span>
       </div>
       <button
         type="button"
@@ -322,8 +322,8 @@ function ErrorState({
           padding: '0 var(--team-space-4)',
           borderRadius: 'var(--team-radius-pill)',
           border: '1px solid color-mix(in srgb, var(--danger) 44%, transparent)',
-          background: 'color-mix(in srgb, var(--danger) 12%, var(--surface))',
-          color: 'var(--text)',
+          background: 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))',
+          color: 'var(--fg-strong)',
           fontSize: 'var(--team-font-xs)',
           fontWeight: 800,
           cursor: onRetryConnection ? 'pointer' : 'not-allowed',
@@ -369,8 +369,8 @@ function PushMessageCard({ message }: { message: PushMessage }) {
           borderRadius: 8,
           border: '1px solid color-mix(in srgb, var(--success) 24%, transparent)',
           borderLeft: '3px solid var(--success)',
-          background: 'color-mix(in srgb, var(--success) 5%, var(--surface))',
-          color: 'var(--text-2)',
+          background: 'color-mix(in srgb, var(--success) 5%, var(--bg-overlay))',
+          color: 'var(--fg-default)',
           fontSize: 11,
         }}
       >
@@ -378,7 +378,7 @@ function PushMessageCard({ message }: { message: PushMessage }) {
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {message.body}
         </span>
-        <time style={{ fontSize: 10, color: 'var(--text-3)' }}>{message.timestamp}</time>
+        <time style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{message.timestamp}</time>
       </article>
     );
   }
@@ -392,18 +392,18 @@ function PushMessageCard({ message }: { message: PushMessage }) {
         borderRadius: 10,
         border: `1px solid color-mix(in srgb, ${meta.color} 28%, transparent)`,
         borderLeft: `3px solid ${meta.color}`,
-        background: `color-mix(in srgb, ${meta.color} 7%, var(--surface))`,
+        background: `color-mix(in srgb, ${meta.color} 7%, var(--bg-overlay))`,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <strong style={{ color: 'var(--text)', fontSize: 12 }}>
+        <strong style={{ color: 'var(--fg-strong)', fontSize: 12 }}>
           {meta.icon} {message.title}
         </strong>
-        <time style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-3)' }}>
+        <time style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--fg-muted)' }}>
           {message.timestamp}
         </time>
       </div>
-      <span style={{ color: 'var(--text-2)', lineHeight: 1.55, fontSize: 12 }}>{message.body}</span>
+      <span style={{ color: 'var(--fg-default)', lineHeight: 1.55, fontSize: 12 }}>{message.body}</span>
       {message.actions ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {message.actions.map((action) => (
@@ -415,8 +415,8 @@ function PushMessageCard({ message }: { message: PushMessage }) {
                 padding: '0 10px',
                 borderRadius: 999,
                 border: `1px solid color-mix(in srgb, ${meta.color} 34%, transparent)`,
-                background: `color-mix(in srgb, ${meta.color} 9%, var(--surface))`,
-                color: 'var(--text)',
+                background: `color-mix(in srgb, ${meta.color} 9%, var(--bg-overlay))`,
+                color: 'var(--fg-strong)',
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: 'pointer',

@@ -29,7 +29,7 @@
 
 .omo-skel {
   animation: omo-pulse 1.5s ease-in-out infinite;
-  background: var(--surface-2);
+  background: var(--bg-surface);
   border-radius: 4px;
 }
 
@@ -64,7 +64,7 @@
 
 .omo-chat-session-skel {
   animation: omo-chat-session-pulse 1.45s ease-in-out infinite;
-  background: var(--surface-2);
+  background: var(--bg-surface);
   border-radius: 6px;
 }
 

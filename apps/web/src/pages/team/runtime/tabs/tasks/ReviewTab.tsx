@@ -83,7 +83,7 @@ export function ReviewTab({
     <div style={{ display: 'grid', gap: 10 }}>
       {/* Header */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>评审队列</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>评审队列</span>
         <span
           style={{
             padding: '1px 8px',
@@ -109,15 +109,15 @@ export function ReviewTab({
             padding: '10px 12px',
             borderRadius: 10,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--card-bg)',
+            background: 'var(--bg-overlay)',
             boxShadow: 'var(--shadow-sm)',
           }}
         >
           <div style={{ display: 'grid', gap: 3 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontWeight: 700 }}>
               当前评审会话
             </span>
-            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-strong)' }}>
               {selectedTeam.title}
             </span>
           </div>
@@ -190,7 +190,7 @@ export function ReviewTab({
                       style={{
                         fontSize: 13,
                         fontWeight: 700,
-                        color: 'var(--text)',
+                        color: 'var(--fg-strong)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -238,11 +238,11 @@ export function ReviewTab({
                         transform: isExpanded ? 'rotate(180deg)' : 'none',
                       }}
                     >
-                      <ChevronDownIcon size={10} color="var(--text-3)" />
+                      <ChevronDownIcon size={10} color="var(--fg-muted)" />
                     </button>
                   </div>
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55 }}>
+                <span style={{ fontSize: 12, color: 'var(--fg-default)', lineHeight: 1.55 }}>
                   {card.summary}
                 </span>
 
@@ -263,7 +263,7 @@ export function ReviewTab({
                           borderRadius: 6,
                           background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
                           fontSize: 11,
-                          color: 'var(--text-2)',
+                          color: 'var(--fg-default)',
                           borderLeft: '2px solid var(--accent)',
                         }}
                       >
@@ -299,9 +299,9 @@ export function ReviewTab({
                         flex: 1,
                         padding: '6px 10px',
                         borderRadius: 6,
-                        border: '1px solid var(--border)',
-                        background: 'var(--surface)',
-                        color: 'var(--text)',
+                        border: '1px solid var(--border-default)',
+                        background: 'var(--bg-overlay)',
+                        color: 'var(--fg-strong)',
                         fontSize: 11,
                         outline: 'none',
                       }}
@@ -315,7 +315,7 @@ export function ReviewTab({
                         borderRadius: 6,
                         border: 'none',
                         background: 'var(--accent)',
-                        color: 'var(--bg)',
+                        color: 'var(--bg-base)',
                         cursor: reviewBusy || !commentInput.trim() ? 'not-allowed' : 'pointer',
                         opacity: reviewBusy || !commentInput.trim() ? 0.5 : 1,
                         fontSize: 10,
@@ -355,9 +355,9 @@ export function ReviewTab({
                         style={{
                           padding: '4px 8px',
                           borderRadius: 6,
-                          border: '1px solid var(--border)',
+                          border: '1px solid var(--border-default)',
                           background: 'transparent',
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontSize: 10,
                           fontWeight: 600,
                           cursor: reviewBusy || !card.sessionId ? 'not-allowed' : 'pointer',
@@ -367,7 +367,7 @@ export function ReviewTab({
                           opacity: reviewBusy || !card.sessionId ? 0.5 : 1,
                         }}
                       >
-                        <Icon name="comment" size={9} color="var(--text-3)" /> 评论
+                        <Icon name="comment" size={9} color="var(--fg-muted)" /> 评论
                       </button>
                       <button
                         type="button"
@@ -382,7 +382,7 @@ export function ReviewTab({
                           borderRadius: 6,
                           border: 'none',
                           background: 'var(--success)',
-                          color: 'var(--fg-on-accent, #ffffff)',
+                          color: 'var(--fg-on-accent))',
                           fontSize: 10,
                           fontWeight: 700,
                           cursor: reviewBusy || !canReply ? 'not-allowed' : 'pointer',
@@ -393,7 +393,7 @@ export function ReviewTab({
                           transition: 'opacity 0.15s',
                         }}
                       >
-                        <Icon name="check" size={9} color="var(--fg-on-accent, #ffffff)" /> 通过
+                        <Icon name="check" size={9} color="var(--fg-on-accent))" /> 通过
                       </button>
                       <button
                         type="button"
@@ -408,7 +408,7 @@ export function ReviewTab({
                           borderRadius: 6,
                           border: 'none',
                           background: 'var(--danger)',
-                          color: 'var(--fg-on-accent, #ffffff)',
+                          color: 'var(--fg-on-accent))',
                           fontSize: 10,
                           fontWeight: 700,
                           cursor: reviewBusy || !canReply ? 'not-allowed' : 'pointer',
@@ -419,7 +419,7 @@ export function ReviewTab({
                           transition: 'opacity 0.15s',
                         }}
                       >
-                        <Icon name="x" size={9} color="var(--fg-on-accent, #ffffff)" /> 驳回
+                        <Icon name="x" size={9} color="var(--fg-on-accent))" /> 驳回
                       </button>
                     </>
                   )}
@@ -433,9 +433,9 @@ export function ReviewTab({
                         style={{
                           padding: '4px 8px',
                           borderRadius: 6,
-                          border: '1px solid var(--border)',
+                          border: '1px solid var(--border-default)',
                           background: 'transparent',
-                          color: 'var(--text-3)',
+                          color: 'var(--fg-muted)',
                           fontSize: 10,
                           fontWeight: 600,
                           cursor: 'pointer',
@@ -444,7 +444,7 @@ export function ReviewTab({
                           gap: 3,
                         }}
                       >
-                        <UndoIcon size={9} color="var(--text-3)" /> 撤回
+                        <UndoIcon size={9} color="var(--fg-muted)" /> 撤回
                       </button>
                     </>
                   )}
@@ -469,7 +469,7 @@ export function ReviewTab({
               style={{
                 fontSize: 11,
                 fontWeight: 700,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
               }}
@@ -487,8 +487,8 @@ export function ReviewTab({
                     boxShadow: '0 0 6px var(--warning)60',
                   }}
                 />
-                <span style={{ fontSize: 11, color: 'var(--text-2)', flex: 1 }}>待审</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-default)', flex: 1 }}>待审</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>
                   {pendingCount}
                 </span>
               </div>
@@ -502,8 +502,8 @@ export function ReviewTab({
                     boxShadow: '0 0 6px var(--success)60',
                   }}
                 />
-                <span style={{ fontSize: 11, color: 'var(--text-2)', flex: 1 }}>已通过</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-default)', flex: 1 }}>已通过</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>
                   {approvedCount}
                 </span>
               </div>
@@ -517,8 +517,8 @@ export function ReviewTab({
                     boxShadow: '0 0 6px var(--danger)60',
                   }}
                 />
-                <span style={{ fontSize: 11, color: 'var(--text-2)', flex: 1 }}>已驳回</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-default)', flex: 1 }}>已驳回</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>
                   {rejectedCount}
                 </span>
               </div>

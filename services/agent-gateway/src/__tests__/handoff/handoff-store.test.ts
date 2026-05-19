@@ -5,7 +5,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type * as DbModule from '../../db.js';
+import type * as DbModule from '../../infra/db.js';
 import type * as HandoffStoreModule from '../../handoff/store/handoff-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -34,7 +34,7 @@ function seedSession(sessionId: string, userId: string): void {
 }
 
 beforeAll(async () => {
-  dbModule = await import('../../db.js');
+  dbModule = await import('../../infra/db.js');
   await dbModule.migrate();
   store = await import('../../handoff/store/handoff-store.js');
 });

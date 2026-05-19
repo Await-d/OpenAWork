@@ -12,10 +12,10 @@ import type {
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
 import { z } from 'zod';
-import type { JwtPayload } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
 import { COMPACTION_SETTINGS_KEY, readCompactionSettings } from '../compaction/compaction-policy.js';
-import { sqliteGet, sqliteRun } from '../db.js';
-import { writeAuditLog } from '../audit-log.js';
+import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { writeAuditLog } from '../infra/audit-log.js';
 import {
   modelRequestSchema,
   type ModelRouteConfig,
@@ -136,10 +136,10 @@ import {
   checkPrometheusToolGuard,
   PLANNING_CONSULT_WARNING,
   PROMETHEUS_WORKFLOW_REMINDER,
-} from '../prometheus-md-only.js';
+} from '../app/prometheus-md-only.js';
 import { shouldInjectNotepadDirective, NOTEPAD_DIRECTIVE } from '../session/sisyphus-junior-notepad.js';
 import { runModelRound } from './stream-model-round.js';
-import { dispatchChatMessage } from '../plugin-host.js';
+import { dispatchChatMessage } from '../runtime/plugin-host.js';
 import {
   clearSessionRuntimeThread,
   SESSION_RUNTIME_THREAD_HEARTBEAT_MS,

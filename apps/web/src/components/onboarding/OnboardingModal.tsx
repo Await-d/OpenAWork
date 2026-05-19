@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useAuthStore } from '../../stores/auth.js';
+import { useAuthStore } from '../../stores/auth/auth.js';
 import { getPairingQr, login, type PairingQrResponse } from '@openAwork/web-client';
 import { PairingPanel, OAuthButton } from '@openAwork/shared-ui';
-import { logger } from '../../utils/logger.js';
+import { logger } from '../../utils/log/logger.js';
 import type { PairingMode } from '@openAwork/shared-ui';
 import {
   type DesktopGatewayMode,
@@ -23,11 +23,11 @@ import {
 } from '../../utils/gateway/desktop-gateway.js';
 
 const inputStyle: React.CSSProperties = {
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
+  background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-default)',
   borderRadius: 8,
   padding: '8px 12px',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   fontSize: 12,
   outline: 'none',
   width: '100%',
@@ -159,7 +159,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
         position: 'fixed',
         inset: 0,
         zIndex: 9999,
-        background: 'oklch(0 0 0 / 0.7)',
+        background: 'rgba(0, 0, 0, 0.7)',
         backdropFilter: 'blur(6px)',
         display: 'flex',
         alignItems: 'center',
@@ -168,8 +168,8 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
     >
       <div
         style={{
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
           borderRadius: 16,
           padding: '2rem',
           width: step === 'mode' ? 680 : 420,
@@ -182,7 +182,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
         <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)', margin: 0 }}>
           OpenAWork Desktop
         </h1>
-        <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0, lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0, lineHeight: 1.6 }}>
           桌面端会使用默认本地身份进入工作台。首次启动只需要选择网关来源，后续可在设置中切换。
         </p>
 
@@ -206,14 +206,14 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 background: 'var(--accent-muted)',
               }}
             >
-              <strong style={{ fontSize: 15, color: 'var(--text)' }}>使用本地网关</strong>
-              <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+              <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>使用本地网关</strong>
+              <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
                 适合单机使用。桌面端会启动内置 Gateway，并自动进入工作台。
               </span>
               <label
                 style={{
                   fontSize: 12,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 4,
@@ -236,7 +236,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 style={{
                   marginTop: 'auto',
                   background: 'var(--accent)',
-                  color: 'var(--accent-text)',
+                  color: 'var(--fg-on-accent)',
                   border: 'none',
                   borderRadius: 8,
                   padding: '0.7rem',
@@ -261,13 +261,13 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 gap: 12,
                 minHeight: 230,
                 padding: 16,
-                border: '1px solid var(--border)',
+                border: '1px solid var(--border-default)',
                 borderRadius: 14,
-                background: 'var(--surface-hover)',
+                background: 'var(--bg-hover)',
               }}
             >
-              <strong style={{ fontSize: 15, color: 'var(--text)' }}>连接远程网关</strong>
-              <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+              <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>连接远程网关</strong>
+              <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
                 适合连接团队服务器、NAS、云端部署或已经运行的 OpenAWork Gateway。
               </span>
               <button
@@ -276,8 +276,8 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 style={{
                   marginTop: 'auto',
                   background: 'transparent',
-                  color: 'var(--text)',
-                  border: '1px solid var(--border)',
+                  color: 'var(--fg-strong)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   padding: '0.7rem',
                   fontSize: 12,
@@ -294,7 +294,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
             <label
               style={{
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
@@ -315,7 +315,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
             <label
               style={{
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
@@ -334,7 +334,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
             <label
               style={{
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
@@ -357,8 +357,8 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'transparent',
-                  color: 'var(--text-3)',
-                  border: '1px solid var(--border)',
+                  color: 'var(--fg-muted)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   padding: '0.6rem',
                   fontSize: 12,
@@ -374,7 +374,7 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'var(--accent)',
-                  color: 'var(--accent-text)',
+                  color: 'var(--fg-on-accent)',
                   border: 'none',
                   borderRadius: 8,
                   padding: '0.6rem',
@@ -543,7 +543,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
         position: 'fixed',
         inset: 0,
         zIndex: 9999,
-        background: 'oklch(0 0 0 / 0.7)',
+        background: 'rgba(0, 0, 0, 0.7)',
         backdropFilter: 'blur(6px)',
         display: 'flex',
         alignItems: 'center',
@@ -553,8 +553,8 @@ function BrowserOnboardingModal({ onComplete }: Props) {
       <div
         style={{
           position: 'relative',
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
           borderRadius: 16,
           padding: '2rem',
           width: step === 'mode' ? 680 : 400,
@@ -578,8 +578,8 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               height: 28,
               borderRadius: 6,
               background: 'transparent',
-              border: '1px solid var(--border)',
-              color: 'var(--text-3)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--fg-muted)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -603,7 +603,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
         <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>OpenAWork</h1>
         {step === 'mode' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>
+            <p style={{ fontSize: 12, color: 'var(--fg-muted)', margin: 0 }}>
               首次启动桌面端时，请选择服务端连接方式。
             </p>
             <div
@@ -625,14 +625,14 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                   background: 'var(--accent-muted)',
                 }}
               >
-                <strong style={{ fontSize: 15, color: 'var(--text)' }}>启动本地服务端</strong>
-                <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+                <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>启动本地服务端</strong>
+                <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
                   适合单机使用。桌面端会启动内置 Gateway，并自动连接到本机地址。
                 </span>
                 <label
                   style={{
                     fontSize: 12,
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 4,
@@ -658,7 +658,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                   style={{
                     marginTop: 'auto',
                     background: 'var(--accent)',
-                    color: 'var(--accent-text)',
+                    color: 'var(--fg-on-accent)',
                     border: 'none',
                     borderRadius: 8,
                     padding: '0.7rem',
@@ -683,13 +683,13 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                   gap: 12,
                   minHeight: 230,
                   padding: 16,
-                  border: '1px solid var(--border)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 14,
-                  background: 'var(--surface-hover)',
+                  background: 'var(--bg-hover)',
                 }}
               >
-                <strong style={{ fontSize: 15, color: 'var(--text)' }}>连接远程服务端</strong>
-                <span style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.55 }}>
+                <strong style={{ fontSize: 15, color: 'var(--fg-strong)' }}>连接远程服务端</strong>
+                <span style={{ color: 'var(--fg-muted)', fontSize: 12, lineHeight: 1.55 }}>
                   适合连接团队服务器、NAS、云端部署或已经运行的 OpenAWork Gateway。
                 </span>
                 <button
@@ -698,8 +698,8 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                   style={{
                     marginTop: 'auto',
                     background: 'transparent',
-                    color: 'var(--text)',
-                    border: '1px solid var(--border)',
+                    color: 'var(--fg-strong)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: 8,
                     padding: '0.7rem',
                     fontSize: 12,
@@ -714,11 +714,11 @@ function BrowserOnboardingModal({ onComplete }: Props) {
           </div>
         ) : step === 'connect' ? (
           <>
-            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>输入网关地址以连接。</p>
+            <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>输入网关地址以连接。</p>
             <label
               style={{
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
@@ -768,7 +768,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'var(--accent)',
-                  color: 'var(--accent-text)',
+                  color: 'var(--fg-on-accent)',
                   border: 'none',
                   borderRadius: 8,
                   padding: '0.6rem',
@@ -788,7 +788,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
                 cursor: 'pointer',
                 alignSelf: 'center',
@@ -805,7 +805,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             }}
             style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
           >
-            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>登录您的账号。</p>
+            <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>登录您的账号。</p>
             <OAuthButton
               providerName="GitHub"
               isAuthorized={false}
@@ -813,9 +813,9 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               onRevoke={() => {}}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0.5rem 0' }}>
-              <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border)' }} />
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>或使用邮箱</span>
-              <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border)' }} />
+              <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }} />
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>或使用邮箱</span>
+              <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--border-default)' }} />
             </div>
             {loginError && (
               <div
@@ -834,7 +834,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             <label
               style={{
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
@@ -853,7 +853,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
             <label
               style={{
                 fontSize: 12,
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
@@ -876,8 +876,8 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'transparent',
-                  color: 'var(--text-3)',
-                  border: '1px solid var(--border)',
+                  color: 'var(--fg-muted)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   padding: '0.6rem',
                   fontSize: 12,
@@ -892,7 +892,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'var(--accent)',
-                  color: 'var(--accent-text)',
+                  color: 'var(--fg-on-accent)',
                   border: 'none',
                   borderRadius: 8,
                   padding: '0.6rem',
@@ -911,7 +911,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--text-3)',
+                color: 'var(--fg-muted)',
                 fontSize: 12,
                 cursor: 'pointer',
                 textDecoration: 'underline',
@@ -924,7 +924,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
           </form>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>将另一台设备与此工作区配对。</p>
+            <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>将另一台设备与此工作区配对。</p>
             <PairingPanel
               mode="host"
               host={{
@@ -938,13 +938,13 @@ function BrowserOnboardingModal({ onComplete }: Props) {
               onModeChange={(_mode: PairingMode) => {}}
             />
             {pairingLoading ? (
-              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>正在生成配对二维码…</p>
+              <p style={{ fontSize: 12, color: 'var(--fg-muted)' }}>正在生成配对二维码…</p>
             ) : null}
             {pairingError ? (
               <p style={{ fontSize: 12, color: 'var(--danger)' }}>{pairingError}</p>
             ) : null}
             {pairingQr ? (
-              <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Gateway: {pairingQr.hostUrl}</p>
+              <p style={{ fontSize: 11, color: 'var(--fg-muted)' }}>Gateway: {pairingQr.hostUrl}</p>
             ) : null}
             <div style={{ display: 'flex', gap: 8 }}>
               <button
@@ -953,8 +953,8 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'transparent',
-                  color: 'var(--text-3)',
-                  border: '1px solid var(--border)',
+                  color: 'var(--fg-muted)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 8,
                   padding: '0.6rem',
                   fontSize: 12,
@@ -969,7 +969,7 @@ function BrowserOnboardingModal({ onComplete }: Props) {
                 style={{
                   flex: 1,
                   background: 'var(--accent)',
-                  color: 'var(--accent-text)',
+                  color: 'var(--fg-on-accent)',
                   border: 'none',
                   borderRadius: 8,
                   padding: '0.6rem',

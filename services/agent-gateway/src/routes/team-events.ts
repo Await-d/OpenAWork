@@ -6,7 +6,7 @@
 
 import type { WebSocket } from '@fastify/websocket';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { JwtPayload } from '../auth.js';
+import type { JwtPayload } from '../infra/auth.js';
 import { subscribeToTeamEvents } from '../handoff/bus/team-events-bus.js';
 
 export async function teamEventsRoutes(app: FastifyInstance): Promise<void> {

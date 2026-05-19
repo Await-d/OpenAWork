@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createAgentsClient, createCapabilitiesClient } from '@openAwork/web-client';
 import type { CapabilityDescriptor, CoreRole, ManagedAgentRecord } from '@openAwork/shared';
 import { FIXED_TEAM_CORE_ROLE_BINDINGS, FIXED_TEAM_CORE_ROLE_ORDER } from '@openAwork/shared';
-import { useAuthStore } from '../../../../stores/auth.js';
+import { useAuthStore } from '../../../../stores/auth/auth.js';
 
 const EXECUTION_ROLES: CoreRole[] = [...FIXED_TEAM_CORE_ROLE_ORDER];
 

@@ -28,8 +28,8 @@ const DRAWER_STYLE: CSSProperties = {
   left: 0,
   right: 0,
   zIndex: 100,
-  borderTop: '1px solid color-mix(in srgb, var(--border) 82%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 96%, var(--bg))',
+  borderTop: '1px solid color-mix(in srgb, var(--border-default) 82%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 96%, var(--bg-base))',
   boxShadow: '0 -4px 24px rgba(0,0,0,0.08)',
   transition: 'transform 200ms ease',
 };
@@ -48,9 +48,9 @@ const CLOSE_BUTTON_STYLE: CSSProperties = {
   width: 24,
   height: 24,
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 92%, var(--bg))',
-  color: 'var(--text-3)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 92%, var(--bg-base))',
+  color: 'var(--fg-muted)',
   fontSize: 14,
   lineHeight: 1,
   cursor: 'pointer',
@@ -61,7 +61,7 @@ const TAB_BAR_STYLE: CSSProperties = {
   gap: 4,
   padding: '4px 16px',
   overflowX: 'auto',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+  borderBottom: '1px solid color-mix(in srgb, var(--border-default) 60%, transparent)',
 };
 
 const TAB_STYLE: CSSProperties = {
@@ -86,7 +86,7 @@ const CONTENT_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const REVIEW_CONTENT_STYLE: CSSProperties = {
@@ -94,7 +94,7 @@ const REVIEW_CONTENT_STYLE: CSSProperties = {
   maxHeight: 280,
   overflowY: 'auto',
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const LAYER_LABELS: Record<TeamRoleLayer, string> = {
@@ -151,7 +151,7 @@ export function LayerConversationDrawer({
         }}
       >
         <span style={{ fontSize: 14, fontWeight: 800 }}>{collapsed ? '▲' : '▼'} 层级对话</span>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{nodeList.length} 个 session</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{nodeList.length} 个 session</span>
         {onClose ? (
           <button
             type="button"
@@ -180,12 +180,12 @@ export function LayerConversationDrawer({
                   style={{
                     ...TAB_STYLE,
                     background: isActive
-                      ? 'color-mix(in srgb, var(--accent) 14%, var(--surface))'
+                      ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-overlay))'
                       : 'transparent',
                     borderColor: isActive
                       ? 'color-mix(in srgb, var(--accent) 40%, transparent)'
                       : 'transparent',
-                    color: isActive ? 'var(--text)' : 'var(--text-3)',
+                    color: isActive ? 'var(--fg-strong)' : 'var(--fg-muted)',
                   }}
                   onClick={() => setActiveTab(node.sessionId)}
                 >
@@ -210,7 +210,7 @@ export function LayerConversationDrawer({
                   style={{
                     ...REVIEW_CONTENT_STYLE,
                     fontStyle: 'italic',
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                   }}
                 >
                   等待审查结果...
@@ -222,7 +222,7 @@ export function LayerConversationDrawer({
               <div
                 style={{
                   ...REVIEW_CONTENT_STYLE,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 选择一个 tab 查看详情

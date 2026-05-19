@@ -16,7 +16,7 @@
  *   - docs/team-architecture-l1-3-streaming-handoff-spec.md §1.1.3
  */
 
-import { sqliteAll, sqliteRun as dbSqliteRun } from '../../db.js';
+import { sqliteAll, sqliteRun as dbSqliteRun } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
 import { createHandoff } from '../store/handoff-store.js';

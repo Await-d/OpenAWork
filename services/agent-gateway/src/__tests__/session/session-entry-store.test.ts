@@ -22,7 +22,7 @@ interface SessionRow {
 let sessionRows: SessionRow[] = [];
 let entryRows: SessionEntryRow[] = [];
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteRun: (...args: unknown[]) => {
     const [sql, params] = args as [string, unknown[]];
     if (sql.includes('INSERT') && sql.includes('session_entry')) {

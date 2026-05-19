@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ActiveSelectionRef, ImageGenerationDefaultsRef } from '@openAwork/shared-ui';
-import type { ThinkingDefaultsRef } from '../settings-types.js';
+import type { ThinkingDefaultsRef } from '../state/settings-types.js';
 import {
   DEFAULT_IMAGE_GENERATION_DEFAULTS,
   DEFAULT_THINKING_DEFAULTS,

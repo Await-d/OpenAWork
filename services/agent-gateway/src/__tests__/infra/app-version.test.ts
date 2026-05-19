@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadAppVersion } from '../../app-version.js';
+import { loadAppVersion } from '../../app/app-version.js';
 
 describe('loadAppVersion', () => {
   it('prefers OPENAWORK_APP_VERSION env over package.json walk', () => {

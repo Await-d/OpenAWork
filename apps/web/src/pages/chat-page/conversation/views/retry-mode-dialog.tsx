@@ -37,8 +37,8 @@ export default function RetryModeDialog({
         style={{
           width: 'min(520px, 100%)',
           borderRadius: 18,
-          border: '1px solid var(--border)',
-          background: 'var(--surface)',
+          border: '1px solid var(--border-default)',
+          background: 'var(--bg-overlay)',
           boxShadow: 'var(--shadow-xl)',
           padding: '20px 20px 18px',
           display: 'flex',
@@ -47,8 +47,8 @@ export default function RetryModeDialog({
         }}
       >
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>选择重试方式</div>
-          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--text-2)' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-strong)' }}>选择重试方式</div>
+          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: 'var(--fg-default)' }}>
             你可以清空这轮回答后在当前会话重新生成，也可以从这里新建会话，避免影响现有历史。
           </div>
         </div>
@@ -57,11 +57,11 @@ export default function RetryModeDialog({
           style={{
             borderRadius: 12,
             border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-2)',
+            background: 'var(--bg-overlay)',
             padding: '10px 12px',
             fontSize: 12,
             lineHeight: 1.6,
-            color: 'var(--text-2)',
+            color: 'var(--fg-default)',
             whiteSpace: 'pre-wrap',
           }}
         >
@@ -76,9 +76,9 @@ export default function RetryModeDialog({
               height: 34,
               padding: '0 14px',
               borderRadius: 10,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--text-2)',
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-overlay)',
+              color: 'var(--fg-default)',
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 600,
@@ -93,9 +93,9 @@ export default function RetryModeDialog({
               height: 34,
               padding: '0 14px',
               borderRadius: 10,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--text)',
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-overlay)',
+              color: 'var(--fg-strong)',
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 600,
@@ -112,7 +112,7 @@ export default function RetryModeDialog({
               borderRadius: 10,
               border: '1px solid var(--accent)',
               background: 'var(--accent)',
-              color: 'var(--accent-text)',
+              color: 'var(--fg-on-accent)',
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 700,

@@ -25,7 +25,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteRun } from '../../db.js';
+import { sqliteRun } from '../../infra/db.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 import type { HandoffRecord, HandoffRoleLayer } from '../store/handoff-store.js';
 import { getTeamConstitution } from '../../team/team-constitution-store.js';

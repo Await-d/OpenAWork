@@ -67,7 +67,7 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--text-3)',
+          color: 'var(--fg-muted)',
           fontSize: 12,
         }}
       >
@@ -101,7 +101,7 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
         flex: 1,
         minHeight: 0,
         overflowY: 'auto',
-        background: 'var(--surface)',
+        background: 'var(--bg-overlay)',
         padding: '20px 24px',
       }}
     >
@@ -111,8 +111,8 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
           maxWidth: 760,
           margin: '0 auto',
           padding: 24,
-          background: 'var(--fg-on-accent, #ffffff)',
-          color: 'var(--bg-overlay, #121721)',
+          background: 'var(--fg-on-accent))',
+          color: 'var(--bg-overlay))',
           border: '1px solid var(--border-subtle)',
           borderRadius: 8,
           boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
@@ -130,7 +130,7 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
             maxWidth: 760,
             margin: '12px auto 0',
             fontSize: 11,
-            color: 'var(--text-3)',
+            color: 'var(--fg-muted)',
           }}
         >
           <summary style={{ cursor: 'pointer' }}>解析警告 ({state.warnings.length})</summary>

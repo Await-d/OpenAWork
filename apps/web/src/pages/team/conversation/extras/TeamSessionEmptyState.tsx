@@ -157,10 +157,10 @@ const ROW_STYLE: CSSProperties = {
   padding: '8px 14px',
   margin: '12px auto',
   borderRadius: 999,
-  border: '1px solid color-mix(in srgb, var(--border) 40%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 70%, transparent)',
   fontSize: 11,
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   fontWeight: 500,
 };
 
@@ -182,7 +182,7 @@ const RECEPTION_CARD_STYLE: CSSProperties = {
   maxWidth: 560,
   borderRadius: 16,
   border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
-  background: 'color-mix(in srgb, var(--accent) 5%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 5%, var(--bg-overlay))',
 };
 
 const CARD_HEADER_STYLE: CSSProperties = {
@@ -209,13 +209,13 @@ const CARD_BADGE_STYLE: CSSProperties = {
 const CARD_TITLE_STYLE: CSSProperties = {
   fontSize: 15,
   fontWeight: 800,
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
   lineHeight: 1.3,
 };
 
 const CARD_SUBTITLE_STYLE: CSSProperties = {
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   lineHeight: 1.55,
 };
 
@@ -224,7 +224,7 @@ const SECTION_LABEL_STYLE: CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
   marginBottom: 6,
 };
 
@@ -240,8 +240,8 @@ const ROLE_PILL_STYLE: CSSProperties = {
   gap: 8,
   padding: '8px 10px',
   borderRadius: 10,
-  background: 'color-mix(in srgb, var(--surface) 80%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   fontSize: 12,
 };
 
@@ -258,36 +258,36 @@ const OPTIONAL_CHIP_STYLE: CSSProperties = {
   gap: 6,
   padding: '4px 10px',
   borderRadius: 999,
-  background: 'color-mix(in srgb, var(--surface) 80%, transparent)',
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   fontSize: 11,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
 };
 
 const HINT_BLOCK_STYLE: CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
-  background: 'color-mix(in srgb, var(--bg-2) 50%, var(--surface))',
+  background: 'color-mix(in srgb, var(--bg-overlay) 50%, var(--bg-overlay))',
   border: '1px dashed color-mix(in srgb, var(--accent) 30%, transparent)',
   fontSize: 12,
-  color: 'var(--text-2)',
+  color: 'var(--fg-default)',
   lineHeight: 1.6,
 };
 
 function colorForRole(role: string): string {
   switch (role) {
     case 'planner':
-      return 'var(--accent, var(--accent, #5cd4c0))';
+      return 'var(--accent))';
     case 'researcher':
-      return 'var(--chart-7, var(--chart-7, #67e8f9))';
+      return 'var(--chart-7))';
     case 'executor':
-      return 'var(--success, var(--success, #3dd49a))';
+      return 'var(--success))';
     case 'reviewer':
-      return 'var(--warning, var(--warning, #f0b429))';
+      return 'var(--warning))';
     case 'leader':
-      return 'var(--chart-5, var(--chart-5, #c4b5fd))';
+      return 'var(--chart-5))';
     default:
-      return 'var(--fg-muted, #7b8a9e)';
+      return 'var(--fg-muted))';
   }
 }
 
@@ -389,10 +389,10 @@ function ReceptionStarterCard({
                   aria-hidden
                   style={{ ...ROLE_DOT_STYLE, background: colorForRole(binding.role) }}
                 />
-                <span style={{ fontWeight: 700, color: 'var(--text)' }}>{binding.role}</span>
+                <span style={{ fontWeight: 700, color: 'var(--fg-strong)' }}>{binding.role}</span>
                 <span
                   style={{
-                    color: 'var(--text-3)',
+                    color: 'var(--fg-muted)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -412,10 +412,10 @@ function ReceptionStarterCard({
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {teamDef.optionalMembers.map((member, idx) => (
               <span key={`${member.agentLabel}-${idx}`} style={OPTIONAL_CHIP_STYLE}>
-                <span style={{ color: 'var(--text-3)' }}>
+                <span style={{ color: 'var(--fg-muted)' }}>
                   {describeOptionalGroup(member.canonicalRole)}
                 </span>
-                <span style={{ color: 'var(--text)', fontWeight: 600 }}>{member.agentLabel}</span>
+                <span style={{ color: 'var(--fg-strong)', fontWeight: 600 }}>{member.agentLabel}</span>
               </span>
             ))}
           </div>
@@ -437,7 +437,7 @@ function ReceptionStarterCard({
                   cursor: onSelectStarter ? 'pointer' : 'not-allowed',
                   opacity: onSelectStarter ? 1 : 0.55,
                   borderStyle: 'dashed',
-                  color: 'var(--text)',
+                  color: 'var(--fg-strong)',
                 }}
                 title={onSelectStarter ? '填入下方输入框（不会自动发送）' : undefined}
               >
@@ -452,7 +452,7 @@ function ReceptionStarterCard({
       ) : null}
 
       <div style={HINT_BLOCK_STYLE}>
-        <strong style={{ color: 'var(--text)' }}>下一步：</strong>
+        <strong style={{ color: 'var(--fg-strong)' }}>下一步：</strong>
         在下方输入框告诉接待层你想做什么。比如「帮我实现 GitHub OAuth 登录」「修复 issue
         #42」。团队不会在你发声之前自动开始工作。
       </div>

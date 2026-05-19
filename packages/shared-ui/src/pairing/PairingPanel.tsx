@@ -36,7 +36,7 @@ export interface PairingPanelProps {
 function HostView({ host }: { host: PairingHostProps }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted))', textAlign: 'center' }}>
         在其他设备上扫描此二维码以连接
       </div>
       <QRCodeDisplay
@@ -51,7 +51,7 @@ function HostView({ host }: { host: PairingHostProps }) {
             style={{
               fontSize: 12,
               fontWeight: 600,
-              color: 'var(--fg-muted, #7b8a9e)',
+              color: 'var(--fg-muted))',
               marginBottom: 6,
             }}
           >
@@ -65,7 +65,7 @@ function HostView({ host }: { host: PairingHostProps }) {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '5px 8px',
-                background: 'var(--bg-overlay, #121721)',
+                background: 'var(--bg-overlay))',
                 borderRadius: 5,
                 border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                 marginBottom: 4,
@@ -73,7 +73,7 @@ function HostView({ host }: { host: PairingHostProps }) {
             >
               <div>
                 <div style={{ fontSize: 12 }}>{d.name}</div>
-                <div style={{ fontSize: 10, color: 'var(--fg-muted, #7b8a9e)' }}>
+                <div style={{ fontSize: 10, color: 'var(--fg-muted))' }}>
                   已连接 {new Date(d.connectedAt).toLocaleTimeString()}
                 </div>
               </div>
@@ -83,7 +83,7 @@ function HostView({ host }: { host: PairingHostProps }) {
                 style={{
                   fontSize: 11,
                   padding: '2px 7px',
-                  border: '1px solid var(--danger, #f06b7e)',
+                  border: '1px solid var(--danger))',
                   color: color.danger,
                   background: 'none',
                   borderRadius: 3,
@@ -97,7 +97,7 @@ function HostView({ host }: { host: PairingHostProps }) {
         </div>
       )}
       {(!host.pairedDevices || host.pairedDevices.length === 0) && (
-        <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)' }}>暂无已连接设备</div>
+        <div style={{ fontSize: 12, color: 'var(--fg-muted))' }}>暂无已连接设备</div>
       )}
     </div>
   );
@@ -107,7 +107,7 @@ function ClientView({ client }: { client: PairingClientProps }) {
   const [manualCode, setManualCode] = useState('');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontSize: 12, color: 'var(--fg-muted, #7b8a9e)', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--fg-muted))', textAlign: 'center' }}>
         扫描主机设备上显示的二维码
       </div>
       <QRCodeScanner onScan={client.onScanned ?? (() => undefined)} />
@@ -118,7 +118,7 @@ function ClientView({ client }: { client: PairingClientProps }) {
           placeholder="或手动输入码"
           style={{
             flex: 1,
-            background: 'var(--bg-overlay, #121721)',
+            background: 'var(--bg-overlay))',
             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
             borderRadius: 4,
             padding: '4px 8px',
@@ -135,7 +135,7 @@ function ClientView({ client }: { client: PairingClientProps }) {
           disabled={!manualCode}
           style={{
             padding: '4px 10px',
-            background: 'var(--accent, #5cd4c0)',
+            background: 'var(--accent))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 4,
@@ -148,7 +148,7 @@ function ClientView({ client }: { client: PairingClientProps }) {
         </button>
       </div>
       {client.connecting && (
-        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--accent, #5cd4c0)' }}>
+        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--accent))' }}>
           连接中…
         </div>
       )}
@@ -166,7 +166,7 @@ export function PairingPanel({ mode = 'host', onModeChange, host, client }: Pair
         style={{
           display: 'flex',
           gap: 0,
-          background: 'var(--bg-overlay, #121721)',
+          background: 'var(--bg-overlay))',
           borderRadius: 6,
           padding: 2,
           border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
@@ -185,8 +185,8 @@ export function PairingPanel({ mode = 'host', onModeChange, host, client }: Pair
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: mode === m ? 600 : 400,
-              background: mode === m ? 'var(--accent, #5cd4c0)' : 'transparent',
-              color: mode === m ? color.fgOnAccent : 'var(--fg-muted, #7b8a9e)',
+              background: mode === m ? 'var(--accent))' : 'transparent',
+              color: mode === m ? color.fgOnAccent : 'var(--fg-muted))',
             }}
           >
             {m === 'host' ? '主机（桌面端）' : '客户端（移动端）'}

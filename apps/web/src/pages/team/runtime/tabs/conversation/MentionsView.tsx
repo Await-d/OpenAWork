@@ -11,7 +11,7 @@
 
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useTeamNotificationStore, type HandoffEvent } from '../../../../../stores/team/team-events.js';
-import MarkdownMessageContent from '../../../../../components/chat/markdown-message-content.js';
+import MarkdownMessageContent from '../../../../../components/chat/markdown/markdown-message-content.js';
 
 const CONTAINER_STYLE: CSSProperties = {
   flex: 1,
@@ -31,19 +31,19 @@ const FILTER_BAR_STYLE: CSSProperties = {
 const FILTER_BTN_STYLE: CSSProperties = {
   padding: '4px 10px',
   borderRadius: 6,
-  border: '1px solid color-mix(in srgb, var(--border) 50%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--border-default) 50%, transparent)',
   background: 'transparent',
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
-  color: 'var(--text-3)',
+  color: 'var(--fg-muted)',
 };
 
 const FILTER_BTN_ACTIVE_STYLE: CSSProperties = {
   ...FILTER_BTN_STYLE,
-  background: 'color-mix(in srgb, var(--accent) 16%, var(--surface))',
+  background: 'color-mix(in srgb, var(--accent) 16%, var(--bg-overlay))',
   borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
-  color: 'var(--text)',
+  color: 'var(--fg-strong)',
 };
 
 const CARD_STYLE: CSSProperties = {
@@ -51,14 +51,14 @@ const CARD_STYLE: CSSProperties = {
   gap: 6,
   padding: '12px 14px',
   borderRadius: 12,
-  border: '1px solid color-mix(in srgb, var(--border) 45%, transparent)',
-  background: 'color-mix(in srgb, var(--surface) 80%, var(--bg))',
+  border: '1px solid color-mix(in srgb, var(--border-default) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--bg-overlay) 80%, var(--bg-base))',
 };
 
 const BLOCKING_CARD_STYLE: CSSProperties = {
   ...CARD_STYLE,
-  borderColor: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 50%, transparent)',
-  background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 8%, var(--surface))',
+  borderColor: 'color-mix(in srgb, var(--warning) 50%, transparent)',
+  background: 'color-mix(in srgb, var(--warning) 8%, var(--bg-overlay))',
 };
 
 const EMPTY_STYLE: CSSProperties = {
@@ -66,8 +66,8 @@ const EMPTY_STYLE: CSSProperties = {
   placeItems: 'center',
   padding: 32,
   borderRadius: 12,
-  border: '1px dashed color-mix(in srgb, var(--border) 60%, transparent)',
-  color: 'var(--text-3)',
+  border: '1px dashed color-mix(in srgb, var(--border-default) 60%, transparent)',
+  color: 'var(--fg-muted)',
   fontSize: 13,
   gap: 6,
 };
@@ -142,7 +142,7 @@ export function MentionsView() {
           <span style={{ fontSize: 26 }} aria-hidden>
             🔔
           </span>
-          <strong style={{ color: 'var(--text-2)' }}>暂无待回复消息</strong>
+          <strong style={{ color: 'var(--fg-default)' }}>暂无待回复消息</strong>
           <span>团队产生阻塞确认或推送通知时，会出现在这里。</span>
         </div>
       </div>
@@ -194,7 +194,7 @@ export function MentionsView() {
                   alignItems: 'center',
                   gap: 8,
                   fontSize: 11,
-                  color: 'var(--text-3)',
+                  color: 'var(--fg-muted)',
                 }}
               >
                 {item.blocking ? (
@@ -202,8 +202,8 @@ export function MentionsView() {
                     style={{
                       padding: '1px 8px',
                       borderRadius: 999,
-                      background: 'color-mix(in srgb, var(--warning, var(--warning, #f0b429)) 22%, transparent)',
-                      color: 'var(--warning, #f0b429)',
+                      background: 'color-mix(in srgb, var(--warning) 22%, transparent)',
+                      color: 'var(--warning))',
                       fontSize: 10,
                       fontWeight: 800,
                       textTransform: 'uppercase',
@@ -212,14 +212,14 @@ export function MentionsView() {
                     阻塞
                   </span>
                 ) : null}
-                <span style={{ fontWeight: 700, color: 'var(--text-2)' }}>{item.event.type}</span>
+                <span style={{ fontWeight: 700, color: 'var(--fg-default)' }}>{item.event.type}</span>
                 {item.event.layer ? <span>· {item.event.layer}</span> : null}
                 <span style={{ flex: 1 }} />
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {new Date(item.event.timestamp).toLocaleTimeString()}
                 </span>
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.55 }}>
+              <div style={{ fontSize: 13, color: 'var(--fg-strong)', lineHeight: 1.55 }}>
                 <MarkdownMessageContent content={summarize(item.event)} />
               </div>
               <div style={{ display: 'flex', gap: 6 }}>

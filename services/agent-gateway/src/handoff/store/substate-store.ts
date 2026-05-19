@@ -14,7 +14,7 @@
  *      让前端订阅 substate 流式变化（前端的 TeamSubstateProgressBar 已在用）。
  */
 
-import { sqliteGet, sqliteRun } from '../../db.js';
+import { sqliteGet, sqliteRun } from '../../infra/db.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
 import { assertSubstateAllowed } from '../capability/layer-capabilities.js';
 import type { HandoffRoleLayer } from './handoff-store.js';

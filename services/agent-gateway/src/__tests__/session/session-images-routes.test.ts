@@ -30,13 +30,13 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../auth.js', () => ({
+vi.mock('../../infra/auth.js', () => ({
   requireAuth: async (request: { user?: { sub: string } }) => {
     request.user = { sub: 'user-a' };
   },
 }));
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../infra/db.js', () => ({
   sqliteGet: mocks.sqliteGetMock,
 }));
 
@@ -57,7 +57,7 @@ vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(async () => Buffer.from('input-image-binary')),
 }));
 
-vi.mock('../../storage-paths.js', () => ({
+vi.mock('../../infra/storage-paths.js', () => ({
   resolveGatewayArtifactsIndexPath: () => '/tmp/test-artifacts-index.json',
 }));
 

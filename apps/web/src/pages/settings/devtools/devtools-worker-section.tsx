@@ -1,6 +1,6 @@
 import React from 'react';
 import { WorkerStatusIndicator, type WorkerEntry } from '@openAwork/shared-ui';
-import type { DevtoolsSourceState } from '../settings-types.js';
+import type { DevtoolsSourceState } from '../state/settings-types.js';
 import {
   InlineFailureNotice,
   buildWorkerKey,
@@ -67,19 +67,19 @@ export function DevtoolsWorkerSection({
           justifyContent: 'space-between',
           padding: '8px 10px',
           borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'color-mix(in srgb, var(--surface) 90%, var(--bg))',
+          border: '1px solid var(--border-default)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Worker 工作台</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>Worker 工作台</div>
           <div
             style={{
               display: 'flex',
               gap: 10,
               flexWrap: 'wrap',
               fontSize: 11,
-              color: 'var(--text-3)',
+              color: 'var(--fg-muted)',
             }}
           >
             <span>全部 Worker：{workers.length}</span>
@@ -102,11 +102,11 @@ export function DevtoolsWorkerSection({
             placeholder="搜索 Worker 名称 / id / endpoint…"
             style={{
               minWidth: 220,
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
+              background: 'var(--bg-overlay)',
+              border: '1px solid var(--border-default)',
               borderRadius: 8,
               padding: '6px 10px',
-              color: 'var(--text)',
+              color: 'var(--fg-strong)',
               fontSize: 11,
             }}
           />
@@ -118,13 +118,13 @@ export function DevtoolsWorkerSection({
           onClick={() => setWorkerStatusFilter('all')}
           style={{
             borderRadius: 8,
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-default)',
             padding: '5px 10px',
             background:
               workerStatusFilter === 'all'
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--surface))'
-                : 'var(--surface)',
-            color: 'var(--text)',
+                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+                : 'var(--bg-overlay)',
+            color: 'var(--fg-strong)',
             fontSize: 11,
             fontWeight: workerStatusFilter === 'all' ? 700 : 400,
             cursor: 'pointer',
@@ -139,14 +139,14 @@ export function DevtoolsWorkerSection({
             borderRadius: 8,
             border:
               workerStatusFilter === 'error'
-                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border))'
-                : '1px solid var(--border)',
+                ? '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))'
+                : '1px solid var(--border-default)',
             padding: '5px 10px',
             background:
               workerStatusFilter === 'error'
-                ? 'color-mix(in srgb, var(--danger) 12%, var(--surface))'
-                : 'var(--surface)',
-            color: workerStatusFilter === 'error' ? 'var(--danger)' : 'var(--text)',
+                ? 'color-mix(in srgb, var(--danger) 12%, var(--bg-overlay))'
+                : 'var(--bg-overlay)',
+            color: workerStatusFilter === 'error' ? 'var(--danger)' : 'var(--fg-strong)',
             fontSize: 11,
             fontWeight: workerStatusFilter === 'error' ? 700 : 400,
             cursor: 'pointer',
@@ -161,14 +161,14 @@ export function DevtoolsWorkerSection({
             borderRadius: 8,
             border:
               workerStatusFilter === 'healthy'
-                ? '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))'
-                : '1px solid var(--border)',
+                ? '1px solid color-mix(in srgb, var(--accent) 40%, var(--border-default))'
+                : '1px solid var(--border-default)',
             padding: '5px 10px',
             background:
               workerStatusFilter === 'healthy'
-                ? 'color-mix(in srgb, var(--accent) 12%, var(--surface))'
-                : 'var(--surface)',
-            color: workerStatusFilter === 'healthy' ? 'var(--accent)' : 'var(--text)',
+                ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-overlay))'
+                : 'var(--bg-overlay)',
+            color: workerStatusFilter === 'healthy' ? 'var(--accent)' : 'var(--fg-strong)',
             fontSize: 11,
             fontWeight: workerStatusFilter === 'healthy' ? 700 : 400,
             cursor: 'pointer',
@@ -182,10 +182,10 @@ export function DevtoolsWorkerSection({
           disabled={!selectedWorker}
           style={{
             borderRadius: 8,
-            border: selectedWorker ? '1px solid var(--accent)' : '1px solid var(--border)',
+            border: selectedWorker ? '1px solid var(--accent)' : '1px solid var(--border-default)',
             padding: '5px 10px',
-            background: selectedWorker ? 'var(--accent)' : 'var(--surface)',
-            color: selectedWorker ? 'var(--accent-text)' : 'var(--text)',
+            background: selectedWorker ? 'var(--accent)' : 'var(--bg-overlay)',
+            color: selectedWorker ? 'var(--fg-on-accent)' : 'var(--fg-strong)',
             fontSize: 11,
             fontWeight: selectedWorker ? 700 : 400,
             cursor: selectedWorker ? 'pointer' : 'not-allowed',
@@ -200,10 +200,10 @@ export function DevtoolsWorkerSection({
           disabled={filteredWorkers.length === 0}
           style={{
             borderRadius: 8,
-            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border))',
+            border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border-default))',
             padding: '5px 10px',
-            background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
-            color: 'var(--text)',
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-overlay))',
+            color: 'var(--fg-strong)',
             fontSize: 11,
             cursor: filteredWorkers.length > 0 ? 'pointer' : 'not-allowed',
             opacity: filteredWorkers.length > 0 ? 1 : 0.45,
@@ -238,15 +238,15 @@ export function DevtoolsWorkerSection({
                     ? '2px solid var(--danger)'
                     : `1px solid ${
                         isActive
-                          ? 'color-mix(in srgb, var(--accent) 40%, var(--border))'
-                          : 'var(--border)'
+                          ? 'color-mix(in srgb, var(--accent) 40%, var(--border-default))'
+                          : 'var(--border-default)'
                       }`,
                   background: isError
-                    ? 'color-mix(in srgb, var(--danger) 7%, var(--surface))'
+                    ? 'color-mix(in srgb, var(--danger) 7%, var(--bg-overlay))'
                     : isActive
-                      ? 'color-mix(in srgb, var(--accent) 10%, var(--surface))'
-                      : 'color-mix(in srgb, var(--surface) 88%, var(--bg))',
-                  color: 'var(--text)',
+                      ? 'color-mix(in srgb, var(--accent) 10%, var(--bg-overlay))'
+                      : 'color-mix(in srgb, var(--bg-overlay) 88%, var(--bg-base))',
+                  color: 'var(--fg-strong)',
                   padding: '7px 10px',
                   display: 'flex',
                   flexDirection: 'column',
@@ -259,12 +259,12 @@ export function DevtoolsWorkerSection({
                   style={{
                     fontSize: 12,
                     fontWeight: 700,
-                    color: isError ? 'var(--danger)' : 'var(--text)',
+                    color: isError ? 'var(--danger)' : 'var(--fg-strong)',
                   }}
                 >
                   {worker.name}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'monospace' }}>
                   {worker.endpoint ?? worker.id}
                 </span>
                 <span
@@ -280,7 +280,7 @@ export function DevtoolsWorkerSection({
             );
           })
         ) : (
-          <p style={{ fontSize: 12, color: 'var(--text-3)', gridColumn: '1 / -1' }}>
+          <p style={{ fontSize: 12, color: 'var(--fg-muted)', gridColumn: '1 / -1' }}>
             筛选后没有匹配 Worker。
           </p>
         )}

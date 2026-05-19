@@ -8,9 +8,9 @@ import {
   type PermissionRequestStatus,
   type PermissionRiskLevel,
 } from '../permission/permission-contract.js';
-import type { JwtPayload } from '../auth.js';
-import { requireAuth } from '../auth.js';
-import { sqliteAll, sqliteGet, sqliteRun } from '../db.js';
+import type { JwtPayload } from '../infra/auth.js';
+import { requireAuth } from '../infra/auth.js';
+import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { createPermissionRepliedEvent } from '../session/session-permission-events.js';
 import { createQuestionRepliedEvent } from '../session/session-question-events.js';
 import {
@@ -32,7 +32,7 @@ import { listSessionFileDiffs } from '../session/session-file-diff-store.js';
 import { listSessionRunEvents } from '../session/session-run-events.js';
 import { listSessionSnapshots } from '../session/session-snapshot-store.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
-import { startRequestWorkflow } from '../request-workflow.js';
+import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
   parseSessionMetadataJson,
   sanitizeSessionMetadataJson,

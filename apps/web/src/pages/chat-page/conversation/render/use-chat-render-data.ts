@@ -3,13 +3,13 @@ import { useMemo } from 'react';
 import {
   renderChatMessageContentWithOptions,
   renderStreamingChatMessageContentWithOptions,
-} from '../../../../components/chat/ChatPageSections.js';
+} from '../../../../components/chat/session/ChatPageSections.js';
 import type {
   ChatRenderAction,
   ChatRenderEntry,
   ChatRenderGroup,
-} from '../../../../components/chat/chat-message-group-list.js';
-import type { ToolCallCardModel } from '../../chat-stream-state.js';
+} from '../../../../components/chat/message/chat-message-group-list.js';
+import type { ToolCallCardModel } from '../../state/chat-stream-state.js';
 import type { ModelPriceEntry } from './chat-page-utils.js';
 import {
   decorateAssistantGroupActions,

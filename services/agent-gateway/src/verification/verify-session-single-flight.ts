@@ -41,7 +41,7 @@ async function main(): Promise<void> {
         async () => {
           const [dbModule, { runSessionInBackground }, { stopAnyInFlightStreamRequestForSession }] =
             await Promise.all([
-              import('../db.js'),
+              import('../infra/db.js'),
               import('../routes/stream-runtime.js'),
               import('../routes/stream-cancellation.js'),
             ]);

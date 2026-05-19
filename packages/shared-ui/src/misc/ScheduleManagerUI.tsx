@@ -35,7 +35,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
   return (
     <div
       style={{
-        background: 'var(--bg-overlay, #121721)',
+        background: 'var(--bg-overlay))',
         border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
         borderRadius: 10,
         overflow: 'hidden',
@@ -45,7 +45,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
         style={{
           padding: '0.65rem 0.875rem',
           borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-          color: 'var(--fg-muted, #7b8a9e)',
+          color: 'var(--fg-muted))',
           fontSize: 11,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -72,7 +72,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
               <tr>
                 <td
                   colSpan={6}
-                  style={{ ...bodyCell, textAlign: 'center', color: 'var(--fg-muted, #7b8a9e)' }}
+                  style={{ ...bodyCell, textAlign: 'center', color: 'var(--fg-muted))' }}
                 >
                   暂无计划任务
                 </td>
@@ -100,7 +100,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
                             border: 'none',
                             borderRadius: 6,
                             background: task.enabled ? color.contrastMuted : color.successMuted,
-                            color: task.enabled ? color.contrast : 'var(--success, #3dd49a)',
+                            color: task.enabled ? color.contrast : 'var(--success))',
                             padding: '0.3rem 0.55rem',
                             fontSize: 11,
                             cursor: 'pointer',
@@ -118,7 +118,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
                             border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
                             borderRadius: 6,
                             background: 'transparent',
-                            color: 'var(--fg-strong, #f1f4f8)',
+                            color: 'var(--fg-strong))',
                             padding: '0.3rem 0.55rem',
                             fontSize: 11,
                             cursor: 'pointer',
@@ -183,7 +183,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
             border: 'none',
             borderRadius: 6,
             background: !onAdd || !canAdd ? 'var(--border-default, hsla(215, 18%, 50%, 0.12))' : '#4338ca',
-            color: !onAdd || !canAdd ? 'var(--fg-muted, #7b8a9e)' : 'var(--fg-default, #c8d1e0)',
+            color: !onAdd || !canAdd ? 'var(--fg-muted))' : 'var(--fg-default))',
             padding: '0.45rem 0.85rem',
             fontSize: 12,
             fontWeight: 600,
@@ -200,7 +200,7 @@ export function ScheduleManagerUI({ tasks, onToggle, onRemove, onAdd }: Schedule
 const headerCell: React.CSSProperties = {
   textAlign: 'left',
   fontSize: 11,
-  color: 'var(--fg-muted, #7b8a9e)',
+  color: 'var(--fg-muted))',
   textTransform: 'uppercase',
   letterSpacing: 0.4,
   padding: '0.5rem 0.65rem',
@@ -208,7 +208,7 @@ const headerCell: React.CSSProperties = {
 
 const bodyCell: React.CSSProperties = {
   fontSize: 12,
-  color: 'var(--fg-strong, #f1f4f8)',
+  color: 'var(--fg-strong))',
   padding: '0.55rem 0.65rem',
   verticalAlign: 'top',
 };
@@ -216,8 +216,8 @@ const bodyCell: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
   borderRadius: 6,
-  background: 'var(--bg-base, #080b12)',
-  color: 'var(--fg-strong, #f1f4f8)',
+  background: 'var(--bg-base))',
+  color: 'var(--fg-strong))',
   padding: '0.4rem 0.55rem',
   fontSize: 12,
   minWidth: 120,

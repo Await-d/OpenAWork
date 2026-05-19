@@ -35,7 +35,7 @@ export function OAuthButton({
               gap: 6,
               fontSize: 12,
               fontWeight: 500,
-              color: 'var(--success, #3dd49a)',
+              color: 'var(--success))',
             }}
           >
             <span
@@ -43,7 +43,7 @@ export function OAuthButton({
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: 'var(--success, #3dd49a)',
+                background: 'var(--success))',
                 flexShrink: 0,
               }}
             />
@@ -54,7 +54,7 @@ export function OAuthButton({
             onClick={onRevoke}
             style={{
               background: 'transparent',
-              border: '1px solid var(--fg-subtle, #4d5b6e)',
+              border: '1px solid var(--fg-subtle))',
               borderRadius: 6,
               color: color.danger,
               padding: '0.3rem 0.75rem',
@@ -70,7 +70,7 @@ export function OAuthButton({
           type="button"
           onClick={onAuthorize}
           style={{
-            background: 'var(--accent, #5cd4c0)',
+            background: 'var(--accent))',
             color: color.fgOnAccent,
             border: 'none',
             borderRadius: 6,
